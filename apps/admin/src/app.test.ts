@@ -299,6 +299,7 @@ function config(devicePairingConfigured = false, companionDevicePairingConfigure
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
     INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
+    OWNER_CONTROL_DEPLOYMENT_TARGET: 'staging',
     OWNER_CONTROL_DATABASE_URL: `postgresql://fetanagent_owner_control_runtime:password@db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
     OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_for_staging_only',

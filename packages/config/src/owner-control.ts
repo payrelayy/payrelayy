@@ -8,14 +8,46 @@ import {
 import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.js';
 
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
+export const OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
 export const OWNER_CONTROL_DATABASE_RUNTIME_ROLE = 'fetanagent_owner_control_runtime';
 export const OWNER_CONTROL_TELEGRAM_BOT_USERNAME = 'fetanagentbot';
-export const OWNER_CONTROL_DATABASE_DIRECT_HOST = `db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
-export const OWNER_CONTROL_DATABASE_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
-export const OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE =
+export const OWNER_CONTROL_STAGING_DATABASE_DIRECT_HOST =
+  `db.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co` as const;
+export const OWNER_CONTROL_PRODUCTION_DATABASE_DIRECT_HOST =
+  `db.${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}.supabase.co` as const;
+export const OWNER_CONTROL_STAGING_DATABASE_POOLER_HOST =
+  'aws-1-eu-west-1.pooler.supabase.com' as const;
+export const OWNER_CONTROL_PRODUCTION_DATABASE_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
+export const OWNER_CONTROL_STAGING_DATABASE_POOLER_RUNTIME_ROLE =
   `${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}.${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}` as const;
+export const OWNER_CONTROL_PRODUCTION_DATABASE_POOLER_RUNTIME_ROLE =
+  `${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}.${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}` as const;
 
-const STAGING_SUPABASE_URL = `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`;
+export const OWNER_CONTROL_DATABASE_TARGETS = {
+  staging: {
+    directHost: OWNER_CONTROL_STAGING_DATABASE_DIRECT_HOST,
+    poolerHost: OWNER_CONTROL_STAGING_DATABASE_POOLER_HOST,
+    poolerRuntimeRole: OWNER_CONTROL_STAGING_DATABASE_POOLER_RUNTIME_ROLE,
+    projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
+    supabaseUrl: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+  },
+  production: {
+    directHost: OWNER_CONTROL_PRODUCTION_DATABASE_DIRECT_HOST,
+    poolerHost: OWNER_CONTROL_PRODUCTION_DATABASE_POOLER_HOST,
+    poolerRuntimeRole: OWNER_CONTROL_PRODUCTION_DATABASE_POOLER_RUNTIME_ROLE,
+    projectReference: OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE,
+    supabaseUrl: `https://${OWNER_CONTROL_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
+  },
+} as const;
+export type OwnerControlDeploymentTarget = keyof typeof OWNER_CONTROL_DATABASE_TARGETS;
+
+// Retain the staging aliases used by the current staging composition.
+export const OWNER_CONTROL_DATABASE_DIRECT_HOST = OWNER_CONTROL_STAGING_DATABASE_DIRECT_HOST;
+export const OWNER_CONTROL_DATABASE_POOLER_HOST = OWNER_CONTROL_STAGING_DATABASE_POOLER_HOST;
+export const OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE =
+  OWNER_CONTROL_STAGING_DATABASE_POOLER_RUNTIME_ROLE;
+
 const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
   OWNER_CONTROL_DATABASE_URL: '/run/secrets/owner_control_database_url',
   OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER:
@@ -28,11 +60,13 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
 export interface OwnerControlDatabaseConnection {
   readonly database: 'postgres';
   readonly host:
-    typeof OWNER_CONTROL_DATABASE_DIRECT_HOST | typeof OWNER_CONTROL_DATABASE_POOLER_HOST;
+    | (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['directHost']
+    | (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['poolerHost'];
   readonly password: string;
   readonly port: 5432;
   readonly user:
-    typeof OWNER_CONTROL_DATABASE_RUNTIME_ROLE | typeof OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE;
+    | typeof OWNER_CONTROL_DATABASE_RUNTIME_ROLE
+    | (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['poolerRuntimeRole'];
 }
 
 export type OwnerControlRuntimeConfig =
@@ -40,6 +74,7 @@ export type OwnerControlRuntimeConfig =
       readonly enabled: false;
       readonly companionDevicePairing: undefined;
       readonly connection: undefined;
+      readonly deploymentTarget: undefined;
       readonly devicePairing: undefined;
       readonly projectReference: undefined;
       readonly publishableKey: undefined;
@@ -60,6 +95,7 @@ export type OwnerControlRuntimeConfig =
             readonly configured: true;
           };
       readonly connection: OwnerControlDatabaseConnection;
+      readonly deploymentTarget: OwnerControlDeploymentTarget;
       readonly devicePairing:
         | {
             readonly assignmentSignerKeyId: undefined;
@@ -69,15 +105,15 @@ export type OwnerControlRuntimeConfig =
             readonly assignmentSignerKeyId: string;
             readonly configured: true;
           };
-      readonly projectReference: typeof OWNER_CONTROL_STAGING_PROJECT_REFERENCE;
+      readonly projectReference: (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['projectReference'];
       readonly publishableKey: string;
       readonly receiverReferenceProtection: {
         readonly encryptionSecret: string;
         readonly fingerprintSecret: string;
         readonly masterProfile: DepositProofReferenceProfile;
       };
-      readonly stage: 'staging';
-      readonly supabaseUrl: typeof STAGING_SUPABASE_URL;
+      readonly stage: OwnerControlDeploymentTarget;
+      readonly supabaseUrl: (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['supabaseUrl'];
       readonly tlsMode: 'verify-full';
     };
 
@@ -104,7 +140,7 @@ function readSecret(
   const filePath = environment[fileName];
 
   if (environment.NODE_ENV === 'production') {
-    if (direct) throw new Error(`${fileName} is required in the production staging container.`);
+    if (direct) throw new Error(`${fileName} is required in the production container.`);
     if (filePath && filePath !== PRODUCTION_SECRET_PATHS[name]) {
       throw new Error(`${fileName} must use the approved private runtime secret path.`);
     }
@@ -146,7 +182,10 @@ function decode(value: string): string {
   }
 }
 
-function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
+function parseDatabaseUrl(
+  value: string,
+  deploymentTarget: OwnerControlDeploymentTarget,
+): OwnerControlDatabaseConnection {
   let url: URL;
   try {
     url = new URL(value);
@@ -155,12 +194,11 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
   }
   const queryKeys = [...url.searchParams.keys()];
   const user = decode(url.username);
+  const expectedTarget = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   const exactDirectRoute =
-    url.hostname === OWNER_CONTROL_DATABASE_DIRECT_HOST &&
-    user === OWNER_CONTROL_DATABASE_RUNTIME_ROLE;
+    url.hostname === expectedTarget.directHost && user === OWNER_CONTROL_DATABASE_RUNTIME_ROLE;
   const exactSessionPoolerRoute =
-    url.hostname === OWNER_CONTROL_DATABASE_POOLER_HOST &&
-    user === OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE;
+    url.hostname === expectedTarget.poolerHost && user === expectedTarget.poolerRuntimeRole;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
     (!exactDirectRoute && !exactSessionPoolerRoute) ||
@@ -173,21 +211,29 @@ function parseDatabaseUrl(value: string): OwnerControlDatabaseConnection {
     url.hash !== ''
   ) {
     throw new Error(
-      'OWNER_CONTROL_DATABASE_URL must use the dedicated staging Owner-control role through the exact direct or session-pooler endpoint.',
+      'OWNER_CONTROL_DATABASE_URL must match the explicit deployment target and use the dedicated Owner-control role through its exact direct or session-pooler endpoint.',
     );
   }
 
   return {
     database: 'postgres',
-    host: exactDirectRoute
-      ? OWNER_CONTROL_DATABASE_DIRECT_HOST
-      : OWNER_CONTROL_DATABASE_POOLER_HOST,
+    host: exactDirectRoute ? expectedTarget.directHost : expectedTarget.poolerHost,
     password: decode(url.password),
     port: 5432,
-    user: exactDirectRoute
-      ? OWNER_CONTROL_DATABASE_RUNTIME_ROLE
-      : OWNER_CONTROL_DATABASE_POOLER_RUNTIME_ROLE,
+    user: exactDirectRoute ? OWNER_CONTROL_DATABASE_RUNTIME_ROLE : expectedTarget.poolerRuntimeRole,
   };
+}
+
+function loadOwnerControlDeploymentTarget(
+  environment: NodeJS.ProcessEnv,
+): OwnerControlDeploymentTarget {
+  const target = environment.OWNER_CONTROL_DEPLOYMENT_TARGET;
+  if (target !== 'staging' && target !== 'production') {
+    throw new Error(
+      'OWNER_CONTROL_DEPLOYMENT_TARGET must be explicitly set to staging or production.',
+    );
+  }
+  return target;
 }
 
 export function loadOwnerControlConfig(
@@ -214,6 +260,7 @@ export function loadOwnerControlConfig(
         enabled: false,
         companionDevicePairing: undefined,
         connection: undefined,
+        deploymentTarget: undefined,
         devicePairing: undefined,
         projectReference: undefined,
         publishableKey: undefined,
@@ -225,8 +272,10 @@ export function loadOwnerControlConfig(
     };
   }
 
-  if (environment.OWNER_CONTROL_SUPABASE_URL !== STAGING_SUPABASE_URL) {
-    throw new Error('OWNER_CONTROL_SUPABASE_URL must target the exact staging project.');
+  const deploymentTarget = loadOwnerControlDeploymentTarget(environment);
+  const databaseTarget = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
+  if (environment.OWNER_CONTROL_SUPABASE_URL !== databaseTarget.supabaseUrl) {
+    throw new Error('OWNER_CONTROL_SUPABASE_URL must match the explicit deployment target.');
   }
   const databaseUrl = readSecret(environment, 'OWNER_CONTROL_DATABASE_URL', dependencies);
   const publishableKey = readSecret(
@@ -301,20 +350,21 @@ export function loadOwnerControlConfig(
         companionServerSignerKeyId === undefined
           ? { serverSignerKeyId: undefined, configured: false }
           : { serverSignerKeyId: companionServerSignerKeyId, configured: true },
-      connection: parseDatabaseUrl(databaseUrl),
+      connection: parseDatabaseUrl(databaseUrl, deploymentTarget),
+      deploymentTarget,
       devicePairing:
         assignmentSignerKeyId === undefined
           ? { assignmentSignerKeyId: undefined, configured: false }
           : { assignmentSignerKeyId, configured: true },
-      projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
+      projectReference: databaseTarget.projectReference,
       publishableKey,
       receiverReferenceProtection: {
         encryptionSecret: receiverReferenceEncryptionMaster,
         fingerprintSecret: receiverReferenceFingerprintMaster,
         masterProfile: receiverReferenceMasterProfile,
       },
-      stage: 'staging',
-      supabaseUrl: STAGING_SUPABASE_URL,
+      stage: deploymentTarget,
+      supabaseUrl: databaseTarget.supabaseUrl,
       tlsMode: 'verify-full',
     },
   };
@@ -328,6 +378,7 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
     server: config.server,
     runtime: {
       enabled: config.runtime.enabled,
+      deploymentTarget: config.runtime.deploymentTarget,
       projectReference: config.runtime.projectReference,
       stage: config.runtime.stage,
       tlsMode: config.runtime.tlsMode,

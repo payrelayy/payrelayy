@@ -181,6 +181,7 @@ assert.match(ownerService, /target: admin/);
 assert.match(ownerService, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/);
 assert.match(ownerService, /OWNER_CONTROL_HOST: 0\.0\.0\.0/);
 assert.match(ownerService, /OWNER_CONTROL_PORT: '3002'/);
+assert.match(ownerService, /OWNER_CONTROL_DEPLOYMENT_TARGET: staging/);
 assert.match(
   ownerService,
   /OWNER_CONTROL_SUPABASE_URL: https:\/\/spzpiyxheappsfyswewl\.supabase\.co/,

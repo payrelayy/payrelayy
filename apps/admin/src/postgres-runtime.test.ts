@@ -9,6 +9,7 @@ import {
 
 const config = {
   enabled: true,
+  deploymentTarget: 'staging',
   stage: 'staging',
   projectReference: 'spzpiyxheappsfyswewl',
   connection: {

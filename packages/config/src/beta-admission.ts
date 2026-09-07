@@ -9,9 +9,22 @@ import {
 } from './shared.js';
 
 export const FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
+export const FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE = 'xzztugbgtulptnbpoelr';
 export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'fetanagent_beta_admission_runtime';
 
 export const BETA_ADMISSION_DATABASE_DIRECT_HOST = `db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+export const BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST = `db.${FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+export const BETA_ADMISSION_DEPLOYMENT_TARGETS = {
+  staging: {
+    databaseDirectHost: BETA_ADMISSION_DATABASE_DIRECT_HOST,
+    projectReference: FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
+  },
+  production: {
+    databaseDirectHost: BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST,
+    projectReference: FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
+  },
+} as const;
+export type BetaAdmissionDeploymentTarget = keyof typeof BETA_ADMISSION_DEPLOYMENT_TARGETS;
 const PRODUCTION_SECRET_FILE_PATHS: Readonly<Record<string, string>> = {
   BETA_ADMISSION_DATABASE_URL: '/run/secrets/beta_admission_database_url',
   BOT_TO_BETA_ADMISSION_HMAC_SECRET: '/run/secrets/beta_admission_bot_transport_hmac',
@@ -38,8 +51,8 @@ export type BetaAdmissionRuntimeConfig =
     }
   | {
       readonly enabled: true;
-      readonly stage: 'staging';
-      readonly projectReference: typeof FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE;
+      readonly stage: BetaAdmissionDeploymentTarget;
+      readonly projectReference: (typeof BETA_ADMISSION_DEPLOYMENT_TARGETS)[BetaAdmissionDeploymentTarget]['projectReference'];
       readonly connection: BetaAdmissionDatabaseConnection;
       readonly tlsMode: 'verify-full';
       readonly transportHmacSecret: string;
@@ -78,7 +91,7 @@ function secretFromEnvironmentOrFile(
 
   if (environment.NODE_ENV === 'production') {
     if (directValue) {
-      throw new Error(`${fileVariableName} is required in the production staging container.`);
+      throw new Error(`${fileVariableName} is required in the production container.`);
     }
     if (filePath && filePath !== PRODUCTION_SECRET_FILE_PATHS[variableName]) {
       throw new Error(`${fileVariableName} must use the approved private runtime secret path.`);
@@ -118,21 +131,28 @@ function decodeDatabaseUrlComponent(value: string): string {
   }
 }
 
-function resolveRuntimeUser(connectionUrl: URL): string {
+function resolveRuntimeUser(
+  connectionUrl: URL,
+  deploymentTarget: BetaAdmissionDeploymentTarget,
+): string {
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
+  const target = BETA_ADMISSION_DEPLOYMENT_TARGETS[deploymentTarget];
   if (
-    connectionUrl.hostname === BETA_ADMISSION_DATABASE_DIRECT_HOST &&
+    connectionUrl.hostname === target.databaseDirectHost &&
     user === BETA_ADMISSION_DATABASE_RUNTIME_ROLE
   ) {
     return user;
   }
 
   throw new Error(
-    'BETA_ADMISSION_DATABASE_URL must use the dedicated staging beta-admission runtime login through the exact IPv6 direct database endpoint.',
+    'BETA_ADMISSION_DATABASE_URL must use the dedicated beta-admission runtime login through the exact deployment-target database endpoint.',
   );
 }
 
-function parseDatabaseConnection(connectionString: string): BetaAdmissionDatabaseConnection {
+function parseDatabaseConnection(
+  connectionString: string,
+  deploymentTarget: BetaAdmissionDeploymentTarget,
+): BetaAdmissionDatabaseConnection {
   let connectionUrl: URL;
   try {
     connectionUrl = new URL(connectionString);
@@ -176,14 +196,26 @@ function parseDatabaseConnection(connectionString: string): BetaAdmissionDatabas
     host: connectionUrl.hostname,
     password: decodeDatabaseUrlComponent(connectionUrl.password),
     port: 5432,
-    user: resolveRuntimeUser(connectionUrl),
+    user: resolveRuntimeUser(connectionUrl, deploymentTarget),
   };
+}
+
+function loadBetaAdmissionDeploymentTarget(
+  environment: NodeJS.ProcessEnv,
+): BetaAdmissionDeploymentTarget {
+  const target = environment.BETA_ADMISSION_DEPLOYMENT_TARGET;
+  if (target !== 'staging' && target !== 'production') {
+    throw new Error(
+      'BETA_ADMISSION_DEPLOYMENT_TARGET must be explicitly set to staging or production.',
+    );
+  }
+  return target;
 }
 
 /**
  * Loads the dedicated invite-redemption service configuration. The single runtime gate is the
- * only path that reads database or HMAC material. Its database URL is pinned to the staging
- * project and cannot be repointed to production by configuration.
+ * only path that reads database or HMAC material. Its database URL is pinned to the explicit
+ * deployment target and cannot cross the staging/production boundary.
  */
 export function loadBetaAdmissionConfig(
   environment: NodeJS.ProcessEnv = process.env,
@@ -217,6 +249,7 @@ export function loadBetaAdmissionConfig(
     };
   }
 
+  const deploymentTarget = loadBetaAdmissionDeploymentTarget(environment);
   const databaseUrl = secretFromEnvironmentOrFile(
     environment,
     'BETA_ADMISSION_DATABASE_URL',
@@ -245,9 +278,9 @@ export function loadBetaAdmissionConfig(
     ...common,
     runtime: {
       enabled: true,
-      stage: 'staging',
-      projectReference: FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
-      connection: parseDatabaseConnection(databaseUrl),
+      stage: deploymentTarget,
+      projectReference: BETA_ADMISSION_DEPLOYMENT_TARGETS[deploymentTarget].projectReference,
+      connection: parseDatabaseConnection(databaseUrl, deploymentTarget),
       tlsMode: 'verify-full',
       transportHmacSecret,
       payloadHmacSecret,

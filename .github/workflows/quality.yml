@@ -49,6 +49,7 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \
@@ -101,6 +102,24 @@ jobs:
             docker compose --env-file /dev/null \
               --file infra/compose.companion-device-pairing.yaml \
               --profile companion-device-pairing config --quiet
+          production_contract_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$production_contract_dir"' EXIT
+          for file in \
+            api-action-capability-hmac api-action-payload-hmac api-action-semantic-hmac \
+            api-action-transport-hmac beta-database-url beta-payload-hmac beta-transport-hmac \
+            bot-action-transport-hmac bot-token bot-transport-hmac \
+            cbe-deposit-reference-encryption-key cbe-deposit-reference-fingerprint-key \
+            cbe-deposit-reference-key-profile.v1.json customer-web-database-url \
+            customer-web-rate-limit-hmac deposit-proof-reference-encryption-master \
+            deposit-proof-reference-fingerprint-master deposit-proof-reference-profile.v2.json \
+            owner-database-url player-action-database-url publishable-key supabase-ca.crt; do
+            install -m 0600 /dev/null "$production_contract_dir/$file"
+          done
+          FETANAGENT_IMAGE_TAG=ci \
+          FETANAGENT_PRODUCTION_SECRET_DIR="$production_contract_dir" \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID=telebirr-assignment-production-v1 \
+            docker compose --env-file /dev/null --file infra/compose.production.yaml \
+              --profile production config --quiet
 
       - name: Build and validate the public HTTPS gateway
         shell: bash

@@ -1,0 +1,243 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+
+const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
+const read = (path) => readFile(`${repositoryRoot}/${path}`, 'utf8');
+
+const [compose, workflow, helper, sudoers, provisionSql, disableSql, packageJson, quality] =
+  await Promise.all([
+    read('infra/compose.production.yaml'),
+    read('.github/workflows/production-runtime.yml'),
+    read('infra/operations/fetanagent-production-deploy-helper.sh'),
+    read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
+    read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
+    read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
+    read('package.json'),
+    read('.github/workflows/quality.yml'),
+  ]);
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function topLevelSection(source, name) {
+  const header = new RegExp(`^${escapeRegExp(name)}:\\s*$`, 'mu').exec(source);
+  assert.ok(header, `missing top-level ${name} section`);
+  const remainder = source.slice(header.index + header[0].length);
+  const next = /^\\S[^\r\n]*:\s*$/mu.exec(remainder);
+  return remainder.slice(0, next?.index ?? remainder.length);
+}
+
+function childBlock(section, name) {
+  const header = new RegExp(`^  ${escapeRegExp(name)}:\\s*$`, 'mu').exec(section);
+  assert.ok(header, `missing ${name} block`);
+  const remainder = section.slice(header.index + header[0].length);
+  const next = /^  [a-z][a-z0-9_-]*:\s*$/mu.exec(remainder);
+  return remainder.slice(0, next?.index ?? remainder.length);
+}
+
+function count(source, expression) {
+  return [...source.matchAll(expression)].length;
+}
+
+const services = topLevelSection(compose, 'services');
+const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gmu)].map(
+  (match) => match[1],
+);
+assert.deepEqual(serviceNames, [
+  'owner-control',
+  'customer-web',
+  'api',
+  'beta-admission',
+  'bot',
+  'gateway',
+]);
+
+const applicationServices = serviceNames
+  .slice(0, 5)
+  .map((name) => [name, childBlock(services, name)]);
+const gateway = childBlock(services, 'gateway');
+for (const [name, service] of applicationServices) {
+  assert.match(service, /image: fetanagent-[a-z-]+:\$\{FETANAGENT_IMAGE_TAG:\?/u, name);
+  assert.match(service, /<<: \*runtime-defaults/u, name);
+  assert.match(service, /NODE_ENV: production/u, name);
+  assert.match(service, /FINANCIAL_ACTIONS_MODE: dry_run/u, name);
+  assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/u, name);
+  assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u, name);
+  assert.doesNotMatch(service, /password|token:\s*[^/\s$]/iu, `${name} contains inline authority`);
+}
+
+for (const invariant of [
+  /profiles: \[production\]/u,
+  /platform: linux\/amd64/u,
+  /pull_policy: never/u,
+  /user: '10001:10001'/u,
+  /restart: unless-stopped/u,
+  /read_only: true/u,
+  /cap_drop:\s*\r?\n    - ALL/u,
+  /no-new-privileges:true/u,
+  /pids_limit: 128/u,
+  /max-size: 10m/u,
+  /max-file: '3'/u,
+]) {
+  assert.match(compose.slice(0, compose.indexOf('services:')), invariant);
+}
+
+const owner = childBlock(services, 'owner-control');
+assert.match(owner, /OWNER_CONTROL_DEPLOYMENT_TARGET: production/u);
+assert.match(owner, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/u);
+assert.match(
+  owner,
+  /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: \$\{FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:\?/u,
+);
+assert.doesNotMatch(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID/u);
+
+const customer = childBlock(services, 'customer-web');
+assert.match(customer, /CUSTOMER_WEB_DEPLOYMENT_TARGET: production/u);
+assert.match(customer, /INTERNAL_CUSTOMER_WEB_AUTH_RUNTIME_ENABLED: 'true'/u);
+assert.match(customer, /INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true'/u);
+assert.match(customer, /INTERNAL_CUSTOMER_WEB_DURABLE_RATE_LIMIT_ENABLED: 'true'/u);
+assert.match(customer, /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'/u);
+assert.match(customer, /INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'false'/u);
+
+const api = childBlock(services, 'api');
+assert.match(api, /PLAYER_ACTION_DEPLOYMENT_TARGET: production/u);
+assert.match(api, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/u);
+assert.match(api, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
+assert.match(api, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/u);
+
+const beta = childBlock(services, 'beta-admission');
+assert.match(beta, /BETA_ADMISSION_DEPLOYMENT_TARGET: production/u);
+assert.match(beta, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/u);
+
+const bot = childBlock(services, 'bot');
+assert.match(bot, /TELEGRAM_BOT_ENABLED: 'true'/u);
+assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
+assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
+assert.match(bot, /condition: service_healthy/u);
+
+assert.match(gateway, /ports:\s*\r?\n      - '80:80\/tcp'\s*\r?\n      - '443:443\/tcp'/u);
+assert.match(gateway, /cap_add:\s*\r?\n      - NET_BIND_SERVICE/u);
+assert.match(gateway, /- companion_device_ingress\s*\r?\n      - telebirr_device_ingress/u);
+assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
+
+assert.match(compose, /^name: fetanagent-production$/mu);
+assert.doesNotMatch(compose, /fetanagent-staging|2026-09-0|shutdown|expires|systemd|timer/iu);
+assert.doesNotMatch(compose, /deposit-executor|trusted-telebirr-verifier|target: executor/iu);
+assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 5);
+assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 5);
+assert.equal(count(compose, /restart: unless-stopped/gu), 1);
+
+const networks = topLevelSection(compose, 'networks');
+assert.match(
+  networks,
+  /companion_device_ingress:\s*\r?\n    external: true\s*\r?\n    name: fetanagent-companion-device-ingress/u,
+);
+assert.match(
+  networks,
+  /telebirr_device_ingress:\s*\r?\n    external: true\s*\r?\n    name: fetanagent-telebirr-device-ingress/u,
+);
+const secrets = topLevelSection(compose, 'secrets');
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 19);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 19);
+assert.doesNotMatch(secrets, /sb_publishable_|postgresql:\/\/|[0-9a-f]{64}/u);
+
+assert.match(workflow, /^name: Production application runtime$/mu);
+assert.match(workflow, /^  workflow_dispatch:$/mu);
+assert.doesNotMatch(workflow, /^  (?:push|pull_request|pull_request_target|schedule):/mu);
+assert.match(workflow, /^permissions:\s*\r?\n  contents: read$/mu);
+assert.match(
+  workflow,
+  /concurrency:\s*\r?\n  group: fetanagent-production-runtime\s*\r?\n  cancel-in-progress: false/u,
+);
+assert.match(workflow, /environment: production/u);
+assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
+assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
+assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
+assert.match(workflow, /"\$CONFIRMED_PROJECT" != "\$STAGING_PROJECT_REF"/u);
+assert.match(workflow, /Verify restricted server boundary and storage/u);
+assert.match(workflow, /current-state/u);
+assert.match(workflow, /Provision continuous least-privilege production logins/u);
+assert.match(workflow, /production-nonfinancial-runtimes-provision\.sql/u);
+assert.match(workflow, /Atomically activate production and switch the public edge/u);
+assert.match(workflow, /Verify live public production services/u);
+assert.match(workflow, /Private production control/u);
+assert.match(workflow, /Attest and finalize the production cutover/u);
+assert.match(workflow, /Roll back a failed production activation/u);
+assert.match(workflow, /PREVIOUS_PRODUCTION_STATE/u);
+assert.match(workflow, /cleanup-incoming/u);
+assert.match(workflow, /production-nonfinancial-runtimes-disable\.sql/u);
+assert.doesNotMatch(workflow, /^  schedule:|2026-09-0|systemctl|service[_-]?role/imu);
+assert.doesNotMatch(workflow, /echo[^\r\n]*(?:PASSWORD|TOKEN|PRIVATE_KEY)/u);
+
+for (const action of [
+  'actions/checkout',
+  'actions/setup-node',
+  'actions/upload-artifact',
+  'actions/download-artifact',
+]) {
+  assert.match(workflow, new RegExp(`${escapeRegExp(action)}@[0-9a-f]{40}`, 'u'));
+}
+for (const secret of [
+  'SUPABASE_DB_PASSWORD',
+  'PRODUCTION_SUPABASE_PUBLISHABLE_KEY',
+  'PRODUCTION_TELEGRAM_BOT_TOKEN',
+  'PRODUCTION_VM_HOST',
+  'PRODUCTION_VM_KNOWN_HOSTS',
+  'PRODUCTION_VM_SSH_PRIVATE_KEY',
+]) {
+  assert.match(workflow, new RegExp(`secrets\\.${secret}`, 'u'));
+}
+
+assert.match(helper, /^set -euo pipefail$/mu);
+assert.match(helper, /\[\[ "\$\(id -u\)" == '0' \]\]/u);
+assert.match(helper, /readonly ROOT='\/srv\/fetanagent\/production'/u);
+assert.match(
+  helper,
+  /readonly HELPER_PATH='\/usr\/local\/sbin\/fetanagent-production-deploy-helper'/u,
+);
+assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
+assert.match(helper, /current-state\)/u);
+assert.match(helper, /cleanup-incoming\)/u);
+assert.match(helper, /rollback_transition/u);
+assert.match(helper, /compose_release "\$release" up --detach --no-build --wait/u);
+assert.match(helper, /Private production control/u);
+assert.match(helper, /finalize\)/u);
+assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);
+
+const helperDigest = createHash('sha256').update(helper).digest('hex');
+assert.equal(
+  sudoers,
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
+  'sudoers must bind the restricted deploy account to this exact helper digest',
+);
+
+for (const role of [
+  'fetanagent_beta_admission_runtime',
+  'fetanagent_customer_web_runtime',
+  'fetanagent_owner_control_runtime',
+  'fetanagent_player_actions_runtime',
+  'fetanagent_telebirr_assignment_broker_runtime',
+  'fetanagent_telebirr_device_state_runtime',
+]) {
+  assert.match(provisionSql, new RegExp(`alter role ${role} with login password`, 'u'));
+  assert.match(disableSql, new RegExp(`alter role ${role} nologin password null`, 'u'));
+}
+assert.equal(count(provisionSql, /valid until 'infinity'/gu), 6);
+assert.match(provisionSql, /rolvaliduntil = 'infinity'::timestamptz/u);
+assert.match(provisionSql, /where mode <> 'disabled'/u);
+assert.match(provisionSql, /Financial runtime logins must remain disabled/u);
+assert.match(provisionSql, /begin transaction isolation level serializable/u);
+assert.match(disableSql, /begin transaction isolation level serializable/u);
+assert.doesNotMatch(`${provisionSql}\n${disableSql}`, /2026-09-0|interval '24 hours'/u);
+
+assert.match(packageJson, /node infra\/verify-production-runtime\.mjs/u);
+assert.match(quality, /bash -n infra\/operations\/fetanagent-production-deploy-helper\.sh/u);
+assert.match(quality, /--file infra\/compose\.production\.yaml/u);
+assert.match(quality, /--profile production config --quiet/u);
+
+console.log(
+  'Production runtime verified: production-only target binding, permanent least-privilege logins, sealed secrets, non-root services, fail-closed financial authority, atomic public cutover, and rollback.',
+);

@@ -1,0 +1,518 @@
+name: Production application runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Build only, deploy, inspect live status, or stop the production application runtime
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - deploy
+          - status
+          - stop
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_operation:
+        description: Type PLAN PRODUCTION RUNTIME, DEPLOY PRODUCTION RUNTIME, STATUS PRODUCTION RUNTIME, or STOP PRODUCTION RUNTIME
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DROPLET_ID: '593344964'
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
+  CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
+  OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
+  PLAYER_ACTION_RUNTIME_ROLE: fetanagent_player_actions_runtime
+
+jobs:
+  validate-target:
+    name: Validate exact production target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main and the exact production operation
+        shell: bash
+        env:
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
+            'plan:PLAN PRODUCTION RUNTIME'|\
+            'deploy:DEPLOY PRODUCTION RUNTIME'|\
+            'status:STATUS PRODUCTION RUNTIME'|\
+            'stop:STOP PRODUCTION RUNTIME') ;;
+            *)
+              echo '::error::The operation confirmation does not match the selected production mode.'
+              exit 1
+              ;;
+          esac
+
+  build:
+    name: Build sealed production images
+    if: inputs.mode == 'plan' || inputs.mode == 'deploy'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Verify production contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node infra/verify-production-runtime.mjs
+          bash -n infra/operations/fetanagent-production-deploy-helper.sh
+
+      - name: Build commit-labelled images without runtime secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          for target in admin customer-web api beta-admission bot gateway; do
+            case "$target" in
+              admin) image='owner-control' ;;
+              *) image="$target" ;;
+            esac
+            docker build --pull=false --target "$target" \
+              --build-arg "VCS_REF=$GITHUB_SHA" -t "fetanagent-$image:$tag" .
+            [[ "$(docker image inspect "fetanagent-$image:$tag" \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$GITHUB_SHA" ]]
+          done
+
+      - name: Save sealed image bundle
+        if: inputs.mode == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          docker save --output "$RUNNER_TEMP/fetanagent-production-images.tar" \
+            "fetanagent-owner-control:$tag" \
+            "fetanagent-customer-web:$tag" \
+            "fetanagent-api:$tag" \
+            "fetanagent-beta-admission:$tag" \
+            "fetanagent-bot:$tag" \
+            "fetanagent-gateway:$tag"
+
+      - name: Upload sealed image bundle
+        if: inputs.mode == 'deploy'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fetanagent-production-images-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-production-images.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Deploy continuous production runtime
+    if: inputs.mode == 'deploy'
+    needs: [validate-target, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: production
+    steps:
+      - name: Check out deployment contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download sealed image bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: fetanagent-production-images-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+
+      - name: Prepare protected deployment bundle
+        id: protected
+        shell: bash
+        env:
+          API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
+          API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
+          API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
+          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          BOT_TO_API_ACTION_HMAC_SECRET: ${{ secrets.BOT_TO_API_ACTION_HMAC_SECRET }}
+          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
+          CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
+          CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
+          CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
+          CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: ${{ secrets.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
+          DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
+          PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
+          PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
+          PRODUCTION_TELEGRAM_BOT_TOKEN_SHA256: ${{ vars.PRODUCTION_TELEGRAM_BOT_TOKEN_SHA256 }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+        run: |
+          set -euo pipefail
+          secret_dir="$RUNNER_TEMP/production-protected"
+          install -d -m 0700 "$secret_dir"
+          umask 077
+
+          values=(
+            "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET"
+            "$API_TELEGRAM_CAPABILITY_HMAC_SECRET"
+            "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET"
+            "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET"
+            "$BETA_ADMISSION_RUNTIME_PASSWORD"
+            "$BOT_TO_API_ACTION_HMAC_SECRET"
+            "$BOT_TO_BETA_ADMISSION_HMAC_SECRET"
+            "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"
+            "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET"
+            "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET"
+            "$CUSTOMER_WEB_RUNTIME_PASSWORD"
+            "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET"
+            "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET"
+            "$OWNER_CONTROL_RUNTIME_PASSWORD"
+            "$PLAYER_ACTION_RUNTIME_PASSWORD"
+            "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD"
+            "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD"
+          )
+          for value in "${values[@]}"; do [[ "$value" =~ ^[0-9a-f]{64}$ ]]; done
+          [[ "$(printf '%s\n' "${values[@]}" | sort -u | wc -l)" -eq "${#values[@]}" ]]
+          [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
+          [[ "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]]
+
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          function verifyProfile(encoded, version, fields, secrets) {
+            const profile = JSON.parse(encoded);
+            const names = [...fields, 'version'].sort().join(',');
+            if (Object.keys(profile).sort().join(',') !== names || profile.version !== version) throw new Error('invalid key profile');
+            for (let index = 0; index < fields.length; index += 1) {
+              const actual = `sha256:${createHash('sha256').update(Buffer.from(secrets[index], 'hex')).digest('hex')}`;
+              if (profile[fields[index]] !== actual) throw new Error('key profile fingerprint mismatch');
+            }
+            if (profile[fields[0]] === profile[fields[1]]) throw new Error('key profile identities are not distinct');
+          }
+          verifyProfile(process.env.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON, 1,
+            ['encryptionKeyFingerprint', 'fingerprintKeyFingerprint'],
+            [process.env.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET, process.env.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET]);
+          verifyProfile(process.env.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON, 2,
+            ['encryptionMasterFingerprint', 'fingerprintMasterFingerprint'],
+            [process.env.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET, process.env.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET]);
+          const token = process.env.PRODUCTION_TELEGRAM_BOT_TOKEN;
+          if (!/^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$/u.test(token)) throw new Error('invalid Telegram token');
+          const digest = `sha256:${createHash('sha256').update(token).digest('hex')}`;
+          if (digest !== process.env.PRODUCTION_TELEGRAM_BOT_TOKEN_SHA256) throw new Error('Telegram token fingerprint mismatch');
+          NODE
+
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$secret_dir/supabase-ca.crt"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/owner-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$CUSTOMER_WEB_RUNTIME_ROLE" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/customer-web-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/beta-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
+            "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/player-action-database-url"
+          printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
+          printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/beta-transport-hmac"
+          printf '%s\n' "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" >"$secret_dir/beta-payload-hmac"
+          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/bot-transport-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/api-action-transport-hmac"
+          printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/bot-action-transport-hmac"
+          printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" >"$secret_dir/api-action-payload-hmac"
+          printf '%s\n' "$API_TELEGRAM_CAPABILITY_HMAC_SECRET" >"$secret_dir/api-action-capability-hmac"
+          printf '%s\n' "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET" >"$secret_dir/api-action-semantic-hmac"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET" >"$secret_dir/cbe-deposit-reference-encryption-key"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET" >"$secret_dir/cbe-deposit-reference-fingerprint-key"
+          printf '%s\n' "$CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON" >"$secret_dir/cbe-deposit-reference-key-profile.v1.json"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-encryption-master"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-fingerprint-master"
+          printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" >"$secret_dir/deposit-proof-reference-profile.v2.json"
+          printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
+          printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
+          chmod 0600 "$secret_dir"/*
+          openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$secret_dir/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$secret_dir/known-hosts" >/dev/null
+          helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)"
+          bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-production-images.tar")"
+          [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
+          echo "secret_dir=$secret_dir" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$helper_sha" >>"$GITHUB_OUTPUT"
+          echo "bundle_bytes=$bundle_bytes" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+
+      - name: Verify Telegram identity without exposing the token
+        shell: bash
+        env:
+          PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --max-time 15 \
+            "https://api.telegram.org/bot${PRODUCTION_TELEGRAM_BOT_TOKEN}/getMe")"
+          jq -e '.ok == true and .result.is_bot == true and (.result.username | ascii_downcase) == "fetanagentbot"' \
+            <<<"$response" >/dev/null
+
+      - name: Verify restricted server boundary and storage
+        id: boundary
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          remote="fetanagent-admin@$VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          current_state="$(ssh "${ssh_opts[@]}" "$remote" \
+            "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
+          [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
+          echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
+
+      - name: Provision continuous least-privilege production logins
+        id: provision
+        shell: bash
+        env:
+          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
+          TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          psql -X --file=infra/sql/production-nonfinancial-runtimes-provision.sql
+
+      - name: Transfer and install the sealed release
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          remote="fetanagent-admin@$VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          incoming="/tmp/fetanagent-production-$GITHUB_SHA"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
+          scp "${ssh_opts[@]}" \
+            "$RUNNER_TEMP/release/fetanagent-production-images.tar" \
+            infra/compose.production.yaml \
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id} \
+            "$remote:$incoming/"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
+
+      - name: Atomically activate production and switch the public edge
+        id: activate
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper activate '$GITHUB_SHA'"
+          echo 'completed=true' >>"$GITHUB_OUTPUT"
+
+      - name: Verify live public production services
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..18}; do
+            owner="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 https://owner.fetanagent.com/owner || true)"
+            customer="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 10 https://fetanagent.com/sign-in || true)"
+            if grep -Fq 'Private production control' <<<"$owner" && \
+              grep -Fq '<title>Sign in · FetanAgent</title>' <<<"$customer"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo '::error::The public production HTTPS smoke did not pass within 90 seconds.'
+          exit 1
+
+      - name: Attest and finalize the production cutover
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          remote="fetanagent-admin@$VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
+          echo 'Production runtime is live continuously; no calendar expiry is installed and every financial switch remains disabled.' >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Roll back a failed production activation
+        if: always() && (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PREVIOUS_PRODUCTION_STATE: ${{ steps.boundary.outputs.current_state }}
+          ACTIVATION_ATTEMPTED: ${{ steps.activate.outputs.attempted }}
+        run: |
+          set +e
+          rollback_status=0
+          database_status=0
+          if [[ -n "$SECRET_DIR" && -n "$VM_HOST" ]]; then
+            recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper cleanup-incoming '$GITHUB_SHA'"
+            if [[ "$ACTIVATION_ATTEMPTED" == 'true' ]]; then
+              recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper rollback '$GITHUB_SHA' && $recovery"
+            fi
+            ssh -F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts" \
+              "fetanagent-admin@$VM_HOST" "$recovery" || rollback_status=$?
+          else
+            rollback_status=1
+          fi
+          if [[ "$PREVIOUS_PRODUCTION_STATE" == 'absent' ]]; then
+            psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql || database_status=$?
+          elif [[ "$PREVIOUS_PRODUCTION_STATE" != 'present' ]]; then
+            database_status=1
+          fi
+          [[ "$rollback_status" -eq 0 && "$database_status" -eq 0 ]]
+
+  operate:
+    name: Inspect or stop production runtime
+    if: inputs.mode == 'status' || inputs.mode == 'stop'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Check out the exact operations contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare protected connection
+        id: connection
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/production-connection"
+          install -d -m 0700 "$protected"
+          umask 077
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected"/*
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+
+      - name: Inspect exact live production release
+        if: inputs.mode == 'status'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -i '${{ steps.connection.outputs.protected }}/deploy-key' -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile='${{ steps.connection.outputs.protected }}/known-hosts' \
+            'fetanagent-admin@${{ steps.connection.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper status '$GITHUB_SHA'"
+
+      - name: Stop production and disable all application logins
+        if: inputs.mode == 'stop'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.connection.outputs.protected }}/supabase-ca.crt
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -i '${{ steps.connection.outputs.protected }}/deploy-key' -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile='${{ steps.connection.outputs.protected }}/known-hosts' \
+            'fetanagent-admin@${{ steps.connection.outputs.vm_host }}' \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper stop"
+          psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql

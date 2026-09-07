@@ -844,6 +844,7 @@ services:
       FINANCIAL_ACTIONS_MODE: dry_run
       BETA_ADMISSION_HOST: 0.0.0.0
       BETA_ADMISSION_PORT: '3001'
+      BETA_ADMISSION_DEPLOYMENT_TARGET: staging
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'
       BETA_ADMISSION_DATABASE_URL_FILE: /run/secrets/beta_admission_database_url

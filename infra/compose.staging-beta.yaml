@@ -39,6 +39,7 @@ services:
       FINANCIAL_ACTIONS_MODE: dry_run
       OWNER_CONTROL_HOST: 0.0.0.0
       OWNER_CONTROL_PORT: '3002'
+      OWNER_CONTROL_DEPLOYMENT_TARGET: staging
       OWNER_CONTROL_SUPABASE_URL: https://spzpiyxheappsfyswewl.supabase.co
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+  OWNER_CONTROL_DATABASE_TARGETS,
   OWNER_CONTROL_DATABASE_DIRECT_HOST,
   OWNER_CONTROL_DATABASE_POOLER_HOST,
   OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
@@ -32,6 +33,7 @@ function enabledEnvironment(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'test',
     INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
+    OWNER_CONTROL_DEPLOYMENT_TARGET: 'staging',
     OWNER_CONTROL_DATABASE_URL: databaseUrl,
     OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: publishableKey,
@@ -70,6 +72,7 @@ describe('Owner-control configuration', () => {
       enabled: true,
       companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
       devicePairing: { assignmentSignerKeyId: undefined, configured: false },
+      deploymentTarget: 'staging',
       projectReference: OWNER_CONTROL_STAGING_PROJECT_REFERENCE,
       stage: 'staging',
       tlsMode: 'verify-full',
@@ -105,6 +108,72 @@ describe('Owner-control configuration', () => {
       expect(() =>
         loadOwnerControlConfig({ ...enabledEnvironment(), OWNER_CONTROL_DATABASE_URL: unsafe }),
       ).toThrow();
+    }
+  });
+
+  it('binds the exact production Auth and database routes only when production is explicit', () => {
+    const productionTarget = OWNER_CONTROL_DATABASE_TARGETS.production;
+    const productionDirectUrl = `postgresql://${OWNER_CONTROL_DATABASE_RUNTIME_ROLE}:password@${productionTarget.directHost}:5432/postgres?sslmode=verify-full`;
+    const productionPoolerUrl = `postgresql://${productionTarget.poolerRuntimeRole}:password@${productionTarget.poolerHost}:5432/postgres?sslmode=verify-full`;
+    const productionEnvironment = {
+      ...enabledEnvironment(),
+      OWNER_CONTROL_DEPLOYMENT_TARGET: 'production',
+      OWNER_CONTROL_DATABASE_URL: productionDirectUrl,
+      OWNER_CONTROL_SUPABASE_URL: productionTarget.supabaseUrl,
+    };
+
+    expect(loadOwnerControlConfig(productionEnvironment).runtime).toMatchObject({
+      enabled: true,
+      deploymentTarget: 'production',
+      projectReference: productionTarget.projectReference,
+      stage: 'production',
+      supabaseUrl: productionTarget.supabaseUrl,
+      connection: {
+        host: productionTarget.directHost,
+        user: OWNER_CONTROL_DATABASE_RUNTIME_ROLE,
+      },
+    });
+    expect(
+      loadOwnerControlConfig({
+        ...productionEnvironment,
+        OWNER_CONTROL_DATABASE_URL: productionPoolerUrl,
+      }).runtime,
+    ).toMatchObject({
+      enabled: true,
+      connection: {
+        host: productionTarget.poolerHost,
+        user: productionTarget.poolerRuntimeRole,
+      },
+    });
+
+    expect(() =>
+      loadOwnerControlConfig({
+        ...productionEnvironment,
+        OWNER_CONTROL_DATABASE_URL: databaseUrl,
+      }),
+    ).toThrow('must match the explicit deployment target');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...productionEnvironment,
+        OWNER_CONTROL_SUPABASE_URL: OWNER_CONTROL_DATABASE_TARGETS.staging.supabaseUrl,
+      }),
+    ).toThrow('must match the explicit deployment target');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_CONTROL_DATABASE_URL: productionDirectUrl,
+      }),
+    ).toThrow('must match the explicit deployment target');
+  });
+
+  it('rejects a missing, differently cased, or unknown deployment target', () => {
+    for (const target of [undefined, 'Production', 'prod']) {
+      expect(() =>
+        loadOwnerControlConfig({
+          ...enabledEnvironment(),
+          OWNER_CONTROL_DEPLOYMENT_TARGET: target,
+        }),
+      ).toThrow('OWNER_CONTROL_DEPLOYMENT_TARGET must be explicitly set');
     }
   });
 
@@ -193,6 +262,7 @@ describe('Owner-control configuration', () => {
       {
         NODE_ENV: 'production',
         INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
+        OWNER_CONTROL_DEPLOYMENT_TARGET: 'staging',
         OWNER_CONTROL_DATABASE_URL_FILE: '/run/secrets/owner_control_database_url',
         OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
         OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:

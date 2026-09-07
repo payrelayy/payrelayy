@@ -1,16 +1,17 @@
 # Owner/Admin control service
 
 This package contains narrow Owner-only backend operations: issue or revoke a Telegram beta invite,
-and record a non-claiming KemerBet Player-ID existence review. It also serves a small private
-staging page at `/owner`; it is not a general dashboard
-and it has no browser database grant. The page signs in directly to the exact staging Supabase Auth
-project with the public publishable key, keeps the access token only in JavaScript memory, and sends
+and record a non-claiming KemerBet Player-ID existence review. It also serves a small private Owner
+page at `/owner`; it is not a general dashboard and it has no browser database grant. The runtime
+requires `OWNER_CONTROL_DEPLOYMENT_TARGET` to be exactly `staging` or `production`, then binds the
+page to that target's exact Supabase Auth origin and database endpoints. The page signs in directly
+with the target's public publishable key, keeps the access token only in JavaScript memory, and sends
 that bearer token to the loopback-only Owner service. It never stores a password, access token,
 service-role key, or database credential in browser storage. A rotating refresh token and the fixed
 twelve-hour deadline are stored only in same-tab session storage; sign-out or closing the tab
 removes them.
 
-The service verifies the bearer token with the exact staging Supabase Auth project, derives the
+The service verifies the bearer token with the exact selected Supabase Auth project, derives the
 Auth user ID from that verified response, and passes it to private database procedures. The
 database independently requires that subject to map to the one active Owner.
 
@@ -96,7 +97,8 @@ active Owner may explicitly approve or revoke an already associated KemerBet Pla
 has no direct table grant, is serialized with new intents, writes fixed reason codes and safe audit
 metadata, and does not open a deposit, change a feature switch, call KemerBet, or move money.
 
-The runtime remains disabled by default. Its staging container binds only to host loopback; the
+The runtime remains disabled by default and rejects missing, mixed-case, unknown, or cross-project
+deployment targets. Its current staging container binds only to host loopback; the
 reviewed public Caddy boundary may proxy the authenticated `/owner` page but exposes neither the
 Unix socket nor the transient browser container. The current page remains private to the Owner, is
 not a customer-facing PWA, and keeps English-only interface and validation copy.

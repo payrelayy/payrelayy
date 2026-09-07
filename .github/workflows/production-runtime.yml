@@ -109,7 +109,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_SHA:0:12}"
-          for target in admin customer-web api beta-admission bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge gateway; do
+          for target in admin customer-web api beta-admission bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge companion-device-bridge gateway; do
             case "$target" in
               admin) image='owner-control' ;;
               *) image="$target" ;;
@@ -135,6 +135,7 @@ jobs:
             "fetanagent-telebirr-assignment-broker:$tag" \
             "fetanagent-telebirr-device-state-broker:$tag" \
             "fetanagent-telebirr-device-bridge:$tag" \
+            "fetanagent-companion-device-bridge:$tag" \
             "fetanagent-gateway:$tag"
 
       - name: Upload sealed image bundle
@@ -180,6 +181,14 @@ jobs:
           CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
           CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
           CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
+          COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          COMPANION_SERVER_SIGNER_PKCS8_BASE64: ${{ secrets.COMPANION_SERVER_SIGNER_PKCS8_BASE64 }}
+          COMPANION_SERVER_SIGNER_ID: ${{ vars.COMPANION_SERVER_SIGNER_ID }}
+          COMPANION_SERVER_SIGNER_KEY_ID: ${{ vars.COMPANION_SERVER_SIGNER_KEY_ID }}
+          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
+          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64: ${{ vars.COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_V2_BASE64 }}
           CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET: ${{ secrets.CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET }}
           CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
           DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
@@ -220,6 +229,7 @@ jobs:
             "$BOT_TO_BETA_ADMISSION_HMAC_SECRET"
             "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"
             "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET"
+            "$COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD"
             "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET"
             "$CUSTOMER_WEB_RUNTIME_PASSWORD"
             "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET"
@@ -323,6 +333,7 @@ jobs:
              .assignmentSigningPublicKeySpkiSha256 == $assignment_digest' \
             "$secret_dir/telebirr-bridge-runtime-manifest.v1.json" >/dev/null
           rm -f -- "$secret_dir/telebirr-bridge.spki.der" "$secret_dir/telebirr-bridge-derived.spki.der"
+          node infra/operations/prepare-production-companion-bundle.mjs "$secret_dir"
           helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)"
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-production-images.tar")"
           [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
@@ -368,6 +379,13 @@ jobs:
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          COMPANION_SERVER_SIGNER_ID: ${{ vars.COMPANION_SERVER_SIGNER_ID }}
+          COMPANION_SERVER_SIGNER_KEY_ID: ${{ vars.COMPANION_SERVER_SIGNER_KEY_ID }}
+          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          COMPANION_SERVER_SIGNER_VALID_FROM: ${{ vars.COMPANION_SERVER_SIGNER_VALID_FROM }}
+          COMPANION_SERVER_SIGNER_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: '5432'
@@ -380,7 +398,19 @@ jobs:
         run: |
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          companion_previous_login="$(psql -X -Atc "select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_companion_device_bridge_runtime'")"
+          [[ "$companion_previous_login" == 't' || "$companion_previous_login" == 'f' ]]
+          echo "companion_previous_login=$companion_previous_login" >>"$GITHUB_OUTPUT"
           psql -X --file=infra/sql/production-nonfinancial-runtimes-provision.sql
+          psql -X \
+            --set=companion_signer_id="$COMPANION_SERVER_SIGNER_ID" \
+            --set=companion_signer_key_id="$COMPANION_SERVER_SIGNER_KEY_ID" \
+            --set=companion_signer_public_spki="$COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL" \
+            --set=companion_signer_public_spki_sha256="$COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256" \
+            --set=companion_signer_valid_from="$COMPANION_SERVER_SIGNER_VALID_FROM" \
+            --set=companion_signer_valid_until="$COMPANION_SERVER_SIGNER_VALID_UNTIL" \
+            --file=infra/sql/production-companion-server-signer-provision.sql
+          psql -X --file=infra/sql/production-companion-bridge-runtime-enable-continuous.sql
 
       - name: Transfer and install the sealed release
         shell: bash
@@ -398,6 +428,7 @@ jobs:
           scp "${ssh_opts[@]}" \
             "$RUNNER_TEMP/release/fetanagent-production-images.tar" \
             infra/compose.production.yaml \
+            "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json} \
             "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url} \
             "$remote:$incoming/"
           ssh "${ssh_opts[@]}" "$remote" \
@@ -451,6 +482,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           echo 'Production web, Telegram, and Android enrollment transport are live continuously; no calendar expiry is installed and every financial switch remains disabled.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'The independently signed Windows companion production pairing and read-only transport is live on the production database.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back a failed production activation
         if: always() && (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
@@ -469,6 +501,7 @@ jobs:
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
           PREVIOUS_PRODUCTION_STATE: ${{ steps.boundary.outputs.current_state }}
           ACTIVATION_ATTEMPTED: ${{ steps.activate.outputs.attempted }}
+          COMPANION_PREVIOUS_LOGIN: ${{ steps.provision.outputs.companion_previous_login }}
         run: |
           set +e
           rollback_status=0
@@ -488,6 +521,9 @@ jobs:
             psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql || database_status=$?
           elif [[ "$PREVIOUS_PRODUCTION_STATE" != 'present' ]]; then
             database_status=1
+          fi
+          if [[ "$COMPANION_PREVIOUS_LOGIN" == 'f' ]]; then
+            psql -X --file=infra/sql/production-companion-runtime-disable.sql || database_status=$?
           fi
           [[ "$rollback_status" -eq 0 && "$database_status" -eq 0 ]]
 

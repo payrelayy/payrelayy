@@ -55,6 +55,7 @@ assert.deepEqual(serviceNames, [
   'telebirr-assignment-broker',
   'telebirr-device-state-broker',
   'telebirr-device-bridge',
+  'production-companion-device-bridge',
   'gateway',
 ]);
 
@@ -95,7 +96,7 @@ assert.match(
   owner,
   /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: \$\{FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:\?/u,
 );
-assert.doesNotMatch(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID/u);
+assert.match(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1/u);
 
 const customer = childBlock(services, 'customer-web');
 assert.match(customer, /CUSTOMER_WEB_DEPLOYMENT_TARGET: production/u);
@@ -150,6 +151,29 @@ assert.match(telebirrBridge, /aliases:\s*\r?\n\s*- telebirr-device-bridge/u);
 assert.match(telebirrBridge, /telebirr-assignment-broker:[\s\S]*?service_healthy/u);
 assert.match(telebirrBridge, /telebirr-device-state-broker:[\s\S]*?service_healthy/u);
 
+const companion = childBlock(services, 'production-companion-device-bridge');
+for (const expression of [
+  /image: fetanagent-companion-device-bridge:\$\{FETANAGENT_IMAGE_TAG:\?/u,
+  /<<: \*runtime-defaults/u,
+  /COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u,
+  /COMPANION_DEVICE_BRIDGE_NO_MONEY_READ_ONLY_LOOKUP_ENABLED: 'true'/u,
+  /FINANCIAL_ACTIONS_MODE: dry_run/u,
+  /KEMERBET_EXECUTOR_ENABLED: 'false'/u,
+  /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u,
+  /companion_device_database_egress/u,
+])
+  assert.match(companion, expression);
+assert.doesNotMatch(
+  companion,
+  /ports:|aliases:|public_application|private_application|OWNER_CONTROL_|SUPABASE_DB_PASSWORD|SERVICE_ROLE|ASSIGNMENT_SIGNER/u,
+);
+assert.equal(count(companion, /- source: /gu), 4);
+assert.match(
+  gateway,
+  /FETANAGENT_COMPANION_BRIDGE_UPSTREAM: production-companion-device-bridge:8085/u,
+);
+assert.match(gateway, /production-companion-device-bridge:[\s\S]*?condition: service_healthy/u);
+
 assert.match(gateway, /ports:\s*\r?\n      - '80:80\/tcp'\s*\r?\n      - '443:443\/tcp'/u);
 assert.match(gateway, /cap_add:\s*\r?\n      - NET_BIND_SERVICE/u);
 assert.match(gateway, /- companion_device_ingress\s*\r?\n      - telebirr_device_ingress/u);
@@ -159,8 +183,8 @@ assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
 assert.match(compose, /^name: fetanagent-production$/mu);
 assert.doesNotMatch(compose, /fetanagent-staging|2026-09-0|shutdown|expires|systemd|timer/iu);
 assert.doesNotMatch(compose, /deposit-executor|trusted-telebirr-verifier|target: executor/iu);
-assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 8);
-assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 8);
+assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 9);
+assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 9);
 assert.equal(count(compose, /restart: unless-stopped/gu), 1);
 
 const networks = topLevelSection(compose, 'networks');
@@ -177,11 +201,11 @@ assert.match(
   /telebirr_device_state_database_egress:\s*\r?\n    driver: bridge\s*\r?\n    enable_ipv6: true/u,
 );
 const configs = topLevelSection(compose, 'configs');
-assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 5);
-assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 5);
+assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
+assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 21);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 21);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 23);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 23);
 assert.doesNotMatch(secrets, /sb_publishable_|postgresql:\/\/|[0-9a-f]{64}/u);
 
 assert.match(workflow, /^name: Production application runtime$/mu);
@@ -212,6 +236,7 @@ assert.match(workflow, /production-nonfinancial-runtimes-disable\.sql/u);
 assert.doesNotMatch(workflow, /^  schedule:|2026-09-0|systemctl|service[_-]?role/imu);
 assert.doesNotMatch(workflow, /echo[^\r\n]*(?:PASSWORD|TOKEN|PRIVATE_KEY)/u);
 for (const target of [
+  'companion-device-bridge',
   'telebirr-assignment-broker',
   'telebirr-device-state-broker',
   'telebirr-device-bridge',
@@ -278,6 +303,11 @@ assert.match(helper, /Private production control/u);
 assert.match(helper, /quiesce_legacy_telebirr_bridge/u);
 assert.match(helper, /restore_legacy_telebirr_bridge/u);
 assert.match(helper, /negative_telebirr_public_smoke/u);
+assert.match(helper, /negative_companion_public_smoke/u);
+assert.match(helper, /expected_count=29/u);
+assert.match(helper, /expected_count=32/u);
+assert.match(helper, /images\+=\(companion-device-bridge\)/u);
+assert.match(helper, /services\+=\(production-companion-device-bridge\)/u);
 assert.match(helper, /LEGACY_TELEBIRR_PROJECT='fetanagent-telebirr-device-pilot'/u);
 assert.match(helper, /finalize\)/u);
 assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);
@@ -314,6 +344,34 @@ assert.match(packageJson, /node infra\/verify-production-runtime\.mjs/u);
 assert.match(quality, /bash -n infra\/operations\/fetanagent-production-deploy-helper\.sh/u);
 assert.match(quality, /--file infra\/compose\.production\.yaml/u);
 assert.match(quality, /--profile production config --quiet/u);
+assert.match(
+  quality,
+  /node --test infra\/operations\/prepare-production-companion-bundle\.test\.mjs/u,
+);
+assert.match(workflow, /node infra\/operations\/prepare-production-companion-bundle\.mjs/u);
+assert.match(workflow, /COMPANION_PREVIOUS_LOGIN/u);
+assert.match(workflow, /production-companion-runtime-disable\.sql/u);
+assert.match(
+  disableSql,
+  /alter role fetanagent_companion_device_bridge_runtime nologin password null/u,
+);
+const companionTrust = await read('infra/sql/production-companion-server-signer-provision.sql');
+const companionLogin = await read(
+  'infra/sql/production-companion-bridge-runtime-enable-continuous.sql',
+);
+for (const sql of [companionTrust, companionLogin]) {
+  assert.match(sql, /xzztugbgtulptnbpoelr/u);
+  assert.match(sql, /begin transaction isolation level serializable/u);
+  assert.match(sql, /financial_features_safe/u);
+  assert.doesNotMatch(sql, /staging|spzpiyxheappsfyswewl|supabase_admin/u);
+}
+assert.match(companionTrust, /companion-server-production-v1/u);
+assert.match(companionTrust, /exact_safe_replay/u);
+assert.match(companionTrust, /server_signer_revocations/u);
+assert.match(companionLogin, /rolconnlimit = 1/u);
+assert.match(companionLogin, /not role\.rolbypassrls/u);
+assert.match(companionLogin, /not membership\.set_option/u);
+assert.match(companionLogin, /role\.rolvaliduntil = 'infinity'::timestamptz/u);
 
 console.log(
   'Production runtime verified: production-only target binding, permanent least-privilege logins, sealed secrets, non-root web and Android enrollment services, fail-closed financial authority, atomic public cutover, and rollback.',

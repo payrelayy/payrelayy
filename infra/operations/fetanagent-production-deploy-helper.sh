@@ -94,6 +94,9 @@ verify_images() {
   if [[ -n "$release" ]] && grep -Fq '  telebirr-assignment-broker:' "$release/compose.production.yaml"; then
     images+=(telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge)
   fi
+  if [[ -n "$release" ]] && grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
+    images+=(companion-device-bridge)
+  fi
   for image in "${images[@]}"; do
     [[ "$(docker image inspect "fetanagent-$image:$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$sha" ]] ||
       die "the $image image is absent or has the wrong revision"
@@ -130,12 +133,15 @@ verify_release_files() {
     telebirr-bridge-server-signer.pkcs8.der
     telebirr-device-state-database-url
   )
+  if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
+    required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json)
+  fi
   [[ ! -L "$release/secrets" && -d "$release/secrets" ]] || die 'the secret directory is unsafe'
   for name in "${required[@]}"; do
     [[ ! -L "$release/secrets/$name" && -f "$release/secrets/$name" && -s "$release/secrets/$name" ]] ||
       die "the production release is missing $name"
     case "$name" in
-      supabase-ca.crt|cbe-deposit-reference-key-profile.v1.json|deposit-proof-reference-profile.v2.json|telebirr-assignment.spki.der|telebirr-bridge-runtime-manifest.v1.json)
+      supabase-ca.crt|cbe-deposit-reference-key-profile.v1.json|deposit-proof-reference-profile.v2.json|telebirr-assignment.spki.der|telebirr-bridge-runtime-manifest.v1.json|companion-bridge-runtime-manifest.v2.json)
         [[ "$(stat --format='%u:%g:%a' "$release/secrets/$name")" == '0:0:444' ]] ||
           die "the production config metadata is wrong for $name"
         ;;
@@ -206,6 +212,23 @@ negative_telebirr_public_smoke() {
   done
 }
 
+negative_companion_public_smoke() {
+  local release="$1" status route
+  if ! grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then return; fi
+  for route in \
+    '/v1/companion/device/enrollments:pair' \
+    '/v1/companion/device/lookup-assignments:poll' \
+    '/v1/companion/device/lookup-results:submit'
+  do
+    status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+      --header 'Content-Type: application/vnd.fetanagent.companion-device-bridge+json' \
+      --header 'Accept: application/vnd.fetanagent.companion-device-bridge+json' \
+      --data '{}' "https://device.fetanagent.com$route")"
+    [[ "$status" == '401' ]] || die 'a production companion route did not reject an unsigned request'
+  done
+}
+
 rollback_transition() {
   local sha="$1" release="$2" previous_file="$STATE_ROOT/pending-$sha.previous" previous=''
   if [[ -f "$previous_file" ]]; then previous="$(<"$previous_file")"; fi
@@ -252,7 +275,7 @@ case "${1:-}" in
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current production release marker is unsafe'
     else
-      for service in owner-control customer-web api beta-admission bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge gateway; do
+      for service in owner-control customer-web api beta-admission bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge production-companion-device-bridge gateway; do
         [[ -z "$(container_for "$PROJECT_NAME" "$service")" ]] ||
           die 'production containers exist without a current release marker'
       done
@@ -310,7 +333,11 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    [[ "$local_count" -eq 29 && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+    expected_count=29
+    if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
+      expected_count=32
+    fi
+    [[ "$local_count" -eq "$expected_count" && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
       die 'the incoming production bundle shape is wrong'
     [[ -s "$incoming/fetanagent-production-images.tar" && -s "$incoming/compose.production.yaml" &&
       -s "$incoming/telebirr-assignment-signer-key-id" ]] || die 'the incoming production contract is incomplete'
@@ -341,6 +368,10 @@ case "${1:-}" in
       "$incoming/secrets/telebirr-bridge-runtime-manifest.v1.json"
     chmod 0444 "$incoming/compose.production.yaml" "$incoming/telebirr-assignment-signer-key-id" \
       "$incoming/.release-sha" "$incoming/.image-tag"
+    if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
+      chown root:root "$incoming/secrets/companion-bridge-runtime-manifest.v2.json"
+      chmod 0444 "$incoming/secrets/companion-bridge-runtime-manifest.v2.json"
+    fi
     mv -- "$incoming" "$release"
     verify_release_files "$release"
     docker load --input "$release/fetanagent-production-images.tar" >/dev/null
@@ -376,6 +407,9 @@ case "${1:-}" in
     quiesce_legacy_telebirr_bridge "$sha"
     compose_release "$release" up --detach --no-build --wait --wait-timeout 120 \
       telebirr-device-bridge
+    if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
+      compose_release "$release" up --detach --no-build --wait --wait-timeout 120 production-companion-device-bridge
+    fi
     compose_release "$release" up --detach --no-build --wait --wait-timeout 120 bot gateway
     owner_body="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 15 https://owner.fetanagent.com/owner)"
     if ! grep -Fq 'Private production control' <<<"$owner_body"; then
@@ -384,6 +418,7 @@ case "${1:-}" in
       die 'the public Owner page is not production-bound'
     fi
     negative_telebirr_public_smoke
+    negative_companion_public_smoke "$release"
     ln -sfn -- "$release" "$CURRENT_LINK.next"
     mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
     trap - ERR
@@ -401,6 +436,9 @@ case "${1:-}" in
     if grep -Fq '  telebirr-assignment-broker:' "$release/compose.production.yaml"; then
       services=(owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge gateway)
     fi
+    if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
+      services+=(production-companion-device-bridge)
+    fi
     for service in "${services[@]}"; do
       id="$(container_for "$PROJECT_NAME" "$service")"
       container_running "$id" || die "$service is not running"
@@ -414,6 +452,7 @@ case "${1:-}" in
     [[ "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" == "$sha" ]] ||
       die 'the Telegram bot revision is wrong'
     negative_telebirr_public_smoke
+    negative_companion_public_smoke "$release"
     ;;
 
   finalize)

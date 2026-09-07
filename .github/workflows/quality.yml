@@ -49,6 +49,7 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
@@ -114,7 +115,9 @@ jobs:
             deposit-proof-reference-fingerprint-master deposit-proof-reference-profile.v2.json \
             owner-database-url player-action-database-url publishable-key supabase-ca.crt \
             telebirr-assignment.spki.der telebirr-bridge-runtime-manifest.v1.json \
-            telebirr-bridge-server-signer.pkcs8.der telebirr-device-state-database-url; do
+            telebirr-bridge-server-signer.pkcs8.der telebirr-device-state-database-url \
+            companion-device-database-url companion-bridge-server-signer.pkcs8.der \
+            companion-bridge-runtime-manifest.v2.json; do
             install -m 0600 /dev/null "$production_contract_dir/$file"
           done
           FETANAGENT_IMAGE_TAG=ci \
@@ -133,6 +136,9 @@ jobs:
             --tag fetanagent-gateway:ci \
             .
           docker run --rm --read-only fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
+          docker run --rm --read-only \
+            --env FETANAGENT_COMPANION_BRIDGE_UPSTREAM=production-companion-device-bridge:8085 \
+            fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
 
       - name: Build and test
         run: pnpm test

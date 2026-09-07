@@ -69,6 +69,15 @@ assert.equal(
 );
 assert.doesNotMatch(pilotCompose, /^\s+ports:\s*$/mu);
 assert.doesNotMatch(pilotCompose, /2026-09-04|shutdownAt|stopAt/u);
+assert.equal(
+  (
+    pilotCompose.match(
+      /DEPLOYMENT_TARGET: \$\{FETANAGENT_TELEBIRR_DEPLOYMENT_TARGET:-staging\}/gu,
+    ) ?? []
+  ).length,
+  3,
+  'one explicit target input must bind all three TeleBirr services',
+);
 
 for (const [name, section, target] of [
   ['assignment broker', assignment, 'telebirr-assignment-broker'],

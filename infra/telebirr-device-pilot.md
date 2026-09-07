@@ -56,7 +56,9 @@ token, KemerBet credential, wallet secret, or Docker socket.
 
 All three containers run as `10001:10001`, use read-only root filesystems, drop every Linux
 capability, prohibit privilege gain, have bounded memory/PIDs/logs, and require
-`FINANCIAL_ACTIONS_MODE=dry_run`. Only Caddy publishes ports.
+`FINANCIAL_ACTIONS_MODE=dry_run`. The single `FETANAGENT_TELEBIRR_DEPLOYMENT_TARGET` composition
+input selects `staging` by default or `production` explicitly for all three services; their runtime
+configuration rejects a split or cross-target database/key binding. Only Caddy publishes ports.
 
 ## Preconditions
 

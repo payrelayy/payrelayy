@@ -175,6 +175,9 @@ assert.match(androidBuild, /operationalSigning\?\.let/);
 
 assert.match(localProvisioner, /Operational TeleBirr material already exists/);
 assert.match(localProvisioner, /Rotation requires a separate reviewed operation/);
+assert.match(localProvisioner, /ValidateSet\('staging', 'production'\)/);
+assert.match(localProvisioner, /telebirr-assignment-\$EnvironmentName-v1/);
+assert.match(localProvisioner, /telebirr-bridge-\$EnvironmentName-v1/);
 assert.match(localProvisioner, /New-P256KeyMaterial/g);
 assert.match(localProvisioner, /Remove-Item -LiteralPath \$finalTemporaryRoot -Recurse -Force/);
 assert.doesNotMatch(

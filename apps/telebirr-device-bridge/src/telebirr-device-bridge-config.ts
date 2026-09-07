@@ -36,11 +36,13 @@ const MAX_SIGNING_TRANSCRIPT_BYTES = 65_536;
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
+export type TelebirrDeviceBridgeDeploymentTarget = 'staging' | 'production';
+
 export type TelebirrDeviceBridgeConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly deploymentTarget: 'staging';
+      readonly deploymentTarget: TelebirrDeviceBridgeDeploymentTarget;
       readonly host: typeof TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST;
       readonly port: typeof TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT;
       readonly serverSigningPublicKeySpkiDer: Uint8Array;
@@ -221,7 +223,10 @@ function readGuardedText(
   }
 }
 
-function parseCanonicalManifest(value: string): Readonly<{
+function parseCanonicalManifest(
+  value: string,
+  deploymentTarget: TelebirrDeviceBridgeDeploymentTarget,
+): Readonly<{
   serverSignerKeyId: string;
   serverSigningPublicKeySpkiSha256: string;
   assignmentSigningPublicKeySpkiSha256: string;
@@ -255,6 +260,7 @@ function parseCanonicalManifest(value: string): Readonly<{
     record.providerCode !== 'telebirr' ||
     typeof record.serverSignerKeyId !== 'string' ||
     !KEY_ID_PATTERN.test(record.serverSignerKeyId) ||
+    record.serverSignerKeyId !== `telebirr-bridge-${deploymentTarget}-v1` ||
     typeof record.serverSigningPublicKeySpkiSha256 !== 'string' ||
     !SHA256_PATTERN.test(record.serverSigningPublicKeySpkiSha256) ||
     typeof record.assignmentSigningPublicKeySpkiSha256 !== 'string' ||
@@ -423,11 +429,12 @@ export function loadTelebirrDeviceBridgeConfig(
 ): TelebirrDeviceBridgeConfig {
   const enabled = exactBoolean(environment.INTERNAL_TELEBIRR_DEVICE_BRIDGE_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
+  const deploymentTarget = environment.TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET;
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     !exactBoolean(environment.TELEBIRR_DEVICE_BRIDGE_NO_MONEY_PILOT_ENABLED) ||
-    environment.TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET !== 'staging'
+    (deploymentTarget !== 'staging' && deploymentTarget !== 'production')
   ) {
     return unavailable();
   }
@@ -436,6 +443,7 @@ export function loadTelebirrDeviceBridgeConfig(
 
   const manifest = parseCanonicalManifest(
     readGuardedText(TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE, dependencies, 'public_config'),
+    deploymentTarget,
   );
   const serverPrivateKey = readGuardedBytes(
     TELEBIRR_DEVICE_BRIDGE_SERVER_SIGNER_PRIVATE_KEY_FILE,
@@ -468,7 +476,7 @@ export function loadTelebirrDeviceBridgeConfig(
   }
   return Object.freeze({
     enabled: true,
-    deploymentTarget: 'staging' as const,
+    deploymentTarget,
     host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST,
     port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
     serverSigningPublicKeySpkiDer: server.publicKeySpkiDer,
@@ -482,7 +490,7 @@ export function redactedTelebirrDeviceBridgeConfigForLog(
   config: TelebirrDeviceBridgeConfig,
 ): Readonly<{
   enabled: boolean;
-  deploymentTarget: 'staging' | undefined;
+  deploymentTarget: TelebirrDeviceBridgeDeploymentTarget | undefined;
   serverSignerConfigured: boolean;
   assignmentSignerPublicKeyConfigured: boolean;
 }> {

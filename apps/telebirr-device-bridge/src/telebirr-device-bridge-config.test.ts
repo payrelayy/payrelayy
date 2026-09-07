@@ -10,6 +10,7 @@ import {
   TELEBIRR_DEVICE_BRIDGE_SERVER_SIGNER_PRIVATE_KEY_FILE,
   loadTelebirrDeviceBridgeConfig,
   redactedTelebirrDeviceBridgeConfigForLog,
+  type TelebirrDeviceBridgeDeploymentTarget,
   type TelebirrDeviceBridgeGuardedFileStat,
 } from './telebirr-device-bridge-config.js';
 import {
@@ -46,22 +47,29 @@ function keys(): KeyFixture {
   };
 }
 
-function manifest(fixture: KeyFixture, extra: Record<string, unknown> = {}): string {
+function manifest(
+  fixture: KeyFixture,
+  extra: Record<string, unknown> = {},
+  deploymentTarget: TelebirrDeviceBridgeDeploymentTarget = 'staging',
+): string {
   return JSON.stringify({
     contractVersion: 1,
     providerCode: 'telebirr',
-    serverSignerKeyId: 'bridge-server-key-0001',
+    serverSignerKeyId: `telebirr-bridge-${deploymentTarget}-v1`,
     serverSigningPublicKeySpkiSha256: fixture.serverPublicKeyDigest,
     assignmentSigningPublicKeySpkiSha256: fixture.assignmentPublicKeyDigest,
     ...extra,
   });
 }
 
-function fileValues(fixture = keys()): Readonly<Record<string, string | Buffer>> {
+function fileValues(
+  fixture = keys(),
+  deploymentTarget: TelebirrDeviceBridgeDeploymentTarget = 'staging',
+): Readonly<Record<string, string | Buffer>> {
   return {
     [TELEBIRR_DEVICE_BRIDGE_SERVER_SIGNER_PRIVATE_KEY_FILE]: fixture.serverPrivateKey,
     [TELEBIRR_DEVICE_BRIDGE_ASSIGNMENT_SIGNER_PUBLIC_KEY_FILE]: fixture.assignmentPublicKey,
-    [TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest(fixture),
+    [TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: manifest(fixture, {}, deploymentTarget),
   };
 }
 
@@ -159,7 +167,7 @@ describe('TeleBirr device bridge guarded configuration', () => {
       deploymentTarget: 'staging',
       host: '0.0.0.0',
       port: 8084,
-      serverSigner: { keyId: 'bridge-server-key-0001' },
+      serverSigner: { keyId: 'telebirr-bridge-staging-v1' },
     });
     if (!config.enabled) throw new Error('expected enabled synthetic config');
     expect(Buffer.from(config.serverSigningPublicKeySpkiDer)).toEqual(fixture.serverPublicKey);
@@ -199,11 +207,42 @@ describe('TeleBirr device bridge guarded configuration', () => {
     );
   });
 
+  it('loads a production bridge only with a production-bound signer manifest', () => {
+    const fixture = keys();
+    const config = loadTelebirrDeviceBridgeConfig(
+      { ...enabledEnvironment, TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' },
+      guardedDependencies(fileValues(fixture, 'production')),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      deploymentTarget: 'production',
+      serverSigner: { keyId: 'telebirr-bridge-production-v1' },
+    });
+  });
+
+  it.each([
+    ['staging target with production manifest', enabledEnvironment, 'production'],
+    [
+      'production target with staging manifest',
+      { ...enabledEnvironment, TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' },
+      'staging',
+    ],
+  ] as const)('rejects a cross-target signer: %s', (_name, environment, manifestTarget) => {
+    expect(() =>
+      loadTelebirrDeviceBridgeConfig(
+        environment,
+        guardedDependencies(fileValues(keys(), manifestTarget)),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
   it.each([
     ['non-production', { NODE_ENV: 'test' }],
     ['live financial mode', { FINANCIAL_ACTIONS_MODE: 'live' }],
     ['missing no-money gate', { TELEBIRR_DEVICE_BRIDGE_NO_MONEY_PILOT_ENABLED: 'false' }],
-    ['wrong target', { TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'production' }],
+    ['missing target', { TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: undefined }],
+    ['mixed-case target', { TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'Production' }],
+    ['unknown target', { TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: 'preview' }],
     ['wrong host', { TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST: '127.0.0.1' }],
     ['wrong port', { TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT: '443' }],
     [
@@ -245,7 +284,7 @@ describe('TeleBirr device bridge guarded configuration', () => {
       manifest({ ...fixture, assignmentPublicKeyDigest: `sha256:${'2'.repeat(64)}` }),
       ` ${manifest(fixture)}`,
       manifest(fixture, { unexpected: true }),
-      manifest(fixture).replace('bridge-server-key-0001', 'short'),
+      manifest(fixture).replace('telebirr-bridge-staging-v1', 'short'),
     ]) {
       expect(() =>
         loadTelebirrDeviceBridgeConfig(

@@ -226,6 +226,8 @@ for (const role of [
   assert.match(disableSql, new RegExp(`alter role ${role} nologin password null`, 'u'));
 }
 assert.equal(count(provisionSql, /valid until 'infinity'/gu), 6);
+assert.match(provisionSql, /count\(distinct credential\) = 6/u);
+assert.doesNotMatch(provisionSql, /pg_catalog\.array\(/u);
 assert.match(provisionSql, /rolvaliduntil = 'infinity'::timestamptz/u);
 assert.match(provisionSql, /where mode <> 'disabled'/u);
 assert.match(provisionSql, /Financial runtime logins must remain disabled/u);

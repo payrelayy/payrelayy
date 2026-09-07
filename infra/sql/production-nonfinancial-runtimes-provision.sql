@@ -30,15 +30,14 @@ select :'beta_runtime_password' ~ '^[0-9a-f]{64}$'
    and :'player_action_runtime_password' ~ '^[0-9a-f]{64}$'
    and :'assignment_runtime_password' ~ '^[0-9a-f]{64}$'
    and :'device_state_runtime_password' ~ '^[0-9a-f]{64}$'
-   and pg_catalog.array_length(
-     pg_catalog.array(
-       select distinct value from pg_catalog.unnest(array[
+   and (
+     select pg_catalog.count(distinct credential) = 6
+       from pg_catalog.unnest(array[
          :'beta_runtime_password', :'customer_web_runtime_password',
          :'owner_runtime_password', :'player_action_runtime_password',
          :'assignment_runtime_password', :'device_state_runtime_password'
-       ]) as value
-     ), 1
-   ) = 6 as credentials_canonical
+       ]) as supplied(credential)
+   ) as credentials_canonical
 \gset
 \if :credentials_canonical
 \else

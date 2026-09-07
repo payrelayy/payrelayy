@@ -143,6 +143,10 @@ uses bounded non-sensitive status codes for invalid authenticated responses. Pai
 assignment polling, and evidence upload remain separate from claim, settlement, execution, and
 money movement.
 
+Version `0.5.3` preserves the exact bounded enrollment failure across process restarts and in the
+operator UI, so expiry, server rejection, unsupported app versions, and invalid trust bindings do
+not collapse into an ambiguous provisioning status.
+
 The equivalent controlled local invocation is:
 
 ```powershell
@@ -168,7 +172,7 @@ later separately reviewed build decision after the no-money transport smoke pass
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.5.2-secure-provisioning-inert` remains compiled with
+versions. Version `0.5.3-secure-provisioning-inert` remains compiled with
 `VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
 enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
 enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,

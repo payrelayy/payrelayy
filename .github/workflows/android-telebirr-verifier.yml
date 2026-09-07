@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'buildConfigField("boolean", "VERIFIER_ENABLED", "false")' app/build.gradle.kts
-          grep -Fq 'else -> "0.5.2-secure-provisioning-inert"' app/build.gradle.kts
+          grep -Fq 'else -> "0.5.3-secure-provisioning-inert"' app/build.gradle.kts
           grep -Fq 'providers.gradleProperty("fetanagentVerifierRuntimeMode").orNull ?: "inert"' app/build.gradle.kts
           grep -Fq 'android:foregroundServiceType="specialUse"' app/src/main/AndroidManifest.xml
           ! grep -R -E '(https://|service_role|SUPABASE_|DATABASE_URL)' app/src/main --include='*.kt' --include='*.xml'

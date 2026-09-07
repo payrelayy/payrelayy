@@ -33,22 +33,9 @@ object VerifierRuntimeComposition {
       ?: return unavailable(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "provisioning_required")
     val certificate = enrolled.certificate
     val now = Instant.ofEpochMilli(System.currentTimeMillis())
-    val trusted =
-      runCatching {
-          profile.requireCertificateBinding(certificate)
-          require(certificate.body.state == "active")
-          require(
-            DeviceBridgeAppVersion.atLeast(
-              BuildConfig.VERSION_NAME,
-              certificate.body.minimumAppVersion,
-            ),
-          )
-          require(now >= Instant.parse(certificate.body.validFrom))
-          require(now < Instant.parse(certificate.body.validUntil))
-        }
-        .isSuccess
-    if (!trusted) {
-      return unavailable(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "enrollment_invalid")
+    val rejection = enrollmentRejectionCode(profile, certificate, now)
+    if (rejection != null) {
+      return unavailable(LivePilotRuntimeState.ENROLLMENT_REQUIRED, rejection)
     }
 
     val identity = AndroidKeystoreP256Identity(certificate.body.keyId)
@@ -84,14 +71,7 @@ object VerifierRuntimeComposition {
     val profile = DeviceBridgeBootstrapProfile.fromBuildConfig() ?: return false
     val enrolled = provisioningStore(context).load() as? DeviceProvisioningState.Enrolled
       ?: return false
-    return runCatching {
-        profile.requireCertificateBinding(enrolled.certificate)
-        val now = Instant.now()
-        enrolled.certificate.body.state == "active" &&
-          now >= Instant.parse(enrolled.certificate.body.validFrom) &&
-          now < Instant.parse(enrolled.certificate.body.validUntil)
-      }
-      .getOrDefault(false)
+    return enrollmentRejectionCode(profile, enrolled.certificate, Instant.now()) == null
   }
 
   fun pairingCoordinator(context: Context): DevicePairingCoordinator {
@@ -149,6 +129,28 @@ object VerifierRuntimeComposition {
 
   private fun provisioningStore(context: Context): EncryptedFileDeviceProvisioningStore =
     EncryptedFileDeviceProvisioningStore.forApplication(context)
+
+  private fun enrollmentRejectionCode(
+    profile: DeviceBridgeBootstrapProfile,
+    certificate: SignedDeviceBridgeEnrollmentCertificate,
+    assessedAt: Instant,
+  ): String? {
+    if (runCatching { profile.requireCertificateBinding(certificate) }.isFailure) {
+      return "enrollment_invalid"
+    }
+    val body = certificate.body
+    if (body.state != "active") return "device_revoked"
+    if (!DeviceBridgeAppVersion.atLeast(BuildConfig.VERSION_NAME, body.minimumAppVersion)) {
+      return "app_version_unsupported"
+    }
+    val validFrom = runCatching { Instant.parse(body.validFrom) }.getOrNull()
+      ?: return "enrollment_invalid"
+    val validUntil = runCatching { Instant.parse(body.validUntil) }.getOrNull()
+      ?: return "enrollment_invalid"
+    if (assessedAt < validFrom) return "device_enrollment_not_yet_valid"
+    if (assessedAt >= validUntil) return "device_enrollment_expired"
+    return null
+  }
 
   private fun unavailable(
     state: LivePilotRuntimeState,

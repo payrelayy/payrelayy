@@ -37,6 +37,20 @@ class VerifierEngineTest {
       ),
     )
     assertEquals(
+      "device_enrollment_expired",
+      VerifierStatusPresentation.code(
+        verifierEnabled = true,
+        enrolled = false,
+        snapshot.copy(
+          status =
+            LivePilotRuntimeStatus(
+              LivePilotRuntimeState.ENROLLMENT_REQUIRED,
+              "device_enrollment_expired",
+            ),
+        ),
+      ),
+    )
+    assertEquals(
       "build_disabled",
       VerifierStatusPresentation.code(verifierEnabled = false, enrolled = false, snapshot),
     )

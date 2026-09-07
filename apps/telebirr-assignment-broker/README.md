@@ -24,15 +24,18 @@ credential. Broker failures leave the process only as an opaque temporary-unavai
 The broker now has a fail-closed start entrypoint and a dedicated non-root container target. Startup
 is disabled by default and succeeds only on Linux when all of these independent no-money gates are
 exact: production Node mode, `FINANCIAL_ACTIONS_MODE=dry_run`, the internal broker gate, the
-broker-specific no-money pilot gate, and the staging target. It accepts no inline secret and rejects
-API/service-role credentials and both reference-protection master-key names.
+broker-specific no-money pilot gate, and an explicit `staging` or `production` target. Each target
+maps to exactly one Supabase project, direct host, session-pooler host, and dedicated role; a
+missing, mixed-case, unknown, or cross-target database route fails closed. It accepts no inline
+secret and rejects API/service-role credentials and both reference-protection master-key names.
 
 Enabled startup reads only these fixed files through `lstat`/`realpath`/`O_NOFOLLOW`/`fstat`
 before-and-after checks. Every file must be owned by root or the effective non-root runtime user;
 the actual mount permissions must allow that runtime user to open it:
 
 - `/run/secrets/telebirr_assignment_broker_database_url` — mode `0400`, the dedicated short-lived
-  runtime login on the exact direct staging host with `sslmode=verify-full`;
+  runtime login on the selected target's exact direct host or session pooler with
+  `sslmode=verify-full`;
 - `/run/secrets/telebirr_assignment_broker_reference_opening_key.v1.json` — mode `0400`, only the
   TeleBirr/purpose-scoped child key and its fingerprint;
 - `/run/secrets/telebirr_assignment_broker_runtime_manifest.v1.json` — mode `0400`, canonical

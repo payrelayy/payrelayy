@@ -26,7 +26,10 @@ dedicated `telebirr-device-state-broker` target. The image runs as UID/GID `1000
 port, starts PostgreSQL before the socket, rechecks database readiness after listening, and closes
 the socket before PostgreSQL. It is disabled by default and accepts no calendar stop or expiry.
 
-The enabled staging runtime accepts only these guarded files:
+The enabled runtime requires an explicit `staging` or `production` target. Each target maps to one
+exact Supabase project, direct host, session-pooler host, and dedicated target-qualified role;
+missing, mixed-case, unknown, and cross-target routes fail closed. It accepts only these guarded
+files:
 
 - `/run/secrets/telebirr_device_state_broker_database_url`: root- or runtime-owned mode `0400`, for
   the exact `fetanagent_telebirr_device_state_runtime` role at the reviewed Supabase host with

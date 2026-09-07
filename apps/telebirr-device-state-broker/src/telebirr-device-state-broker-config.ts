@@ -22,6 +22,14 @@ export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST =
   'aws-1-eu-west-1.pooler.supabase.com' as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER =
   `${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE}.${TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE}` as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_PROJECT_REFERENCE =
+  'xzztugbgtulptnbpoelr' as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_DATABASE_HOST =
+  'db.xzztugbgtulptnbpoelr.supabase.co' as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
+export const TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_SESSION_POOLER_USER =
+  `${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE}.${TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_PROJECT_REFERENCE}` as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE =
   '/run/secrets/telebirr_device_state_broker_database_url' as const;
 export const TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE =
@@ -29,12 +37,29 @@ export const TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE =
 
 const MAX_GUARDED_FILE_BYTES = 16_384;
 
+export const TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS = {
+  staging: {
+    projectReference: TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE,
+    directHost: TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST,
+    sessionPoolerHost: TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST,
+    sessionPoolerUser: TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER,
+  },
+  production: {
+    projectReference: TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_PROJECT_REFERENCE,
+    directHost: TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_DATABASE_HOST,
+    sessionPoolerHost: TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_SESSION_POOLER_HOST,
+    sessionPoolerUser: TELEBIRR_DEVICE_STATE_BROKER_PRODUCTION_SESSION_POOLER_USER,
+  },
+} as const;
+export type TelebirrDeviceStateBrokerDeploymentTarget =
+  keyof typeof TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS;
+
 export type TelebirrDeviceStateBrokerConfig =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly deploymentTarget: 'staging';
-      readonly projectReference: typeof TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE;
+      readonly deploymentTarget: TelebirrDeviceStateBrokerDeploymentTarget;
+      readonly projectReference: (typeof TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS)[TelebirrDeviceStateBrokerDeploymentTarget]['projectReference'];
       readonly connection: TelebirrDeviceStateConnectionConfig;
     };
 
@@ -232,7 +257,10 @@ function decodeUrlComponent(value: string): string {
   }
 }
 
-function connectionFromUrl(value: string): Omit<TelebirrDeviceStateConnectionConfig, 'ca'> {
+function connectionFromUrl(
+  value: string,
+  deploymentTarget: TelebirrDeviceStateBrokerDeploymentTarget,
+): Omit<TelebirrDeviceStateConnectionConfig, 'ca'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -243,12 +271,12 @@ function connectionFromUrl(value: string): Omit<TelebirrDeviceStateConnectionCon
   const user = decodeUrlComponent(url.username);
   const password = decodeUrlComponent(url.password);
   const database = decodeUrlComponent(url.pathname.slice(1));
+  const expectedTarget = TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS[deploymentTarget];
   const directRoute =
-    url.hostname === TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST &&
+    url.hostname === expectedTarget.directHost &&
     user === TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE;
   const sessionPoolerRoute =
-    url.hostname === TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST &&
-    user === TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER;
+    url.hostname === expectedTarget.sessionPoolerHost && user === expectedTarget.sessionPoolerUser;
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
     (!directRoute && !sessionPoolerRoute) ||
@@ -264,14 +292,12 @@ function connectionFromUrl(value: string): Omit<TelebirrDeviceStateConnectionCon
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: directRoute
-      ? TELEBIRR_DEVICE_STATE_BROKER_STAGING_DATABASE_HOST
-      : TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_HOST,
+    host: directRoute ? expectedTarget.directHost : expectedTarget.sessionPoolerHost,
     password,
     port: 5432 as const,
     user: directRoute
       ? TELEBIRR_DEVICE_STATE_BROKER_DATABASE_ROLE
-      : TELEBIRR_DEVICE_STATE_BROKER_STAGING_SESSION_POOLER_USER,
+      : expectedTarget.sessionPoolerUser,
   });
 }
 
@@ -324,30 +350,33 @@ export function loadTelebirrDeviceStateBrokerConfig(
 ): TelebirrDeviceStateBrokerConfig {
   const enabled = exactBoolean(environment.INTERNAL_TELEBIRR_DEVICE_STATE_BROKER_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
+  const deploymentTarget = environment.TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET;
   if (
     environment.NODE_ENV !== 'production' ||
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     !exactBoolean(environment.TELEBIRR_DEVICE_STATE_BROKER_NO_MONEY_PILOT_ENABLED) ||
-    environment.TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET !== 'staging' ||
+    (deploymentTarget !== 'staging' && deploymentTarget !== 'production') ||
     environment.NODE_EXTRA_CA_CERTS !== TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE
   ) {
     return unavailable();
   }
   rejectInlineOrRootSecrets(environment);
   requireFixedFiles(environment);
+  const databaseTarget = TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS[deploymentTarget];
 
   const connectionWithoutCa = connectionFromUrl(
     guardedSingleLine(
       readGuardedText(TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE, dependencies, 'secret'),
     ),
+    deploymentTarget,
   );
   const ca = guardedCa(
     readGuardedText(TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE, dependencies, 'public_config'),
   );
   return Object.freeze({
     enabled: true,
-    deploymentTarget: 'staging' as const,
-    projectReference: TELEBIRR_DEVICE_STATE_BROKER_STAGING_PROJECT_REFERENCE,
+    deploymentTarget,
+    projectReference: databaseTarget.projectReference,
     connection: Object.freeze({ ...connectionWithoutCa, ca }),
   });
 }
@@ -357,7 +386,7 @@ export function redactedTelebirrDeviceStateBrokerConfigForLog(
   config: TelebirrDeviceStateBrokerConfig,
 ): Readonly<{
   enabled: boolean;
-  deploymentTarget: 'staging' | undefined;
+  deploymentTarget: TelebirrDeviceStateBrokerDeploymentTarget | undefined;
   connectionConfigured: boolean;
 }> {
   return Object.freeze({

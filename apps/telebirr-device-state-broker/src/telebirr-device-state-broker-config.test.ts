@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS,
   TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE,
   TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE,
   loadTelebirrDeviceStateBrokerConfig,
@@ -15,6 +16,8 @@ const directDatabaseUrl =
   'postgresql://fetanagent_telebirr_device_state_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const databaseUrl =
   'postgresql://fetanagent_telebirr_device_state_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+const productionDirectDatabaseUrl = `postgresql://fetanagent_telebirr_device_state_runtime:synthetic-password-123456@${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.directHost}:5432/postgres?sslmode=verify-full`;
+const productionDatabaseUrl = `postgresql://${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.sessionPoolerUser}:synthetic-password-123456@${TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.sessionPoolerHost}:5432/postgres?sslmode=verify-full`;
 const ca = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(62)}==\n-----END CERTIFICATE-----\n`;
 const enabledEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
@@ -151,10 +154,76 @@ describe('private TeleBirr device-state broker configuration', () => {
   });
 
   it.each([
+    [
+      'session pooler',
+      productionDatabaseUrl,
+      TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.sessionPoolerHost,
+      TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.sessionPoolerUser,
+    ],
+    [
+      'direct route',
+      productionDirectDatabaseUrl,
+      TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.directHost,
+      'fetanagent_telebirr_device_state_runtime',
+    ],
+  ])('loads the exact production %s', (_route, value, host, user) => {
+    const config = loadTelebirrDeviceStateBrokerConfig(
+      {
+        ...enabledEnvironment,
+        TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: 'production',
+      },
+      guardedDependencies({
+        [TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE]: value,
+        [TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE]: ca,
+      }),
+    );
+    expect(config).toEqual({
+      enabled: true,
+      deploymentTarget: 'production',
+      projectReference: TELEBIRR_DEVICE_STATE_BROKER_DATABASE_TARGETS.production.projectReference,
+      connection: {
+        ca,
+        database: 'postgres',
+        host,
+        password: 'synthetic-password-123456',
+        port: 5432,
+        user,
+      },
+    });
+  });
+
+  it.each([
+    ['staging target with production pooler', enabledEnvironment, productionDatabaseUrl],
+    [
+      'production target with staging pooler',
+      {
+        ...enabledEnvironment,
+        TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: 'production',
+      },
+      databaseUrl,
+    ],
+  ])('rejects a cross-target database route: %s', (_name, environment, value) => {
+    expect(() =>
+      loadTelebirrDeviceStateBrokerConfig(
+        environment,
+        guardedDependencies({
+          [TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE]: value,
+          [TELEBIRR_DEVICE_STATE_BROKER_SUPABASE_CA_FILE]: ca,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it.each([
     ['non-production', { NODE_ENV: 'test' }],
     ['live financial mode', { FINANCIAL_ACTIONS_MODE: 'live' }],
     ['missing no-money gate', { TELEBIRR_DEVICE_STATE_BROKER_NO_MONEY_PILOT_ENABLED: 'false' }],
-    ['wrong deployment target', { TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: 'production' }],
+    ['missing deployment target', { TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: undefined }],
+    [
+      'mixed-case deployment target',
+      { TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: 'Production' },
+    ],
+    ['unknown deployment target', { TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: 'preview' }],
     ['wrong CA path', { NODE_EXTRA_CA_CERTS: '/tmp/ca' }],
     ['wrong database path', { TELEBIRR_DEVICE_STATE_BROKER_DATABASE_URL_FILE: '/tmp/database' }],
   ])('rejects the enabled runtime with %s', (_name, override) => {

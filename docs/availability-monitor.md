@@ -37,12 +37,21 @@ adding these files to Git. Use a root-owned, non-writable-by-others script and u
 SMTP configuration lives only at `/etc/fetanagent/availability-monitor/smtp.json`, a root:root
 regular file with mode `0600`, inside a root-controlled directory. It has exactly six fields:
 `host`, `port`, `from`, `to`, `user`, `password`. `host` must be `smtp.eu.mailgun.org` and `port`
-must be integer `587`; the three addresses must be single mailboxes, with no display names or
+must be integer `2525`; the three addresses must be single mailboxes, with no display names or
 newline characters. Use an approved verified sender, the existing Owner recipient, and a protected
 Mailgun SMTP credential. Do not commit a populated configuration or print it in commands, logs,
 screenshots, issues or this documentation. Authentication is attempted only after verified
 STARTTLS. Mailgun account/plan eligibility must be checked before installation; this code does not
 purchase a service, alter SMTP account settings or change the application's authentication email.
+
+This is a fixed endpoint, not a configurable port allowlist or an automatic fallback. DigitalOcean
+[blocks standard SMTP ports 25, 465 and 587 on Droplets](https://docs.digitalocean.com/support/why-is-smtp-blocked/).
+Mailgun's [port 2525 supports STARTTLS](https://documentation.mailgun.com/docs/mailgun/user-manual/sending-messages/send-smtp),
+and this monitor requires certificate and hostname verification before sending credentials on it.
+Missing STARTTLS or certificate failure stops delivery; it never falls back to plaintext, another
+host or another port. Confirm credential-free TLS connectivity from the production host before the
+first authorized email test. A successful authentication email from a different service does not
+establish connectivity from this VM.
 
 State and a nonblocking process lock live in `/var/lib/fetanagent-availability-monitor`, mode
 `0700`, owned by root:root. State updates use atomic replacement and filesystem synchronization.

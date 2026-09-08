@@ -23,7 +23,7 @@ class AvailabilityMonitorTests(unittest.TestCase):
     def setUp(self):
         self.now = 1_800_000_000
         self.issue = ['container:bot:unhealthy']
-        self.config = {'host': 'smtp.eu.mailgun.org', 'port': 587,
+        self.config = {'host': 'smtp.eu.mailgun.org', 'port': 2525,
                        'from': 'alerts@example.com', 'to': 'owner@example.com',
                        'user': 'postmaster@example.com', 'password': 'private-test-credential'}
 
@@ -36,7 +36,11 @@ class AvailabilityMonitorTests(unittest.TestCase):
         with patch.object(Path, 'lstat', return_value=parent), patch.object(monitor, 'secure_read') as read:
             read.return_value = self.config
             self.assertEqual(monitor.load_config(), self.config)
-            for changes in ({'host': 'other.example.com'}, {'port': 465}, {'port': True},
+            for changes in ({'host': 'other.example.com'}, {'host': 'smtp.mailgun.org'},
+                            {'host': '127.0.0.1'}, {'host': None}, {'port': 587}, {'port': 465},
+                            {'port': 25}, {'port': 0}, {'port': -1}, {'port': 65536},
+                            {'port': True}, {'port': False}, {'port': '2525'}, {'port': 2525.0},
+                            {'port': None},
                             {'to': 'owner@example.com\r\nBcc: attacker@example.com'},
                             {'from': 'Name <alerts@example.com>'}, {'user': 'bad'},
                             {'password': 'bad\nsecret'}, {'password': ''}, {'extra': 'field'}):
@@ -222,13 +226,24 @@ class AvailabilityMonitorTests(unittest.TestCase):
         self.assertIn('SERVICE TEST', message['Subject'])
         self.assertNotIn(self.config['password'], message.as_string())
         self.assertEqual(smtp.send_message.call_args.kwargs['to_addrs'], ['owner@example.com'])
-        connect.assert_called_once_with('smtp.eu.mailgun.org', 587, timeout=6)
+        connect.assert_called_once_with('smtp.eu.mailgun.org', 2525, timeout=6)
 
     def test_missing_starttls_never_sends_credentials(self):
         smtp = Mock()
         smtp.starttls.side_effect = smtplib.SMTPNotSupportedError('not supported')
         with patch.object(monitor.smtplib, 'SMTP', return_value=smtp), self.assertRaises(smtplib.SMTPException):
             monitor.send_email(self.config, 'outage', self.issue, self.now)
+        smtp.login.assert_not_called()
+        smtp.send_message.assert_not_called()
+        smtp.close.assert_called_once()
+
+    def test_certificate_failure_never_sends_credentials_or_retries_another_endpoint(self):
+        smtp = Mock()
+        smtp.starttls.side_effect = ssl.SSLCertVerificationError('certificate mismatch')
+        with patch.object(monitor.smtplib, 'SMTP', return_value=smtp) as connect:
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                monitor.send_email(self.config, 'outage', self.issue, self.now)
+        connect.assert_called_once_with('smtp.eu.mailgun.org', 2525, timeout=6)
         smtp.login.assert_not_called()
         smtp.send_message.assert_not_called()
         smtp.close.assert_called_once()

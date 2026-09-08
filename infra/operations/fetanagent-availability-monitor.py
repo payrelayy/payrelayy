@@ -94,7 +94,9 @@ def load_config(path=CONFIG_PATH):
     value = secure_read(path)
     if not isinstance(value, dict) or set(value) != {'host', 'port', 'from', 'to', 'user', 'password'}:
         raise ValueError('configuration shape')
-    if value['host'] != 'smtp.eu.mailgun.org' or type(value['port']) is not int or value['port'] != 587:
+    # Fixed Mailgun submission endpoint: DigitalOcean blocks the standard SMTP ports.
+    # Port 2525 still requires certificate-verified STARTTLS before authentication below.
+    if value['host'] != 'smtp.eu.mailgun.org' or type(value['port']) is not int or value['port'] != 2525:
         raise ValueError('SMTP target')
     for field in ('from', 'to', 'user'):
         if (not isinstance(value[field], str) or len(value[field]) > 254

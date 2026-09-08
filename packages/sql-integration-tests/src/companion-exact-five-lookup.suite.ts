@@ -13,6 +13,7 @@ const newTables = [
   'agent_platform_companion_lookup_results',
 ] as const;
 const ownerFunctions = [
+  'app.get_owner_companion_connection_status(uuid)',
   'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)',
   'app.get_agent_platform_companion_exact_five_lookup_status(uuid)',
 ] as const;
@@ -497,6 +498,144 @@ export function registerCompanionExactFiveLookupSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('signed exact-five companion lookup database boundary', () => {
+    it('reports paired, never-seen, stale, and connected devices without exposing identities or issuing commands', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ auth_user_id: string }>(
+          'select auth_user_id::text from app.admin_users where id = $1::uuid',
+          [getOwnerAdminId()],
+        );
+        const status = () =>
+          queryAsOwnerControl(
+            client,
+            'select * from app.get_owner_companion_connection_status($1::uuid)',
+            [owner.rows[0]!.auth_user_id],
+          );
+        expect((await status())[0]).toMatchObject({
+          paired_device_count: 0,
+          valid_device_count: 0,
+          connected_device_count: 0,
+          last_seen_at: null,
+        });
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        expect((await status())[0]).toMatchObject({
+          paired_device_count: 1,
+          valid_device_count: 1,
+          connected_device_count: 0,
+          last_seen_at: null,
+        });
+        for (const [secondsAgo, path] of [
+          [120, '/v1/companion/device/lookup-assignments:poll'],
+          [-120, '/v1/companion/device/lookup-assignments:poll'],
+          [0, '/v1/companion/device/lookup-results:submit'],
+        ] as const) {
+          await client.query(
+            `insert into app.agent_platform_companion_http_request_replays
+            (replay_identity, http_request_body_digest, request_id, certificate_id, canonical_path, issued_at, expires_at, received_at)
+            select $1, $2, $3, $4::uuid, $5, moment, moment + interval '1 minute', moment
+            from (select date_trunc('milliseconds', clock_timestamp()) - $6::integer * interval '1 second' as moment) times`,
+            [
+              sha(randomUUID()),
+              sha(randomUUID()),
+              randomUUID(),
+              paired.certificateBody.certificateId,
+              path,
+              secondsAgo,
+            ],
+          );
+        }
+        expect((await status())[0]).toMatchObject({
+          paired_device_count: 1,
+          valid_device_count: 1,
+          connected_device_count: 0,
+        });
+        await retireLegacyProfiles(client);
+        expect((await client.query(claimSql, idlePollValues(paired))).rows[0]).toMatchObject({
+          claim_state: 'none',
+        });
+        const connected = (await status())[0]!;
+        expect(connected).toMatchObject({
+          paired_device_count: 1,
+          valid_device_count: 1,
+          connected_device_count: 1,
+        });
+        expect(Object.keys(connected).sort()).toEqual([
+          'checked_at',
+          'connected_device_count',
+          'last_seen_at',
+          'paired_device_count',
+          'valid_device_count',
+        ]);
+        expect(
+          (connected.checked_at as Date).getTime() - (connected.last_seen_at as Date).getTime(),
+        ).toBeLessThan(60_000);
+        const commands = await client.query(
+          'select count(*)::integer as count from app.agent_platform_companion_lookup_assignments',
+        );
+        expect(commands.rows).toEqual([{ count: 0 }]);
+        await expect(
+          queryAsOwnerControl(
+            client,
+            'select * from app.get_owner_companion_connection_status($1::uuid)',
+            [randomUUID()],
+          ),
+        ).rejects.toThrow('active Owner');
+        await expect(
+          queryAsOwnerControl(
+            client,
+            'select * from app.get_owner_companion_connection_status(null)',
+          ),
+        ).rejects.toThrow('active Owner');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it.each(['device', 'signer'] as const)(
+      'never reports a revoked %s as connected despite a recent accepted poll',
+      async (kind) => {
+        const client = getClient();
+        await client.query('begin');
+        try {
+          const paired = await createPairedDevice(client, getOwnerAdminId());
+          await retireLegacyProfiles(client);
+          await client.query(claimSql, idlePollValues(paired));
+          if (kind === 'device') {
+            await client.query(
+              `insert into app.agent_platform_companion_device_revocations
+            (certificate_id, revocation_request_key, revoked_by_admin_id, revoked_at, reason)
+            values ($1::uuid, $2::uuid, $3::uuid, clock_timestamp(), 'owner_requested')`,
+              [paired.certificateBody.certificateId, randomUUID(), getOwnerAdminId()],
+            );
+          } else {
+            await client.query(
+              `insert into app.agent_platform_companion_server_signer_revocations
+            (server_signer_id, revoked_at, reason) values ($1::uuid, clock_timestamp(), 'operator_revocation')`,
+              [paired.signerId],
+            );
+          }
+          const owner = await client.query<{ auth_user_id: string }>(
+            'select auth_user_id::text from app.admin_users where id = $1::uuid',
+            [getOwnerAdminId()],
+          );
+          const result = await queryAsOwnerControl(
+            client,
+            'select * from app.get_owner_companion_connection_status($1::uuid)',
+            [owner.rows[0]!.auth_user_id],
+          );
+          expect(result[0]).toMatchObject({
+            paired_device_count: 1,
+            valid_device_count: 0,
+            connected_device_count: 0,
+          });
+          expect(result[0]!.last_seen_at).toBeInstanceOf(Date);
+        } finally {
+          await client.query('rollback');
+        }
+      },
+    );
+
     it('accepts an idle paired device without a legacy profile but rejects replay, wrong identity, expiry, and revocation', async () => {
       const client = getClient();
       await client.query('begin');
@@ -660,7 +799,7 @@ export function registerCompanionExactFiveLookupSqlTests(
           order by signature`,
         [bridgeGroupRole, ownerGroupRole, [...ownerFunctions, ...bridgeFunctions]],
       );
-      expect(routines.rows).toHaveLength(6);
+      expect(routines.rows).toHaveLength(7);
       for (const routine of routines.rows) {
         const ownerProcedure = ownerFunctions.includes(
           routine.signature as (typeof ownerFunctions)[number],

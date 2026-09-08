@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 
 import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import Fastify, { LogController } from 'fastify';
+import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
 
 import {
   OwnerDepositIntakeRejectedError,
@@ -1695,6 +1696,31 @@ export function buildOwnerControlApp(
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/companion-connection',
+    async (request, reply) => {
+      try {
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        if (!dependencies.runtime.companionConnection) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const connection = await dependencies.runtime.companionConnection.status(authUserId);
+        return reply.code(200).send({ connection });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerCompanionConnectionRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
 
   app.get<{ Querystring: Record<string, string> }>(
     '/v1/owner/companion-exact-five-lookup/status',

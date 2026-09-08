@@ -1,6 +1,6 @@
 import { createContext, runInContext } from 'node:vm';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
 
@@ -279,6 +279,9 @@ function ownerBrowserHarness(
       randomUUID: options.randomUUID ?? (() => '11111111-1111-4111-8111-111111111111'),
     },
     document: {
+      addEventListener: (name: string, callback: BrowserListener) =>
+        element('document').addEventListener(name, callback),
+      hidden: false,
       createElement: (_name: string) => new FakeElement(),
       querySelector: element,
       querySelectorAll: (_selector: string) => [] as FakeElement[],
@@ -319,6 +322,98 @@ function ownerBrowserHarness(
 }
 
 describe('Owner dashboard browser authentication boundary', () => {
+  it.each([
+    [0, 0, 0, null, 'No paired companion'],
+    [1, 1, 0, null, 'Paired — awaiting first check-in'],
+    [1, 1, 0, '2026-09-08T10:00:00.000Z', 'Paired — no recent check-in'],
+    [1, 0, 0, '2026-09-08T10:00:00.000Z', 'Pairing needs attention'],
+    [
+      2,
+      2,
+      1,
+      '2026-09-08T11:00:00.000Z',
+      'Connected — 1 of 2 valid paired devices checked in recently',
+    ],
+  ])(
+    'shows accurate companion state %# and clears it on failures',
+    async (pairedDeviceCount, validDeviceCount, connectedDeviceCount, lastSeenAt, label) => {
+      let fail = false;
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url) => {
+          if (url !== '/v1/owner/companion-connection') return undefined;
+          return response(fail ? 503 : 200, {
+            connection: {
+              pairedDeviceCount,
+              validDeviceCount,
+              connectedDeviceCount,
+              lastSeenAt,
+              checkedAt: '2026-09-08T11:00:10.000Z',
+            },
+          });
+        },
+      });
+      await browser.signIn();
+      expect(browser.element('#companion-connection-status').textContent).toBe(label);
+      expect(browser.element('#companion-connection-refresh').disabled).toBe(false);
+      fail = true;
+      await browser.call('loadCompanionConnection');
+      expect(browser.element('#companion-connection-status').textContent).toBe(
+        'Connection status unavailable',
+      );
+      expect(browser.element('#companion-connection-detail').textContent).toBe('');
+    },
+  );
+
+  it('polls read-only, refreshes manually, discards stale results after sign-out, and clears hidden-tab status', async () => {
+    let release: ((value: ReturnType<typeof response>) => void) | undefined;
+    let pending = false;
+    const connection = {
+      pairedDeviceCount: 1,
+      validDeviceCount: 1,
+      connectedDeviceCount: 1,
+      lastSeenAt: '2026-09-08T11:00:00.000Z',
+      checkedAt: '2026-09-08T11:00:10.000Z',
+    };
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) => {
+        if (url !== '/v1/owner/companion-connection') return undefined;
+        expect(init.method).toBe('GET');
+        if (pending)
+          return new Promise((resolve) => {
+            release = resolve;
+          });
+        return response(200, { connection });
+      },
+    });
+    await browser.signIn();
+    browser.expireLatestTimer(20_000);
+    await vi.waitFor(() =>
+      expect(browser.element('#companion-connection-status').textContent).toContain('Connected'),
+    );
+    browser.evaluate('document.hidden = true');
+    await browser.element('document').listeners.get('visibilitychange')?.({ preventDefault() {} });
+    expect(browser.element('#companion-connection-status').textContent).toBe(
+      'Connection status needs refresh',
+    );
+    browser.evaluate('document.hidden = false');
+    await browser.element('#companion-connection-refresh').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    await vi.waitFor(() =>
+      expect(browser.element('#companion-connection-status').textContent).toContain('Connected'),
+    );
+    pending = true;
+    const request = browser.call('loadCompanionConnection');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await browser.call('signOut', 'Signed out');
+    release!(response(200, { connection }));
+    await request;
+    expect(browser.element('#companion-connection-status').textContent).toBe(
+      'Sign in to check the companion connection.',
+    );
+    expect(browser.element('#companion-connection-refresh').disabled).toBe(true);
+  });
+
   it.each([201, 503])(
     'keeps receiver save feedback beside the form after a %s response and refreshes without a second mutation',
     async (saveStatus) => {

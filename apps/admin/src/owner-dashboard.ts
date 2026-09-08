@@ -277,6 +277,16 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               The pairing package below grants public-key enrollment only. A separate signed
               command can authorize exactly five find-only Player-ID lookups.
             </p>
+            <div class="device-pairing" aria-labelledby="companion-connection-title">
+              <h3 id="companion-connection-title">Companion connection</h3>
+              <p id="companion-connection-status" role="status" aria-live="polite">Sign in to check the companion connection.</p>
+              <p id="companion-connection-detail"></p>
+              <p id="companion-connection-guidance"></p>
+              <p>Connected means an authenticated companion check-in within the last minute.
+                It does not confirm the current KemerBet sign-in or payment readiness.
+                This check does not send commands or move money. Refreshes every 20 seconds while this page is visible.</p>
+              <button id="companion-connection-refresh" type="button" disabled>Refresh connection</button>
+            </div>
             <div class="actions companion-actions">
               <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
                 rel="noopener noreferrer">Download Windows companion</a>
@@ -616,6 +626,10 @@ const companionDevicePairingReceipt = document.querySelector('#companion-device-
 const companionDevicePairingPackage = document.querySelector('#companion-device-pairing-package');
 const companionDevicePairingCopyButton = document.querySelector('#companion-device-pairing-copy-button');
 const companionDevicePairingClearButton = document.querySelector('#companion-device-pairing-clear-button');
+const companionConnectionStatus = document.querySelector('#companion-connection-status');
+const companionConnectionDetail = document.querySelector('#companion-connection-detail');
+const companionConnectionGuidance = document.querySelector('#companion-connection-guidance');
+const companionConnectionRefresh = document.querySelector('#companion-connection-refresh');
 const companionLookupForm = document.querySelector('#companion-lookup-form');
 const companionLookupConfirmation = document.querySelector('#companion-lookup-confirmation');
 const companionLookupButton = document.querySelector('#companion-lookup-button');
@@ -644,6 +658,10 @@ let companionDevicePairingExpiryTimer;
 let pendingCompanionLookupRequestId;
 let currentCompanionLookup;
 let companionLookupPollTimer;
+let companionConnectionPollTimer;
+let companionConnectionExpiryTimer;
+let companionConnectionRequest = 0;
+let companionConnectionLoading = false;
 let eligiblePilotPlayers = [];
 let eligibleReadinessCohortPlayerCount = 0;
 let readinessCohortPrepared = false;
@@ -1263,6 +1281,7 @@ function signOut(message = 'Signed out.') {
   companionDevicePairingStatus.textContent = 'Sign in to check pairing readiness.';
   companionDevicePairingButton.disabled = true;
   clearCompanionLookup();
+  clearCompanionConnection();
   companionLookupConfirmation.checked = false;
   companionLookupStatus.textContent = 'Sign in to check lookup readiness.';
   companionLookupButton.disabled = true;
@@ -2643,6 +2662,106 @@ function renderCompanionLookup(status) {
   renderPilotCandidates(eligiblePilotPlayers);
 }
 
+function clearCompanionConnection() {
+  companionConnectionRequest += 1;
+  companionConnectionLoading = false;
+  window.clearTimeout(companionConnectionPollTimer);
+  window.clearTimeout(companionConnectionExpiryTimer);
+  companionConnectionPollTimer = undefined;
+  companionConnectionExpiryTimer = undefined;
+  companionConnectionStatus.textContent = 'Sign in to check the companion connection.';
+  companionConnectionDetail.textContent = '';
+  companionConnectionGuidance.textContent = '';
+  companionConnectionRefresh.disabled = true;
+}
+
+function validCompanionConnection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'checkedAt,connectedDeviceCount,lastSeenAt,pairedDeviceCount,validDeviceCount') return false;
+  const counts = [value.pairedDeviceCount, value.validDeviceCount, value.connectedDeviceCount];
+  if (counts.some(count => !Number.isSafeInteger(count) || count < 0) ||
+      value.validDeviceCount > value.pairedDeviceCount ||
+      value.connectedDeviceCount > value.validDeviceCount) return false;
+  const canonicalTime = time => typeof time === 'string' && Number.isFinite(Date.parse(time)) &&
+    new Date(time).toISOString() === time;
+  if (!canonicalTime(value.checkedAt) ||
+      (value.lastSeenAt !== null && !canonicalTime(value.lastSeenAt)) ||
+      (value.pairedDeviceCount === 0 && value.lastSeenAt !== null)) return false;
+  const age = value.lastSeenAt === null ? Infinity : Date.parse(value.checkedAt) - Date.parse(value.lastSeenAt);
+  return age >= 0 && (value.connectedDeviceCount === 0 || age < 60_000);
+}
+
+async function loadCompanionConnection() {
+  if (!accessToken || document.hidden || companionConnectionLoading) return;
+  const generation = ownerAuthGeneration;
+  const requestId = ++companionConnectionRequest;
+  const startedAt = Date.now();
+  companionConnectionLoading = true;
+  window.clearTimeout(companionConnectionPollTimer);
+  window.clearTimeout(companionConnectionExpiryTimer);
+  companionConnectionStatus.textContent = 'Checking companion connection…';
+  companionConnectionDetail.textContent = '';
+  companionConnectionGuidance.textContent = '';
+  companionConnectionRefresh.disabled = true;
+  const current = () => generation === ownerAuthGeneration && requestId === companionConnectionRequest && !!accessToken;
+  try {
+    const response = await ownerRequest('/v1/owner/companion-connection', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('companion_connection_unavailable');
+    const payload = await response.json();
+    if (!current()) return;
+    if (!payload || Object.keys(payload).join(',') !== 'connection' ||
+        !validCompanionConnection(payload.connection)) throw new Error('invalid_connection_status');
+    const connection = payload.connection;
+    const freshnessRemaining = connection.lastSeenAt === null ? 0 :
+      60_000 - (Date.parse(connection.checkedAt) - Date.parse(connection.lastSeenAt)) - Math.max(0, Date.now() - startedAt);
+    companionConnectionDetail.textContent =
+      'Paired devices: ' + connection.pairedDeviceCount + '. Valid pairings: ' + connection.validDeviceCount +
+      '. Last successful check-in: ' + (connection.lastSeenAt === null ? 'not received yet' : new Date(connection.lastSeenAt).toLocaleString()) +
+      '. Checked: ' + new Date(connection.checkedAt).toLocaleString() + '.';
+    if (connection.pairedDeviceCount === 0) {
+      companionConnectionStatus.textContent = 'No paired companion';
+      companionConnectionGuidance.textContent = 'Use the pairing section below to enroll this computer once.';
+    } else if (connection.validDeviceCount === 0) {
+      companionConnectionStatus.textContent = 'Pairing needs attention';
+      companionConnectionGuidance.textContent = 'The saved pairing has expired or been revoked, or its server signing certificate is not currently valid. Check the pairing before trying again.';
+    } else if (connection.connectedDeviceCount > 0 && freshnessRemaining > 0) {
+      companionConnectionStatus.textContent = 'Connected — ' + connection.connectedDeviceCount + ' of ' + connection.validDeviceCount + ' valid paired devices checked in recently';
+      companionConnectionGuidance.textContent = 'Keep the installed companion and its separate Chrome window open. There is no need to download or pair it again.';
+      companionConnectionExpiryTimer = window.setTimeout(() => {
+        if (!current()) return;
+        companionConnectionStatus.textContent = 'Connection status needs refresh';
+        companionConnectionGuidance.textContent = 'The last displayed check-in is no longer recent. Refresh to check again.';
+        void loadCompanionConnection();
+      }, freshnessRemaining);
+    } else {
+      companionConnectionStatus.textContent = connection.lastSeenAt === null ? 'Paired — awaiting first check-in' : 'Paired — no recent check-in';
+      companionConnectionGuidance.textContent = 'Open Start FetanAgent Companion.vbs from the folder already installed on this computer. Check its separate Chrome window and your internet connection. This status cannot tell whether the app is closed, offline, or waiting for sign-in. Do not re-pair just because a check-in is missing.';
+    }
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      companionConnectionStatus.textContent = 'Connection status unavailable';
+      companionConnectionDetail.textContent = '';
+      companionConnectionGuidance.textContent = 'The server check did not complete. Refresh to try again; this does not mean the companion is signed out.';
+    }
+  } finally {
+    if (current()) {
+      companionConnectionLoading = false;
+      companionConnectionRefresh.disabled = false;
+      companionConnectionPollTimer = window.setTimeout(() => void loadCompanionConnection(), 20_000);
+    }
+  }
+}
+
+companionConnectionRefresh.addEventListener('click', () => void loadCompanionConnection());
+document.addEventListener('visibilitychange', () => {
+  clearCompanionConnection();
+  if (accessToken) {
+    companionConnectionStatus.textContent = 'Connection status needs refresh';
+    if (!document.hidden) void loadCompanionConnection();
+  }
+});
+
 function scheduleCompanionLookupStatus() {
   if (companionLookupPollTimer !== undefined) window.clearTimeout(companionLookupPollTimer);
   companionLookupPollTimer = undefined;
@@ -3789,6 +3908,7 @@ async function loadOwnerPlayerQueues() {
       loadDepositIntake(),
       loadCurrentPilot(),
       loadCompanionLookupStatus(),
+      loadCompanionConnection(),
     ]);
   } finally {
     refreshRequestsButton.disabled = false;

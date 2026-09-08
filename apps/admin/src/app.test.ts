@@ -3993,6 +3993,69 @@ describe('Owner-control HTTP boundary', () => {
     await notReadyApp.close();
   });
 
+  it('serves no-store Owner-only connection status without sending any device command', async () => {
+    const calls: string[] = [];
+    const connection = {
+      pairedDeviceCount: 1,
+      validDeviceCount: 1,
+      connectedDeviceCount: 0,
+      lastSeenAt: null,
+      checkedAt: '2026-09-08T11:00:10.000Z',
+    };
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionConnection: {
+          status: async (actor) => {
+            calls.push(actor);
+            return connection;
+          },
+        },
+      }),
+    });
+    const denied = await app.inject({ method: 'GET', url: '/v1/owner/companion-connection' });
+    expect(denied.statusCode).toBe(403);
+    expect(calls).toEqual([]);
+    const query = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/companion-connection?device=anything',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(query.statusCode).toBe(400);
+    expect(calls).toEqual([]);
+    const result = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/companion-connection',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['cache-control']).toBe('no-store, max-age=0');
+    expect(result.json()).toEqual({ connection });
+    expect(calls).toEqual([authUserId]);
+    await app.close();
+  });
+
+  it('does not expose a private database error from the connection endpoint', async () => {
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionConnection: {
+          status: async () => {
+            throw new Error('private database detail');
+          },
+        },
+      }),
+    });
+    const result = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/companion-connection',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(result.statusCode).toBe(503);
+    expect(result.json()).toEqual({ error: 'owner_control_unavailable' });
+    await app.close();
+  });
+
   it('issues and reads only an authenticated, idempotent, exact-five no-money lookup', async () => {
     const calls: Array<readonly string[]> = [];
     const status = companionLookupStatus({

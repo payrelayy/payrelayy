@@ -9,7 +9,7 @@
     "@fetanagent/customer-web-auth-runtime": "workspace:*",
     "@fetanagent/customer-web-workspace-runtime": "workspace:*",
     "@fetanagent/deposit-reference-protection": "workspace:*",
-    "fastify": "5.11.2"
+    "fastify": "5.12.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

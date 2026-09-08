@@ -8,7 +8,7 @@
     "@fetanagent/contracts": "workspace:*",
     "@fetanagent/deposit-reference-protection": "workspace:*",
     "@fetanagent/domain": "workspace:*",
-    "fastify": "^5.0.0",
+    "fastify": "^5.12.1",
     "pg": "8.22.0"
   },
   "scripts": {

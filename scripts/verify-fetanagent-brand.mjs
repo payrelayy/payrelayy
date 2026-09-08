@@ -25,6 +25,24 @@ const exactCompanionReleaseLinks = [
   companionReleasesUrl,
 ];
 
+// The production CI gate must bind GitHub's externally assigned repository
+// identity literally, and its tests must verify that exact API target. Allow
+// only these three complete code lines in these two files, not either whole
+// file, arbitrary repository mentions, product copy, or legacy-named paths.
+const exactRepositoryIdentityLines = new Map([
+  [
+    'infra/operations/require-production-ci.mjs',
+    new Set([`const REPOSITORY = '${repositorySlug}/${repositorySlug}';`]),
+  ],
+  [
+    'infra/operations/require-production-ci.test.mjs',
+    new Set([
+      `  repository: '${repositorySlug}/${repositorySlug}',`,
+      String.raw`    assert.match(url.pathname, /^\/repos\/${repositorySlug}\/${repositorySlug}\/actions\//u);`,
+    ]),
+  ],
+]);
+
 const files = execFileSync(
   'git',
   ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -63,6 +81,9 @@ for (const file of files) {
 
   const lines = contents.toString('utf8').split(/\r?\n/u);
   for (const [index, line] of lines.entries()) {
+    if (exactRepositoryIdentityLines.get(normalizedFile)?.has(line)) {
+      continue;
+    }
     const productText =
       normalizedFile === 'apps/admin/src/owner-dashboard.ts'
         ? exactCompanionReleaseLinks.reduce(

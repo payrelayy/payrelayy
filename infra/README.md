@@ -1,6 +1,15 @@
 # Infrastructure contract
 
-## Current state
+## Production operations
+
+The production stack is defined in [`compose.production.yaml`](compose.production.yaml) and
+deployed through the exact-target `production-runtime.yml` workflow. See the
+[non-financial operations guide](../docs/nonfinancial-operations.md) for service health,
+download troubleshooting, and verification limits. The production stack does not deploy a
+financial executor. The inactive and staging contracts below are retained separately; they do
+not describe the currently deployed production services.
+
+## Legacy inactive and staging contracts
 
 The Stage 14A contract remains inactive and exposes no public HTTP(S) listener. A separately
 guarded staging-beta release may run on the London VM with Owner control bound only to loopback and

@@ -5,6 +5,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
+import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
@@ -39,6 +40,8 @@ if (!config.telegram.enabled) {
 }
 
 const bot = new Bot(config.telegram.token);
+const pollingReadiness = createTelegramPollingReadiness();
+bot.api.config.use(pollingReadiness.transformer);
 const betaAdmission = config.telegramBetaAdmission;
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
@@ -249,18 +252,22 @@ bot.catch((error) => {
   );
 });
 
-await runTelegramPolling(bot, {
-  allowed_updates: playerActions.enabled ? ['message', 'callback_query'] : ['message'],
-  onStart: (botInfo) => {
-    console.info(
-      {
-        username: botInfo.username,
-        betaAdmissionEnabled: config.telegramBetaAdmission.enabled,
-        playerActionsEnabled: config.telegramActionChannel.enabled,
-      },
-      betaAdmission.enabled || playerActions.enabled
-        ? 'Telegram bot started with configured private admission and action handlers.'
-        : 'Telegram bot started in Stage 0 mode.',
-    );
+await runTelegramPolling(
+  bot,
+  {
+    allowed_updates: playerActions.enabled ? ['message', 'callback_query'] : ['message'],
+    onStart: (botInfo) => {
+      console.info(
+        {
+          username: botInfo.username,
+          betaAdmissionEnabled: config.telegramBetaAdmission.enabled,
+          playerActionsEnabled: config.telegramActionChannel.enabled,
+        },
+        betaAdmission.enabled || playerActions.enabled
+          ? 'Telegram bot started with configured private admission and action handlers.'
+          : 'Telegram bot started in Stage 0 mode.',
+      );
+    },
   },
-});
+  { onShutdown: pollingReadiness.stop },
+);

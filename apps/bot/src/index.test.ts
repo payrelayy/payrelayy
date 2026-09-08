@@ -26,6 +26,7 @@ vi.mock('@fetanagent/config/bot', () => ({
 
 vi.mock('grammy', () => ({
   Bot: class {
+    public api = { config: { use: vi.fn() } };
     public async init(): Promise<void> {}
 
     public on(event: string, handler: (context: unknown) => Promise<void>): void {
@@ -51,6 +52,10 @@ vi.mock('grammy', () => ({
       return this;
     }
   },
+}));
+
+vi.mock('./telegram-polling-readiness.js', () => ({
+  createTelegramPollingReadiness: () => ({ transformer: vi.fn(), stop: vi.fn() }),
 }));
 
 vi.mock('./telegram-beta-invite-admission.js', () => ({

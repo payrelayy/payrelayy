@@ -78,6 +78,33 @@ afterEach(() => {
 });
 
 describe('Telegram polling lifecycle', () => {
+  it('invalidates readiness before shutdown acknowledgement and on lifecycle completion', async () => {
+    const bot = testBot();
+    const invalidateReadiness = vi.fn();
+    bot.start.mockImplementation(async () => {
+      requestShutdown();
+    });
+    bot.stop.mockImplementation(async () => {
+      expect(invalidateReadiness).toHaveBeenCalledOnce();
+    });
+
+    await runTelegramPolling(bot, {}, { onShutdown: invalidateReadiness });
+
+    expect(invalidateReadiness).toHaveBeenCalledTimes(2);
+    expectListenersRemoved();
+  });
+
+  it('invalidates readiness when initialization fails without receiving a shutdown signal', async () => {
+    const bot = testBot();
+    const invalidateReadiness = vi.fn();
+    bot.init.mockRejectedValue(new Error('private initialization failure'));
+
+    await runTelegramPolling(bot, {}, { onShutdown: invalidateReadiness });
+
+    expect(invalidateReadiness).toHaveBeenCalledOnce();
+    expectListenersRemoved();
+  });
+
   it('initializes before polling and preserves polling options and the startup callback', async () => {
     const bot = testBot();
     const onStart = vi.fn(async () => {});

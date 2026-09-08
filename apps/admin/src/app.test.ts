@@ -534,6 +534,41 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('keeps Owner open for companion downloads and provides a safe official fallback', async () => {
+    const app = buildOwnerControlApp(config(), { runtime: runtime() });
+    const response = await app.inject({ method: 'GET', url: '/owner' });
+    expect(response.statusCode).toBe(200);
+    const repositorySlug = ['pay', 'relayy'].join('');
+    const releasesUrl = `https://github.com/${repositorySlug}/${repositorySlug}/releases`;
+    const downloadUrl = `${releasesUrl}/latest/download/FetanAgent-Windows-Companion.zip`;
+    const links = [...response.body.matchAll(/<a\s[^>]*>[\s\S]*?<\/a>/gu)].map((match) => match[0]);
+    for (const url of [downloadUrl, `${downloadUrl}.sha256`]) {
+      const matches = links.filter((link) => link.includes(`href="${url}"`));
+      expect(matches).toHaveLength(1);
+      const link = matches[0]!;
+      expect(link).toContain('target="_blank"');
+      expect(link).toContain('rel="noopener noreferrer"');
+      expect(link).toContain('aria-describedby="companion-download-help"');
+      expect(link).toContain('(new tab)');
+    }
+    const releaseLinks = links.filter((link) => link.includes(`href="${releasesUrl}"`));
+    expect(releaseLinks).toHaveLength(1);
+    expect(releaseLinks[0]).toContain('target="_blank"');
+    expect(releaseLinks[0]).toContain('rel="noopener noreferrer"');
+    expect(releaseLinks[0]).toContain('>official FetanAgent GitHub releases page (new tab)</a>');
+    expect(response.body).toContain('id="companion-download-help"');
+    expect(response.body).toContain('already connected, no download or re-pairing is needed');
+    expect(response.body).toContain('&ldquo;Not Found&rdquo; or is blocked');
+    expect(response.body).toMatch(
+      /report the exact error text without passwords,\s+pairing packages, or signed download URLs/u,
+    );
+    expect(response.body).toMatch(
+      /Do not turn off browser or antivirus\s+protection to force a download/u,
+    );
+    expect(response.body).toContain('A download error does not require a new pairing.');
+    await app.close();
+  });
+
   it('returns only public staging Auth configuration to the private page', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner/config.json' });

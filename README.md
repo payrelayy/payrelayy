@@ -1,5 +1,13 @@
 # FetanAgent
 
+For the current non-financial operations scope, Owner download troubleshooting, and the meaning
+of Telegram polling health, see
+[`docs/nonfinancial-operations.md`](docs/nonfinancial-operations.md). The production web, Owner,
+Telegram transport, and device-enrollment services are deployed; older staging/default-off
+descriptions below inventory earlier implementation boundaries, not the current deployment state.
+Neither running services nor a connected companion establish payment capability or public-launch
+readiness. Financial execution remains disabled.
+
 The canonical plain-language path from the current public, financially disabled release through the
 five-account real-money pilot and a later separate public launch is
 [`docs/real-money-go-live-phases.md`](docs/real-money-go-live-phases.md). Use that phase map for

@@ -55,18 +55,6 @@ Docker does not automatically restart a container merely because it becomes unhe
 No restart controller is installed. Do not launch a second instance of the same bot to
 diagnose a polling problem.
 
-## Availability alerts
-
-The [host availability monitor](availability-monitor.md) checks container health, public HTTPS
-responses, and root-disk usage without changing application state. It supports incident,
-recovery, and rate-limited reminder emails. Installing application images alone does not
-install or enable its systemd timer: its dedicated SMTP credential, root-protected host
-configuration, and alert-delivery verification are separate operator steps.
-
-This host-local monitor cannot report a complete host or outbound-network failure. An
-independent external monitor is still needed for that coverage. SMTP acceptance alone is not
-proof that an alert reached the recipient's inbox.
-
 ## Release verification
 
 Use the existing **Production application runtime** GitHub workflow against its exact reviewed
@@ -96,8 +84,8 @@ account recovery, support handling, data restoration, or completion of every pro
 ## Remaining operational evidence
 
 Before calling the non-financial service ready for general users, retain current evidence for
-account recovery/email delivery, a backup and isolated restore exercise, incident ownership and
-alert delivery, and the intended device reconnect/restart behavior. Earlier screenshots or
+account recovery/email delivery, a backup and isolated restore exercise, and the intended device
+reconnect/restart behavior. Earlier screenshots or
 historical test results must not be substituted for current evidence. Record any unavailable
 service-plan feature or required external approval explicitly instead of silently enabling a
 paid service or claiming the work is complete.

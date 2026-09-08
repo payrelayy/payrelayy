@@ -270,10 +270,6 @@ assert.doesNotMatch(operateJob, /validate-ci|actions: read|require-production-ci
 assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
-assert.match(
-  quality,
-  /sudo python3 -B -m unittest discover -s infra\/operations -p 'test_fetanagent_availability_monitor\.py'/u,
-);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
 assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);

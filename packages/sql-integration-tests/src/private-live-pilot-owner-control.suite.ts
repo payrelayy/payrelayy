@@ -200,6 +200,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
         { signature: 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
+        { signature: 'app.get_owner_companion_connection_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
         {
           signature: 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)',

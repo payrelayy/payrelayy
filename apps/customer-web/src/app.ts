@@ -31,6 +31,8 @@ import {
 } from '@fetanagent/deposit-reference-protection';
 import Fastify, { LogController, type FastifyReply, type FastifyRequest } from 'fastify';
 
+import { isGatewayProxyTrust, type GatewayProxyTrust } from './gateway-proxy-trust.js';
+
 import {
   createAccountPage,
   depositInstructionsPage,
@@ -153,7 +155,7 @@ export interface CustomerWebAppOptions {
   readonly rateLimit?: CustomerWebRateLimitOptions;
   readonly rateLimiter?: CustomerWebRateLimiter;
   readonly requestKeyFactory?: () => string;
-  readonly trustProxy?: false | 1;
+  readonly gatewayProxyTrust?: GatewayProxyTrust;
   readonly workspace: CustomerWorkspaceRuntime;
 }
 
@@ -732,11 +734,7 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
   if (options.productPreviewMode !== undefined && typeof options.productPreviewMode !== 'boolean') {
     throw new Error('Customer web product preview option is invalid.');
   }
-  if (
-    options.trustProxy !== undefined &&
-    options.trustProxy !== false &&
-    options.trustProxy !== 1
-  ) {
+  if (options.gatewayProxyTrust !== undefined && !isGatewayProxyTrust(options.gatewayProxyTrust)) {
     throw new Error('Customer web trusted-proxy configuration is invalid.');
   }
   if (
@@ -770,10 +768,11 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
     bodyLimit: DEFAULT_BODY_LIMIT,
     logController: new LogController({ disableRequestLogging: true }),
     logger: false,
-    trustProxy: options.trustProxy ?? false,
+    trustProxy: options.gatewayProxyTrust?.trustProxy ?? false,
   });
 
   app.addHook('onClose', async () => {
+    options.gatewayProxyTrust?.close();
     await options.workspace.close();
   });
 

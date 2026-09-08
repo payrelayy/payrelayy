@@ -80,10 +80,37 @@ jobs:
               ;;
           esac
 
+  validate-ci:
+    name: Require exact production commit CI
+    if: inputs.mode == 'deploy'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact CI gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require latest passing main push CI before building
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
   build:
     name: Build sealed production images
-    if: inputs.mode == 'plan' || inputs.mode == 'deploy'
-    needs: validate-target
+    if: >-
+      always() && !cancelled() && needs.validate-target.result == 'success' &&
+      (inputs.mode == 'plan' || (inputs.mode == 'deploy' && needs.validate-ci.result == 'success'))
+    needs: [validate-target, validate-ci]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -151,15 +178,28 @@ jobs:
   deploy:
     name: Deploy continuous production runtime
     if: inputs.mode == 'deploy'
-    needs: [validate-target, build]
+    needs: [validate-target, validate-ci, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     environment: production
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Check out deployment contract
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Recheck latest main push CI before production secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
 
       - name: Download sealed image bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -438,10 +478,12 @@ jobs:
         id: activate
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
           set -euo pipefail
+          node infra/operations/require-production-ci.mjs
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \

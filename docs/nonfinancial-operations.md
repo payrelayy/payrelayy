@@ -52,8 +52,20 @@ unverified and remain usable as rollback predecessors.
 | Stopped   | Bot process is not running                              | Inspect the deployment result and shutdown reason before restarting.                                |
 
 Docker does not automatically restart a container merely because it becomes unhealthy.
-No restart controller or scheduled monitoring is installed by this change. Do not launch
-a second instance of the same bot to diagnose a polling problem.
+No restart controller is installed. Do not launch a second instance of the same bot to
+diagnose a polling problem.
+
+## Availability alerts
+
+The [host availability monitor](availability-monitor.md) checks container health, public HTTPS
+responses, and root-disk usage without changing application state. It supports incident,
+recovery, and rate-limited reminder emails. Installing application images alone does not
+install or enable its systemd timer: its dedicated SMTP credential, root-protected host
+configuration, and alert-delivery verification are separate operator steps.
+
+This host-local monitor cannot report a complete host or outbound-network failure. An
+independent external monitor is still needed for that coverage. SMTP acceptance alone is not
+proof that an alert reached the recipient's inbox.
 
 ## Release verification
 
@@ -61,6 +73,12 @@ Use the existing **Production application runtime** GitHub workflow against its 
 main commit and production target. Its deployment path retains previous application artifacts
 and rolls back a failed activation. A finalized release is not a general-purpose database
 rollback; never restore a database as a routine application-restart step.
+
+Production deployment requires successful current main-push runs of the seven required CI
+workflows for that exact source SHA. The deployment checks them before building, before
+using production secrets, and again immediately before activation. Missing, failed, queued,
+or changing CI evidence blocks deployment; plan, status, and stop remain separate operations.
+These are point-in-time GitHub checks, not an atomic lock on later remote CI changes.
 
 Verification must establish:
 

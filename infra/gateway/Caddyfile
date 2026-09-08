@@ -19,6 +19,8 @@ fetanagent.com, www.fetanagent.com {
 	import security_headers
 	encode zstd gzip
 	reverse_proxy customer-web:3003 {
+		# Caddy's default X-Forwarded-For/Host/Proto handling ignores incoming values.
+		# Keep trusted_proxies unset: the public connection, not a supplied header, is authoritative.
 		health_uri /healthz
 		health_interval 30s
 		health_timeout 3s

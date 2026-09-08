@@ -39,6 +39,15 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level=high
+
+      - name: Test production CI gate and availability monitor
+        shell: bash
+        run: |
+          node --test infra/operations/require-production-ci.test.mjs
+          sudo python3 -m unittest discover -s infra/operations -p 'test_fetanagent_availability_monitor.py'
+
       - name: Verify FetanAgent branding
         run: pnpm verify:brand
 

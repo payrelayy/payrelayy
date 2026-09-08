@@ -8,6 +8,7 @@ import { createCustomerWebAuthPort } from '@fetanagent/customer-web-auth-runtime
 import { createCustomerWorkspacePostgresRuntime } from '@fetanagent/customer-web-workspace-runtime';
 
 import { buildCustomerWebApp, createDurableCustomerWebRateLimiter } from './app.js';
+import { createGatewayProxyTrust } from './gateway-proxy-trust.js';
 
 function customerWebPort(value: string | undefined): number {
   const port = value === undefined ? 3003 : Number(value);
@@ -43,6 +44,7 @@ if (!rateLimitConfig.enabled) {
   throw new Error('The durable customer-web rate-limit gate is disabled.');
 }
 const workspace = await createCustomerWorkspacePostgresRuntime(workspaceConfig);
+const gatewayProxyTrust = createGatewayProxyTrust();
 
 const app = buildCustomerWebApp({
   auth: createCustomerWebAuthPort(config),
@@ -61,7 +63,7 @@ const app = buildCustomerWebApp({
     : {}),
   publicOrigin: 'https://fetanagent.com',
   rateLimiter: createDurableCustomerWebRateLimiter(workspace, rateLimitConfig.hmacSecret),
-  trustProxy: 1,
+  gatewayProxyTrust,
   workspace,
 });
 let closing = false;
@@ -84,6 +86,7 @@ try {
     host: customerWebHost(process.env.CUSTOMER_WEB_HOST),
     port: customerWebPort(process.env.CUSTOMER_WEB_PORT),
   });
+  gatewayProxyTrust.start();
 } catch {
   await closeGracefully();
   throw new Error('The customer web service could not start.');

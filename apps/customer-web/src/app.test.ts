@@ -16,6 +16,8 @@ import {
 } from '@fetanagent/config/customer-web';
 import { describe, expect, it, vi } from 'vitest';
 
+import { createGatewayProxyTrust } from './gateway-proxy-trust.js';
+
 import {
   buildCustomerWebApp as buildCustomerWebAppImplementation,
   createDurableCustomerWebRateLimiter,
@@ -707,7 +709,7 @@ describe('customer web SSR and PWA boundary', () => {
     await app.close();
   });
 
-  it('uses the durable limiter with an HMAC pseudonym and one trusted proxy hop', async () => {
+  it('uses the durable limiter with an HMAC pseudonym only through the resolved gateway', async () => {
     const consumeRateLimit = vi.fn<CustomerWorkspaceRuntime['consumeRateLimit']>(async () => ({
       allowed: true,
       currentCount: 1,
@@ -715,11 +717,15 @@ describe('customer web SSR and PWA boundary', () => {
       retryAfterSeconds: 0,
     }));
     const workspace = fakeWorkspace({ consumeRateLimit });
+    const gatewayProxyTrust = createGatewayProxyTrust({
+      resolveAddresses: async () => ['10.0.0.5'],
+    });
+    await gatewayProxyTrust.refresh();
     const app = buildCustomerWebApp({
       auth: fakeAuth(),
       rateLimit: { maxRequests: 8, windowMs: 60_000 },
       rateLimiter: createDurableCustomerWebRateLimiter(workspace, 'a'.repeat(64)),
-      trustProxy: 1,
+      gatewayProxyTrust,
       workspace,
     });
     await app.inject({
@@ -747,6 +753,68 @@ describe('customer web SSR and PWA boundary', () => {
     expect(JSON.stringify(input)).not.toContain('203.0.113.10');
     expect(JSON.stringify(input)).not.toContain('10.0.0.5');
     await app.close();
+  });
+
+  it.each([
+    ['10.0.0.6', '10.0.0.6'],
+    ['198.51.100.9', '198.51.100.9'],
+    ['::ffff:10.0.0.5', '203.0.113.10'],
+  ])(
+    'ignores forged forwarding headers unless the connecting peer %s is the gateway',
+    async (remoteAddress, expectedAddress) => {
+      const gatewayProxyTrust = createGatewayProxyTrust({
+        resolveAddresses: async () => ['10.0.0.5'],
+      });
+      await gatewayProxyTrust.refresh();
+      const app = buildCustomerWebApp({ auth: fakeAuth(), gatewayProxyTrust });
+      app.get('/proxy-test', async (request) => ({
+        address: request.ip,
+        host: request.host,
+        protocol: request.protocol,
+      }));
+      const response = await app.inject({
+        method: 'GET',
+        remoteAddress,
+        url: '/proxy-test',
+        headers: {
+          host: 'fetanagent.com',
+          'x-forwarded-for': '192.0.2.99, 203.0.113.10',
+          'x-forwarded-host': 'forged.example',
+          'x-forwarded-proto': 'https',
+        },
+      });
+      const trusted = remoteAddress === '::ffff:10.0.0.5';
+      expect(response.json()).toEqual({
+        address: expectedAddress,
+        host: trusted ? 'forged.example' : 'fetanagent.com',
+        protocol: trusted ? 'https' : 'http',
+      });
+      await app.close();
+      expect(gatewayProxyTrust.trustProxy('10.0.0.5', 0)).toBe(false);
+    },
+  );
+
+  it('serves health without waiting for gateway DNS and discards pending trust on close', async () => {
+    const gatewayProxyTrust = createGatewayProxyTrust({
+      resolveAddresses: async () => new Promise<string[]>(() => {}),
+    });
+    const app = buildCustomerWebApp({ auth: fakeAuth(), gatewayProxyTrust });
+    await app.ready();
+    gatewayProxyTrust.start();
+    expect((await app.inject({ method: 'GET', url: '/healthz' })).statusCode).toBe(200);
+    expect(gatewayProxyTrust.trustProxy('10.0.0.5', 0)).toBe(false);
+    await app.close();
+  });
+
+  it('rejects unvalidated custom proxy callbacks instead of enabling broad trust', () => {
+    expect(() =>
+      buildCustomerWebApp({
+        auth: fakeAuth(),
+        gatewayProxyTrust: { trustProxy: () => true } as unknown as NonNullable<
+          CustomerWebAppOptions['gatewayProxyTrust']
+        >,
+      }),
+    ).toThrow('Customer web trusted-proxy configuration is invalid.');
   });
 
   it('fails closed when the durable limiter is unavailable and returns its exact retry delay', async () => {

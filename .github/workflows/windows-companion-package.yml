@@ -12,6 +12,7 @@ on:
       - 'packages/agent-platform-contracts/**'
       - 'packages/agent-platform-kemerbet/**'
       - 'scripts/build-windows-companion-package.ps1'
+      - 'scripts/test-windows-companion-pairing-dialog.ps1'
       - 'pnpm-lock.yaml'
   push:
     tags:

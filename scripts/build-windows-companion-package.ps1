@@ -31,7 +31,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or $checkedOutSha -ne $ReleaseSha) {
     throw 'The release SHA does not match the checked-out source.'
   }
-  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1
+  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1 scripts/test-windows-companion-pairing-dialog.ps1
   if ($LASTEXITCODE -ne 0) { throw 'Release inputs contain uncommitted changes.' }
 
   pnpm --filter '@fetanagent/windows-companion...' run build
@@ -91,6 +91,13 @@ if (Test-Path -LiteralPath $verificationRoot) {
 }
 Expand-Archive -LiteralPath $zipPath -DestinationPath $verificationRoot
 $extractedPackage = Join-Path $verificationRoot (Split-Path -Leaf $packageRoot)
+# Exercise the archived WinForms callback in the same Windows PowerShell 5.1
+# runtime used by the VBS launcher, not only the Node.js import graph.
+& (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+  -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass `
+  -File (Join-Path $PSScriptRoot 'test-windows-companion-pairing-dialog.ps1') `
+  -DialogPath (Join-Path $extractedPackage 'Enter FetanAgent Pairing Package.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'The extracted Windows companion pairing dialog failed its callback checks.' }
 if ((Get-Content -LiteralPath (Join-Path $extractedPackage 'RELEASE_SHA') -Raw).Trim() -ne $ReleaseSha) {
   throw 'The extracted archive release identity is invalid.'
 }

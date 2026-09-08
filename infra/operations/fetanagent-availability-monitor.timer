@@ -1,0 +1,11 @@
+[Unit]
+Description=Check FetanAgent availability once per minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=1s
+Unit=fetanagent-availability-monitor.service
+
+[Install]
+WantedBy=timers.target

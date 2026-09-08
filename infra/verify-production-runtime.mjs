@@ -223,6 +223,57 @@ assert.match(
   /concurrency:\s*\r?\n  group: fetanagent-production-runtime\s*\r?\n  cancel-in-progress: false/u,
 );
 assert.match(workflow, /environment: production/u);
+const runtimeJobs = topLevelSection(workflow, 'jobs');
+const ciGate = childBlock(runtimeJobs, 'validate-ci');
+const buildJob = childBlock(runtimeJobs, 'build');
+const deployJob = childBlock(runtimeJobs, 'deploy');
+const operateJob = childBlock(runtimeJobs, 'operate');
+assert.match(ciGate, /if: inputs\.mode == 'deploy'/u);
+assert.match(ciGate, /needs: validate-target/u);
+assert.match(ciGate, /actions: read/u);
+assert.match(ciGate, /node infra\/operations\/require-production-ci\.mjs/u);
+assert.doesNotMatch(ciGate, /secrets\.|environment: production/u);
+assert.match(buildJob, /needs: \[validate-target, validate-ci\]/u);
+assert.match(
+  buildJob,
+  /always\(\) && !cancelled\(\) && needs\.validate-target\.result == 'success'/u,
+);
+assert.match(
+  buildJob,
+  /inputs\.mode == 'plan' \|\| \(inputs\.mode == 'deploy' && needs\.validate-ci\.result == 'success'\)/u,
+);
+assert.match(deployJob, /needs: \[validate-target, validate-ci, build\]/u);
+assert.match(deployJob, /actions: read/u);
+assert.match(deployJob, /node infra\/operations\/require-production-ci\.mjs/u);
+assert.ok(
+  deployJob.indexOf('node infra/operations/require-production-ci.mjs') <
+    deployJob.indexOf('secrets.'),
+  'production secrets must not be consumed before the fresh CI recheck',
+);
+const activationStep = deployJob
+  .split('      - name: Atomically activate production and switch the public edge')[1]
+  ?.split('      - name: ')[0];
+assert.ok(activationStep, 'production activation step must exist');
+assert.match(activationStep, /GH_TOKEN: \$\{\{ github\.token \}\}/u);
+assert.match(
+  activationStep,
+  /set -euo pipefail\s+node infra\/operations\/require-production-ci\.mjs/u,
+);
+assert.ok(
+  activationStep.indexOf('node infra/operations/require-production-ci.mjs') <
+    activationStep.indexOf("echo 'attempted=true'"),
+  'the final CI check must precede the activation attempt marker',
+);
+assert.equal(count(workflow, /node infra\/operations\/require-production-ci\.mjs/gu), 3);
+assert.match(operateJob, /needs: validate-target/u);
+assert.doesNotMatch(operateJob, /validate-ci|actions: read|require-production-ci/u);
+assert.equal(count(workflow, /actions: read/gu), 2);
+assert.match(quality, /pnpm audit --prod --audit-level=high/u);
+assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
+assert.match(
+  quality,
+  /sudo python3 -B -m unittest discover -s infra\/operations -p 'test_fetanagent_availability_monitor\.py'/u,
+);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
 assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);

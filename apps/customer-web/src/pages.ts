@@ -393,20 +393,47 @@ export function offlinePage(): string {
   );
 }
 
-export function genericErrorPage(statusCode: number): string {
+export function genericErrorPage(statusCode: number, retryAfterSeconds?: number): string {
   const unavailable = statusCode >= 500;
+  const rateLimited = statusCode === 429;
+  const retryDelay =
+    rateLimited &&
+    typeof retryAfterSeconds === 'number' &&
+    Number.isSafeInteger(retryAfterSeconds) &&
+    retryAfterSeconds >= 1 &&
+    retryAfterSeconds <= 3_600
+      ? retryAfterSeconds
+      : undefined;
+  const title = rateLimited
+    ? 'Too many requests'
+    : unavailable
+      ? 'Temporarily unavailable'
+      : 'Request not completed';
+  const message = rateLimited
+    ? retryDelay === undefined
+      ? 'Too many requests were sent. Please wait before trying again.'
+      : `Please wait ${retryDelay} ${retryDelay === 1 ? 'second' : 'seconds'} before trying again.`
+    : unavailable
+      ? 'Please try again shortly.'
+      : 'Check the details and try again.';
   return layout(
-    unavailable ? 'Temporarily unavailable' : 'Request not completed',
+    title,
     `<main class="auth-layout">
       <section class="card" aria-labelledby="error-title">
         <p class="eyebrow">FetanAgent</p>
         <h2 id="error-title">${
-          unavailable ? 'Temporarily unavailable.' : 'We could not complete that request.'
+          rateLimited
+            ? 'Too many requests.'
+            : unavailable
+              ? 'Temporarily unavailable.'
+              : 'We could not complete that request.'
         }</h2>
-        <p class="supporting">${
-          unavailable ? 'Please try again shortly.' : 'Check the details and try again.'
-        }</p>
-        <div class="actions"><a class="button secondary" href="/">Return home</a></div>
+        <p class="supporting">${message}</p>
+        <div class="actions">${
+          retryDelay === undefined
+            ? '<a class="button secondary" href="/">Return home</a>'
+            : '<a class="button secondary" href="/sign-in">Return to sign in</a><a class="button secondary" href="/forgot-password">Password recovery</a>'
+        }</div>
       </section>
     </main>`,
   );

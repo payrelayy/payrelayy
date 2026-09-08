@@ -631,7 +631,7 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(response.body).toContain('Your session remains active; select Refresh to retry.');
     expect(response.body).toMatch(
-      /signOut\(failureNotice\);\s*return;\s*\} finally \{\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\(/u,
+      /signOut\(failureNotice\);\s*return;\s*\} finally \{\s*if \(tokenRequest\) tokenRequest\.deadline\.finish\(\);\s*setBusy\(loginForm, false\);\s*\}\s*await loadOwnerDashboardAfterAuthentication\(/u,
     );
     expect(response.body).toContain(
       'Your saved Owner session is temporarily unreachable. Its twelve-hour credential remains',

@@ -748,6 +748,9 @@ function createRequestDeadline(timeoutMs) {
     }, timeoutMs);
   });
   return {
+    cancel() {
+      controller.abort();
+    },
     finish() {
       if (complete) return;
       complete = true;
@@ -3951,12 +3954,14 @@ async function loadOwnerDashboardAfterAuthentication(successNotice) {
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (loginForm.dataset.ownerBusy === 'true') return;
   setBusy(loginForm, true);
   setNotice('Signing in…');
-  let failureNotice = 'Sign-in failed. Check the staging Owner account and try again.';
+  let failureNotice = 'Sign-in is temporarily unavailable. Please try again shortly.';
+  let tokenRequest;
   try {
     const config = await loadOwnerAuthConfig();
-    const response = await deadlineFetch(
+    tokenRequest = await beginDeadlineFetch(
       config.supabaseUrl + '/auth/v1/token?grant_type=password',
       {
         method: 'POST',
@@ -3968,9 +3973,20 @@ loginForm.addEventListener('submit', async (event) => {
       },
       OWNER_TOKEN_REQUEST_TIMEOUT_MS,
     );
+    const response = tokenRequest.response;
     passwordInput.value = '';
-    if (!response.ok) throw new Error('login');
-    const session = await response.json();
+    if (!response.ok) {
+      // No error body is needed. Cancel it before releasing the deadline so a
+      // stalled upstream body cannot outlive this rejected sign-in attempt.
+      tokenRequest.deadline.cancel();
+      if (response.status === 429) {
+        failureNotice = 'Too many sign-in attempts. Wait before trying again; repeated attempts will not help.';
+      } else if (response.status === 400 || response.status === 401 || response.status === 422) {
+        failureNotice = 'Sign-in was not accepted. Check your Owner email and password, then try again.';
+      }
+      throw new Error('login');
+    }
+    const session = await tokenRequest.deadline.run(() => response.json());
     const parsedSession = validOwnerAuthSession(session);
     if (!parsedSession) {
       failureNotice = 'Supabase accepted sign-in but returned an unusable session. Refresh and try again.';
@@ -3981,11 +3997,15 @@ loginForm.addEventListener('submit', async (event) => {
     updateCompanionDevicePairingAvailability();
     updateCompanionLookupAvailability();
     applyOwnerAuthSession(session, true);
-  } catch {
+  } catch (error) {
+    if (isOwnerTransportError(error)) {
+      failureNotice = 'The sign-in connection was interrupted or took too long. Check your internet connection and try again. Your password was not changed.';
+    }
     passwordInput.value = '';
     signOut(failureNotice);
     return;
   } finally {
+    if (tokenRequest) tokenRequest.deadline.finish();
     setBusy(loginForm, false);
   }
   await loadOwnerDashboardAfterAuthentication(

@@ -67,7 +67,7 @@ import {
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
 
-export const WINDOWS_COMPANION_VERSION = '0.1.8' as const;
+export const WINDOWS_COMPANION_VERSION = '0.1.9' as const;
 export const COMPANION_PAIRING_PACKAGE_PREFIX = AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX;
 export const COMPANION_PAIRING_CONTENT_TYPE = AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE;
 export const COMPANION_PAIRING_PATH = AGENT_PLATFORM_COMPANION_PAIRING_PATH;
@@ -164,6 +164,17 @@ export interface CompanionDeviceEnrollmentResult {
   readonly identifiersRedacted: true;
   readonly pairingRequired: boolean;
   readonly transferDisabled: true;
+}
+
+export interface RestoreCompanionDeviceEnrollmentOptions {
+  readonly dataRoot: string;
+  readonly enrollment: unknown;
+  // Obtain these pins independently from the authenticated production signer
+  // record, never from the candidate certificate being restored.
+  readonly expectedServerSignerKeyId: string;
+  readonly expectedServerSigningPublicKeySpkiSha256: string;
+  readonly now?: () => Date;
+  readonly protector?: WindowsCurrentUserDataProtector;
 }
 
 function fail(code: CompanionDeviceEnrollmentFailureCode): never {
@@ -609,7 +620,7 @@ async function requestCertificate(
   pairingPackage: CompanionPairingPackage,
   request: SignedCompanionPairingRequest,
   fetchImplementation: typeof fetch,
-  assessedAt: Date,
+  now: () => Date,
 ): Promise<SignedCompanionEnrollmentCertificate> {
   let response: Response;
   try {
@@ -647,8 +658,12 @@ async function requestCertificate(
   }
   const certificate = decodeSignedCompanionEnrollmentCertificate(parsed.certificate);
   const serverKey = p256PublicKey(pairingPackage.serverSigningPublicKeySpki);
+  // The server issues the certificate after the request starts. Assess it only
+  // after receiving the complete response, including any transport delay.
+  const assessedAt = now();
   try {
     if (
+      !Number.isFinite(assessedAt.getTime()) ||
       !certificate ||
       certificate.signerKeyId !== pairingPackage.signerKeyId ||
       certificate.transcriptVersion !== AGENT_PLATFORM_COMPANION_CERTIFICATE_TRANSCRIPT_VERSION ||
@@ -736,7 +751,8 @@ export async function ensureCompanionDeviceEnrollment(
   if (!/^(?:[0-9a-f]{40}|local-development)$/u.test(options.releaseSha)) {
     fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
   }
-  const now = options.now?.() ?? new Date();
+  const nowProvider = options.now ?? (() => new Date());
+  const now = nowProvider();
   if (!Number.isFinite(now.getTime()) || now.toISOString() !== timestamp(now.toISOString())) {
     fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
   }
@@ -793,7 +809,7 @@ export async function ensureCompanionDeviceEnrollment(
     pairingPackage,
     request,
     options.fetch ?? fetch,
-    now,
+    nowProvider,
   );
   const storedEnrollment: StoredDeviceEnrollment = Object.freeze({
     enrollmentVersion: 1,
@@ -804,11 +820,72 @@ export async function ensureCompanionDeviceEnrollment(
     certificate,
   });
   await writeExclusive(enrollmentPath, storedEnrollment);
-  if (!(await validateExistingEnrollment(storedKey, JSON.stringify(storedEnrollment), now))) {
+  if (
+    !(await validateExistingEnrollment(storedKey, JSON.stringify(storedEnrollment), nowProvider()))
+  ) {
     fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
   }
   return Object.freeze({
     alreadyPaired: false,
+    devicePaired: true,
+    identifiersRedacted: true,
+    pairingRequired: false,
+    transferDisabled: true,
+  });
+}
+
+// Recover an already-issued public certificate after a lost/rejected response.
+// This cannot generate a key, create a pairing, change trust, or overwrite an
+// existing enrollment. The operator must first check server-side revocation.
+export async function restoreCompanionDeviceEnrollment(
+  options: RestoreCompanionDeviceEnrollmentOptions,
+): Promise<CompanionDeviceEnrollmentResult> {
+  const enrollment = decodeStoredEnrollment(options.enrollment);
+  if (
+    !enrollment ||
+    !OPAQUE_ID_PATTERN.test(options.expectedServerSignerKeyId) ||
+    !DIGEST_PATTERN.test(options.expectedServerSigningPublicKeySpkiSha256) ||
+    enrollment.serverSignerKeyId !== options.expectedServerSignerKeyId ||
+    enrollment.serverSigningPublicKeySpkiSha256 !== options.expectedServerSigningPublicKeySpkiSha256
+  )
+    fail('FETANAGENT_DEVICE_ENROLLMENT_REJECTED');
+
+  const deviceRoot = resolve(options.dataRoot, 'device');
+  const deviceRootStat = await lstat(deviceRoot);
+  const canonicalDataRoot = await realpath(options.dataRoot);
+  if (
+    !deviceRootStat.isDirectory() ||
+    deviceRootStat.isSymbolicLink() ||
+    (await realpath(deviceRoot)).toLocaleLowerCase('en-US') !==
+      resolve(canonicalDataRoot, 'device').toLocaleLowerCase('en-US')
+  )
+    fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+
+  const rawKey = await readStored(resolve(deviceRoot, DEVICE_KEY_FILE));
+  const key = rawKey === undefined ? undefined : decodeStoredDeviceKey(parseJson(rawKey));
+  if (!key) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+  const protector =
+    options.protector ?? createWindowsCurrentUserDataProtector(process.env, 'device-signing-key');
+  await openDevicePrivateKey(key, protector);
+  const assessedAt = options.now?.() ?? new Date();
+  if (
+    !Number.isFinite(assessedAt.getTime()) ||
+    !(await validateExistingEnrollment(key, JSON.stringify(enrollment), assessedAt))
+  )
+    fail('FETANAGENT_DEVICE_ENROLLMENT_REJECTED');
+
+  const enrollmentPath = resolve(deviceRoot, DEVICE_ENROLLMENT_FILE);
+  const existingRaw = await readStored(enrollmentPath);
+  if (existingRaw !== undefined) {
+    const existing = decodeStoredEnrollment(parseJson(existingRaw));
+    if (!existing || JSON.stringify(existing) !== JSON.stringify(enrollment)) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_REJECTED');
+    }
+  } else {
+    await writeExclusive(enrollmentPath, enrollment);
+  }
+  return Object.freeze({
+    alreadyPaired: existingRaw !== undefined,
     devicePaired: true,
     identifiersRedacted: true,
     pairingRequired: false,

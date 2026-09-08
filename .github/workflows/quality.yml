@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           node --test infra/operations/require-production-ci.test.mjs
-          sudo python3 -m unittest discover -s infra/operations -p 'test_fetanagent_availability_monitor.py'
+          sudo python3 -B -m unittest discover -s infra/operations -p 'test_fetanagent_availability_monitor.py'
 
       - name: Verify FetanAgent branding
         run: pnpm verify:brand

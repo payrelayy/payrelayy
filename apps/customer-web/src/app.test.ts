@@ -22,7 +22,9 @@ import {
   buildCustomerWebApp as buildCustomerWebAppImplementation,
   createDurableCustomerWebRateLimiter,
   type CustomerWebAppOptions,
+  type CustomerWebRateLimitDecision,
 } from './app.js';
+import { genericErrorPage } from './pages.js';
 
 const csrfToken = 'A'.repeat(43);
 const recoveryCode = 'recovery_code_1234567890';
@@ -701,9 +703,19 @@ describe('customer web SSR and PWA boundary', () => {
     const limited = await app.inject(request);
     expect(limited.statusCode).toBe(429);
     expect(limited.headers['retry-after']).toBe('10');
+    expect(limited.body).toContain('Please wait 10 seconds before trying again.');
+    expect(limited.body).not.toContain('Check the details');
     expect(signIn).toHaveBeenCalledTimes(2);
 
-    now += 10_000;
+    now += 9_000;
+    const almostReady = await app.inject(request);
+    expect(almostReady.statusCode).toBe(429);
+    expect(almostReady.headers['retry-after']).toBe('1');
+    expect(almostReady.body).toContain('Please wait 1 second before trying again.');
+    expect(almostReady.body).not.toContain('1 seconds');
+    expect(signIn).toHaveBeenCalledTimes(2);
+
+    now += 1_000;
     expect((await app.inject(request)).statusCode).toBe(400);
     expect(signIn).toHaveBeenCalledTimes(3);
     await app.close();
@@ -836,7 +848,125 @@ describe('customer web SSR and PWA boundary', () => {
     const response = await limited.inject({ method: 'GET', url: '/auth/recovery' });
     expect(response.statusCode).toBe(429);
     expect(response.headers['retry-after']).toBe('17');
+    expect(response.body).toContain('Please wait 17 seconds before trying again.');
     await limited.close();
+  });
+
+  it.each([1, 17])(
+    'shows the exact %i-second auth retry delay without replaying or exposing the request',
+    async (retryAfterSeconds) => {
+      const auth = fakeAuth();
+      const authCalls = Object.keys(auth).map((name) =>
+        vi.spyOn(auth, name as keyof CustomerWebAuthPort),
+      );
+      const workspace = fakeWorkspace();
+      const workspaceCalls = Object.keys(workspace).map((name) =>
+        vi.spyOn(workspace, name as keyof CustomerWorkspaceRuntime),
+      );
+      const app = buildCustomerWebApp({
+        auth,
+        workspace,
+        rateLimiter: { consume: async () => ({ allowed: false, ok: true, retryAfterSeconds }) },
+      });
+      try {
+        for (const path of [
+          '/create-account',
+          '/sign-in',
+          '/sign-out',
+          '/forgot-password',
+          '/update-password',
+          '/auth/recovery',
+        ]) {
+          const response = await app.inject({
+            method: path === '/auth/recovery' ? 'GET' : 'POST',
+            url: `${path}?code=${recoveryCode}&next=https://untrusted.invalid/redirect`,
+            headers: mutationHeaders(
+              `__Host-fetanagent-csrf=${csrfToken}; __Host-fetanagent-recovery=${recoveryCode}`,
+            ),
+            ...(path === '/auth/recovery'
+              ? {}
+              : {
+                  payload: form({
+                    _csrf: csrfToken,
+                    email: 'private-person@example.com',
+                    password: 'do-not-reflect-this-password',
+                  }),
+                }),
+          });
+          expect(response.statusCode).toBe(429);
+          expect(response.headers['retry-after']).toBe(String(retryAfterSeconds));
+          expect(response.body).toContain(
+            `Please wait ${retryAfterSeconds} ${retryAfterSeconds === 1 ? 'second' : 'seconds'} before trying again.`,
+          );
+          expect(response.body).toContain('href="/sign-in">Return to sign in</a>');
+          expect(response.body).toContain('href="/forgot-password">Password recovery</a>');
+          for (const hidden of [
+            '<form',
+            'http-equiv="refresh"',
+            'Check the details',
+            'private-person@example.com',
+            'do-not-reflect-this-password',
+            recoveryCode,
+            'untrusted.invalid',
+          ]) {
+            expect(response.body).not.toContain(hidden);
+          }
+          expect(response.body.match(/<script\b[^>]*>[\s\S]*?<\/script>/gu)).toEqual([
+            '<script src="/assets/register-sw.v1.js" defer></script>',
+          ]);
+          expect(response.headers.location).toBeUndefined();
+        }
+        for (const call of [...authCalls, ...workspaceCalls]) expect(call).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 3_601, '17'])(
+    'keeps malformed durable retry delays fail-closed (%s)',
+    async (retryAfterSeconds) => {
+      const signIn = vi.fn<CustomerWebAuthPort['signInWithEmailPassword']>();
+      const app = buildCustomerWebApp({
+        auth: fakeAuth({ signInWithEmailPassword: signIn }),
+        rateLimiter: {
+          consume: async () =>
+            ({ allowed: false, ok: true, retryAfterSeconds }) as CustomerWebRateLimitDecision,
+        },
+      });
+      try {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/sign-in',
+          headers: mutationHeaders(`__Host-fetanagent-csrf=${csrfToken}`),
+          payload: form({
+            _csrf: csrfToken,
+            email: 'person@example.com',
+            password: 'a-long-password',
+          }),
+        });
+        expect(response.statusCode).toBe(503);
+        expect(response.headers['retry-after']).toBeUndefined();
+        expect(response.body).toContain('Temporarily unavailable.');
+        expect(response.body).not.toContain('Please wait');
+        expect(signIn).not.toHaveBeenCalled();
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('renders a generic 429 safely when no validated auth retry delay is available', () => {
+    for (const invalid of [undefined, 0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 3_601]) {
+      const page = genericErrorPage(429, invalid);
+      expect(page).toContain('Too many requests.');
+      expect(page).toContain('Please wait before trying again.');
+      expect(page).not.toContain('Check the details');
+      expect(page).toContain('href="/">Return home</a>');
+    }
+    const untrusted = '<script>alert(1)</script>';
+    expect(genericErrorPage(429, untrusted as unknown as number)).not.toContain(untrusted);
+    expect(genericErrorPage(503, 17)).not.toContain('Please wait 17');
   });
 
   it('does not consume a rate-limit bucket until mutation security checks pass', async () => {

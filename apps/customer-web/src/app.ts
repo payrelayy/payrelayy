@@ -113,6 +113,15 @@ const RATE_LIMITED_ROUTES = new Set([
   'GET /auth/recovery',
 ]);
 
+const AUTH_RATE_LIMITED_ROUTES = new Set([
+  'POST /create-account',
+  'POST /sign-in',
+  'POST /sign-out',
+  'POST /forgot-password',
+  'POST /update-password',
+  'GET /auth/recovery',
+]);
+
 const publicDirectory = new URL('../public/', import.meta.url);
 const publicAssets = {
   css: readFileSync(new URL('app.v1.css', publicDirectory), 'utf8'),
@@ -847,7 +856,10 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
           return html(
             reply.header('retry-after', String(decision.retryAfterSeconds)),
             429,
-            genericErrorPage(429),
+            genericErrorPage(
+              429,
+              AUTH_RATE_LIMITED_ROUTES.has(routeKey) ? decision.retryAfterSeconds : undefined,
+            ),
           );
         }
         return;
@@ -865,7 +877,11 @@ export function buildCustomerWebApp(options: CustomerWebAppOptions) {
       }
       if (bucket.count >= rateLimit.maxRequests) {
         const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - timestamp) / 1_000));
-        return html(reply.header('retry-after', String(retryAfter)), 429, genericErrorPage(429));
+        return html(
+          reply.header('retry-after', String(retryAfter)),
+          429,
+          genericErrorPage(429, AUTH_RATE_LIMITED_ROUTES.has(routeKey) ? retryAfter : undefined),
+        );
       }
       bucket.count += 1;
     }

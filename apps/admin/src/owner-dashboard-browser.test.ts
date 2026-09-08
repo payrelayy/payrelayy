@@ -323,6 +323,93 @@ function ownerBrowserHarness(
 
 describe('Owner dashboard browser authentication boundary', () => {
   it.each([
+    [400, 'Sign-in was not accepted.'],
+    [401, 'Sign-in was not accepted.'],
+    [422, 'Sign-in was not accepted.'],
+    [429, 'Too many sign-in attempts.'],
+    [500, 'Sign-in is temporarily unavailable.'],
+    [503, 'Sign-in is temporarily unavailable.'],
+  ])(
+    'explains a %s sign-in failure without exposing provider details or leaving a deadline',
+    async (status, message) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url) =>
+          url.endsWith('/auth/v1/token?grant_type=password')
+            ? {
+                ...response(status, {
+                  error: 'private-provider-detail',
+                  email: 'private@example.test',
+                }),
+                json: () => new Promise(() => {}),
+              }
+            : undefined,
+      });
+      await browser.signIn();
+      expect(browser.element('#notice').textContent).toContain(message);
+      expect(browser.element('#notice').textContent).not.toMatch(
+        /staging|private-provider-detail|private@example/,
+      );
+      expect(browser.element('#password').value).toBe('');
+      expect(browser.element('#login-form').dataset.ownerBusy).toBe('false');
+      expect(browser.element('#email').disabled).toBe(false);
+      expect(browser.element('#login-panel').hidden).toBe(false);
+      expect(browser.fetchCalls.some(({ url }) => url.startsWith('/v1/owner/'))).toBe(false);
+      expect(
+        browser.fetchCalls.find(({ url }) => url.endsWith('grant_type=password'))?.init.signal
+          ?.aborted,
+      ).toBe(true);
+      expect(() => browser.expireLatestTimer(10_000)).toThrow('No active');
+    },
+  );
+
+  it('reports a sign-in network failure without blaming or changing the password', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.endsWith('/auth/v1/token?grant_type=password')
+          ? Promise.reject(new Error('private-network-detail'))
+          : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#notice').textContent).toContain('Check your internet connection');
+    expect(browser.element('#notice').textContent).toContain('Your password was not changed.');
+    expect(browser.element('#notice').textContent).not.toContain('private-network-detail');
+    expect(browser.element('#password').value).toBe('');
+    expect(browser.element('#login-form').dataset.ownerBusy).toBe('false');
+    expect(() => browser.expireLatestTimer(10_000)).toThrow('No active');
+  });
+
+  it.each(['headers', 'body'] as const)(
+    'bounds sign-in %s waiting and ignores a duplicate submission',
+    async (stage) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url) => {
+          if (!url.endsWith('/auth/v1/token?grant_type=password')) return undefined;
+          return stage === 'headers'
+            ? new Promise(() => {})
+            : { ...response(200, {}), json: () => new Promise(() => {}) };
+        },
+      });
+      const attempt = browser.signIn();
+      await vi.waitFor(() =>
+        expect(browser.fetchCalls.some(({ url }) => url.endsWith('grant_type=password'))).toBe(
+          true,
+        ),
+      );
+      await browser.element('#login-form').listeners.get('submit')?.({ preventDefault() {} });
+      expect(
+        browser.fetchCalls.filter(({ url }) => url.endsWith('grant_type=password')),
+      ).toHaveLength(1);
+      browser.expireLatestTimer(10_000);
+      await attempt;
+      expect(browser.element('#notice').textContent).toContain('interrupted or took too long');
+      expect(browser.element('#password').value).toBe('');
+      expect(browser.element('#login-form').dataset.ownerBusy).toBe('false');
+      expect(browser.evaluate('accessToken')).toBeUndefined();
+      expect(() => browser.expireLatestTimer(10_000)).toThrow('No active');
+    },
+  );
+
+  it.each([
     [0, 0, 0, null, 'No paired companion'],
     [1, 1, 0, null, 'Paired — awaiting first check-in'],
     [1, 1, 0, '2026-09-08T10:00:00.000Z', 'Paired — no recent check-in'],

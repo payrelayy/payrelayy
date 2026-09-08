@@ -272,7 +272,7 @@ assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
 assert.match(
   quality,
-  /sudo python3 -m unittest discover -s infra\/operations -p 'test_fetanagent_availability_monitor\.py'/u,
+  /sudo python3 -B -m unittest discover -s infra\/operations -p 'test_fetanagent_availability_monitor\.py'/u,
 );
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);

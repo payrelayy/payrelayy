@@ -59,8 +59,16 @@ diagnose a polling problem.
 
 Use the existing **Production application runtime** GitHub workflow against its exact reviewed
 main commit and production target. Its deployment path retains previous application artifacts
-and rolls back a failed activation. A finalized release is not a general-purpose database
-rollback; never restore a database as a routine application-restart step.
+and can roll back a failed activation only while the exact pending predecessor record exists.
+Finalization removes that record; the helper rejects rollback of the finalized current release.
+Retaining an older image or release directory does not extend this automatic rollback window.
+
+After finalization, application recovery needs a separately reviewed redeployment through the
+existing main-branch and exact-commit CI gates. Never recreate or edit predecessor markers,
+switch release symlinks manually, or bypass those gates to force a rollback. Application
+rollback does not restore database contents; never restore a database as a routine
+application-restart step. See the [recovery readiness checklist](recovery-readiness.md) for the
+distinct application, host, database, and configuration recovery evidence.
 
 Production deployment requires successful current main-push runs of the seven required CI
 workflows for that exact source SHA. The deployment checks them before building, before
@@ -89,3 +97,7 @@ reconnect/restart behavior. Earlier screenshots or
 historical test results must not be substituted for current evidence. Record any unavailable
 service-plan feature or required external approval explicitly instead of silently enabling a
 paid service or claiming the work is complete.
+
+Use the [recovery readiness checklist](recovery-readiness.md) to record scope, approvals,
+acceptable recovery limits, and actual exercise results. Completing documentation does not
+constitute a backup or a successful restore.

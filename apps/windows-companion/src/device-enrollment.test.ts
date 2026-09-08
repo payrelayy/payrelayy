@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, randomUUID, sign, type KeyObject } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +34,7 @@ import {
   decodeCompanionPairingPackage,
   ensureCompanionDeviceEnrollment,
   loadCompanionDeviceSigningRuntime,
+  restoreCompanionDeviceEnrollment,
 } from './device-enrollment.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
@@ -201,19 +202,32 @@ function signedLookupAssignment(
   });
 }
 
-function successfulFetch(serverPrivateKey: KeyObject) {
+function successfulFetch(
+  serverPrivateKey: KeyObject,
+  certificateOverrides: Partial<CompanionEnrollmentCertificateBody> = {},
+  onResponseRead?: () => void,
+) {
   return vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
     expect(init?.method).toBe('POST');
     expect(init?.redirect).toBe('error');
     const request = JSON.parse(String(init?.body)) as SignedCompanionPairingRequest;
     expect(verifySignedCompanionPairingRequest(request)).toBe(true);
     const certificate = signCompanionEnrollmentCertificateForTest(
-      certificateBody(request),
+      { ...certificateBody(request), ...certificateOverrides },
       signerKeyId,
       serverPrivateKey,
     );
     const encoded = JSON.stringify({ certificate });
-    return new Response(encoded, {
+    const responseBody = onResponseRead
+      ? new ReadableStream<Uint8Array>({
+          pull(controller) {
+            onResponseRead();
+            controller.enqueue(Buffer.from(encoded));
+            controller.close();
+          },
+        })
+      : encoded;
+    return new Response(responseBody, {
       status: 201,
       headers: {
         'content-length': String(Buffer.byteLength(encoded)),
@@ -224,6 +238,163 @@ function successfulFetch(serverPrivateKey: KeyObject) {
 }
 
 describe('Windows companion device enrollment', () => {
+  it('assesses a newly issued certificate after reading the response, not before pairing started', async () => {
+    const dataRoot = await root();
+    const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const publicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+    let observedNow = now;
+    const issuedAt = new Date(now.getTime() + 2_000).toISOString();
+    const fetchImplementation = successfulFetch(
+      server.privateKey,
+      { issuedAt, validFrom: issuedAt },
+      () => {
+        observedNow = new Date(now.getTime() + 3_000);
+      },
+    );
+    await expect(
+      ensureCompanionDeviceEnrollment({
+        dataRoot,
+        releaseSha,
+        pairingPackage: pairingPackage(publicKey),
+        fetch: fetchImplementation as unknown as typeof fetch,
+        now: () => observedNow,
+        protector: protector(),
+      }),
+    ).resolves.toMatchObject({ devicePaired: true });
+    await expect(
+      readFile(join(dataRoot, 'device', 'companion-primary.enrollment.json'), 'utf8'),
+    ).resolves.toContain(issuedAt);
+  });
+
+  it.each(['expired-during-response', 'still-future', 'invalid-clock'] as const)(
+    'rejects a certificate at the actual response time: %s',
+    async (scenario) => {
+      const dataRoot = await root();
+      const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+      const publicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+      let observedNow = now;
+      const later = new Date(now.getTime() + 2_000).toISOString();
+      const overrides =
+        scenario === 'expired-during-response'
+          ? { validUntil: later }
+          : scenario === 'still-future'
+            ? { issuedAt: later, validFrom: later }
+            : {};
+      await expect(
+        ensureCompanionDeviceEnrollment({
+          dataRoot,
+          releaseSha,
+          pairingPackage: pairingPackage(publicKey),
+          fetch: successfulFetch(server.privateKey, overrides, () => {
+            observedNow =
+              scenario === 'invalid-clock'
+                ? new Date(Number.NaN)
+                : new Date(now.getTime() + (scenario === 'still-future' ? 1_000 : 3_000));
+          }) as unknown as typeof fetch,
+          now: () => observedNow,
+          protector: protector(),
+        }),
+      ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+      await expect(
+        readFile(join(dataRoot, 'device', 'companion-primary.enrollment.json')),
+      ).rejects.toThrow();
+    },
+  );
+
+  it('restores only the already-issued, pinned certificate for the existing protected key', async () => {
+    const dataRoot = await root();
+    const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const publicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+    const selectedProtector = protector();
+    await ensureCompanionDeviceEnrollment({
+      dataRoot,
+      releaseSha,
+      pairingPackage: pairingPackage(publicKey),
+      fetch: successfulFetch(server.privateKey) as unknown as typeof fetch,
+      now: () => now,
+      protector: selectedProtector,
+    });
+    const enrollmentPath = join(dataRoot, 'device', 'companion-primary.enrollment.json');
+    const keyPath = join(dataRoot, 'device', 'companion-primary.key.json');
+    const keyBefore = await readFile(keyPath);
+    const enrollment = JSON.parse(await readFile(enrollmentPath, 'utf8'));
+    await rm(enrollmentPath);
+    const options = {
+      dataRoot,
+      enrollment,
+      expectedServerSignerKeyId: signerKeyId,
+      expectedServerSigningPublicKeySpkiSha256: sha(publicKey),
+      now: () => now,
+      protector: selectedProtector,
+    };
+    await expect(restoreCompanionDeviceEnrollment(options)).resolves.toMatchObject({
+      alreadyPaired: false,
+      devicePaired: true,
+      transferDisabled: true,
+    });
+    await expect(restoreCompanionDeviceEnrollment(options)).resolves.toMatchObject({
+      alreadyPaired: true,
+      devicePaired: true,
+    });
+    expect(await readFile(keyPath)).toEqual(keyBefore);
+
+    await rm(enrollmentPath);
+    await expect(
+      restoreCompanionDeviceEnrollment({
+        ...options,
+        expectedServerSignerKeyId: 'another-server-key',
+      }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    await expect(
+      restoreCompanionDeviceEnrollment({
+        ...options,
+        expectedServerSigningPublicKeySpkiSha256: `sha256:${'0'.repeat(64)}`,
+      }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    await expect(
+      restoreCompanionDeviceEnrollment({
+        ...options,
+        now: () => new Date('2027-01-01T00:00:00.000Z'),
+      }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    const altered = structuredClone(enrollment);
+    altered.certificate.body.transferAllowed = true;
+    await expect(
+      restoreCompanionDeviceEnrollment({ ...options, enrollment: altered }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    const wrongSignature = structuredClone(enrollment);
+    wrongSignature.certificate.signature = 'A'.repeat(86);
+    await expect(
+      restoreCompanionDeviceEnrollment({ ...options, enrollment: wrongSignature }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    await expect(readFile(enrollmentPath)).rejects.toThrow();
+
+    const otherRoot = await root();
+    await ensureCompanionDeviceEnrollment({
+      dataRoot: otherRoot,
+      releaseSha,
+      pairingPackage: pairingPackage(publicKey),
+      fetch: successfulFetch(server.privateKey) as unknown as typeof fetch,
+      now: () => now,
+      protector: selectedProtector,
+    });
+    const otherEnrollmentPath = join(otherRoot, 'device', 'companion-primary.enrollment.json');
+    await rm(otherEnrollmentPath);
+    await expect(
+      restoreCompanionDeviceEnrollment({ ...options, dataRoot: otherRoot }),
+    ).rejects.toMatchObject({ code: 'FETANAGENT_DEVICE_ENROLLMENT_REJECTED' });
+    await expect(readFile(otherEnrollmentPath)).rejects.toThrow();
+
+    await writeFile(enrollmentPath, 'existing-enrollment-must-not-be-overwritten');
+    await expect(restoreCompanionDeviceEnrollment(options)).rejects.toMatchObject({
+      code: 'FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE',
+    });
+    expect(await readFile(enrollmentPath, 'utf8')).toBe(
+      'existing-enrollment-must-not-be-overwritten',
+    );
+    expect(await readFile(keyPath)).toEqual(keyBefore);
+  });
+
   it('creates a DPAPI-protected device key, pairs once, and resumes without a package', async () => {
     const dataRoot = await root();
     const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });

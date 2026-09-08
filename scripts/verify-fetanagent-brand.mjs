@@ -17,10 +17,13 @@ const legacyTransitionFiles = new Set([
 // The product download uses the repository's existing, externally assigned owner/name. This is
 // an exact URL exception, not permission to reintroduce the former product name into UI copy.
 const repositorySlug = ['pay', 'relayy'].join('');
-const companionReleaseAssetUrl =
-  `https://github.com/${repositorySlug}/${repositorySlug}/releases/latest/download/` +
-  'FetanAgent-Windows-Companion.zip';
-const exactCompanionReleaseLinks = [companionReleaseAssetUrl + '.sha256', companionReleaseAssetUrl];
+const companionReleasesUrl = `https://github.com/${repositorySlug}/${repositorySlug}/releases`;
+const companionReleaseAssetUrl = `${companionReleasesUrl}/latest/download/FetanAgent-Windows-Companion.zip`;
+const exactCompanionReleaseLinks = [
+  companionReleaseAssetUrl + '.sha256',
+  companionReleaseAssetUrl,
+  companionReleasesUrl,
+];
 
 const files = execFileSync(
   'git',
@@ -62,7 +65,10 @@ for (const file of files) {
   for (const [index, line] of lines.entries()) {
     const productText =
       normalizedFile === 'apps/admin/src/owner-dashboard.ts'
-        ? exactCompanionReleaseLinks.reduce((text, url) => text.replaceAll(url, ''), line)
+        ? exactCompanionReleaseLinks.reduce(
+            (text, url) => text.replaceAll(`href="${url}"`, 'href=""'),
+            line,
+          )
         : line;
     if (legacyPattern.test(productText)) {
       violations.push(`${normalizedFile}:${index + 1}: legacy brand in content`);

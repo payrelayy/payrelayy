@@ -401,6 +401,13 @@ services:
       beta-admission:
         condition: service_healthy
         restart: true
+    # Observe only successful existing long polls; the probe makes no Telegram requests.
+    healthcheck:
+      test: ['CMD', 'node', 'apps/bot/dist/telegram-polling-healthcheck.js']
+      interval: 15s
+      timeout: 3s
+      start_period: 45s
+      retries: 3
 
   telebirr-assignment-broker:
     <<: *runtime-defaults

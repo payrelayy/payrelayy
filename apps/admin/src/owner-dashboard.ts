@@ -289,10 +289,24 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <div class="actions companion-actions">
               <a href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip"
-                rel="noopener noreferrer">Download Windows companion</a>
+                target="_blank" rel="noopener noreferrer"
+                aria-describedby="companion-download-help">Download Windows companion ZIP (new tab)</a>
               <a class="secondary-link"
                 href="https://github.com/payrelayy/payrelayy/releases/latest/download/FetanAgent-Windows-Companion.zip.sha256"
-                rel="noopener noreferrer">Download SHA-256 checksum</a>
+                target="_blank" rel="noopener noreferrer"
+                aria-describedby="companion-download-help">Download SHA-256 checksum (new tab)</a>
+            </div>
+            <div id="companion-download-help" class="receipt-label">
+              <p>If the companion is already connected, no download or re-pairing is needed.
+                Keep the installed companion and its separate Chrome window open.</p>
+              <p>Download links open a new tab so this Owner page stays open. If a download says
+                &ldquo;Not Found&rdquo; or is blocked, check the assets on the
+                <a href="https://github.com/payrelayy/payrelayy/releases"
+                  target="_blank" rel="noopener noreferrer">official FetanAgent GitHub releases page (new tab)</a>
+                for the companion ZIP and its matching SHA-256 checksum.</p>
+              <p>If the file is still unavailable, report the exact error text without passwords,
+                pairing packages, or signed download URLs. Do not turn off browser or antivirus
+                protection to force a download. A download error does not require a new pairing.</p>
             </div>
             <ol class="companion-steps">
               <li>Extract the ZIP once.</li>

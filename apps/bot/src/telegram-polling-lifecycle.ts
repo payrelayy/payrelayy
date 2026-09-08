@@ -34,7 +34,11 @@ function isCancellation(error: unknown): boolean {
 }
 
 /** Own both long-polling promises: stop() does not wait for start()'s middleware to drain. */
-export async function runTelegramPolling(bot: PollingBot, options: PollingOptions): Promise<void> {
+export async function runTelegramPolling(
+  bot: PollingBot,
+  options: PollingOptions,
+  lifecycle: { readonly onShutdown?: () => void } = {},
+): Promise<void> {
   const initialization = new AbortController();
   let phase: PollingPhase = 'initializing';
   let shutdownRequested = false;
@@ -52,6 +56,7 @@ export async function runTelegramPolling(bot: PollingBot, options: PollingOption
   function requestShutdown(): void {
     if (shutdownRequested) return;
     shutdownRequested = true;
+    lifecycle.onShutdown?.();
     console.info('Telegram bot shutdown requested.');
     initialization.abort();
     if (pollingStarted) shutdown = stopPolling();
@@ -78,6 +83,7 @@ export async function runTelegramPolling(bot: PollingBot, options: PollingOption
   } catch (error) {
     if (!shutdownRequested || !isCancellation(error)) reportFailure(phase, error);
   } finally {
+    lifecycle.onShutdown?.();
     // Keep both signal handlers installed while either shutdown or middleware is pending.
     await shutdown;
     process.removeListener('SIGINT', requestShutdown);

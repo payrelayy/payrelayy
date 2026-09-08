@@ -451,6 +451,12 @@ case "${1:-}" in
     container_running "$id" || die 'the Telegram bot is not running'
     [[ "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" == "$sha" ]] ||
       die 'the Telegram bot revision is wrong'
+    if grep -Fq 'apps/bot/dist/telegram-polling-healthcheck.js' "$release/compose.production.yaml"; then
+      [[ "$(docker inspect --format '{{.State.Health.Status}}' "$id")" == 'healthy' ]] ||
+        die 'the Telegram bot has no recent successful polling check'
+    else
+      printf '%s\n' 'Legacy release: Telegram polling health is unverified; only process and revision were checked.' >&2
+    fi
     negative_telebirr_public_smoke
     negative_companion_public_smoke "$release"
     ;;

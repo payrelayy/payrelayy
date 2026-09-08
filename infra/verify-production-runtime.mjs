@@ -121,6 +121,12 @@ assert.match(bot, /TELEGRAM_BOT_ENABLED: 'true'/u);
 assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(bot, /condition: service_healthy/u);
+assert.match(
+  bot,
+  /healthcheck:\s*test: \['CMD', 'node', 'apps\/bot\/dist\/telegram-polling-healthcheck\.js'\]/u,
+);
+assert.match(bot, /interval: 15s\s*timeout: 3s\s*start_period: 45s\s*retries: 3/u);
+assert.doesNotMatch(bot, /ports:|api\.telegram\.org/u);
 
 const telebirrAssignment = childBlock(services, 'telebirr-assignment-broker');
 const telebirrDeviceState = childBlock(services, 'telebirr-device-state-broker');
@@ -308,6 +314,11 @@ assert.match(helper, /expected_count=29/u);
 assert.match(helper, /expected_count=32/u);
 assert.match(helper, /images\+=\(companion-device-bridge\)/u);
 assert.match(helper, /services\+=\(production-companion-device-bridge\)/u);
+assert.match(
+  helper,
+  /if grep -Fq 'apps\/bot\/dist\/telegram-polling-healthcheck\.js' "\$release\/compose\.production\.yaml"; then[\s\S]*?die 'the Telegram bot has no recent successful polling check'/u,
+);
+assert.match(helper, /Legacy release: Telegram polling health is unverified/u);
 assert.match(helper, /LEGACY_TELEBIRR_PROJECT='fetanagent-telebirr-device-pilot'/u);
 assert.match(helper, /finalize\)/u);
 assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);

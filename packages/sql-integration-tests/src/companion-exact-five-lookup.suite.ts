@@ -390,6 +390,38 @@ const acceptSql = `
   )
 `;
 
+async function retireLegacyProfiles(client: Client): Promise<void> {
+  await client.query(`
+    update app.private_owner_kemerbet_agent_profile_revisions profile
+       set retired_at = clock_timestamp()
+      from app.platforms platform
+     where platform.id = profile.platform_id
+       and platform.code = 'kemerbet' and profile.retired_at is null
+  `);
+  await client.query(`
+    update app.platform_agent_accounts agent set status = 'inactive'
+      from app.platforms platform
+     where platform.id = agent.platform_id
+       and platform.code = 'kemerbet' and agent.status = 'active'
+  `);
+}
+
+function idlePollValues(paired: Awaited<ReturnType<typeof createPairedDevice>>): SqlValue[] {
+  const assessedAt = canonicalNow();
+  return [
+    sha(`idle-replay:${randomUUID()}`),
+    sha(`idle-body:${randomUUID()}`),
+    `idle-request-${randomUUID().replaceAll('-', '')}`,
+    String(paired.certificateBody.certificateId),
+    String(paired.certificateBody.deviceId),
+    String(paired.certificateBody.deviceKeyId),
+    assessedAt,
+    new Date(assessedAt.getTime() + 60_000),
+    assessedAt,
+    paired.signerKeyId,
+  ];
+}
+
 export async function createAcceptedExactFiveCompanionEvidence(
   client: Client,
   ownerAdminId: string,
@@ -465,6 +497,116 @@ export function registerCompanionExactFiveLookupSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('signed exact-five companion lookup database boundary', () => {
+    it('accepts an idle paired device without a legacy profile but rejects replay, wrong identity, expiry, and revocation', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        await retireLegacyProfiles(client);
+        const values = idlePollValues(paired);
+        const accepted = await client.query<LookupClaimRow>(claimSql, values);
+        expect(accepted.rows).toEqual([
+          { claim_state: 'none', assignment_body: null, signed_assignment: null },
+        ]);
+        expect((await client.query(claimSql, values)).rows).toEqual([]);
+
+        const wrongIdentity = idlePollValues(paired);
+        wrongIdentity[4] = `wrong-device-${randomUUID()}`;
+        expect((await client.query(claimSql, wrongIdentity)).rows).toEqual([]);
+        const expired = idlePollValues(paired);
+        expired[6] = new Date(Date.now() - 120_000);
+        expired[7] = new Date(Date.now() - 60_000);
+        expect((await client.query(claimSql, expired)).rows).toEqual([]);
+
+        await client.query(
+          `insert into app.agent_platform_companion_device_revocations (
+             certificate_id, revocation_request_key, revoked_by_admin_id, revoked_at, reason
+           ) values ($1::uuid, $2::uuid, $3::uuid, clock_timestamp(), 'owner_requested')`,
+          [paired.certificateBody.certificateId, randomUUID(), getOwnerAdminId()],
+        );
+        expect((await client.query(claimSql, idlePollValues(paired))).rows).toEqual([]);
+        const counts = await client.query(
+          `select
+             (select count(*)::integer from app.agent_platform_companion_http_request_replays
+               where certificate_id = $1::uuid) as accepted_polls,
+             (select count(*)::integer from app.agent_platform_companion_lookup_assignments
+               where certificate_id = $1::uuid) as assignments,
+             (select count(*)::integer from app.agent_platform_companion_lookup_results
+               where certificate_id = $1::uuid) as results`,
+          [paired.certificateBody.certificateId],
+        );
+        expect(counts.rows).toEqual([{ accepted_polls: 1, assignments: 0, results: 0 }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it.each([
+      'cbe_birr_authoritative_verification',
+      'deposit_execution',
+      'payment_verification',
+      'private_live_deposit_pilot',
+      'telebirr_authoritative_verification',
+    ])('still rejects an idle poll when %s is not disabled', async (featureKey) => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        await retireLegacyProfiles(client);
+        await client.query(
+          "update app.feature_switches set mode = 'dry_run' where feature_key = $1::text",
+          [featureKey],
+        );
+        await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
+          'The companion idle poll requires every money switch to be disabled.',
+        );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('retains the full legacy-profile boundary before claiming a non-empty assignment', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          'select auth_user_id::text from app.admin_users where id = $1::uuid',
+          [getOwnerAdminId()],
+        );
+        const ownerAuthUserId = owner.rows[0]!.auth_user_id;
+        await createExactFivePlayers(client, ownerAuthUserId);
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const issued = await queryAsOwnerControl<LookupIssueRow>(
+          client,
+          `select * from app.issue_agent_platform_companion_exact_five_lookup(
+             $1::uuid, $2::uuid, $3::text
+           )`,
+          [ownerAuthUserId, randomUUID(), paired.signerKeyId],
+        );
+        expect(issued).toHaveLength(1);
+        await retireLegacyProfiles(client);
+        await client.query('savepoint idle_profile_boundary');
+        await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
+          'The KemerBet readiness claim requires one active configured agent profile.',
+        );
+        await client.query('rollback to savepoint idle_profile_boundary');
+        const status = await client.query(
+          `select state, first_claimed_at from app.agent_platform_companion_lookup_assignments
+            where assignment_id = $1::uuid`,
+          [issued[0]!.assignment_id],
+        );
+        expect(status.rows).toEqual([{ state: 'pending', first_claimed_at: null }]);
+        const replay = await client.query(
+          `select count(*)::integer as count from app.agent_platform_companion_http_request_replays
+            where certificate_id = $1::uuid`,
+          [paired.certificateBody.certificateId],
+        );
+        expect(replay.rows).toEqual([{ count: 0 }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('seals raw lookup state and grants only the reviewed owner and bridge procedures', async () => {
       const client = getClient();
       const tables = await client.query(

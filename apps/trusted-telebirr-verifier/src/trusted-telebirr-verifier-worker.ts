@@ -69,15 +69,17 @@ export function createTrustedTelebirrVerifierWorker(
       }
 
       const result = await dependencies.verifier.verifyAndComplete(request);
-      if (result.status === 'not_settled') {
-        if (result.disposition !== 'invalid' || result.reasonCode !== 'trusted_evidence_invalid') {
-          throw new TrustedTelebirrVerifierWorkerUnavailableError();
-        }
+      const invalidEvidence =
+        (result.status === 'not_settled' && result.disposition === 'invalid') ||
+        (result.status === 'shadow_not_completed' && result.disposition === 'would_reject');
+      if (invalidEvidence && result.reasonCode === 'trusted_evidence_invalid') {
         await dependencies.source.quarantineInvalid({
           verificationAttemptId: request.verificationAttemptId,
           leaseToken: request.leaseToken,
           observationBodyDigest: request.signedObservation.bodyDigest,
         });
+      } else if (result.status === 'not_settled' || result.status === 'shadow_not_completed') {
+        throw new TrustedTelebirrVerifierWorkerUnavailableError();
       }
       try {
         dependencies.onResult?.(redactedTrustedTelebirrVerificationForLog(result));

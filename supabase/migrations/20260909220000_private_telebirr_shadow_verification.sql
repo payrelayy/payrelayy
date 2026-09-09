@@ -1397,6 +1397,7 @@ begin
       and existing_stage.signed_assignment = p_signed_assignment
       and existing_stage.signed_observation = p_signed_observation then
       return query select 'accepted'::text, null::text, true;
+      return;
     end if;
     return query select 'rejected'::text, 'binding_mismatch'::text, false;
     return;

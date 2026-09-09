@@ -1092,7 +1092,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly eleven non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly twelve non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1130,6 +1130,7 @@ describe('disposable SQL migration baseline', () => {
     expect(functions.rows.map((row) => row.signature)).toEqual([
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+      'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
@@ -6809,6 +6810,10 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
       {
         signature:
+          'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+      },
+      {
+        signature:
           'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
       },
       { signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)' },
@@ -6824,6 +6829,10 @@ describe('disposable SQL migration baseline', () => {
       {
         signature:
           'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
+      },
+      {
+        signature:
+          'app.load_private_telebirr_shadow_verification_authority(uuid,uuid,timestamp with time zone)',
       },
       { signature: 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)' },
       {

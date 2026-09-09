@@ -125,7 +125,7 @@ async function createTelegramShadowInbound(
        channel, external_event_id, customer_identity_id, payload_digest
      ) values ('telegram', $1::text, $2::uuid, $3::text)
      returning id`,
-    [`shadow-admission:${seed}`, identityId, `hmac-sha256-v1:${'a'.repeat(64)}`],
+    [`update:${telegramUserId}`, identityId, `hmac-sha256-v1:${'a'.repeat(64)}`],
   );
   const tokenDigest = `sha256-v1:${createHash('sha256')
     .update(`shadow-invite:${seed}`, 'utf8')
@@ -493,10 +493,10 @@ export function registerTelebirrShadowVerificationSqlTests(
       }>(`
         select column_default,
                exists (
-                 select 1 from pg_constraint constraint
-                  where constraint.conrelid = 'app.private_telebirr_shadow_proof_requests'::regclass
-                    and constraint.contype = 'c'
-                    and pg_get_constraintdef(constraint.oid) like '%proof_status%verification_queued%'
+                 select 1 from pg_constraint catalog_constraint
+                  where catalog_constraint.conrelid = 'app.private_telebirr_shadow_proof_requests'::regclass
+                    and catalog_constraint.contype = 'c'
+                    and pg_get_constraintdef(catalog_constraint.oid) like '%proof_status%verification_queued%'
                ) as accepted_constraint
           from information_schema.columns
          where table_schema = 'app'

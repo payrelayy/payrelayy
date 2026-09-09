@@ -1,0 +1,2 @@
+# This digest pins the exact reviewed helper bytes installed at the path below.
+fetanagent-admin ALL=(root) NOPASSWD: sha256:7b77a8398d0b8549074169fed002aa55099fd31de7742cefc484cd6598428ebe /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper *

@@ -1,0 +1,554 @@
+name: Production trusted TeleBirr verifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan, stage a stopped release, activate only the verifier, inspect, or emergency-disable
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - stage-disabled
+          - activate-verifier
+          - status
+          - emergency-disable
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_pin_manifest_sha256:
+        description: For staging type the reviewed sha256 digest; otherwise type not-applicable
+        required: true
+        type: string
+      confirm_operation:
+        description: Type the exact operation phrase documented in the verifier runbook
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-trusted-telebirr-verifier
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DROPLET_ID: '593344964'
+  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  PRODUCTION_DATABASE_TUNNEL_PORT: '25432'
+  VERIFIER_RUNTIME_ROLE: fetanagent_trusted_telebirr_verifier_runtime
+
+jobs:
+  validate-target:
+    name: Validate exact production verifier operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main, exact target, source, and action-time operation phrase
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_PROJECT" != "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
+            'plan:PLAN PRODUCTION VERIFIER'|
+            'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'|
+            'activate-verifier:ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY'|
+            'status:STATUS PRODUCTION VERIFIER'|
+            'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER') ;;
+            *)
+              echo '::error::The verifier operation confirmation does not match the selected mode.'
+              exit 1
+              ;;
+          esac
+          if [[ "$REQUESTED_MODE" == 'stage-disabled' ]]; then
+            [[ "$CONFIRMED_PIN_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          else
+            [[ "$CONFIRMED_PIN_DIGEST" == 'not-applicable' ]]
+          fi
+
+  validate-ci:
+    name: Require exact production commit CI
+    if: inputs.mode == 'stage-disabled' || inputs.mode == 'activate-verifier'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Require latest passing main push CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+  build:
+    name: Build sealed verifier image without production inputs
+    if: >-
+      always() && !cancelled() && needs.validate-target.result == 'success' &&
+      (inputs.mode == 'plan' ||
+       (inputs.mode == 'stage-disabled' && needs.validate-ci.result == 'success'))
+    needs: [validate-target, validate-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify production verifier contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node infra/verify-trusted-telebirr-verifier-deployment.mjs
+          bash -n infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh
+          bash -n infra/operations/fetanagent-production-direct-database-tunnel.sh
+      - name: Build and inspect exact commit image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          image="fetanagent-trusted-telebirr-verifier:$tag"
+          docker build --pull=false --target trusted-telebirr-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$image" .
+          [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
+          [[ "$(docker image inspect "$image" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$GITHUB_SHA" ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" == 'null' ]]
+      - name: Save sealed image bundle
+        if: inputs.mode == 'stage-disabled'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker save --output "$RUNNER_TEMP/fetanagent-trusted-telebirr-verifier-image.tar" \
+            "fetanagent-trusted-telebirr-verifier:${GITHUB_SHA:0:12}"
+      - name: Upload one-use sealed image bundle
+        if: inputs.mode == 'stage-disabled'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: production-trusted-telebirr-verifier-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-trusted-telebirr-verifier-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  stage-disabled:
+    name: Stage exact stopped production verifier release
+    if: inputs.mode == 'stage-disabled'
+    needs: [validate-target, validate-ci, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Check out deployment contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Recheck latest main push CI before protected inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+      - name: Download sealed image bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: production-trusted-telebirr-verifier-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+      - name: Validate and prepare protected release inputs
+        id: protected
+        shell: bash
+        env:
+          PIN_MANIFEST_BASE64: ${{ vars.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
+          RUNTIME_PASSWORD: ${{ secrets.TRUSTED_TELEBIRR_VERIFIER_RUNTIME_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/production-verifier-protected"
+          install -d -m 0700 "$protected"
+          [[ "$RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/trusted-telebirr-verifier-pins.v1.json"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$VERIFIER_RUNTIME_ROLE" "$RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" \
+            >"$protected/trusted-telebirr-verifier-database-url"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          [[ "sha256:$(sha256sum "$protected/trusted-telebirr-verifier-pins.v1.json" | cut -d ' ' -f 1)" == \
+            "$CONFIRMED_PIN_DIGEST" ]]
+          node --input-type=module - "$protected/trusted-telebirr-verifier-pins.v1.json" <<'NODE'
+          import { createHash, createPublicKey } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const text = readFileSync(process.argv[2], 'utf8');
+          const manifest = JSON.parse(text);
+          if (JSON.stringify(manifest) !== text ||
+              Object.keys(manifest).join(',') !== 'contractVersion,assignmentSigners,devices' ||
+              manifest.contractVersion !== 1) process.exit(1);
+          const pins = [...manifest.assignmentSigners, ...manifest.devices];
+          if (!Array.isArray(manifest.assignmentSigners) || !Array.isArray(manifest.devices) ||
+              manifest.assignmentSigners.length < 1 || manifest.assignmentSigners.length > 16 ||
+              manifest.devices.length < 1 || manifest.devices.length > 16) process.exit(1);
+          const ids = new Set();
+          const digests = new Set();
+          for (const pin of pins) {
+            if (Object.keys(pin).join(',') !== 'keyId,publicKeySpkiDerBase64' ||
+                !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(pin.keyId) || ids.has(pin.keyId)) process.exit(1);
+            const bytes = Buffer.from(pin.publicKeySpkiDerBase64, 'base64');
+            const key = createPublicKey({ key: bytes, format: 'der', type: 'spki' });
+            const canonical = Buffer.from(key.export({ format: 'der', type: 'spki' }));
+            const digest = createHash('sha256').update(bytes).digest('hex');
+            if (bytes.toString('base64') !== pin.publicKeySpkiDerBase64 || bytes.length !== 91 ||
+                !bytes.equals(canonical) || key.asymmetricKeyType !== 'ec' ||
+                key.asymmetricKeyDetails?.namedCurve !== 'prime256v1' || digests.has(digest)) process.exit(1);
+            ids.add(pin.keyId); digests.add(digest); bytes.fill(0); canonical.fill(0);
+          }
+          NODE
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+      - name: Stage sealed release without starting or enabling it
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+          PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          incoming="/tmp/fetanagent-production-trusted-telebirr-verifier-$GITHUB_SHA"
+          image_tar="$RUNNER_TEMP/release/fetanagent-trusted-telebirr-verifier-image.tar"
+          bytes="$(stat -c %s "$image_tar")"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          remote="fetanagent-admin@$VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '$HELPER_SHA' && sudo -n '$helper' preflight '$bytes' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
+          trap 'ssh "${ssh_opts[@]}" "$remote" "sudo -n '\''$helper'\'' cleanup-incoming '\''$GITHUB_SHA'\''" || true' EXIT
+          scp "${ssh_opts[@]}" \
+            "$image_tar" \
+            infra/compose.production-trusted-telebirr-verifier.yaml \
+            "$PROTECTED/supabase-ca.crt" \
+            "$PROTECTED/trusted-telebirr-verifier-database-url" \
+            "$PROTECTED/trusted-telebirr-verifier-pins.v1.json" \
+            "$remote:$incoming/"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "chmod 0600 '$incoming'/* && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$PIN_DIGEST' '$incoming'"
+          trap - EXIT
+          echo 'The immutable production verifier release is staged and stopped. Its database login and every financial switch were unchanged.' >>"$GITHUB_STEP_SUMMARY"
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/production-verifier-protected"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]
+            find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$protected"
+          fi
+
+  operate:
+    name: Activate, inspect, or emergency-disable production verifier
+    if: >-
+      always() && !cancelled() && needs.validate-target.result == 'success' &&
+      ((inputs.mode == 'activate-verifier' && needs.validate-ci.result == 'success') ||
+       inputs.mode == 'status' || inputs.mode == 'emergency-disable')
+    needs: [validate-target, validate-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Check out exact operations contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up protected production connection
+        id: protected
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/production-verifier-operation"
+          install -d -m 0700 "$protected"
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" ]]
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+      - name: Open exact production direct-database tunnel
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          source infra/operations/fetanagent-production-direct-database-tunnel.sh
+          fetanagent_open_production_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PRODUCTION_DATABASE_DIRECT_HOST" "$PRODUCTION_DATABASE_TUNNEL_PORT"
+          fetanagent_close_production_direct_database_tunnel
+      - name: Preflight exact stopped activation candidate
+        if: inputs.mode == 'activate-verifier'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper activation-preflight '$GITHUB_SHA'"
+      - name: Inspect pre-operation database boundary
+        id: database-before
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.PRODUCTION_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          source infra/operations/fetanagent-production-direct-database-tunnel.sh
+          fetanagent_open_production_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_production_direct_database_tunnel EXIT
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/production-trusted-telebirr-verifier-inspect.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "verifier_status_inspect" and
+            .deploymentTarget == "production" and
+            (.verifierLogin == "disabled" or .verifierLogin == "bounded") and
+            .executorLogin == "disabled" and
+            (.financialBoundary == "disabled" or .financialBoundary == "dry_run" or
+             .financialBoundary == "live_verification")
+          ' <<<"$result" >/dev/null
+          echo "prior_login=$(jq -r '.verifierLogin' <<<"$result")" >>"$GITHUB_OUTPUT"
+      - name: Provision only the bounded verifier login
+        id: provision
+        if: inputs.mode == 'activate-verifier'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          TRUSTED_TELEBIRR_VERIFIER_RUNTIME_PASSWORD: ${{ secrets.TRUSTED_TELEBIRR_VERIFIER_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.PRODUCTION_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          source infra/operations/fetanagent-production-direct-database-tunnel.sh
+          fetanagent_open_production_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_production_direct_database_tunnel EXIT
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/production-trusted-telebirr-verifier-provision.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "bounded_verifier_login_provision" and
+            .deploymentTarget == "production" and .verifierLogin == "bounded_24h" and
+            .executorLogin == "disabled" and .financialSwitchesChanged == false
+          ' <<<"$result" >/dev/null
+      - name: Start and attest only the database-ingress verifier
+        id: activate
+        if: inputs.mode == 'activate-verifier'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
+          remote="fetanagent-admin@$VM_HOST"
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '$HELPER_SHA' && sudo -n '$helper' activate '$GITHUB_SHA' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
+          echo 'The isolated verifier is healthy. This workflow did not change a financial switch and the deposit executor remains disabled.' >>"$GITHUB_STEP_SUMMARY"
+      - name: Inspect exact running verifier
+        if: inputs.mode == 'status'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status '$GITHUB_SHA'"
+      - name: Emergency-stop the verifier process
+        id: emergency-stop
+        if: inputs.mode == 'emergency-disable'
+        continue-on-error: true
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          ssh -F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper stop"
+      - name: Revoke verifier login and terminate its sessions
+        if: inputs.mode == 'emergency-disable'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.PRODUCTION_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          source infra/operations/fetanagent-production-direct-database-tunnel.sh
+          fetanagent_open_production_direct_database_tunnel \
+            "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_production_direct_database_tunnel EXIT
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/production-trusted-telebirr-verifier-disable.sql)"
+          jq -e '
+            .operation == "verifier_emergency_disable" and .deploymentTarget == "production" and
+            .verifierLogin == "disabled" and .financialSwitchesChanged == false
+          ' <<<"$result" >/dev/null
+          [[ '${{ steps.emergency-stop.outcome }}' == 'success' ]]
+      - name: Roll back an incomplete verifier activation
+        if: >-
+          always() && inputs.mode == 'activate-verifier' &&
+          (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PRIOR_LOGIN: ${{ steps.database-before.outputs.prior_login }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.PRODUCTION_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set +e
+          rollback_status=0
+          database_status=0
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
+          remote="fetanagent-admin@$VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' rollback '$GITHUB_SHA'" || rollback_status=$?
+          if [[ "$PRIOR_LOGIN" == 'disabled' ]]; then
+            source infra/operations/fetanagent-production-direct-database-tunnel.sh
+            if fetanagent_open_production_direct_database_tunnel \
+              "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"; then
+              psql -X --quiet \
+                --file=infra/sql/production-trusted-telebirr-verifier-disable.sql \
+                >/dev/null || database_status=$?
+            else
+              database_status=$?
+            fi
+            fetanagent_close_production_direct_database_tunnel
+          fi
+          [[ "$rollback_status" -eq 0 && "$database_status" -eq 0 ]]
+      - name: Remove runner-local protected material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/production-verifier-operation"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]
+            find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$protected"
+          fi

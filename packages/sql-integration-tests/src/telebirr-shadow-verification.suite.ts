@@ -603,6 +603,26 @@ export function registerTelebirrShadowVerificationSqlTests(
             expect(finalCheckIndex, row.signature).toBeGreaterThan(finalRefreshIndex);
             expect(firstWriteIndex, row.signature).toBeGreaterThan(finalCheckIndex);
           }
+
+          if (row.signature === quarantineFunction) {
+            const attemptLockIndex = row.definition.indexOf('for update of attempt');
+            const outcomeReferenceIndex = row.definition.indexOf(
+              'app.private_telebirr_shadow_verification_outcomes',
+              attemptLockIndex,
+            );
+            const outcomeCheckIndex = row.definition.lastIndexOf(
+              'if exists (',
+              outcomeReferenceIndex,
+            );
+            expect(
+              row.definition.slice(0, attemptLockIndex),
+              'quarantine must not snapshot outcomes before waiting for the attempt lock',
+            ).not.toContain('private_telebirr_shadow_verification_outcomes');
+            expect(attemptLockIndex).toBeGreaterThanOrEqual(0);
+            expect(outcomeCheckIndex).toBeGreaterThan(attemptLockIndex);
+            expect(assertionIndex).toBeGreaterThan(outcomeCheckIndex);
+            expect(firstWriteIndex).toBeGreaterThan(assertionIndex);
+          }
         } else {
           expect(row.definition, row.signature).toContain(
             'app.private_telebirr_shadow_mode_is_ready',

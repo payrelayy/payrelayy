@@ -1993,13 +1993,18 @@ begin
      and proof.verification_job_id = attempt.verification_job_id
    where staged.observation_body_digest = p_observation_body_digest
      and staged.verification_attempt_id = p_verification_attempt_id
-     and not exists (
-       select 1 from app.private_telebirr_shadow_verification_outcomes outcome
-        where outcome.verification_attempt_id = p_verification_attempt_id
-     )
    for update of attempt;
 
   if staged_attempt_id is null then
+    raise exception 'The trusted TeleBirr shadow staged evidence is unavailable.';
+  end if;
+
+  -- FOR UPDATE may have waited behind completion. Use a new READ COMMITTED statement after the
+  -- attempt lock so an outcome committed during that wait is visible before quarantine can win.
+  if exists (
+    select 1 from app.private_telebirr_shadow_verification_outcomes outcome
+     where outcome.verification_attempt_id = p_verification_attempt_id
+  ) then
     raise exception 'The trusted TeleBirr shadow staged evidence is unavailable.';
   end if;
 

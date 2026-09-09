@@ -222,6 +222,30 @@ for (const transition of [
     );
   }
 }
+const quarantineBody = functionBody('quarantine_private_telebirr_shadow_staged_evidence');
+const quarantineAttemptLockIndex = quarantineBody.indexOf('for update of attempt');
+const quarantineOutcomeReferenceIndex = quarantineBody.indexOf(
+  'app.private_telebirr_shadow_verification_outcomes',
+  quarantineAttemptLockIndex,
+);
+const quarantineOutcomeCheckIndex = quarantineBody.lastIndexOf(
+  'if exists (',
+  quarantineOutcomeReferenceIndex,
+);
+const quarantineGateIndex = quarantineBody.indexOf(
+  'app.require_private_telebirr_shadow_mode_ready',
+);
+assert.doesNotMatch(
+  quarantineBody.slice(0, quarantineAttemptLockIndex),
+  /private_telebirr_shadow_verification_outcomes/u,
+  'quarantine must not take its outcome snapshot before waiting for the attempt lock',
+);
+assert.ok(
+  quarantineAttemptLockIndex >= 0 &&
+    quarantineOutcomeCheckIndex > quarantineAttemptLockIndex &&
+    quarantineGateIndex > quarantineOutcomeCheckIndex,
+  'quarantine must freshly reject a completed attempt after locking and before its gate or write',
+);
 assert.match(
   functionBody('lease_private_live_telebirr_assignment_broker'),
   /if not app\.private_telebirr_shadow_mode_is_ready\(enrollment\.pilot_revision_id\) then\s+return;\s+end if;/iu,

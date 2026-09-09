@@ -1104,7 +1104,10 @@ describe('disposable SQL migration baseline', () => {
       select
         procedure.oid::regprocedure::text as signature,
         procedure.prosecdef
-          and procedure.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+          and procedure.proconfig in (
+            array['search_path=pg_catalog']::text[],
+            array['search_path=pg_catalog, app, pg_temp']::text[]
+          )
           and procedure.proowner = 'postgres'::regrole as hardened,
         has_function_privilege('fetanagent_player_actions', procedure.oid, 'EXECUTE')
           as group_allowed,

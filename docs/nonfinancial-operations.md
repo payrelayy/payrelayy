@@ -70,6 +70,16 @@ function grants on startup, so do not apply this migration before the new applic
 is successfully activated. After the migration, recovery must use a compatible
 reviewed application; do not switch blindly to an older image.
 
+The Owner startup catalog check must expect exactly its 33 baseline functions plus
+each existing, explicitly named support function (36 once all three are installed).
+It still requires EXECUTE on every existing support function and denies every
+function outside the allowlist. A fixed count of 33 fails after this migration on
+the next process restart, even if an already-running Owner process appears healthy.
+Releases through `8a4d4d65b552705fa2f1327888e0090083093969` contain that stale-count
+bug and are not safe post-support-migration restart/rollback targets. Recovery
+requires the reviewed preflight-count fix, not revoking grants, changing data,
+removing startup checks, or manually switching release markers.
+
 Verify the anonymous public endpoint returns only
 `{"supportContact":{"telegramUsername":null}}` initially, unauthenticated Owner
 requests return 403, and the authenticated form shows the blank saved setting.

@@ -60,6 +60,10 @@ describe('Owner-control bounded PostgreSQL pool', () => {
   });
 
   it('keeps the three additive support procedures optional before migration without weakening the deny list', () => {
+    const executeCountSql = OWNER_CONTROL_PREFLIGHT_SQL.split(
+      'as exact_app_execute_count',
+    )[0]!.split('as recorder_denied,')[1]!;
+    expect(executeCountSql).toMatch(/select count\(\*\) = 33\s*\+/u);
     for (const signature of [
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',
@@ -71,6 +75,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
         `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
       );
+      expect(executeCountSql).toContain(`to_regprocedure('${signature}')`);
     }
   });
 
@@ -167,7 +172,6 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)',
     );
-    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('select count(*) = 33');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.get_owner_companion_connection_status(uuid)',
     );

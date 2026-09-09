@@ -52,6 +52,13 @@ messages cannot be edited by changing the setting. No bot restart or deployment 
 needed for future contact changes. `/support` does not enter the customer/payment
 pipeline or provide deposit or financial-processing authority.
 
+Support also accepts Telegram's addressed command form, `/support@FetanAgentBot`,
+with optional arguments. The recipient must match the running bot's initialized
+username (case-insensitive); no additional Telegram identity request is made.
+Malformed support addresses and support commands addressed to other bots are
+consumed without a reply, contact fetch, or customer-inbox event. Group and bot
+senders remain unsupported. Unrelated commands keep their existing behavior.
+
 ### One-time release ordering
 
 Deploy the reviewed application first, then apply migration

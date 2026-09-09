@@ -132,10 +132,27 @@ export async function handleTelegramSupportMessage(
   dependencies: {
     readonly reply: (text: string) => Promise<unknown>;
     readonly fetchContact?: typeof fetch;
+    readonly botUsername?: string | undefined;
   },
 ): Promise<'ignored' | 'handled'> {
-  if (typeof metadata.text !== 'string' || !/^\/support(?:\s|$)/u.test(metadata.text)) {
+  if (typeof metadata.text !== 'string' || !/^\/support(?=@|\s|$)/u.test(metadata.text)) {
     return 'ignored';
+  }
+  if (metadata.text.startsWith('/support@')) {
+    const addressedUsername = /^\/support@([A-Za-z0-9_]{5,32})(?:\s|$)/u.exec(metadata.text)?.[1];
+    const botUsername = dependencies.botUsername;
+    // Consume malformed or other-bot support commands without entering customer pipelines.
+    // The current identity comes from grammY's initialized bot info, not message content.
+    if (
+      !addressedUsername ||
+      typeof botUsername !== 'string' ||
+      botUsername.length < 5 ||
+      botUsername.length > 32 ||
+      /[^A-Za-z0-9_]/u.test(botUsername) ||
+      addressedUsername.toLowerCase() !== botUsername.toLowerCase()
+    ) {
+      return 'handled';
+    }
   }
   const { chat, from } = metadata;
   if (

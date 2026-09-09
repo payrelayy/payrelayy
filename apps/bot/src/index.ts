@@ -88,7 +88,7 @@ bot.on('message', async (context) => {
       from: context.from ? { id: context.from.id, isBot: context.from.is_bot } : undefined,
     },
     config.supportContactUrl,
-    { reply: (text) => context.reply(text) },
+    { reply: (text) => context.reply(text), botUsername: context.me.username },
   );
   if (supportOutcome === 'handled') return;
 

@@ -85,6 +85,7 @@ vi.mock('./telegram-ingress.js', () => ({
 }));
 
 interface TestMessageContext {
+  readonly me: { readonly username: string };
   readonly update: { readonly update_id: number };
   readonly chat: { readonly id: number; readonly type: 'private' };
   readonly from: {
@@ -101,6 +102,7 @@ interface TestMessageContext {
 function messageContext(text: string): TestMessageContext {
   const replies: string[] = [];
   return {
+    me: { username: 'FetanAgentBot' },
     update: { update_id: 123456 },
     chat: { id: 123456789, type: 'private' },
     from: {
@@ -194,43 +196,79 @@ describe('Telegram admission, private action, and ingress composition', () => {
     'handles public /support before every pipeline with beta=$beta action=$action',
     async ({ beta, action }) => {
       await loadComposition(beta, action);
-      const context = messageContext('/support');
-      await runtime.messageHandler!(context);
-      expect(context.replies[0]).toContain('support contact is not available');
+      for (const command of ['/support', '/support@FetanAgentBot', '/support@fetanagentbot help']) {
+        const context = messageContext(command);
+        await runtime.messageHandler!(context);
+        expect(context.replies[0]).toContain('support contact is not available');
+      }
       expect(runtime.admissionCalls).toHaveLength(0);
       expect(runtime.actionDeliveries).toHaveLength(0);
       expect(runtime.ingressDeliveries).toHaveLength(0);
     },
   );
 
-  it('looks up the configured contact without admission, action or inbound delivery', async () => {
-    const fetchContact = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ supportContact: { telegramUsername: 'help_team' } }));
-    vi.stubGlobal('fetch', fetchContact);
-    runtime.config = {
-      ...botConfig(true, true),
-      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
-    };
-    await import('./index.js');
-    const context = messageContext('/support');
-    await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('https://t.me/help_team');
-    expect(runtime.admissionCalls).toHaveLength(0);
-    expect(runtime.actionDeliveries).toHaveLength(0);
-    expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(fetchContact).toHaveBeenCalledOnce();
-  });
+  it.each(['/support', '/support@FetanAgentBot', '/support@FETANAGENTBOT help'])(
+    'looks up the configured contact without admission, action or inbound delivery: %s',
+    async (command) => {
+      const fetchContact = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(Response.json({ supportContact: { telegramUsername: 'help_team' } }));
+      vi.stubGlobal('fetch', fetchContact);
+      runtime.config = {
+        ...botConfig(true, true),
+        supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+      };
+      await import('./index.js');
+      const context = messageContext(command);
+      await runtime.messageHandler!(context);
+      expect(context.replies[0]).toContain('https://t.me/help_team');
+      expect(runtime.admissionCalls).toHaveLength(0);
+      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+      expect(fetchContact).toHaveBeenCalledOnce();
+    },
+  );
 
-  it('does not turn a group /support command into an inbox event', async () => {
-    await loadComposition(false, false);
-    const context = messageContext('/support');
-    await runtime.messageHandler!({ ...context, chat: { id: -123456789, type: 'group' } });
-    expect(context.replies).toHaveLength(0);
-    expect(runtime.admissionCalls).toHaveLength(0);
-    expect(runtime.actionDeliveries).toHaveLength(0);
-    expect(runtime.ingressDeliveries).toHaveLength(0);
-  });
+  it.each([
+    { beta: false, action: false },
+    { beta: true, action: false },
+    { beta: false, action: true },
+    { beta: true, action: true },
+  ])(
+    'consumes other-bot and malformed support addresses with beta=$beta action=$action',
+    async ({ beta, action }) => {
+      await loadComposition(beta, action);
+      const fetchContact = vi.fn<typeof fetch>();
+      vi.stubGlobal('fetch', fetchContact);
+      for (const command of [
+        '/support@AnotherBot',
+        '/support@',
+        '/support@@FetanAgentBot',
+        '/support@FetanAgentBot.extra',
+      ]) {
+        const context = messageContext(command);
+        await runtime.messageHandler!(context);
+        expect(context.replies).toHaveLength(0);
+      }
+      expect(fetchContact).not.toHaveBeenCalled();
+      expect(runtime.admissionCalls).toHaveLength(0);
+      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    },
+  );
+
+  it.each(['/support', '/support@FetanAgentBot'])(
+    'does not turn group support into an inbox event: %s',
+    async (command) => {
+      await loadComposition(false, false);
+      const context = messageContext(command);
+      await runtime.messageHandler!({ ...context, chat: { id: -123456789, type: 'group' } });
+      expect(context.replies).toHaveLength(0);
+      expect(runtime.admissionCalls).toHaveLength(0);
+      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    },
+  );
 
   it('adds support discoverability without replacing existing deposit help', async () => {
     await loadComposition(false, true);

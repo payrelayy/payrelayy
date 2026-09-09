@@ -175,6 +175,100 @@ describe('public Telegram support contact transport', () => {
 });
 
 describe('private human /support routing', () => {
+  it.each([
+    '/support',
+    '/support help',
+    '/support@FetanAgentBot',
+    '/support@fetanagentbot help',
+    '/support@FETANAGENTBOT\naccount access',
+  ])('handles bare and current-bot support commands: %s', async (text) => {
+    const reply = vi.fn(async () => {});
+    const fetchContact = vi.fn<typeof fetch>().mockResolvedValue(json(contact('help_team')));
+    expect(
+      await handleTelegramSupportMessage(
+        { ...privateMessage, text },
+        BOT_PUBLIC_SUPPORT_CONTACT_URL,
+        {
+          botUsername: 'FetanAgentBot',
+          reply,
+          fetchContact,
+        },
+      ),
+    ).toBe('handled');
+    expect(reply).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledWith(expect.stringContaining('https://t.me/help_team'));
+    expect(fetchContact).toHaveBeenCalledOnce();
+  });
+
+  it('uses the initialized bot identity rather than hard-coding the production username', async () => {
+    const reply = vi.fn(async () => {});
+    await handleTelegramSupportMessage(
+      { ...privateMessage, text: '/support@DifferentBot' },
+      undefined,
+      {
+        botUsername: 'DifferentBot',
+        reply,
+      },
+    );
+    expect(reply).toHaveBeenCalledWith(TELEGRAM_SUPPORT_UNAVAILABLE_TEXT);
+  });
+
+  it.each([
+    '/support@AnotherBot',
+    '/support@',
+    '/support@@FetanAgentBot',
+    '/support@FetanAgentBot.extra',
+    '/support@FetanAgentBot/extra',
+    '/support@FetanAgentBot\u200b',
+    '/support@FеtanAgentBot',
+    '/support@abcd',
+    `/support@${'a'.repeat(33)}`,
+  ])('consumes other-bot or malformed addresses without side effects: %s', async (text) => {
+    const reply = vi.fn(async () => {});
+    const fetchContact = vi.fn<typeof fetch>();
+    expect(
+      await handleTelegramSupportMessage(
+        { ...privateMessage, text },
+        BOT_PUBLIC_SUPPORT_CONTACT_URL,
+        {
+          botUsername: 'FetanAgentBot',
+          reply,
+          fetchContact,
+        },
+      ),
+    ).toBe('handled');
+    expect(reply).not.toHaveBeenCalled();
+    expect(fetchContact).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    '',
+    '@FetanAgentBot',
+    'FetanAgentBot\n',
+    'FеtanAgentBot',
+    'abcd',
+    'a'.repeat(33),
+  ])(
+    'consumes addressed support when the current bot identity is missing or invalid: %s',
+    async (botUsername) => {
+      const reply = vi.fn(async () => {});
+      const fetchContact = vi.fn<typeof fetch>();
+      expect(
+        await handleTelegramSupportMessage(
+          { ...privateMessage, text: '/support@FetanAgentBot' },
+          BOT_PUBLIC_SUPPORT_CONTACT_URL,
+          {
+            botUsername,
+            reply,
+            fetchContact,
+          },
+        ),
+      ).toBe('handled');
+      expect(reply).not.toHaveBeenCalled();
+      expect(fetchContact).not.toHaveBeenCalled();
+    },
+  );
   it('sends a generic access-help message without adding Telegram metadata to the request', async () => {
     const reply = vi.fn(async () => {});
     const fetchContact = vi.fn<typeof fetch>().mockResolvedValue(json(contact('help_team')));
@@ -207,6 +301,8 @@ describe('private human /support routing', () => {
     { ...privateMessage, from: undefined },
     { ...privateMessage, chat: undefined },
     { ...privateMessage, chat: { id: 1.5, type: 'private' } },
+    { ...privateMessage, text: '/support@FetanAgentBot', chat: { id: 123456789, type: 'group' } },
+    { ...privateMessage, text: '/support@FetanAgentBot', from: { id: 123456789, isBot: true } },
   ])(
     'consumes unsupported identities without replying or entering another pipeline %#',
     async (input) => {
@@ -214,6 +310,7 @@ describe('private human /support routing', () => {
       const fetchContact = vi.fn<typeof fetch>();
       expect(
         await handleTelegramSupportMessage(input, BOT_PUBLIC_SUPPORT_CONTACT_URL, {
+          botUsername: 'FetanAgentBot',
           reply,
           fetchContact,
         }),

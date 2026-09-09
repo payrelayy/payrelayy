@@ -8,11 +8,10 @@ umask 077
 readonly PROJECT_NAME='fetanagent-production-trusted-telebirr-verifier'
 readonly ROOT='/srv/fetanagent/production-trusted-telebirr-verifier'
 readonly RELEASE_ROOT="$ROOT/releases"
-readonly CURRENT_LINK="$ROOT/current"
 readonly STATE_ROOT='/var/lib/fetanagent/production-trusted-telebirr-verifier'
 readonly PRODUCTION_STATE_ROOT='/var/lib/fetanagent/production'
 readonly HELPER_PATH='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
-readonly EXPECTED_COMPOSE_SHA256='8b9610be87d5347a3f30e6d9fd007ac256c55ddb5d50eac90edb99543e1856c2'
+readonly EXPECTED_COMPOSE_SHA256='8498713c25e93b929b110d2945b83f7b6dd4c26e9d59eb45073aa8fbe720740f'
 
 die() {
   printf 'fetanagent production trusted TeleBirr verifier helper: %s\n' "$*" >&2
@@ -72,13 +71,17 @@ require_release() {
   printf '%s\n' "$release"
 }
 
+verifier_container_ids() {
+  docker container ls --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+    --filter 'label=com.docker.compose.service=trusted-telebirr-verifier'
+}
+
 container_for_verifier() {
+  local output
   local -a matches=()
-  mapfile -t matches < <(
-    docker container ls --all --quiet \
-      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
-      --filter 'label=com.docker.compose.service=trusted-telebirr-verifier'
-  )
+  output="$(verifier_container_ids)" || die 'the production verifier container inventory failed'
+  if [[ -n "$output" ]]; then mapfile -t matches <<<"$output"; fi
   [[ "${#matches[@]}" -le 1 ]] || die 'multiple production verifier containers are present'
   if [[ "${#matches[@]}" -eq 1 ]]; then printf '%s\n' "${matches[0]}"; fi
 }
@@ -88,16 +91,30 @@ assert_verifier_container_absent() {
     die 'the production verifier container remains present'
 }
 
-assert_deposit_executor_absent() {
-  local id title service
-  local -a running=()
-  mapfile -t running < <(docker container ls --quiet)
-  for id in "${running[@]}"; do
-    title="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.title" }}' "$id")"
-    service="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$id")"
-    [[ "$title" != 'fetanagent-deposit-executor' && "$service" != 'executor' ]] ||
-      die 'a deposit executor container is running; verifier activation is refused'
+emergency_stop_verifier() {
+  local attempt output
+  local -a ids=()
+  command -v docker >/dev/null || die 'Docker is required for emergency stop'
+  command -v timeout >/dev/null || die 'timeout is required for bounded emergency stop'
+
+  # There is deliberately no operation-lock, release, current-link, or Compose dependency here.
+  # The three exact-label scans close a concurrent observation/removal window. No command in this
+  # helper can create or start this service, so a successful final scan is stable within this
+  # lifecycle. Direct root Docker access remains outside the delegated helper boundary.
+  for attempt in 1 2 3; do
+    output="$(verifier_container_ids)" || die 'the emergency container inventory failed'
+    ids=()
+    if [[ -n "$output" ]]; then mapfile -t ids <<<"$output"; fi
+    if [[ "${#ids[@]}" -gt 0 ]]; then
+      if ! timeout --signal=TERM --kill-after=5s 25s \
+        docker container rm --force --time 10 -- "${ids[@]}"; then
+        printf '%s\n' 'An emergency removal attempt failed; rescanning every exact labeled container.' >&2
+      fi
+    fi
+    if [[ "$attempt" != '3' ]]; then sleep 2; fi
   done
+  output="$(verifier_container_ids)" || die 'the final emergency container inventory failed'
+  [[ -z "$output" ]] || die 'a production verifier container remains present'
 }
 
 verify_release() {
@@ -169,78 +186,8 @@ verify_release() {
     die 'the verifier pin manifest shape is invalid'
 }
 
-compose_release() {
-  local release="$1" gate_mode="$2"
-  shift 2
-  local financial_mode='dry_run' verifier_enabled='false' pilot_enabled='false'
-  if [[ "$gate_mode" == 'active' ]]; then
-    financial_mode='live'
-    verifier_enabled='true'
-    pilot_enabled='true'
-  elif [[ "$gate_mode" != 'disabled' ]]; then
-    die 'the verifier gate mode is invalid'
-  fi
-  FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_IMAGE_ID="$(<"$release/.image-id")" \
-    FETANAGENT_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE="$financial_mode" \
-    FETANAGENT_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED="$verifier_enabled" \
-    FETANAGENT_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED="$pilot_enabled" \
-    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_SECRET_FILE="$release/trusted-telebirr-verifier-database-url" \
-    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_CONFIG_FILE="$release/trusted-telebirr-verifier-pins.v1.json" \
-    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_CONFIG_FILE="$release/supabase-ca.crt" \
-    docker compose --project-name "$PROJECT_NAME" \
-      --file "$release/compose.production-trusted-telebirr-verifier.yaml" \
-      --profile production-trusted-telebirr-verifier "$@"
-}
-
-verify_running() {
-  local sha="$1" release="$2" id inspection image_id
-  id="$(container_for_verifier)"
-  [[ -n "$id" ]] || die 'the production verifier container is absent'
-  inspection="$(docker inspect "$id")"
-  image_id="$(<"$release/.image-id")"
-  jq -e --arg project "$PROJECT_NAME" --arg revision "$sha" --arg image "$image_id" '
-    length == 1 and
-    .[0].Config.Labels["com.docker.compose.project"] == $project and
-    .[0].Config.Labels["com.docker.compose.service"] == "trusted-telebirr-verifier" and
-    .[0].Config.Labels["org.opencontainers.image.revision"] == $revision and
-    .[0].Image == $image and
-    .[0].State.Running == true and .[0].State.Health.Status == "healthy" and
-    .[0].Config.User == "10001:10001" and
-    .[0].HostConfig.ReadonlyRootfs == true and
-    .[0].HostConfig.Privileged == false and
-    .[0].HostConfig.RestartPolicy.Name == "unless-stopped" and
-    .[0].HostConfig.CapDrop == ["ALL"] and
-    .[0].HostConfig.SecurityOpt == ["no-new-privileges:true"] and
-    (.[0].NetworkSettings.Ports | length) == 0 and
-    (.[0].NetworkSettings.Networks | length) == 1
-  ' <<<"$inspection" >/dev/null || die 'the production verifier container boundary is wrong'
-}
-
-rollback_transition() {
-  local sha="$1" release="$2" receipt="$STATE_ROOT/pending-$sha.previous" previous=''
-  [[ ! -L "$receipt" && -f "$receipt" && "$(stat --format='%u:%g:%a' "$receipt")" == '0:0:600' ]] ||
-    die 'the verifier rollback receipt is absent or unsafe'
-  previous="$(<"$receipt")"
-  compose_release "$release" disabled down --remove-orphans --timeout 20
-  assert_verifier_container_absent
-  if [[ -n "$previous" ]]; then
-    assert_deposit_executor_absent
-    previous_sha="${previous##*/}"
-    [[ "$previous" == "$(require_release "$previous_sha")" && "$previous" != "$release" ]] ||
-      die 'the verifier rollback predecessor is not exact'
-    verify_release "$previous_sha" "$previous"
-    compose_release "$previous" active up --detach --no-build --wait --wait-timeout 90
-    verify_running "$previous_sha" "$previous"
-    ln -sfn -- "$previous" "$CURRENT_LINK.next"
-    mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
-  else
-    rm -f -- "$CURRENT_LINK"
-  fi
-  rm -f -- "$receipt"
-}
-
 case "${1:-}" in
-  preflight|prepare-incoming|cleanup-incoming|install|activation-preflight|activate|status|status-current|finalize|rollback|stop)
+  preflight|prepare-incoming|cleanup-incoming|install)
     acquire_operation_locks
     ;;
 esac
@@ -262,7 +209,7 @@ case "${1:-}" in
     install -d -m 0700 -o root -g root "$ROOT" "$RELEASE_ROOT" "$STATE_ROOT"
     available="$(df --output=avail --block-size=1 "$ROOT" | tail -n 1 | tr -d ' ')"
     [[ "$available" =~ ^[0-9]+$ && "$available" -gt $((2 * $2 + 536870912)) ]] ||
-      die 'insufficient storage for the verifier release and rollback margin'
+      die 'insufficient storage for the verifier release and staging margin'
     ;;
 
   prepare-incoming)
@@ -294,6 +241,7 @@ case "${1:-}" in
     tag="$3"
     pin_digest="$4"
     incoming="$5"
+    assert_verifier_container_absent
     require_sha "$sha"
     require_tag "$tag"
     require_pin_digest "$pin_digest"
@@ -351,145 +299,19 @@ case "${1:-}" in
     verify_release "$sha" "$release"
     ;;
 
-  activation-preflight)
-    [[ $# -eq 2 ]] || die 'activation-preflight requires one exact commit SHA'
-    sha="$2"
-    release="$(require_release "$sha")"
-    verify_release "$sha" "$release"
-    assert_deposit_executor_absent
-    shopt -s nullglob
-    pending_receipts=("$STATE_ROOT"/pending-*.previous)
-    shopt -u nullglob
-    [[ "${#pending_receipts[@]}" -eq 0 ]] ||
-      die 'a pending verifier transition must be resolved before activation'
-    if [[ -L "$CURRENT_LINK" ]]; then
-      previous="$(readlink -f -- "$CURRENT_LINK")"
-      [[ "$previous" != "$release" ]] || die 'the requested verifier release is already current'
-      previous_sha="${previous##*/}"
-      [[ "$previous" == "$(require_release "$previous_sha")" ]] ||
-        die 'the current verifier release link is unsafe'
-      verify_release "$previous_sha" "$previous"
-      verify_running "$previous_sha" "$previous"
-      cmp --silent -- "$previous/trusted-telebirr-verifier-database-url" \
-        "$release/trusted-telebirr-verifier-database-url" ||
-        die 'an active verifier upgrade cannot rotate its runtime credential'
-    elif [[ -e "$CURRENT_LINK" ]]; then
-      die 'the current verifier release marker is unsafe'
-    else
-      [[ -z "$(container_for_verifier)" ]] || die 'an untracked verifier container is present'
-    fi
-    printf '%s\n' 'The exact staged verifier release is eligible for a separately confirmed activation.'
+  status-inert)
+    [[ $# -eq 1 ]] || die 'status-inert accepts no arguments'
+    assert_verifier_container_absent
+    printf '%s\n' 'Production trusted TeleBirr verifier: activation unavailable; no service container exists.'
     ;;
 
-  activate)
-    [[ $# -eq 2 ]] || die 'activate requires one exact commit SHA'
-    sha="$2"
-    release="$(require_release "$sha")"
-    verify_release "$sha" "$release"
-    assert_deposit_executor_absent
-    receipt="$STATE_ROOT/pending-$sha.previous"
-    [[ ! -e "$receipt" && ! -L "$receipt" ]] || die 'a pending verifier activation already exists'
-    previous=''
-    if [[ -L "$CURRENT_LINK" ]]; then
-      previous="$(readlink -f -- "$CURRENT_LINK")"
-      [[ "$previous" == "$(require_release "${previous##*/}")" ]] ||
-        die 'the current verifier release link is unsafe'
-      [[ "$previous" != "$release" ]] || die 'the requested verifier release is already current'
-      verify_release "${previous##*/}" "$previous"
-      verify_running "${previous##*/}" "$previous"
-      cmp --silent -- "$previous/trusted-telebirr-verifier-database-url" \
-        "$release/trusted-telebirr-verifier-database-url" ||
-        die 'an active verifier upgrade cannot rotate its runtime credential'
-    elif [[ -e "$CURRENT_LINK" ]]; then
-      die 'the current verifier release marker is unsafe'
-    fi
-    printf '%s\n' "$previous" >"$receipt"
-    chown root:root "$receipt"
-    chmod 0600 "$receipt"
-    trap 'rollback_transition "$sha" "$release"' ERR
-    if [[ -n "$previous" ]]; then
-      compose_release "$previous" disabled down --remove-orphans --timeout 20
-      assert_verifier_container_absent
-    fi
-    compose_release "$release" active config --quiet
-    compose_release "$release" active up --detach --no-build --wait --wait-timeout 90
-    verify_running "$sha" "$release"
-    ln -sfn -- "$release" "$CURRENT_LINK.next"
-    mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
-    trap - ERR
-    ;;
-
-  status)
-    [[ $# -eq 2 ]] || die 'status requires one exact commit SHA'
-    sha="$2"
-    release="$(require_release "$sha")"
-    [[ -L "$CURRENT_LINK" && "$(readlink -f -- "$CURRENT_LINK")" == "$release" ]] ||
-      die 'the requested verifier release is not current'
-    verify_release "$sha" "$release"
-    assert_deposit_executor_absent
-    verify_running "$sha" "$release"
-    printf '%s\n' 'Production trusted TeleBirr verifier: exact release running and healthy.'
-    ;;
-
-  status-current)
-    [[ $# -eq 1 ]] || die 'status-current accepts no arguments'
-    [[ -L "$CURRENT_LINK" ]] || die 'there is no current production verifier release'
-    release="$(readlink -f -- "$CURRENT_LINK")"
-    sha="${release##*/}"
-    [[ "$release" == "$(require_release "$sha")" ]] ||
-      die 'the current verifier release is unsafe'
-    verify_release "$sha" "$release"
-    assert_deposit_executor_absent
-    verify_running "$sha" "$release"
-    printf '%s\n' 'Production trusted TeleBirr verifier: current release running and healthy.'
-    ;;
-
-  finalize)
-    [[ $# -eq 2 ]] || die 'finalize requires one exact commit SHA'
-    sha="$2"
-    release="$(require_release "$sha")"
-    [[ -L "$CURRENT_LINK" && "$(readlink -f -- "$CURRENT_LINK")" == "$release" ]] ||
-      die 'only the current verifier release can be finalized'
-    assert_deposit_executor_absent
-    verify_running "$sha" "$release"
-    receipt="$STATE_ROOT/pending-$sha.previous"
-    [[ ! -L "$receipt" && -f "$receipt" ]] || die 'the verifier activation receipt is absent'
-    rm -f -- "$receipt"
-    ;;
-
-  rollback)
-    [[ $# -eq 2 ]] || die 'rollback requires one exact commit SHA'
-    sha="$2"
-    release="$(require_release "$sha")"
-    receipt="$STATE_ROOT/pending-$sha.previous"
-    if [[ -e "$receipt" || -L "$receipt" ]]; then
-      rollback_transition "$sha" "$release"
-    elif [[ ! -e "$CURRENT_LINK" && ! -L "$CURRENT_LINK" ]]; then
-      printf '%s\n' 'The verifier activation was already rolled back to no active release.'
-    elif [[ -L "$CURRENT_LINK" && "$(readlink -f -- "$CURRENT_LINK")" != "$release" ]]; then
-      printf '%s\n' 'The verifier activation was already rolled back to its predecessor.'
-    else
-      die 'the current verifier release has no pending rollback boundary'
-    fi
-    ;;
-
-  stop)
-    [[ $# -eq 1 ]] || die 'stop accepts no arguments'
-    if [[ -L "$CURRENT_LINK" ]]; then
-      release="$(readlink -f -- "$CURRENT_LINK")"
-      sha="${release##*/}"
-      [[ "$release" == "$(require_release "$sha")" ]] || die 'the current verifier release is unsafe'
-      compose_release "$release" disabled down --remove-orphans --timeout 20
-      assert_verifier_container_absent
-      rm -f -- "$CURRENT_LINK"
-    elif [[ -e "$CURRENT_LINK" ]]; then
-      die 'the current verifier release marker is unsafe'
-    else
-      [[ -z "$(container_for_verifier)" ]] || die 'an untracked verifier container is present'
-    fi
+  emergency-stop)
+    [[ $# -eq 1 ]] || die 'emergency-stop accepts no arguments'
+    emergency_stop_verifier
+    printf '%s\n' 'Production trusted TeleBirr verifier: exact labeled service container absent.'
     ;;
 
   *)
-    die 'expected verify, preflight, prepare-incoming, cleanup-incoming, install, activation-preflight, activate, status, status-current, finalize, rollback, or stop'
+    die 'expected verify, preflight, prepare-incoming, cleanup-incoming, install, status-inert, or emergency-stop'
     ;;
 esac

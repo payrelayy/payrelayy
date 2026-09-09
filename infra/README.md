@@ -45,8 +45,8 @@ The repository provides:
   invocation time and none is provisioned by this repository;
 - [`compose.production-trusted-telebirr-verifier.yaml`](compose.production-trusted-telebirr-verifier.yaml):
   a production-only explicit profile pinned to a staged Docker content ID and reviewed public-key
-  manifest. Its manual exact-target lifecycle, bounded role, rollback, and emergency kill switch
-  are documented in
+  manifest, with all process gates fixed off. Its manual exact-target stage/status controls,
+  deliberately absent activation route, and independent emergency kill switches are documented in
   [`production-trusted-telebirr-verifier.md`](production-trusted-telebirr-verifier.md);
 - [`.github/workflows/customer-web-image-smoke.yml`](../.github/workflows/customer-web-image-smoke.yml):
   builds the real customer-web image, verifies its non-root identity and immutable revision label,

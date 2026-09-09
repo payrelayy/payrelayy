@@ -26,7 +26,8 @@ fetanagent_open_production_direct_database_tunnel() {
   local -a ssh_options=(
     -F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes
     -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts"
-    -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -T
+    -o ExitOnForwardFailure=yes -o ConnectTimeout=5 -o ConnectionAttempts=1
+    -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -T
   )
   ssh "${ssh_options[@]}" -N \
     -L "127.0.0.1:$local_port:$database_host:5432" \

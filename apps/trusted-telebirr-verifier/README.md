@@ -72,10 +72,10 @@ gates off, and probes only a stubbed unavailable health boundary under `--networ
 
 The separate production-only composition and manual lifecycle are documented in
 [`../../infra/production-trusted-telebirr-verifier.md`](../../infra/production-trusted-telebirr-verifier.md).
-That path stages a stopped, content-ID-pinned image and digest-pinned public-key manifest. A later
-action-time-confirmed mode may grant only the verifier runtime a 24-hour login and start one
-database-ingress consumer. It never changes a feature switch or enables the executor/final action,
-and it includes both activation rollback and an independent emergency disable.
+That path can only plan, stage a stopped content-ID-pinned image and digest-pinned public-key
+manifest, prove the runtime remains absent/`NOLOGIN`, or run independent host/database emergency
+disablement. It has no activation, login-provisioning, renewal, or rollback route; its production
+Compose gates are fixed off until a shared atomic database interlock is separately reviewed.
 
 ## Existing database and verifier safety
 
@@ -96,7 +96,7 @@ SECURITY DEFINER reader; it has no arbitrary query, URL, socket, or uploader inp
 
 The application slice intentionally does not:
 
-- create or enable the runtime LOGIN/password outside the separate guarded production lifecycle;
+- create or enable the runtime LOGIN/password through the disabled production lifecycle;
 - generate or install an assignment-signing private key;
 - enroll an Android device or install its public key;
 - create the receiver profile, pilot, proof, or financial switches;

@@ -1,8 +1,8 @@
 name: fetanagent-production-trusted-telebirr-verifier
 
-# This production verifier is a separate, explicit-profile-only stack. Staging a release does not
-# select the profile, start this service, enable its database login, or change a financial switch.
-# The root helper supplies the recorded immutable local image ID and release-bound files.
+# This production verifier is a separate, explicit-profile-only, disabled stack. The checked-in
+# lifecycle can stage and inspect it but has no activation route. All process gates remain fixed
+# off until a future atomic database/host activation design is separately reviewed.
 services:
   trusted-telebirr-verifier:
     profiles: [production-trusted-telebirr-verifier]
@@ -33,9 +33,9 @@ services:
         max-file: '3'
     environment:
       NODE_ENV: production
-      FINANCIAL_ACTIONS_MODE: ${FETANAGENT_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE:?set only through the guarded verifier activation}
-      INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: ${FETANAGENT_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED:?set only through the guarded verifier activation}
-      TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: ${FETANAGENT_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED:?set only through the guarded verifier activation}
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: 'false'
+      TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false'
       TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: production
       TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE: /run/secrets/trusted_telebirr_verifier_database_url
       TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE: /run/configs/trusted_telebirr_verifier_pins.v1.json

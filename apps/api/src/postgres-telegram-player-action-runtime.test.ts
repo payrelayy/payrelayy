@@ -382,7 +382,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     },
   );
 
-  it.each(['cbe_birr', 'telebirr'] as const)(
+  it.each(['cbe_birr'] as const)(
     'protects an amount-free %s proof before the dry-run database call',
     async (providerCode) => {
       const transactionReference = 'SYNTHETICREF7890';
@@ -472,6 +472,68 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       expect(calls.map((call) => call.query).join('\n')).not.toContain(transactionReference);
     },
   );
+
+  it('routes a TeleBirr proof only to the no-money shadow intake RPC', async () => {
+    const transactionReference = 'SYNTHETICREF7890';
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-09-10T08:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('capture_telegram_telebirr_shadow_proof')) {
+          return {
+            rows: [
+              {
+                shadow_proof_request_id: depositProofRequestId,
+                shadow_verification_job_id: 'b7de0dac-a890-4a31-9140-888a20f2089f',
+                provider_code: 'telebirr',
+                proof_status: 'verification_queued',
+                submitted_at: new Date('2026-09-10T08:00:00.000Z'),
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference,
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_shadow_verification_queued',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'verification_queued',
+      verificationMode: 'shadow_no_money',
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.query).toContain('capture_telegram_telebirr_shadow_proof');
+    expect(calls[1]?.query).not.toContain('capture_telegram_dry_run_deposit_proof');
+    expect(JSON.stringify(calls)).not.toContain(transactionReference);
+  });
 
   it('keeps amount-free proof intake unavailable outside dry-run mode', async () => {
     const calls: string[] = [];

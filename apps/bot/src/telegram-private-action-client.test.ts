@@ -215,6 +215,38 @@ describe('Telegram private-action bot client', () => {
     },
   );
 
+  it('accepts only the fully redacted no-money TeleBirr shadow-queue projection', async () => {
+    const queuedResult = {
+      version: 1,
+      outcome: 'telebirr_shadow_verification_queued',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'verification_queued',
+      verificationMode: 'shadow_no_money',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => queuedResult }),
+      }),
+    ).resolves.toEqual(queuedResult);
+
+    for (const unsafeResult of [
+      { ...queuedResult, providerCode: 'cbe_birr' },
+      { ...queuedResult, proofStatus: 'verified' },
+      { ...queuedResult, verificationMode: 'live' },
+      { ...queuedResult, proofToken: 'A'.repeat(22) },
+      { ...queuedResult, shadowProofRequestId: 'private' },
+      { ...queuedResult, playerId: 'PLAYER-DEMO-42' },
+      { ...queuedResult, transactionReference: 'SYNTHETICREF7890' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only a generic two-key status-unavailable response', async () => {
     await expect(
       deliverTelegramPrivateAction(action, config, {

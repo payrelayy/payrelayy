@@ -278,6 +278,9 @@ and vocabulary. See [docs/architecture.md](docs/architecture.md),
 [docs/provider-verification.md](docs/provider-verification.md), and
 [docs/reference-protection.md](docs/reference-protection.md) for the current implementation,
 database-access, provider-verification, and reference-protection boundaries. See
+[docs/telebirr-shadow-proof-intake.md](docs/telebirr-shadow-proof-intake.md) for the token-free,
+no-money Telegram TeleBirr shadow-verification intake adapter and its independent activation gates.
+See
 [docs/cbe-birr-authoritative-shadow.md](docs/cbe-birr-authoritative-shadow.md) for the disabled
 Stage 1A safe-facts/queue boundary and offline Stage 1C/1D planners, and
 [docs/cbe-birr-authoritative-adapter-fixtures.md](docs/cbe-birr-authoritative-adapter-fixtures.md)

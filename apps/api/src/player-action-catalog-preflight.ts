@@ -11,6 +11,7 @@ const ALLOWED_FUNCTIONS = [
   'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
   'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
   'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+  'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
   'app.get_telegram_customer_deposit(uuid,uuid)',
   'app.get_telegram_customer_deposit_proof(uuid,uuid)',
 ] as const;
@@ -99,7 +100,12 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
     (
       select count(*) = ${ALLOWED_FUNCTIONS.length} and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
-        and routine.proconfig = array['search_path=pg_catalog, app, pg_temp']::text[]
+        and routine.proconfig = case
+          when routine.oid = pg_catalog.to_regprocedure(
+            'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)'
+          ) then array['search_path=pg_catalog']::text[]
+          else array['search_path=pg_catalog, app, pg_temp']::text[]
+        end
         and owner.rolname = 'postgres'
       )
       from pg_catalog.pg_proc as routine

@@ -84,6 +84,15 @@ export function presentTelegramPlayerIdFlowResult(
           ],
         },
       };
+    case 'telebirr_shadow_verification_queued':
+      return {
+        kind: 'message',
+        text: [
+          'NO-MONEY VERIFICATION ONLY — TeleBirr proof queued for a shadow check.',
+          'No payment has been marked verified or credited.',
+          'This check cannot create a deposit, execute a transfer, or move money.',
+        ].join('\n'),
+      };
     case 'deposit_status':
       return {
         kind: 'message',

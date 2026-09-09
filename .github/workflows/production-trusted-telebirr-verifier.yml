@@ -500,7 +500,7 @@ jobs:
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           echo "protected=$protected" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
-      - name: Always attempt the independent database kill switch
+      - name: Always attempt the database kill switch
         if: always()
         shell: bash
         env:

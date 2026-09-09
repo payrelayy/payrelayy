@@ -72,9 +72,10 @@ require_release() {
 }
 
 verifier_container_ids() {
-  docker container ls --all --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME" \
-    --filter 'label=com.docker.compose.service=trusted-telebirr-verifier'
+  timeout --signal=TERM --kill-after=5s 20s \
+    docker container ls --all --quiet \
+      --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+      --filter 'label=com.docker.compose.service=trusted-telebirr-verifier'
 }
 
 container_for_verifier() {
@@ -228,10 +229,21 @@ case "${1:-}" in
     incoming="/tmp/fetanagent-production-trusted-telebirr-verifier-$sha"
     if [[ -e "$incoming" || -L "$incoming" ]]; then
       [[ ! -L "$incoming" && -d "$incoming" && "$(realpath -- "$incoming")" == "$incoming" &&
-        "$(stat --format='%U:%G:%a' "$incoming")" == 'fetanagent-admin:fetanagent-admin:700' ]] ||
+        ( "$(stat --format='%U:%G:%a' "$incoming")" == 'fetanagent-admin:fetanagent-admin:700' ||
+          "$(stat --format='%U:%G:%a' "$incoming")" == 'root:root:700' ) &&
+        -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
         die 'the verifier incoming path is unsafe'
       find -P "$incoming" -mindepth 1 -maxdepth 1 -type f -delete
       rmdir -- "$incoming"
+    fi
+    sealed="$RELEASE_ROOT/.incoming-$sha"
+    if [[ -e "$sealed" || -L "$sealed" ]]; then
+      [[ ! -L "$sealed" && -d "$sealed" && "$(realpath -- "$sealed")" == "$sealed" &&
+        "$(stat --format='%U:%G:%a' "$sealed")" == 'root:root:700' &&
+        -z "$(find -P "$sealed" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+        die 'the sealed verifier staging path is unsafe'
+      find -P "$sealed" -mindepth 1 -maxdepth 1 -type f -delete
+      rmdir -- "$sealed"
     fi
     ;;
 
@@ -251,6 +263,17 @@ case "${1:-}" in
     [[ ! -L "$incoming" && -d "$incoming" && "$(realpath -- "$incoming")" == "$incoming" &&
       "$(stat --format='%U:%G:%a' "$incoming")" == 'fetanagent-admin:fetanagent-admin:700' ]] ||
       die 'the verifier incoming directory is unsafe'
+
+    # Claim the directory entry without following a replacement link, then verify that the
+    # exact inode we inspected is now root-owned. The sticky /tmp parent and mode 0700 prevent
+    # the SSH principal from replacing entries after this point. Individual files can still
+    # have pre-opened writers, so they are copied into a separate root-only staging directory
+    # and every content/shape check below is repeated against that sealed copy.
+    incoming_identity="$(stat --format='%d:%i' "$incoming")"
+    chown --no-dereference root:root "$incoming"
+    [[ ! -L "$incoming" && -d "$incoming" && "$(realpath -- "$incoming")" == "$incoming" &&
+      "$(stat --format='%d:%i:%U:%G:%a' "$incoming")" == "$incoming_identity:root:root:700" ]] ||
+      die 'the verifier incoming directory changed while it was claimed'
     [[ "$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 5 &&
       -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
       die 'the verifier incoming bundle shape is wrong'
@@ -275,27 +298,52 @@ case "${1:-}" in
       exit 0
     fi
 
-    docker load --input "$incoming/fetanagent-trusted-telebirr-verifier-image.tar" >/dev/null
+    sealed="$RELEASE_ROOT/.incoming-$sha"
+    if [[ -e "$sealed" || -L "$sealed" ]]; then
+      [[ ! -L "$sealed" && -d "$sealed" && "$(realpath -- "$sealed")" == "$sealed" &&
+        "$(stat --format='%U:%G:%a' "$sealed")" == 'root:root:700' &&
+        -z "$(find -P "$sealed" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+        die 'the sealed verifier staging path is unsafe'
+      find -P "$sealed" -mindepth 1 -maxdepth 1 -type f -delete
+      rmdir -- "$sealed"
+    fi
+    install -d -m 0700 -o root -g root "$sealed"
+    for name in fetanagent-trusted-telebirr-verifier-image.tar \
+      compose.production-trusted-telebirr-verifier.yaml supabase-ca.crt \
+      trusted-telebirr-verifier-database-url trusted-telebirr-verifier-pins.v1.json; do
+      cp --no-dereference --reflink=never -- "$incoming/$name" "$sealed/$name"
+      [[ ! -L "$sealed/$name" && -f "$sealed/$name" && -s "$sealed/$name" &&
+        "$(stat --format='%U:%G:%h' "$sealed/$name")" == 'root:root:1' ]] ||
+        die "the sealed verifier bundle is unsafe for $name"
+    done
+    find -P "$incoming" -mindepth 1 -maxdepth 1 -type f -delete
+    rmdir -- "$incoming"
+
+    [[ "sha256:$(sha256sum "$sealed/trusted-telebirr-verifier-pins.v1.json" | cut -d ' ' -f 1)" == "$pin_digest" ]] ||
+      die 'the sealed production verifier pin digest does not match'
+    [[ "$(sha256sum "$sealed/compose.production-trusted-telebirr-verifier.yaml" | cut -d ' ' -f 1)" == \
+      "$EXPECTED_COMPOSE_SHA256" ]] || die 'the sealed verifier Compose contract is not exact'
+
+    docker load --input "$sealed/fetanagent-trusted-telebirr-verifier-image.tar" >/dev/null
     image_id="$(docker image inspect "fetanagent-trusted-telebirr-verifier:$tag" --format '{{.Id}}')"
     [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'the loaded verifier image ID is invalid'
     [[ "$(docker image inspect "$image_id" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$sha" ]] ||
       die 'the loaded verifier image revision is wrong'
-    rm -f -- "$incoming/fetanagent-trusted-telebirr-verifier-image.tar"
-    printf '%s\n' "$sha" >"$incoming/.release-sha"
-    printf '%s\n' "$tag" >"$incoming/.image-tag"
-    printf '%s\n' "$image_id" >"$incoming/.image-id"
-    printf '%s\n' "$pin_digest" >"$incoming/.pin-manifest-sha256"
-    chown -R root:root "$incoming"
-    chmod 0700 "$incoming"
+    rm -f -- "$sealed/fetanagent-trusted-telebirr-verifier-image.tar"
+    printf '%s\n' "$sha" >"$sealed/.release-sha"
+    printf '%s\n' "$tag" >"$sealed/.image-tag"
+    printf '%s\n' "$image_id" >"$sealed/.image-id"
+    printf '%s\n' "$pin_digest" >"$sealed/.pin-manifest-sha256"
+    chmod 0700 "$sealed"
     chmod 0444 \
-      "$incoming/compose.production-trusted-telebirr-verifier.yaml" \
-      "$incoming/supabase-ca.crt" \
-      "$incoming/trusted-telebirr-verifier-pins.v1.json" \
-      "$incoming/.release-sha" "$incoming/.image-tag" \
-      "$incoming/.image-id" "$incoming/.pin-manifest-sha256"
-    chown 10001:10001 "$incoming/trusted-telebirr-verifier-database-url"
-    chmod 0400 "$incoming/trusted-telebirr-verifier-database-url"
-    mv -- "$incoming" "$release"
+      "$sealed/compose.production-trusted-telebirr-verifier.yaml" \
+      "$sealed/supabase-ca.crt" \
+      "$sealed/trusted-telebirr-verifier-pins.v1.json" \
+      "$sealed/.release-sha" "$sealed/.image-tag" \
+      "$sealed/.image-id" "$sealed/.pin-manifest-sha256"
+    chown 10001:10001 "$sealed/trusted-telebirr-verifier-database-url"
+    chmod 0400 "$sealed/trusted-telebirr-verifier-database-url"
+    mv -- "$sealed" "$release"
     verify_release "$sha" "$release"
     ;;
 

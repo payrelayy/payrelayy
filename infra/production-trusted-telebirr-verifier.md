@@ -94,7 +94,10 @@ be absent, while the serializable read-only database inspection requires the run
 executor and recognized financial-boundary state without changing either.
 
 `emergency-disable` overrides this workflow's ordinary serialization by canceling an older run in
-the same concurrency group. It then launches two independent protected jobs:
+the same concurrency group. It then launches two DAG-independent protected jobs. They execute even
+when the other job fails, but the current database route still tunnels through the production VM,
+so both jobs share a VM/SSH failure domain until the database kill switch has a separately reachable
+administrative route:
 
 - The host job needs only the SSH host/key/known-hosts inputs. It calls the installed
   sudoers-digest-pinned `emergency-stop` command directly with bounded SSH. That command takes no
@@ -104,7 +107,8 @@ the same concurrency group. It then launches two independent protected jobs:
   absence checks. Ordinary status and staging still reject a broken multiple-container invariant.
 - In parallel, the database job always attempts the `NOLOGIN` kill switch through the exact
   verify-full direct tunnel. It clears both verifier-role passwords and terminates all verifier
-  sessions. A host failure cannot skip this job, and a database failure cannot skip the host job.
+  sessions. A failure result from one job cannot skip the other job, but loss of the shared VM/SSH
+  route can prevent both operations and must be treated as an administrator incident.
 
 The new helper contains no service-creation primitive, and the production Compose gates are fixed
 off. Thus an operation racing with emergency intent cannot use this lifecycle to recreate a healthy
@@ -133,6 +137,8 @@ Before a future production activation can even be proposed, all of these remain 
 7. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.
 8. Obtain another separate financial confirmation before any live feature-switch operation or
    actual deposit. Verifier staging is not authorization to execute or move money.
+9. Provide and test a database emergency-revocation route that does not depend on the production VM,
+   its SSH key, its host key, or its network path.
 
 Local/static verification is non-mutating:
 

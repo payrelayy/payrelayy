@@ -336,8 +336,8 @@ const emergencyHostJob = productionWorkflow
   .split('\n  emergency-host-stop:')[1]
   ?.split('\n  emergency-database-revoke:')[0];
 const emergencyDatabaseJob = productionWorkflow.split('\n  emergency-database-revoke:')[1];
-assert.ok(emergencyHostJob, 'missing independent emergency host-stop job');
-assert.ok(emergencyDatabaseJob, 'missing independent emergency database-revoke job');
+assert.ok(emergencyHostJob, 'missing DAG-independent emergency host-stop job');
+assert.ok(emergencyDatabaseJob, 'missing DAG-independent emergency database-revoke job');
 assert.match(emergencyHostJob, /always\(\).*inputs\.mode == 'emergency-disable'/s);
 assert.match(emergencyDatabaseJob, /always\(\).*inputs\.mode == 'emergency-disable'/s);
 assert.match(emergencyHostJob, /needs: validate-target/);
@@ -348,7 +348,7 @@ assert.match(
   /timeout --signal=TERM --kill-after=10s 110s[\s\S]*?ConnectTimeout=8[\s\S]*?helper emergency-stop/,
 );
 assert.doesNotMatch(emergencyHostJob, /SUPABASE_(?:DB_PASSWORD|CA_CERTIFICATE)|PGPASSWORD|PGHOST/);
-assert.match(emergencyDatabaseJob, /Always attempt the independent database kill switch/);
+assert.match(emergencyDatabaseJob, /Always attempt the database kill switch/);
 assert.match(emergencyDatabaseJob, /if: always\(\)/g);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-disable\.sql/);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-inspect\.sql/);
@@ -387,6 +387,14 @@ assert.match(productionHelper, /^\s{2}emergency-stop\)$/m);
 assert.match(productionHelper, /docker container rm --force -- "\$\{ids\[@\]\}"/);
 assert.doesNotMatch(productionHelper, /docker container rm[^\r\n]*--time\b/);
 assert.match(productionHelper, /timeout --signal=TERM --kill-after=5s 25s/);
+const verifierInventoryFunction = productionHelper
+  .split('verifier_container_ids() {')[1]
+  ?.split('\n}')[0];
+assert.ok(verifierInventoryFunction, 'missing bounded verifier container inventory');
+assert.match(
+  verifierInventoryFunction,
+  /timeout --signal=TERM --kill-after=5s 20s\s+\\?\s*docker container ls --all --quiet/u,
+);
 assert.match(productionHelper, /if ! timeout[\s\S]*?rescanning every exact labeled container/);
 assert.match(
   productionHelper,
@@ -396,6 +404,40 @@ assert.match(
   productionHelper,
   /case "\$\{1:-\}" in\s+preflight\|prepare-incoming\|cleanup-incoming\|install\)\s+acquire_operation_locks/s,
 );
+const verifierInstallCase = productionHelper
+  .split('\n  install)')[1]
+  ?.split('\n  status-inert)')[0];
+assert.ok(verifierInstallCase, 'missing trusted verifier install case');
+const verifierCleanupCase = productionHelper
+  .split('\n  cleanup-incoming)')[1]
+  ?.split('\n  install)')[0];
+assert.ok(verifierCleanupCase, 'missing trusted verifier cleanup case');
+assert.match(
+  verifierCleanupCase,
+  /fetanagent-admin:fetanagent-admin:700'[\s\S]*?root:root:700'[\s\S]*?sealed="\$RELEASE_ROOT\/\.incoming-\$sha"/,
+);
+assert.match(
+  verifierCleanupCase,
+  /find -P "\$sealed" -mindepth 1 -maxdepth 1 -type f -delete[\s\S]*?rmdir -- "\$sealed"/,
+);
+assert.match(
+  verifierInstallCase,
+  /incoming_identity="\$\(stat --format='%d:%i' "\$incoming"\)"[\s\S]*?chown --no-dereference root:root "\$incoming"[\s\S]*?\$incoming_identity:root:root:700/,
+);
+assert.match(
+  verifierInstallCase,
+  /install -d -m 0700 -o root -g root "\$sealed"[\s\S]*?cp --no-dereference --reflink=never -- "\$incoming\/\$name" "\$sealed\/\$name"/,
+);
+assert.match(
+  verifierInstallCase,
+  /sha256sum "\$sealed\/trusted-telebirr-verifier-pins\.v1\.json"[\s\S]*?sha256sum "\$sealed\/compose\.production-trusted-telebirr-verifier\.yaml"[\s\S]*?docker load --input "\$sealed\/fetanagent-trusted-telebirr-verifier-image\.tar"/,
+);
+assert.match(
+  verifierInstallCase,
+  /mv -- "\$sealed" "\$release"[\s\S]*?verify_release "\$sha" "\$release"/,
+);
+assert.doesNotMatch(verifierInstallCase, /docker load --input "\$incoming\//);
+assert.doesNotMatch(verifierInstallCase, /chown -R[\s\S]*?"\$incoming"/);
 const emergencyStopFunction = productionHelper
   .split('emergency_stop_verifier() {')[1]
   ?.split('\n}')[0];
@@ -516,7 +558,9 @@ assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 assert.match(productionRunbook, /Production activation is deliberately unavailable/);
 assert.match(productionRunbook, /shared database state machine or epoch/);
 assert.match(productionRunbook, /There is no same-release renewal path/);
-assert.match(productionRunbook, /two independent protected jobs/);
+assert.match(productionRunbook, /two DAG-independent protected jobs/);
+assert.match(productionRunbook, /share a VM\/SSH failure domain/);
+assert.match(productionRunbook, /database emergency-revocation route that does not depend/);
 assert.doesNotMatch(productionRunbook, /ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY/);
 assert.doesNotMatch(productionRunbook, /Renewal is .*activate-verifier/);
 
@@ -542,5 +586,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, fixed-off process gates, no activation/provision/renewal route, strict inert status, and independent bounded host/database emergency disable',
+  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, fixed-off process gates, no activation/provision/renewal route, strict inert status, bounded DAG-independent emergency jobs, and the documented shared-route blocker',
 );

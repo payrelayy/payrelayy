@@ -563,14 +563,27 @@ async function beginRoleTransaction(
   await client.query(`set local statement_timeout = '10s'`);
 }
 
-async function waitForAdvisoryLock(client: Client, applicationName: string): Promise<void> {
+async function waitForAdvisoryLock(
+  client: Client,
+  applicationName: string,
+  pending: Promise<unknown>,
+): Promise<void> {
+  let pendingSettled = false;
+  void pending.then(
+    () => {
+      pendingSettled = true;
+    },
+    () => {
+      pendingSettled = true;
+    },
+  );
+
   for (let poll = 0; poll < 100; poll += 1) {
     const activity = await client.query<{
-      readonly state: string;
       readonly wait_event: string | null;
       readonly wait_event_type: string | null;
     }>(
-      `select state, wait_event_type, wait_event
+      `select wait_event_type, wait_event
          from pg_stat_activity
         where application_name = $1::text
           and pid <> pg_backend_pid()`,
@@ -582,7 +595,7 @@ async function waitForAdvisoryLock(client: Client, applicationName: string): Pro
       expect(row.wait_event?.toLowerCase()).toBe('advisory');
       return;
     }
-    if (row?.state.startsWith('idle')) {
+    if (pendingSettled) {
       throw new Error('The lock-order waiter completed before reaching the intent advisory lock.');
     }
     await client.query(`select pg_sleep(0.025)`);
@@ -810,7 +823,7 @@ async function runSettlementTransitionLockOrderRace(
         );
         pending = transitionPending;
         void transitionPending.catch(() => undefined);
-        await waitForAdvisoryLock(client, waiterName);
+        await waitForAdvisoryLock(client, waiterName, transitionPending);
         await settlementClient.query('commit');
         const transitionRows = await awaitWithoutDeadlock(transitionPending);
         expectExecutionTransitionResult(kind, transitionRows);
@@ -836,7 +849,7 @@ async function runSettlementTransitionLockOrderRace(
         );
         pending = replayPending;
         void replayPending.catch(() => undefined);
-        await waitForAdvisoryLock(client, waiterName);
+        await waitForAdvisoryLock(client, waiterName, replayPending);
         await executorClient.query('commit');
         const replayRows = await awaitWithoutDeadlock(replayPending);
         expectExactSettlementReplay(replayRows, prepared, kind, true);

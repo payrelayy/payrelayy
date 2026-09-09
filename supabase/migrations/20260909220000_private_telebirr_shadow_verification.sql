@@ -2555,7 +2555,7 @@ declare
   conversation_id uuid;
   conversation_version bigint;
   customer_id uuid;
-  customer_identity_id uuid;
+  v_customer_identity_id uuid;
   customer_status app.record_status;
   identity_status app.record_status;
   processed_at timestamptz;
@@ -2594,13 +2594,13 @@ begin
   perform app.lock_telegram_inbound_event_scope(p_origin_inbound_event_id);
 
   select inbound_event.customer_identity_id, inbound_event.processed_at
-    into customer_identity_id, processed_at
+    into v_customer_identity_id, processed_at
     from app.inbound_events inbound_event
    where inbound_event.id = p_origin_inbound_event_id
      and inbound_event.channel = 'telegram'
    for update;
 
-  if customer_identity_id is null then
+  if v_customer_identity_id is null then
     raise exception 'The Telegram inbound event is unavailable for shadow verification.';
   end if;
 
@@ -2621,7 +2621,7 @@ begin
      and telegram_identity.private_chat_id = telegram_identity.telegram_user_id
     join app.bot_conversations conversation
       on conversation.telegram_identity_id = identity.id
-   where identity.id = customer_identity_id
+   where identity.id = v_customer_identity_id
      and identity.identity_kind = 'telegram'
      and exists (
        select 1
@@ -2656,7 +2656,7 @@ begin
 
     if existing_proof.id is null
       or existing_receipt.semantic_input_hmac is distinct from p_semantic_input_hmac
-      or existing_receipt.customer_identity_id is distinct from customer_identity_id
+      or existing_receipt.customer_identity_id is distinct from v_customer_identity_id
       or existing_receipt.submitting_customer_id is distinct from customer_id
       or existing_receipt.conversation_id is distinct from conversation_id
       or existing_receipt.created_at is distinct from processed_at
@@ -2868,7 +2868,7 @@ begin
     created_at
   ) values (
     p_origin_inbound_event_id,
-    customer_identity_id,
+    v_customer_identity_id,
     customer_id,
     conversation_id,
     inserted_proof.id,

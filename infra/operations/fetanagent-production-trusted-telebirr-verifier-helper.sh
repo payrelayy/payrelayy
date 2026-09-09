@@ -83,6 +83,11 @@ container_for_verifier() {
   if [[ "${#matches[@]}" -eq 1 ]]; then printf '%s\n' "${matches[0]}"; fi
 }
 
+assert_verifier_container_absent() {
+  [[ -z "$(container_for_verifier)" ]] ||
+    die 'the production verifier container remains present'
+}
+
 assert_deposit_executor_absent() {
   local id title service
   local -a running=()
@@ -216,7 +221,8 @@ rollback_transition() {
   [[ ! -L "$receipt" && -f "$receipt" && "$(stat --format='%u:%g:%a' "$receipt")" == '0:0:600' ]] ||
     die 'the verifier rollback receipt is absent or unsafe'
   previous="$(<"$receipt")"
-  compose_release "$release" disabled down --remove-orphans --timeout 20 >/dev/null 2>&1 || true
+  compose_release "$release" disabled down --remove-orphans --timeout 20
+  assert_verifier_container_absent
   if [[ -n "$previous" ]]; then
     assert_deposit_executor_absent
     previous_sha="${previous##*/}"
@@ -234,7 +240,7 @@ rollback_transition() {
 }
 
 case "${1:-}" in
-  preflight|prepare-incoming|cleanup-incoming|install|activation-preflight|activate|status|finalize|rollback|stop)
+  preflight|prepare-incoming|cleanup-incoming|install|activation-preflight|activate|status|status-current|finalize|rollback|stop)
     acquire_operation_locks
     ;;
 esac
@@ -364,6 +370,9 @@ case "${1:-}" in
         die 'the current verifier release link is unsafe'
       verify_release "$previous_sha" "$previous"
       verify_running "$previous_sha" "$previous"
+      cmp --silent -- "$previous/trusted-telebirr-verifier-database-url" \
+        "$release/trusted-telebirr-verifier-database-url" ||
+        die 'an active verifier upgrade cannot rotate its runtime credential'
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current verifier release marker is unsafe'
     else
@@ -386,7 +395,11 @@ case "${1:-}" in
       [[ "$previous" == "$(require_release "${previous##*/}")" ]] ||
         die 'the current verifier release link is unsafe'
       [[ "$previous" != "$release" ]] || die 'the requested verifier release is already current'
-      compose_release "$previous" disabled down --remove-orphans --timeout 20
+      verify_release "${previous##*/}" "$previous"
+      verify_running "${previous##*/}" "$previous"
+      cmp --silent -- "$previous/trusted-telebirr-verifier-database-url" \
+        "$release/trusted-telebirr-verifier-database-url" ||
+        die 'an active verifier upgrade cannot rotate its runtime credential'
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current verifier release marker is unsafe'
     fi
@@ -394,6 +407,10 @@ case "${1:-}" in
     chown root:root "$receipt"
     chmod 0600 "$receipt"
     trap 'rollback_transition "$sha" "$release"' ERR
+    if [[ -n "$previous" ]]; then
+      compose_release "$previous" disabled down --remove-orphans --timeout 20
+      assert_verifier_container_absent
+    fi
     compose_release "$release" active config --quiet
     compose_release "$release" active up --detach --no-build --wait --wait-timeout 90
     verify_running "$sha" "$release"
@@ -412,6 +429,19 @@ case "${1:-}" in
     assert_deposit_executor_absent
     verify_running "$sha" "$release"
     printf '%s\n' 'Production trusted TeleBirr verifier: exact release running and healthy.'
+    ;;
+
+  status-current)
+    [[ $# -eq 1 ]] || die 'status-current accepts no arguments'
+    [[ -L "$CURRENT_LINK" ]] || die 'there is no current production verifier release'
+    release="$(readlink -f -- "$CURRENT_LINK")"
+    sha="${release##*/}"
+    [[ "$release" == "$(require_release "$sha")" ]] ||
+      die 'the current verifier release is unsafe'
+    verify_release "$sha" "$release"
+    assert_deposit_executor_absent
+    verify_running "$sha" "$release"
+    printf '%s\n' 'Production trusted TeleBirr verifier: current release running and healthy.'
     ;;
 
   finalize)
@@ -450,6 +480,7 @@ case "${1:-}" in
       sha="${release##*/}"
       [[ "$release" == "$(require_release "$sha")" ]] || die 'the current verifier release is unsafe'
       compose_release "$release" disabled down --remove-orphans --timeout 20
+      assert_verifier_container_absent
       rm -f -- "$CURRENT_LINK"
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current verifier release marker is unsafe'
@@ -459,6 +490,6 @@ case "${1:-}" in
     ;;
 
   *)
-    die 'expected verify, preflight, prepare-incoming, cleanup-incoming, install, activation-preflight, activate, status, finalize, rollback, or stop'
+    die 'expected verify, preflight, prepare-incoming, cleanup-incoming, install, activation-preflight, activate, status, status-current, finalize, rollback, or stop'
     ;;
 esac

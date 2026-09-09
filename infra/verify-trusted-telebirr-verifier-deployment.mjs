@@ -297,6 +297,27 @@ assert.match(productionWorkflow, /TRUSTED_TELEBIRR_VERIFIER_RUNTIME_PASSWORD/);
 assert.match(productionWorkflow, /PGSSLMODE: verify-full/g);
 assert.match(productionWorkflow, /fetanagent_open_production_direct_database_tunnel/g);
 assert.match(productionWorkflow, /activation-preflight '\$GITHUB_SHA'/);
+assert.match(productionWorkflow, /if: inputs\.mode != 'emergency-disable'/g);
+assert.match(
+  productionWorkflow,
+  /REQUESTED_MODE.*activate-verifier[\s\S]*?\.financialBoundary == "disabled" or \.financialBoundary == "dry_run"/,
+);
+assert.match(
+  productionWorkflow,
+  /fetanagent-production-trusted-telebirr-verifier-helper status-current/,
+);
+assert.match(
+  productionWorkflow,
+  /if: always\(\) && inputs\.mode == 'emergency-disable'/,
+);
+assert.match(
+  productionWorkflow,
+  /fetanagent-production-trusted-telebirr-verifier-helper stop/,
+);
+assert.doesNotMatch(
+  productionWorkflow,
+  /fetanagent-production-trusted-telebirr-verifier-helper verify '\$HELPER_SHA' && sudo -n \/usr\/local\/sbin\/fetanagent-production-trusted-telebirr-verifier-helper (?:status|stop)/,
+);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-provision\.sql/);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-disable\.sql/);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-inspect\.sql/);
@@ -326,14 +347,27 @@ assert.match(productionHelper, new RegExp(`EXPECTED_COMPOSE_SHA256='${production
 assert.match(productionHelper, /sha256sum .*compose\.production-trusted-telebirr-verifier\.yaml/);
 assert.match(productionHelper, /docker image inspect .*\.Id/);
 assert.match(productionHelper, /assert_deposit_executor_absent/);
+assert.match(productionHelper, /assert_verifier_container_absent/);
 assert.match(productionHelper, /activation-preflight\)/);
+assert.match(productionHelper, /status-current\)/);
 assert.match(productionHelper, /pending-\*\.previous/);
 assert.match(productionHelper, /fetanagent-deposit-executor/);
 assert.match(productionHelper, /service" != 'executor'/);
 assert.match(productionHelper, /--no-build --wait --wait-timeout 90/g);
 assert.match(productionHelper, /rollback_transition/);
 assert.match(productionHelper, /compose_release .* disabled down/);
+assert.match(productionHelper, /an active verifier upgrade cannot rotate its runtime credential/g);
 assert.match(productionHelper, /rm -f -- "\$CURRENT_LINK"/);
+assert.doesNotMatch(
+  productionHelper,
+  /compose_release "\$release" disabled down[^\r\n]*\|\| true/,
+);
+assert.ok(
+  productionHelper.indexOf('printf \'%s\\n\' "$previous" >"$receipt"') <
+    productionHelper.indexOf('compose_release "$previous" disabled down',
+      productionHelper.indexOf('  activate)')),
+  'the rollback receipt must exist before an active predecessor is stopped',
+);
 assert.doesNotMatch(productionHelper, /docker\s+(?:push|login)|curl\s+http|KEMERBET/iu);
 
 const helperDigest = createHash('sha256').update(productionHelper).digest('hex');
@@ -362,6 +396,7 @@ assert.match(productionProvisionSql, /interval '23 hours 55 minutes'/);
 assert.match(productionProvisionSql, /fetanagent_deposit_executor_runtime/);
 assert.match(productionProvisionSql, /financialSwitchesChanged', false/);
 assert.match(productionProvisionSql, /executorLogin', 'disabled'/);
+assert.doesNotMatch(productionProvisionSql, /live_verification_executor_disabled/);
 assert.doesNotMatch(
   productionProvisionSql,
   /^\s*(?:insert|update|delete|truncate|create|drop|grant|revoke)\b/im,

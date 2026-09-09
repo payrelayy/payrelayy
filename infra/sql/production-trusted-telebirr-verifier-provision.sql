@@ -125,30 +125,6 @@ begin
             'configuration_digest', pilot.configuration_digest
           )
      ) then 'dry_run'
-    when (select count(*) from app.feature_switches
-           where feature_key in (
-             'payment_verification', 'deposit_execution',
-             'telebirr_authoritative_verification', 'private_live_deposit_pilot'
-           ) and mode = 'live') = 4
-     and (select count(*) from app.feature_switches
-           where feature_key in (
-             'withdrawal_validation', 'withdrawal_collection',
-             'cbe_birr_authoritative_verification'
-           ) and mode = 'disabled' and settings = '{}'::jsonb) = 3
-     and exists (
-       select 1
-         from app.feature_switches pilot_switch
-         join app.private_live_deposit_pilot_revisions pilot
-           on pilot.status = 'armed'
-          and pilot.active_from <= pg_catalog.clock_timestamp()
-          and pilot.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
-        where pilot_switch.feature_key = 'private_live_deposit_pilot'
-          and pilot_switch.settings = pg_catalog.jsonb_build_object(
-            'contract_version', 1,
-            'pilot_revision_id', pilot.id::text,
-            'configuration_digest', pilot.configuration_digest
-          )
-     ) then 'live_verification_executor_disabled'
     else 'unsafe'
   end into financial_state;
 

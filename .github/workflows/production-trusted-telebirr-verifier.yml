@@ -309,29 +309,32 @@ jobs:
         id: protected
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
           protected="$RUNNER_TEMP/production-verifier-operation"
           install -d -m 0700 "$protected"
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
-          [[ -n "$SUPABASE_DB_PASSWORD" ]]
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected"/*
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
-          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          if [[ "$REQUESTED_MODE" != 'emergency-disable' ]]; then
+            [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+            openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          fi
           echo "protected=$protected" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
           echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
       - name: Open exact production direct-database tunnel
+        if: inputs.mode != 'emergency-disable'
         shell: bash
         env:
           PROTECTED: ${{ steps.protected.outputs.protected }}
@@ -357,8 +360,10 @@ jobs:
             "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper activation-preflight '$GITHUB_SHA'"
       - name: Inspect pre-operation database boundary
         id: database-before
+        if: inputs.mode != 'emergency-disable'
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           PROTECTED: ${{ steps.protected.outputs.protected }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -388,6 +393,10 @@ jobs:
             (.financialBoundary == "disabled" or .financialBoundary == "dry_run" or
              .financialBoundary == "live_verification")
           ' <<<"$result" >/dev/null
+          if [[ "$REQUESTED_MODE" == 'activate-verifier' ]]; then
+            jq -e '.financialBoundary == "disabled" or .financialBoundary == "dry_run"' \
+              <<<"$result" >/dev/null
+          fi
           echo "prior_login=$(jq -r '.verifierLogin' <<<"$result")" >>"$GITHUB_OUTPUT"
       - name: Provision only the bounded verifier login
         id: provision
@@ -446,13 +455,12 @@ jobs:
         env:
           PROTECTED: ${{ steps.protected.outputs.protected }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
-          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
         run: |
           set -euo pipefail
           ssh -F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
             "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status '$GITHUB_SHA'"
+            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-current"
       - name: Emergency-stop the verifier process
         id: emergency-stop
         if: inputs.mode == 'emergency-disable'
@@ -461,15 +469,14 @@ jobs:
         env:
           PROTECTED: ${{ steps.protected.outputs.protected }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
-          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
         run: |
           set -euo pipefail
           ssh -F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
             "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper stop"
+            "sudo -n /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper stop"
       - name: Revoke verifier login and terminate its sessions
-        if: inputs.mode == 'emergency-disable'
+        if: always() && inputs.mode == 'emergency-disable'
         shell: bash
         env:
           PROTECTED: ${{ steps.protected.outputs.protected }}

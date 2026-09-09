@@ -55,10 +55,11 @@ being confused with a release install.
 
 `activate-verifier` is an action-time activation boundary. Use it only after the Owner separately
 confirms that exact operation. It never changes a database feature switch. Provisioning succeeds
-only when the deposit executor login is disabled and the database is in one of three explicitly
-recognized states: all financial switches disabled, the exact armed no-money dry run, or the exact
-live verification pilot with withdrawals/CBE disabled and the executor still disabled. Any other
-combination fails closed.
+only when the deposit executor login is disabled and the database is in one of two explicitly
+recognized non-live states: all financial switches disabled or the exact armed no-money dry run.
+It refuses to start a newly provisioned verifier while live payment switches already exist, because
+that start could otherwise consume queued evidence without the separate financial activation
+boundary. Any other combination fails closed.
 
 Starting the process sets only its three process-local gates. While the database switches remain
 disabled or dry-run, the staged-evidence reader returns an empty queue. Payment verification can
@@ -84,20 +85,28 @@ database operation reject a role with five minutes or less remaining. Renewal is
 separately confirmed `activate-verifier` operation; there is no continuous or infinite verifier
 credential.
 
+`status` inspects the release referenced by the root-owned current-release link rather than assuming
+that the verifier release is the repository's latest `main` commit. Both `status` and the host half
+of `emergency-disable` invoke the installed sudoers-digest-pinned helper directly. They therefore
+remain usable after `main` advances; a release install or activation still requires the source
+helper digest to match exactly.
+
 ## Rollback and emergency disable
 
-Activation writes a root-only predecessor receipt before replacing a running verifier. A failed
-start automatically stops the candidate and restores the exact predecessor when one exists. The
-workflow repeats that rollback idempotently if a later activation step fails. The receipt is
-deleted only after the exact release passes status.
+Activation writes a root-only predecessor receipt before stopping or replacing a running verifier.
+An in-place upgrade is rejected if its release-bound runtime credential differs from the active
+release. A failed start must completely remove the candidate before it may restore the exact
+predecessor. The workflow repeats that rollback idempotently if a later activation step fails. The
+receipt is deleted only after the exact release passes status.
 
 Emergency disable is fail-safe in two independent layers: the workflow attempts to stop the
-container first, then changes only the verifier group/runtime roles to `NOLOGIN`, clears their
-passwords, resets validity, and terminates every remaining verifier session. The workflow reports
-failure if the host stop failed, even after the database kill switch succeeded. It deliberately
-does not rewrite global financial switches; the unavailable verifier login and terminated session
-are sufficient to stop this consumer, while the Owner's separate stop remains available for the
-pilot itself.
+container before any database tunnel, database inspection, CA validation, or database credential
+can block that host-side action. It then always attempts to change only the verifier group/runtime
+roles to `NOLOGIN`, clear their passwords, reset validity, and terminate every remaining verifier
+session. The workflow reports failure if the host stop failed, even after the database kill switch
+succeeded. It deliberately does not rewrite global financial switches; the unavailable verifier
+login and terminated session are sufficient to stop this consumer, while the Owner's separate stop
+remains available for the pilot itself.
 
 Never use `docker compose` directly to bypass the helper, reuse a staging credential/key, extend
 the role beyond 24 hours, add a public route, mount the Docker socket, or add executor material to

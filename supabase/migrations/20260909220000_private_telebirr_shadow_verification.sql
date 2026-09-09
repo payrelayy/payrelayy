@@ -387,6 +387,12 @@ declare
   locked_switch_count integer;
   locked_pilot_revision_id uuid;
 begin
+  -- Post-lock revocation and terminal checks require a new command snapshot. Reject stronger
+  -- snapshot isolation instead of allowing a caller to preserve pre-wait visibility.
+  if pg_catalog.current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'The no-money TeleBirr shadow verification requires read committed isolation.';
+  end if;
+
   if p_pilot_revision_id is null then
     raise exception 'The no-money TeleBirr shadow verification authority is unavailable.';
   end if;

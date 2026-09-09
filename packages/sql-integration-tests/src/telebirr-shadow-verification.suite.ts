@@ -159,7 +159,11 @@ async function createTelegramShadowInbound(
        channel, external_event_id, customer_identity_id, payload_digest
      ) values ('telegram', $1::text, $2::uuid, $3::text)
      returning id`,
-    [`shadow-proof:${seed}`, identityId, `hmac-sha256-v1:${'b'.repeat(64)}`],
+    [
+      `update:${(BigInt(telegramUserId) + 1n).toString()}`,
+      identityId,
+      `hmac-sha256-v1:${'b'.repeat(64)}`,
+    ],
   );
   return inbound.rows[0]!.id;
 }
@@ -660,6 +664,9 @@ export function registerTelebirrShadowVerificationSqlTests(
         )) as definition
       `);
       const lockDefinition = lockGate.rows[0]?.definition ?? '';
+      expect(lockDefinition).toContain(
+        "pg_catalog.current_setting('transaction_isolation') <> 'read committed'",
+      );
       for (const feature of [
         'payment_verification',
         'deposit_execution',
@@ -684,6 +691,26 @@ export function registerTelebirrShadowVerificationSqlTests(
         ) as executable
       `);
       expect(helperAccess.rows).toEqual([{ executable: false }]);
+    });
+
+    it('rejects shadow writes from a repeatable-read transaction snapshot', async () => {
+      const client = getClient();
+      await client.query('begin isolation level repeatable read');
+      let failure: unknown;
+      try {
+        await client.query(`select app.require_private_telebirr_shadow_mode_ready($1::uuid)`, [
+          randomUUID(),
+        ]);
+      } catch (error) {
+        failure = error;
+      } finally {
+        await client.query('rollback');
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure instanceof Error ? failure.message : String(failure)).toMatch(
+        /requires read committed isolation/u,
+      );
     });
 
     it('preserves public broker/device signatures and hides the renamed live implementations', async () => {

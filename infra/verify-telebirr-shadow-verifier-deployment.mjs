@@ -130,6 +130,11 @@ assert.match(healthSource, /fetanagent-telebirr-shadow-verifier/u);
 assert.match(mainSource, /FetanAgent TeleBirr shadow verifier failed closed\./u);
 
 const lockedGateBody = functionBody('require_private_telebirr_shadow_mode_ready');
+assert.match(
+  lockedGateBody,
+  /pg_catalog\.current_setting\('transaction_isolation'\) <> 'read committed'/iu,
+  'every shadow writer must reject snapshots that cannot see post-lock commits',
+);
 assert.match(lockedGateBody, /order by feature_switch\.feature_key\s+for share/iu);
 assert.match(lockedGateBody, /get diagnostics locked_switch_count = row_count/iu);
 assert.match(

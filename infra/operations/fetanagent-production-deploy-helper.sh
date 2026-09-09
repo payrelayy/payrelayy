@@ -45,6 +45,73 @@ require_release() {
   printf '%s\n' "$release"
 }
 
+acquire_operation_lock() {
+  command -v flock >/dev/null || die 'the production operation lock is unavailable'
+  [[ ! -L "$STATE_ROOT" ]] || die 'the production state directory is unsafe'
+  if [[ ! -e "$STATE_ROOT" ]]; then install -d -m 0700 -o root -g root "$STATE_ROOT"; fi
+  [[ -d "$STATE_ROOT" && "$(stat --format='%u:%g:%a' "$STATE_ROOT")" == '0:0:700' ]] ||
+    die 'the production state directory is unsafe'
+  local lock_file="$STATE_ROOT/helper.lock"
+  [[ ! -L "$lock_file" ]] || die 'the production operation lock is unsafe'
+  if [[ -e "$lock_file" ]]; then
+    [[ -f "$lock_file" && "$(stat --format='%u:%g:%a' "$lock_file")" == '0:0:600' ]] ||
+      die 'the production operation lock is unsafe'
+  fi
+  exec 9>>"$lock_file"
+  flock --nonblock 9 || die 'another production operation is in progress; retry after it finishes'
+}
+
+# Caller holds the operation lock. Validation itself never changes services or receipts.
+validate_rollback_transition() {
+  local sha="$1" release="$2" receipt="$STATE_ROOT/pending-$1.previous"
+  local previous='' current='' previous_sha='' current_sha='' ids='' revisions='' id revision
+  local -a receipt_lines=() container_ids=()
+  [[ "$(require_release "$sha")" == "$release" ]] || die 'the rollback candidate is not exact'
+  [[ ! -L "$receipt" && -f "$receipt" &&
+    "$(stat --format='%u:%g:%a' "$receipt")" == '0:0:600' &&
+    "$(stat --format='%s' "$receipt")" -le 4096 ]] ||
+    die 'the pending rollback receipt is absent or unsafe'
+  mapfile -t receipt_lines <"$receipt"
+  [[ "${#receipt_lines[@]}" -eq 1 ]] || die 'the pending rollback receipt is malformed'
+  previous="${receipt_lines[0]}"
+  if [[ -n "$previous" ]]; then
+    previous_sha="${previous##*/}"
+    [[ "$previous" == "$(require_release "$previous_sha")" && "$previous" != "$release" ]] ||
+      die 'the rollback predecessor is not exact'
+  fi
+  if [[ -L "$CURRENT_LINK" ]]; then
+    current="$(readlink -f -- "$CURRENT_LINK")" || die 'the current production release link is unsafe'
+    current_sha="${current##*/}"
+    [[ "$current" == "$(require_release "$current_sha")" ]] ||
+      die 'the current production release link is unsafe'
+  elif [[ -e "$CURRENT_LINK" ]]; then
+    die 'the current production release marker is unsafe'
+  fi
+  [[ "$current" == "$release" ||
+    ( -n "$previous" && "$current" == "$previous" ) ||
+    ( -z "$previous" && -z "$current" ) ]] ||
+    die 'stale rollback refused: production is outside this pending transition'
+  ids="$(docker container ls --all --quiet --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
+    die 'the production container identities could not be read'
+  if [[ -n "$ids" ]]; then
+    mapfile -t container_ids <<<"$ids"
+    for id in "${container_ids[@]}"; do
+      [[ "$id" =~ ^[0-9a-f]{12,64}$ ]] || die 'a production container identity is malformed'
+    done
+    revisions="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${container_ids[@]}")" ||
+      die 'the production container revisions could not be read'
+    mapfile -t receipt_lines <<<"$revisions"
+    [[ "${#receipt_lines[@]}" -eq "${#container_ids[@]}" ]] ||
+      die 'the production container revision count is wrong'
+    for revision in "${receipt_lines[@]}"; do
+      [[ "$revision" =~ ^[0-9a-f]{40}$ &&
+        ( "$revision" == "$sha" || ( -n "$previous_sha" && "$revision" == "$previous_sha" ) ) ]] ||
+        die 'stale rollback refused: a production container is outside this pending transition'
+    done
+  fi
+  ROLLBACK_PREVIOUS="$previous"
+}
+
 compose_release() {
   local release="$1"
   shift
@@ -230,10 +297,11 @@ negative_companion_public_smoke() {
 }
 
 rollback_transition() {
-  local sha="$1" release="$2" previous_file="$STATE_ROOT/pending-$sha.previous" previous=''
-  if [[ -f "$previous_file" ]]; then previous="$(<"$previous_file")"; fi
+  local sha="$1" release="$2" previous=''
+  validate_rollback_transition "$sha" "$release"
+  previous="$ROLLBACK_PREVIOUS"
   compose_release "$release" down --remove-orphans --timeout 30 >/dev/null 2>&1 || true
-  if [[ -n "$previous" && ! -L "$previous" && -d "$previous" && "$previous" == "$RELEASE_ROOT/"* ]]; then
+  if [[ -n "$previous" ]]; then
     compose_release "$previous" up --detach --no-build --wait --wait-timeout 120
     ln -sfn -- "$previous" "$CURRENT_LINK.next"
     mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
@@ -244,6 +312,13 @@ rollback_transition() {
   fi
   restore_legacy_telebirr_bridge "$sha"
 }
+
+# Hold the same host lock throughout activation, including its internal ERR rollback.
+case "${1:-}" in
+  preflight|prepare-incoming|cleanup-incoming|install|activate|finalize|rollback|stop|check-rollback)
+    acquire_operation_lock
+    ;;
+esac
 
 case "${1:-}" in
   verify)
@@ -383,18 +458,22 @@ case "${1:-}" in
     [[ $# -eq 2 ]] || die 'activate requires one exact commit SHA'
     sha="$2"
     release="$(require_release "$sha")"
-    tag="$(<"$release/.image-tag")"
-    verify_release_files "$release"
-    verify_images "$sha" "$tag" "$release"
-    install -d -m 0700 "$STATE_ROOT"
     previous_file="$STATE_ROOT/pending-$sha.previous"
+    [[ ! -e "$previous_file" && ! -L "$previous_file" ]] ||
+      die 'a pending activation already exists; inspect its rollback boundary before retrying'
     previous=''
     if [[ -L "$CURRENT_LINK" ]]; then
       previous="$(readlink -f -- "$CURRENT_LINK")"
-      [[ "$previous" == "$RELEASE_ROOT/"* && -d "$previous" ]] || die 'the current production release link is unsafe'
+      [[ "$previous" == "$(require_release "${previous##*/}")" ]] ||
+        die 'the current production release link is unsafe'
+      [[ "$previous" != "$release" ]] ||
+        die 'the requested release is already current; use status instead of reactivating it'
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current production release marker is unsafe'
     fi
+    tag="$(<"$release/.image-tag")"
+    verify_release_files "$release"
+    verify_images "$sha" "$tag" "$release"
     printf '%s\n' "$previous" >"$previous_file"
     trap 'rollback_transition "$sha" "$release"' ERR
     compose_release "$release" config --quiet
@@ -482,7 +561,7 @@ case "${1:-}" in
     sha="$2"
     release="$(require_release "$sha")"
     previous_file="$STATE_ROOT/pending-$sha.previous"
-    if [[ -f "$previous_file" ]]; then
+    if [[ -e "$previous_file" || -L "$previous_file" ]]; then
       rollback_transition "$sha" "$release"
       rm -f -- "$previous_file"
     elif [[ -L "$CURRENT_LINK" ]]; then
@@ -494,6 +573,14 @@ case "${1:-}" in
     elif [[ -e "$CURRENT_LINK" ]]; then
       die 'the current production release marker is unsafe'
     fi
+    ;;
+
+  check-rollback)
+    [[ $# -eq 2 ]] || die 'check-rollback requires one exact commit SHA'
+    sha="$2"
+    release="$(require_release "$sha")"
+    validate_rollback_transition "$sha" "$release"
+    printf '%s\n' 'The pending rollback boundary is valid; no services or receipts were changed.'
     ;;
 
   stop)
@@ -509,6 +596,6 @@ case "${1:-}" in
     ;;
 
   *)
-    die 'expected verify, preflight, current-state, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, or stop'
+    die 'expected verify, preflight, current-state, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, check-rollback, or stop'
     ;;
 esac

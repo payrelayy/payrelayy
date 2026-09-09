@@ -358,6 +358,27 @@ assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
 assert.match(helper, /current-state\)/u);
 assert.match(helper, /cleanup-incoming\)/u);
 assert.match(helper, /rollback_transition/u);
+assert.match(helper, /flock --nonblock 9/u);
+assert.match(
+  helper,
+  /preflight\|prepare-incoming\|cleanup-incoming\|install\|activate\|finalize\|rollback\|stop\|check-rollback\)\s+acquire_operation_lock/u,
+);
+const rollbackTransition = helper.split('\nrollback_transition() {')[1]?.split('\n}\n')[0];
+assert.ok(rollbackTransition, 'rollback transition must exist');
+assert.ok(
+  rollbackTransition.indexOf('validate_rollback_transition "$sha" "$release"') <
+    rollbackTransition.indexOf('compose_release "$release" down'),
+  'the complete pending transition must be validated before stopping production',
+);
+assert.match(helper, /stale rollback refused: production is outside this pending transition/u);
+assert.match(
+  helper,
+  /stale rollback refused: a production container is outside this pending transition/u,
+);
+assert.match(
+  helper,
+  /check-rollback\)\s+[\s\S]*?validate_rollback_transition "\$sha" "\$release"/u,
+);
 assert.match(helper, /chown 10001:10001 "\$incoming\/secrets"\/\*/u);
 assert.match(helper, /'10001:10001:400'/u);
 assert.match(helper, /'0:0:444'/u);
@@ -440,6 +461,8 @@ assert.match(companionLogin, /rolconnlimit = 1/u);
 assert.match(companionLogin, /not role\.rolbypassrls/u);
 assert.match(companionLogin, /not membership\.set_option/u);
 assert.match(companionLogin, /role\.rolvaliduntil = 'infinity'::timestamptz/u);
+
+await import('./verify-production-rollback.mjs');
 
 console.log(
   'Production runtime verified: production-only target binding, permanent least-privilege logins, sealed secrets, non-root web and Android enrollment services, fail-closed financial authority, atomic public cutover, and rollback.',

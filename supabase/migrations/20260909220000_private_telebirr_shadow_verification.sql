@@ -455,7 +455,7 @@ set search_path = pg_catalog
 as $$
 declare
   actor_admin_id uuid;
-  now_at timestamptz := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  now_at timestamptz := pg_catalog.clock_timestamp();
   pilot app.private_live_deposit_pilot_revisions%rowtype;
   current_switch_mode text;
 begin
@@ -621,6 +621,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
+  authority_at timestamptz;
   now_at timestamptz;
   enrollment app.private_live_telebirr_device_enrollments%rowtype;
   pilot app.private_live_deposit_pilot_revisions%rowtype;
@@ -694,18 +695,19 @@ begin
   -- The request-key and authority locks above can wait. Recheck the time-based authority only
   -- after every blocking lock needed by either the replay or new-lease branch is held.
   perform app.require_private_telebirr_shadow_mode_ready(enrollment.pilot_revision_id);
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
 
   if pilot.id is null
     or profile.id is null
-    or now_at < enrollment.valid_from
-    or now_at >= enrollment.valid_until
-    or now_at < profile.valid_from
-    or now_at >= profile.valid_until
+    or authority_at < enrollment.valid_from
+    or authority_at >= enrollment.valid_until
+    or authority_at < profile.valid_from
+    or authority_at >= profile.valid_until
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     raise exception 'The TeleBirr shadow assignment authority is unavailable.';
   end if;
@@ -715,7 +717,7 @@ begin
       or existing_attempt.leased_by is distinct from p_leased_by
       or existing_attempt.requested_lease_seconds is distinct from p_lease_seconds
       or existing_attempt.lease_request_digest is distinct from request_digest
-      or now_at >= existing_attempt.expires_at then
+      or authority_at >= existing_attempt.expires_at then
       raise exception 'The TeleBirr shadow assignment replay conflicts or expired.';
     end if;
 
@@ -768,8 +770,8 @@ begin
     from app.private_telebirr_shadow_proof_requests candidate
    where candidate.pilot_revision_id = pilot.id
      and candidate.receiver_profile_id = profile.id
-     and now_at >= candidate.not_before
-     and now_at < candidate.expires_at
+     and authority_at >= candidate.not_before
+     and authority_at < candidate.expires_at
      and not exists (
        select 1 from app.private_telebirr_shadow_verification_outcomes outcome
         where outcome.shadow_proof_request_id = candidate.id
@@ -778,7 +780,7 @@ begin
        select 1
          from app.private_telebirr_shadow_verification_attempts attempt
         where attempt.shadow_proof_request_id = candidate.id
-          and now_at < attempt.expires_at
+          and authority_at < attempt.expires_at
      )
    order by candidate.submitted_at, candidate.id
    limit 1
@@ -791,16 +793,22 @@ begin
   -- SKIP LOCKED does not wait on another proof row, but the final gate check also makes natural
   -- pilot expiry fail closed immediately before the lease timestamp is minted.
   perform app.require_private_telebirr_shadow_mode_ready(enrollment.pilot_revision_id);
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  if now_at < enrollment.valid_from
-    or now_at >= enrollment.valid_until
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
+  if authority_at < enrollment.valid_from
+    or authority_at >= enrollment.valid_until
+    or authority_at < profile.valid_from
+    or authority_at >= profile.valid_until
+    or authority_at < proof.not_before
+    or authority_at >= proof.expires_at
+    -- A canonical millisecond issue time must not round below an authority start boundary.
+    or now_at < enrollment.valid_from
     or now_at < profile.valid_from
-    or now_at >= profile.valid_until
-    or now_at >= proof.expires_at
+    or now_at < proof.not_before
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     raise exception 'The TeleBirr shadow assignment authority is unavailable.';
   end if;
@@ -857,12 +865,15 @@ begin
       'fetanagent:telebirr:shadow-assignment-challenge:v1|' || challenge_material::text
     ),
     now_at,
-    least(
-      now_at + pg_catalog.make_interval(secs => p_lease_seconds),
-      proof.expires_at,
-      pilot.expires_at,
-      profile.valid_until,
-      enrollment.valid_until
+    pg_catalog.date_trunc(
+      'milliseconds',
+      least(
+        now_at + pg_catalog.make_interval(secs => p_lease_seconds),
+        proof.expires_at,
+        pilot.expires_at,
+        profile.valid_until,
+        enrollment.valid_until
+      )
     )
   ) returning * into inserted_attempt;
 
@@ -1025,6 +1036,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
+  authority_at timestamptz;
   now_at timestamptz;
   attempt app.private_telebirr_shadow_verification_attempts%rowtype;
   proof app.private_telebirr_shadow_proof_requests%rowtype;
@@ -1080,7 +1092,8 @@ begin
    where candidate.id = p_assignment_signer_id
    for share;
 
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
 
   if attempt.id is null
     or proof.id is null
@@ -1088,7 +1101,7 @@ begin
     or signer.id is null
     or signer.signer_key_id = enrollment.key_id
     or signer.public_key_spki_sha256 = enrollment.public_key_spki_sha256
-    or now_at >= attempt.expires_at
+    or authority_at >= attempt.expires_at
     or attempt.issued_at < enrollment.valid_from
     or attempt.expires_at > enrollment.valid_until
     or attempt.issued_at < signer.valid_from
@@ -1096,12 +1109,12 @@ begin
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     )
     or exists (
       select 1 from app.private_live_telebirr_assignment_signer_revocations revocation
        where revocation.assignment_signer_id = signer.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     raise exception 'The TeleBirr shadow assignment persistence authority is unavailable.';
   end if;
@@ -1110,17 +1123,18 @@ begin
 
   -- The locking gate can wait behind a pilot transition. Use a post-wait instant for the final
   -- lease and revocation check and for the persisted signature timestamp.
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  if now_at >= attempt.expires_at
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
+  if authority_at >= attempt.expires_at
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     )
     or exists (
       select 1 from app.private_live_telebirr_assignment_signer_revocations revocation
        where revocation.assignment_signer_id = signer.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     raise exception 'The TeleBirr shadow assignment persistence authority is unavailable.';
   end if;
@@ -1268,6 +1282,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
+  authority_at timestamptz;
   now_at timestamptz;
   observed_at timestamptz;
   assignment_body jsonb;
@@ -1344,7 +1359,8 @@ begin
    where candidate.id = proof.receiver_profile_id
    for share;
 
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
 
   if transcript.id is null
     or attempt.id is null
@@ -1355,15 +1371,15 @@ begin
     or enrollment.pilot_revision_id is distinct from proof.pilot_revision_id
     or enrollment.receiver_profile_id is distinct from profile.id
     or not app.private_telebirr_shadow_mode_is_ready(proof.pilot_revision_id)
-    or now_at < enrollment.valid_from
-    or now_at >= enrollment.valid_until
-    or now_at >= attempt.expires_at
+    or authority_at < enrollment.valid_from
+    or authority_at >= enrollment.valid_until
+    or authority_at >= attempt.expires_at
     or observed_at < attempt.issued_at
     or observed_at >= attempt.expires_at
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     return query select 'rejected'::text,
       case
@@ -1371,12 +1387,12 @@ begin
           or not app.private_telebirr_shadow_mode_is_ready(proof.pilot_revision_id)
           then 'pilot_stopped'::text
         when enrollment.id is null
-          or now_at < enrollment.valid_from
-          or now_at >= enrollment.valid_until
+          or authority_at < enrollment.valid_from
+          or authority_at >= enrollment.valid_until
           or exists (
             select 1 from app.private_live_telebirr_device_revocations revocation
              where revocation.device_enrollment_id = enrollment.id
-               and revocation.revoked_at <= now_at
+               and revocation.revoked_at <= authority_at
           ) then 'device_revoked'::text
         else 'binding_mismatch'::text
       end,
@@ -1388,23 +1404,24 @@ begin
 
   -- A gate transition can hold the locking guard after the first typed validation. Refresh and
   -- repeat every wall-clock authority check before accepting the immutable staged evidence.
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  if now_at < enrollment.valid_from
-    or now_at >= enrollment.valid_until
-    or now_at >= attempt.expires_at
+  authority_at := pg_catalog.clock_timestamp();
+  now_at := pg_catalog.date_trunc('milliseconds', authority_at);
+  if authority_at < enrollment.valid_from
+    or authority_at >= enrollment.valid_until
+    or authority_at >= attempt.expires_at
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     return query select 'rejected'::text,
       case
-        when now_at < enrollment.valid_from
-          or now_at >= enrollment.valid_until
+        when authority_at < enrollment.valid_from
+          or authority_at >= enrollment.valid_until
           or exists (
             select 1 from app.private_live_telebirr_device_revocations revocation
              where revocation.device_enrollment_id = enrollment.id
-               and revocation.revoked_at <= now_at
+               and revocation.revoked_at <= authority_at
           ) then 'device_revoked'::text
         else 'binding_mismatch'::text
       end,
@@ -1613,7 +1630,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
-  now_at timestamptz;
+  authority_at timestamptz;
   attempt app.private_telebirr_shadow_verification_attempts%rowtype;
   proof app.private_telebirr_shadow_proof_requests%rowtype;
   transcript app.private_telebirr_shadow_assignment_transcripts%rowtype;
@@ -1717,7 +1734,7 @@ begin
    limit 1
    for share;
 
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  authority_at := pg_catalog.clock_timestamp();
 
   if attempt.id is null
     or proof.id is null
@@ -1739,8 +1756,8 @@ begin
          is distinct from p_source_document_digest
     or staged.signed_observation -> 'body' ->> 'normalizedFactsDigest'
          is distinct from p_normalized_facts_digest
-    or now_at >= attempt.expires_at
-    or now_at >= proof.expires_at
+    or authority_at >= attempt.expires_at
+    or authority_at >= proof.expires_at
     or p_assessed_at < p_observed_at
     or p_retrieved_at > p_assessed_at
     or exists (
@@ -1751,12 +1768,12 @@ begin
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     )
     or exists (
       select 1 from app.private_live_telebirr_assignment_signer_revocations revocation
        where revocation.assignment_signer_id = signer.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     )
     or (
       p_disposition = 'settlement_candidate'
@@ -1773,9 +1790,9 @@ begin
 
   -- Attempt, device, signer, and gate locks can all wait. Re-evaluate the terminal authority at
   -- the post-wait instant before an advisory outcome can be recorded.
-  now_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  if now_at >= attempt.expires_at
-    or now_at >= proof.expires_at
+  authority_at := pg_catalog.clock_timestamp();
+  if authority_at >= attempt.expires_at
+    or authority_at >= proof.expires_at
     or exists (
       select 1 from app.private_telebirr_shadow_evidence_quarantine quarantine
        where quarantine.verification_attempt_id = attempt.id
@@ -1784,12 +1801,12 @@ begin
     or exists (
       select 1 from app.private_live_telebirr_device_revocations revocation
        where revocation.device_enrollment_id = enrollment.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     )
     or exists (
       select 1 from app.private_live_telebirr_assignment_signer_revocations revocation
        where revocation.assignment_signer_id = signer.id
-         and revocation.revoked_at <= now_at
+         and revocation.revoked_at <= authority_at
     ) then
     raise exception 'The no-money TeleBirr shadow completion authority is unavailable.';
   end if;
@@ -1922,7 +1939,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
-  captured_at timestamptz := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  captured_at timestamptz := pg_catalog.clock_timestamp();
 begin
   perform app.require_telebirr_shadow_verifier_session();
 
@@ -2049,7 +2066,7 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
-  captured_at timestamptz := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  captured_at timestamptz := pg_catalog.clock_timestamp();
   attempt app.private_telebirr_shadow_verification_attempts%rowtype;
   proof app.private_telebirr_shadow_proof_requests%rowtype;
   pilot app.private_live_deposit_pilot_revisions%rowtype;
@@ -2551,10 +2568,11 @@ security definer
 set search_path = pg_catalog
 as $$
 declare
+  authority_at timestamptz;
   captured_at timestamptz;
   conversation_id uuid;
   conversation_version bigint;
-  customer_id uuid;
+  v_customer_id uuid;
   v_customer_identity_id uuid;
   customer_status app.record_status;
   identity_status app.record_status;
@@ -2609,7 +2627,7 @@ begin
          customer.status,
          conversation.id,
          conversation.version
-    into customer_id,
+    into v_customer_id,
          identity_status,
          customer_status,
          conversation_id,
@@ -2634,7 +2652,7 @@ begin
      )
    for update of identity, customer, telegram_identity, conversation;
 
-  if customer_id is null then
+  if v_customer_id is null then
     raise exception 'The Telegram customer is unavailable for shadow verification.';
   end if;
 
@@ -2651,13 +2669,13 @@ begin
         on member.pilot_revision_id = proof.pilot_revision_id
        and member.player_account_id = proof.player_account_id
      where proof.id = existing_receipt.shadow_proof_request_id
-       and proof.submitting_customer_id = customer_id
+       and proof.submitting_customer_id = v_customer_id
        and member.player_id_snapshot = p_player_id;
 
     if existing_proof.id is null
       or existing_receipt.semantic_input_hmac is distinct from p_semantic_input_hmac
       or existing_receipt.customer_identity_id is distinct from v_customer_identity_id
-      or existing_receipt.submitting_customer_id is distinct from customer_id
+      or existing_receipt.submitting_customer_id is distinct from v_customer_id
       or existing_receipt.conversation_id is distinct from conversation_id
       or existing_receipt.created_at is distinct from processed_at
       or existing_proof.candidate_reference_fingerprint is distinct from p_reference_fingerprint
@@ -2729,7 +2747,8 @@ begin
   end if;
 
   perform app.require_private_telebirr_shadow_mode_ready(pilot.id);
-  captured_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  authority_at := pg_catalog.clock_timestamp();
+  captured_at := pg_catalog.date_trunc('milliseconds', authority_at);
 
   select member.*
     into player_member
@@ -2751,8 +2770,8 @@ begin
    where receiver_profile.pilot_revision_id = pilot.id
      and receiver_profile.payment_provider_id = provider_member.payment_provider_id
      and receiver_profile.pilot_configuration_digest = pilot.configuration_digest
-     and captured_at >= receiver_profile.valid_from
-     and captured_at < receiver_profile.valid_until
+     and authority_at >= receiver_profile.valid_from
+     and authority_at < receiver_profile.valid_until
    for share;
 
   select player.* into current_player
@@ -2778,7 +2797,7 @@ begin
     or not exists (
       select 1 from app.private_live_deposit_pilot_customers member
        where member.pilot_revision_id = pilot.id
-         and member.customer_id = customer_id
+         and member.customer_id = v_customer_id
          and member.customer_status_snapshot = 'active'
     )
     or current_player.id is null
@@ -2816,8 +2835,15 @@ begin
   -- The per-reference advisory lock can outlive the first readiness check. Recheck the locked
   -- pilot and profile at a fresh instant before consuming the inbound event or minting a proof.
   perform app.require_private_telebirr_shadow_mode_ready(pilot.id);
-  captured_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  if captured_at < profile.valid_from or captured_at >= profile.valid_until then
+  authority_at := pg_catalog.clock_timestamp();
+  captured_at := pg_catalog.date_trunc('milliseconds', authority_at);
+  if authority_at < pilot.active_from
+    or authority_at >= pilot.expires_at
+    or authority_at < profile.valid_from
+    or authority_at >= profile.valid_until
+    -- Persisted proof timestamps are canonical milliseconds; delay rather than round below start.
+    or captured_at < pilot.active_from
+    or captured_at < profile.valid_from then
     raise exception 'The no-money TeleBirr shadow proof boundary is unavailable.';
   end if;
 
@@ -2842,7 +2868,7 @@ begin
     expires_at
   ) values (
     pilot.id,
-    customer_id,
+    v_customer_id,
     player_member.player_account_id,
     provider_member.payment_provider_id,
     profile.id,
@@ -2854,7 +2880,10 @@ begin
     p_reference_profile_version,
     captured_at,
     captured_at,
-    least(captured_at + interval '5 minutes', pilot.expires_at, profile.valid_until)
+    pg_catalog.date_trunc(
+      'milliseconds',
+      least(captured_at + interval '5 minutes', pilot.expires_at, profile.valid_until)
+    )
   ) returning * into inserted_proof;
 
   insert into app.telegram_telebirr_shadow_proof_receipts (
@@ -2869,7 +2898,7 @@ begin
   ) values (
     p_origin_inbound_event_id,
     v_customer_identity_id,
-    customer_id,
+    v_customer_id,
     conversation_id,
     inserted_proof.id,
     p_semantic_input_hmac,
@@ -2895,7 +2924,7 @@ begin
     metadata
   ) values (
     'customer',
-    customer_id,
+    v_customer_id,
     'deposit.telebirr_shadow_proof_received',
     'private_telebirr_shadow_proof',
     inserted_proof.id,

@@ -145,26 +145,26 @@ assert.match(lockedGateBody, /locked_switch_count <> 7/iu);
 const postLockTimeBoundaries = new Map([
   [
     'capture_telegram_telebirr_shadow_proof',
-    { timestamp: 'captured_at', finalCheck: 'captured_at >= profile.valid_until' },
+    { timestamp: 'authority_at', finalCheck: 'authority_at >= profile.valid_until' },
   ],
   [
     'lease_private_telebirr_shadow_assignment',
-    { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' },
+    { timestamp: 'authority_at', finalCheck: 'or authority_at >= proof.expires_at' },
   ],
   [
     'persist_private_telebirr_shadow_assignment_signature',
     {
-      timestamp: 'now_at',
+      timestamp: 'authority_at',
       finalCheck: 'where revocation.assignment_signer_id = signer.id',
     },
   ],
   [
     'stage_private_telebirr_shadow_device_evidence',
-    { timestamp: 'now_at', finalCheck: 'or now_at >= attempt.expires_at' },
+    { timestamp: 'authority_at', finalCheck: 'or authority_at >= attempt.expires_at' },
   ],
   [
     'complete_private_telebirr_shadow_verification',
-    { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' },
+    { timestamp: 'authority_at', finalCheck: 'or authority_at >= proof.expires_at' },
   ],
 ]);
 for (const transition of [
@@ -203,14 +203,17 @@ for (const transition of [
     );
     assert.equal(
       body.match(
-        new RegExp(`\\b${timeBoundary.timestamp}\\s*:=\\s*pg_catalog\\.date_trunc\\(`, 'gu'),
+        new RegExp(
+          `\\b${timeBoundary.timestamp}\\s*:=\\s*pg_catalog\\.clock_timestamp\\(\\)`,
+          'gu',
+        ),
       )?.length,
       2,
       `${transition} must refresh time after its initial locks and again at its final gate`,
     );
 
     const finalRefreshIndex = body.lastIndexOf(
-      `${timeBoundary.timestamp} := pg_catalog.date_trunc(`,
+      `${timeBoundary.timestamp} := pg_catalog.clock_timestamp()`,
     );
     const finalBlockingBoundaryIndex = Math.max(
       body.lastIndexOf('pg_advisory_xact_lock'),
@@ -226,6 +229,21 @@ for (const transition of [
       `${transition} must refresh and recheck time after its final blocking boundary and before writing`,
     );
   }
+}
+const captureBody = functionBody('capture_telegram_telebirr_shadow_proof');
+assert.match(captureBody, /\bv_customer_id uuid;/u);
+assert.match(captureBody, /\bv_customer_identity_id uuid;/u);
+assert.doesNotMatch(captureBody, /(^|\s)customer_id uuid;/u);
+assert.doesNotMatch(captureBody, /(^|\s)customer_identity_id uuid;/u);
+for (const reader of [
+  'load_next_private_telebirr_shadow_staged_evidence',
+  'load_private_telebirr_shadow_verification_authority',
+]) {
+  assert.doesNotMatch(
+    functionBody(reader),
+    /date_trunc\('milliseconds',\s*pg_catalog\.clock_timestamp\(\)\)/iu,
+    `${reader} must use a full-precision authority clock`,
+  );
 }
 const quarantineBody = functionBody('quarantine_private_telebirr_shadow_staged_evidence');
 const quarantineAttemptLockIndex = quarantineBody.indexOf('for update of attempt');

@@ -490,6 +490,10 @@ export function registerTelebirrShadowVerificationSqlTests(
       expect(completion).toContain('app.private_telebirr_shadow_evidence_quarantine');
       expect(capture).toContain('insert into app.private_telebirr_shadow_proof_requests');
       expect(capture).toContain("'shadow_no_money'");
+      expect(capture).toContain('v_customer_id uuid');
+      expect(capture).toContain('v_customer_identity_id uuid');
+      expect(capture).not.toMatch(/\bcustomer_id uuid;/u);
+      expect(capture).not.toMatch(/\bcustomer_identity_id uuid;/u);
 
       const proofStatus = await client.query<{
         readonly accepted_constraint: boolean;
@@ -527,24 +531,27 @@ export function registerTelebirrShadowVerificationSqlTests(
       const postLockTimeBoundaries = new Map([
         [
           captureFunction,
-          { timestamp: 'captured_at', finalCheck: 'captured_at >= profile.valid_until' },
+          { timestamp: 'authority_at', finalCheck: 'authority_at >= profile.valid_until' },
         ],
         [
           'app.lease_private_telebirr_shadow_assignment(uuid,text,uuid,integer)',
-          { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' },
+          { timestamp: 'authority_at', finalCheck: 'or authority_at >= proof.expires_at' },
         ],
         [
           'app.persist_private_telebirr_shadow_assignment_signature(uuid,uuid,uuid,text,text,text,text)',
           {
-            timestamp: 'now_at',
+            timestamp: 'authority_at',
             finalCheck: 'where revocation.assignment_signer_id = signer.id',
           },
         ],
         [
           'app.stage_private_telebirr_shadow_device_evidence(uuid,text,text,text,jsonb,jsonb)',
-          { timestamp: 'now_at', finalCheck: 'or now_at >= attempt.expires_at' },
+          { timestamp: 'authority_at', finalCheck: 'or authority_at >= attempt.expires_at' },
         ],
-        [completionFunction, { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' }],
+        [
+          completionFunction,
+          { timestamp: 'authority_at', finalCheck: 'or authority_at >= proof.expires_at' },
+        ],
       ]);
       const definitions = await client.query<{
         readonly definition: string;
@@ -588,13 +595,13 @@ export function registerTelebirrShadowVerificationSqlTests(
             );
 
             const refreshPattern = new RegExp(
-              `\\b${timeBoundary.timestamp}\\s*:=\\s*pg_catalog\\.date_trunc\\(`,
+              `\\b${timeBoundary.timestamp}\\s*:=\\s*pg_catalog\\.clock_timestamp\\(\\)`,
               'gu',
             );
             expect(row.definition.match(refreshPattern) ?? [], row.signature).toHaveLength(2);
 
             const finalRefreshIndex = row.definition.lastIndexOf(
-              `${timeBoundary.timestamp} := pg_catalog.date_trunc(`,
+              `${timeBoundary.timestamp} := pg_catalog.clock_timestamp()`,
             );
             const finalBlockingBoundaryIndex = Math.max(
               row.definition.lastIndexOf('pg_advisory_xact_lock'),
@@ -630,6 +637,9 @@ export function registerTelebirrShadowVerificationSqlTests(
         } else {
           expect(row.definition, row.signature).toContain(
             'app.private_telebirr_shadow_mode_is_ready',
+          );
+          expect(row.definition, row.signature).not.toContain(
+            "date_trunc('milliseconds', pg_catalog.clock_timestamp())",
           );
         }
       }

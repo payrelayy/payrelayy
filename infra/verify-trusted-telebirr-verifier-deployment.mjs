@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -380,7 +384,8 @@ assert.match(productionHelper, /docker image inspect .*\.Id/);
 assert.match(productionHelper, /assert_verifier_container_absent/);
 assert.match(productionHelper, /^\s{2}status-inert\)$/m);
 assert.match(productionHelper, /^\s{2}emergency-stop\)$/m);
-assert.match(productionHelper, /docker container rm --force --time 10 -- "\$\{ids\[@\]\}"/);
+assert.match(productionHelper, /docker container rm --force -- "\$\{ids\[@\]\}"/);
+assert.doesNotMatch(productionHelper, /docker container rm[^\r\n]*--time\b/);
 assert.match(productionHelper, /timeout --signal=TERM --kill-after=5s 25s/);
 assert.match(productionHelper, /if ! timeout[\s\S]*?rescanning every exact labeled container/);
 assert.match(
@@ -433,6 +438,72 @@ assert.doesNotMatch(
   /helper \*$|\b(?:activate|activation-preflight|finalize|rollback|status-current)\b/m,
 );
 assert.doesNotMatch(productionSudoers, /REPLACE_WITH/);
+
+if (process.platform === 'linux') {
+  const execute = promisify(execFile);
+  const fixtureRoot = await mkdtemp(join(tmpdir(), 'fetanagent-verifier-emergency-'));
+  try {
+    const fixtureBin = join(fixtureRoot, 'bin');
+    const containerState = join(fixtureRoot, 'containers');
+    const dockerLog = join(fixtureRoot, 'docker.log');
+    const containerId = 'a'.repeat(64);
+    await mkdir(fixtureBin, { mode: 0o700 });
+    await writeFile(containerState, `${containerId}\n`, { mode: 0o600 });
+    await writeFile(dockerLog, '', { mode: 0o600 });
+    await writeFile(
+      join(fixtureBin, 'id'),
+      "#!/usr/bin/env bash\n[[ \"${1:-}\" == '-u' ]] || exit 64\nprintf '%s\\n' 0\n",
+      { mode: 0o700 },
+    );
+    await writeFile(join(fixtureBin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o700 });
+    await writeFile(
+      join(fixtureBin, 'docker'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >>"$FAKE_DOCKER_LOG"
+if [[ "$1" == 'container' && "$2" == 'ls' ]]; then
+  [[ "$*" == "container ls --all --quiet --filter label=com.docker.compose.project=fetanagent-production-trusted-telebirr-verifier --filter label=com.docker.compose.service=trusted-telebirr-verifier" ]] || exit 64
+  if [[ -s "$FAKE_DOCKER_STATE" ]]; then cat "$FAKE_DOCKER_STATE"; fi
+elif [[ "$1" == 'container' && "$2" == 'rm' ]]; then
+  [[ "$#" -eq 5 && "$3" == '--force' && "$4" == '--' && "$5" == '${containerId}' ]] || exit 65
+  : >"$FAKE_DOCKER_STATE"
+else
+  exit 66
+fi
+`,
+      { mode: 0o700 },
+    );
+    const fixtureHelper = join(fixtureRoot, 'helper.sh');
+    await writeFile(
+      fixtureHelper,
+      productionHelper.replace(
+        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        `PATH=${fixtureBin}:/usr/bin:/bin`,
+      ),
+      { mode: 0o700 },
+    );
+    await chmod(fixtureHelper, 0o700);
+    const result = await execute('bash', [fixtureHelper, 'emergency-stop'], {
+      env: {
+        ...process.env,
+        FAKE_DOCKER_LOG: dockerLog,
+        FAKE_DOCKER_STATE: containerState,
+      },
+      timeout: 10_000,
+    });
+    assert.equal(
+      result.stdout,
+      'Production trusted TeleBirr verifier: exact labeled service container absent.\n',
+    );
+    assert.equal(await readFile(containerState, 'utf8'), '');
+    const dockerCalls = (await readFile(dockerLog, 'utf8')).trim().split('\n');
+    assert.equal(dockerCalls.length, 5);
+    assert.equal(dockerCalls[1], `container rm --force -- ${containerId}`);
+    assert.equal(dockerCalls.filter((call) => call.startsWith('container ls ')).length, 4);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+}
 
 assert.match(productionTunnel, /db\.xzztugbgtulptnbpoelr\.supabase\.co/);
 assert.match(productionTunnel, /local_port" == '25432'/);

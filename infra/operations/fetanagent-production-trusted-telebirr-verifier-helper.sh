@@ -107,7 +107,7 @@ emergency_stop_verifier() {
     if [[ -n "$output" ]]; then mapfile -t ids <<<"$output"; fi
     if [[ "${#ids[@]}" -gt 0 ]]; then
       if ! timeout --signal=TERM --kill-after=5s 25s \
-        docker container rm --force --time 10 -- "${ids[@]}"; then
+        docker container rm --force -- "${ids[@]}"; then
         printf '%s\n' 'An emergency removal attempt failed; rescanning every exact labeled container.' >&2
       fi
     fi

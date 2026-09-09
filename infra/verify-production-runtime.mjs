@@ -118,6 +118,16 @@ assert.match(beta, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/u);
 
 const bot = childBlock(services, 'bot');
 assert.match(bot, /TELEGRAM_BOT_ENABLED: 'true'/u);
+assert.match(
+  bot,
+  /^      BOT_SUPPORT_CONTACT_URL: https:\/\/owner\.fetanagent\.com\/v1\/public\/support-contact\r?$/mu,
+  'the production bot must use the exact public support-contact URL',
+);
+assert.equal(
+  count(compose, /\bBOT_SUPPORT_CONTACT_URL\b/gu),
+  1,
+  'the public support-contact URL must occur only in the bot service',
+);
 assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(bot, /condition: service_healthy/u);

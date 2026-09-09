@@ -479,6 +479,55 @@ async function nextEventLoopTurn(): Promise<void> {
 }
 
 describe('Owner-control HTTP boundary', () => {
+  it('registers support configuration with verified Owner identity and no-store public projection', async () => {
+    const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'production'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        supportContact: {
+          get: async (actor) => {
+            calls.push(actor);
+            return baseline;
+          },
+          set: async (actor, username, revision) => {
+            calls.push([actor, username, revision]);
+            return {
+              telegramUsername: 'support_name',
+              revision: 1,
+              updatedAt: '2026-09-09T12:00:00.000Z',
+            };
+          },
+          publicContact: async () => ({ telegramUsername: null }),
+        },
+      }),
+    });
+    try {
+      const publicResponse = await app.inject('/v1/public/support-contact');
+      expect(publicResponse.statusCode).toBe(200);
+      expect(publicResponse.json()).toEqual({ supportContact: { telegramUsername: null } });
+      expect(publicResponse.headers['cache-control']).toBe('no-store, max-age=0');
+      expect(publicResponse.headers['access-control-allow-origin']).toBeUndefined();
+      expect((await app.inject('/v1/owner/support-contact')).statusCode).toBe(403);
+      expect(calls).toEqual([]);
+      const headers = { authorization: `Bearer ${bearer}`, origin: 'https://owner.fetanagent.com' };
+      const ownerResponse = await app.inject({ url: '/v1/owner/support-contact', headers });
+      expect(ownerResponse.statusCode).toBe(200);
+      expect(ownerResponse.json()).toEqual({ supportContact: baseline });
+      expect(ownerResponse.headers['cache-control']).toBe('no-store, max-age=0');
+      const saved = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/support-contact',
+        headers,
+        payload: { telegramUsername: '@Support_Name', expectedRevision: 0 },
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(calls).toEqual([authUserId, [authUserId, 'support_name', 0]]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('serves a no-store, loopback-only Owner page with strict browser policy', async () => {
     const app = buildOwnerControlApp(config(), { runtime: runtime() });
     const response = await app.inject({ method: 'GET', url: '/owner' });

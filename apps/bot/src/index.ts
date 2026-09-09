@@ -6,6 +6,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
+import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './telegram-support.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
@@ -80,6 +81,17 @@ async function deliverPlayerAction(
 }
 
 bot.on('message', async (context) => {
+  const supportOutcome = await handleTelegramSupportMessage(
+    {
+      text: 'text' in context.message ? context.message.text : undefined,
+      chat: context.chat ? { id: context.chat.id, type: context.chat.type } : undefined,
+      from: context.from ? { id: context.from.id, isBot: context.from.is_bot } : undefined,
+    },
+    config.supportContactUrl,
+    { reply: (text) => context.reply(text) },
+  );
+  if (supportOutcome === 'handled') return;
+
   if (betaAdmission.enabled) {
     const outcome = await handleTelegramBetaInviteMessage(
       {
@@ -127,7 +139,7 @@ bot.on('message', async (context) => {
     };
     const text = 'text' in context.message ? context.message.text : undefined;
     if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
-      await context.reply(telegramDepositHelpText());
+      await context.reply(`${telegramDepositHelpText()}\n${TELEGRAM_SUPPORT_HELP_TEXT}`);
       return;
     }
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });

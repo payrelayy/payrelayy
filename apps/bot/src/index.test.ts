@@ -20,6 +20,7 @@ const runtime = vi.hoisted(() => ({
 }));
 
 vi.mock('@fetanagent/config/bot', () => ({
+  BOT_PUBLIC_SUPPORT_CONTACT_URL: 'https://owner.fetanagent.com/v1/public/support-contact',
   loadBotConfig: () => runtime.config,
   redactedBotConfigForLog: () => ({ redacted: true }),
 }));
@@ -121,6 +122,7 @@ function botConfig(betaAdmissionEnabled: boolean, actionChannelEnabled: boolean)
     nodeEnv: 'test',
     logLevel: 'silent',
     telegram: { enabled: true, token: '123456:test-token' },
+    supportContactUrl: undefined as string | undefined,
     apiIngress: betaAdmissionEnabled
       ? { enabled: false, baseUrl: undefined, transportHmacSecret: undefined }
       : {
@@ -172,6 +174,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   signals.forEach((signal, index) => {
     for (const listener of process.rawListeners(signal)) {
       if (!signalListeners[index]?.includes(listener)) {
@@ -182,6 +185,62 @@ afterEach(() => {
 });
 
 describe('Telegram admission, private action, and ingress composition', () => {
+  it.each([
+    { beta: false, action: false },
+    { beta: true, action: false },
+    { beta: false, action: true },
+    { beta: true, action: true },
+  ])(
+    'handles public /support before every pipeline with beta=$beta action=$action',
+    async ({ beta, action }) => {
+      await loadComposition(beta, action);
+      const context = messageContext('/support');
+      await runtime.messageHandler!(context);
+      expect(context.replies[0]).toContain('support contact is not available');
+      expect(runtime.admissionCalls).toHaveLength(0);
+      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    },
+  );
+
+  it('looks up the configured contact without admission, action or inbound delivery', async () => {
+    const fetchContact = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ supportContact: { telegramUsername: 'help_team' } }));
+    vi.stubGlobal('fetch', fetchContact);
+    runtime.config = {
+      ...botConfig(true, true),
+      supportContactUrl: 'https://owner.fetanagent.com/v1/public/support-contact',
+    };
+    await import('./index.js');
+    const context = messageContext('/support');
+    await runtime.messageHandler!(context);
+    expect(context.replies[0]).toContain('https://t.me/help_team');
+    expect(runtime.admissionCalls).toHaveLength(0);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(fetchContact).toHaveBeenCalledOnce();
+  });
+
+  it('does not turn a group /support command into an inbox event', async () => {
+    await loadComposition(false, false);
+    const context = messageContext('/support');
+    await runtime.messageHandler!({ ...context, chat: { id: -123456789, type: 'group' } });
+    expect(context.replies).toHaveLength(0);
+    expect(runtime.admissionCalls).toHaveLength(0);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('adds support discoverability without replacing existing deposit help', async () => {
+    await loadComposition(false, true);
+    const context = messageContext('/help');
+    await runtime.messageHandler!(context);
+    expect(context.replies[0]).toContain('For app or account-access help, use /support.');
+    expect(context.replies[0]).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(context.replies[0]).toContain('/deposit_status');
+  });
+
   it.each([
     {
       betaAdmissionEnabled: false,

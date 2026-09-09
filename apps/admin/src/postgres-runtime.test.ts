@@ -59,7 +59,22 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     ).toThrow(OwnerControlPostgresRuntimeUnavailableError);
   });
 
-  it('allows exactly thirty-three reviewed Owner procedures including read-only connection status', () => {
+  it('keeps the three additive support procedures optional before migration without weakening the deny list', () => {
+    for (const signature of [
+      'app.get_owner_support_contact(uuid)',
+      'app.set_owner_support_contact(uuid,text,integer)',
+      'app.get_public_support_contact()',
+    ]) {
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+        `to_regprocedure('${signature}')::oid, 'execute'), true)`,
+      );
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+        `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
+      );
+    }
+  });
+
+  it('allows only the reviewed Owner procedures including read-only connection status and support configuration', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',
     );

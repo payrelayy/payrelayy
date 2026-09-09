@@ -98,6 +98,40 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
         </div>
 
+        <section class="review-section" aria-labelledby="support-contact-title">
+          <div class="panel-heading">
+            <h2 id="support-contact-title">Customer support</h2>
+            <button class="secondary" id="support-contact-refresh" type="button">Refresh saved contact</button>
+          </div>
+          <p class="receipt-label">
+            Choose the Telegram username customers can contact for help. Only this username is
+            published; this setting does not change any payment or account permissions.
+          </p>
+          <p class="request-meta" id="support-contact-saved">Sign in to load the saved contact.</p>
+          <form id="support-contact-form" autocomplete="off" novalidate>
+            <label for="support-contact-username">Public Telegram username (optional @)</label>
+            <input id="support-contact-username" name="telegramUsername" type="text"
+              maxlength="33" autocomplete="off" spellcheck="false" autocapitalize="none"
+              aria-describedby="support-contact-help support-contact-preview" />
+            <p class="receipt-label" id="support-contact-help">
+              Use 5–32 letters, digits, or underscores. Leave blank to disable the public contact.
+              Check the preview yourself before approving it; FetanAgent does not verify who owns it.
+            </p>
+            <p class="request-meta" id="support-contact-preview">No public contact will be published.</p>
+            <a id="support-contact-link" target="_blank" rel="noopener noreferrer" hidden>Check Telegram preview</a>
+            <label class="confirmation-row" for="support-contact-confirmation">
+              <input id="support-contact-confirmation" name="confirmation" type="checkbox" />
+              I checked the preview, control this username, and approve making it public; if blank,
+              I approve disabling the public contact.
+            </label>
+            <div class="actions">
+              <button id="support-contact-save" type="submit" disabled>Save support contact</button>
+              <button class="secondary" id="support-contact-clear" type="button">Clear draft / disable contact</button>
+            </div>
+          </form>
+          <p class="request-meta" id="support-contact-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+        </section>
+
         <section class="review-section" aria-labelledby="player-review-title">
           <div class="panel-heading">
             <div>
@@ -583,6 +617,16 @@ const inviteForm = document.querySelector('#invite-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
+const supportContactForm = document.querySelector('#support-contact-form');
+const supportContactUsername = document.querySelector('#support-contact-username');
+const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
+const supportContactSave = document.querySelector('#support-contact-save');
+const supportContactClear = document.querySelector('#support-contact-clear');
+const supportContactRefresh = document.querySelector('#support-contact-refresh');
+const supportContactSaved = document.querySelector('#support-contact-saved');
+const supportContactPreview = document.querySelector('#support-contact-preview');
+const supportContactLink = document.querySelector('#support-contact-link');
+const supportContactFeedback = document.querySelector('#support-contact-feedback');
 const notice = document.querySelector('#notice');
 const receipt = document.querySelector('#invite-receipt');
 const inviteOutput = document.querySelector('#invite-url');
@@ -659,6 +703,12 @@ let accessTokenRefreshAt;
 let ownerRefreshTimer;
 let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
+let supportContactRevision;
+let supportContactSavedUsername;
+let supportContactRequest = 0;
+let supportContactLoading = false;
+let supportContactSaving = false;
+let supportContactDirty = false;
 let pendingKemerbetReadinessCohortRequestId;
 let currentInvite;
 let currentPilot;
@@ -970,6 +1020,207 @@ function setNotice(message) {
 function setBusy(form, busy) {
   form.dataset.ownerBusy = busy ? 'true' : 'false';
   for (const element of form.elements) element.disabled = busy;
+}
+
+function normalizedSupportUsername(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const username = trimmed.startsWith('@') ? trimmed.slice(1) : trimmed;
+  return /^[A-Za-z0-9_]{5,32}$/.test(username) ? username.toLowerCase() : undefined;
+}
+
+function setSupportContactFeedback(message) {
+  supportContactFeedback.textContent = message;
+  supportContactFeedback.hidden = !message;
+}
+
+function updateSupportContactControls() {
+  setBusy(supportContactForm, supportContactSaving);
+  supportContactRefresh.disabled = !accessToken || supportContactLoading || supportContactSaving;
+  supportContactSave.disabled = !accessToken || supportContactLoading || supportContactSaving ||
+    supportContactRevision === undefined || !supportContactConfirmation.checked ||
+    normalizedSupportUsername(supportContactUsername.value) === undefined;
+}
+
+function renderSupportContactPreview() {
+  const username = normalizedSupportUsername(supportContactUsername.value);
+  supportContactLink.hidden = !username;
+  supportContactLink.removeAttribute('href');
+  supportContactLink.textContent = '';
+  supportContactPreview.textContent = username === undefined
+    ? 'Invalid username: use 5–32 ASCII letters, digits, or underscores, with an optional @.'
+    : username === null ? 'No public contact will be published.' : 'Public link preview:';
+  if (username) {
+    const link = 'https://t.me/' + username;
+    supportContactLink.href = link;
+    supportContactLink.textContent = link;
+  }
+  updateSupportContactControls();
+}
+
+function clearSupportContact() {
+  supportContactRequest += 1;
+  supportContactRevision = undefined;
+  supportContactSavedUsername = undefined;
+  supportContactLoading = false;
+  supportContactSaving = false;
+  supportContactDirty = false;
+  supportContactUsername.value = '';
+  supportContactConfirmation.checked = false;
+  supportContactSaved.textContent = 'Sign in to load the saved contact.';
+  setSupportContactFeedback('');
+  renderSupportContactPreview();
+}
+
+function validSupportContact(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).join(',') !== 'supportContact') return false;
+  const value = payload.supportContact;
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'revision,telegramUsername,updatedAt' ||
+      !Number.isSafeInteger(value.revision) || value.revision < 0 ||
+      (value.telegramUsername !== null && (typeof value.telegramUsername !== 'string' ||
+        !/^[a-z0-9_]{5,32}$/.test(value.telegramUsername)))) return false;
+  if (value.revision === 0) return value.telegramUsername === null && value.updatedAt === null;
+  return typeof value.updatedAt === 'string' &&
+    Number.isFinite(Date.parse(value.updatedAt)) &&
+    new Date(value.updatedAt).toISOString() === value.updatedAt;
+}
+
+function renderSavedSupportContact(value) {
+  supportContactRevision = value.revision;
+  supportContactSavedUsername = value.telegramUsername;
+  supportContactSaved.textContent = 'Last confirmed saved contact: ' +
+    (value.telegramUsername === null ? 'not configured (disabled)' : '@' + value.telegramUsername) +
+    '. Revision ' + value.revision +
+    (value.updatedAt === null ? '.' : '. Updated ' + new Date(value.updatedAt).toLocaleString() + '.');
+}
+
+async function supportContactRequestForSession(generation, init) {
+  await ensureFreshOwnerAccessToken();
+  if (generation !== ownerAuthGeneration || !accessToken) throw new Error('signed_out');
+  const request = await beginDeadlineFetch('/v1/owner/support-contact', {
+    ...init,
+    cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + accessToken },
+  }, OWNER_API_REQUEST_TIMEOUT_MS);
+  if (generation !== ownerAuthGeneration || !accessToken) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    throw new Error('signed_out');
+  }
+  if (request.response.status !== 200) {
+    request.deadline.cancel();
+    request.deadline.finish();
+    if (request.response.status === 401 || request.response.status === 403) {
+      signOut('Your session is unavailable or is not an active Owner.');
+      throw new Error('signed_out');
+    }
+    return { status: request.response.status };
+  }
+  const payload = await deadlineBoundResponse(request.response, request.deadline).json();
+  return { status: 200, payload };
+}
+
+async function loadSupportContact() {
+  if (!accessToken || supportContactLoading || supportContactSaving) return;
+  const generation = ownerAuthGeneration;
+  const requestId = ++supportContactRequest;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === supportContactRequest && !!accessToken;
+  supportContactLoading = true;
+  supportContactRevision = undefined;
+  supportContactConfirmation.checked = false;
+  setSupportContactFeedback('Loading saved support contact…');
+  updateSupportContactControls();
+  try {
+    const result = await supportContactRequestForSession(generation, { method: 'GET' });
+    if (!current()) return;
+    if (result.status !== 200 || !validSupportContact(result.payload)) throw new Error('unavailable');
+    renderSavedSupportContact(result.payload.supportContact);
+    if (!supportContactDirty) {
+      supportContactUsername.value = result.payload.supportContact.telegramUsername ?? '';
+      supportContactConfirmation.checked = false;
+    }
+    setSupportContactFeedback(supportContactDirty
+      ? 'Saved contact refreshed. Your unsaved draft has been kept; review it before saving.'
+      : 'Saved support contact loaded.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      setSupportContactFeedback('Support contact is temporarily unavailable. Refresh saved contact before saving.');
+    }
+  } finally {
+    if (current()) {
+      supportContactLoading = false;
+      renderSupportContactPreview();
+    }
+  }
+}
+
+async function saveSupportContact() {
+  if (!accessToken || supportContactLoading || supportContactSaving) return;
+  const username = normalizedSupportUsername(supportContactUsername.value);
+  if (username === undefined) {
+    setSupportContactFeedback('Invalid username. Enter 5–32 ASCII letters, digits, or underscores, not a URL.');
+    return;
+  }
+  if (!supportContactConfirmation.checked) {
+    setSupportContactFeedback('Check the preview and confirm that you approve publishing or disabling this contact.');
+    return;
+  }
+  if (supportContactRevision === undefined) {
+    setSupportContactFeedback('Refresh saved contact before saving.');
+    return;
+  }
+  const generation = ownerAuthGeneration;
+  const requestId = ++supportContactRequest;
+  const expectedRevision = supportContactRevision;
+  const previousUsername = supportContactSavedUsername;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === supportContactRequest && !!accessToken;
+  supportContactSaving = true;
+  setSupportContactFeedback('Saving support contact…');
+  updateSupportContactControls();
+  try {
+    const result = await supportContactRequestForSession(generation, {
+      method: 'POST', body: JSON.stringify({ telegramUsername: username, expectedRevision }),
+    });
+    if (!current()) return;
+    if (result.status === 400) {
+      setSupportContactFeedback('The username was not accepted. Check the username and your confirmation, then try again.');
+      return;
+    }
+    if (result.status === 409) {
+      supportContactRevision = undefined;
+      supportContactConfirmation.checked = false;
+      setSupportContactFeedback('The saved contact changed elsewhere. Refresh saved contact, review your draft, and save again.');
+      return;
+    }
+    if (result.status !== 200 || !validSupportContact(result.payload) ||
+        result.payload.supportContact.telegramUsername !== username ||
+        result.payload.supportContact.revision < expectedRevision ||
+        (result.payload.supportContact.revision === expectedRevision && username !== previousUsername)) {
+      throw new Error('unconfirmed');
+    }
+    renderSavedSupportContact(result.payload.supportContact);
+    supportContactDirty = false;
+    supportContactUsername.value = username ?? '';
+    supportContactConfirmation.checked = false;
+    setSupportContactFeedback(username === null
+      ? 'Saved. The public support contact is disabled.'
+      : 'Saved. The public support link is https://t.me/' + username + '.');
+  } catch (error) {
+    if (current() && !isSignedOutError(error)) {
+      supportContactRevision = undefined;
+      supportContactConfirmation.checked = false;
+      setSupportContactFeedback('Saving could not be confirmed. Refresh saved contact before retrying; your draft has been kept.');
+    }
+  } finally {
+    if (current()) {
+      supportContactSaving = false;
+      renderSupportContactPreview();
+    }
+  }
 }
 
 function clearInvite() {
@@ -1292,6 +1543,7 @@ function signOut(message = 'Signed out.') {
   clearPlayerEligibility();
   clearKemerbetReadinessCohort();
   clearReceivers();
+  clearSupportContact();
   clearKemerbetAgentProfiles();
   clearCompanionDevicePairingPackage();
   companionDevicePairingConfirmation.checked = false;
@@ -3938,7 +4190,7 @@ async function loadOwnerDashboardAfterAuthentication(successNotice) {
   invitePanel.hidden = false;
   setNotice(successNotice);
   try {
-    await loadOwnerPlayerQueues();
+    await Promise.all([loadOwnerPlayerQueues(), loadSupportContact()]);
   } catch (error) {
     // Authentication and dashboard hydration are separate boundaries. A transient read failure
     // must not discard a valid, rotating Owner session or misreport it as a password failure.
@@ -4119,6 +4371,27 @@ logoutButton.addEventListener('click', async () => {
   signOut();
 });
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
+supportContactRefresh.addEventListener('click', loadSupportContact);
+supportContactUsername.addEventListener('input', () => {
+  supportContactDirty = true;
+  supportContactConfirmation.checked = false;
+  setSupportContactFeedback('');
+  renderSupportContactPreview();
+});
+supportContactConfirmation.addEventListener('change', updateSupportContactControls);
+supportContactClear.addEventListener('click', () => {
+  if (supportContactSaving) return;
+  supportContactUsername.value = '';
+  supportContactDirty = true;
+  supportContactConfirmation.checked = false;
+  setSupportContactFeedback('Draft cleared. Confirm and save to disable the public contact. Nothing has been saved yet.');
+  renderSupportContactPreview();
+  supportContactConfirmation.focus();
+});
+supportContactForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await saveSupportContact();
+});
 kemerbetReadinessCohortConfirmation.addEventListener(
   'change',
   updateKemerbetReadinessCohortAvailability,

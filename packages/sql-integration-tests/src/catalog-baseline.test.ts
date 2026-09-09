@@ -18,6 +18,7 @@ import { applyMigrationsLexically, listMigrationsLexically } from './migration-r
 import { registerOwnerKemerbetAgentProfileControlSqlTests } from './owner-kemerbet-agent-profile-control.suite.js';
 import { registerOwnerKemerbetReadinessCohortSqlTests } from './owner-kemerbet-readiness-cohort.suite.js';
 import { registerOwnerReceiverAccountControlSqlTests } from './owner-receiver-account-control.suite.js';
+import { registerOwnerSupportContactSqlTests } from './owner-support-contact.suite.js';
 import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
@@ -9581,6 +9582,11 @@ registerOwnerReceiverAccountControlSqlTests(
 registerOwnerKemerbetAgentProfileControlSqlTests(
   () => client,
   () => ownerAdminId,
+);
+registerOwnerSupportContactSqlTests(
+  () => client,
+  () => ownerAdminId,
+  () => createSqlIntegrationClient(environment),
 );
 registerOwnerKemerbetReadinessCohortSqlTests(
   () => client,

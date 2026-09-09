@@ -198,6 +198,12 @@ function ownerBrowserHarness(
   const password = element('#password');
   element('#login-form').elements = namedElements({ email, password });
   element('#invite-form').elements = namedElements({ expiry: new FakeElement() });
+  element('#support-contact-form').elements = namedElements({
+    telegramUsername: element('#support-contact-username'),
+    confirmation: element('#support-contact-confirmation'),
+    save: element('#support-contact-save'),
+    clear: element('#support-contact-clear'),
+  });
   element('#receiver-form').elements = namedElements({
     accountHolderName: element('#receiver-holder-name'),
     accountReference: element('#receiver-account-reference'),
@@ -320,6 +326,437 @@ function ownerBrowserHarness(
     },
   };
 }
+
+describe('Owner customer support contact', () => {
+  const contact = (telegramUsername: string | null = null, revision = 0) => ({
+    supportContact: {
+      telegramUsername,
+      revision,
+      updatedAt: revision === 0 ? null : '2026-09-09T12:00:00.000Z',
+    },
+  });
+  const edit = async (browser: ReturnType<typeof ownerBrowserHarness>, value: string) => {
+    browser.element('#support-contact-username').value = value;
+    await browser.element('#support-contact-username').listeners.get('input')?.({
+      preventDefault() {},
+    });
+  };
+  const confirm = async (browser: ReturnType<typeof ownerBrowserHarness>) => {
+    browser.element('#support-contact-confirmation').checked = true;
+    await browser.element('#support-contact-confirmation').listeners.get('change')?.({
+      preventDefault() {},
+    });
+  };
+
+  it('loads only after sign-in, normalizes an approved username, and confirms the acknowledged link', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/support-contact'
+          ? response(200, init.method === 'POST' ? contact('help_team', 1) : contact())
+          : undefined,
+    });
+    expect(browser.fetchCalls).toHaveLength(0);
+    await browser.signIn();
+    expect(browser.element('#support-contact-saved').textContent).toContain('not configured');
+    await edit(browser, '  @Help_Team  ');
+    expect(browser.element('#support-contact-link').href).toBe('https://t.me/help_team');
+    expect(browser.element('#support-contact-save').disabled).toBe(true);
+    await browser.call('saveSupportContact');
+    expect(browser.element('#support-contact-feedback').textContent).toContain('confirm');
+    expect(
+      browser.fetchCalls.filter(
+        ({ init }) => init.method === 'POST' && String(init.body).includes('expectedRevision'),
+      ),
+    ).toHaveLength(0);
+    await confirm(browser);
+    await browser.element('#support-contact-form').listeners.get('submit')?.({
+      preventDefault() {},
+    });
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      telegramUsername: 'help_team',
+      expectedRevision: 0,
+    });
+    expect(save?.init).toMatchObject({
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+    expect(browser.element('#support-contact-feedback').textContent).toBe(
+      'Saved. The public support link is https://t.me/help_team.',
+    );
+    expect(browser.element('#support-contact-saved').textContent).toContain(
+      '@help_team. Revision 1',
+    );
+    expect(browser.element('#support-contact-confirmation').checked).toBe(false);
+  });
+
+  it.each([
+    '@',
+    'abcd',
+    'a'.repeat(33),
+    'https://t.me/helper',
+    '@@helper',
+    '<script>',
+    'a bcd',
+    'help\nteam',
+    'Kelvin',
+    'équipe',
+  ])('rejects invalid input %j without a request or link', async (value) => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/support-contact' ? response(200, contact()) : undefined,
+    });
+    await browser.signIn();
+    await edit(browser, value);
+    await confirm(browser);
+    await browser.call('saveSupportContact');
+    expect(browser.element('#support-contact-link').href).toBe('');
+    expect(browser.element('#support-contact-link').hidden).toBe(true);
+    expect(browser.element('#support-contact-feedback').textContent).toContain('Invalid username');
+    expect(
+      browser.fetchCalls.filter(
+        ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('clears only the draft until explicitly approved and acknowledged as null', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/support-contact'
+          ? response(200, init.method === 'POST' ? contact(null, 4) : contact('existing_team', 3))
+          : undefined,
+    });
+    await browser.signIn();
+    await browser.element('#support-contact-clear').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    expect(browser.element('#support-contact-saved').textContent).toContain('@existing_team');
+    expect(browser.element('#support-contact-feedback').textContent).toContain(
+      'Nothing has been saved yet',
+    );
+    expect(browser.element('#support-contact-save').disabled).toBe(true);
+    await confirm(browser);
+    await browser.call('saveSupportContact');
+    const save = browser.fetchCalls.find(
+      ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+    );
+    expect(JSON.parse(String(save?.init.body))).toEqual({
+      telegramUsername: null,
+      expectedRevision: 3,
+    });
+    expect(browser.element('#support-contact-feedback').textContent).toBe(
+      'Saved. The public support contact is disabled.',
+    );
+    expect(browser.element('#support-contact-link').href).toBe('');
+  });
+
+  it.each([true, false])(
+    'accepts a same-revision acknowledgement only for an unchanged saved value (%s)',
+    async (unchanged) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url, init) =>
+          url === '/v1/owner/support-contact'
+            ? response(
+                200,
+                init.method === 'POST'
+                  ? contact('help_team', 2)
+                  : contact(unchanged ? 'help_team' : 'old_team', 2),
+              )
+            : undefined,
+      });
+      await browser.signIn();
+      await edit(browser, 'help_team');
+      await confirm(browser);
+      await browser.call('saveSupportContact');
+      expect(browser.element('#support-contact-feedback').textContent).toContain(
+        unchanged ? 'Saved. The public support link' : 'could not be confirmed',
+      );
+    },
+  );
+
+  it('keeps edits made while loading and requires a fresh confirmation after refresh', async () => {
+    let release: ((value: ReturnType<typeof response>) => void) | undefined;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/support-contact'
+          ? new Promise((resolve) => {
+              release = resolve;
+            })
+          : undefined,
+    });
+    const login = browser.signIn();
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await edit(browser, '@unsaved_draft');
+    release?.(response(200, contact('saved_team', 2)));
+    await login;
+    await vi.waitFor(() =>
+      expect(browser.element('#support-contact-saved').textContent).toContain('@saved_team'),
+    );
+    expect(browser.element('#support-contact-username').value).toBe('@unsaved_draft');
+    expect(browser.element('#support-contact-saved').textContent).toContain('@saved_team');
+    expect(browser.element('#support-contact-feedback').textContent).toContain(
+      'unsaved draft has been kept',
+    );
+    await confirm(browser);
+    const previousRelease = release;
+    const refresh = browser.call('loadSupportContact');
+    await vi.waitFor(() => expect(release).not.toBe(previousRelease));
+    expect(browser.element('#support-contact-confirmation').checked).toBe(false);
+    release?.(response(200, contact('other_team', 3)));
+    await refresh;
+    expect(browser.element('#support-contact-username').value).toBe('@unsaved_draft');
+    expect(browser.element('#support-contact-save').disabled).toBe(true);
+  });
+
+  it.each([400, 409, 503])(
+    'reports save status %s beside the form without false success or server details',
+    async (status) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url, init) =>
+          url === '/v1/owner/support-contact'
+            ? init.method === 'POST'
+              ? {
+                  ...response(status, { error: 'private-server-detail' }),
+                  json: () => new Promise(() => {}),
+                }
+              : response(200, contact())
+            : undefined,
+      });
+      await browser.signIn();
+      await edit(browser, 'help_team');
+      await confirm(browser);
+      await browser.call('saveSupportContact');
+      const message = browser.element('#support-contact-feedback').textContent;
+      expect(message).toContain(
+        status === 400
+          ? 'not accepted'
+          : status === 409
+            ? 'changed elsewhere'
+            : 'could not be confirmed',
+      );
+      expect(message).not.toMatch(/Saved\.|private-server-detail/);
+      expect(browser.element('#support-contact-username').value).toBe('help_team');
+      expect(browser.element('#support-contact-saved').textContent).toContain('not configured');
+      const save = browser.fetchCalls.find(
+        ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+      );
+      expect(save?.init.signal?.aborted).toBe(true);
+      if (status !== 400) {
+        await confirm(browser);
+        await browser.call('saveSupportContact');
+        expect(
+          browser.fetchCalls.filter(
+            ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+          ),
+        ).toHaveLength(1);
+      }
+    },
+  );
+
+  it.each(['headers', 'body'] as const)(
+    'times out stalled save %s, blocks duplicate submission, and preserves the draft',
+    async (stage) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url, init) =>
+          url === '/v1/owner/support-contact'
+            ? init.method === 'POST'
+              ? stage === 'headers'
+                ? new Promise(() => {})
+                : { ...response(200, {}), json: () => new Promise(() => {}) }
+              : response(200, contact())
+            : undefined,
+      });
+      await browser.signIn();
+      await edit(browser, 'help_team');
+      await confirm(browser);
+      const save = browser.call('saveSupportContact');
+      await vi.waitFor(() =>
+        expect(
+          browser.fetchCalls.some(
+            ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+          ),
+        ).toBe(true),
+      );
+      await browser.call('saveSupportContact');
+      expect(browser.element('#support-contact-form').dataset.ownerBusy).toBe('true');
+      browser.expireLatestTimer(25_000);
+      await save;
+      expect(
+        browser.fetchCalls.filter(
+          ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+        ),
+      ).toHaveLength(1);
+      expect(browser.element('#support-contact-feedback').textContent).toContain(
+        'could not be confirmed',
+      );
+      expect(browser.element('#support-contact-form').dataset.ownerBusy).toBe('false');
+      expect(browser.element('#support-contact-username').value).toBe('help_team');
+      expect(browser.element('#support-contact-save').disabled).toBe(true);
+    },
+  );
+
+  it.each([
+    contact('wrong_team', 1),
+    contact('https://evil.example', 1),
+    contact('help_team', -1),
+    { supportContact: { ...contact('help_team', 1).supportContact, extra: 'private' } },
+    { supportContact: { ...contact('help_team', 1).supportContact, updatedAt: 'invalid' } },
+  ])('rejects a malformed or mismatching success acknowledgement %#', async (payload) => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) =>
+        url === '/v1/owner/support-contact'
+          ? response(200, init.method === 'POST' ? payload : contact())
+          : undefined,
+    });
+    await browser.signIn();
+    await edit(browser, 'help_team');
+    await confirm(browser);
+    await browser.call('saveSupportContact');
+    expect(browser.element('#support-contact-feedback').textContent).toContain(
+      'could not be confirmed',
+    );
+    expect(browser.element('#support-contact-saved').textContent).toContain('not configured');
+  });
+
+  it.each([200, 403])(
+    'ignores old-session save status %s after sign-out and a new sign-in',
+    async (status) => {
+      let release: ((value: ReturnType<typeof response>) => void) | undefined;
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url, init) =>
+          url === '/v1/owner/support-contact'
+            ? init.method === 'POST'
+              ? new Promise((resolve) => {
+                  release = resolve;
+                })
+              : response(200, contact())
+            : undefined,
+      });
+      await browser.signIn();
+      await edit(browser, 'help_team');
+      await confirm(browser);
+      const save = browser.call('saveSupportContact');
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      await browser.call('signOut');
+      expect(browser.element('#support-contact-username').value).toBe('');
+      expect(browser.element('#support-contact-link').href).toBe('');
+      await browser.signIn();
+      release?.(response(status, contact('help_team', 1)));
+      await save;
+      expect(browser.element('#invite-panel').hidden).toBe(false);
+      expect(browser.element('#support-contact-saved').textContent).toContain('not configured');
+      expect(browser.element('#support-contact-feedback').textContent).toBe(
+        'Saved support contact loaded.',
+      );
+    },
+  );
+
+  it('fails closed on a current-session forbidden response', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => (url === '/v1/owner/support-contact' ? response(403, {}) : undefined),
+    });
+    await browser.signIn();
+    expect(browser.evaluate('accessToken')).toBeUndefined();
+    expect(browser.element('#invite-panel').hidden).toBe(true);
+    expect(browser.element('#support-contact-saved').textContent).toBe(
+      'Sign in to load the saved contact.',
+    );
+  });
+
+  it.each([
+    response(503, {}),
+    response(200, { supportContact: { telegramUsername: 'bad://url' } }),
+  ])(
+    'does not enable saving when the initial saved contact cannot be verified %#',
+    async (result) => {
+      const browser = ownerBrowserHarness(503, {
+        fetchOverride: (url) => (url === '/v1/owner/support-contact' ? result : undefined),
+      });
+      await browser.signIn();
+      await edit(browser, 'help_team');
+      await confirm(browser);
+      await browser.call('saveSupportContact');
+      expect(browser.element('#support-contact-save').disabled).toBe(true);
+      expect(browser.element('#support-contact-refresh').disabled).toBe(false);
+      expect(browser.element('#support-contact-feedback').textContent).toBe(
+        'Refresh saved contact before saving.',
+      );
+      expect(
+        browser.fetchCalls.filter(
+          ({ url, init }) => url === '/v1/owner/support-contact' && init.method === 'POST',
+        ),
+      ).toHaveLength(0);
+    },
+  );
+
+  it('uses the refreshed revision after a conflict, retains the draft, and requires renewed approval', async () => {
+    let revision = 3;
+    let saves = 0;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url, init) => {
+        if (url !== '/v1/owner/support-contact') return undefined;
+        if (init.method === 'POST') {
+          saves += 1;
+          if (saves === 1) {
+            revision = 4;
+            return response(409, {});
+          }
+          expect(JSON.parse(String(init.body))).toEqual({
+            telegramUsername: 'my_draft',
+            expectedRevision: 4,
+          });
+          return response(200, contact('my_draft', 5));
+        }
+        return response(200, contact('saved_team', revision));
+      },
+    });
+    await browser.signIn();
+    await edit(browser, 'my_draft');
+    await confirm(browser);
+    await browser.call('saveSupportContact');
+    await browser.call('loadSupportContact');
+    expect(browser.element('#support-contact-username').value).toBe('my_draft');
+    expect(browser.element('#support-contact-confirmation').checked).toBe(false);
+    await browser.call('saveSupportContact');
+    expect(saves).toBe(1);
+    await confirm(browser);
+    await browser.call('saveSupportContact');
+    expect(saves).toBe(2);
+    expect(browser.element('#support-contact-saved').textContent).toContain('Revision 5');
+  });
+
+  it('ignores an old load after sign-out without restoring private controls', async () => {
+    let release: ((value: ReturnType<typeof response>) => void) | undefined;
+    let pending = false;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/support-contact'
+          ? pending
+            ? new Promise((resolve) => {
+                release = resolve;
+              })
+            : response(200, contact())
+          : undefined,
+    });
+    await browser.signIn();
+    pending = true;
+    const load = browser.call('loadSupportContact');
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await browser.call('signOut');
+    release?.(response(200, contact('old_team', 2)));
+    await load;
+    expect(browser.element('#support-contact-username').value).toBe('');
+    expect(browser.element('#support-contact-saved').textContent).toBe(
+      'Sign in to load the saved contact.',
+    );
+    expect(browser.element('#support-contact-save').disabled).toBe(true);
+    expect(browser.element('#support-contact-feedback').textContent).toBe('');
+  });
+});
 
 describe('Owner dashboard browser authentication boundary', () => {
   it.each([

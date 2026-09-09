@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 
 import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import Fastify, { LogController } from 'fastify';
+import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
 
 import {
@@ -434,6 +435,12 @@ export function buildOwnerControlApp(
     );
     return verified.authUserId;
   }
+
+  registerSupportContactRoutes(app, {
+    supportContact: dependencies.runtime.supportContact,
+    ownerSubject,
+    mutationOrigins: privatePilotMutationOrigins,
+  });
 
   async function interactiveOwnerSubject(rawHeaders: readonly string[]): Promise<string> {
     const token = bearerTokenFromRawHeaders(rawHeaders);

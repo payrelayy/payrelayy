@@ -360,6 +360,7 @@ services:
       LOG_LEVEL: info
       FINANCIAL_ACTIONS_MODE: dry_run
       TELEGRAM_BOT_ENABLED: 'true'
+      BOT_SUPPORT_CONTACT_URL: https://owner.fetanagent.com/v1/public/support-contact
       TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
       BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'

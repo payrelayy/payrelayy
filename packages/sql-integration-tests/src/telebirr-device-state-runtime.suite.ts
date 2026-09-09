@@ -720,12 +720,13 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
 
         const proof = await createLiveProof(client, pilot);
         await stageProof(client, proof.id);
+        const leaseRequestKey = randomUUID();
         const lease = await client.query<LeaseRow>(
           `select *
              from app.lease_private_live_telebirr_assignment_broker(
                $1::uuid, $2::text, $3::uuid, 120
              )`,
-          [paired.enrollmentId, 'sql-telebirr-device-state-01', randomUUID()],
+          [paired.enrollmentId, 'sql-telebirr-device-state-01', leaseRequestKey],
         );
         expect(lease.rows).toHaveLength(1);
         const assignment = lease.rows[0]!;
@@ -850,6 +851,62 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           observations: before.rows[0]!.observations,
           outcomes: before.rows[0]!.outcomes,
         });
+
+        await client.query('set local role fetanagent_trusted_telebirr_verifier');
+        try {
+          const loaded = await client.query<{
+            readonly completion_request_key: string;
+            readonly lease_token: string;
+            readonly observation_body_digest: string;
+            readonly signed_assignment: Record<string, unknown>;
+            readonly signed_observation: Record<string, unknown>;
+            readonly verification_attempt_id: string;
+          }>('select * from app.load_next_private_live_telebirr_staged_evidence()');
+          expect(loaded.rows).toEqual([
+            {
+              verification_attempt_id: assignment.verification_attempt_id,
+              lease_token: assignment.lease_token,
+              completion_request_key: leaseRequestKey,
+              observation_body_digest: observationBodyDigest,
+              signed_assignment: signedAssignment,
+              signed_observation: signedObservation,
+            },
+          ]);
+
+          const quarantined = await client.query<{ readonly quarantined: boolean }>(
+            `select app.quarantine_private_live_telebirr_staged_evidence(
+               $1::uuid, $2::uuid, $3::text, 'trusted_evidence_invalid'
+             ) as quarantined`,
+            [assignment.verification_attempt_id, assignment.lease_token, observationBodyDigest],
+          );
+          expect(quarantined.rows).toEqual([{ quarantined: true }]);
+          const replayedQuarantine = await client.query<{ readonly quarantined: boolean }>(
+            `select app.quarantine_private_live_telebirr_staged_evidence(
+               $1::uuid, $2::uuid, $3::text, 'trusted_evidence_invalid'
+             ) as quarantined`,
+            [assignment.verification_attempt_id, assignment.lease_token, observationBodyDigest],
+          );
+          expect(replayedQuarantine.rows).toEqual([{ quarantined: true }]);
+          expect(
+            (
+              await client.query(
+                'select * from app.load_next_private_live_telebirr_staged_evidence()',
+              )
+            ).rows,
+          ).toEqual([]);
+        } finally {
+          await client.query('reset role');
+        }
+
+        const quarantine = await client.query<{ readonly quarantines: string }>(
+          `select count(*)::text as quarantines
+             from app.private_live_telebirr_verifier_evidence_quarantine
+            where verification_attempt_id = $1::uuid
+              and observation_body_digest = $2::text
+              and reason_code = 'trusted_evidence_invalid'`,
+          [assignment.verification_attempt_id, observationBodyDigest],
+        );
+        expect(quarantine.rows).toEqual([{ quarantines: '1' }]);
       });
     });
 

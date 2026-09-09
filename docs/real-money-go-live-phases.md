@@ -546,6 +546,10 @@ logs, screenshots, or ordinary database columns.
 9. Compose the trusted verifier as a separate dedicated service with its pinned signer/device public
    keys, direct verify-full PostgreSQL connection, singleton behavior, bounded role validity, and no
    public ingress.
+   **Database-consumer source-complete, not activated:** the repository contains the guarded
+   staged-evidence worker, loopback-only health/readiness, bounded signal shutdown, immutable image
+   target, explicit-profile Compose contract, tests, and inert image smoke. It still has no runtime
+   credential, production composition/deployment command, or enabled financial gate.
 10. Provision its short-lived dedicated database LOGIN outside Git.
 11. Prove the Android device and backend reject stale leases, revoked keys/devices, wrong receiver,
     wrong reference, unsupported layout, ambiguous status, unavailable provider, and replay.

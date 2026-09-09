@@ -328,15 +328,10 @@ function pinnedKeyMap(
   return result;
 }
 
-function requestFrom(value: unknown):
-  | Readonly<{
-      verificationAttemptId: string;
-      leaseToken: string;
-      completionRequestKey: string;
-      signedAssignment: TelebirrLivePilotSignedAssignment;
-      signedObservation: TelebirrLivePilotSignedObservation;
-    }>
-  | undefined {
+/** Strictly decode one database-sourced verifier request before any authority read or completion. */
+export function decodeTrustedTelebirrVerificationRequest(
+  value: unknown,
+): TrustedTelebirrVerificationRequest | undefined {
   const record = exactDataRecord(value, REQUEST_KEYS);
   if (
     !record ||
@@ -354,6 +349,7 @@ function requestFrom(value: unknown):
   const signedObservation = decodeTelebirrLivePilotSignedObservation(record.signedObservation);
   return signedAssignment && signedObservation
     ? Object.freeze({
+        contractVersion: TRUSTED_TELEBIRR_VERIFIER_CONTRACT_VERSION,
         verificationAttemptId: record.verificationAttemptId,
         leaseToken: record.leaseToken,
         completionRequestKey: record.completionRequestKey,
@@ -834,7 +830,7 @@ export function createTrustedTelebirrVerifier(
   return Object.freeze({
     async verifyAndComplete(requestCandidate: TrustedTelebirrVerificationRequest) {
       try {
-        const request = requestFrom(requestCandidate);
+        const request = decodeTrustedTelebirrVerificationRequest(requestCandidate);
         if (!request) throw new Error();
         const observation = request.signedObservation.body;
         const occurredAt =

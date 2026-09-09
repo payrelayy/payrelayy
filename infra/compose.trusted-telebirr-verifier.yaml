@@ -1,0 +1,95 @@
+name: fetanagent-trusted-telebirr-verifier
+
+# This service is absent from ordinary `docker compose up`. It can start only when the explicit
+# profile, immutable image reference, three exact runtime gates, and three root-managed input files
+# are all supplied. It publishes no port; its only work ingress is the exact database staging reader.
+services:
+  trusted-telebirr-verifier:
+    profiles: [trusted-telebirr-verifier]
+    platform: linux/amd64
+    image: ${FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_IMAGE_REFERENCE:?set the reviewed repository@sha256 immutable image reference}
+    pull_policy: always
+    init: true
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.50
+    stop_signal: SIGTERM
+    stop_grace_period: 20s
+    deploy:
+      replicas: 1
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: ${FETANAGENT_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE:?set live only for a separately reviewed activation}
+      INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: ${FETANAGENT_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED:?set true only for a separately reviewed activation}
+      TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: ${FETANAGENT_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED:?set true only for a separately reviewed activation}
+      TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: staging
+      TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE: /run/secrets/trusted_telebirr_verifier_database_url
+      TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE: /run/configs/trusted_telebirr_verifier_pins.v1.json
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      HTTP_PROXY: ''
+      http_proxy: ''
+      HTTPS_PROXY: ''
+      https_proxy: ''
+      NO_PROXY: ''
+      no_proxy: ''
+      FTP_PROXY: ''
+      ftp_proxy: ''
+      ALL_PROXY: ''
+      all_proxy: ''
+    secrets:
+      - source: trusted_telebirr_verifier_database_url
+        target: trusted_telebirr_verifier_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: trusted_telebirr_verifier_pins
+        target: /run/configs/trusted_telebirr_verifier_pins.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: trusted_telebirr_verifier_supabase_ca
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - trusted_telebirr_verifier_egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8091/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+secrets:
+  trusted_telebirr_verifier_database_url:
+    file: ${FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_SECRET_FILE:?set the root-managed short-lived runtime database URL file}
+
+configs:
+  trusted_telebirr_verifier_pins:
+    file: ${FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_CONFIG_FILE:?set the reviewed public-key pin manifest file}
+  trusted_telebirr_verifier_supabase_ca:
+    file: ${FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_CONFIG_FILE:?set the reviewed Supabase CA file}
+
+networks:
+  trusted_telebirr_verifier_egress:
+    driver: bridge

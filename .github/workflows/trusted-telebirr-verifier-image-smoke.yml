@@ -1,0 +1,142 @@
+name: Trusted TeleBirr verifier image smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  trusted-telebirr-verifier-image-smoke:
+    name: Build and smoke ingress-free trusted TeleBirr verifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build and inspect the verifier image
+        shell: bash
+        env:
+          VERIFIER_IMAGE: fetanagent-trusted-telebirr-verifier:ci
+        run: |
+          set -euo pipefail
+          docker build --pull=false --target trusted-telebirr-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag "$VERIFIER_IMAGE" .
+
+          test "$(docker image inspect "$VERIFIER_IMAGE" --format '{{.Config.User}}')" = \
+            '10001:10001'
+          test "$(docker image inspect "$VERIFIER_IMAGE" --format '{{json .Config.Cmd}}')" = \
+            '["node","apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-main.js"]'
+          test "$(docker image inspect "$VERIFIER_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
+            "$GITHUB_SHA"
+          test "$(docker image inspect "$VERIFIER_IMAGE" --format '{{json .Config.ExposedPorts}}')" = \
+            'null'
+          image_environment="$(docker image inspect "$VERIFIER_IMAGE" \
+            --format '{{range .Config.Env}}{{println .}}{{end}}')"
+          grep -Fx 'NODE_ENV=production' <<<"$image_environment"
+          for proxy_name in \
+            HTTP_PROXY http_proxy HTTPS_PROXY https_proxy NO_PROXY no_proxy \
+            FTP_PROXY ftp_proxy ALL_PROXY all_proxy; do
+            test "$(grep -Fxc "$proxy_name=" <<<"$image_environment")" -eq 1
+          done
+
+      - name: Verify the real entrypoint fails closed without activation inputs
+        shell: bash
+        env:
+          VERIFIER_IMAGE: fetanagent-trusted-telebirr-verifier:ci
+        run: |
+          set -euo pipefail
+          set +e
+          startup_output="$(
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --env NODE_ENV=production \
+              --env FINANCIAL_ACTIONS_MODE=dry_run \
+              --env INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED=false \
+              --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
+              "$VERIFIER_IMAGE" 2>&1
+          )"
+          startup_status=$?
+          set -e
+
+          test "$startup_status" -eq 1
+          test "$startup_output" = 'FetanAgent trusted TeleBirr verifier failed closed.'
+
+      - name: Probe only the inert loopback health boundary
+        shell: bash
+        env:
+          VERIFIER_IMAGE: fetanagent-trusted-telebirr-verifier:ci
+        run: |
+          set -euo pipefail
+          container_name='fetanagent-trusted-telebirr-verifier-image-smoke'
+          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach --name "$container_name" --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges --no-healthcheck \
+            --env NODE_ENV=production \
+            --env FINANCIAL_ACTIONS_MODE=dry_run \
+            --env INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED=false \
+            --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
+            "$VERIFIER_IMAGE" node --input-type=module --eval "
+              const { createTrustedTelebirrVerifierHealth } = await import(
+                './apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-health.js'
+              );
+              const { createTrustedTelebirrVerifierHealthServer } = await import(
+                './apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-health-server.js'
+              );
+              const health = createTrustedTelebirrVerifierHealth(async () => false);
+              const server = createTrustedTelebirrVerifierHealthServer(health, {
+                host: '127.0.0.1',
+                port: 8091,
+              });
+              await server.start();
+              const stop = async () => {
+                health.markStopping();
+                await server.close();
+              };
+              process.once('SIGINT', () => void stop());
+              process.once('SIGTERM', () => void stop());
+            "
+
+          for attempt in {1..20}; do
+            if docker exec "$container_name" node --input-type=module --eval \
+              "const response = await fetch('http://127.0.0.1:8091/healthz');
+               if (response.status !== 200) process.exit(1);"; then
+              break
+            fi
+            test "$(docker inspect "$container_name" --format '{{.State.Running}}')" = 'true'
+            if [[ "$attempt" -eq 20 ]]; then
+              docker logs "$container_name"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker exec "$container_name" node --input-type=module --eval \
+            "const health = await fetch('http://127.0.0.1:8091/healthz');
+             const healthBody = await health.json();
+             if (health.status !== 200 || healthBody.status !== 'ok' ||
+                 healthBody.service !== 'fetanagent-trusted-telebirr-verifier') process.exit(1);
+             const readiness = await fetch('http://127.0.0.1:8091/readyz');
+             const readinessBody = await readiness.json();
+             if (readiness.status !== 503 || readinessBody.ready !== false ||
+                 readinessBody.reason !== 'database_unavailable') process.exit(1);
+             const forbidden = await fetch('http://127.0.0.1:8091/verify');
+             if (forbidden.status !== 404) process.exit(1);"
+
+          docker stop --time 5 "$container_name" >/dev/null
+          test "$(docker inspect "$container_name" --format '{{.State.ExitCode}}')" -eq 0

@@ -1,19 +1,28 @@
 import { createRequire } from 'node:module';
 
 import {
+  decodeTrustedTelebirrVerificationRequest,
   type TrustedTelebirrCompletionInput,
+  type TrustedTelebirrVerificationRequest,
   type TrustedTelebirrVerifierDatabase,
 } from './trusted-telebirr-verifier.js';
 
 const VERIFIER_GROUP_ROLE = 'fetanagent_trusted_telebirr_verifier';
 const VERIFIER_RUNTIME_ROLE = 'fetanagent_trusted_telebirr_verifier_runtime';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const AUTHORITY_FUNCTION =
   'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)';
 const COMPLETION_FUNCTION =
   'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
+const STAGED_EVIDENCE_FUNCTION = 'app.load_next_private_live_telebirr_staged_evidence()';
+const QUARANTINE_FUNCTION =
+  'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)';
 const AUTHORITY_FUNCTION_SQL = `pg_catalog.to_regprocedure('${AUTHORITY_FUNCTION}')`;
 const COMPLETION_FUNCTION_SQL = `pg_catalog.to_regprocedure('${COMPLETION_FUNCTION}')`;
-const ALLOWED_FUNCTIONS_SQL = `${AUTHORITY_FUNCTION_SQL}, ${COMPLETION_FUNCTION_SQL}`;
+const STAGED_EVIDENCE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${STAGED_EVIDENCE_FUNCTION}')`;
+const QUARANTINE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${QUARANTINE_FUNCTION}')`;
+const ALLOWED_FUNCTIONS_SQL = `${AUTHORITY_FUNCTION_SQL}, ${COMPLETION_FUNCTION_SQL}, ${STAGED_EVIDENCE_FUNCTION_SQL}, ${QUARANTINE_FUNCTION_SQL}`;
 
 export const TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS = [
   'runtime_login_identity_allowed',
@@ -34,6 +43,8 @@ export const TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS = [
   'allowed_functions_hardened',
   'authority_function_contract_exact',
   'completion_function_contract_exact',
+  'staged_evidence_function_contract_exact',
+  'quarantine_function_contract_exact',
   'allowed_functions_execution_private',
   'default_function_execution_private',
 ] as const;
@@ -146,7 +157,7 @@ export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_non_system_base_object_access,
     (
-      select count(*) = 2
+      select count(*) = 4
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname not in ('pg_catalog', 'information_schema')
@@ -176,7 +187,7 @@ export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_FUNCTIONS_SQL})
     ) as no_reachable_unallowlisted_security_definer,
     (
-      select count(*) = 2 and pg_catalog.bool_and(
+      select count(*) = 4 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'
@@ -210,6 +221,37 @@ export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
         and pg_catalog.lower(pg_catalog.pg_get_function_result(routine.oid)) =
           'table(verification_outcome_id uuid, outcome_disposition text, outcome_reason_code text, deposit_intent_id uuid, deposit_payment_claim_id uuid, execution_job_id uuid, settlement_created boolean, already_completed boolean)'
     ) as completion_function_contract_exact,
+    exists (
+      select 1 from pg_catalog.pg_proc as routine
+      where routine.oid = ${STAGED_EVIDENCE_FUNCTION_SQL}
+        and routine.pronargs = 0 and routine.pronargdefaults = 0
+        and routine.proretset
+        and routine.prorettype = pg_catalog.to_regtype('pg_catalog.record')::pg_catalog.oid
+        and routine.proargnames = array[
+          'verification_attempt_id', 'lease_token', 'completion_request_key',
+          'observation_body_digest', 'signed_assignment', 'signed_observation'
+        ]::pg_catalog.text[]
+        and pg_catalog.lower(pg_catalog.pg_get_function_result(routine.oid)) =
+          'table(verification_attempt_id uuid, lease_token uuid, completion_request_key uuid, observation_body_digest text, signed_assignment jsonb, signed_observation jsonb)'
+    ) as staged_evidence_function_contract_exact,
+    exists (
+      select 1 from pg_catalog.pg_proc as routine
+      where routine.oid = ${QUARANTINE_FUNCTION_SQL}
+        and routine.pronargs = 4 and routine.pronargdefaults = 0
+        and not routine.proretset
+        and routine.prorettype = pg_catalog.to_regtype('pg_catalog.bool')::pg_catalog.oid
+        and routine.proargtypes = array[
+          pg_catalog.to_regtype('pg_catalog.uuid')::pg_catalog.oid,
+          pg_catalog.to_regtype('pg_catalog.uuid')::pg_catalog.oid,
+          pg_catalog.to_regtype('pg_catalog.text')::pg_catalog.oid,
+          pg_catalog.to_regtype('pg_catalog.text')::pg_catalog.oid
+        ]::pg_catalog.oidvector
+        and routine.proargnames = array[
+          'p_verification_attempt_id', 'p_lease_token',
+          'p_observation_body_digest', 'p_reason_code'
+        ]::pg_catalog.text[]
+        and pg_catalog.lower(pg_catalog.pg_get_function_result(routine.oid)) = 'boolean'
+    ) as quarantine_function_contract_exact,
     not exists (
       select 1
       from pg_catalog.pg_proc as routine
@@ -252,6 +294,18 @@ export const COMPLETE_TRUSTED_TELEBIRR_VERIFICATION_SQL = `
       $12::text, $13::timestamptz, $14::text, $15::text, $16::text,
       $17::timestamptz, $18::bigint, $19::timestamptz, $20::text
     )
+`;
+
+export const LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL = `
+  select verification_attempt_id, lease_token, completion_request_key,
+         observation_body_digest, signed_assignment, signed_observation
+    from app.load_next_private_live_telebirr_staged_evidence()
+`;
+
+export const QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL = `
+  select app.quarantine_private_live_telebirr_staged_evidence(
+    $1::uuid, $2::uuid, $3::text, $4::text
+  ) as quarantined
 `;
 
 export const TRUSTED_TELEBIRR_VERIFIER_SINGLETON_KEYS = Object.freeze([20260821, 204500] as const);
@@ -405,6 +459,101 @@ export class PostgresTrustedTelebirrVerifierDatabase implements TrustedTelebirrV
   }
 }
 
+export interface TrustedTelebirrVerifierWorkSource {
+  loadNext(): Promise<TrustedTelebirrVerificationRequest | null>;
+  quarantineInvalid(identity: TrustedTelebirrStagedEvidenceIdentity): Promise<void>;
+}
+
+export interface TrustedTelebirrStagedEvidenceIdentity {
+  readonly verificationAttemptId: string;
+  readonly leaseToken: string;
+  readonly observationBodyDigest: string;
+}
+
+export class PostgresTrustedTelebirrVerifierWorkSource implements TrustedTelebirrVerifierWorkSource {
+  constructor(private readonly database: TrustedTelebirrPostgresQuery) {}
+
+  async loadNext(): Promise<TrustedTelebirrVerificationRequest | null> {
+    try {
+      await assertTrustedTelebirrVerifierCatalogPreflight(this.database);
+      const result = await this.database.query(LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL, []);
+      if (result.rows.length === 0) return null;
+      if (result.rows.length !== 1) throw new Error();
+      const row = exactRecord(result.rows[0], [
+        'verification_attempt_id',
+        'lease_token',
+        'completion_request_key',
+        'observation_body_digest',
+        'signed_assignment',
+        'signed_observation',
+      ]);
+      if (!row) throw new Error();
+      if (
+        typeof row.verification_attempt_id !== 'string' ||
+        !UUID_PATTERN.test(row.verification_attempt_id) ||
+        typeof row.lease_token !== 'string' ||
+        !UUID_PATTERN.test(row.lease_token) ||
+        typeof row.observation_body_digest !== 'string' ||
+        !SHA256_PATTERN.test(row.observation_body_digest)
+      ) {
+        throw new Error();
+      }
+      const request = decodeTrustedTelebirrVerificationRequest({
+        contractVersion: 1,
+        verificationAttemptId: row.verification_attempt_id,
+        leaseToken: row.lease_token,
+        completionRequestKey: row.completion_request_key,
+        signedAssignment: row.signed_assignment,
+        signedObservation: row.signed_observation,
+      });
+      if (!request || request.signedObservation.bodyDigest !== row.observation_body_digest) {
+        await this.quarantineInvalid({
+          verificationAttemptId: row.verification_attempt_id,
+          leaseToken: row.lease_token,
+          observationBodyDigest: row.observation_body_digest,
+        });
+        return null;
+      }
+      return request;
+    } catch {
+      throw new TrustedTelebirrPostgresRuntimeUnavailableError();
+    }
+  }
+
+  async quarantineInvalid(identity: TrustedTelebirrStagedEvidenceIdentity): Promise<void> {
+    try {
+      const exactIdentity = exactRecord(identity, [
+        'verificationAttemptId',
+        'leaseToken',
+        'observationBodyDigest',
+      ]);
+      if (
+        !exactIdentity ||
+        typeof exactIdentity.verificationAttemptId !== 'string' ||
+        !UUID_PATTERN.test(exactIdentity.verificationAttemptId) ||
+        typeof exactIdentity.leaseToken !== 'string' ||
+        !UUID_PATTERN.test(exactIdentity.leaseToken) ||
+        typeof exactIdentity.observationBodyDigest !== 'string' ||
+        !SHA256_PATTERN.test(exactIdentity.observationBodyDigest)
+      ) {
+        throw new Error();
+      }
+      await assertTrustedTelebirrVerifierCatalogPreflight(this.database);
+      const result = await this.database.query(QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL, [
+        exactIdentity.verificationAttemptId,
+        exactIdentity.leaseToken,
+        exactIdentity.observationBodyDigest,
+        'trusted_evidence_invalid',
+      ]);
+      if (result.rows.length !== 1 || !exactBooleanRow(result.rows[0], 'quarantined')) {
+        throw new Error();
+      }
+    } catch {
+      throw new TrustedTelebirrPostgresRuntimeUnavailableError();
+    }
+  }
+}
+
 export interface TrustedTelebirrVerifierConnectionConfig {
   readonly ca: string;
   readonly database: 'postgres';
@@ -433,6 +582,7 @@ export interface TrustedTelebirrPostgresRuntimeDependencies {
 
 export interface TrustedTelebirrPostgresRuntime {
   readonly database: TrustedTelebirrVerifierDatabase;
+  readonly workSource: TrustedTelebirrVerifierWorkSource;
   ready(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -502,8 +652,10 @@ export async function createTrustedTelebirrPostgresRuntime(
   }
 
   const database = new PostgresTrustedTelebirrVerifierDatabase(guarded);
+  const workSource = new PostgresTrustedTelebirrVerifierWorkSource(guarded);
   return Object.freeze({
     database,
+    workSource,
     async ready() {
       if (!available || closed || !lockHeld) return false;
       try {

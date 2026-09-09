@@ -15,6 +15,7 @@ import { PostgresOwnerCompanionConnection } from './owner-companion-connection.j
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
+import { PostgresOwnerTelebirrShadowVerificationStatus } from './owner-telebirr-shadow-verification-status.js';
 
 export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
@@ -42,6 +43,10 @@ export interface OwnerControlPostgresRuntime {
   >;
   readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
+  readonly telebirrShadowVerification: Pick<
+    PostgresOwnerTelebirrShadowVerificationStatus,
+    'status'
+  >;
   close(): Promise<void>;
   ready(): Promise<boolean>;
 }
@@ -142,6 +147,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_dry_run_fixture_assessments(uuid,integer)', 'execute') as fixture_assessment_list_allowed,
     has_function_privilege(current_user, 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)', 'execute') as shadow_enqueue_allowed,
     has_function_privilege(current_user, 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)', 'execute') as shadow_list_allowed,
+    has_function_privilege(current_user, 'app.get_owner_telebirr_shadow_verification_status(uuid)', 'execute') as telebirr_shadow_status_allowed,
     has_function_privilege(current_user, 'app.list_owner_player_deposit_eligibility(uuid,integer)', 'execute') as player_eligibility_list_allowed,
     has_function_privilege(current_user, 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)', 'execute') as player_eligibility_decide_allowed,
     has_function_privilege(current_user, 'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)', 'execute') as private_live_pilot_prepare_allowed,
@@ -205,7 +211,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 33
+      select count(*) = 34
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -233,6 +239,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.list_owner_dry_run_fixture_assessments(uuid,integer)'::regprocedure,
           'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)'::regprocedure,
           'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)'::regprocedure,
+          'app.get_owner_telebirr_shadow_verification_status(uuid)'::regprocedure,
           'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
           'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
           'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamptz,timestamptz)'::regprocedure,
@@ -357,6 +364,9 @@ export async function createOwnerControlPostgresRuntime(
           config.devicePairing.assignmentSignerKeyId,
         )
       : undefined,
+    telebirrShadowVerification: new PostgresOwnerTelebirrShadowVerificationStatus({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
     ready: async () => {
       if (closed) return false;
       try {

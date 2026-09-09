@@ -28,6 +28,7 @@ import {
 import { deriveTelebirrLivePilotPolicyDigest } from '@fetanagent/telebirr-live-pilot-outcome-adapter';
 
 import {
+  createTelebirrShadowVerifier,
   createTrustedTelebirrVerifier,
   redactedTrustedTelebirrVerificationForLog,
   TrustedTelebirrVerifierUnavailableError,
@@ -277,6 +278,7 @@ function fixture(facts: TelebirrLivePilotReceiptFacts = foundFacts()) {
   };
   const authority = {
     contractVersion: 1,
+    verificationMode: 'live',
     capturedAt: assessedAt,
     authorityStateDigest: sha('a'),
     verificationAttemptId: ids.attempt,
@@ -459,6 +461,18 @@ function nonSettlementCompletion(input: TrustedTelebirrCompletionInput, alreadyC
   };
 }
 
+function shadowCompletion(input: TrustedTelebirrCompletionInput, alreadyCompleted = false) {
+  return {
+    ...nonSettlementCompletion(input, alreadyCompleted),
+    outcome_disposition:
+      input.disposition === 'settlement_candidate'
+        ? 'would_verify'
+        : input.disposition === 'review_required'
+          ? 'would_review'
+          : 'would_reject',
+  };
+}
+
 function persistedCompletion(input: TrustedTelebirrCompletionInput) {
   const { verificationAttemptId: _attemptId, leaseToken: _leaseToken, ...persisted } = input;
   return persisted;
@@ -523,6 +537,118 @@ describe('trusted TeleBirr verifier', () => {
       receiptPrincipalAmountMinor: '2500',
       receiverIdentityDigest: value.assignment.body.expectedReceiverNameDigest,
     });
+  });
+
+  it('authenticates shadow evidence but accepts only a no-money advisory completion', async () => {
+    const value = fixture();
+    value.authority.verificationMode = 'shadow';
+    const complete = vi.fn(async (input: TrustedTelebirrCompletionInput) =>
+      shadowCompletion(input),
+    );
+    const verifier = createTelebirrShadowVerifier(
+      {
+        loadAuthority: async () => value.authority,
+        complete,
+      },
+      {
+        assignmentSigners: [
+          { keyId: value.assignment.signerKeyId, publicKeySpkiDer: value.signer.spki },
+        ],
+        devices: [{ keyId: value.assignment.body.keyId, publicKeySpkiDer: value.device.spki }],
+      },
+    );
+
+    const result = await verifier.verifyAndComplete(value.request);
+    expect(result).toEqual({
+      status: 'shadow_completed',
+      verificationOutcomeId: '10101010-1010-4010-8010-101010101010',
+      disposition: 'would_verify',
+      reasonCode: 'exact_proof_match',
+      wouldVerify: true,
+      alreadyCompleted: false,
+    });
+    const projection = redactedTrustedTelebirrVerificationForLog(result);
+    expect(projection).toMatchObject({
+      status: 'shadow_completed',
+      disposition: 'would_verify',
+      reasonCode: 'shadow_verification_completed',
+    });
+    expect(JSON.stringify(projection)).not.toMatch(/settlement_candidate|settled/u);
+    expect(complete).toHaveBeenCalledTimes(1);
+
+    const unsafeVerifier = createTelebirrShadowVerifier(
+      {
+        loadAuthority: async () => value.authority,
+        complete: async () => successfulCompletion(),
+      },
+      {
+        assignmentSigners: [
+          { keyId: value.assignment.signerKeyId, publicKeySpkiDer: value.signer.spki },
+        ],
+        devices: [{ keyId: value.assignment.body.keyId, publicKeySpkiDer: value.device.spki }],
+      },
+    );
+    await expect(unsafeVerifier.verifyAndComplete(value.request)).rejects.toBeInstanceOf(
+      TrustedTelebirrVerifierUnavailableError,
+    );
+
+    value.authority.trustedPilot.state = 'stopped';
+    value.authority.authorityStateDigest = sha('f');
+    const rejectedVerifier = createTelebirrShadowVerifier(
+      {
+        loadAuthority: async () => value.authority,
+        complete: vi.fn(),
+      },
+      {
+        assignmentSigners: [
+          { keyId: value.assignment.signerKeyId, publicKeySpkiDer: value.signer.spki },
+        ],
+        devices: [{ keyId: value.assignment.body.keyId, publicKeySpkiDer: value.device.spki }],
+      },
+    );
+    const rejected = await rejectedVerifier.verifyAndComplete(value.request);
+    expect(rejected).toEqual({
+      status: 'shadow_not_completed',
+      disposition: 'would_reject',
+      reasonCode: 'trusted_evidence_invalid',
+    });
+    const rejectedProjection = redactedTrustedTelebirrVerificationForLog(rejected);
+    expect(rejectedProjection).toMatchObject({
+      status: 'shadow_not_completed',
+      disposition: 'would_reject',
+      reasonCode: 'shadow_verification_not_completed',
+    });
+    expect(JSON.stringify(rejectedProjection)).not.toMatch(
+      /settlement_candidate|settled|not_settled|review_required|definite_reject/u,
+    );
+  });
+
+  it('rejects cross-wired live and shadow authority modes before completion', async () => {
+    const live = fixture();
+    const shadow = fixture();
+    shadow.authority.verificationMode = 'shadow';
+    const liveRuntime = verifierFor(shadow);
+    await expect(liveRuntime.verifier.verifyAndComplete(shadow.request)).rejects.toBeInstanceOf(
+      TrustedTelebirrVerifierUnavailableError,
+    );
+    expect(liveRuntime.complete).not.toHaveBeenCalled();
+
+    const complete = vi.fn(async (input: TrustedTelebirrCompletionInput) =>
+      shadowCompletion(input),
+    );
+    const shadowVerifier = createTelebirrShadowVerifier(
+      { loadAuthority: async () => live.authority, complete },
+      {
+        assignmentSigners: [
+          { keyId: live.assignment.signerKeyId, publicKeySpkiDer: live.signer.spki },
+        ],
+        devices: [{ keyId: live.assignment.body.keyId, publicKeySpkiDer: live.device.spki }],
+      },
+    );
+    await expect(shadowVerifier.verifyAndComplete(live.request)).rejects.toBeInstanceOf(
+      TrustedTelebirrVerifierUnavailableError,
+    );
+    expect(complete).not.toHaveBeenCalled();
   });
 
   it('rejects malformed, noncanonical, wrong-curve, or cross-role pins at construction', () => {

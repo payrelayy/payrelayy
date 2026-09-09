@@ -63,7 +63,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     const executeCountSql = OWNER_CONTROL_PREFLIGHT_SQL.split(
       'as exact_app_execute_count',
     )[0]!.split('as recorder_denied,')[1]!;
-    expect(executeCountSql).toMatch(/select count\(\*\) = 33\s*\+/u);
+    expect(executeCountSql).toMatch(/select count\(\*\) = 34\s*\+/u);
     for (const signature of [
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',

@@ -12,6 +12,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
 import type { TrustedTelebirrVerifierConnectionConfig } from './postgres-trusted-telebirr-verifier.js';
+import type { TelebirrShadowVerifierConnectionConfig } from './postgres-telebirr-shadow-verifier.js';
 import type {
   TrustedTelebirrPinnedKeys,
   TrustedTelebirrPinnedPublicKey,
@@ -32,6 +33,12 @@ export const TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE =
   '/run/configs/trusted_telebirr_verifier_pins.v1.json' as const;
 export const TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE =
   '/run/configs/supabase_ca_certificate' as const;
+export const TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE =
+  'fetanagent_telebirr_shadow_verifier_runtime' as const;
+export const TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE =
+  '/run/secrets/telebirr_shadow_verifier_database_url' as const;
+export const TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE =
+  '/run/configs/telebirr_shadow_verifier_pins.v1.json' as const;
 
 const MAX_CONFIG_BYTES = 16_384;
 
@@ -55,6 +62,16 @@ export type TrustedTelebirrVerifierConfig =
       readonly deploymentTarget: TrustedTelebirrVerifierDeploymentTarget;
       readonly projectReference: (typeof TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS)[TrustedTelebirrVerifierDeploymentTarget]['projectReference'];
       readonly connection: TrustedTelebirrVerifierConnectionConfig;
+      readonly pinnedKeys: TrustedTelebirrPinnedKeys;
+    };
+
+export type TelebirrShadowVerifierConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly deploymentTarget: TrustedTelebirrVerifierDeploymentTarget;
+      readonly projectReference: (typeof TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS)[TrustedTelebirrVerifierDeploymentTarget]['projectReference'];
+      readonly connection: TelebirrShadowVerifierConnectionConfig;
       readonly pinnedKeys: TrustedTelebirrPinnedKeys;
     };
 
@@ -238,10 +255,17 @@ function decodedComponent(value: string): string {
   }
 }
 
-function connectionFromUrl(
+function connectionFromUrl<const RuntimeRole extends string>(
   value: string,
   deploymentTarget: TrustedTelebirrVerifierDeploymentTarget,
-): Omit<TrustedTelebirrVerifierConnectionConfig, 'ca'> {
+  expectedRuntimeRole: RuntimeRole,
+): Readonly<{
+  database: 'postgres';
+  host: string;
+  password: string;
+  port: 5432;
+  user: RuntimeRole;
+}> {
   let url: URL;
   try {
     url = new URL(value);
@@ -257,7 +281,7 @@ function connectionFromUrl(
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
     url.hostname !== expectedTarget.host ||
     (url.port !== '' && url.port !== '5432') ||
-    user !== TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE ||
+    user !== expectedRuntimeRole ||
     password.length < 16 ||
     database !== 'postgres' ||
     url.hash !== '' ||
@@ -272,7 +296,7 @@ function connectionFromUrl(
     host: expectedTarget.host,
     password,
     port: 5432 as const,
-    user: TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE,
+    user: expectedRuntimeRole,
   });
 }
 
@@ -403,6 +427,7 @@ export function loadTrustedTelebirrVerifierConfig(
   const connectionWithoutCa = connectionFromUrl(
     guardedText(readGuarded(databaseFile, dependencies, 'secret')),
     deploymentTarget,
+    TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE,
   );
   const pinnedKeys = pinsFromManifest(
     guardedText(readGuarded(pinFile, dependencies, 'public_config')),
@@ -418,4 +443,69 @@ export function loadTrustedTelebirrVerifierConfig(
     connection,
     pinnedKeys,
   });
+}
+
+export function loadTelebirrShadowVerifierConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: TrustedTelebirrVerifierConfigDependencies = {},
+): TelebirrShadowVerifierConfig {
+  let enabled: boolean;
+  try {
+    enabled = exactBoolean(
+      environment.INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED,
+      'INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED',
+    );
+  } catch {
+    throw new Error('The TeleBirr shadow verifier configuration is unavailable.');
+  }
+  if (!enabled) return Object.freeze({ enabled: false });
+
+  try {
+    const deploymentTarget = environment.TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET;
+    if (
+      environment.NODE_ENV !== 'production' ||
+      environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
+      !exactBoolean(
+        environment.TELEBIRR_SHADOW_VERIFICATION_ENABLED,
+        'TELEBIRR_SHADOW_VERIFICATION_ENABLED',
+      ) ||
+      environment.TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED !== 'false' ||
+      environment.KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED !== 'false' ||
+      (deploymentTarget !== 'staging' && deploymentTarget !== 'production') ||
+      environment.NODE_EXTRA_CA_CERTS !== TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE
+    ) {
+      throw new Error();
+    }
+    const databaseTarget = TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS[deploymentTarget];
+    const databaseFile = environment.TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE;
+    const pinFile = environment.TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE;
+    if (
+      databaseFile !== TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE ||
+      pinFile !== TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE ||
+      !isAbsolute(databaseFile) ||
+      !isAbsolute(pinFile)
+    ) {
+      throw new Error();
+    }
+    const connectionWithoutCa = connectionFromUrl(
+      guardedText(readGuarded(databaseFile, dependencies, 'secret')),
+      deploymentTarget,
+      TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE,
+    );
+    const pinnedKeys = pinsFromManifest(
+      guardedText(readGuarded(pinFile, dependencies, 'public_config')),
+    );
+    const ca = guardedCa(
+      readGuarded(TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE, dependencies, 'public_config'),
+    );
+    return Object.freeze({
+      enabled: true,
+      deploymentTarget,
+      projectReference: databaseTarget.projectReference,
+      connection: Object.freeze({ ...connectionWithoutCa, ca }),
+      pinnedKeys,
+    });
+  } catch {
+    throw new Error('The TeleBirr shadow verifier configuration is unavailable.');
+  }
 }

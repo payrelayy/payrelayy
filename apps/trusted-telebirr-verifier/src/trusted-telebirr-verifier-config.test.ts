@@ -4,9 +4,12 @@ import { constants } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE,
+  TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE,
   TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE,
   TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE,
   TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE,
+  loadTelebirrShadowVerifierConfig,
   loadTrustedTelebirrVerifierConfig,
   type TrustedTelebirrVerifierConfigDependencies,
   type TrustedTelebirrVerifierGuardedFileStat,
@@ -16,6 +19,8 @@ const databaseUrl =
   'postgresql://fetanagent_trusted_telebirr_verifier_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const productionDatabaseUrl =
   'postgresql://fetanagent_trusted_telebirr_verifier_runtime:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full';
+const shadowDatabaseUrl =
+  'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
 
 function publicKeySpki(namedCurve: string): Buffer {
@@ -78,10 +83,13 @@ function guardedDependencies(
   ): TrustedTelebirrVerifierGuardedFileStat => {
     const value = values[path];
     if (value === undefined) throw new Error('missing synthetic file');
+    const secret =
+      path === TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE ||
+      path === TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE;
     return {
       dev: 7,
-      ino: path === TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE ? 11 : path.length,
-      mode: path === TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE ? 0o100400 : 0o100444,
+      ino: secret ? 11 : path.length,
+      mode: secret ? 0o100400 : 0o100444,
       mtimeMs: 1_700_000_000_000,
       size: Buffer.byteLength(value),
       uid: 0,
@@ -310,5 +318,71 @@ describe('trusted TeleBirr verifier configuration', () => {
     expect(message).toBe('The trusted TeleBirr verifier configuration is unavailable.');
     expect(message).not.toContain('synthetic-password');
     expect(message).not.toContain('/private/runtime/path');
+  });
+});
+
+describe('TeleBirr shadow verifier configuration', () => {
+  const shadowEnvironment: NodeJS.ProcessEnv = {
+    NODE_ENV: 'production',
+    FINANCIAL_ACTIONS_MODE: 'dry_run',
+    INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED: 'true',
+    TELEBIRR_SHADOW_VERIFICATION_ENABLED: 'true',
+    TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false',
+    KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false',
+    TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET: 'staging',
+    TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE,
+    TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE,
+    NODE_EXTRA_CA_CERTS: TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE,
+  };
+  const shadowFiles = {
+    [TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE]: shadowDatabaseUrl,
+    [TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE]: manifest(),
+    [TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE]: caCertificate,
+  };
+
+  it('is inert by default without reading configuration', () => {
+    const dependencies = guardedDependencies(shadowFiles);
+    expect(loadTelebirrShadowVerifierConfig({}, dependencies)).toEqual({ enabled: false });
+    expect(dependencies.fileSystem.lstat).not.toHaveBeenCalled();
+  });
+
+  it('loads only dry-run mode, the shadow role, reviewed pins, and fixed files', () => {
+    const config = loadTelebirrShadowVerifierConfig(
+      shadowEnvironment,
+      guardedDependencies(shadowFiles),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      deploymentTarget: 'staging',
+      connection: {
+        database: 'postgres',
+        host: 'db.spzpiyxheappsfyswewl.supabase.co',
+        port: 5432,
+        user: 'fetanagent_telebirr_shadow_verifier_runtime',
+      },
+    });
+  });
+
+  it('fails closed if any no-money or role boundary is cross-wired', () => {
+    for (const environment of [
+      { ...shadowEnvironment, FINANCIAL_ACTIONS_MODE: 'live' },
+      { ...shadowEnvironment, TELEBIRR_SHADOW_VERIFICATION_ENABLED: 'false' },
+      { ...shadowEnvironment, TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'true' },
+      { ...shadowEnvironment, KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'true' },
+    ]) {
+      expect(() =>
+        loadTelebirrShadowVerifierConfig(environment, guardedDependencies(shadowFiles)),
+      ).toThrow('The TeleBirr shadow verifier configuration is unavailable.');
+    }
+
+    expect(() =>
+      loadTelebirrShadowVerifierConfig(
+        shadowEnvironment,
+        guardedDependencies({
+          ...shadowFiles,
+          [TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE]: databaseUrl,
+        }),
+      ),
+    ).toThrow('The TeleBirr shadow verifier configuration is unavailable.');
   });
 });

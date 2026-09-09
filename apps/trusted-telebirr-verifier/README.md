@@ -77,6 +77,14 @@ manifest, prove the runtime remains absent/`NOLOGIN`, or run independent host/da
 disablement. It has no activation, login-provisioning, renewal, or rollback route; its production
 Compose gates are fixed off until a shared atomic database interlock is separately reviewed.
 
+The same package also contains a strictly separate, dry-run-only shadow entrypoint. Its runtime
+role, four-function database surface, singleton, health identity/port, secret path, Docker target,
+and opt-in Compose profile are distinct from the live verifier. It authenticates official
+observations into append-only advisory outcomes and accepts completion only when all three
+financial IDs are null and `settlement_created=false`. See
+[`../../docs/telebirr-shadow-verification.md`](../../docs/telebirr-shadow-verification.md) for the
+exact intake RPC, seven-gate predicate, redacted status surface, and no-money deployment boundary.
+
 ## Existing database and verifier safety
 
 The database migrations still leave the runtime as a `NOLOGIN` scaffold. Its group can execute
@@ -116,4 +124,5 @@ These commands build and test artifacts only; they do not provision or start the
 pnpm --filter "@fetanagent/trusted-telebirr-verifier..." run build
 pnpm --filter @fetanagent/trusted-telebirr-verifier run test
 node infra/verify-trusted-telebirr-verifier-deployment.mjs
+node infra/verify-telebirr-shadow-verifier-deployment.mjs
 ```

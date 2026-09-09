@@ -1,0 +1,125 @@
+name: TeleBirr shadow verifier image smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  telebirr-shadow-verifier-image-smoke:
+    name: Build and smoke ingress-free no-money TeleBirr shadow verifier
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build and inspect the shadow image
+        shell: bash
+        env:
+          SHADOW_IMAGE: fetanagent-telebirr-shadow-verifier:ci
+        run: |
+          set -euo pipefail
+          docker build --pull=false --target telebirr-shadow-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --tag "$SHADOW_IMAGE" .
+
+          test "$(docker image inspect "$SHADOW_IMAGE" --format '{{.Config.User}}')" = \
+            '10001:10001'
+          test "$(docker image inspect "$SHADOW_IMAGE" --format '{{json .Config.Cmd}}')" = \
+            '["node","apps/trusted-telebirr-verifier/dist/telebirr-shadow-verifier-main.js"]'
+          test "$(docker image inspect "$SHADOW_IMAGE" \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
+            "$GITHUB_SHA"
+          test "$(docker image inspect "$SHADOW_IMAGE" --format '{{json .Config.ExposedPorts}}')" = \
+            'null'
+
+      - name: Prove the real entrypoint is inert without activation inputs
+        shell: bash
+        env:
+          SHADOW_IMAGE: fetanagent-telebirr-shadow-verifier:ci
+        run: |
+          set -euo pipefail
+          set +e
+          startup_output="$(
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              --env NODE_ENV=production \
+              --env FINANCIAL_ACTIONS_MODE=dry_run \
+              --env INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED=false \
+              --env TELEBIRR_SHADOW_VERIFICATION_ENABLED=false \
+              --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
+              --env KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false \
+              "$SHADOW_IMAGE" 2>&1
+          )"
+          startup_status=$?
+          set -e
+
+          test "$startup_status" -eq 1
+          test "$startup_output" = 'FetanAgent TeleBirr shadow verifier failed closed.'
+
+      - name: Probe only the inert loopback health boundary
+        shell: bash
+        env:
+          SHADOW_IMAGE: fetanagent-telebirr-shadow-verifier:ci
+        run: |
+          set -euo pipefail
+          container_name='fetanagent-telebirr-shadow-verifier-image-smoke'
+          trap 'docker rm --force "$container_name" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach --name "$container_name" --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges --no-healthcheck \
+            "$SHADOW_IMAGE" node --input-type=module --eval "
+              const { createTelebirrShadowVerifierHealth } = await import(
+                './apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-health.js'
+              );
+              const { createTrustedTelebirrVerifierHealthServer } = await import(
+                './apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-health-server.js'
+              );
+              const health = createTelebirrShadowVerifierHealth(async () => false);
+              const server = createTrustedTelebirrVerifierHealthServer(health, {
+                host: '127.0.0.1', port: 8092,
+              });
+              await server.start();
+              const stop = async () => { health.markStopping(); await server.close(); };
+              process.once('SIGINT', () => void stop());
+              process.once('SIGTERM', () => void stop());
+            "
+
+          for attempt in {1..20}; do
+            if docker exec "$container_name" node --input-type=module --eval \
+              "const response = await fetch('http://127.0.0.1:8092/healthz');
+               if (response.status !== 200) process.exit(1);"; then
+              break
+            fi
+            test "$(docker inspect "$container_name" --format '{{.State.Running}}')" = 'true'
+            if [[ "$attempt" -eq 20 ]]; then docker logs "$container_name"; exit 1; fi
+            sleep 1
+          done
+
+          docker exec "$container_name" node --input-type=module --eval \
+            "const health = await fetch('http://127.0.0.1:8092/healthz');
+             const body = await health.json();
+             if (health.status !== 200 || body.status !== 'ok' ||
+                 body.service !== 'fetanagent-telebirr-shadow-verifier') process.exit(1);
+             const readiness = await fetch('http://127.0.0.1:8092/readyz');
+             const readyBody = await readiness.json();
+             if (readiness.status !== 503 || readyBody.ready !== false ||
+                 readyBody.reason !== 'database_unavailable') process.exit(1);
+             const forbidden = await fetch('http://127.0.0.1:8092/verify');
+             if (forbidden.status !== 404) process.exit(1);"
+
+          docker stop --time 5 "$container_name" >/dev/null
+          test "$(docker inspect "$container_name" --format '{{.State.ExitCode}}')" -eq 0

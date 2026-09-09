@@ -623,8 +623,9 @@ remain impossible.
 
 ### Required work
 
-1. Submit a fresh pilot proof through the intended Telegram flow and retain its customer tracking
-   handle through the proof and deposit lifecycle.
+1. Submit a fresh pilot proof through the intended Telegram flow into the dedicated authenticated
+   shadow lineage. Return no internal proof/job identifier or customer tracking token; the fixed
+   customer response states that no payment was verified or credited.
 2. Lease it only to the enrolled verifier device.
 3. Retrieve and authenticate the official TeleBirr observation.
 4. Recompute protected-reference, receiver, policy, database-snapshot, assignment, device, and
@@ -634,11 +635,20 @@ remain impossible.
    paths.
 7. Confirm no claim, reservation, job, or balance change can exist.
 
+The repository contract for this phase is documented in
+[`telebirr-shadow-verification.md`](telebirr-shadow-verification.md). It reuses only the signed
+assignment/observation wire contracts and existing enrolled trust roots. Capture, attempts,
+transcripts, staged evidence, advisory outcomes, and quarantine remain distinct from both the
+fixture-backed dry-run simulation and live payment-proof tables. Every state transition rechecks
+the six exact disabled financial/provider switches plus the exact armed `dry_run` pilot binding.
+
 ### Owner-visible proof
 
-The customer sees a truthful non-financial status such as `verification under review` or
-`payment observed`; the Owner sees an authenticated redacted result and a manual comparison record.
-KemerBet history and balances are unchanged.
+The customer sees only the truthful no-money shadow-queued response. The Owner sees a fixed
+aggregate status projection containing gate state and counts, with no customer/Player/proof ID,
+reference, digest, signature, evidence, or amount. The verifier completion always returns null
+deposit-intent/payment-claim/execution-job IDs and `settlement_created=false`. KemerBet history and
+balances are unchanged.
 
 ### Exit gate
 

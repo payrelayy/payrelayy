@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { runTelebirrShadowVerifierMain } from './telebirr-shadow-verifier-main.js';
 import { runTrustedTelebirrVerifierMain } from './trusted-telebirr-verifier-main.js';
 
 describe('trusted TeleBirr verifier main', () => {
@@ -19,6 +20,32 @@ describe('trusted TeleBirr verifier main', () => {
     await runTrustedTelebirrVerifierMain({
       createApplication: async () => {
         throw new Error('database password and internal detail');
+      },
+      reportFailure,
+      setExitCode,
+    });
+    expect(reportFailure).toHaveBeenCalledTimes(1);
+    expect(setExitCode).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('TeleBirr shadow verifier main', () => {
+  it('runs only the composed shadow application', async () => {
+    const run = vi.fn(async () => undefined);
+    await runTelebirrShadowVerifierMain({
+      createApplication: async () => ({ run, stop: vi.fn() }),
+      reportFailure: vi.fn(),
+      setExitCode: vi.fn(),
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('redacts startup and runtime failures behind one fixed report', async () => {
+    const reportFailure = vi.fn();
+    const setExitCode = vi.fn();
+    await runTelebirrShadowVerifierMain({
+      createApplication: async () => {
+        throw new Error('sensitive player and database detail');
       },
       reportFailure,
       setExitCode,

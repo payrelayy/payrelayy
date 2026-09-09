@@ -35,6 +35,7 @@ const REQUEST_KEYS = [
 ] as const;
 const AUTHORITY_KEYS = [
   'contractVersion',
+  'verificationMode',
   'capturedAt',
   'authorityStateDigest',
   'verificationAttemptId',
@@ -163,6 +164,8 @@ export interface TrustedTelebirrVerifierDatabase {
   complete(input: TrustedTelebirrCompletionInput): Promise<unknown>;
 }
 
+export type TrustedTelebirrVerificationMode = 'live' | 'shadow';
+
 export type TrustedTelebirrVerificationResult =
   | {
       readonly status: 'not_settled';
@@ -183,6 +186,19 @@ export type TrustedTelebirrVerificationResult =
       readonly depositPaymentClaimId: string;
       readonly executionJobId: string;
       readonly alreadyCompleted: boolean;
+    }
+  | {
+      readonly status: 'shadow_completed';
+      readonly verificationOutcomeId: string;
+      readonly disposition: 'would_reject' | 'would_review' | 'would_verify';
+      readonly reasonCode: string;
+      readonly wouldVerify: boolean;
+      readonly alreadyCompleted: boolean;
+    }
+  | {
+      readonly status: 'shadow_not_completed';
+      readonly disposition: 'would_reject' | 'would_review';
+      readonly reasonCode: string;
     };
 
 export interface RedactedTrustedTelebirrVerificationLogProjection {
@@ -519,6 +535,7 @@ function authorityFrom(
   value: unknown,
   expectedAttemptId: string,
   expectedLeaseToken: string,
+  expectedVerificationMode: TrustedTelebirrVerificationMode,
 ): ParsedAuthority | undefined {
   const record = exactDataRecord(value, AUTHORITY_KEYS);
   const capturedAt = canonicalTimestamp(record?.capturedAt);
@@ -539,6 +556,7 @@ function authorityFrom(
   if (
     !record ||
     record.contractVersion !== TRUSTED_TELEBIRR_VERIFIER_CONTRACT_VERSION ||
+    record.verificationMode !== expectedVerificationMode ||
     record.verificationAttemptId !== expectedAttemptId ||
     record.leaseTokenAccepted !== true ||
     !capturedAt ||
@@ -728,8 +746,19 @@ function authenticatedOutcome(
 
 function nonSettlementResult(
   outcome: ReturnType<typeof adaptTelebirrLivePilotOutcome>,
-): Extract<TrustedTelebirrVerificationResult, { readonly status: 'not_settled' }> {
+  verificationMode: TrustedTelebirrVerificationMode,
+): Extract<
+  TrustedTelebirrVerificationResult,
+  { readonly status: 'not_settled' | 'shadow_not_completed' }
+> {
   if (!outcome) {
+    if (verificationMode === 'shadow') {
+      return Object.freeze({
+        status: 'shadow_not_completed' as const,
+        disposition: 'would_reject' as const,
+        reasonCode: 'trusted_evidence_invalid',
+      });
+    }
     return Object.freeze({
       status: 'not_settled' as const,
       disposition: 'invalid' as const,
@@ -737,10 +766,27 @@ function nonSettlementResult(
     });
   }
   if (outcome.disposition === 'settlement_candidate') {
+    if (verificationMode === 'shadow') {
+      return Object.freeze({
+        status: 'shadow_not_completed' as const,
+        disposition: 'would_reject' as const,
+        reasonCode: 'trusted_evidence_invalid',
+      });
+    }
     return Object.freeze({
       status: 'not_settled' as const,
       disposition: 'invalid' as const,
       reasonCode: 'trusted_evidence_invalid',
+    });
+  }
+  if (verificationMode === 'shadow') {
+    return Object.freeze({
+      status: 'shadow_not_completed' as const,
+      disposition:
+        outcome.disposition === 'review_required'
+          ? ('would_review' as const)
+          : ('would_reject' as const),
+      reasonCode: outcome.reasonCode,
     });
   }
   return Object.freeze({
@@ -750,21 +796,52 @@ function nonSettlementResult(
   });
 }
 
+function shadowAdvisoryOutcome(
+  disposition: TrustedTelebirrCompletionInput['disposition'],
+): 'would_reject' | 'would_review' | 'would_verify' {
+  if (disposition === 'settlement_candidate') return 'would_verify';
+  return disposition === 'review_required' ? 'would_review' : 'would_reject';
+}
+
 function completionResult(
   value: unknown,
   expectedDisposition: TrustedTelebirrCompletionInput['disposition'],
   expectedReasonCode: string,
+  verificationMode: TrustedTelebirrVerificationMode,
 ): TrustedTelebirrVerificationResult | undefined {
   const row = exactDataRecord(value, COMPLETION_ROW_KEYS);
+  const expectedReturnedDisposition =
+    verificationMode === 'shadow'
+      ? shadowAdvisoryOutcome(expectedDisposition)
+      : expectedDisposition;
   if (
     !row ||
-    row.outcome_disposition !== expectedDisposition ||
+    row.outcome_disposition !== expectedReturnedDisposition ||
     row.outcome_reason_code !== expectedReasonCode ||
     typeof row.already_completed !== 'boolean' ||
     typeof row.verification_outcome_id !== 'string' ||
     !UUID_PATTERN.test(row.verification_outcome_id)
   ) {
     return undefined;
+  }
+  if (verificationMode === 'shadow') {
+    if (
+      row.settlement_created !== false ||
+      row.deposit_intent_id !== null ||
+      row.deposit_payment_claim_id !== null ||
+      row.execution_job_id !== null ||
+      (expectedDisposition === 'settlement_candidate' && expectedReasonCode !== 'exact_proof_match')
+    ) {
+      return undefined;
+    }
+    return Object.freeze({
+      status: 'shadow_completed' as const,
+      verificationOutcomeId: row.verification_outcome_id,
+      disposition: shadowAdvisoryOutcome(expectedDisposition),
+      reasonCode: expectedReasonCode,
+      wouldVerify: expectedDisposition === 'settlement_candidate',
+      alreadyCompleted: row.already_completed,
+    });
   }
   if (expectedDisposition !== 'settlement_candidate') {
     if (
@@ -805,9 +882,10 @@ function completionResult(
   });
 }
 
-export function createTrustedTelebirrVerifier(
+function createTelebirrVerifier(
   database: TrustedTelebirrVerifierDatabase,
   pinnedKeys: TrustedTelebirrPinnedKeys,
+  verificationMode: TrustedTelebirrVerificationMode,
 ): TrustedTelebirrVerifier {
   const pinRecord = exactDataRecord(pinnedKeys, ['assignmentSigners', 'devices']);
   if (
@@ -844,6 +922,7 @@ export function createTrustedTelebirrVerifier(
           ),
           request.verificationAttemptId,
           request.leaseToken,
+          verificationMode,
         );
         if (!firstAuthority || !exactTranscriptMatch(firstAuthority, request.signedAssignment)) {
           throw new Error();
@@ -856,7 +935,7 @@ export function createTrustedTelebirrVerifier(
           !devicePin ||
           devicePin.fingerprint !== firstAuthority.deviceSpkiFingerprint
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
 
         const firstVerification = authenticatedOutcome(
@@ -866,7 +945,7 @@ export function createTrustedTelebirrVerifier(
           signerPin.spki,
           devicePin.spki,
         );
-        if (!firstVerification) return nonSettlementResult(undefined);
+        if (!firstVerification) return nonSettlementResult(undefined, verificationMode);
 
         const secondAuthority = authorityFrom(
           await database.loadAuthority(
@@ -876,13 +955,14 @@ export function createTrustedTelebirrVerifier(
           ),
           request.verificationAttemptId,
           request.leaseToken,
+          verificationMode,
         );
         if (
           !secondAuthority ||
           secondAuthority.authorityStateDigest !== firstAuthority.authorityStateDigest ||
           !exactTranscriptMatch(secondAuthority, request.signedAssignment)
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
         const secondSignerPin = signerPins.get(String(secondAuthority.signer.signerKeyId));
         const secondDevicePin = devicePins.get(String(secondAuthority.device.keyId));
@@ -892,7 +972,7 @@ export function createTrustedTelebirrVerifier(
           !secondDevicePin ||
           secondDevicePin.fingerprint !== secondAuthority.deviceSpkiFingerprint
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
         const secondVerification = authenticatedOutcome(
           secondAuthority,
@@ -901,7 +981,7 @@ export function createTrustedTelebirrVerifier(
           secondSignerPin.spki,
           secondDevicePin.spki,
         );
-        if (!secondVerification) return nonSettlementResult(undefined);
+        if (!secondVerification) return nonSettlementResult(undefined, verificationMode);
         const { outcome: secondOutcome, protocol: secondProtocol } = secondVerification;
 
         const trustedReference = dataRecord(secondAuthority.outcomeInputBase.trustedReference);
@@ -912,7 +992,7 @@ export function createTrustedTelebirrVerifier(
               secondOutcome.canonicalReference.fingerprint !== trustedReference.fingerprint ||
               secondOutcome.canonicalReference.masked !== trustedReference.masked))
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
         const replayIdentity = deriveTelebirrLivePilotReplayIdentity(
           request.signedAssignment,
@@ -926,7 +1006,7 @@ export function createTrustedTelebirrVerifier(
           replayIdentity !== secondProtocol.replayIdentity ||
           !observationSignatureDigest
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
 
         const isSettlement = secondOutcome.disposition === 'settlement_candidate';
@@ -975,7 +1055,7 @@ export function createTrustedTelebirrVerifier(
                 !trustedReceiver ||
                 existingCompletion.receiverIdentityDigest !== trustedReceiver.identityDigest)))
         ) {
-          return nonSettlementResult(undefined);
+          return nonSettlementResult(undefined, verificationMode);
         }
         const completionInput = existingCompletion ?? currentCompletionInput;
 
@@ -983,6 +1063,7 @@ export function createTrustedTelebirrVerifier(
           await database.complete(completionInput),
           completionInput.disposition,
           completionInput.reasonCode,
+          verificationMode,
         );
         if (!completed) throw new Error();
         return completed;
@@ -991,6 +1072,22 @@ export function createTrustedTelebirrVerifier(
       }
     },
   });
+}
+
+/** Live-only verifier factory. Its completion contract still requires financial settlement IDs. */
+export function createTrustedTelebirrVerifier(
+  database: TrustedTelebirrVerifierDatabase,
+  pinnedKeys: TrustedTelebirrPinnedKeys,
+): TrustedTelebirrVerifier {
+  return createTelebirrVerifier(database, pinnedKeys, 'live');
+}
+
+/** No-money factory. It accepts only advisory completion rows with every financial field absent. */
+export function createTelebirrShadowVerifier(
+  database: TrustedTelebirrVerifierDatabase,
+  pinnedKeys: TrustedTelebirrPinnedKeys,
+): TrustedTelebirrVerifier {
+  return createTelebirrVerifier(database, pinnedKeys, 'shadow');
 }
 
 /** Fixed-key projection; it excludes IDs, references, digests, signatures, tokens, and keys. */
@@ -1004,6 +1101,24 @@ export function redactedTrustedTelebirrVerificationForLog(
       disposition: 'settlement_candidate',
       reasonCode: 'exact_proof_match',
       alreadyCompleted: result.alreadyCompleted,
+    });
+  }
+  if (result.status === 'shadow_completed') {
+    return Object.freeze({
+      verifierVersion: TRUSTED_TELEBIRR_VERIFIER_VERSION,
+      status: 'shadow_completed',
+      disposition: result.disposition,
+      reasonCode: 'shadow_verification_completed',
+      alreadyCompleted: result.alreadyCompleted,
+    });
+  }
+  if (result.status === 'shadow_not_completed') {
+    return Object.freeze({
+      verifierVersion: TRUSTED_TELEBIRR_VERIFIER_VERSION,
+      status: 'shadow_not_completed',
+      disposition: result.disposition,
+      reasonCode: 'shadow_verification_not_completed',
+      alreadyCompleted: false,
     });
   }
   if (result.status === 'completed_without_settlement') {

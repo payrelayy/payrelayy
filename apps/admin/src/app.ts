@@ -86,6 +86,10 @@ import {
   OwnerTelebirrDevicePairingRejectedError,
   OwnerTelebirrDevicePairingUnavailableError,
 } from './owner-telebirr-device-pairing.js';
+import {
+  OwnerTelebirrShadowVerificationStatusRejectedError,
+  OwnerTelebirrShadowVerificationStatusUnavailableError,
+} from './owner-telebirr-shadow-verification-status.js';
 import type { OwnerControlPostgresRuntime } from './postgres-runtime.js';
 import {
   OWNER_DASHBOARD_CSS,
@@ -1758,6 +1762,34 @@ export function buildOwnerControlApp(
           error instanceof OwnerCompanionLookupUnavailableError
         ) {
           request.log.warn('Owner companion lookup status is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/telebirr-shadow-verification/status',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const status = await dependencies.runtime.telebirrShadowVerification.status(authUserId);
+        return reply.code(200).send({ shadowVerification: status });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerTelebirrShadowVerificationStatusRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (
+          error instanceof OwnerAuthenticationUnavailableError ||
+          error instanceof OwnerTelebirrShadowVerificationStatusUnavailableError
+        ) {
+          request.log.warn('Owner TeleBirr shadow-verification status is unavailable.');
         }
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }

@@ -26,6 +26,7 @@ import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegra
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
+import { registerTelebirrShadowVerificationSqlTests } from './telebirr-shadow-verification.suite.js';
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
@@ -9609,6 +9610,10 @@ registerTelebirrAssignmentBrokerRuntimeSqlTests(
   () => ownerAdminId,
 );
 registerTelebirrDeviceStateRuntimeSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerTelebirrShadowVerificationSqlTests(
   () => client,
   () => ownerAdminId,
 );

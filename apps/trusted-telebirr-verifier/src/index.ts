@@ -1,4 +1,7 @@
 export * from './postgres-trusted-telebirr-verifier.js';
+export * from './postgres-telebirr-shadow-verifier.js';
+export * from './telebirr-shadow-verifier-application.js';
+export * from './telebirr-shadow-verifier-main.js';
 export * from './trusted-telebirr-verifier-config.js';
 export * from './trusted-telebirr-verifier-application.js';
 export * from './trusted-telebirr-verifier-health.js';

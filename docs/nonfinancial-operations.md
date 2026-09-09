@@ -121,6 +121,28 @@ and can roll back a failed activation only while the exact pending predecessor r
 Finalization removes that record; the helper rejects rollback of the finalized current release.
 Retaining an older image or release directory does not extend this automatic rollback window.
 
+A pending record is not sufficient by itself: before stopping any service, the helper checks
+that the current release is still the candidate or its recorded predecessor (or absent for
+an initial activation), and that every production container belongs to one of those exact
+commits. A stale record from an earlier failed deployment is rejected. Missing, malformed,
+symlinked, or incorrectly owned predecessor records also fail closed. This check preserves
+recovery when an activation failed before updating the current-release link.
+
+Operators can inspect this boundary without stopping services or removing receipts:
+
+```sh
+sudo -n /usr/local/sbin/fetanagent-production-deploy-helper check-rollback <exact-pending-commit-sha>
+```
+
+This command checks eligibility only; it does not guarantee the predecessor will start or
+that its schema expectations match the current database. Do not use `rollback` as a status
+check. Mutating helper operations and this boundary check hold a nonblocking host lock.
+If another operation is in progress, allow it to finish, inspect the resulting release state,
+and then retry if still appropriate. The lock covers each helper invocation, not an entire
+multi-step GitHub workflow, and cannot serialize manual Docker changes outside the helper.
+Activation will not overwrite an existing pending record or reactivate the already-current
+commit. Inspect an unfinished transition before retrying; use `status` for the current release.
+
 After finalization, application recovery needs a separately reviewed redeployment through the
 existing main-branch and exact-commit CI gates. Never recreate or edit predecessor markers,
 switch release symlinks manually, or bypass those gates to force a rollback. Application

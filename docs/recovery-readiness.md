@@ -66,6 +66,10 @@ email setup; a recovery inventory is not permission to rotate credentials or rep
 The production helper can restore a pending activation's predecessor. Its `finalize` operation
 removes the pending predecessor record, and rollback of the finalized current release is then
 rejected. An older image remaining on disk does not change that contract.
+An old pending record also cannot authorize recovery over a newer release: the helper checks
+both the current-release link and all production container revisions before stopping services.
+Use `check-rollback <exact-pending-commit-sha>` for a boundary-only check; it does not execute
+recovery or prove that the predecessor is compatible with the current database.
 
 Later application recovery requires reviewed redeployment through the existing main-branch
 and exact-SHA CI gates. Do not tamper with markers, edit the current-release symlink, invoke

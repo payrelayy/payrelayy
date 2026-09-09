@@ -4,9 +4,45 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadBotConfig, redactedBotConfigForLog } from './bot.js';
+import { BOT_PUBLIC_SUPPORT_CONTACT_URL, loadBotConfig, redactedBotConfigForLog } from './bot.js';
 
 const temporaryDirectories: string[] = [];
+
+describe('public bot support-contact configuration', () => {
+  it.each([undefined, ''])('is optional without supplying a fake contact URL: %s', (value) => {
+    const config = loadBotConfig({ NODE_ENV: 'test', BOT_SUPPORT_CONTACT_URL: value });
+    expect(config.supportContactUrl).toBeUndefined();
+    expect(redactedBotConfigForLog(config).supportContactConfigured).toBe(false);
+  });
+
+  it.each(['test', 'production'])('accepts only the public production URL in %s', (nodeEnv) => {
+    const config = loadBotConfig({
+      NODE_ENV: nodeEnv,
+      BOT_SUPPORT_CONTACT_URL: BOT_PUBLIC_SUPPORT_CONTACT_URL,
+    });
+    expect(config.supportContactUrl).toBe(BOT_PUBLIC_SUPPORT_CONTACT_URL);
+    expect(redactedBotConfigForLog(config).supportContactConfigured).toBe(true);
+    expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(
+      BOT_PUBLIC_SUPPORT_CONTACT_URL,
+    );
+  });
+
+  it.each([
+    'http://owner.fetanagent.com/v1/public/support-contact',
+    'https://owner.fetanagent.com.evil.example/v1/public/support-contact',
+    'https://secret@owner.fetanagent.com/v1/public/support-contact',
+    'https://owner.fetanagent.com:443/v1/public/support-contact',
+    `${BOT_PUBLIC_SUPPORT_CONTACT_URL}/`,
+    `${BOT_PUBLIC_SUPPORT_CONTACT_URL}?secret=private`,
+    `${BOT_PUBLIC_SUPPORT_CONTACT_URL}#fragment`,
+    ` ${BOT_PUBLIC_SUPPORT_CONTACT_URL}`,
+    'http://127.0.0.1/',
+  ])('rejects unapproved URLs without reflecting their values: %#', (value) => {
+    expect(() => loadBotConfig({ NODE_ENV: 'test', BOT_SUPPORT_CONTACT_URL: value })).toThrow(
+      'BOT_SUPPORT_CONTACT_URL must be the approved public support-contact URL.',
+    );
+  });
+});
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {

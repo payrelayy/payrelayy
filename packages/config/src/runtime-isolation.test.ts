@@ -266,6 +266,7 @@ describe('runtime configuration isolation', () => {
     expect(redactedBotConfigForLog(config)).toEqual({
       nodeEnv: 'test',
       logLevel: 'info',
+      supportContactConfigured: false,
       telegram: { enabled: true, tokenConfigured: true },
       apiIngress: { enabled: true, secretsConfigured: true },
       telegramBetaAdmission: { enabled: false, secretsConfigured: false },

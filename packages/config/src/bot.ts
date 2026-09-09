@@ -63,6 +63,18 @@ export interface BotConfig extends RuntimeConfig {
   readonly apiIngress: BotApiIngressConfig;
   readonly telegramBetaAdmission: BotTelegramBetaAdmissionConfig;
   readonly telegramActionChannel: BotTelegramActionChannelConfig;
+  readonly supportContactUrl: string | undefined;
+}
+
+export const BOT_PUBLIC_SUPPORT_CONTACT_URL =
+  'https://owner.fetanagent.com/v1/public/support-contact';
+
+function optionalSupportContactUrl(value: string | undefined): string | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (value !== BOT_PUBLIC_SUPPORT_CONTACT_URL) {
+    throw new Error('BOT_SUPPORT_CONTACT_URL must be the approved public support-contact URL.');
+  }
+  return value;
 }
 
 function secretFromEnvironmentOrFile(
@@ -318,6 +330,7 @@ function assertDistinctBotTelegramTransportHmacSecrets(
 
 export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): BotConfig {
   const runtime = loadRuntimeConfig(environment);
+  const supportContactUrl = optionalSupportContactUrl(environment.BOT_SUPPORT_CONTACT_URL);
   const enabled = booleanFromEnv(environment.TELEGRAM_BOT_ENABLED, false, 'TELEGRAM_BOT_ENABLED');
   const actionChannelEnabled = booleanFromEnv(
     environment.INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED,
@@ -350,6 +363,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       },
       telegramBetaAdmission,
       telegramActionChannel,
+      supportContactUrl,
     };
   }
 
@@ -386,13 +400,19 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     apiIngress,
     telegramBetaAdmission,
     telegramActionChannel,
+    supportContactUrl,
   };
 }
 
 export function redactedBotConfigForLog(config: BotConfig): Omit<
   BotConfig,
-  'telegram' | 'apiIngress' | 'telegramBetaAdmission' | 'telegramActionChannel'
+  | 'telegram'
+  | 'apiIngress'
+  | 'telegramBetaAdmission'
+  | 'telegramActionChannel'
+  | 'supportContactUrl'
 > & {
+  readonly supportContactConfigured: boolean;
   readonly telegram: { readonly enabled: boolean; readonly tokenConfigured: boolean };
   readonly apiIngress: { readonly enabled: boolean; readonly secretsConfigured: boolean };
   readonly telegramBetaAdmission: {
@@ -407,6 +427,7 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
   return {
     nodeEnv: config.nodeEnv,
     logLevel: config.logLevel,
+    supportContactConfigured: config.supportContactUrl !== undefined,
     telegram: {
       enabled: config.telegram.enabled,
       tokenConfigured: config.telegram.enabled,

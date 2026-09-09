@@ -12,6 +12,7 @@ import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
+import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
 
@@ -19,6 +20,8 @@ export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
+  readonly supportContact?:
+    Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
@@ -154,6 +157,11 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)', 'execute') as companion_lookup_issue_allowed,
     has_function_privilege(current_user, 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)', 'execute') as companion_lookup_status_allowed,
     has_function_privilege(current_user, 'app.get_owner_companion_connection_status(uuid)', 'execute') as companion_connection_status_allowed,
+    -- This additive feature deploys before its migration. Missing functions keep only
+    -- support unavailable; an existing function with incorrect privileges fails closed.
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 'execute'), true) as support_contact_write_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_public_support_contact()')::oid, 'execute'), true) as support_contact_public_projection_allowed,
     not has_function_privilege(current_user, 'app.claim_agent_platform_companion_pairing(uuid,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_device_pairing_claim_denied,
     not has_function_privilege(current_user, 'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)', 'execute') as internal_companion_device_pairing_complete_denied,
     not has_function_privilege(current_user, 'app.claim_agent_platform_companion_lookup_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)', 'execute') as internal_companion_lookup_claim_denied,
@@ -234,6 +242,10 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)'::regprocedure
           ,'app.get_agent_platform_companion_exact_five_lookup_status(uuid)'::regprocedure
           ,'app.get_owner_companion_connection_status(uuid)'::regprocedure
+          -- Never allow NULL into NOT IN: that would neutralize this deny check.
+          ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_public_support_contact()')::oid, 0::oid)
           ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
@@ -297,6 +309,9 @@ export async function createOwnerControlPostgresRuntime(
         )
       : undefined,
     companionConnection: new PostgresOwnerCompanionConnection({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    supportContact: new PostgresOwnerSupportContact({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     companionLookup: config.companionDevicePairing.configured

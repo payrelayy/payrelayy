@@ -28,6 +28,47 @@ If a download still fails:
 This guidance does not guarantee that a browser extension or network policy will allow a download.
 It provides a recovery path without replacing the signed-in dashboard or weakening local protection.
 
+## Owner-managed public Telegram support
+
+In the signed-in Owner dashboard, open **Customer support**. Enter the Telegram
+username you control (with or without `@`), check the `https://t.me/…` preview,
+confirm it is the intended public contact, and select **Save support contact**.
+The saved contact and success message appear in the same section. This field is
+a public support username, not a bot token, password, wallet number, or payment setting.
+FetanAgent validates its format but does not verify that you own the Telegram account.
+
+The initial setting is blank. To remove a published contact, select **Clear draft /
+disable contact**, confirm the change, and save. Clearing the draft alone changes
+nothing on the server. A conflicting edit from another Owner tab requires
+**Refresh saved contact** and review before saving again. After an uncertain result,
+refresh to check what actually persisted; do not assume a failed response means the
+database did not save it.
+
+The bot's private-chat `/support` command reads this setting without customer
+identifiers or credentials and replies with the current public link. A missing or
+unavailable contact produces an unavailable response, never a fabricated fallback.
+Saved changes invalidate the server's five-second cache; already-sent Telegram
+messages cannot be edited by changing the setting. No bot restart or deployment is
+needed for future contact changes. `/support` does not enter the customer/payment
+pipeline or provide deposit or financial-processing authority.
+
+### One-time release ordering
+
+Deploy the reviewed application first, then apply migration
+`20260909162450_owner_telegram_support_contact.sql` through the existing production
+migration workflow. The new runtime accepts the absence of these three additive
+support functions without relaxing its other privilege checks; support remains
+unavailable until the migration is applied. The previous runtime rejects the new
+function grants on startup, so do not apply this migration before the new application
+is successfully activated. After the migration, recovery must use a compatible
+reviewed application; do not switch blindly to an older image.
+
+Verify the anonymous public endpoint returns only
+`{"supportContact":{"telegramUsername":null}}` initially, unauthenticated Owner
+requests return 403, and the authenticated form shows the blank saved setting.
+Do not publish a placeholder contact in production to test saving. The Owner then
+saves their intended real username and can send `/support` to check the live reply.
+
 ## What Telegram bot health means
 
 Production bot health requires a successful existing `getUpdates` response within the last

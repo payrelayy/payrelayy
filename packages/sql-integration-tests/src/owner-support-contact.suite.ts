@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { Client, QueryResultRow } from 'pg';
@@ -14,6 +15,56 @@ type ContactRow = {
 const readContactSql = 'select * from app.get_owner_support_contact($1::uuid)';
 const saveContactSql =
   'select * from app.set_owner_support_contact($1::uuid, $2::text, $3::integer)';
+
+const supportRoutines = [
+  ['app.get_owner_support_contact(uuid)', 'support_contact_read_allowed'],
+  ['app.set_owner_support_contact(uuid,text,integer)', 'support_contact_write_allowed'],
+  ['app.get_public_support_contact()', 'support_contact_public_projection_allowed'],
+] as const;
+
+async function actualOwnerPreflightSql(): Promise<string> {
+  // Read the production export itself: importing the application would require unrelated
+  // runtime dependencies in this deliberately isolated, credential-free SQL test image.
+  const source = await readFile(
+    new URL('../../../apps/admin/src/postgres-runtime.ts', import.meta.url),
+    'utf8',
+  );
+  const matches = [...source.matchAll(/export const OWNER_CONTROL_PREFLIGHT_SQL = `([^`]+)`;/gu)];
+  expect(matches).toHaveLength(1);
+  const sql = matches[0]![1]!;
+  // The export is a literal. Fail instead of executing a differently interpreted template.
+  expect(sql).not.toContain('${');
+  expect(sql).not.toContain('\\');
+  return sql;
+}
+
+async function runActualOwnerPreflight(client: Client): Promise<Record<string, boolean>> {
+  const sql = await actualOwnerPreflightSql();
+  await client.query('set session authorization fetanagent_owner_control_runtime');
+  try {
+    await client.query("set local search_path = 'pg_catalog'");
+    const result = await client.query<Record<string, boolean>>(sql);
+    expect(result.rows).toHaveLength(1);
+    return result.rows[0]!;
+  } finally {
+    await client.query('reset session authorization');
+  }
+}
+
+function expectEveryPreflightCheckReady(row: Record<string, boolean>): void {
+  expect(Object.keys(row).length).toBeGreaterThan(30);
+  expect(Object.entries(row).filter(([, value]) => value !== true)).toEqual([]);
+}
+
+async function executableOwnerFunctionCount(client: Client): Promise<number> {
+  const result = await client.query<{ readonly count: number }>(`
+    select count(*)::integer as count
+      from pg_proc routine join pg_namespace namespace on namespace.oid = routine.pronamespace
+     where namespace.nspname = 'app'
+       and has_function_privilege('fetanagent_owner_control_runtime', routine.oid, 'EXECUTE')
+  `);
+  return result.rows[0]!.count;
+}
 
 async function queryWithSavepoint<T extends QueryResultRow>(
   client: Client,
@@ -59,6 +110,64 @@ export function registerOwnerSupportContactSqlTests(
   createClient: () => Client,
 ): void {
   describe('Owner-controlled public Telegram support contact', () => {
+    it('executes the actual startup preflight before and after the three support RPCs exist', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        // Only the disposable role is made login-capable, matching the production catalog
+        // shape. No connection credentials or application functions are executed.
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        await client.query('savepoint support_pre_migration_catalog');
+        for (const [signature] of supportRoutines) {
+          await client.query(`drop function ${signature}`);
+        }
+        expect(await executableOwnerFunctionCount(client)).toBe(33);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+
+        // Restore the actual checked-in migration's functions and ACLs, not test doubles.
+        // This models the formerly healthy process restarting after that additive migration.
+        await client.query('rollback to savepoint support_pre_migration_catalog');
+        await client.query('release savepoint support_pre_migration_catalog');
+        expect(await executableOwnerFunctionCount(client)).toBe(36);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+      });
+    });
+
+    it.each(supportRoutines)(
+      'rejects a missing support grant for %s at actual startup',
+      async (signature, check) => {
+        const client = getClient();
+        await withRollback(client, async () => {
+          await client.query('alter role fetanagent_owner_control_runtime login');
+          await client.query(
+            `revoke execute on function ${signature} from fetanagent_owner_control`,
+          );
+          expect(await executableOwnerFunctionCount(client)).toBe(35);
+          const row = await runActualOwnerPreflight(client);
+          expect(row[check]).toBe(false);
+          expect(row.exact_app_execute_count).toBe(false);
+          expect(row.all_other_app_functions_denied).toBe(true);
+        });
+      },
+    );
+
+    it('rejects one unexpected executable function without weakening the support checks', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        await client.query(`
+          create function app.sql_integration_unexpected_support_probe() returns boolean
+          language sql set search_path = pg_catalog as 'select true';
+          revoke all on function app.sql_integration_unexpected_support_probe() from public;
+          grant execute on function app.sql_integration_unexpected_support_probe() to fetanagent_owner_control;
+        `);
+        expect(await executableOwnerFunctionCount(client)).toBe(37);
+        const row = await runActualOwnerPreflight(client);
+        expect(row.exact_app_execute_count).toBe(false);
+        expect(row.all_other_app_functions_denied).toBe(false);
+        for (const [, check] of supportRoutines) expect(row[check]).toBe(true);
+      });
+    });
+
     it('exposes only the three hardened RPCs to the Owner role and seals both tables', async () => {
       const client = getClient();
       const routines = await client.query<{

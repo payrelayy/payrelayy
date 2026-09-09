@@ -206,6 +206,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
       select count(*) = 33
+        + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
+        + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
+        + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
       from pg_proc procedure
       join pg_namespace namespace on namespace.oid = procedure.pronamespace
       where namespace.nspname = 'app'

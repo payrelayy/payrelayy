@@ -15,6 +15,9 @@ const authorityFunction =
   'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)';
 const completionFunction =
   'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
+const stagedEvidenceFunction = 'app.load_next_private_live_telebirr_staged_evidence()';
+const quarantineFunction =
+  'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)';
 const internalCompletionFunction =
   'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const sessionGuardFunction = 'app.require_trusted_telebirr_verifier_session()';
@@ -232,7 +235,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       ]);
     });
 
-    it('grants exactly two hardened routines with no base-object or extension authority', async () => {
+    it('grants exactly four hardened routines with no base-object or extension authority', async () => {
       const client = getClient();
       const functions = await client.query<{
         readonly group_execute: boolean;
@@ -262,7 +265,19 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           runtime_execute: true,
         },
         {
+          signature: stagedEvidenceFunction,
+          hardened: true,
+          group_execute: true,
+          runtime_execute: true,
+        },
+        {
           signature: authorityFunction,
+          hardened: true,
+          group_execute: true,
+          runtime_execute: true,
+        },
+        {
+          signature: quarantineFunction,
           hardened: true,
           group_execute: true,
           runtime_execute: true,
@@ -600,7 +615,21 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         {
           grantee: verifierGroup,
           object_kind: 'routine',
+          object_identity: stagedEvidenceFunction,
+          privilege_type: 'EXECUTE',
+          is_grantable: false,
+        },
+        {
+          grantee: verifierGroup,
+          object_kind: 'routine',
           object_identity: authorityFunction,
+          privilege_type: 'EXECUTE',
+          is_grantable: false,
+        },
+        {
+          grantee: verifierGroup,
+          object_kind: 'routine',
+          object_identity: quarantineFunction,
           privilege_type: 'EXECUTE',
           is_grantable: false,
         },
@@ -660,10 +689,10 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
            and has_schema_privilege('${verifierRuntime}', namespace.oid, 'USAGE')
            and has_function_privilege('${verifierRuntime}', routine.oid, 'EXECUTE')
       `,
-        [[authorityFunction, completionFunction]],
+        [[authorityFunction, completionFunction, stagedEvidenceFunction, quarantineFunction]],
       );
       expect(reachableRoutines.rows).toEqual([
-        { reachable_count: 2, unexpected_count: 0, unexpected_security_definer_count: 0 },
+        { reachable_count: 4, unexpected_count: 0, unexpected_security_definer_count: 0 },
       ]);
     });
 
@@ -708,28 +737,50 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       ];
       const denied = await client.query<{
         readonly completion_execute: boolean;
+        readonly quarantine_execute: boolean;
         readonly reader_execute: boolean;
         readonly rolname: string;
+        readonly staged_evidence_execute: boolean;
       }>(
         `
         select role.rolname,
                has_function_privilege(role.oid, $1::regprocedure, 'EXECUTE') as reader_execute,
                has_function_privilege(role.oid, $2::regprocedure, 'EXECUTE')
-                 as completion_execute
+                 as completion_execute,
+               has_function_privilege(role.oid, $3::regprocedure, 'EXECUTE')
+                 as staged_evidence_execute,
+               has_function_privilege(role.oid, $4::regprocedure, 'EXECUTE')
+                 as quarantine_execute
           from pg_roles role
-         where role.rolname = any($3::text[])
+         where role.rolname = any($5::text[])
          order by role.rolname
       `,
-        [authorityFunction, completionFunction, deniedRoles],
+        [
+          authorityFunction,
+          completionFunction,
+          stagedEvidenceFunction,
+          quarantineFunction,
+          deniedRoles,
+        ],
       );
       expect(denied.rows).toHaveLength(deniedRoles.length);
-      expect(denied.rows.every((row) => !row.reader_execute && !row.completion_execute)).toBe(true);
+      expect(
+        denied.rows.every(
+          (row) =>
+            !row.reader_execute &&
+            !row.completion_execute &&
+            !row.staged_evidence_execute &&
+            !row.quarantine_execute,
+        ),
+      ).toBe(true);
 
       const publicAcl = await client.query<{ readonly public_execute: boolean }>(
         `
         select exists (
           select 1
-            from unnest(array[$1::regprocedure, $2::regprocedure]) routine_oid
+            from unnest(array[
+              $1::regprocedure, $2::regprocedure, $3::regprocedure, $4::regprocedure
+            ]) routine_oid
             join pg_proc routine on routine.oid = routine_oid
            cross join lateral aclexplode(coalesce(
              routine.proacl, acldefault('f', routine.proowner)
@@ -737,7 +788,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
            where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
         ) as public_execute
       `,
-        [authorityFunction, completionFunction],
+        [authorityFunction, completionFunction, stagedEvidenceFunction, quarantineFunction],
       );
       expect(publicAcl.rows).toEqual([{ public_execute: false }]);
 

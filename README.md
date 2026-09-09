@@ -219,7 +219,7 @@ environment file.
 | `apps/maintenance`                                          | Internal nonce-retention privilege preflight; no scheduler or purge command                                                          |
 | `apps/executor`                                             | Guarded one-shot KemerBet executor/runtime; deployment remains unprovisioned                                                         |
 | `apps/windows-companion`                                    | Local headed-Chrome KemerBet enrollment; read-only and no-transfer                                                                   |
-| `apps/trusted-telebirr-verifier`                            | Export-only trusted verifier foundation; uncomposed, unprovisioned, and default-off                                                  |
+| `apps/trusted-telebirr-verifier`                            | Database-only staged-evidence verifier worker; unprovisioned, undeployed, and default-off                                            |
 | `apps/telebirr-device-bridge`                               | Database-free internal Android gateway; guarded image, HTTPS ingress unprovisioned                                                   |
 | `apps/telebirr-assignment-broker`                           | Private protected-reference lease/sign broker; guarded and unprovisioned                                                             |
 | `apps/telebirr-device-state-broker`                         | Private durable Android device-state broker; guarded and unprovisioned                                                               |

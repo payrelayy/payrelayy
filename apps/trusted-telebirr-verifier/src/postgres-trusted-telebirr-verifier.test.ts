@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   COMPLETE_TRUSTED_TELEBIRR_VERIFICATION_SQL,
+  LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL,
   LOAD_TRUSTED_TELEBIRR_AUTHORITY_SQL,
+  PostgresTrustedTelebirrVerifierWorkSource,
   PostgresTrustedTelebirrVerifierDatabase,
+  QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL,
   TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL,
   TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS,
   TRUSTED_TELEBIRR_VERIFIER_SINGLETON_ACQUIRE_SQL,
@@ -50,7 +53,7 @@ function completionInput(
 }
 
 describe('trusted TeleBirr PostgreSQL boundary', () => {
-  it('preflights only the bounded runtime identity and two exact SECURITY DEFINER functions', () => {
+  it('preflights only the bounded runtime identity and four exact SECURITY DEFINER functions', () => {
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       "current_user = 'fetanagent_trusted_telebirr_verifier_runtime'",
     );
@@ -80,6 +83,12 @@ describe('trusted TeleBirr PostgreSQL boundary', () => {
     );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as allowed_functions_execution_private',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'as staged_evidence_function_contract_exact',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'as quarantine_function_contract_exact',
     );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'defaults.defaclnamespace = 0',
@@ -176,6 +185,95 @@ describe('trusted TeleBirr PostgreSQL boundary', () => {
     expect(query).toHaveBeenCalledTimes(2);
     expect(query).toHaveBeenNthCalledWith(1, TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL, []);
     expect(query).toHaveBeenNthCalledWith(2, TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL, []);
+  });
+
+  it('maps an empty staged-evidence read and binds quarantine to the exact request', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql === TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL) {
+        return { rows: [truePreflight] };
+      }
+      if (sql === LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL) return { rows: [] };
+      if (sql === QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL) {
+        return { rows: [{ quarantined: true }] };
+      }
+      throw new Error('unexpected SQL');
+    });
+    const source = new PostgresTrustedTelebirrVerifierWorkSource({ query });
+    await expect(source.loadNext()).resolves.toBeNull();
+
+    const input = completionInput();
+    await expect(
+      source.quarantineInvalid({
+        verificationAttemptId: input.verificationAttemptId,
+        leaseToken: input.leaseToken,
+        observationBodyDigest: input.observationBodyDigest,
+      }),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledWith(LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL, []);
+    expect(query).toHaveBeenCalledWith(QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL, [
+      input.verificationAttemptId,
+      input.leaseToken,
+      input.observationBodyDigest,
+      'trusted_evidence_invalid',
+    ]);
+  });
+
+  it('fails closed when a staged-evidence row is not the exact verifier request shape', async () => {
+    const query = vi.fn(async (sql: string) =>
+      sql === TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL
+        ? { rows: [truePreflight] }
+        : {
+            rows: [
+              {
+                verification_attempt_id: 'not-a-uuid',
+                lease_token: null,
+                completion_request_key: null,
+                observation_body_digest: null,
+                signed_assignment: {},
+                signed_observation: {},
+              },
+            ],
+          },
+    );
+    const source = new PostgresTrustedTelebirrVerifierWorkSource({ query });
+    await expect(source.loadNext()).rejects.toBeInstanceOf(
+      TrustedTelebirrPostgresRuntimeUnavailableError,
+    );
+  });
+
+  it('quarantines structurally invalid staged envelopes without poisoning the worker loop', async () => {
+    const input = completionInput();
+    const query = vi.fn(async (sql: string) => {
+      if (sql === TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL) {
+        return { rows: [truePreflight] };
+      }
+      if (sql === LOAD_NEXT_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL) {
+        return {
+          rows: [
+            {
+              verification_attempt_id: input.verificationAttemptId,
+              lease_token: input.leaseToken,
+              completion_request_key: input.completionRequestKey,
+              observation_body_digest: input.observationBodyDigest,
+              signed_assignment: {},
+              signed_observation: {},
+            },
+          ],
+        };
+      }
+      if (sql === QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL) {
+        return { rows: [{ quarantined: true }] };
+      }
+      throw new Error('unexpected SQL');
+    });
+    const source = new PostgresTrustedTelebirrVerifierWorkSource({ query });
+    await expect(source.loadNext()).resolves.toBeNull();
+    expect(query).toHaveBeenCalledWith(QUARANTINE_TRUSTED_TELEBIRR_STAGED_EVIDENCE_SQL, [
+      input.verificationAttemptId,
+      input.leaseToken,
+      input.observationBodyDigest,
+      'trusted_evidence_invalid',
+    ]);
   });
 
   it('uses one direct singleton connection and becomes unavailable on lock/catalog drift', async () => {

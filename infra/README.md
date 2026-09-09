@@ -21,9 +21,9 @@ The repository provides:
 
 - [`../Dockerfile`](../Dockerfile): locked dependency builds and distinct non-root API,
   customer-web, Owner-control, beta-admission, bot, executor, TeleBirr assignment-broker,
-  TeleBirr device-state-broker, and secret-free gateway runtime targets with no secret copied into
-  them. Their shared Linux/amd64 base image is pinned to a reviewed immutable digest for the London
-  VM and must be reverified before a real deployment;
+  TeleBirr device-state-broker, trusted TeleBirr verifier, and secret-free gateway runtime targets
+  with no secret copied into them. Their shared Linux/amd64 base image is pinned to a reviewed
+  immutable digest for the London VM and must be reverified before a real deployment;
 - [`compose.inactive.yaml`](compose.inactive.yaml): an explicitly `inactive` Compose profile on an
   internal Docker network, with neither an image-exposed nor published host port; it contains the
   API and customer-web fail-closed runtime containers.
@@ -37,6 +37,12 @@ The repository provides:
   bridge. It publishes no host port, gives each broker separate database egress, gives the bridge
   only the internal Caddy ingress network, and contains no calendar stop; see
   [`telebirr-device-pilot.md`](telebirr-device-pilot.md);
+- [`compose.trusted-telebirr-verifier.yaml`](compose.trusted-telebirr-verifier.yaml): a separate
+  explicit-profile-only, non-root trusted-verifier worker with one direct PostgreSQL connection,
+  lifetime singleton, no published port, fixed loopback health, and database-staged evidence as its
+  only work ingress.
+  Its image, short-lived login, public-key pins, CA, and three activation gates are all required at
+  invocation time and none is provisioned by this repository;
 - [`.github/workflows/customer-web-image-smoke.yml`](../.github/workflows/customer-web-image-smoke.yml):
   builds the real customer-web image, verifies its non-root identity and immutable revision label,
   requires the credential-free production entrypoint to fail closed, and probes the built app only
@@ -73,6 +79,7 @@ docker build --target customer-web --build-arg VCS_REF=<reviewed-commit> `
 docker compose -f infra/compose.inactive.yaml config
 node infra/verify-executor-deployment.mjs
 node infra/verify-customer-web-image.mjs
+node infra/verify-trusted-telebirr-verifier-deployment.mjs
 ```
 
 Do not run `docker compose up`, publish a port, attach a secret file, or set an enable switch from
@@ -95,6 +102,7 @@ not reference any of them.
 | TeleBirr assignment broker   | dedicated direct verify-full URL, scoped reference-opening child key, assignment signer and manifest             | master reference-protection keys, device-state URL, service-role key, Telegram/KemerBet credentials |
 | TeleBirr device-state broker | dedicated direct verify-full URL and verified Supabase CA                                                        | opening/signing keys, assignment URL, service-role key, settlement/execution authority              |
 | TeleBirr device bridge       | bridge server signer, assignment public key, immutable public manifest, two read-only Unix sockets               | every database URL/key, reference-opening key, service-role key, proxy/Internet egress              |
+| TeleBirr verifier            | short-lived dedicated direct verify-full PostgreSQL URL, verified public CA, and signer/device public-key pins   | provider PIN/OTP, private signing keys, bot/API/executor credentials                                |
 
 No container may mount the Docker socket. Do not use a shared production `.env` file, browser
 profile, Git secret, or chat transcript as a secret store.

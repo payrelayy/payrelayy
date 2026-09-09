@@ -137,6 +137,31 @@ assert.match(
   /from app\.private_live_deposit_pilot_revisions pilot[\s\S]*?for share/iu,
 );
 assert.match(lockedGateBody, /locked_switch_count <> 7/iu);
+const postLockTimeBoundaries = new Map([
+  [
+    'capture_telegram_telebirr_shadow_proof',
+    { timestamp: 'captured_at', finalCheck: 'captured_at >= profile.valid_until' },
+  ],
+  [
+    'lease_private_telebirr_shadow_assignment',
+    { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' },
+  ],
+  [
+    'persist_private_telebirr_shadow_assignment_signature',
+    {
+      timestamp: 'now_at',
+      finalCheck: 'where revocation.assignment_signer_id = signer.id',
+    },
+  ],
+  [
+    'stage_private_telebirr_shadow_device_evidence',
+    { timestamp: 'now_at', finalCheck: 'or now_at >= attempt.expires_at' },
+  ],
+  [
+    'complete_private_telebirr_shadow_verification',
+    { timestamp: 'now_at', finalCheck: 'or now_at >= proof.expires_at' },
+  ],
+]);
 for (const transition of [
   'capture_telegram_telebirr_shadow_proof',
   'lease_private_telebirr_shadow_assignment',
@@ -151,12 +176,51 @@ for (const transition of [
     /app\.require_private_telebirr_shadow_mode_ready/u,
     `${transition} must hold the locked seven-gate assertion before writing`,
   );
+  const firstWriteIndex = body.search(
+    /\b(?:insert into|update|delete from) app\.(?:private_telebirr_shadow|telegram_telebirr_shadow)/iu,
+  );
   assert.ok(
-    body.search(
-      /\b(?:insert into|update|delete from) app\.(?:private_telebirr_shadow|telegram_telebirr_shadow)/iu,
-    ) > body.search(/app\.require_private_telebirr_shadow_mode_ready/u),
+    firstWriteIndex > body.search(/app\.require_private_telebirr_shadow_mode_ready/u),
     `${transition} must assert and hold the seven gates before its first shadow write`,
   );
+
+  const timeBoundary = postLockTimeBoundaries.get(transition);
+  if (timeBoundary) {
+    assert.match(
+      body,
+      new RegExp(`\\b${timeBoundary.timestamp}\\s+timestamptz\\s*;`, 'u'),
+      `${transition} must not capture its authority timestamp at function entry`,
+    );
+    assert.doesNotMatch(
+      body,
+      new RegExp(`\\b${timeBoundary.timestamp}\\s+timestamptz\\s*:=`, 'u'),
+      `${transition} must not initialize its authority timestamp before locking`,
+    );
+    assert.equal(
+      body.match(
+        new RegExp(`\\b${timeBoundary.timestamp}\\s*:=\\s*pg_catalog\\.date_trunc\\(`, 'gu'),
+      )?.length,
+      2,
+      `${transition} must refresh time after its initial locks and again at its final gate`,
+    );
+
+    const finalRefreshIndex = body.lastIndexOf(
+      `${timeBoundary.timestamp} := pg_catalog.date_trunc(`,
+    );
+    const finalBlockingBoundaryIndex = Math.max(
+      body.lastIndexOf('pg_advisory_xact_lock'),
+      body.lastIndexOf('for share'),
+      body.lastIndexOf('for update'),
+      body.lastIndexOf('app.require_private_telebirr_shadow_mode_ready'),
+    );
+    const finalCheckIndex = body.lastIndexOf(timeBoundary.finalCheck);
+    assert.ok(
+      finalRefreshIndex > finalBlockingBoundaryIndex &&
+        finalCheckIndex > finalRefreshIndex &&
+        firstWriteIndex > finalCheckIndex,
+      `${transition} must refresh and recheck time after its final blocking boundary and before writing`,
+    );
+  }
 }
 assert.match(
   functionBody('lease_private_live_telebirr_assignment_broker'),

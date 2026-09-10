@@ -114,6 +114,37 @@ describe('trusted TeleBirr verifier staged-evidence worker', () => {
     await running;
   });
 
+  it('quarantines invalid shadow evidence so it cannot starve later proofs', async () => {
+    let calls = 0;
+    const work = source(async () => (calls++ === 0 ? request : null));
+    const verifier: TrustedTelebirrVerifier = {
+      verifyAndComplete: vi.fn(
+        async () =>
+          ({
+            status: 'shadow_not_completed',
+            disposition: 'would_reject',
+            reasonCode: 'trusted_evidence_invalid',
+          }) as const,
+      ),
+    };
+    const worker = createTrustedTelebirrVerifierWorker({
+      source: work,
+      verifier,
+      pollIntervalMilliseconds: 10,
+    });
+
+    const running = worker.run();
+    await vi.waitFor(() =>
+      expect(work.quarantineInvalid).toHaveBeenCalledWith({
+        verificationAttemptId: request.verificationAttemptId,
+        leaseToken: request.leaseToken,
+        observationBodyDigest: request.signedObservation.bodyDigest,
+      }),
+    );
+    await worker.stop();
+    await running;
+  });
+
   it('fails closed on a source error or an unpersisted non-terminal result', async () => {
     const unavailable = createTrustedTelebirrVerifierWorker({
       source: source(async () => {
@@ -139,6 +170,23 @@ describe('trusted TeleBirr verifier staged-evidence worker', () => {
       },
     });
     await expect(unpersisted.run()).rejects.toEqual(
+      new TrustedTelebirrVerifierWorkerUnavailableError(),
+    );
+
+    const unpersistedShadow = createTrustedTelebirrVerifierWorker({
+      source: source(async () => request),
+      verifier: {
+        verifyAndComplete: vi.fn(
+          async () =>
+            ({
+              status: 'shadow_not_completed',
+              disposition: 'would_review',
+              reasonCode: 'source_unavailable',
+            }) as const,
+        ),
+      },
+    });
+    await expect(unpersistedShadow.run()).rejects.toEqual(
       new TrustedTelebirrVerifierWorkerUnavailableError(),
     );
   });

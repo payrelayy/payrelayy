@@ -7,22 +7,39 @@ import {
   type TrustedTelebirrVerifierDatabase,
 } from './trusted-telebirr-verifier.js';
 
-const VERIFIER_GROUP_ROLE = 'fetanagent_trusted_telebirr_verifier';
-const VERIFIER_RUNTIME_ROLE = 'fetanagent_trusted_telebirr_verifier_runtime';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u;
-const AUTHORITY_FUNCTION =
-  'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)';
-const COMPLETION_FUNCTION =
-  'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
-const STAGED_EVIDENCE_FUNCTION = 'app.load_next_private_live_telebirr_staged_evidence()';
-const QUARANTINE_FUNCTION =
-  'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)';
-const AUTHORITY_FUNCTION_SQL = `pg_catalog.to_regprocedure('${AUTHORITY_FUNCTION}')`;
-const COMPLETION_FUNCTION_SQL = `pg_catalog.to_regprocedure('${COMPLETION_FUNCTION}')`;
-const STAGED_EVIDENCE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${STAGED_EVIDENCE_FUNCTION}')`;
-const QUARANTINE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${QUARANTINE_FUNCTION}')`;
-const ALLOWED_FUNCTIONS_SQL = `${AUTHORITY_FUNCTION_SQL}, ${COMPLETION_FUNCTION_SQL}, ${STAGED_EVIDENCE_FUNCTION_SQL}, ${QUARANTINE_FUNCTION_SQL}`;
+
+interface TelebirrVerifierCatalogContract {
+  readonly authorityFunction: string;
+  readonly completionFunction: string;
+  readonly groupRole: string;
+  readonly quarantineFunction: string;
+  readonly runtimeRole: string;
+  readonly stagedEvidenceFunction: string;
+}
+
+const LIVE_CATALOG_CONTRACT: TelebirrVerifierCatalogContract = Object.freeze({
+  authorityFunction:
+    'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
+  completionFunction:
+    'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+  groupRole: 'fetanagent_trusted_telebirr_verifier',
+  quarantineFunction: 'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)',
+  runtimeRole: 'fetanagent_trusted_telebirr_verifier_runtime',
+  stagedEvidenceFunction: 'app.load_next_private_live_telebirr_staged_evidence()',
+});
+
+const SHADOW_CATALOG_CONTRACT: TelebirrVerifierCatalogContract = Object.freeze({
+  authorityFunction:
+    'app.load_private_telebirr_shadow_verification_authority(uuid,uuid,timestamp with time zone)',
+  completionFunction:
+    'app.complete_private_telebirr_shadow_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
+  groupRole: 'fetanagent_telebirr_shadow_verifier',
+  quarantineFunction: 'app.quarantine_private_telebirr_shadow_staged_evidence(uuid,uuid,text,text)',
+  runtimeRole: 'fetanagent_telebirr_shadow_verifier_runtime',
+  stagedEvidenceFunction: 'app.load_next_private_telebirr_shadow_staged_evidence()',
+});
 
 export const TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS = [
   'runtime_login_identity_allowed',
@@ -50,7 +67,15 @@ export const TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS = [
 ] as const;
 
 /** Catalog-only, row-data-free startup proof. Every named result must be exactly true. */
-export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
+function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogContract): string {
+  const VERIFIER_GROUP_ROLE = contract.groupRole;
+  const VERIFIER_RUNTIME_ROLE = contract.runtimeRole;
+  const AUTHORITY_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.authorityFunction}')`;
+  const COMPLETION_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.completionFunction}')`;
+  const STAGED_EVIDENCE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.stagedEvidenceFunction}')`;
+  const QUARANTINE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.quarantineFunction}')`;
+  const ALLOWED_FUNCTIONS_SQL = `${AUTHORITY_FUNCTION_SQL}, ${COMPLETION_FUNCTION_SQL}, ${STAGED_EVIDENCE_FUNCTION_SQL}, ${QUARANTINE_FUNCTION_SQL}`;
+  return `
   select
     current_user = '${VERIFIER_RUNTIME_ROLE}' and session_user = current_user
       as runtime_login_identity_allowed,
@@ -277,6 +302,12 @@ export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL = `
         )
     ) as default_function_execution_private
 `;
+}
+
+export const TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL =
+  telebirrVerifierCatalogPreflightSql(LIVE_CATALOG_CONTRACT);
+export const TELEBIRR_SHADOW_VERIFIER_CATALOG_PREFLIGHT_SQL =
+  telebirrVerifierCatalogPreflightSql(SHADOW_CATALOG_CONTRACT);
 
 export const LOAD_TRUSTED_TELEBIRR_AUTHORITY_SQL = `
   select app.load_private_live_telebirr_verification_authority(
@@ -420,7 +451,21 @@ export class PostgresTrustedTelebirrVerifierDatabase implements TrustedTelebirrV
       ]);
       const row = exactRecord(result.rows[0], ['authority_payload']);
       if (result.rows.length !== 1 || !row || row.authority_payload === null) throw new Error();
-      return row.authority_payload;
+      const payload = row.authority_payload;
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        Array.isArray(payload) ||
+        (Object.getPrototypeOf(payload) !== Object.prototype &&
+          Object.getPrototypeOf(payload) !== null) ||
+        Object.hasOwn(payload, 'verificationMode')
+      ) {
+        throw new Error();
+      }
+      return Object.freeze({
+        ...(payload as Readonly<Record<string, unknown>>),
+        verificationMode: 'live' as const,
+      });
     } catch {
       throw new TrustedTelebirrPostgresRuntimeUnavailableError();
     }

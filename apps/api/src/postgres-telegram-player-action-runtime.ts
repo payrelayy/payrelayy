@@ -23,6 +23,7 @@ import {
 } from './telegram-action-capability.js';
 import { PostgresTelegramPrivateActionNonceStore } from './postgres-telegram-private-action-nonce-store.js';
 import { playerActionCatalogPreflightPassed } from './player-action-catalog-preflight.js';
+import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -477,8 +478,12 @@ async function handleDepositProof(
     return { version: 1, outcome: 'deposit_unavailable' };
   }
 
+  if (action.providerCode === 'telebirr') {
+    return captureTelegramTelebirrShadowProof(database, originInboundEventId, action, config);
+  }
+
   const protectedReference = protectDepositProofReference({
-    provider: action.providerCode,
+    provider: 'cbe_birr',
     reference: action.transactionReference,
     secrets: {
       encryptionSecret:
@@ -491,7 +496,7 @@ async function handleDepositProof(
     consumer: 'capture_dry_run_deposit_proof',
     originInboundEventId,
     playerId: action.playerId,
-    providerCode: action.providerCode,
+    providerCode: 'cbe_birr',
     referenceFingerprint: protectedReference.fingerprint,
     referenceMasked: protectedReference.masked,
     keyVersion: protectedReference.keyVersion,
@@ -503,7 +508,7 @@ async function handleDepositProof(
       await database.query(CAPTURE_DRY_RUN_PROOF_SQL, [
         originInboundEventId,
         action.playerId,
-        action.providerCode,
+        'cbe_birr',
         protectedReference.ciphertext,
         protectedReference.fingerprint,
         protectedReference.masked,
@@ -516,7 +521,7 @@ async function handleDepositProof(
   if (
     typeof row.deposit_proof_request_id !== 'string' ||
     !UUID_PATTERN.test(row.deposit_proof_request_id) ||
-    row.provider_code !== action.providerCode ||
+    row.provider_code !== 'cbe_birr' ||
     row.proof_status !== 'proof_received' ||
     !(row.submitted_at instanceof Date) ||
     Number.isNaN(row.submitted_at.getTime()) ||
@@ -529,8 +534,8 @@ async function handleDepositProof(
     version: 1,
     outcome: 'deposit_proof_received',
     proofToken: encodeTelegramCapabilityId(row.deposit_proof_request_id),
-    providerCode: action.providerCode,
-    providerName: action.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr',
+    providerCode: 'cbe_birr',
+    providerName: 'CBE Birr',
     proofStatus: 'proof_received',
     financialMode: 'dry_run',
   };

@@ -158,6 +158,14 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      readonly outcome: 'telebirr_shadow_verification_queued';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly proofStatus: 'verification_queued';
+      readonly verificationMode: 'shadow_no_money';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_status';
       readonly amountMinor: string;
       readonly currencyCode: 'ETB';

@@ -49,7 +49,7 @@ expand the runtime's effective routine surface and correctly fail the exact-four
 the singleton, and close PostgreSQL. Cleanup has one fixed 15-second deadline; the Compose stop
 grace is 20 seconds. Startup and runtime failures emit only one generic fail-closed message.
 
-## Deployment artifact (still dormant)
+## Deployment artifacts (still dormant)
 
 [`../../infra/compose.trusted-telebirr-verifier.yaml`](../../infra/compose.trusted-telebirr-verifier.yaml)
 is a separate opt-in profile. Ordinary Compose startup does not select it. It requires, without
@@ -67,9 +67,23 @@ and joins only its dedicated outbound database network. Its health listener rema
 loopback-only. The image is built from the repository's digest-pinned Linux/amd64 Node base and
 contains no runtime secret or configuration material.
 
-No deployment workflow selects this profile. The image-smoke workflow builds it with no secrets,
-proves the real entrypoint fails closed with all gates off, and probes only a stubbed unavailable
-health boundary under `--network none`.
+The image-smoke workflow builds it with no secrets, proves the real entrypoint fails closed with all
+gates off, and probes only a stubbed unavailable health boundary under `--network none`.
+
+The separate production-only composition and manual lifecycle are documented in
+[`../../infra/production-trusted-telebirr-verifier.md`](../../infra/production-trusted-telebirr-verifier.md).
+That path can only plan, stage a stopped content-ID-pinned image and digest-pinned public-key
+manifest, prove the runtime remains absent/`NOLOGIN`, or run independent host/database emergency
+disablement. It has no activation, login-provisioning, renewal, or rollback route; its production
+Compose gates are fixed off until a shared atomic database interlock is separately reviewed.
+
+The same package also contains a strictly separate, dry-run-only shadow entrypoint. Its runtime
+role, four-function database surface, singleton, health identity/port, secret path, Docker target,
+and opt-in Compose profile are distinct from the live verifier. It authenticates official
+observations into append-only advisory outcomes and accepts completion only when all three
+financial IDs are null and `settlement_created=false`. See
+[`../../docs/telebirr-shadow-verification.md`](../../docs/telebirr-shadow-verification.md) for the
+exact intake RPC, seven-gate predicate, redacted status surface, and no-money deployment boundary.
 
 ## Existing database and verifier safety
 
@@ -88,14 +102,15 @@ SECURITY DEFINER reader; it has no arbitrary query, URL, socket, or uploader inp
 
 ## Still required before any activation
 
-This slice intentionally does not:
+The application slice intentionally does not:
 
-- create or enable the runtime LOGIN/password or extend its bounded validity;
+- create or enable the runtime LOGIN/password through the disabled production lifecycle;
 - generate or install an assignment-signing private key;
 - enroll an Android device or install its public key;
 - create the receiver profile, pilot, proof, or financial switches;
 - expose an uploader, API, bot route, public listener, scheduler, or generic-worker hook; or
-- deploy/start a container or call TeleBirr, Supabase, KemerBet, or any financial provider.
+- deploy/start a container during build, test, staging, or any automatic trigger, or call TeleBirr,
+  KemerBet, or any financial provider.
 
 Provisioning and activation require the physical Android enrollment plus the operational
 stop/expiry/revocation/rotation/rollback evidence listed in
@@ -109,4 +124,5 @@ These commands build and test artifacts only; they do not provision or start the
 pnpm --filter "@fetanagent/trusted-telebirr-verifier..." run build
 pnpm --filter @fetanagent/trusted-telebirr-verifier run test
 node infra/verify-trusted-telebirr-verifier-deployment.mjs
+node infra/verify-telebirr-shadow-verifier-deployment.mjs
 ```

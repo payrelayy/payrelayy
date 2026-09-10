@@ -218,6 +218,37 @@ describe('Telegram Player ID capability protection', () => {
     ).toThrow('protected deposit-proof semantics');
   });
 
+  it('domain-separates no-money TeleBirr shadow intake from the legacy dry-run proof lane', () => {
+    const shared = {
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      providerCode: 'telebirr' as const,
+      referenceFingerprint: 'd'.repeat(64),
+      referenceMasked: '***7890',
+      keyVersion: DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
+      profileVersion: DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+      semanticHmacSecret: keys.semanticHmacSecret,
+    };
+    const shadow = createTelegramActionSemanticHmac({
+      ...shared,
+      consumer: 'capture_telegram_telebirr_shadow_proof',
+    });
+    const legacyDryRun = createTelegramActionSemanticHmac({
+      ...shared,
+      consumer: 'capture_dry_run_deposit_proof',
+    });
+
+    expect(shadow).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(shadow).not.toBe(legacyDryRun);
+    expect(() =>
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'capture_telegram_telebirr_shadow_proof',
+        providerCode: 'cbe_birr',
+      }),
+    ).toThrow('protected deposit-proof semantics');
+  });
+
   it('fails closed on malformed internal identifiers or secrets', () => {
     expect(() =>
       derivePlayerRegistrationCapabilityPresentation({

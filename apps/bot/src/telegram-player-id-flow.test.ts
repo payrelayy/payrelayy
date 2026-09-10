@@ -150,6 +150,28 @@ describe('Telegram Player-ID flow presentation', () => {
     },
   );
 
+  it('renders a token-free shadow queue acknowledgement that cannot imply payment completion', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_shadow_verification_queued',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'verification_queued',
+      verificationMode: 'shadow_no_money',
+    });
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: [
+        'NO-MONEY VERIFICATION ONLY — TeleBirr proof queued for a shadow check.',
+        'No payment has been marked verified or credited.',
+        'This check cannot create a deposit, execute a transfer, or move money.',
+      ].join('\n'),
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(/player|reference|token|uuid|amount/iu);
+    expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
+  });
+
   it('explains the available proof and tracking commands without requesting money', () => {
     expect(telegramDepositHelpText()).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
     expect(telegramDepositHelpText()).toContain('/deposit telebirr PLAYER_ID TRANSACTION_ID');

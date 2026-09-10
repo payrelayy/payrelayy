@@ -288,6 +288,19 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["nod
 
 CMD ["node", "apps/trusted-telebirr-verifier/dist/trusted-telebirr-verifier-main.js"]
 
+# This separate target reuses only the verifier build artifacts. Its distinct entrypoint, health
+# port, runtime role, and Compose profile keep the no-money shadow lane from being cross-wired to
+# the live completion process.
+FROM trusted-telebirr-verifier AS telebirr-shadow-verifier
+
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="fetanagent-telebirr-shadow-verifier" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:8092/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+
+CMD ["node", "apps/trusted-telebirr-verifier/dist/telebirr-shadow-verifier-main.js"]
+
 # The executor uses the distribution-provided Chromium at the production-pinned
 # /usr/bin/chromium path. playwright-core does not download or bundle another browser.
 FROM runtime-base AS executor-runtime-base

@@ -450,6 +450,25 @@ function runtime(
     companionDevicePairing: undefined,
     companionLookup: undefined,
     telebirrDevicePairing: undefined,
+    telebirrShadowVerification: {
+      status: async () => ({
+        contractVersion: 1,
+        verificationMode: 'shadow_no_money',
+        pilotState: 'absent',
+        switchMode: 'disabled',
+        shadowModeReady: false,
+        proofCount: '0',
+        claimableProofCount: '0',
+        activeAssignmentCount: '0',
+        stagedEvidenceCount: '0',
+        completedCount: '0',
+        wouldVerifyCount: '0',
+        wouldReviewCount: '0',
+        wouldRejectCount: '0',
+        quarantinedCount: '0',
+        checkedAt: '2026-09-10T10:00:00.000Z',
+      }),
+    },
     ready: async () => true,
     close: async () => undefined,
     ...overrides,
@@ -4137,6 +4156,67 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(result.statusCode).toBe(503);
     expect(result.json()).toEqual({ error: 'owner_control_unavailable' });
+    await app.close();
+  });
+
+  it('serves only the no-store authenticated aggregate TeleBirr shadow status', async () => {
+    const calls: string[] = [];
+    const shadowVerification = {
+      contractVersion: 1 as const,
+      verificationMode: 'shadow_no_money' as const,
+      pilotState: 'armed' as const,
+      switchMode: 'dry_run' as const,
+      shadowModeReady: true,
+      proofCount: '3',
+      claimableProofCount: '1',
+      activeAssignmentCount: '1',
+      stagedEvidenceCount: '2',
+      completedCount: '1',
+      wouldVerifyCount: '1',
+      wouldReviewCount: '0',
+      wouldRejectCount: '0',
+      quarantinedCount: '1',
+      checkedAt: '2026-09-10T10:00:00.000Z',
+    };
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrShadowVerification: {
+          status: async (actor) => {
+            calls.push(actor);
+            return shadowVerification;
+          },
+        },
+      }),
+    });
+
+    const denied = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/telebirr-shadow-verification/status',
+    });
+    expect(denied.statusCode).toBe(403);
+    const invalid = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/telebirr-shadow-verification/status?proof=anything',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(calls).toEqual([]);
+    const accepted = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/telebirr-shadow-verification/status',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.headers['cache-control']).toBe('no-store, max-age=0');
+    expect(accepted.json()).toEqual({ shadowVerification });
+    expect(accepted.body).not.toMatch(
+      /player|customer|reference|digest|signature|assignmentId|proofRequestId/iu,
+    );
+    expect(accepted.body).not.toMatch(
+      /settlement_candidate|settled|review_required|definite_reject/iu,
+    );
+    expect(calls).toEqual([authUserId]);
     await app.close();
   });
 

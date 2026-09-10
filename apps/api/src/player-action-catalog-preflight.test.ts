@@ -52,7 +52,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires public action onboarding and only non-live deposit procedures in the exact 11-function surface', () => {
+  it('requires public action onboarding and only no-money deposit procedures in the exact 12-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -68,6 +68,15 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
     );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      "then array['search_path=pg_catalog']::text[]",
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      "else array['search_path=pg_catalog, app, pg_temp']::text[]",
+    );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).not.toContain(
       'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)',
     );
@@ -80,6 +89,6 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 11');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 12');
   });
 });

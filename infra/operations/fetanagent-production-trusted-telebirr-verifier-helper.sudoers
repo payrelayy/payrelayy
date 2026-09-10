@@ -1,0 +1,12 @@
+# This digest pins the exact disabled stage/status/emergency helper. Commands capable of enabling a
+# database login or creating/starting a verifier container are deliberately absent.
+Cmnd_Alias FETANAGENT_PRODUCTION_VERIFIER_DISABLED = \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify *, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper preflight *, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper prepare-incoming *, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper cleanup-incoming *, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper install *, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-inert, \
+  sha256:c2367b6c6a45b998e0bedffeefbb7890292f0e29a8d0b5c27a3cb473490e6243 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper emergency-stop
+
+fetanagent-admin ALL=(root) NOPASSWD: FETANAGENT_PRODUCTION_VERIFIER_DISABLED

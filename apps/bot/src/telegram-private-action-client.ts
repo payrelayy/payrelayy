@@ -88,6 +88,16 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'telebirr_shadow_verification_queued' &&
+    keys.length === 6 &&
+    value.providerCode === 'telebirr' &&
+    value.providerName === 'TeleBirr' &&
+    value.proofStatus === 'verification_queued' &&
+    value.verificationMode === 'shadow_no_money'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'deposit_status' &&
     keys.length === 5 &&
     typeof value.amountMinor === 'string' &&

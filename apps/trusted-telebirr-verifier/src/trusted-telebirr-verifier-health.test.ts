@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTrustedTelebirrVerifierHealth } from './trusted-telebirr-verifier-health.js';
+import {
+  createTelebirrShadowVerifierHealth,
+  createTrustedTelebirrVerifierHealth,
+} from './trusted-telebirr-verifier-health.js';
 
 describe('trusted TeleBirr verifier health', () => {
   it('reports redacted liveness and database-backed readiness', async () => {
@@ -56,6 +59,19 @@ describe('trusted TeleBirr verifier health', () => {
       status: 'unavailable',
       service: 'fetanagent-trusted-telebirr-verifier',
       reason: 'stopping',
+    });
+  });
+
+  it('uses a distinct redacted service identity for the no-money shadow process', async () => {
+    const health = createTelebirrShadowVerifierHealth(async () => true);
+    expect(health.healthz()).toEqual({
+      status: 'ok',
+      service: 'fetanagent-telebirr-shadow-verifier',
+    });
+    await expect(health.readyz()).resolves.toEqual({
+      ready: true,
+      status: 'ready',
+      service: 'fetanagent-telebirr-shadow-verifier',
     });
   });
 });

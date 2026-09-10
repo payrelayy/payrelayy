@@ -23,6 +23,7 @@ export type TelegramActionSemanticConsumer =
   | 'open_dry_run_deposit_intent'
   | 'capture_dry_run_deposit_reference'
   | 'capture_dry_run_deposit_proof'
+  | 'capture_telegram_telebirr_shadow_proof'
   | 'open_live_deposit_intent'
   | 'capture_live_deposit_reference';
 
@@ -71,7 +72,7 @@ type DepositReferenceSemanticInput = {
 };
 
 type DepositProofSemanticInput = {
-  readonly consumer: 'capture_dry_run_deposit_proof';
+  readonly consumer: 'capture_dry_run_deposit_proof' | 'capture_telegram_telebirr_shadow_proof';
   readonly originInboundEventId: string;
   readonly playerId: string;
   readonly providerCode: DepositProofProviderCode;
@@ -300,8 +301,11 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
       });
       break;
     case 'capture_dry_run_deposit_proof':
+    case 'capture_telegram_telebirr_shadow_proof':
       if (
         (input.providerCode !== 'cbe_birr' && input.providerCode !== 'telebirr') ||
+        (input.consumer === 'capture_telegram_telebirr_shadow_proof' &&
+          input.providerCode !== 'telebirr') ||
         !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
         !/^\*{3}[A-Z0-9]{4}$/u.test(input.referenceMasked) ||
         !Number.isSafeInteger(input.keyVersion) ||
@@ -320,7 +324,10 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         referenceMasked: input.referenceMasked,
         keyVersion: input.keyVersion,
         profileVersion: input.profileVersion,
-        financialMode: 'dry_run',
+        financialMode:
+          input.consumer === 'capture_telegram_telebirr_shadow_proof'
+            ? 'shadow_no_money'
+            : 'dry_run',
       });
       break;
     default:

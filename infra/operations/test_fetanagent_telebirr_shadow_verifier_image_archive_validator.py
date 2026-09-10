@@ -94,13 +94,21 @@ def hybrid_archive(
     config_descriptor_override="default",
     config_root=DEFAULT,
     descriptor_size_delta=0,
+    include_layer_sources=False,
+    layer_sources_override=DEFAULT,
     layer_payload_override=DEFAULT,
+    parent=DEFAULT,
     extra_files=None,
     repo_tags=None,
 ) -> pathlib.Path:
     layer = b"one bounded layer\n"
     layer_digest = f"sha256:{hashlib.sha256(layer).hexdigest()}"
+    diff_id = f"sha256:{hashlib.sha256(b'uncompressed bounded layer').hexdigest()}"
     config = runtime_config(config_root)
+    if include_layer_sources and config_root is DEFAULT:
+        config_value = json.loads(config)
+        config_value["rootfs"] = {"type": "layers", "diff_ids": [diff_id]}
+        config = encoded(config_value)
     config_digest = f"sha256:{hashlib.sha256(config).hexdigest()}"
     config_descriptor = (
         {
@@ -111,18 +119,17 @@ def hybrid_archive(
         if config_descriptor_override == "default"
         else config_descriptor_override
     )
+    layer_descriptor = {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": layer_digest,
+        "size": len(layer),
+    }
     image_manifest = encoded(
         {
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.manifest.v1+json",
             "config": config_descriptor,
-            "layers": [
-                {
-                    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
-                    "digest": layer_digest,
-                    "size": len(layer),
-                }
-            ],
+            "layers": [layer_descriptor],
         }
     )
     manifest_digest = f"sha256:{hashlib.sha256(image_manifest).hexdigest()}"
@@ -141,16 +148,21 @@ def hybrid_archive(
     )
     config_path = f"blobs/sha256/{config_digest.removeprefix('sha256:')}"
     layer_path = f"blobs/sha256/{layer_digest.removeprefix('sha256:')}"
+    docker_entry = {
+        "Config": config_path,
+        "RepoTags": [FULL_TAG] if repo_tags is None else repo_tags,
+        "Layers": [layer_path],
+    }
+    if include_layer_sources:
+        docker_entry["LayerSources"] = (
+            {diff_id: layer_descriptor}
+            if layer_sources_override is DEFAULT
+            else layer_sources_override
+        )
+    if parent is not DEFAULT:
+        docker_entry["Parent"] = parent
     files = {
-        "manifest.json": encoded(
-            [
-                {
-                    "Config": config_path,
-                    "RepoTags": [FULL_TAG] if repo_tags is None else repo_tags,
-                    "Layers": [layer_path],
-                }
-            ]
-        ),
+        "manifest.json": encoded([docker_entry]),
         "index.json": encoded(
             {
                 "schemaVersion": 2,
@@ -230,6 +242,32 @@ class ArchiveValidatorTests(unittest.TestCase):
         self.assertEqual(result["archiveFormat"], "docker-save-oci-v1")
         self.assertRegex(result["imageConfigDigest"], r"^sha256:[0-9a-f]{64}$")
         self.assertRegex(result["imageManifestDigest"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_accepts_exact_oci_layer_sources_and_parent_metadata(self) -> None:
+        result = validator.validate(
+            str(
+                self.keep(
+                    hybrid_archive(
+                        include_layer_sources=True,
+                        parent=f"sha256:{'c' * 64}",
+                    )
+                )
+            ),
+            TAG,
+            RELEASE,
+        )
+        self.assertEqual(result["archiveFormat"], "docker-save-oci-v1")
+
+    def test_rejects_unbound_oci_layer_sources_and_invalid_parent_metadata(self) -> None:
+        hostile_archives = [
+            hybrid_archive(include_layer_sources=True, layer_sources_override={}),
+            hybrid_archive(include_layer_sources=True, layer_sources_override=[]),
+            hybrid_archive(parent="not-a-digest"),
+        ]
+        for path in hostile_archives:
+            with self.subTest(path=path):
+                with self.assertRaises(RuntimeError):
+                    validator.validate(str(self.keep(path)), TAG, RELEASE)
 
     def test_accepts_singular_legacy_docker_save(self) -> None:
         result = validator.validate(str(self.keep(legacy_archive())), TAG, RELEASE)

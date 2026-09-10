@@ -63,6 +63,7 @@ type FeatureSwitchSnapshotRow = {
 };
 
 type Fixture = {
+  readonly agentCreated: boolean;
   readonly agentId: string;
   readonly originalSwitches: readonly FeatureSwitchSnapshotRow[];
   readonly pilotRevisionId: string;
@@ -299,18 +300,35 @@ async function createArmedBoundaryFixture(
   await client.query('begin');
   try {
     await client.query(`set local session_replication_role = 'replica'`);
-    const agent = await client.query<{ readonly id: string }>(
-      `
-      insert into app.platform_agent_accounts (platform_id, label, credential_ref)
-      select platform.id, $1::text, 'secret://disposable-shadow-lifecycle-only'
-        from app.platforms platform
+    const existingAgent = await client.query<{ readonly id: string }>(`
+      select account.id
+        from app.platform_agent_accounts account
+        join app.platforms platform on platform.id = account.platform_id
        where platform.code = 'kemerbet'
-      returning id
-    `,
-      [`shadow-lifecycle-${fixtureNonce}`],
-    );
-    expect(agent.rows).toHaveLength(1);
-    const agentId = agent.rows[0]!.id;
+         and account.status = 'active'
+       order by account.id
+       limit 1
+       for update of account
+    `);
+    expect(existingAgent.rows.length).toBeLessThanOrEqual(1);
+
+    let agentCreated = false;
+    let agentId = existingAgent.rows[0]?.id;
+    if (agentId === undefined) {
+      const agent = await client.query<{ readonly id: string }>(
+        `
+        insert into app.platform_agent_accounts (platform_id, label, credential_ref)
+        select platform.id, $1::text, 'secret://disposable-shadow-lifecycle-only'
+          from app.platforms platform
+         where platform.code = 'kemerbet'
+        returning id
+      `,
+        [`shadow-lifecycle-${fixtureNonce}`],
+      );
+      expect(agent.rows).toHaveLength(1);
+      agentId = agent.rows[0]!.id;
+      agentCreated = true;
+    }
 
     const pilot = await client.query<{ readonly id: string }>(
       `
@@ -391,7 +409,7 @@ async function createArmedBoundaryFixture(
     }
 
     await client.query('commit');
-    return { agentId, originalSwitches: originalSwitches.rows, pilotRevisionId };
+    return { agentCreated, agentId, originalSwitches: originalSwitches.rows, pilotRevisionId };
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -415,9 +433,11 @@ async function removeFixture(client: Client, fixture: Fixture): Promise<void> {
     await client.query(`delete from app.private_live_deposit_pilot_revisions where id = $1::uuid`, [
       fixture.pilotRevisionId,
     ]);
-    await client.query(`delete from app.platform_agent_accounts where id = $1::uuid`, [
-      fixture.agentId,
-    ]);
+    if (fixture.agentCreated) {
+      await client.query(`delete from app.platform_agent_accounts where id = $1::uuid`, [
+        fixture.agentId,
+      ]);
+    }
     await client.query('commit');
   } catch (error) {
     await client.query('rollback');

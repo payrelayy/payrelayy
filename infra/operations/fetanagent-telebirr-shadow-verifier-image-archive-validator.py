@@ -140,7 +140,7 @@ def require_digest_bound_blob(
     return value
 
 
-def validate_runtime_config(config_bytes: bytes, expected_release: str) -> None:
+def validate_runtime_config(config_bytes: bytes, expected_release: str) -> dict[str, object]:
     image = parse_json(config_bytes, "image config")
     if not isinstance(image, dict):
         refuse("image config root is not an object")
@@ -203,6 +203,7 @@ def validate_runtime_config(config_bytes: bytes, expected_release: str) -> None:
     }
     if forbidden_environment.intersection(environment_names):
         refuse("image embeds a runtime secret or financial-action setting")
+    return image
 
 
 def validate_oci_archive(
@@ -280,6 +281,7 @@ def validate_oci_archive(
     )
     if not isinstance(config_bytes, bytes):
         refuse("OCI image config was not read")
+    image_config = validate_runtime_config(config_bytes, expected_release)
     expected_config_path = f"blobs/sha256/{image_config_digest.removeprefix('sha256:')}"
     if docker_entry.get("Config") != expected_config_path:
         refuse("Docker manifest does not name the exact OCI config")
@@ -313,6 +315,26 @@ def validate_oci_archive(
         layer_paths.append(f"blobs/sha256/{layer_digest.removeprefix('sha256:')}")
     if docker_entry.get("Layers") != layer_paths:
         refuse("Docker and OCI layer inventories differ")
+    if "LayerSources" in docker_entry:
+        layer_sources = docker_entry.get("LayerSources")
+        rootfs = image_config.get("rootfs")
+        diff_ids = rootfs.get("diff_ids") if isinstance(rootfs, dict) else None
+        if (
+            not isinstance(layer_sources, dict)
+            or not isinstance(rootfs, dict)
+            or set(rootfs) != {"type", "diff_ids"}
+            or rootfs.get("type") != "layers"
+            or not isinstance(diff_ids, list)
+            or len(diff_ids) != len(layers)
+            or any(not is_digest(diff_id) for diff_id in diff_ids)
+            or len(set(diff_ids)) != len(diff_ids)
+            or layer_sources
+            != {
+                diff_id: layer
+                for diff_id, layer in zip(diff_ids, layers, strict=True)
+            }
+        ):
+            refuse("Docker layer sources are not exactly bound to the image config and manifest")
     oci_layout = parse_json(member_bytes(archive, members_by_name, "oci-layout"), "OCI layout")
     if oci_layout != {"imageLayoutVersion": "1.0.0"}:
         refuse("OCI layout version is not exact")
@@ -327,7 +349,6 @@ def validate_oci_archive(
     observed_files = {member.name for member in members_by_name.values() if member.isfile()}
     if observed_files != expected_files:
         refuse("OCI Docker archive contains an unrelated image or payload")
-    validate_runtime_config(config_bytes, expected_release)
     return {
         "archiveFormat": "docker-save-oci-v1",
         "imageConfigDigest": image_config_digest,
@@ -343,6 +364,8 @@ def validate_legacy_archive(
     expected_tag: str,
     expected_release: str,
 ) -> dict[str, str]:
+    if "LayerSources" in docker_entry:
+        refuse("legacy Docker archive unexpectedly contains OCI layer sources")
     config_path = docker_entry.get("Config")
     config_match = (
         re.fullmatch(r"([0-9a-f]{64})\.json", config_path)
@@ -448,12 +471,17 @@ def validate(archive_path: str, expected_tag: str, expected_release: str) -> dic
         if not isinstance(docker_manifest, list) or len(docker_manifest) != 1:
             refuse("Docker archive manifest is not singular")
         docker_entry = docker_manifest[0]
-        if not isinstance(docker_entry, dict) or set(docker_entry) != {
-            "Config",
-            "RepoTags",
-            "Layers",
-        }:
+        required_entry_fields = {"Config", "RepoTags", "Layers"}
+        allowed_entry_fields = required_entry_fields | {"Parent", "LayerSources"}
+        if (
+            not isinstance(docker_entry, dict)
+            or not required_entry_fields.issubset(docker_entry)
+            or not set(docker_entry).issubset(allowed_entry_fields)
+        ):
             refuse("Docker archive manifest entry is not exact")
+        parent = docker_entry.get("Parent")
+        if "Parent" in docker_entry and not is_digest(parent):
+            refuse("Docker archive parent identity is invalid")
         if docker_entry.get("RepoTags") != [expected_full_tag]:
             refuse("Docker archive contains another image tag")
 

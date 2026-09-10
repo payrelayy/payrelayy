@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Client } from 'pg';
+import type { Client, QueryResult } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -88,6 +88,7 @@ async function expectOperationInterlockClosed(
 export function registerTrustedTelebirrActivationEpochSqlTests(
   getClient: () => Client,
   getOwnerAdminId: () => string,
+  createSession: () => Client,
 ): void {
   describe('trusted TeleBirr activation epoch foundation', () => {
     it('starts at immutable epoch zero with private tables and no activation routine', async () => {
@@ -106,11 +107,19 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
       expect(state.rows).toEqual([{ authority_state: 'disabled', current_epoch: '0' }]);
 
       const rls = await client.query<{
+        readonly owner_only_acl: boolean;
         readonly relforcerowsecurity: boolean;
         readonly relname: string;
         readonly relrowsecurity: boolean;
       }>(`
-        select relation.relname, relation.relrowsecurity, relation.relforcerowsecurity
+        select relation.relname, relation.relrowsecurity, relation.relforcerowsecurity,
+               not exists (
+                 select 1
+                   from aclexplode(coalesce(
+                     relation.relacl, acldefault('r', relation.relowner)
+                   )) privilege
+                  where privilege.grantee <> relation.relowner
+               ) as owner_only_acl
           from pg_class relation
           join pg_namespace namespace on namespace.oid = relation.relnamespace
          where namespace.nspname = 'app'
@@ -122,14 +131,177 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
          order by relation.relname
       `);
       expect(rls.rows).toHaveLength(3);
-      expect(rls.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity)).toBe(true);
+      expect(
+        rls.rows.every(
+          (row) => row.relrowsecurity && row.relforcerowsecurity && row.owner_only_acl,
+        ),
+      ).toBe(true);
 
-      const activationSurface = await client.query<{ readonly routine: string | null }>(`
-        select to_regprocedure(
-          'app.activate_private_trusted_telebirr_epoch(uuid,uuid,uuid)'
-        )::text as routine
+      const policies = await client.query<{ readonly policyname: string }>(`
+        select policyname
+          from pg_policies
+         where schemaname = 'app'
+           and tablename in (
+             'private_trusted_telebirr_activation_control',
+             'private_trusted_telebirr_activation_epochs',
+             'private_trusted_telebirr_emergency_disable_intents'
+           )
       `);
-      expect(activationSurface.rows).toEqual([{ routine: null }]);
+      expect(policies.rows).toEqual([]);
+
+      const emergencyBoundary = await client.query<{
+        readonly anon_execute: boolean;
+        readonly configuration: readonly string[] | null;
+        readonly hardened: boolean;
+        readonly owner_control_execute: boolean;
+        readonly owner_runtime_execute: boolean;
+        readonly public_execute: boolean;
+        readonly service_execute: boolean;
+        readonly verifier_execute: boolean;
+      }>(`
+        select routine.prosecdef and routine.proowner = 'postgres'::regrole as hardened,
+               routine.proconfig as configuration,
+               exists (
+                 select 1
+                   from aclexplode(coalesce(
+                     routine.proacl, acldefault('f', routine.proowner)
+                   )) privilege
+                  where privilege.grantee = 0
+                    and privilege.privilege_type = 'EXECUTE'
+               ) as public_execute,
+               has_function_privilege('anon', routine.oid, 'EXECUTE') as anon_execute,
+               has_function_privilege('service_role', routine.oid, 'EXECUTE') as service_execute,
+               has_function_privilege(
+                 'fetanagent_trusted_telebirr_verifier', routine.oid, 'EXECUTE'
+               ) as verifier_execute,
+               has_function_privilege(
+                 'fetanagent_owner_control', routine.oid, 'EXECUTE'
+               ) as owner_control_execute,
+               has_function_privilege(
+                 'fetanagent_owner_control_runtime', routine.oid, 'EXECUTE'
+               ) as owner_runtime_execute
+          from pg_proc routine
+         where routine.oid =
+           'app.request_private_trusted_telebirr_emergency_disable(uuid,bigint,uuid,text)'
+             ::regprocedure
+      `);
+      expect(emergencyBoundary.rows).toEqual([
+        {
+          hardened: true,
+          configuration: ['search_path='],
+          public_execute: false,
+          anon_execute: false,
+          service_execute: false,
+          verifier_execute: false,
+          owner_control_execute: true,
+          owner_runtime_execute: true,
+        },
+      ]);
+
+      const activationSurface = await client.query<{ readonly routine: string }>(`
+        select routine.oid::regprocedure::text as routine
+          from pg_proc routine
+          join pg_namespace namespace on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'app'
+           and routine.proname like 'activate_private_trusted_telebirr%'
+      `);
+      expect(activationSurface.rows).toEqual([]);
+
+      const ownerLockOrder = await client.query<{
+        readonly authority_first: boolean;
+        readonly signature: string;
+      }>(`
+        select routine.oid::regprocedure::text as signature,
+               position(
+                 'lock_private_trusted_telebirr_activation_authority()'
+                 in pg_get_functiondef(routine.oid)
+               ) > 0
+               and position('_by_admin_id' in pg_get_functiondef(routine.oid)) > 0
+               and position(
+                 'perform gate.singleton'
+                 in pg_get_functiondef(routine.oid)
+               ) > position(
+                 'lock_private_trusted_telebirr_activation_authority()'
+                 in pg_get_functiondef(routine.oid)
+               )
+               and position(
+                 'perform gate.singleton'
+                 in pg_get_functiondef(routine.oid)
+               ) < position('_by_admin_id' in pg_get_functiondef(routine.oid))
+                 as authority_first
+          from pg_proc routine
+         where routine.oid in (
+           'app.arm_private_live_deposit_pilot(uuid,uuid)'::regprocedure,
+           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure
+         )
+         order by signature
+      `);
+      expect(ownerLockOrder.rows).toEqual([
+        {
+          signature: 'app.arm_private_live_deposit_pilot(uuid,uuid)',
+          authority_first: true,
+        },
+        {
+          signature: 'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
+          authority_first: true,
+        },
+      ]);
+
+      const explicitFinancialOrder = await client.query<{
+        readonly ordered: boolean;
+        readonly signature: string;
+      }>(`
+        select routine.oid::regprocedure::text as signature,
+               position(
+                 'lock_private_trusted_telebirr_activation_authority()'
+                 in pg_get_functiondef(routine.oid)
+               ) > 0
+               and position(
+                 'perform gate.singleton'
+                 in pg_get_functiondef(routine.oid)
+               ) > position(
+                 'lock_private_trusted_telebirr_activation_authority()'
+                 in pg_get_functiondef(routine.oid)
+               )
+               and position(
+                 'perform feature_switch.feature_key'
+                 in pg_get_functiondef(routine.oid)
+               ) > position(
+                 'perform gate.singleton'
+                 in pg_get_functiondef(routine.oid)
+               )
+               and position(
+                 'perform pilot_revision.id'
+                 in pg_get_functiondef(routine.oid)
+               ) > position(
+                 'perform feature_switch.feature_key'
+                 in pg_get_functiondef(routine.oid)
+               )
+               and position(
+                 'update app.private_owner_kemerbet_readiness_cohort_gate'
+                 in pg_get_functiondef(routine.oid)
+               ) > position(
+                 'perform pilot_revision.id'
+                 in pg_get_functiondef(routine.oid)
+               ) as ordered
+          from pg_proc routine
+         where routine.oid in (
+           'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)'
+             ::regprocedure,
+           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure
+         )
+         order by signature
+      `);
+      expect(explicitFinancialOrder.rows).toEqual([
+        {
+          signature: 'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',
+          ordered: true,
+        },
+        {
+          signature: 'app.stop_private_live_deposit_pilot(uuid,uuid,text)',
+          ordered: true,
+        },
+      ]);
 
       const loader = await client.query(
         'select * from app.load_next_private_live_telebirr_staged_evidence()',
@@ -387,6 +559,52 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
           },
         ]);
 
+        const advancedEpoch = String(Number(epoch.rows[0]!.current_epoch) + 1);
+        await client.query(
+          `insert into app.private_trusted_telebirr_activation_epochs (
+             epoch, authority_state, pilot_revision_id, configuration_digest,
+             active_from, expires_at, activated_by_admin_id, activated_at
+           ) values (
+             $1::bigint, 'active', $2::uuid, $3::text,
+             clock_timestamp() - interval '1 second',
+             clock_timestamp() + interval '1 hour',
+             $4::uuid, clock_timestamp()
+           )`,
+          [advancedEpoch, pilot.pilotRevisionId, pilot.configurationDigest, ownerAdminId],
+        );
+        await client.query(
+          `update app.private_trusted_telebirr_activation_control
+              set current_epoch = $1::bigint
+            where control_key = 'trusted_telebirr_financial_authority'`,
+          [advancedEpoch],
+        );
+
+        expect((await disable()).rows).toEqual([
+          { activation_epoch: epoch.rows[0]!.current_epoch, replayed: true },
+        ]);
+        const changedReason = await failureAtSavepoint(client, () =>
+          client.query(
+            `select * from app.request_private_trusted_telebirr_emergency_disable(
+               $1::uuid, $2::bigint, $3::uuid, 'provider_incident'
+             )`,
+            [ownerAdminId, epoch.rows[0]!.current_epoch, requestKey],
+          ),
+        );
+        expect(changedReason.message).toContain(
+          'The trusted TeleBirr emergency-disable replay conflicts.',
+        );
+        const changedRequestKey = await failureAtSavepoint(client, () =>
+          client.query(
+            `select * from app.request_private_trusted_telebirr_emergency_disable(
+               $1::uuid, $2::bigint, $3::uuid, 'execution_uncertainty'
+             )`,
+            [ownerAdminId, epoch.rows[0]!.current_epoch, randomUUID()],
+          ),
+        );
+        expect(changedRequestKey.message).toContain(
+          'The trusted TeleBirr emergency-disable replay conflicts.',
+        );
+
         const authorityFailure = await failureAtSavepoint(client, () =>
           readAuthority(
             client,
@@ -409,6 +627,119 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
           'The trusted TeleBirr activation epoch is not currently authorized.',
         );
       });
+    });
+
+    it('rechecks authority time after waiting for the control lock', async () => {
+      const client = getClient();
+      const ownerAdminId = getOwnerAdminId();
+      let pilot: TelebirrPilot | undefined;
+      let currentEpoch: string | undefined;
+      let cleanupRequestKey: string | undefined;
+
+      try {
+        pilot = await prepareTelebirrPilot(client, ownerAdminId);
+        const epoch = await client.query<{ readonly current_epoch: string }>(`
+          select current_epoch
+            from app.private_trusted_telebirr_activation_control
+           where control_key = 'trusted_telebirr_financial_authority'
+        `);
+        currentEpoch = epoch.rows[0]!.current_epoch;
+        cleanupRequestKey = randomUUID();
+
+        const expiresAt = new Date(Date.now() + 2_000);
+        await client.query('begin');
+        try {
+          await client.query("set local session_replication_role = 'replica'");
+          await client.query(
+            `update app.private_trusted_telebirr_activation_epochs
+                set expires_at = $1::timestamptz
+              where epoch = $2::bigint`,
+            [expiresAt, currentEpoch],
+          );
+          await client.query(
+            `update app.private_live_deposit_pilot_revisions
+                set expires_at = $1::timestamptz
+              where id = $2::uuid`,
+            [expiresAt, pilot.pilotRevisionId],
+          );
+          await client.query('commit');
+        } catch (error) {
+          await client.query('rollback');
+          throw error;
+        }
+
+        const locker = createSession();
+        const reader = createSession();
+        let lockerCommitted = false;
+        let readerRolledBack = false;
+        let readerAttempt:
+          Promise<QueryResult<{ readonly current_epoch: string | null }>> | undefined;
+        await Promise.all([locker.connect(), reader.connect()]);
+        try {
+          await Promise.all([locker.query('begin'), reader.query('begin')]);
+          await locker.query("set local lock_timeout = '8s'");
+          await reader.query("set local lock_timeout = '8s'");
+          await reader.query("set local statement_timeout = '12s'");
+          await reader.query("set local application_name = 'trusted_telebirr_epoch_expiry_wait'");
+          await locker.query(`
+            select current_epoch
+              from app.private_trusted_telebirr_activation_control
+             where control_key = 'trusted_telebirr_financial_authority'
+             for update
+          `);
+
+          readerAttempt = reader.query<{ readonly current_epoch: string | null }>(`
+            select app.current_private_trusted_telebirr_activation_epoch()::text
+                     as current_epoch
+          `);
+
+          let observedControlWait = false;
+          for (let attempt = 0; attempt < 80; attempt += 1) {
+            const lockState = await client.query<{ readonly waiting: boolean }>(`
+              select exists (
+                select 1
+                  from pg_stat_activity activity
+                 where activity.application_name = 'trusted_telebirr_epoch_expiry_wait'
+                   and activity.wait_event_type = 'Lock'
+              ) as waiting
+            `);
+            if (lockState.rows[0]!.waiting) {
+              observedControlWait = true;
+              break;
+            }
+            await client.query('select pg_sleep(0.025)');
+          }
+          expect(observedControlWait).toBe(true);
+
+          await client.query('select pg_sleep(2.1)');
+          await locker.query('commit');
+          lockerCommitted = true;
+          expect((await readerAttempt).rows).toEqual([{ current_epoch: null }]);
+          readerAttempt = undefined;
+          await reader.query('rollback');
+          readerRolledBack = true;
+        } finally {
+          if (!lockerCommitted) {
+            await Promise.allSettled([locker.query('rollback')]);
+          }
+          if (readerAttempt) {
+            await Promise.allSettled([readerAttempt]);
+          }
+          if (!readerRolledBack) {
+            await Promise.allSettled([reader.query('rollback')]);
+          }
+          await Promise.allSettled([locker.end(), reader.end()]);
+        }
+      } finally {
+        if (pilot && currentEpoch && cleanupRequestKey) {
+          await client.query(
+            `select * from app.request_private_trusted_telebirr_emergency_disable(
+               $1::uuid, $2::bigint, $3::uuid, 'owner_stop'
+             )`,
+            [ownerAdminId, currentEpoch, cleanupRequestKey],
+          );
+        }
+      }
     });
   });
 }

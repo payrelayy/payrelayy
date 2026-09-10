@@ -6832,7 +6832,7 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       {
         signature:
-          'app.load_private_live_telebirr_verification_authority_before_activation_epoch(uuid,uuid,timestamp with time zone)',
+          'app.load_private_live_telebirr_verification_authority_pre_epoch(uuid,uuid,timestamp with time zone)',
       },
       {
         signature:
@@ -9633,6 +9633,7 @@ registerTelebirrShadowVerificationSqlTests(
 registerTrustedTelebirrActivationEpochSqlTests(
   () => client,
   () => ownerAdminId,
+  () => createSqlIntegrationClient(environment),
 );
 registerTrustedTelebirrVerifierRuntimeSqlTests(
   () => client,

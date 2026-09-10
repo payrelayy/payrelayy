@@ -11,6 +11,11 @@ begin;
 alter default privileges for role postgres in schema app
   revoke execute on functions from public;
 
+-- Hold a write-conflicting table lock from the prerequisite check through trigger installation and
+-- the final revalidation. An ordinary SELECT would allow a privileged switch writer to commit live
+-- state after preflight but before CREATE TRIGGER acquires its own table lock.
+lock table app.feature_switches in share row exclusive mode;
+
 do $trusted_telebirr_activation_preflight$
 declare
   safe_switch_count integer;
@@ -193,7 +198,7 @@ set search_path = ''
 as $$
 declare
   candidate app.private_trusted_telebirr_activation_epochs%rowtype;
-  checked_at timestamptz := pg_catalog.clock_timestamp();
+  checked_at timestamptz;
 begin
   if new.control_key is distinct from old.control_key
     or new.current_epoch <= old.current_epoch then
@@ -205,6 +210,9 @@ begin
     from app.private_trusted_telebirr_activation_epochs activation_epoch
    where activation_epoch.epoch = new.current_epoch
    for share;
+
+  -- Authority time is evaluated only after every potentially blocking lock above is held.
+  checked_at := pg_catalog.clock_timestamp();
 
   if candidate.epoch is null
     or candidate.authority_state <> 'active'
@@ -224,6 +232,36 @@ begin
 end;
 $$;
 
+create function app.lock_private_trusted_telebirr_activation_authority()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  locked_epoch bigint;
+begin
+  select activation_control.current_epoch
+    into locked_epoch
+    from app.private_trusted_telebirr_activation_control activation_control
+   where activation_control.control_key = 'trusted_telebirr_financial_authority'
+   for share;
+
+  if locked_epoch is null then
+    raise exception 'Trusted TeleBirr activation authority is unavailable.';
+  end if;
+
+  perform activation_epoch.epoch
+    from app.private_trusted_telebirr_activation_epochs activation_epoch
+   where activation_epoch.epoch = locked_epoch
+   for share;
+
+  if not found then
+    raise exception 'Trusted TeleBirr activation authority is unavailable.';
+  end if;
+end;
+$$;
+
 create function app.lock_private_trusted_telebirr_activation_for_switch_write()
 returns trigger
 language plpgsql
@@ -231,14 +269,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  perform activation_control.control_key
-    from app.private_trusted_telebirr_activation_control activation_control
-   where activation_control.control_key = 'trusted_telebirr_financial_authority'
-   for share;
-
-  if not found then
-    raise exception 'Trusted TeleBirr activation control is unavailable.';
-  end if;
+  perform app.lock_private_trusted_telebirr_activation_authority();
   return null;
 end;
 $$;
@@ -252,22 +283,29 @@ as $$
 declare
   authority app.private_trusted_telebirr_activation_epochs%rowtype;
   pilot app.private_live_deposit_pilot_revisions%rowtype;
-  checked_at timestamptz := pg_catalog.clock_timestamp();
+  checked_at timestamptz;
+  locked_epoch bigint;
   switch_count integer;
 begin
+  select activation_control.current_epoch
+    into locked_epoch
+    from app.private_trusted_telebirr_activation_control activation_control
+   where activation_control.control_key = 'trusted_telebirr_financial_authority'
+   for share;
+
+  if locked_epoch is null then
+    return null;
+  end if;
+
   select activation_epoch.*
     into authority
-    from app.private_trusted_telebirr_activation_control activation_control
-    join app.private_trusted_telebirr_activation_epochs activation_epoch
-      on activation_epoch.epoch = activation_control.current_epoch
-   where activation_control.control_key = 'trusted_telebirr_financial_authority'
-   for share of activation_control, activation_epoch;
+    from app.private_trusted_telebirr_activation_epochs activation_epoch
+   where activation_epoch.epoch = locked_epoch
+   for share;
 
   if authority.epoch is null
     or authority.authority_state <> 'active'
     or authority.revoked_at is not null
-    or checked_at < authority.active_from
-    or checked_at >= authority.expires_at
     or exists (
       select 1
         from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
@@ -276,20 +314,9 @@ begin
     return null;
   end if;
 
-  select pilot_revision.*
-    into pilot
-    from app.private_live_deposit_pilot_revisions pilot_revision
-   where pilot_revision.id = authority.pilot_revision_id
-   for share;
-
-  if pilot.id is null
-    or pilot.status <> 'armed'
-    or pilot.configuration_digest is distinct from authority.configuration_digest
-    or pilot.active_from is distinct from authority.active_from
-    or pilot.expires_at is distinct from authority.expires_at then
-    return null;
-  end if;
-
+  -- The repository-wide financial order is authority, switches, then pilot. Existing settlement,
+  -- executor, and Owner-stop paths already take switches before pilot, so reversing those two rows
+  -- here would introduce a lock-upgrade deadlock.
   perform feature_switch.feature_key
     from app.feature_switches feature_switch
    where feature_switch.feature_key in (
@@ -303,7 +330,23 @@ begin
    for share;
   get diagnostics switch_count = row_count;
 
-  if switch_count <> 5
+  select pilot_revision.*
+    into pilot
+    from app.private_live_deposit_pilot_revisions pilot_revision
+   where pilot_revision.id = authority.pilot_revision_id
+   for share;
+
+  -- Do not let time spent waiting for either switch or pilot locks preserve expired authority.
+  checked_at := pg_catalog.clock_timestamp();
+
+  if checked_at < authority.active_from
+    or checked_at >= authority.expires_at
+    or pilot.id is null
+    or pilot.status <> 'armed'
+    or pilot.configuration_digest is distinct from authority.configuration_digest
+    or pilot.active_from is distinct from authority.active_from
+    or pilot.expires_at is distinct from authority.expires_at
+    or switch_count <> 5
     or not exists (
       select 1
         from app.feature_switches feature_switch
@@ -350,7 +393,7 @@ declare
   authority app.private_trusted_telebirr_activation_epochs%rowtype;
   pilot app.private_live_deposit_pilot_revisions%rowtype;
   telebirr_is_live boolean;
-  checked_at timestamptz := pg_catalog.clock_timestamp();
+  checked_at timestamptz;
 begin
   if tg_op = 'DELETE' then
     if old.feature_key in (
@@ -403,6 +446,10 @@ begin
     from app.private_live_deposit_pilot_revisions pilot_revision
    where pilot_revision.id = authority.pilot_revision_id
    for share;
+
+  -- The statement trigger already holds activation control and epoch before PostgreSQL locks the
+  -- switch row. Refresh time after the remaining pilot lock so a lock wait cannot extend authority.
+  checked_at := pg_catalog.clock_timestamp();
 
   if authority.epoch is null
     or authority.authority_state <> 'active'
@@ -458,7 +505,9 @@ begin
 end;
 $$;
 
-create trigger feature_switches_trusted_telebirr_activation_lock
+-- PostgreSQL fires same-kind triggers in name order. The `00` prefix guarantees activation
+-- authority is acquired before the existing readiness serializer locks its gate row.
+create trigger feature_switches_00_trusted_telebirr_activation_lock
 before insert or update or delete on app.feature_switches
 for each statement
 execute function app.lock_private_trusted_telebirr_activation_for_switch_write();
@@ -514,6 +563,263 @@ before truncate on app.private_trusted_telebirr_emergency_disable_intents
 for each statement
 execute function app.reject_private_trusted_telebirr_activation_truncate();
 
+-- The legacy arm and stop implementations acquire financial switches before the pilot row. Enter
+-- the activation authority first so those Owner paths cannot invert the emergency-disable order.
+-- CREATE OR REPLACE preserves the existing function OIDs and their narrowly granted ACLs.
+create or replace function app.arm_private_live_deposit_pilot(
+  p_actor_auth_user_id uuid,
+  p_pilot_revision_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  actor_admin_id uuid;
+begin
+  perform app.require_private_live_deposit_pilot_owner_controller();
+
+  if p_actor_auth_user_id is null then
+    raise exception 'The authenticated Owner subject is required.';
+  end if;
+
+  select admin_user.id
+    into actor_admin_id
+    from app.admin_users admin_user
+   where admin_user.auth_user_id = p_actor_auth_user_id
+     and admin_user.role = 'owner'
+     and admin_user.status = 'active'
+   for share;
+
+  if actor_admin_id is null and session_user = 'postgres' then
+    select admin_user.id
+      into actor_admin_id
+      from app.admin_users admin_user
+     where admin_user.id = p_actor_auth_user_id
+       and admin_user.role = 'owner'
+       and admin_user.status = 'active'
+     for share;
+  end if;
+
+  if actor_admin_id is null then
+    raise exception 'Only the active Owner can arm the private live-deposit pilot.';
+  end if;
+
+  perform app.lock_private_trusted_telebirr_activation_authority();
+  perform gate.singleton
+    from app.private_owner_kemerbet_readiness_cohort_gate gate
+   where gate.singleton
+   for update;
+  perform app.arm_private_live_deposit_pilot_by_admin_id(
+    actor_admin_id,
+    p_pilot_revision_id
+  );
+end;
+$$;
+
+create or replace function app.arm_companion_verified_private_live_telebirr_pilot(
+  p_actor_auth_user_id uuid,
+  p_pilot_revision_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  context_count integer;
+begin
+  perform app.require_private_live_deposit_pilot_owner_controller();
+  perform app.lock_private_trusted_telebirr_activation_authority();
+
+  perform gate.singleton
+    from app.private_owner_kemerbet_readiness_cohort_gate gate
+   where gate.singleton
+   for update;
+
+  -- The companion proof reader takes the pilot row. Pre-lock switches and then the pilot before
+  -- invoking it so the wrapper cannot invert the shared financial order.
+  perform feature_switch.feature_key
+    from app.feature_switches feature_switch
+   where feature_switch.feature_key in (
+     'cbe_birr_authoritative_verification',
+     'deposit_execution',
+     'payment_verification',
+     'private_live_deposit_pilot',
+     'telebirr_authoritative_verification'
+   )
+   order by feature_switch.feature_key
+   for update;
+
+  perform pilot_revision.id
+    from app.private_live_deposit_pilot_revisions pilot_revision
+   where pilot_revision.id = p_pilot_revision_id
+   for update;
+
+  perform app.require_companion_verified_private_live_telebirr_pilot(
+    p_actor_auth_user_id,
+    p_pilot_revision_id
+  );
+
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = pg_catalog.pg_backend_pid(),
+         pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id(),
+         pilot_mutation_mode = 'arm'
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid is null
+     and gate.pilot_mutation_transaction_id is null
+     and gate.pilot_mutation_mode is null;
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context is unavailable.';
+  end if;
+
+  begin
+    perform app.arm_private_live_deposit_pilot(
+      p_actor_auth_user_id,
+      p_pilot_revision_id
+    );
+    perform app.ensure_private_live_telebirr_receiver_profile(p_pilot_revision_id);
+  exception when others then
+    update app.private_owner_kemerbet_readiness_cohort_gate gate
+       set pilot_mutation_backend_pid = null,
+           pilot_mutation_transaction_id = null,
+           pilot_mutation_mode = null
+     where gate.singleton
+       and gate.pilot_mutation_backend_pid = pg_catalog.pg_backend_pid()
+       and gate.pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id()
+       and gate.pilot_mutation_mode = 'arm';
+    raise;
+  end;
+
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = null,
+         pilot_mutation_transaction_id = null,
+         pilot_mutation_mode = null
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid = pg_catalog.pg_backend_pid()
+     and gate.pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id()
+     and gate.pilot_mutation_mode = 'arm';
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context did not close.';
+  end if;
+end;
+$$;
+
+create or replace function app.stop_private_live_deposit_pilot(
+  p_actor_auth_user_id uuid,
+  p_pilot_revision_id uuid,
+  p_reason_code text
+)
+returns void
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  actor_admin_id uuid;
+  context_count integer;
+begin
+  perform app.require_private_live_deposit_pilot_owner_controller();
+
+  if p_actor_auth_user_id is null then
+    raise exception 'The authenticated Owner subject is required.';
+  end if;
+
+  select admin_user.id
+    into actor_admin_id
+    from app.admin_users admin_user
+   where admin_user.auth_user_id = p_actor_auth_user_id
+     and admin_user.role = 'owner'
+     and admin_user.status = 'active'
+   for share;
+
+  if actor_admin_id is null and session_user = 'postgres' then
+    select admin_user.id
+      into actor_admin_id
+      from app.admin_users admin_user
+     where admin_user.id = p_actor_auth_user_id
+       and admin_user.role = 'owner'
+       and admin_user.status = 'active'
+     for share;
+  end if;
+
+  if actor_admin_id is null then
+    raise exception 'Only the active Owner can stop the private live-deposit pilot.';
+  end if;
+
+  perform app.lock_private_trusted_telebirr_activation_authority();
+
+  perform gate.singleton
+    from app.private_owner_kemerbet_readiness_cohort_gate gate
+   where gate.singleton
+   for update;
+
+  perform feature_switch.feature_key
+    from app.feature_switches feature_switch
+   where feature_switch.feature_key in (
+     'cbe_birr_authoritative_verification',
+     'deposit_execution',
+     'payment_verification',
+     'private_live_deposit_pilot',
+     'telebirr_authoritative_verification'
+   )
+   order by feature_switch.feature_key
+   for update;
+
+  perform pilot_revision.id
+    from app.private_live_deposit_pilot_revisions pilot_revision
+   where pilot_revision.id = p_pilot_revision_id
+   for update;
+
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = pg_catalog.pg_backend_pid(),
+         pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id(),
+         pilot_mutation_mode = 'stop'
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid is null
+     and gate.pilot_mutation_transaction_id is null
+     and gate.pilot_mutation_mode is null;
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context is unavailable.';
+  end if;
+
+  begin
+    perform app.stop_private_live_deposit_pilot_by_admin_id(
+      actor_admin_id,
+      p_pilot_revision_id,
+      p_reason_code
+    );
+  exception when others then
+    update app.private_owner_kemerbet_readiness_cohort_gate gate
+       set pilot_mutation_backend_pid = null,
+           pilot_mutation_transaction_id = null,
+           pilot_mutation_mode = null
+     where gate.singleton
+       and gate.pilot_mutation_backend_pid = pg_catalog.pg_backend_pid()
+       and gate.pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id()
+       and gate.pilot_mutation_mode = 'stop';
+    raise;
+  end;
+
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = null,
+         pilot_mutation_transaction_id = null,
+         pilot_mutation_mode = null
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid = pg_catalog.pg_backend_pid()
+     and gate.pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id()
+     and gate.pilot_mutation_mode = 'stop';
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context did not close.';
+  end if;
+end;
+$$;
+
 create function app.request_private_trusted_telebirr_emergency_disable(
   p_actor_auth_user_id uuid,
   p_expected_epoch bigint,
@@ -531,8 +837,9 @@ as $$
 declare
   actor_admin_id uuid;
   authority app.private_trusted_telebirr_activation_epochs%rowtype;
+  context_count integer;
   existing_intent app.private_trusted_telebirr_emergency_disable_intents%rowtype;
-  emergency_at timestamptz := pg_catalog.clock_timestamp();
+  emergency_at timestamptz;
 begin
   perform app.require_private_live_deposit_pilot_owner_controller();
 
@@ -577,6 +884,27 @@ begin
       message = 'Only the active Owner can request trusted TeleBirr emergency disable.';
   end if;
 
+  -- A committed intent is immutable. Resolve it before consulting the moving control pointer so an
+  -- exact retry remains idempotent after a later epoch advances, while any changed request key,
+  -- actor, epoch, or reason is still rejected as a conflict.
+  select emergency_intent.*
+    into existing_intent
+    from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+   where emergency_intent.request_key = p_request_key
+      or emergency_intent.expected_epoch = p_expected_epoch
+   for share;
+
+  if existing_intent.request_key is not null then
+    if existing_intent.request_key = p_request_key
+      and existing_intent.expected_epoch = p_expected_epoch
+      and existing_intent.requested_by_admin_id = actor_admin_id
+      and existing_intent.reason_code = p_reason_code then
+      return query select p_expected_epoch, true;
+      return;
+    end if;
+    raise exception 'The trusted TeleBirr emergency-disable replay conflicts.';
+  end if;
+
   perform activation_control.control_key
     from app.private_trusted_telebirr_activation_control activation_control
    where activation_control.control_key = 'trusted_telebirr_financial_authority'
@@ -593,6 +921,8 @@ begin
    where activation_epoch.epoch = p_expected_epoch
    for update;
 
+  -- Recheck after serializing on control: a concurrent first request may have committed while this
+  -- caller waited and must now be replayed or rejected without attempting a duplicate insert.
   select emergency_intent.*
     into existing_intent
     from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
@@ -614,6 +944,39 @@ begin
   if authority.authority_state <> 'active' or authority.revoked_at is not null then
     raise exception 'The trusted TeleBirr activation epoch is not revocable.';
   end if;
+
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = pg_catalog.pg_backend_pid(),
+         pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id(),
+         pilot_mutation_mode = 'stop'
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid is null
+     and gate.pilot_mutation_transaction_id is null
+     and gate.pilot_mutation_mode is null;
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context is unavailable.';
+  end if;
+
+  perform feature_switch.feature_key
+    from app.feature_switches feature_switch
+   where feature_switch.feature_key in (
+     'cbe_birr_authoritative_verification',
+     'deposit_execution',
+     'payment_verification',
+     'private_live_deposit_pilot',
+     'telebirr_authoritative_verification'
+   )
+   order by feature_switch.feature_key
+   for update;
+
+  perform pilot_revision.id
+    from app.private_live_deposit_pilot_revisions pilot_revision
+   where pilot_revision.id = authority.pilot_revision_id
+   for update;
+
+  -- Use authority time only after every potentially blocking row lock has been acquired.
+  emergency_at := pg_catalog.clock_timestamp();
 
   insert into app.private_trusted_telebirr_emergency_disable_intents (
     request_key,
@@ -654,6 +1017,19 @@ begin
    where pilot_revision.id = authority.pilot_revision_id
      and pilot_revision.status in ('draft', 'armed');
 
+  update app.private_owner_kemerbet_readiness_cohort_gate gate
+     set pilot_mutation_backend_pid = null,
+         pilot_mutation_transaction_id = null,
+         pilot_mutation_mode = null
+   where gate.singleton
+     and gate.pilot_mutation_backend_pid = pg_catalog.pg_backend_pid()
+     and gate.pilot_mutation_transaction_id = pg_catalog.pg_current_xact_id()
+     and gate.pilot_mutation_mode = 'stop';
+  get diagnostics context_count = row_count;
+  if context_count <> 1 then
+    raise exception 'The companion-verified pilot mutation context did not close.';
+  end if;
+
   insert into app.audit_events (
     actor_kind,
     actor_admin_id,
@@ -680,9 +1056,9 @@ end;
 $$;
 
 alter function app.load_next_private_live_telebirr_staged_evidence()
-  rename to load_next_private_live_telebirr_staged_evidence_before_activation_epoch;
+  rename to load_next_private_live_telebirr_staged_evidence_pre_epoch;
 
-revoke all on function app.load_next_private_live_telebirr_staged_evidence_before_activation_epoch()
+revoke all on function app.load_next_private_live_telebirr_staged_evidence_pre_epoch()
 from public, anon, authenticated, service_role,
      fetanagent_trusted_telebirr_verifier,
      fetanagent_trusted_telebirr_verifier_runtime;
@@ -714,15 +1090,15 @@ begin
          staged.observation_body_digest,
          staged.signed_assignment,
          staged.signed_observation
-    from app.load_next_private_live_telebirr_staged_evidence_before_activation_epoch() staged;
+    from app.load_next_private_live_telebirr_staged_evidence_pre_epoch() staged;
 end;
 $$;
 
 alter function app.load_private_live_telebirr_verification_authority(
   uuid, uuid, timestamptz
-) rename to load_private_live_telebirr_verification_authority_before_activation_epoch;
+) rename to load_private_live_telebirr_verification_authority_pre_epoch;
 
-revoke all on function app.load_private_live_telebirr_verification_authority_before_activation_epoch(
+revoke all on function app.load_private_live_telebirr_verification_authority_pre_epoch(
   uuid, uuid, timestamptz
 ) from public, anon, authenticated, service_role,
        fetanagent_trusted_telebirr_verifier,
@@ -751,7 +1127,7 @@ begin
       message = 'The trusted TeleBirr activation epoch is not currently authorized.';
   end if;
 
-  authority := app.load_private_live_telebirr_verification_authority_before_activation_epoch(
+  authority := app.load_private_live_telebirr_verification_authority_pre_epoch(
     p_verification_attempt_id,
     p_lease_token,
     p_occurred_at
@@ -767,9 +1143,9 @@ $$;
 alter function app.complete_private_live_telebirr_verification(
   uuid, uuid, uuid, text, text, text, text, text, timestamptz, text, text,
   text, timestamptz, text, text, text, timestamptz, bigint, timestamptz, text
-) rename to complete_private_live_telebirr_verification_before_activation_epoch;
+) rename to complete_private_live_telebirr_verification_pre_epoch;
 
-revoke all on function app.complete_private_live_telebirr_verification_before_activation_epoch(
+revoke all on function app.complete_private_live_telebirr_verification_pre_epoch(
   uuid, uuid, uuid, text, text, text, text, text, timestamptz, text, text,
   text, timestamptz, text, text, text, timestamptz, bigint, timestamptz, text
 ) from public, anon, authenticated, service_role,
@@ -830,7 +1206,7 @@ begin
          completed.execution_job_id,
          completed.settlement_created,
          completed.already_completed
-    from app.complete_private_live_telebirr_verification_before_activation_epoch(
+    from app.complete_private_live_telebirr_verification_pre_epoch(
       p_verification_attempt_id,
       p_lease_token,
       p_completion_request_key,
@@ -855,6 +1231,36 @@ begin
 end;
 $$;
 
+-- Revalidate while the migration-long SHARE ROW EXCLUSIVE lock is still held. This proves the
+-- prerequisite remained true through guard installation instead of trusting only the first read.
+do $trusted_telebirr_activation_revalidation$
+declare
+  safe_switch_count integer;
+begin
+  select pg_catalog.count(*)::integer
+    into safe_switch_count
+    from app.feature_switches feature_switch
+   where (
+     feature_switch.feature_key in (
+       'cbe_birr_authoritative_verification',
+       'deposit_execution',
+       'payment_verification',
+       'telebirr_authoritative_verification'
+     )
+     and feature_switch.mode = 'disabled'
+     and feature_switch.settings = '{}'::jsonb
+   ) or (
+     feature_switch.feature_key = 'private_live_deposit_pilot'
+     and feature_switch.mode in ('disabled', 'dry_run')
+   );
+
+  if safe_switch_count <> 5 then
+    raise exception
+      'Trusted TeleBirr activation foundation lost its non-live prerequisite.';
+  end if;
+end;
+$trusted_telebirr_activation_revalidation$;
+
 alter table app.private_trusted_telebirr_activation_epochs enable row level security;
 alter table app.private_trusted_telebirr_activation_epochs force row level security;
 alter table app.private_trusted_telebirr_activation_control enable row level security;
@@ -871,6 +1277,7 @@ alter function app.reject_private_trusted_telebirr_activation_retained_mutation(
 alter function app.reject_private_trusted_telebirr_activation_truncate() owner to postgres;
 alter function app.enforce_private_trusted_telebirr_epoch_revocation() owner to postgres;
 alter function app.enforce_private_trusted_telebirr_control_transition() owner to postgres;
+alter function app.lock_private_trusted_telebirr_activation_authority() owner to postgres;
 alter function app.lock_private_trusted_telebirr_activation_for_switch_write()
   owner to postgres;
 alter function app.current_private_trusted_telebirr_activation_epoch() owner to postgres;
@@ -914,6 +1321,7 @@ revoke all on function
   app.reject_private_trusted_telebirr_activation_truncate(),
   app.enforce_private_trusted_telebirr_epoch_revocation(),
   app.enforce_private_trusted_telebirr_control_transition(),
+  app.lock_private_trusted_telebirr_activation_authority(),
   app.lock_private_trusted_telebirr_activation_for_switch_write(),
   app.current_private_trusted_telebirr_activation_epoch(),
   app.enforce_private_trusted_telebirr_live_switch(),

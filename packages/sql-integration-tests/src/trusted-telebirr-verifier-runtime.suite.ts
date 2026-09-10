@@ -14,17 +14,18 @@ const verifierRuntime = 'fetanagent_trusted_telebirr_verifier_runtime';
 const authorityFunction =
   'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)';
 const authorityBeforeActivationFunction =
-  'app.load_private_live_telebirr_verification_authority_before_activation_epoch(uuid,uuid,timestamp with time zone)';
+  'app.load_private_live_telebirr_verification_authority_pre_epoch(uuid,uuid,timestamp with time zone)';
 const completionFunction =
   'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const completionBeforeActivationFunction =
-  'app.complete_private_live_telebirr_verification_before_activation_epoch(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
+  'app.complete_private_live_telebirr_verification_pre_epoch(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const stagedEvidenceFunction = 'app.load_next_private_live_telebirr_staged_evidence()';
 const stagedEvidenceBeforeActivationFunction =
-  'app.load_next_private_live_telebirr_staged_evidence_before_activation_epoch()';
+  'app.load_next_private_live_telebirr_staged_evidence_pre_epoch()';
 const quarantineFunction =
   'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)';
 const currentActivationEpochFunction = 'app.current_private_trusted_telebirr_activation_epoch()';
+const activationAuthorityLockFunction = 'app.lock_private_trusted_telebirr_activation_authority()';
 const internalCompletionFunction =
   'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const sessionGuardFunction = 'app.require_trusted_telebirr_verifier_session()';
@@ -300,15 +301,19 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         readonly configuration: readonly string[] | null;
         readonly group_execute: boolean;
         readonly hardened: boolean;
+        readonly identifier_within_limit: boolean;
         readonly owner_only_acl: boolean;
         readonly runtime_execute: boolean;
         readonly signature: string;
       }>(
         `
-        select requested.signature,
+        select routine.oid::regprocedure::text as signature,
                routine.prosecdef
                  and routine.proowner = 'postgres'::regrole as hardened,
                routine.proconfig as configuration,
+               pg_catalog.octet_length(routine.proname::text)
+                 <= pg_catalog.current_setting('max_identifier_length')::integer
+                   as identifier_within_limit,
                has_function_privilege('${verifierGroup}', requested.signature, 'EXECUTE')
                  as group_execute,
                has_function_privilege('${verifierRuntime}', requested.signature, 'EXECUTE')
@@ -322,7 +327,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
                ) as owner_only_acl
           from unnest($1::text[]) requested(signature)
           join pg_proc routine on routine.oid = requested.signature::regprocedure
-         order by requested.signature
+         order by routine.oid::regprocedure::text
       `,
         [
           [
@@ -330,6 +335,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
             currentActivationEpochFunction,
             stagedEvidenceBeforeActivationFunction,
             authorityBeforeActivationFunction,
+            activationAuthorityLockFunction,
           ],
         ],
       );
@@ -338,6 +344,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           signature: completionBeforeActivationFunction,
           configuration: ['search_path=pg_catalog'],
           hardened: true,
+          identifier_within_limit: true,
           group_execute: false,
           runtime_execute: false,
           owner_only_acl: true,
@@ -346,6 +353,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           signature: currentActivationEpochFunction,
           configuration: ['search_path='],
           hardened: true,
+          identifier_within_limit: true,
           group_execute: false,
           runtime_execute: false,
           owner_only_acl: true,
@@ -354,6 +362,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           signature: stagedEvidenceBeforeActivationFunction,
           configuration: ['search_path=pg_catalog'],
           hardened: true,
+          identifier_within_limit: true,
           group_execute: false,
           runtime_execute: false,
           owner_only_acl: true,
@@ -362,6 +371,16 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           signature: authorityBeforeActivationFunction,
           configuration: ['search_path=pg_catalog'],
           hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
+        },
+        {
+          signature: activationAuthorityLockFunction,
+          configuration: ['search_path='],
+          hardened: true,
+          identifier_within_limit: true,
           group_execute: false,
           runtime_execute: false,
           owner_only_acl: true,

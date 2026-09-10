@@ -23,10 +23,13 @@ is not accepted here.
 Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
 the singleton pointer, and change the complete TeleBirr switch set in the same database
 transaction. The deferred complete-set constraint rejects a transaction that leaves TeleBirr live
-with a partial or mismatched switch set. The lock order is activation control, epoch, pilot, then
-feature switches; host orchestration must never be treated as authority. Expiry, revocation, pilot
-drift, switch drift, or the mere presence of emergency intent makes work loading empty and rejects
-authority reads and completion of leases obtained earlier.
+with a partial or mismatched switch set. Mutating control paths lock activation control, epoch, the
+readiness serialization gate, feature switches, then pilot; read/completion paths that do not use
+the readiness gate preserve the same control, epoch, switches, pilot subsequence. Owner arm/stop
+enters activation authority before the existing readiness/switch/pilot sequence, and host
+orchestration must never be treated as authority. Expiry, revocation, pilot drift, switch drift, or
+the mere presence of emergency intent makes work loading empty and rejects authority reads and
+completion of leases obtained earlier.
 
 The production verifier remains separate from `compose.production.yaml`. Its staged service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct

@@ -29,6 +29,7 @@ const [
   productionRunbook,
   productionDisableSql,
   productionInspectSql,
+  readinessCohortMigration,
   activationEpochMigration,
 ] = await Promise.all([
   read('Dockerfile'),
@@ -50,6 +51,7 @@ const [
   read('infra/production-trusted-telebirr-verifier.md'),
   read('infra/sql/production-trusted-telebirr-verifier-disable.sql'),
   read('infra/sql/production-trusted-telebirr-verifier-inspect.sql'),
+  read('supabase/migrations/20260825103000_private_owner_kemerbet_readiness_cohort_claim.sql'),
   read('supabase/migrations/20260910154104_trusted_telebirr_activation_epoch_foundation.sql'),
 ]);
 const manifest = JSON.parse(manifestText);
@@ -87,6 +89,15 @@ function continuedDockerRunCommands(value) {
     commands.push(commandLines.join('\n'));
   }
   return commands;
+}
+
+function migrationFunctionBody(name) {
+  const match = new RegExp(
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    'u',
+  ).exec(activationEpochMigration);
+  assert.ok(match, `missing activation-epoch function ${name}`);
+  return match[1];
 }
 
 assert.equal(
@@ -563,6 +574,10 @@ assert.match(productionRunbook, /There is no same-release renewal path/);
 assert.match(productionRunbook, /two DAG-independent protected jobs/);
 assert.match(productionRunbook, /share a VM\/SSH failure domain/);
 assert.match(productionRunbook, /database emergency-revocation route that does not depend/);
+assert.match(
+  productionRunbook,
+  /lock activation control, epoch, the\s+readiness serialization gate, feature switches, then pilot/,
+);
 assert.doesNotMatch(productionRunbook, /ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY/);
 assert.doesNotMatch(productionRunbook, /Renewal is .*activate-verifier/);
 
@@ -582,21 +597,157 @@ assert.match(
 assert.match(activationEpochMigration, /deferrable initially deferred/);
 assert.match(activationEpochMigration, /current_private_trusted_telebirr_activation_epoch\(\)/);
 assert.match(activationEpochMigration, /request_private_trusted_telebirr_emergency_disable/);
+assert.match(activationEpochMigration, /load_next_private_live_telebirr_staged_evidence_pre_epoch/);
 assert.match(
   activationEpochMigration,
-  /load_next_private_live_telebirr_staged_evidence_before_activation_epoch/,
+  /load_private_live_telebirr_verification_authority_pre_epoch/,
 );
-assert.match(
-  activationEpochMigration,
-  /load_private_live_telebirr_verification_authority_before_activation_epoch/,
-);
-assert.match(
-  activationEpochMigration,
-  /complete_private_live_telebirr_verification_before_activation_epoch/,
-);
+assert.match(activationEpochMigration, /complete_private_live_telebirr_verification_pre_epoch/);
 assert.doesNotMatch(
   activationEpochMigration,
-  /create function app\.activate_private_trusted_telebirr|grant execute on function app\.current_private_trusted/,
+  /create(?: or replace)? function app\.activate_private_trusted_telebirr|grant execute on function app\.current_private_trusted/,
+);
+
+const migrationLockIndex = activationEpochMigration.indexOf(
+  'lock table app.feature_switches in share row exclusive mode',
+);
+const migrationPreflightIndex = activationEpochMigration.indexOf(
+  'do $trusted_telebirr_activation_preflight$',
+);
+const switchGuardIndex = activationEpochMigration.indexOf(
+  'create trigger feature_switches_00_trusted_telebirr_activation_lock',
+);
+const migrationRevalidationIndex = activationEpochMigration.indexOf(
+  'do $trusted_telebirr_activation_revalidation$',
+);
+assert.ok(migrationLockIndex >= 0, 'activation preflight must hold the switch table');
+assert.ok(
+  migrationLockIndex < migrationPreflightIndex &&
+    migrationPreflightIndex < switchGuardIndex &&
+    switchGuardIndex < migrationRevalidationIndex,
+  'migration must lock switches before preflight and revalidate after guard installation',
+);
+assert.equal(
+  [...activationEpochMigration.matchAll(/safe_switch_count <> 5/gu)].length,
+  2,
+  'migration must evaluate the non-live switch prerequisite before and after guard installation',
+);
+const activationSwitchTrigger = /create trigger (feature_switches_\S+activation_lock)/u.exec(
+  activationEpochMigration,
+);
+const readinessSwitchTrigger =
+  /create trigger (feature_switches_serialize_kemerbet_readiness)/u.exec(readinessCohortMigration);
+assert.ok(activationSwitchTrigger && readinessSwitchTrigger);
+assert.ok(
+  activationSwitchTrigger[1].localeCompare(readinessSwitchTrigger[1]) < 0,
+  'activation authority trigger must run before the readiness serialization trigger',
+);
+
+const renamedActivationInternals = [
+  ...activationEpochMigration.matchAll(/\brename to\s+([a-z][a-z0-9_]*)/gu),
+].map((match) => match[1]);
+assert.equal(renamedActivationInternals.length, 3);
+for (const identifier of renamedActivationInternals) {
+  assert.ok(
+    Buffer.byteLength(identifier, 'utf8') <= 63,
+    `PostgreSQL would truncate activation internal ${identifier}`,
+  );
+}
+
+const currentEpochBody = migrationFunctionBody('current_private_trusted_telebirr_activation_epoch');
+const currentControlLockIndex = currentEpochBody.indexOf('select activation_control.current_epoch');
+const currentEpochLockIndex = currentEpochBody.indexOf('select activation_epoch.*');
+const currentSwitchLockIndex = currentEpochBody.indexOf('perform feature_switch.feature_key');
+const currentPilotLockIndex = currentEpochBody.indexOf('select pilot_revision.*');
+const currentTimeIndex = currentEpochBody.indexOf('checked_at := pg_catalog.clock_timestamp()');
+assert.ok(
+  currentControlLockIndex >= 0 &&
+    currentControlLockIndex < currentEpochLockIndex &&
+    currentEpochLockIndex < currentSwitchLockIndex &&
+    currentSwitchLockIndex < currentPilotLockIndex &&
+    currentPilotLockIndex < currentTimeIndex,
+  'operation-time authority must lock control, epoch, switches, and pilot before reading time',
+);
+
+for (const ownerFunction of ['arm_private_live_deposit_pilot', 'stop_private_live_deposit_pilot']) {
+  const body = migrationFunctionBody(ownerFunction);
+  const authorityLockIndex = body.indexOf('lock_private_trusted_telebirr_activation_authority()');
+  const readinessLockIndex = body.indexOf('perform gate.singleton');
+  const legacyDelegateIndex = body.indexOf(`${ownerFunction}_by_admin_id`);
+  assert.ok(
+    authorityLockIndex >= 0 &&
+      authorityLockIndex < readinessLockIndex &&
+      readinessLockIndex < legacyDelegateIndex,
+    `${ownerFunction} must lock authority and readiness before its legacy switch/pilot sequence`,
+  );
+}
+
+const companionArmBody = migrationFunctionBody(
+  'arm_companion_verified_private_live_telebirr_pilot',
+);
+const companionAuthorityIndex = companionArmBody.indexOf(
+  'lock_private_trusted_telebirr_activation_authority()',
+);
+const companionSwitchIndex = companionArmBody.indexOf('perform feature_switch.feature_key');
+const companionPilotIndex = companionArmBody.indexOf('perform pilot_revision.id');
+const companionReadinessIndex = companionArmBody.indexOf('perform gate.singleton');
+const companionGateIndex = companionArmBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+assert.ok(
+  companionAuthorityIndex >= 0 &&
+    companionAuthorityIndex < companionReadinessIndex &&
+    companionReadinessIndex < companionSwitchIndex &&
+    companionSwitchIndex < companionPilotIndex &&
+    companionPilotIndex < companionGateIndex,
+  'companion arm must lock authority, readiness, switches, and pilot before opening its context',
+);
+
+const ownerStopBody = migrationFunctionBody('stop_private_live_deposit_pilot');
+const ownerStopAuthorityIndex = ownerStopBody.indexOf(
+  'lock_private_trusted_telebirr_activation_authority()',
+);
+const ownerStopSwitchIndex = ownerStopBody.indexOf('perform feature_switch.feature_key');
+const ownerStopPilotIndex = ownerStopBody.indexOf('perform pilot_revision.id');
+const ownerStopReadinessIndex = ownerStopBody.indexOf('perform gate.singleton');
+const ownerStopGateIndex = ownerStopBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+assert.ok(
+  ownerStopAuthorityIndex >= 0 &&
+    ownerStopAuthorityIndex < ownerStopReadinessIndex &&
+    ownerStopReadinessIndex < ownerStopSwitchIndex &&
+    ownerStopSwitchIndex < ownerStopPilotIndex &&
+    ownerStopPilotIndex < ownerStopGateIndex,
+  'Owner stop must lock authority, readiness, switches, and pilot before opening its context',
+);
+
+const emergencyBody = migrationFunctionBody('request_private_trusted_telebirr_emergency_disable');
+const emergencyIntentReads = [
+  ...emergencyBody.matchAll(/from app\.private_trusted_telebirr_emergency_disable_intents/gu),
+];
+const emergencyControlLockIndex = emergencyBody.indexOf('perform activation_control.control_key');
+const emergencyEpochLockIndex = emergencyBody.indexOf('select activation_epoch.*');
+const emergencyReadinessIndex = emergencyBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+const emergencySwitchLockIndex = emergencyBody.indexOf('perform feature_switch.feature_key');
+const emergencyPilotLockIndex = emergencyBody.indexOf('perform pilot_revision.id');
+const emergencyTimeIndex = emergencyBody.indexOf('emergency_at := pg_catalog.clock_timestamp()');
+assert.equal(
+  emergencyIntentReads.length,
+  2,
+  'emergency replay must be checked around control lock',
+);
+assert.ok(
+  emergencyIntentReads[0].index < emergencyControlLockIndex &&
+    emergencyControlLockIndex < emergencyEpochLockIndex &&
+    emergencyEpochLockIndex < emergencyIntentReads[1].index &&
+    emergencyIntentReads[1].index < emergencyReadinessIndex &&
+    emergencyReadinessIndex < emergencySwitchLockIndex &&
+    emergencySwitchLockIndex < emergencyPilotLockIndex &&
+    emergencyPilotLockIndex < emergencyTimeIndex,
+  'emergency disable must preserve replay and global lock/time order',
 );
 
 assert.match(productionDisableSql, /fetanagent_trusted_telebirr_verifier_runtime with/);

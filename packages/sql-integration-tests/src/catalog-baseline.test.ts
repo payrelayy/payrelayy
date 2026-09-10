@@ -6829,6 +6829,7 @@ describe('disposable SQL migration baseline', () => {
           'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)',
       },
       { signature: 'app.lease_next_deposit_execution(uuid,integer)' },
+      { signature: 'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)' },
       { signature: 'app.list_customer_web_player_registrations(uuid,integer)' },
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       {
@@ -6897,6 +6898,7 @@ describe('disposable SQL migration baseline', () => {
            'app.fence_deposit_execution_final_action(uuid,uuid)'::regprocedure,
            'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)'::regprocedure,
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
+           'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)'::regprocedure,
            'app.list_customer_web_player_registrations(uuid,integer)'::regprocedure,
            'app.list_owner_player_deposit_eligibility(uuid,integer)'::regprocedure,
            'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamptz)'::regprocedure,
@@ -6984,6 +6986,15 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.lease_next_deposit_execution(uuid,integer)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)',
       },
       {
         customer_web_runtime: true,

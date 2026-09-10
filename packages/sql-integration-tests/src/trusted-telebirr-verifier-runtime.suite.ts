@@ -269,21 +269,21 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       expect(functions.rows).toEqual([
         {
           signature: completionFunction,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
         },
         {
           signature: stagedEvidenceFunction,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
         },
         {
           signature: authorityFunction,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
@@ -351,7 +351,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         },
         {
           signature: currentActivationEpochFunction,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           hardened: true,
           identifier_within_limit: true,
           group_execute: false,
@@ -378,7 +378,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         },
         {
           signature: activationAuthorityLockFunction,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           hardened: true,
           identifier_within_limit: true,
           group_execute: false,

@@ -14,6 +14,7 @@ type SqlValue = boolean | Date | number | string | readonly string[] | null;
 
 export type TelebirrPilot = PreparedPilot & {
   readonly assignmentSignerId: string;
+  readonly assignmentSignerPublicKeyDigest: string;
   readonly deviceEnrollmentId: string;
   readonly policyDigest: string;
   readonly receiverIdentityDigest: string;
@@ -446,6 +447,7 @@ export async function prepareTelebirrPilot(
   );
 
   const assignmentSignerId = randomUUID();
+  const assignmentSignerPublicKeyDigest = `sha256:${fingerprint(assignmentSignerId)}`;
   await client.query(
     `insert into app.private_live_telebirr_assignment_signers (
        id, signer_key_id, public_key_spki_sha256, valid_from, valid_until
@@ -453,7 +455,7 @@ export async function prepareTelebirrPilot(
     [
       assignmentSignerId,
       `sql-signer-${fingerprint().slice(0, 16)}`,
-      digest('d'),
+      assignmentSignerPublicKeyDigest,
       pilot.activeFrom,
       pilot.expiresAt,
     ],
@@ -483,6 +485,7 @@ export async function prepareTelebirrPilot(
   return {
     ...pilot,
     assignmentSignerId,
+    assignmentSignerPublicKeyDigest,
     deviceEnrollmentId,
     policyDigest: policy.rows[0]!.policy_digest,
     receiverIdentityDigest,
@@ -801,8 +804,13 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
       }>(
         `select routine.oid::regprocedure::text as signature,
                 routine.prosecdef as is_security_definer,
-                coalesce(routine.proconfig, '{}'::text[])
-                  @> array['search_path=pg_catalog']::text[] as safe_search_path,
+                case
+                  when routine.oid = to_regprocedure($2::text)
+                    then coalesce(routine.proconfig, '{}'::text[])
+                      = array['search_path=""']::text[]
+                  else coalesce(routine.proconfig, '{}'::text[])
+                    @> array['search_path=pg_catalog']::text[]
+                end as safe_search_path,
                 has_function_privilege('public', routine.oid, 'EXECUTE') as public_execute,
                 has_function_privilege(
                   'fetanagent_owner_control', routine.oid, 'EXECUTE'
@@ -827,7 +835,7 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
            from unnest($1::text[]) requested(signature)
            join pg_proc routine on routine.oid = to_regprocedure(requested.signature)
           order by signature`,
-        [[...lineageFunctions]],
+        [[...lineageFunctions], lineageFunctions.at(-1)!],
       );
       expect(routines.rows).toHaveLength(lineageFunctions.length);
       expect(
@@ -1178,7 +1186,9 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
           assignment_signature_digest: firstAssignment.digests.signature,
         });
         expect(transcript.rows[0]!.signer_key_id_snapshot).toMatch(/^sql-signer-/u);
-        expect(transcript.rows[0]!.signer_public_key_spki_sha256_snapshot).toBe(digest('d'));
+        expect(transcript.rows[0]!.signer_public_key_spki_sha256_snapshot).toBe(
+          pilot.assignmentSignerPublicKeyDigest,
+        );
 
         await expectFailureAtSavepoint(
           client,
@@ -1756,7 +1766,7 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
               'exact_proof_match',
             ),
           ],
-          /completion lineage is invalid/u,
+          /activation epoch is not currently authorized/u,
         );
       });
     });

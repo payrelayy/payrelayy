@@ -188,7 +188,7 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
       expect(emergencyBoundary.rows).toEqual([
         {
           hardened: true,
-          configuration: ['search_path='],
+          configuration: ['search_path=""'],
           public_execute: false,
           anon_execute: false,
           service_execute: false,
@@ -330,9 +330,7 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
                set mode = 'disabled', settings = '{}'::jsonb
              where feature_key = 'payment_verification'
           `);
-          await client.query(
-            'set constraints feature_switches_trusted_telebirr_complete_set immediate',
-          );
+          await client.query('set constraints all immediate');
         });
         expect(partialSet.message).toContain(
           'Live TeleBirr authority requires the complete epoch-bound financial switch set.',

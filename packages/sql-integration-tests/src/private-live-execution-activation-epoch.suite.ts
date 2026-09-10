@@ -272,14 +272,14 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
               row.signature.includes('_pre_epoch') ||
               row.signature.includes('get_private_live_deposit_pilot_status_by_admin_id')
                 ? 'search_path=pg_catalog'
-                : 'search_path=',
+                : 'search_path=""',
             ],
             direct_grantees: [],
             executor_allowed: false,
           });
         } else {
           expect(row).toMatchObject({
-            configuration: ['search_path='],
+            configuration: ['search_path=""'],
             direct_grantees: ['fetanagent_deposit_executor'],
             executor_allowed: true,
           });

@@ -140,11 +140,15 @@ async function queryAsRole<T extends QueryResultRow>(
   values: readonly SqlValue[] = [],
 ): Promise<readonly T[]> {
   await client.query(`set local role ${role}`);
+  let queryCompleted = false;
   try {
     const result = await client.query<T>(query, [...values]);
+    queryCompleted = true;
     return result.rows;
   } finally {
-    await client.query('reset role');
+    // A failed statement leaves the transaction aborted until the caller rolls back its
+    // savepoint. Preserve the original database error instead of masking it with 25P02.
+    if (queryCompleted) await client.query('reset role');
   }
 }
 
@@ -1442,7 +1446,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           client,
           `truncate table app.private_live_deposit_pilot_reservations`,
           [],
-          /cannot be truncated/u,
+          /cannot (?:be truncated|truncate)/u,
         );
 
         const missingProviderSavepoint = `missing_provider_dispatch_${sha256(randomUUID()).slice(0, 12)}`;
@@ -2101,7 +2105,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             row.is_security_definer &&
             row.owner_name === 'postgres' &&
             JSON.stringify(row.runtime_config) ===
-              JSON.stringify(epochWrapper ? ['search_path='] : ['search_path=pg_catalog'])
+              JSON.stringify(epochWrapper ? ['search_path=""'] : ['search_path=pg_catalog'])
           );
         }),
       ).toBe(true);

@@ -171,6 +171,7 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
 declare
   expired_attempt_id uuid;
   expired_intent_id uuid;

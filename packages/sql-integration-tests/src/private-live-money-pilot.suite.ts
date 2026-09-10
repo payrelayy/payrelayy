@@ -1354,10 +1354,19 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await client.query(`rollback to savepoint ${expiredLeaseSavepoint}`);
         await client.query(`release savepoint ${expiredLeaseSavepoint}`);
 
-        const lease = await queryAsRole<LeaseRow>(
+        const epochClosedLease = await queryAsRole<LeaseRow>(
           client,
           'fetanagent_deposit_executor',
           `select * from app.lease_next_private_live_deposit_execution($1::uuid, 300)`,
+          [randomUUID()],
+        );
+        expect(epochClosedLease).toEqual([]);
+
+        // Preserve coverage of the retained CBE pilot implementation through its owner-only
+        // pre-epoch name. The public executor entrypoint is now intentionally TeleBirr-epoch-bound.
+        const lease = await queryAsMigrationOwner<LeaseRow>(
+          client,
+          `select * from app.lease_private_live_deposit_pre_epoch($1::uuid, 300)`,
           [randomUUID()],
         );
         expect(lease).toHaveLength(1);
@@ -1386,7 +1395,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_execution_final_action(
+             from app.fence_private_live_deposit_pre_epoch(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1397,7 +1406,6 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             lease[0]!.pilot_authorization_token!,
           ],
           /not financially active/u,
-          'fetanagent_deposit_executor',
         );
         await client.query(`rollback to savepoint ${stoppedFenceSavepoint}`);
         await client.query(`release savepoint ${stoppedFenceSavepoint}`);
@@ -1415,7 +1423,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_execution_final_action(
+             from app.fence_private_live_deposit_pre_epoch(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1426,7 +1434,6 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             lease[0]!.pilot_authorization_token!,
           ],
           /execution authorization is invalid/u,
-          'fetanagent_deposit_executor',
         );
         await client.query(`rollback to savepoint ${expiredFenceSavepoint}`);
         await client.query(`release savepoint ${expiredFenceSavepoint}`);
@@ -1434,7 +1441,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_execution_final_action(
+             from app.fence_private_live_deposit_pre_epoch(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1445,14 +1452,12 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             randomUUID(),
           ],
           /lease authorization does not match/u,
-          'fetanagent_deposit_executor',
         );
 
-        const fence = await queryAsRole<FenceRow>(
+        const fence = await queryAsMigrationOwner<FenceRow>(
           client,
-          'fetanagent_deposit_executor',
           `select *
-             from app.fence_private_live_deposit_execution_final_action(
+             from app.fence_private_live_deposit_pre_epoch(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1590,12 +1595,17 @@ export function registerPrivateLiveMoneyPilotSqlTests(
       `);
       expect(functionCatalog.rows).toHaveLength(7);
       expect(
-        functionCatalog.rows.every(
-          (row) =>
+        functionCatalog.rows.every((row) => {
+          const epochWrapper =
+            row.signature.includes('lease_next_private_live_deposit_execution') ||
+            row.signature.includes('fence_private_live_deposit_execution_final_action');
+          return (
             row.is_security_definer &&
             row.owner_name === 'postgres' &&
-            JSON.stringify(row.runtime_config) === JSON.stringify(['search_path=pg_catalog']),
-        ),
+            JSON.stringify(row.runtime_config) ===
+              JSON.stringify(epochWrapper ? ['search_path='] : ['search_path=pg_catalog'])
+          );
+        }),
       ).toBe(true);
 
       const leaseSources = await client.query<{
@@ -1607,20 +1617,28 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           from pg_proc procedure
          where procedure.oid in (
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
+           'app.lease_private_live_deposit_pre_epoch(uuid,integer)'::regprocedure,
            'app.lease_next_private_live_deposit_execution(uuid,integer)'::regprocedure
          )
          order by function_name
       `);
-      expect(leaseSources.rows).toHaveLength(2);
+      expect(leaseSources.rows).toHaveLength(3);
       expect(
         leaseSources.rows.find((row) => row.function_name === 'lease_next_deposit_execution')
           ?.source,
       ).toMatch(/for update of [^;]+ skip locked/iu);
       expect(
         leaseSources.rows.find(
-          (row) => row.function_name === 'lease_next_private_live_deposit_execution',
+          (row) => row.function_name === 'lease_private_live_deposit_pre_epoch',
         )?.source,
       ).toContain('from app.lease_next_deposit_execution(');
+      const epochLeaseSource = leaseSources.rows.find(
+        (row) => row.function_name === 'lease_next_private_live_deposit_execution',
+      )!.source;
+      expect(epochLeaseSource).toContain('from app.lease_private_live_deposit_pre_epoch(');
+      expect(epochLeaseSource).toContain(
+        'insert into app.private_live_deposit_execution_epoch_bindings',
+      );
 
       const authoritySources = await client.query<{
         readonly function_name: string;

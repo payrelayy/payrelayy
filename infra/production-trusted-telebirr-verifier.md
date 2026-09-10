@@ -15,21 +15,25 @@ administrator operation outside this lifecycle has made the database unsafe.
 This conservative boundary is required because checking financial switches and then starting a
 poller are separate cross-system operations. The database foundation now defines one shared
 database state machine or epoch, enforces it at the verifier loader, authority reader, completion
-boundary, and every relevant feature-switch write, and provides an idempotent Owner emergency
-intent/revocation transaction. It seeds only immutable epoch zero in `disabled` state and provides
-no live-activation writer. An additional read before process start is not an atomic interlock and
-is not accepted here.
+boundary, every relevant feature-switch write, and the private-live execution lease and final-action
+fence, and provides an idempotent Owner emergency intent/revocation transaction. Each execution
+lease records an immutable attempt-to-epoch binding; its complete lease window must fit inside that
+epoch, and the same epoch must still be current with ten seconds remaining when final action is
+fenced. It seeds only immutable epoch zero in `disabled` state and provides no live-activation
+writer. An additional read before process start is not an atomic interlock and is not accepted here.
 
 Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
 the singleton pointer, and change the complete TeleBirr switch set in the same database
 transaction. The deferred complete-set constraint rejects a transaction that leaves TeleBirr live
 with a partial or mismatched switch set. Mutating control paths lock activation control, epoch, the
 readiness serialization gate, feature switches, then pilot; read/completion paths that do not use
-the readiness gate preserve the same control, epoch, switches, pilot subsequence. Owner arm/stop
-enters activation authority before the existing readiness/switch/pilot sequence, and host
-orchestration must never be treated as authority. Expiry, revocation, pilot drift, switch drift, or
-the mere presence of emergency intent makes work loading empty and rejects authority reads and
-completion of leases obtained earlier.
+the readiness gate preserve the same control, epoch, switches, pilot subsequence. Execution paths
+then acquire the job, intent, attempt, agent, and immutable binding rows. Owner arm/stop enters
+activation authority before the existing readiness/switch/pilot sequence, and host orchestration
+must never be treated as authority. Expiry, revocation, epoch advance, pilot drift, switch drift, or
+the mere presence of emergency intent makes work loading empty and rejects verifier authority,
+verification completion, and final-action fencing for leases obtained earlier. Cancellation and
+reconciliation deliberately remain usable after disable so uncertainty can only tighten.
 
 The production verifier remains separate from `compose.production.yaml`. Its staged service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct
@@ -147,7 +151,8 @@ Before a future production activation can even be proposed, all of these remain 
 3. Complete Android device pairing and independently review the public-key pin manifest.
 4. Stage the exact disabled release and prove the container, login, password, and sessions absent.
 5. Review and apply the disabled-only database epoch foundation, including its switch interlock,
-   lease-to-authority and authority-to-completion tests, and independent emergency route.
+   verifier lease-to-authority and authority-to-completion tests, execution lease-to-epoch and
+   epoch-to-fence tests, immutable binding ACL/RLS checks, and independent emergency route.
 6. Add any live-epoch creation and bounded-login provisioning only in a later separately confirmed
    change; the foundation intentionally contains neither.
 7. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.

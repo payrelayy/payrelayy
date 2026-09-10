@@ -21,6 +21,7 @@ import { registerOwnerReceiverAccountControlSqlTests } from './owner-receiver-ac
 import { registerOwnerSupportContactSqlTests } from './owner-support-contact.suite.js';
 import { registerPrivateLivePilotOwnerControlSqlTests } from './private-live-pilot-owner-control.suite.js';
 import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilot.suite.js';
+import { registerPrivateLiveExecutionActivationEpochSqlTests } from './private-live-execution-activation-epoch.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
@@ -9631,6 +9632,11 @@ registerTelebirrShadowVerificationSqlTests(
   () => ownerAdminId,
 );
 registerTrustedTelebirrActivationEpochSqlTests(
+  () => client,
+  () => ownerAdminId,
+  () => createSqlIntegrationClient(environment),
+);
+registerPrivateLiveExecutionActivationEpochSqlTests(
   () => client,
   () => ownerAdminId,
   () => createSqlIntegrationClient(environment),

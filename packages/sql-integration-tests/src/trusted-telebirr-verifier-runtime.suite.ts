@@ -976,7 +976,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         expect(second.authority_state_digest).toBe(first.authority_state_digest);
         expect(Date.parse(second.captured_at)).toBeGreaterThan(Date.parse(first.captured_at));
         expect(first.pilot_state).toBe('armed');
-        expect(first.signer_fingerprint).toBe(`sha256:${'d'.repeat(64)}`);
+        expect(first.signer_fingerprint).toBe(pilot.assignmentSignerPublicKeyDigest);
         expect(first.device_fingerprint).toBe(`sha256:${'e'.repeat(64)}`);
         expect(first.signer_fingerprint).not.toBe(first.device_fingerprint);
         expect(first.submitting_customer_id).toBe(pilot.submittingCustomerId);

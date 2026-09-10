@@ -15,6 +15,7 @@ from typing import BinaryIO
 
 
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
 RELEASE = re.compile(r"[0-9a-f]{40}")
 IMAGE_REPOSITORY = "fetanagent-telebirr-shadow-verifier"
 EXPECTED_COMMAND = [
@@ -38,6 +39,21 @@ MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
 MAX_LAYER_BYTES = 512 * 1024 * 1024
 MAX_METADATA_BYTES = 16 * 1024 * 1024
 MAX_MEMBERS = 4096
+LEGACY_V1_CONFIG_FIELDS = {
+    "id",
+    "parent",
+    "comment",
+    "created",
+    "container",
+    "container_config",
+    "docker_version",
+    "author",
+    "config",
+    "architecture",
+    "variant",
+    "os",
+    "Size",
+}
 
 
 def refuse(message: str) -> None:
@@ -206,6 +222,86 @@ def validate_runtime_config(config_bytes: bytes, expected_release: str) -> dict[
     return image
 
 
+def validate_legacy_v1_config_blobs(
+    archive: tarfile.TarFile,
+    members_by_name: Mapping[str, tarfile.TarInfo],
+    paths: set[str],
+    expected_count: int,
+    image_config: Mapping[str, object],
+) -> None:
+    """Validate the exact auxiliary v1 config chain emitted by graphdriver docker save."""
+    if len(paths) != expected_count:
+        refuse("Docker archive legacy config count does not match its layer inventory")
+
+    configs_by_id: dict[str, dict[str, object]] = {}
+    for path in paths:
+        path_match = re.fullmatch(r"blobs/sha256/([0-9a-f]{64})", path)
+        if path_match is None:
+            refuse("OCI Docker archive contains an unrelated image or payload")
+        member, stream = member_stream(archive, members_by_name, path, MAX_METADATA_BYTES)
+        value = read_exact(stream, member.size, MAX_METADATA_BYTES)
+        if hashlib.sha256(value).hexdigest() != path_match.group(1):
+            refuse("Docker legacy config blob is not content-addressed")
+        config = parse_json(value, "Docker legacy v1 config")
+        if (
+            not isinstance(config, dict)
+            or not set(config).issubset(LEGACY_V1_CONFIG_FIELDS)
+            or not isinstance(config.get("id"), str)
+            or HEX_DIGEST.fullmatch(config["id"]) is None
+            or config.get("os") != "linux"
+            or config.get("architecture") not in (None, "amd64")
+            or ("config" in config and not isinstance(config.get("config"), dict))
+            or (
+                "container_config" in config
+                and not isinstance(config.get("container_config"), dict)
+            )
+        ):
+            refuse("Docker legacy v1 config is outside the reviewed schema")
+        parent = config.get("parent")
+        if parent is not None and (
+            not isinstance(parent, str) or HEX_DIGEST.fullmatch(parent) is None
+        ):
+            refuse("Docker legacy v1 config parent is invalid")
+        legacy_id = config["id"]
+        if legacy_id in configs_by_id:
+            refuse("Docker legacy v1 config IDs are not unique")
+        configs_by_id[legacy_id] = config
+
+    child_by_parent: dict[str, str] = {}
+    roots: list[str] = []
+    for legacy_id, config in configs_by_id.items():
+        parent = config.get("parent")
+        if parent is None:
+            roots.append(legacy_id)
+        elif parent not in configs_by_id or parent in child_by_parent:
+            refuse("Docker legacy v1 config parent chain is invalid")
+        else:
+            child_by_parent[parent] = legacy_id
+    if len(roots) != 1:
+        refuse("Docker legacy v1 config parent chain has no unique root")
+
+    ordered_ids: list[str] = []
+    current: str | None = roots[0]
+    while current is not None:
+        if current in ordered_ids:
+            refuse("Docker legacy v1 config parent chain contains a cycle")
+        ordered_ids.append(current)
+        current = child_by_parent.get(current)
+    if len(ordered_ids) != expected_count:
+        refuse("Docker legacy v1 config parent chain is disconnected")
+
+    projection_fields = LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
+    expected_projection = {
+        key: image_config[key] for key in projection_fields if key in image_config
+    }
+    top_config = configs_by_id[ordered_ids[-1]]
+    observed_projection = {
+        key: top_config[key] for key in projection_fields if key in top_config
+    }
+    if observed_projection != expected_projection:
+        refuse("Docker legacy v1 top config does not match the runtime image config")
+
+
 def validate_oci_archive(
     archive: tarfile.TarFile,
     members_by_name: Mapping[str, tarfile.TarInfo],
@@ -366,6 +462,16 @@ def validate_oci_archive(
             refuse("Docker repositories map contains another tag or layer identity")
         expected_files.add("repositories")
     observed_files = {member.name for member in members_by_name.values() if member.isfile()}
+    if has_repositories:
+        legacy_config_paths = observed_files - expected_files
+        validate_legacy_v1_config_blobs(
+            archive,
+            members_by_name,
+            legacy_config_paths,
+            len(layers),
+            image_config,
+        )
+        expected_files.update(legacy_config_paths)
     if observed_files != expected_files:
         refuse("OCI Docker archive contains an unrelated image or payload")
     return {

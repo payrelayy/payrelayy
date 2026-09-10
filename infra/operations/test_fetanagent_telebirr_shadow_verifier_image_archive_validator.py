@@ -98,6 +98,7 @@ def hybrid_archive(
     include_repositories=False,
     layer_sources_override=DEFAULT,
     layer_payload_override=DEFAULT,
+    legacy_configs_override=DEFAULT,
     parent=DEFAULT,
     repositories_override=DEFAULT,
     extra_files=None,
@@ -107,7 +108,7 @@ def hybrid_archive(
     layer_digest = f"sha256:{hashlib.sha256(layer).hexdigest()}"
     diff_id = f"sha256:{hashlib.sha256(b'uncompressed bounded layer').hexdigest()}"
     config = runtime_config(config_root)
-    if include_layer_sources and config_root is DEFAULT:
+    if (include_layer_sources or include_repositories) and config_root is DEFAULT:
         config_value = json.loads(config)
         config_value["rootfs"] = {"type": "layers", "diff_ids": [diff_id]}
         config = encoded(config_value)
@@ -185,6 +186,25 @@ def hybrid_archive(
             if repositories_override is DEFAULT
             else repositories_override
         )
+        config_value = json.loads(config)
+        legacy_configs = (
+            [
+                {
+                    **{
+                        key: config_value[key]
+                        for key in validator.LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
+                        if key in config_value
+                    },
+                    "id": "b" * 64,
+                }
+            ]
+            if legacy_configs_override is DEFAULT
+            else legacy_configs_override
+        )
+        for legacy_config in legacy_configs:
+            legacy_config_bytes = encoded(legacy_config)
+            legacy_config_digest = hashlib.sha256(legacy_config_bytes).hexdigest()
+            files[f"blobs/sha256/{legacy_config_digest}"] = legacy_config_bytes
     return write_archive(files)
 
 
@@ -273,6 +293,31 @@ class ArchiveValidatorTests(unittest.TestCase):
             hybrid_archive(include_layer_sources=True, layer_sources_override=[]),
             hybrid_archive(include_repositories=True, repositories_override={}),
             hybrid_archive(parent="not-a-digest"),
+        ]
+        for path in hostile_archives:
+            with self.subTest(path=path):
+                with self.assertRaises(RuntimeError):
+                    validator.validate(str(self.keep(path)), TAG, RELEASE)
+
+    def test_rejects_missing_or_malformed_oci_legacy_config_chain(self) -> None:
+        hostile_archives = [
+            hybrid_archive(
+                include_layer_sources=True,
+                include_repositories=True,
+                legacy_configs_override=[],
+            ),
+            hybrid_archive(
+                include_layer_sources=True,
+                include_repositories=True,
+                legacy_configs_override=[{"id": "not-a-digest", "os": "linux"}],
+            ),
+            hybrid_archive(
+                include_layer_sources=True,
+                include_repositories=True,
+                legacy_configs_override=[
+                    {"id": "b" * 64, "os": "linux", "unexpected": "payload"}
+                ],
+            ),
         ]
         for path in hostile_archives:
             with self.subTest(path=path):

@@ -74,6 +74,14 @@ function response(status: number, body: unknown) {
   return value;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function pairingReceipt(expiresAt: string) {
   const pairingPackage =
     'fetanagent-pairing-v1.' +
@@ -170,6 +178,39 @@ function companionLookupReceipt(state: 'pending' | 'completed' | 'review_require
   } as const;
 }
 
+function kemerbetAgentProfile() {
+  return {
+    configuredAt: '2026-09-10T08:00:00.000Z',
+    configurationReason: 'initial_configuration',
+    platformAgentAccountId: '77777777-7777-4777-8777-777777777777',
+    platformCode: 'kemerbet',
+    profileContractVersion: 1,
+    profileLabel: 'Primary KemerBet agent revision 1',
+    profileRevision: 1,
+    profileStatus: 'active',
+  } as const;
+}
+
+function ordinaryKemerbetSession() {
+  return {
+    active: false,
+    loginRequired: false,
+    phase: 'idle',
+    signedIn: false,
+    transferDisabled: true,
+  } as const;
+}
+
+function recoveryRequiredKemerbetSession() {
+  return {
+    ...ordinaryKemerbetSession(),
+    quarantine: {
+      reasonCode: 'profile_integrity_unverified',
+      recoveryRequired: true,
+    },
+  } as const;
+}
+
 function ownerBrowserHarness(
   dashboardStatus: 401 | 403 | 503,
   options: Readonly<{
@@ -210,8 +251,12 @@ function ownerBrowserHarness(
     providerCode: element('#receiver-provider'),
     rotationReason: element('#receiver-rotation-reason'),
   });
+  const kemerbetAgentProfileReason = element('#kemerbet-agent-profile-reason');
+  kemerbetAgentProfileReason.value = 'initial_configuration';
   element('#kemerbet-agent-profile-form').elements = namedElements({
-    configurationReason: new FakeElement(),
+    configurationReason: kemerbetAgentProfileReason,
+    confirmation: element('#kemerbet-agent-profile-confirmation'),
+    submit: element('#kemerbet-agent-profile-submit'),
   });
   element('#telebirr-device-pairing-form').elements = namedElements({
     confirmation: element('#telebirr-device-pairing-confirmation'),
@@ -975,6 +1020,9 @@ describe('Owner dashboard browser authentication boundary', () => {
         },
       });
       await browser.signIn();
+      browser.evaluate(
+        "kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true;",
+      );
       activeTest = true;
       browser.element('#receiver-holder-name').value = 'FetanAgent Receiver';
       browser.element('#receiver-account-reference').value = '0000003456';
@@ -1049,6 +1097,767 @@ describe('Owner dashboard browser authentication boundary', () => {
     );
   });
 
+  it('requires no-money profile setup before showing exact-five lookup readiness', async () => {
+    const profile = kemerbetAgentProfile();
+    let profilePrepared = false;
+    let profileRetired = false;
+    let profilePosts = 0;
+    let lookupPosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, {
+            profiles: profilePrepared
+              ? [
+                  profileRetired
+                    ? {
+                        ...profile,
+                        profileStatus: 'inactive',
+                        retiredAt: '2026-09-10T09:00:00.000Z',
+                      }
+                    : profile,
+                ]
+              : [],
+          });
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') {
+          profilePosts += 1;
+          profilePrepared = true;
+          expect(init.method).toBe('POST');
+          expect(init.headers).toMatchObject({
+            'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1',
+            'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+          });
+          expect(JSON.parse(String(init.body))).toEqual({
+            configurationReason: 'initial_configuration',
+            confirmation: 'owner_confirmed_kemerbet_agent_profile',
+            requestId: '11111111-1111-4111-8111-111111111111',
+          });
+          expect(String(init.body)).not.toMatch(/password|cookie|otp|session|player|amount/iu);
+          return response(201, { profile });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          return response(200, { session: ordinaryKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup') {
+          lookupPosts += 1;
+          return response(503, { error: 'unexpected_test_lookup' });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+
+    expect(browser.element('#kemerbet-agent-profile-status').textContent).toBe(
+      'Profile setup is required before any signed exact-five lookup can be issued.',
+    );
+    expect(browser.element('#companion-lookup-status').textContent).toBe(
+      'Profile setup is required. Prepare the no-money KemerBet lookup profile before issuing an exact-five assignment.',
+    );
+    const lookupConfirmation = browser.element('#companion-lookup-confirmation');
+    lookupConfirmation.checked = true;
+    await lookupConfirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#companion-lookup-button').disabled).toBe(true);
+    await browser.call('issueCompanionLookup');
+    expect(lookupPosts).toBe(0);
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.companion-exact-five-lookup-request.v1'),
+    ).toBeNull();
+
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    const profileSubmit = browser.element('#kemerbet-agent-profile-form').listeners.get('submit');
+    if (!profileSubmit) throw new Error('KemerBet profile submit listener was not installed.');
+    await profileSubmit({ preventDefault() {} });
+
+    expect(profilePosts).toBe(1);
+    expect(browser.element('#kemerbet-agent-profile-status').textContent).toBe(
+      'One active no-money lookup profile is prepared. Exact-five readiness can now be checked.',
+    );
+    expect(browser.element('#companion-lookup-status').textContent).toBe(
+      'Profile and signer prerequisites are present; the server will recheck all no-money readiness gates when you confirm.',
+    );
+    expect(lookupConfirmation.checked).toBe(false);
+    expect(browser.element('#companion-lookup-button').disabled).toBe(true);
+    lookupConfirmation.checked = true;
+    await lookupConfirmation.listeners.get('change')?.({ preventDefault() {} });
+    expect(browser.element('#companion-lookup-button').disabled).toBe(false);
+
+    profileRetired = true;
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(browser.element('#companion-lookup-status').textContent).toContain(
+      'Profile setup is required',
+    );
+    expect(browser.element('#companion-lookup-button').disabled).toBe(true);
+  });
+
+  it('reconciles an uncertain profile response with the exact original request and reason', async () => {
+    const requestId = '88888888-8888-4888-8888-888888888888';
+    const profile = kemerbetAgentProfile();
+    const postedRequests: Array<
+      Readonly<{ configurationReason: string; confirmation: string; requestId: string }>
+    > = [];
+    let profileActive = false;
+    let profilePosts = 0;
+    let randomUUIDCalls = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      randomUUID: () => {
+        randomUUIDCalls += 1;
+        return requestId;
+      },
+      fetchOverride: (url, init) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: profileActive ? [profile] : [] });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          return response(200, {
+            session: {
+              active: false,
+              loginRequired: false,
+              phase: 'idle',
+              signedIn: false,
+              transferDisabled: true,
+            },
+          });
+        }
+        if (url !== '/v1/owner/kemerbet-agent-profiles/prepare') return undefined;
+        profilePosts += 1;
+        const posted = JSON.parse(String(init.body)) as {
+          configurationReason: string;
+          confirmation: string;
+          requestId: string;
+        };
+        postedRequests.push(posted);
+        expect(init.headers).toMatchObject({ 'x-idempotency-key': requestId });
+        profileActive = true;
+        return profilePosts === 1
+          ? response(503, { error: 'owner_control_unavailable' })
+          : response(201, { profile });
+      },
+    });
+    await browser.signIn();
+
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profilePosts).toBe(1);
+    expect(randomUUIDCalls).toBe(1);
+    expect(browser.element('#notice').textContent).toContain(
+      'exact request ID and original reason are retained',
+    );
+    expect(
+      JSON.parse(
+        browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+      ),
+    ).toEqual({ configurationReason: 'initial_configuration', requestId });
+
+    await browser.call('loadKemerbetAgentProfiles');
+    browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.value =
+      'agent_rotation';
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profilePosts).toBe(2);
+    expect(randomUUIDCalls).toBe(1);
+    expect(postedRequests).toEqual([
+      {
+        configurationReason: 'initial_configuration',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId,
+      },
+      {
+        configurationReason: 'initial_configuration',
+        confirmation: 'owner_confirmed_kemerbet_agent_profile',
+        requestId,
+      },
+    ]);
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1'),
+    ).toBeNull();
+  });
+
+  it('clears a pending ordinary profile request when security recovery becomes authoritative', async () => {
+    const requestId = '88888888-8888-4888-8888-888888888888';
+    let profilePosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          return response(200, {
+            session: {
+              active: false,
+              loginRequired: false,
+              phase: 'idle',
+              signedIn: false,
+              transferDisabled: true,
+            },
+          });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') profilePosts += 1;
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    browser.sessionStorage.setItem(
+      'fetanagent.owner.kemerbet-agent-profile-request.v1',
+      JSON.stringify({ configurationReason: 'agent_rotation', requestId }),
+    );
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+
+    await browser.call('renderKemerbetSession', {
+      active: false,
+      loginRequired: false,
+      phase: 'idle',
+      quarantine: {
+        reasonCode: 'profile_integrity_unverified',
+        recoveryRequired: true,
+      },
+      signedIn: false,
+      transferDisabled: true,
+    });
+
+    expect(profilePosts).toBe(0);
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1'),
+    ).toBeNull();
+    expect(browser.element('#kemerbet-agent-profile-confirmation').checked).toBe(false);
+    expect(
+      browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.value,
+    ).toBe('security_recovery');
+    expect(browser.element('#notice').textContent).toContain(
+      'no longer matches the authoritative security-recovery lane',
+    );
+    expect(browser.element('#notice').textContent).toContain(
+      'No request was sent and no money moved.',
+    );
+  });
+
+  it.each([
+    {
+      expectedNotice: 'no longer matches the authoritative ordinary profile lane',
+      label: 'ordinary lifecycle',
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        signedIn: false,
+        transferDisabled: true,
+      },
+    },
+    {
+      expectedNotice: 'no longer matches the advanced recovery lifecycle',
+      label: 'advanced recovery lifecycle',
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'security_recovery_cohort_required',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      },
+    },
+  ])(
+    'clears a pending security-recovery profile request in the $label',
+    async ({ expectedNotice, session }) => {
+      const requestId = '88888888-8888-4888-8888-888888888888';
+      let profilePosts = 0;
+      const browser = ownerBrowserHarness(503, {
+        companionDevicePairingConfigured: true,
+        fetchOverride: (url) => {
+          if (url === '/v1/owner/kemerbet-agent-profiles') {
+            return response(200, { profiles: [kemerbetAgentProfile()] });
+          }
+          if (url === '/v1/owner/kemerbet-session') {
+            return response(200, {
+              session: {
+                active: false,
+                loginRequired: false,
+                phase: 'idle',
+                signedIn: false,
+                transferDisabled: true,
+              },
+            });
+          }
+          if (url === '/v1/owner/companion-exact-five-lookup/status') {
+            return response(200, { lookup: null });
+          }
+          if (url === '/v1/owner/kemerbet-agent-profiles/prepare') profilePosts += 1;
+          return undefined;
+        },
+      });
+      await browser.signIn();
+      browser.sessionStorage.setItem(
+        'fetanagent.owner.kemerbet-agent-profile-request.v1',
+        JSON.stringify({ configurationReason: 'security_recovery', requestId }),
+      );
+      browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+
+      await browser.call('renderKemerbetSession', session);
+
+      expect(profilePosts).toBe(0);
+      expect(
+        browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1'),
+      ).toBeNull();
+      expect(browser.element('#kemerbet-agent-profile-confirmation').checked).toBe(false);
+      expect(browser.element('#notice').textContent).toContain(expectedNotice);
+      expect(browser.element('#notice').textContent).toContain(
+        'No request was sent and no money moved.',
+      );
+    },
+  );
+
+  it.each([
+    {
+      currentSession: ordinaryKemerbetSession(),
+      expectedReason: 'agent_rotation',
+      label: 'late recovery after newer ordinary',
+      staleSession: recoveryRequiredKemerbetSession(),
+    },
+    {
+      currentSession: recoveryRequiredKemerbetSession(),
+      expectedReason: 'security_recovery',
+      label: 'late ordinary after newer recovery',
+      staleSession: ordinaryKemerbetSession(),
+    },
+  ])(
+    'keeps the exact compatible pending profile request across $label lifecycle responses',
+    async ({ currentSession, expectedReason, staleSession }) => {
+      const originalRequestId = '88888888-8888-4888-8888-888888888888';
+      const generatedRequestId = '99999999-9999-4999-8999-999999999999';
+      const staleLifecycle = deferred<ReturnType<typeof response>>();
+      const postedRequests: Array<
+        Readonly<{
+          configurationReason: string;
+          idempotencyKey: unknown;
+          requestId: string;
+        }>
+      > = [];
+      let profilePosts = 0;
+      let raceLifecycleGets = 0;
+      let raceStarted = false;
+      let randomUUIDCalls = 0;
+      const browser = ownerBrowserHarness(503, {
+        companionDevicePairingConfigured: true,
+        confirm: true,
+        randomUUID: () => {
+          randomUUIDCalls += 1;
+          return generatedRequestId;
+        },
+        fetchOverride: (url, init) => {
+          if (url === '/v1/owner/kemerbet-agent-profiles') {
+            return response(200, { profiles: [kemerbetAgentProfile()] });
+          }
+          if (url === '/v1/owner/companion-exact-five-lookup/status') {
+            return response(200, { lookup: null });
+          }
+          if (url === '/v1/owner/kemerbet-session') {
+            if (!raceStarted) return response(200, { session: ordinaryKemerbetSession() });
+            raceLifecycleGets += 1;
+            return raceLifecycleGets === 1
+              ? staleLifecycle.promise
+              : response(200, { session: currentSession });
+          }
+          if (url === '/v1/owner/kemerbet-agent-profiles/prepare') {
+            profilePosts += 1;
+            const body = JSON.parse(String(init.body)) as {
+              configurationReason: string;
+              requestId: string;
+            };
+            postedRequests.push({
+              configurationReason: body.configurationReason,
+              idempotencyKey: (init.headers as Record<string, unknown>)['x-idempotency-key'],
+              requestId: body.requestId,
+            });
+            return response(503, { error: 'owner_control_unavailable' });
+          }
+          return undefined;
+        },
+      });
+      await browser.signIn();
+      browser.sessionStorage.setItem(
+        'fetanagent.owner.kemerbet-agent-profile-request.v1',
+        JSON.stringify({ configurationReason: expectedReason, requestId: originalRequestId }),
+      );
+
+      raceStarted = true;
+      const staleLoad = browser.call('loadKemerbetSession');
+      await vi.waitFor(() => expect(raceLifecycleGets).toBe(1));
+      await browser.call('loadKemerbetSession');
+      staleLifecycle.resolve(response(200, { session: staleSession }));
+      await staleLoad;
+
+      expect(
+        JSON.parse(
+          browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+        ),
+      ).toEqual({ configurationReason: expectedReason, requestId: originalRequestId });
+      expect(
+        browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.value,
+      ).toBe(expectedReason);
+      expect(browser.element('#notice').textContent).not.toContain('was cleared from this tab');
+      expect(profilePosts).toBe(0);
+      expect(randomUUIDCalls).toBe(0);
+
+      browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+      await browser.call('prepareKemerbetAgentProfile');
+
+      expect(profilePosts).toBe(1);
+      expect(randomUUIDCalls).toBe(0);
+      expect(postedRequests).toEqual([
+        {
+          configurationReason: expectedReason,
+          idempotencyKey: originalRequestId,
+          requestId: originalRequestId,
+        },
+      ]);
+      expect(
+        JSON.parse(
+          browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+        ),
+      ).toEqual({ configurationReason: expectedReason, requestId: originalRequestId });
+    },
+  );
+
+  it('ignores a stale lifecycle failure after a newer successful observation', async () => {
+    const staleLifecycle = deferred<ReturnType<typeof response>>();
+    let raceLifecycleGets = 0;
+    let raceStarted = false;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          if (!raceStarted) return response(200, { session: ordinaryKemerbetSession() });
+          raceLifecycleGets += 1;
+          return raceLifecycleGets === 1
+            ? staleLifecycle.promise
+            : response(200, { session: ordinaryKemerbetSession() });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+
+    raceStarted = true;
+    const staleLoad = browser.call('loadKemerbetSession');
+    await vi.waitFor(() => expect(raceLifecycleGets).toBe(1));
+    await browser.call('loadKemerbetSession');
+    const currentStatus = browser.element('#kemerbet-session-status').textContent;
+    const currentNotice = browser.element('#notice').textContent;
+    staleLifecycle.resolve(response(503, { error: 'owner_control_unavailable' }));
+    await staleLoad;
+
+    expect(browser.element('#kemerbet-session-status').textContent).toBe(currentStatus);
+    expect(browser.element('#notice').textContent).toBe(currentNotice);
+    expect(
+      browser.evaluate(
+        '({ failures: kemerbetSessionPollFailures, laneKnown: kemerbetRecoveryLaneKnown, ' +
+          'reconnect: kemerbetSessionReconnectNeeded })',
+      ),
+    ).toEqual({ failures: 0, laneKnown: true, reconnect: false });
+  });
+
+  it('retains an ordinary pending profile request across a late generic recovery conflict until a guarded snapshot', async () => {
+    const originalRequestId = '88888888-8888-4888-8888-888888888888';
+    const generatedRequestId = '99999999-9999-4999-8999-999999999999';
+    const staleConflict = deferred<ReturnType<typeof response>>();
+    const postedRequests: Array<
+      Readonly<{ configurationReason: string; idempotencyKey: unknown; requestId: string }>
+    > = [];
+    let conflictRequests = 0;
+    let profilePosts = 0;
+    let randomUUIDCalls = 0;
+    let sessionGets = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      randomUUID: () => {
+        randomUUIDCalls += 1;
+        return generatedRequestId;
+      },
+      fetchOverride: (url, init) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          sessionGets += 1;
+          return response(200, { session: ordinaryKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/test-stale-recovery-conflict') {
+          conflictRequests += 1;
+          return staleConflict.promise;
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') {
+          profilePosts += 1;
+          const body = JSON.parse(String(init.body)) as {
+            configurationReason: string;
+            requestId: string;
+          };
+          postedRequests.push({
+            configurationReason: body.configurationReason,
+            idempotencyKey: (init.headers as Record<string, unknown>)['x-idempotency-key'],
+            requestId: body.requestId,
+          });
+          return response(503, { error: 'owner_control_unavailable' });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+
+    const lateConflict = browser.call<Readonly<{ status: number }>>(
+      'ownerRequest',
+      '/v1/owner/test-stale-recovery-conflict',
+      { method: 'POST', headers: {} },
+    );
+    await vi.waitFor(() => expect(conflictRequests).toBe(1));
+    await browser.call('loadKemerbetSession');
+    browser.sessionStorage.setItem(
+      'fetanagent.owner.kemerbet-agent-profile-request.v1',
+      JSON.stringify({ configurationReason: 'agent_rotation', requestId: originalRequestId }),
+    );
+    browser.evaluate(
+      'kemerbetSecurityRecoveryCohortRequired = true; ' +
+        'kemerbetSecurityRecoveryInProgress = true; ' +
+        'kemerbetSecurityRecoverySessionAllowed = true;',
+    );
+
+    staleConflict.resolve(response(409, { error: 'kemerbet_security_recovery_required' }));
+    await expect(lateConflict).resolves.toMatchObject({ status: 409 });
+
+    expect(
+      JSON.parse(
+        browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+      ),
+    ).toEqual({ configurationReason: 'agent_rotation', requestId: originalRequestId });
+    expect(browser.element('#kemerbet-agent-profile-submit').disabled).toBe(true);
+    expect(browser.element('#kemerbet-agent-profile-status').textContent).toBe(
+      'The authoritative KemerBet recovery lifecycle is being refreshed. Profile actions remain disabled until reconciliation completes.',
+    );
+    expect(browser.element('#notice').textContent).not.toContain('was cleared from this tab');
+    expect(
+      browser.evaluate(
+        '({ cohortRequired: kemerbetSecurityRecoveryCohortRequired, ' +
+          'inProgress: kemerbetSecurityRecoveryInProgress, ' +
+          'laneKnown: kemerbetRecoveryLaneKnown, reconnect: kemerbetSessionReconnectNeeded, ' +
+          'recoveryRequired: kemerbetSecurityRecoveryRequired, ' +
+          'sessionAllowed: kemerbetSecurityRecoverySessionAllowed })',
+      ),
+    ).toEqual({
+      cohortRequired: false,
+      inProgress: false,
+      laneKnown: false,
+      reconnect: true,
+      recoveryRequired: true,
+      sessionAllowed: false,
+    });
+    expect(browser.element('#kemerbet-readiness-cohort-button').disabled).toBe(true);
+    expect(browser.element('#kemerbet-session-start-button').disabled).toBe(true);
+    expect(profilePosts).toBe(0);
+    expect(randomUUIDCalls).toBe(0);
+
+    expect(sessionGets).toBe(2);
+    browser.expireLatestTimer(15_000);
+    await vi.waitFor(() => expect(sessionGets).toBe(3));
+    await vi.waitFor(() => expect(browser.evaluate('kemerbetRecoveryLaneKnown')).toBe(true));
+    expect(
+      browser.element('#kemerbet-agent-profile-form').elements.configurationReason!.value,
+    ).toBe('agent_rotation');
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profilePosts).toBe(1);
+    expect(randomUUIDCalls).toBe(0);
+    expect(postedRequests).toEqual([
+      {
+        configurationReason: 'agent_rotation',
+        idempotencyKey: originalRequestId,
+        requestId: originalRequestId,
+      },
+    ]);
+  });
+
+  it('keeps profile preparation and exact-five issuance fail-closed when profile history is unavailable', async () => {
+    let profilePosts = 0;
+    let lookupPosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') {
+          profilePosts += 1;
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup') lookupPosts += 1;
+        return undefined;
+      },
+    });
+    await browser.signIn();
+
+    expect(browser.element('#kemerbet-agent-profile-status').textContent).toContain(
+      'readiness is unavailable',
+    );
+    expect(browser.element('#companion-lookup-status').textContent).toContain(
+      'readiness is unavailable',
+    );
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    browser.element('#companion-lookup-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+    await browser.call('issueCompanionLookup');
+
+    expect(profilePosts).toBe(0);
+    expect(lookupPosts).toBe(0);
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.companion-exact-five-lookup-request.v1'),
+    ).toBeNull();
+    expect(browser.element('#kemerbet-agent-profile-submit').disabled).toBe(true);
+    expect(browser.element('#companion-lookup-button').disabled).toBe(true);
+  });
+
+  it('keeps profile mutation fail-closed while the active-profile recovery lifecycle is unavailable', async () => {
+    let profilePosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      companionDevicePairingConfigured: true,
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') profilePosts += 1;
+        return undefined;
+      },
+    });
+    await browser.signIn();
+
+    expect(browser.element('#kemerbet-session-status').textContent).toBe(
+      'Private sign-in status is temporarily unavailable. Reconnecting…',
+    );
+    expect(browser.element('#kemerbet-agent-profile-submit').disabled).toBe(true);
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profilePosts).toBe(0);
+    expect(
+      browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1'),
+    ).toBeNull();
+  });
+
+  it('does not let a signed-out profile refresh poison the next authenticated profile load', async () => {
+    let profileGets = 0;
+    let sessionGets = 0;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          profileGets += 1;
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          sessionGets += 1;
+          return response(200, { session: ordinaryKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        return undefined;
+      },
+    });
+    await browser.call('signOut', 'Signed out for the profile-refresh test.');
+
+    expect(browser.element('#kemerbet-agent-refresh-button').disabled).toBe(true);
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(profileGets).toBe(0);
+    expect(browser.evaluate('activeKemerbetAgentProfileLoadId')).toBeUndefined();
+
+    await browser.signIn();
+
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+    expect(browser.evaluate('activeKemerbetAgentProfileLoadId')).toBeUndefined();
+    expect(browser.evaluate('kemerbetRecoveryLaneKnown')).toBe(true);
+    expect(browser.element('#kemerbet-agent-refresh-button').disabled).toBe(false);
+  });
+
+  it.each([
+    ['unavailable', response(503, { error: 'owner_control_unavailable' })],
+    ['malformed', response(200, { lookup: {} })],
+  ])(
+    'keeps exact-five issuance fail-closed when assignment status is %s',
+    async (_label, lookupStatusResponse) => {
+      let lookupPosts = 0;
+      const browser = ownerBrowserHarness(503, {
+        companionDevicePairingConfigured: true,
+        confirm: true,
+        fetchOverride: (url) => {
+          if (url === '/v1/owner/kemerbet-agent-profiles') {
+            return response(200, { profiles: [kemerbetAgentProfile()] });
+          }
+          if (url === '/v1/owner/kemerbet-session') {
+            return response(200, {
+              session: {
+                active: false,
+                loginRequired: false,
+                phase: 'idle',
+                signedIn: false,
+                transferDisabled: true,
+              },
+            });
+          }
+          if (url === '/v1/owner/companion-exact-five-lookup/status') {
+            return lookupStatusResponse;
+          }
+          if (url === '/v1/owner/companion-exact-five-lookup') lookupPosts += 1;
+          return undefined;
+        },
+      });
+      await browser.signIn();
+
+      expect(browser.element('#companion-lookup-status').textContent).toBe(
+        'Signed lookup status is unavailable. Refresh before issuing an exact-five assignment.',
+      );
+      const confirmation = browser.element('#companion-lookup-confirmation');
+      confirmation.checked = true;
+      await confirmation.listeners.get('change')?.({ preventDefault() {} });
+      expect(browser.element('#companion-lookup-button').disabled).toBe(true);
+      await browser.call('issueCompanionLookup');
+
+      expect(lookupPosts).toBe(0);
+      expect(
+        browser.sessionStorage.getItem('fetanagent.owner.companion-exact-five-lookup-request.v1'),
+      ).toBeNull();
+    },
+  );
+
   it('issues one exact-five read-only command and renders only redacted terminal counts', async () => {
     const pending = companionLookupReceipt();
     const { alreadyIssued: _alreadyIssued, ...terminal } =
@@ -1059,6 +1868,12 @@ describe('Owner dashboard browser authentication boundary', () => {
       companionDevicePairingConfigured: true,
       confirm: true,
       fetchOverride: (url, init) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status' && !activeTest) {
+          return response(200, { lookup: null });
+        }
         if (!activeTest) return undefined;
         if (url === '/v1/owner/companion-exact-five-lookup') {
           lookupPosts += 1;
@@ -1081,6 +1896,9 @@ describe('Owner dashboard browser authentication boundary', () => {
       },
     });
     await browser.signIn();
+    expect(browser.element('#companion-lookup-status').textContent).toBe(
+      'Profile and signer prerequisites are present; the server will recheck all no-money readiness gates when you confirm.',
+    );
     activeTest = true;
     const confirmation = browser.element('#companion-lookup-confirmation');
     confirmation.checked = true;
@@ -1109,7 +1927,10 @@ describe('Owner dashboard browser authentication boundary', () => {
   it('enables the quarantined dry-run pilot only for a fresh completed five-for-five lookup', async () => {
     const browser = ownerBrowserHarness(503);
     await browser.signIn();
-    browser.evaluate('kemerbetSecurityRecoveryRequired = true; currentPilot = undefined;');
+    browser.evaluate(
+      'kemerbetRecoveryLaneKnown = true; kemerbetSecurityRecoveryRequired = true; ' +
+        'currentPilot = undefined;',
+    );
     const players = Array.from({ length: 5 }, (_, index) => ({
       decision: 'eligible',
       playerId: `PLAYER-${index + 1}`,
@@ -1373,7 +2194,10 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     });
     await browser.signIn();
     activeTest = true;
-    browser.evaluate("activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777';");
+    browser.evaluate(
+      "activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777'; " +
+        "kemerbetAgentProfileLoadState = 'loaded';",
+    );
 
     await browser.call('renderKemerbetSession', inactiveSession, true);
 
@@ -1406,6 +2230,251 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     expect(start.disabled).toBe(true);
     expect(stop.disabled).toBe(false);
     expect(browser.element('#receiver-form').elements.accountReference!.disabled).toBe(true);
+  });
+
+  it('blocks profile refresh while a session mutation is unresolved and resumes it after the mutation', async () => {
+    const startAcknowledgement = deferred<ReturnType<typeof response>>();
+    let profileGets = 0;
+    let sessionGets = 0;
+    let startPosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          profileGets += 1;
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          sessionGets += 1;
+          return response(200, { session: ordinaryKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-session/start') {
+          startPosts += 1;
+          return startAcknowledgement.promise;
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+
+    browser.element('#kemerbet-session-confirmation').checked = true;
+    const start = browser.call('startKemerbetSession');
+    await vi.waitFor(() => expect(startPosts).toBe(1));
+    expect(browser.element('#kemerbet-agent-refresh-button').disabled).toBe(true);
+
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+
+    startAcknowledgement.resolve(
+      response(202, {
+        session: {
+          active: true,
+          expiresAt: '2099-09-10T12:00:00.000Z',
+          frameSequence: 0,
+          generation: '11111111-1111-4111-8111-111111111111',
+          loginRequired: false,
+          phase: 'starting',
+          signedIn: false,
+          transferDisabled: true,
+        },
+      }),
+    );
+    await start;
+    expect(browser.element('#kemerbet-agent-refresh-button').disabled).toBe(false);
+
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(profileGets).toBe(2);
+    expect(sessionGets).toBe(2);
+  });
+
+  it('fences profile and lifecycle reads while profile preparation is unresolved and replays its exact request', async () => {
+    const requestId = '88888888-8888-4888-8888-888888888888';
+    const firstAcknowledgement = deferred<ReturnType<typeof response>>();
+    const postedRequests: Array<
+      Readonly<{ configurationReason: string; idempotencyKey: unknown; requestId: string }>
+    > = [];
+    let profileGets = 0;
+    let profilePosts = 0;
+    let randomUUIDCalls = 0;
+    let sessionGets = 0;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      randomUUID: () => {
+        randomUUIDCalls += 1;
+        return requestId;
+      },
+      fetchOverride: (url, init) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          profileGets += 1;
+          return response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          sessionGets += 1;
+          return response(200, { session: recoveryRequiredKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-agent-profiles/prepare') {
+          profilePosts += 1;
+          const body = JSON.parse(String(init.body)) as {
+            configurationReason: string;
+            requestId: string;
+          };
+          postedRequests.push({
+            configurationReason: body.configurationReason,
+            idempotencyKey: (init.headers as Record<string, unknown>)['x-idempotency-key'],
+            requestId: body.requestId,
+          });
+          return profilePosts === 1
+            ? firstAcknowledgement.promise
+            : response(503, { error: 'owner_control_unavailable' });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    const firstPreparation = browser.call('prepareKemerbetAgentProfile');
+    await vi.waitFor(() => expect(profilePosts).toBe(1));
+
+    expect(browser.element('#kemerbet-agent-profile-form').dataset.ownerBusy).toBe('true');
+    expect(browser.element('#kemerbet-agent-refresh-button').disabled).toBe(true);
+    expect(
+      JSON.parse(
+        browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+      ),
+    ).toEqual({ configurationReason: 'security_recovery', requestId });
+
+    await expect(browser.call('loadKemerbetSession')).resolves.toBe('stale');
+    await browser.call('loadKemerbetAgentProfiles');
+    await expect(browser.call('reconcilePendingKemerbetReadinessCohort')).resolves.toBe('stale');
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+    expect(profilePosts).toBe(1);
+    expect(randomUUIDCalls).toBe(1);
+
+    firstAcknowledgement.resolve(response(503, { error: 'owner_control_unavailable' }));
+    await firstPreparation;
+
+    expect(profileGets).toBe(2);
+    expect(sessionGets).toBe(2);
+    expect(browser.element('#notice').textContent).toContain(
+      'exact request ID and original reason are retained',
+    );
+    expect(
+      JSON.parse(
+        browser.sessionStorage.getItem('fetanagent.owner.kemerbet-agent-profile-request.v1')!,
+      ),
+    ).toEqual({ configurationReason: 'security_recovery', requestId });
+
+    browser.element('#kemerbet-agent-profile-confirmation').checked = true;
+    await browser.call('prepareKemerbetAgentProfile');
+
+    expect(profilePosts).toBe(2);
+    expect(randomUUIDCalls).toBe(1);
+    expect(postedRequests).toEqual([
+      {
+        configurationReason: 'security_recovery',
+        idempotencyKey: requestId,
+        requestId,
+      },
+      {
+        configurationReason: 'security_recovery',
+        idempotencyKey: requestId,
+        requestId,
+      },
+    ]);
+  });
+
+  it('blocks session mutation and duplicate profile loads until a profile refresh establishes its lifecycle', async () => {
+    const profileRefresh = deferred<ReturnType<typeof response>>();
+    let profileGets = 0;
+    let profileRefreshStarted = false;
+    let randomUUIDCalls = 0;
+    let sessionGets = 0;
+    let startPosts = 0;
+    const browser = ownerBrowserHarness(503, {
+      randomUUID: () => {
+        randomUUIDCalls += 1;
+        return '11111111-1111-4111-8111-111111111111';
+      },
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/kemerbet-agent-profiles') {
+          profileGets += 1;
+          return profileRefreshStarted
+            ? profileRefresh.promise
+            : response(200, { profiles: [kemerbetAgentProfile()] });
+        }
+        if (url === '/v1/owner/kemerbet-session') {
+          sessionGets += 1;
+          return response(200, { session: ordinaryKemerbetSession() });
+        }
+        if (url === '/v1/owner/companion-exact-five-lookup/status') {
+          return response(200, { lookup: null });
+        }
+        if (url === '/v1/owner/kemerbet-session/start') {
+          startPosts += 1;
+          return response(202, {
+            session: {
+              active: true,
+              expiresAt: '2099-09-10T12:00:00.000Z',
+              frameSequence: 0,
+              generation: '11111111-1111-4111-8111-111111111111',
+              loginRequired: false,
+              phase: 'starting',
+              signedIn: false,
+              transferDisabled: true,
+            },
+          });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+
+    browser.evaluate("kemerbetReadinessCohortForm.dataset.ownerBusy = 'true';");
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(profileGets).toBe(1);
+    expect(sessionGets).toBe(1);
+    browser.evaluate("kemerbetReadinessCohortForm.dataset.ownerBusy = 'false';");
+
+    profileRefreshStarted = true;
+    const refresh = browser.call('loadKemerbetAgentProfiles');
+    await vi.waitFor(() => expect(profileGets).toBe(2));
+    expect(browser.element('#kemerbet-session-start-button').disabled).toBe(true);
+
+    await browser.call('loadKemerbetAgentProfiles');
+    expect(profileGets).toBe(2);
+    await expect(browser.call('reconcilePendingKemerbetReadinessCohort')).resolves.toBe('stale');
+    expect(sessionGets).toBe(1);
+    browser.element('#kemerbet-session-confirmation').checked = true;
+    await browser.call('startKemerbetSession');
+    expect(startPosts).toBe(0);
+    expect(randomUUIDCalls).toBe(0);
+
+    profileRefresh.resolve(response(200, { profiles: [kemerbetAgentProfile()] }));
+    await refresh;
+    expect(sessionGets).toBe(2);
+    expect(browser.element('#kemerbet-session-start-button').disabled).toBe(false);
+
+    browser.element('#kemerbet-session-confirmation').checked = true;
+    await browser.call('startKemerbetSession');
+    expect(startPosts).toBe(1);
+    expect(randomUUIDCalls).toBe(1);
   });
 
   it('renders only a fixed redacted startup failure after clean coordinator shutdown', async () => {
@@ -1737,6 +2806,8 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     activeTest = true;
     browser.evaluate(
       'currentPilotLoaded = true; eligibleReadinessCohortPlayerCount = 5; ' +
+        "activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777'; " +
+        "kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true; " +
         'kemerbetSecurityRecoveryRequired = true; ' +
         'kemerbetSecurityRecoveryCohortRequired = true;',
     );
@@ -1805,6 +2876,8 @@ describe('Owner dashboard readiness mutation transport boundary', () => {
     activeTest = true;
     browser.evaluate(
       'currentPilotLoaded = true; eligibleReadinessCohortPlayerCount = 5; ' +
+        "activeKemerbetAgentProfileId = '77777777-7777-4777-8777-777777777777'; " +
+        "kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true; " +
         'kemerbetSecurityRecoveryRequired = true; ' +
         'kemerbetSecurityRecoveryCohortRequired = true;',
     );

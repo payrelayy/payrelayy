@@ -583,7 +583,14 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('KemerBet Windows companion');
     expect(response.body).toContain('Local identity validation');
     expect(response.body).toContain('Windows-protected fingerprint');
-    expect(response.body).toContain('id="kemerbet-legacy-profile-controls" hidden inert');
+    expect(response.body).toContain('Required no-money lookup setup');
+    expect(response.body).toContain('id="kemerbet-lookup-profile-setup"');
+    expect(response.body).toMatch(
+      /id="kemerbet-lookup-profile-setup"\s+role="region" aria-labelledby="kemerbet-agent-title">/u,
+    );
+    expect(response.body).not.toContain('id="kemerbet-legacy-profile-controls"');
+    expect(response.body).toContain('Prepare no-money KemerBet profile');
+    expect(response.body).toContain('id="kemerbet-agent-refresh-button" type="button" disabled');
     expect(response.body).toMatch(/Public-key enrollment only/u);
     expect(response.body).toContain('id="companion-device-pairing-form"');
     expect(response.body).toContain('releases/latest/download/FetanAgent-Windows-Companion.zip');
@@ -733,6 +740,27 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1'");
     expect(response.body).toContain('owner_confirmed_kemerbet_agent_profile');
     expect(response.body).toContain("'x-fetanagent-owner-csrf': 'owner-kemerbet-agent-profile-v1'");
+    expect(response.body).toContain('KEMERBET_AGENT_PROFILE_REQUEST_STORAGE_KEY');
+    expect(response.body).toContain('readPendingKemerbetAgentProfileRequest()');
+    expect(response.body).toContain('persistPendingKemerbetAgentProfileRequest({');
+    expect(response.body).toContain('kemerbetLifecycleApplicationGeneration');
+    expect(response.body).toContain('currentKemerbetLifecycleObservation(');
+    expect(response.body).toContain('beginKemerbetSessionMutation()');
+    expect(response.body).toContain('kemerbetAgentProfileLoadSerial');
+    expect(response.body).toContain('currentKemerbetAgentProfileLoad(');
+    expect(response.body).toContain('kemerbetAgentProfileMutationSerial');
+    expect(response.body).toContain('beginKemerbetAgentProfileMutation()');
+    expect(response.body).toContain('currentKemerbetAgentProfileMutation(');
+    expect(response.body).toContain(
+      'The authoritative KemerBet recovery lifecycle is being refreshed.',
+    );
+    expect(response.body).toContain('exact request ID and original reason are retained');
+    expect(response.body).toContain(
+      'verify one active no-money KemerBet lookup profile, exactly five eligible Players',
+    );
+    expect(response.body).toContain(
+      'Profile and signer prerequisites are present; the server will recheck all no-money readiness gates',
+    );
     expect(response.body).toContain('/v1/owner/kemerbet-session/start');
     expect(response.body).toContain('/v1/owner/kemerbet-session/frame?generation=');
     expect(response.body).toContain('/v1/owner/kemerbet-session/input');

@@ -272,7 +272,7 @@ set search_path = ''
 as $$
 #variable_conflict use_column
 declare
-  authorization record;
+  pilot_authority record;
   checked_at timestamptz;
   claimed_agent_id uuid;
   claimed_amount_minor bigint;
@@ -528,13 +528,13 @@ begin
   returning * into claimed_attempt;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authority
     from app.require_private_live_deposit_pilot_authorization(
       claimed_job.deposit_intent_id,
       claimed_attempt.id
     ) pilot_authorization;
 
-  if authorization.pilot_reservation_id is null
+  if pilot_authority.pilot_reservation_id is null
     or claimed_provider_code is null
     or claimed_provider_code not in ('cbe_birr', 'telebirr')
     or (claimed_provider_code = 'telebirr' and not p_allow_telebirr) then
@@ -552,11 +552,11 @@ begin
          claimed_job.lease_token,
          claimed_job.lease_expires_at,
          'execution'::text,
-         authorization.pilot_contract_version,
-         authorization.pilot_revision_id,
-         authorization.pilot_reservation_id,
-         authorization.pilot_configuration_digest,
-         authorization.pilot_authorization_token,
+         pilot_authority.pilot_contract_version,
+         pilot_authority.pilot_revision_id,
+         pilot_authority.pilot_reservation_id,
+         pilot_authority.pilot_configuration_digest,
+         pilot_authority.pilot_authorization_token,
          claimed_provider_code;
 end;
 $$;
@@ -939,7 +939,7 @@ security definer
 set search_path = ''
 as $$
 declare
-  authorization record;
+  pilot_authority record;
   authority app.private_trusted_telebirr_activation_epochs%rowtype;
   binding app.private_live_deposit_execution_epoch_bindings%rowtype;
   checked_at timestamptz;
@@ -1014,16 +1014,16 @@ begin
   end if;
 
   select pilot_authorization.*
-    into authorization
+    into pilot_authority
     from app.require_private_live_deposit_pilot_authorization(
       resolved_deposit_intent_id,
       p_execution_attempt_id
     ) pilot_authorization;
 
   if not found
-    or authorization.pilot_revision_id is distinct from p_pilot_revision_id
-    or authorization.pilot_reservation_id is distinct from p_pilot_reservation_id
-    or authorization.pilot_authorization_token is distinct from p_pilot_authorization_token then
+    or pilot_authority.pilot_revision_id is distinct from p_pilot_revision_id
+    or pilot_authority.pilot_reservation_id is distinct from p_pilot_reservation_id
+    or pilot_authority.pilot_authorization_token is distinct from p_pilot_authorization_token then
     raise exception 'The private-live lease authorization does not match final action.';
   end if;
 
@@ -1038,8 +1038,8 @@ begin
     join app.payment_providers payment_provider
       on payment_provider.id = provider_member.payment_provider_id
      and payment_provider.code = provider_member.provider_code_snapshot
-   where pilot_reservation.id = authorization.pilot_reservation_id
-     and pilot_reservation.pilot_revision_id = authorization.pilot_revision_id
+   where pilot_reservation.id = pilot_authority.pilot_reservation_id
+     and pilot_reservation.pilot_revision_id = pilot_authority.pilot_revision_id
      and pilot_reservation.deposit_intent_id = resolved_deposit_intent_id
    for share of pilot_reservation, provider_member, payment_provider;
 

@@ -581,7 +581,10 @@ assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 
 assert.match(productionRunbook, /Production activation is deliberately unavailable/);
 assert.match(productionRunbook, /shared\s+database state machine or epoch/);
-assert.match(productionRunbook, /execution\s+lease records an immutable attempt-to-epoch binding/);
+assert.match(
+  productionRunbook,
+  /TeleBirr execution\s+lease records\s+an immutable attempt-to-epoch binding/,
+);
 assert.match(productionRunbook, /Cancellation and\s+reconciliation deliberately remain usable/);
 assert.match(productionRunbook, /There is no same-release renewal path/);
 assert.match(productionRunbook, /two DAG-independent protected jobs/);
@@ -665,7 +668,12 @@ assert.deepEqual(renamedExecutionInternals, [
   'lease_private_live_deposit_pre_epoch',
   'fence_private_live_deposit_pre_epoch',
 ]);
-for (const identifier of renamedExecutionInternals) {
+const executionInternals = [
+  ...renamedExecutionInternals,
+  'recover_expired_private_live_prepared',
+  'lease_private_live_deposit_by_provider',
+];
+for (const identifier of executionInternals) {
   assert.ok(
     Buffer.byteLength(identifier, 'utf8') <= 63,
     `PostgreSQL would truncate execution internal ${identifier}`,
@@ -675,8 +683,13 @@ for (const identifier of renamedExecutionInternals) {
 const epochLeaseBody = executionEpochFunctionBody('lease_next_private_live_deposit_execution');
 const leaseControlIndex = epochLeaseBody.indexOf('select activation_control.current_epoch');
 const leaseEpochIndex = epochLeaseBody.indexOf('select activation_epoch.*');
-const leaseDelegateIndex = epochLeaseBody.indexOf('lease_private_live_deposit_pre_epoch');
-const leaseRecheckIndex = epochLeaseBody.indexOf(
+const leaseSwitchIndex = epochLeaseBody.indexOf('perform feature_switch.feature_key');
+const leaseRecoveryIndex = epochLeaseBody.indexOf('recover_expired_private_live_prepared');
+const leaseInitialAuthorityIndex = epochLeaseBody.indexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
+const leaseDispatchIndex = epochLeaseBody.indexOf('lease_private_live_deposit_by_provider');
+const leaseRecheckIndex = epochLeaseBody.lastIndexOf(
   'current_private_trusted_telebirr_activation_epoch()',
 );
 const leaseTimeIndex = epochLeaseBody.indexOf('checked_at := pg_catalog.clock_timestamp()');
@@ -686,12 +699,17 @@ const leaseBindingIndex = epochLeaseBody.indexOf(
 assert.ok(
   leaseControlIndex >= 0 &&
     leaseControlIndex < leaseEpochIndex &&
-    leaseEpochIndex < leaseDelegateIndex &&
-    leaseDelegateIndex < leaseRecheckIndex &&
+    leaseEpochIndex < leaseSwitchIndex &&
+    leaseSwitchIndex < leaseRecoveryIndex &&
+    leaseRecoveryIndex < leaseInitialAuthorityIndex &&
+    leaseInitialAuthorityIndex < leaseDispatchIndex &&
+    leaseDispatchIndex < leaseRecheckIndex &&
     leaseRecheckIndex < leaseTimeIndex &&
     leaseTimeIndex < leaseBindingIndex,
-  'execution lease must lock authority before the legacy lock sequence and bind only after time recheck',
+  'execution lease must recover before provider authority and bind TeleBirr only after post-lock recheck',
 );
+assert.match(epochLeaseBody, /leased\.provider_code_snapshot = 'cbe_birr'/);
+assert.match(epochLeaseBody, /A CBE Birr execution cannot carry TeleBirr activation authority/);
 assert.match(
   epochLeaseBody,
   /leased\.lease_expires_at > authority\.expires_at/,
@@ -703,23 +721,36 @@ const epochFenceBody = executionEpochFunctionBody(
 );
 const fenceControlIndex = epochFenceBody.indexOf('select activation_control.current_epoch');
 const fenceEpochIndex = epochFenceBody.indexOf('select activation_epoch.*');
+const fenceSwitchIndex = epochFenceBody.indexOf('perform feature_switch.feature_key');
+const fenceProviderIndex = epochFenceBody.indexOf(
+  'from app.private_live_deposit_pilot_reservations',
+);
+const fenceInitialAuthorityIndex = epochFenceBody.indexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
 const fenceDelegateIndex = epochFenceBody.indexOf('fence_private_live_deposit_pre_epoch');
 const fenceBindingIndex = epochFenceBody.indexOf(
   'from app.private_live_deposit_execution_epoch_bindings',
 );
-const fenceRecheckIndex = epochFenceBody.indexOf(
+const fenceRecheckIndex = epochFenceBody.lastIndexOf(
   'current_private_trusted_telebirr_activation_epoch()',
 );
-const fenceTimeIndex = epochFenceBody.indexOf('checked_at := pg_catalog.clock_timestamp()');
+const fenceTimeIndex = epochFenceBody.lastIndexOf('checked_at := pg_catalog.clock_timestamp()');
 assert.ok(
   fenceControlIndex >= 0 &&
     fenceControlIndex < fenceEpochIndex &&
+    fenceEpochIndex < fenceSwitchIndex &&
+    fenceSwitchIndex < fenceProviderIndex &&
+    fenceProviderIndex < fenceInitialAuthorityIndex &&
+    fenceInitialAuthorityIndex < fenceDelegateIndex &&
     fenceEpochIndex < fenceDelegateIndex &&
     fenceDelegateIndex < fenceBindingIndex &&
     fenceBindingIndex < fenceRecheckIndex &&
     fenceRecheckIndex < fenceTimeIndex,
-  'execution fence must lock authority before legacy locks and validate the binding afterward',
+  'execution fence must resolve provider under global locks and validate TeleBirr binding afterward',
 );
+assert.match(epochFenceBody, /provider_code = 'cbe_birr'/);
+assert.match(epochFenceBody, /provider_code = 'telebirr'/);
 assert.match(
   epochFenceBody,
   /fenced\.final_action_fenced_at \+ interval '10 seconds' > authority\.expires_at/,
@@ -727,9 +758,26 @@ assert.match(
 );
 assert.match(
   executionEpochMigration,
-  /revoke all on function[^]*lease_private_live_deposit_pre_epoch[^]*fence_private_live_deposit_pre_epoch[^]*from public, anon, authenticated, service_role/,
-  'renamed pre-epoch OIDs must lose every inherited runtime grant',
+  /revoke all on function[^]*recover_expired_private_live_prepared[^]*lease_private_live_deposit_by_provider[^]*lease_private_live_deposit_pre_epoch[^]*fence_private_live_deposit_pre_epoch[^]*from public, anon, authenticated, service_role/,
+  'recovery, provider dispatch, and renamed pre-epoch OIDs must be owner-only',
 );
+assert.doesNotMatch(
+  executionEpochMigration,
+  /grant execute on function app\.(?:recover_expired_private_live_prepared|lease_private_live_deposit_by_provider|lease_private_live_deposit_pre_epoch|fence_private_live_deposit_pre_epoch)/,
+  'no recovery, dispatch, or pre-epoch implementation may regain a runtime grant',
+);
+const recoveryBody = executionEpochFunctionBody('recover_expired_private_live_prepared');
+assert.match(recoveryBody, /set status = 'cancelled_before_action'/);
+assert.match(recoveryBody, /set status = 'execution_review'/);
+assert.doesNotMatch(recoveryBody, /status = 'queued'|insert into app\.deposit_execution_attempts/);
+const providerLeaseBody = executionEpochFunctionBody('lease_private_live_deposit_by_provider');
+assert.match(providerLeaseBody, /provider_member\.provider_code_snapshot = 'cbe_birr'/);
+assert.match(
+  providerLeaseBody,
+  /p_allow_telebirr[^]*provider_member\.provider_code_snapshot = 'telebirr'/,
+);
+assert.match(providerLeaseBody, /pilot_reservation\.deposit_intent_id = deposit_intent\.id/);
+assert.match(providerLeaseBody, /payment_provider\.code = provider_member\.provider_code_snapshot/);
 assert.match(
   executionEpochMigration,
   /grant execute on function app\.lease_next_private_live_deposit_execution\(uuid, integer\)[^]*to fetanagent_deposit_executor/,

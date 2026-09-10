@@ -16,11 +16,13 @@ This conservative boundary is required because checking financial switches and t
 poller are separate cross-system operations. The database foundation now defines one shared
 database state machine or epoch, enforces it at the verifier loader, authority reader, completion
 boundary, every relevant feature-switch write, and the private-live execution lease and final-action
-fence, and provides an idempotent Owner emergency intent/revocation transaction. Each execution
-lease records an immutable attempt-to-epoch binding; its complete lease window must fit inside that
-epoch, and the same epoch must still be current with ten seconds remaining when final action is
-fenced. It seeds only immutable epoch zero in `disabled` state and provides no live-activation
-writer. An additional read before process start is not an atomic interlock and is not accepted here.
+fence, and provides an idempotent Owner emergency intent/revocation transaction. Immutable pilot
+reservation/provider lineage dispatches the shared public executor API: CBE Birr retains its
+existing pilot boundary and receives no TeleBirr epoch binding; each TeleBirr execution lease records
+an immutable attempt-to-epoch binding, its complete lease window must fit inside that epoch, and the
+same epoch must still be current with ten seconds remaining when final action is fenced. It seeds
+only immutable epoch zero in `disabled` state and provides no live-activation writer. An additional
+read before process start is not an atomic interlock and is not accepted here.
 
 Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
 the singleton pointer, and change the complete TeleBirr switch set in the same database
@@ -33,7 +35,9 @@ activation authority before the existing readiness/switch/pilot sequence, and ho
 must never be treated as authority. Expiry, revocation, epoch advance, pilot drift, switch drift, or
 the mere presence of emergency intent makes work loading empty and rejects verifier authority,
 verification completion, and final-action fencing for leases obtained earlier. Cancellation and
-reconciliation deliberately remain usable after disable so uncertainty can only tighten.
+reconciliation deliberately remain usable after disable so uncertainty can only tighten. The
+executor lease entrypoint also retains one recovery-only path after stop/expiry: it may adopt an
+expired `prepared` attempt and cancel it into review, but cannot issue a new lease or action fence.
 
 The production verifier remains separate from `compose.production.yaml`. Its staged service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct

@@ -111,10 +111,13 @@ The exact pilot revision must be checked at every authority transition:
    expiry, rechecks current Player-ID eligibility, checks per-deposit/per-player/aggregate/count
    limits, reserves the pilot budget, globally claims the provider reference, and enqueues exactly
    one execution command in one transaction.
-4. **Execution lease.** An execution job without the exact pilot reservation cannot be leased. A
-   trusted TeleBirr job is also immutably bound to the current database activation epoch, and its
-   complete lease window must end no later than that epoch. The public executor contract remains
-   unchanged; the epoch and expiry are retained only in the private database boundary.
+4. **Execution lease.** An execution job without the exact pilot reservation and provider
+   membership cannot be leased. The database dispatches from that immutable lineage: CBE Birr keeps
+   the existing pilot/switch boundary and receives no TeleBirr epoch binding, while a TeleBirr job
+   is immutably bound to the current database activation epoch and its complete lease window must
+   end no later than that epoch. A stale TeleBirr job is excluded before queue selection, so it
+   cannot starve an otherwise eligible CBE Birr job. The public executor contract remains unchanged;
+   provider dispatch, epoch, and expiry remain private database facts.
 5. **Final-action fence.** Immediately before the irreversible KemerBet action, the database
    rechecks that the pilot is still armed, unexpired, within budget, and bound to the same Player ID,
    amount, intent, claim, and execution attempt. It also requires the lease's exact epoch to remain
@@ -123,7 +126,9 @@ The exact pilot revision must be checked at every authority transition:
 6. **Reconciliation.** Once a final action is fenced, uncertainty never causes a blind retry. The
    job remains blocked for exact KemerBet-history reconciliation even if the Owner stops the pilot
    or its activation epoch expires or is revoked. Cancellation and reconciliation are deliberately
-   not gated by current activation authority.
+   not gated by current activation authority. A fresh executor poll may also adopt exactly one
+   expired `prepared` attempt after stop or expiry, but that recovery-only transition can only
+   cancel the attempt into review; it cannot lease new work or mint final-action authority.
 
 Checks at the API or UI are useful for early rejection but never replace the database and executor
 checks.

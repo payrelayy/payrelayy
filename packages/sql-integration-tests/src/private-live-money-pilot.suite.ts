@@ -1317,6 +1317,59 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           /cannot be truncated/u,
         );
 
+        const missingProviderSavepoint = `missing_provider_dispatch_${sha256(randomUUID()).slice(0, 12)}`;
+        await client.query(`savepoint ${missingProviderSavepoint}`);
+        await client.query(`set local session_replication_role = 'replica'`);
+        await client.query(
+          `delete from app.private_live_deposit_pilot_providers
+            where pilot_revision_id = $1::uuid
+              and payment_provider_id = $2::uuid`,
+          [pilot.pilotRevisionId, pilot.paymentProviderId],
+        );
+        await client.query(`set local session_replication_role = 'origin'`);
+        const missingProviderLease = await queryAsRole<LeaseRow>(
+          client,
+          'fetanagent_deposit_executor',
+          `select * from app.lease_next_private_live_deposit_execution($1::uuid, 300)`,
+          [randomUUID()],
+        );
+        expect(missingProviderLease).toEqual([]);
+        await client.query(`rollback to savepoint ${missingProviderSavepoint}`);
+        await client.query(`release savepoint ${missingProviderSavepoint}`);
+
+        await client.query(`set local session_replication_role = 'replica'`);
+        await expectFailureAtSavepoint(
+          client,
+          `update app.private_live_deposit_pilot_providers
+              set provider_code_snapshot = 'unknown_provider'
+            where pilot_revision_id = $1::uuid
+              and payment_provider_id = $2::uuid`,
+          [pilot.pilotRevisionId, pilot.paymentProviderId],
+          /provider_code_snapshot|check constraint/u,
+        );
+        await client.query(`set local session_replication_role = 'origin'`);
+
+        const mismatchedProviderSavepoint = `mismatched_provider_dispatch_${sha256(randomUUID()).slice(0, 12)}`;
+        await client.query(`savepoint ${mismatchedProviderSavepoint}`);
+        await client.query(`set local session_replication_role = 'replica'`);
+        await client.query(
+          `update app.private_live_deposit_pilot_providers
+              set provider_code_snapshot = 'telebirr'
+            where pilot_revision_id = $1::uuid
+              and payment_provider_id = $2::uuid`,
+          [pilot.pilotRevisionId, pilot.paymentProviderId],
+        );
+        await client.query(`set local session_replication_role = 'origin'`);
+        const mismatchedProviderLease = await queryAsRole<LeaseRow>(
+          client,
+          'fetanagent_deposit_executor',
+          `select * from app.lease_next_private_live_deposit_execution($1::uuid, 300)`,
+          [randomUUID()],
+        );
+        expect(mismatchedProviderLease).toEqual([]);
+        await client.query(`rollback to savepoint ${mismatchedProviderSavepoint}`);
+        await client.query(`release savepoint ${mismatchedProviderSavepoint}`);
+
         const stopSavepoint = `stopped_lease_probe_${sha256(randomUUID()).slice(0, 12)}`;
         await client.query(`savepoint ${stopSavepoint}`);
         await queryAsMigrationOwner(
@@ -1354,19 +1407,12 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await client.query(`rollback to savepoint ${expiredLeaseSavepoint}`);
         await client.query(`release savepoint ${expiredLeaseSavepoint}`);
 
-        const epochClosedLease = await queryAsRole<LeaseRow>(
+        // Provider dispatch is derived from the immutable CBE reservation. The shared public
+        // executor entrypoint must preserve CBE without minting TeleBirr epoch authority.
+        const lease = await queryAsRole<LeaseRow>(
           client,
           'fetanagent_deposit_executor',
           `select * from app.lease_next_private_live_deposit_execution($1::uuid, 300)`,
-          [randomUUID()],
-        );
-        expect(epochClosedLease).toEqual([]);
-
-        // Preserve coverage of the retained CBE pilot implementation through its owner-only
-        // pre-epoch name. The public executor entrypoint is now intentionally TeleBirr-epoch-bound.
-        const lease = await queryAsMigrationOwner<LeaseRow>(
-          client,
-          `select * from app.lease_private_live_deposit_pre_epoch($1::uuid, 300)`,
           [randomUUID()],
         );
         expect(lease).toHaveLength(1);
@@ -1384,6 +1430,13 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           player_id: pilot.playerIds[0],
         });
         expect(lease[0]!.lease_expires_at).toBeInstanceOf(Date);
+        const cbeBinding = await client.query<{ readonly binding_count: number }>(
+          `select count(*)::integer as binding_count
+             from app.private_live_deposit_execution_epoch_bindings
+            where execution_attempt_id = $1::uuid`,
+          [lease[0]!.execution_attempt_id],
+        );
+        expect(cbeBinding.rows).toEqual([{ binding_count: 0 }]);
 
         const stoppedFenceSavepoint = `stopped_fence_probe_${sha256(randomUUID()).slice(0, 12)}`;
         await client.query(`savepoint ${stoppedFenceSavepoint}`);
@@ -1395,7 +1448,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_pre_epoch(
+             from app.fence_private_live_deposit_execution_final_action(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1406,6 +1459,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             lease[0]!.pilot_authorization_token!,
           ],
           /not financially active/u,
+          'fetanagent_deposit_executor',
         );
         await client.query(`rollback to savepoint ${stoppedFenceSavepoint}`);
         await client.query(`release savepoint ${stoppedFenceSavepoint}`);
@@ -1423,7 +1477,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_pre_epoch(
+             from app.fence_private_live_deposit_execution_final_action(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1434,6 +1488,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             lease[0]!.pilot_authorization_token!,
           ],
           /execution authorization is invalid/u,
+          'fetanagent_deposit_executor',
         );
         await client.query(`rollback to savepoint ${expiredFenceSavepoint}`);
         await client.query(`release savepoint ${expiredFenceSavepoint}`);
@@ -1441,7 +1496,7 @@ export function registerPrivateLiveMoneyPilotSqlTests(
         await expectFailureAtSavepoint(
           client,
           `select *
-             from app.fence_private_live_deposit_pre_epoch(
+             from app.fence_private_live_deposit_execution_final_action(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1452,12 +1507,14 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             randomUUID(),
           ],
           /lease authorization does not match/u,
+          'fetanagent_deposit_executor',
         );
 
-        const fence = await queryAsMigrationOwner<FenceRow>(
+        const fence = await queryAsRole<FenceRow>(
           client,
+          'fetanagent_deposit_executor',
           `select *
-             from app.fence_private_live_deposit_pre_epoch(
+             from app.fence_private_live_deposit_execution_final_action(
                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid
              )`,
           [
@@ -1480,6 +1537,121 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           pilot_revision_id: lease[0]!.pilot_revision_id,
         });
         expect(fence[0]!.final_action_fenced_at).toBeInstanceOf(Date);
+        const fencedCbeBinding = await client.query<{ readonly binding_count: number }>(
+          `select count(*)::integer as binding_count
+             from app.private_live_deposit_execution_epoch_bindings
+            where execution_attempt_id = $1::uuid`,
+          [lease[0]!.execution_attempt_id],
+        );
+        expect(fencedCbeBinding.rows).toEqual([{ binding_count: 0 }]);
+      });
+    });
+
+    it('recovers an expired prepared CBE lease after pilot expiry without new authority', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await preparePilot(
+          client,
+          getOwnerAdminId(),
+          await createPilotPrerequisites(client),
+        );
+        await armPilot(client, getOwnerAdminId(), pilot);
+        await activateSyntheticPilot(client);
+        const lineage = await createSettlementLineage(client, pilot);
+        const settlement = await settlePrivatePilot(client, lineage);
+        expect(settlement).toHaveLength(1);
+
+        const lease = await queryAsRole<LeaseRow>(
+          client,
+          'fetanagent_deposit_executor',
+          `select * from app.lease_next_private_live_deposit_execution($1::uuid, 30)`,
+          [randomUUID()],
+        );
+        expect(lease).toHaveLength(1);
+        expect(lease[0]!.lease_disposition).toBe('execution');
+
+        await client.query(`set local session_replication_role = 'replica'`);
+        await client.query(
+          `update app.deposit_jobs
+              set lease_expires_at = clock_timestamp() - interval '1 day'
+            where id = $1::uuid`,
+          [lease[0]!.execution_job_id],
+        );
+        await client.query(
+          `update app.private_live_deposit_pilot_revisions
+              set expires_at = active_from + interval '1 second'
+            where id = $1::uuid`,
+          [pilot.pilotRevisionId],
+        );
+        await client.query(`set local session_replication_role = 'origin'`);
+
+        const recovered = await queryAsRole<LeaseRow>(
+          client,
+          'fetanagent_deposit_executor',
+          `select * from app.lease_next_private_live_deposit_execution($1::uuid, 30)`,
+          [randomUUID()],
+        );
+        expect(recovered).toEqual([
+          {
+            amount_minor: null,
+            currency_code: null,
+            deposit_intent_id: lease[0]!.deposit_intent_id,
+            execution_attempt_id: lease[0]!.execution_attempt_id,
+            execution_job_id: null,
+            lease_disposition: 'recovered_expired_prepared',
+            lease_expires_at: null,
+            lease_token: null,
+            pilot_authorization_token: null,
+            pilot_configuration_digest: null,
+            pilot_contract_version: null,
+            pilot_reservation_id: null,
+            pilot_revision_id: null,
+            platform_agent_account_id: null,
+            player_id: null,
+          },
+        ]);
+
+        const terminalState = await client.query<{
+          readonly attempt_count: number;
+          readonly attempt_status: string;
+          readonly binding_count: number;
+          readonly deposit_status: string;
+          readonly job_status: string;
+          readonly review_count: number;
+        }>(
+          `select execution_attempt.status::text as attempt_status,
+                  execution_job.status::text as job_status,
+                  deposit_intent.status::text as deposit_status,
+                  (select count(*)::integer
+                     from app.deposit_execution_attempts counted_attempt
+                    where counted_attempt.deposit_intent_id = deposit_intent.id)
+                    as attempt_count,
+                  (select count(*)::integer
+                     from app.deposit_review_cases review_case
+                    where review_case.deposit_intent_id = deposit_intent.id
+                      and review_case.review_kind = 'execution') as review_count,
+                  (select count(*)::integer
+                     from app.private_live_deposit_execution_epoch_bindings epoch_binding
+                    where epoch_binding.execution_attempt_id = execution_attempt.id)
+                    as binding_count
+             from app.deposit_execution_attempts execution_attempt
+             join app.deposit_jobs execution_job
+               on execution_job.id = execution_attempt.deposit_job_id
+             join app.deposit_intents deposit_intent
+               on deposit_intent.id = execution_attempt.deposit_intent_id
+            where execution_attempt.id = $1::uuid`,
+          [lease[0]!.execution_attempt_id],
+        );
+        expect(terminalState.rows).toEqual([
+          {
+            attempt_count: 1,
+            attempt_status: 'cancelled_before_action',
+            binding_count: 0,
+            deposit_status: 'execution_review',
+            job_status: 'cancelled',
+            review_count: 1,
+          },
+        ]);
       });
     });
 
@@ -1617,12 +1789,14 @@ export function registerPrivateLiveMoneyPilotSqlTests(
           from pg_proc procedure
          where procedure.oid in (
            'app.lease_next_deposit_execution(uuid,integer)'::regprocedure,
+           'app.recover_expired_private_live_prepared()'::regprocedure,
+           'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)'::regprocedure,
            'app.lease_private_live_deposit_pre_epoch(uuid,integer)'::regprocedure,
            'app.lease_next_private_live_deposit_execution(uuid,integer)'::regprocedure
          )
          order by function_name
       `);
-      expect(leaseSources.rows).toHaveLength(3);
+      expect(leaseSources.rows).toHaveLength(5);
       expect(
         leaseSources.rows.find((row) => row.function_name === 'lease_next_deposit_execution')
           ?.source,
@@ -1635,10 +1809,22 @@ export function registerPrivateLiveMoneyPilotSqlTests(
       const epochLeaseSource = leaseSources.rows.find(
         (row) => row.function_name === 'lease_next_private_live_deposit_execution',
       )!.source;
-      expect(epochLeaseSource).toContain('from app.lease_private_live_deposit_pre_epoch(');
+      expect(epochLeaseSource).toContain('from app.recover_expired_private_live_prepared(');
+      expect(epochLeaseSource).toContain('from app.lease_private_live_deposit_by_provider(');
       expect(epochLeaseSource).toContain(
         'insert into app.private_live_deposit_execution_epoch_bindings',
       );
+      const providerLeaseSource = leaseSources.rows.find(
+        (row) => row.function_name === 'lease_private_live_deposit_by_provider',
+      )!.source;
+      expect(providerLeaseSource).toMatch(/for update of [^;]+ skip locked/iu);
+      expect(providerLeaseSource).toContain("provider_member.provider_code_snapshot = 'cbe_birr'");
+      expect(providerLeaseSource).toContain("provider_member.provider_code_snapshot = 'telebirr'");
+      const recoverySource = leaseSources.rows.find(
+        (row) => row.function_name === 'recover_expired_private_live_prepared',
+      )!.source;
+      expect(recoverySource).toContain("set status = 'cancelled_before_action'");
+      expect(recoverySource).not.toContain("status = 'queued'");
 
       const authoritySources = await client.query<{
         readonly function_name: string;

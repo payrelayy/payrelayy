@@ -61,10 +61,15 @@ async function queryAsExecutor<T>(
   values: readonly unknown[] = [],
 ): Promise<readonly T[]> {
   await client.query('set local role fetanagent_deposit_executor');
+  let queryCompleted = false;
   try {
-    return (await client.query<T & Record<string, unknown>>(text, [...values])).rows;
+    const rows = (await client.query<T & Record<string, unknown>>(text, [...values])).rows;
+    queryCompleted = true;
+    return rows;
   } finally {
-    await client.query('reset role');
+    // A failed statement leaves the transaction aborted until the surrounding savepoint rolls
+    // back. Do not replace its intended database error with RESET ROLE's 25P02 error.
+    if (queryCompleted) await client.query('reset role');
   }
 }
 
@@ -238,6 +243,8 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
           from pg_proc routine
           join pg_roles owner_role on owner_role.oid = routine.proowner
          where routine.oid in (
+           'app.recover_expired_private_live_prepared()'::regprocedure,
+           'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)'::regprocedure,
            'app.lease_private_live_deposit_pre_epoch(uuid,integer)'::regprocedure,
            'app.fence_private_live_deposit_pre_epoch(uuid,uuid,uuid,uuid,uuid)'::regprocedure,
            'app.lease_next_private_live_deposit_execution(uuid,integer)'::regprocedure,
@@ -246,16 +253,22 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
          )
          order by signature
       `);
-      expect(routines.rows).toHaveLength(4);
+      expect(routines.rows).toHaveLength(6);
       for (const row of routines.rows) {
         expect(row.owner_name).toBe('postgres');
         expect(row.public_allowed).toBe(false);
         expect(
           Buffer.byteLength(row.signature.split('(')[0]!.split('.').at(-1)!, 'utf8'),
         ).toBeLessThanOrEqual(63);
-        if (row.signature.includes('_pre_epoch')) {
+        const ownerOnlyInternal =
+          row.signature.includes('_pre_epoch') ||
+          row.signature.includes('recover_expired_private_live_prepared') ||
+          row.signature.includes('lease_private_live_deposit_by_provider');
+        if (ownerOnlyInternal) {
           expect(row).toMatchObject({
-            configuration: ['search_path=pg_catalog'],
+            configuration: [
+              row.signature.includes('_pre_epoch') ? 'search_path=pg_catalog' : 'search_path=',
+            ],
             direct_grantees: [],
             executor_allowed: false,
           });
@@ -425,7 +438,9 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
         const expiredFailure = await failureAtSavepoint(client, () =>
           fenceExecution(client, lease),
         );
-        expect(expiredFailure.message).toContain('activation epoch changed before final action');
+        expect(expiredFailure.message).toMatch(
+          /execution authorization is invalid|activation epoch|not currently authorized/iu,
+        );
         await assertPrepared(client, lease.execution_attempt_id);
         await client.query('rollback to savepoint expired_epoch_fence');
         await client.query('release savepoint expired_epoch_fence');
@@ -564,6 +579,81 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
       });
     });
 
+    it('recovers an expired prepared TeleBirr attempt after emergency stop without new authority', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await prepareQueuedExecution(client, getOwnerAdminId());
+        const lease = await leaseExecution(client, 30);
+
+        await client.query(
+          `select * from app.request_private_trusted_telebirr_emergency_disable(
+             $1::uuid, $2::bigint, $3::uuid, 'execution_uncertainty'
+           )`,
+          [getOwnerAdminId(), fixture.epoch, randomUUID()],
+        );
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(
+          `update app.deposit_jobs
+              set lease_expires_at = clock_timestamp() - interval '1 day'
+            where id = $1::uuid`,
+          [lease.execution_job_id],
+        );
+        await client.query("set local session_replication_role = 'origin'");
+
+        const recovered = await queryAsExecutor<LeaseRow>(
+          client,
+          'select * from app.lease_next_private_live_deposit_execution($1::uuid, 30)',
+          [randomUUID()],
+        );
+        expect(recovered).toHaveLength(1);
+        expect(recovered[0]).toMatchObject({
+          deposit_intent_id: lease.deposit_intent_id,
+          execution_attempt_id: lease.execution_attempt_id,
+          execution_job_id: null,
+          lease_disposition: 'recovered_expired_prepared',
+          lease_token: null,
+          pilot_authorization_token: null,
+          pilot_revision_id: null,
+        });
+
+        const terminal = await client.query<{
+          readonly attempt_count: number;
+          readonly attempt_status: string;
+          readonly binding_count: number;
+          readonly deposit_status: string;
+          readonly job_status: string;
+        }>(
+          `select execution_attempt.status::text as attempt_status,
+                  execution_job.status::text as job_status,
+                  deposit_intent.status::text as deposit_status,
+                  (select count(*)::integer
+                     from app.deposit_execution_attempts counted_attempt
+                    where counted_attempt.deposit_intent_id = deposit_intent.id)
+                    as attempt_count,
+                  (select count(*)::integer
+                     from app.private_live_deposit_execution_epoch_bindings epoch_binding
+                    where epoch_binding.execution_attempt_id = execution_attempt.id)
+                    as binding_count
+             from app.deposit_execution_attempts execution_attempt
+             join app.deposit_jobs execution_job
+               on execution_job.id = execution_attempt.deposit_job_id
+             join app.deposit_intents deposit_intent
+               on deposit_intent.id = execution_attempt.deposit_intent_id
+            where execution_attempt.id = $1::uuid`,
+          [lease.execution_attempt_id],
+        );
+        expect(terminal.rows).toEqual([
+          {
+            attempt_count: 1,
+            attempt_status: 'cancelled_before_action',
+            binding_count: 1,
+            deposit_status: 'execution_review',
+            job_status: 'cancelled',
+          },
+        ]);
+      });
+    });
+
     it('rechecks expiry after a fence waits on the activation-control lock', async () => {
       const client = getClient();
       const ownerAdminId = getOwnerAdminId();
@@ -655,7 +745,9 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
           await client.query('select pg_sleep(2.1)');
           await locker.query('commit');
           lockerCommitted = true;
-          await expect(fenceAttempt).rejects.toThrow(/financially active|activation epoch/iu);
+          await expect(fenceAttempt).rejects.toThrow(
+            /financially active|execution authorization|activation epoch/iu,
+          );
           fenceAttempt = undefined;
           await executor.query('rollback');
           executorRolledBack = true;

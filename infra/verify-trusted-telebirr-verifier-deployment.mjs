@@ -29,6 +29,9 @@ const [
   productionRunbook,
   productionDisableSql,
   productionInspectSql,
+  readinessCohortMigration,
+  activationEpochMigration,
+  executionEpochMigration,
 ] = await Promise.all([
   read('Dockerfile'),
   read('infra/compose.trusted-telebirr-verifier.yaml'),
@@ -49,6 +52,9 @@ const [
   read('infra/production-trusted-telebirr-verifier.md'),
   read('infra/sql/production-trusted-telebirr-verifier-disable.sql'),
   read('infra/sql/production-trusted-telebirr-verifier-inspect.sql'),
+  read('supabase/migrations/20260825103000_private_owner_kemerbet_readiness_cohort_claim.sql'),
+  read('supabase/migrations/20260910154104_trusted_telebirr_activation_epoch_foundation.sql'),
+  read('supabase/migrations/20260910170000_private_live_execution_activation_epoch.sql'),
 ]);
 const manifest = JSON.parse(manifestText);
 
@@ -85,6 +91,24 @@ function continuedDockerRunCommands(value) {
     commands.push(commandLines.join('\n'));
   }
   return commands;
+}
+
+function migrationFunctionBody(name) {
+  const match = new RegExp(
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    'u',
+  ).exec(activationEpochMigration);
+  assert.ok(match, `missing activation-epoch function ${name}`);
+  return match[1];
+}
+
+function executionEpochFunctionBody(name) {
+  const match = new RegExp(
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    'u',
+  ).exec(executionEpochMigration);
+  assert.ok(match, `missing execution-epoch function ${name}`);
+  return match[1];
 }
 
 assert.equal(
@@ -556,13 +580,382 @@ assert.match(productionTunnel, /ConnectionAttempts=1/);
 assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 
 assert.match(productionRunbook, /Production activation is deliberately unavailable/);
-assert.match(productionRunbook, /shared database state machine or epoch/);
+assert.match(productionRunbook, /shared\s+database state machine or epoch/);
+assert.match(
+  productionRunbook,
+  /TeleBirr execution\s+lease records\s+an immutable\s+attempt-to-epoch binding/,
+);
+assert.match(productionRunbook, /Cancellation and\s+reconciliation deliberately remain usable/);
 assert.match(productionRunbook, /There is no same-release renewal path/);
 assert.match(productionRunbook, /two DAG-independent protected jobs/);
 assert.match(productionRunbook, /share a VM\/SSH failure domain/);
 assert.match(productionRunbook, /database emergency-revocation route that does not depend/);
+assert.match(
+  productionRunbook,
+  /lock activation control, epoch, the\s+readiness serialization gate, feature switches, then pilot/,
+);
 assert.doesNotMatch(productionRunbook, /ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY/);
 assert.doesNotMatch(productionRunbook, /Renewal is .*activate-verifier/);
+
+assert.match(activationEpochMigration, /values \(0\)/);
+assert.match(
+  activationEpochMigration,
+  /create table app\.private_trusted_telebirr_activation_epochs/,
+);
+assert.match(
+  activationEpochMigration,
+  /create table app\.private_trusted_telebirr_emergency_disable_intents/,
+);
+assert.match(
+  activationEpochMigration,
+  /create constraint trigger feature_switches_trusted_telebirr_complete_set/,
+);
+assert.match(activationEpochMigration, /deferrable initially deferred/);
+assert.match(activationEpochMigration, /current_private_trusted_telebirr_activation_epoch\(\)/);
+assert.match(activationEpochMigration, /request_private_trusted_telebirr_emergency_disable/);
+assert.match(activationEpochMigration, /load_next_private_live_telebirr_staged_evidence_pre_epoch/);
+assert.match(
+  activationEpochMigration,
+  /load_private_live_telebirr_verification_authority_pre_epoch/,
+);
+assert.match(activationEpochMigration, /complete_private_live_telebirr_verification_pre_epoch/);
+assert.doesNotMatch(
+  activationEpochMigration,
+  /create(?: or replace)? function app\.activate_private_trusted_telebirr|grant execute on function app\.current_private_trusted/,
+);
+assert.match(
+  executionEpochMigration,
+  /create table app\.private_live_deposit_execution_epoch_bindings/,
+);
+assert.match(
+  executionEpochMigration,
+  /alter table app\.private_live_deposit_execution_epoch_bindings enable row level security/,
+);
+assert.match(
+  executionEpochMigration,
+  /alter table app\.private_live_deposit_execution_epoch_bindings force row level security/,
+);
+assert.match(executionEpochMigration, /rename to lease_private_live_deposit_pre_epoch/);
+assert.match(executionEpochMigration, /rename to fence_private_live_deposit_pre_epoch/);
+assert.doesNotMatch(
+  executionEpochMigration,
+  /create(?: or replace)? function app\.activate_private_trusted_telebirr|insert into app\.private_trusted_telebirr_activation_epochs|update app\.private_trusted_telebirr_activation_control/,
+);
+const executionMigrationControlIndex = executionEpochMigration.indexOf(
+  'select activation_control.current_epoch',
+);
+const executionMigrationEpochIndex = executionEpochMigration.indexOf(
+  'perform activation_epoch.epoch',
+);
+const executionMigrationSwitchIndex = executionEpochMigration.indexOf(
+  'perform feature_switch.feature_key',
+);
+const executionMigrationAttemptLockIndex = executionEpochMigration.indexOf(
+  'lock table app.deposit_execution_attempts in share row exclusive mode',
+);
+assert.ok(
+  executionMigrationControlIndex >= 0 &&
+    executionMigrationControlIndex < executionMigrationEpochIndex &&
+    executionMigrationEpochIndex < executionMigrationSwitchIndex &&
+    executionMigrationSwitchIndex < executionMigrationAttemptLockIndex,
+  'execution-epoch migration must preflight in control, epoch, switch, execution order',
+);
+
+const renamedExecutionInternals = [
+  ...executionEpochMigration.matchAll(/\brename to\s+([a-z][a-z0-9_]*)/gu),
+].map((match) => match[1]);
+assert.deepEqual(renamedExecutionInternals, [
+  'lease_private_live_deposit_pre_epoch',
+  'fence_private_live_deposit_pre_epoch',
+]);
+const executionInternals = [
+  ...renamedExecutionInternals,
+  'recover_expired_private_live_prepared',
+  'lease_private_live_deposit_by_provider',
+];
+for (const identifier of executionInternals) {
+  assert.ok(
+    Buffer.byteLength(identifier, 'utf8') <= 63,
+    `PostgreSQL would truncate execution internal ${identifier}`,
+  );
+}
+
+const epochLeaseBody = executionEpochFunctionBody('lease_next_private_live_deposit_execution');
+const leaseControlIndex = epochLeaseBody.indexOf('select activation_control.current_epoch');
+const leaseEpochIndex = epochLeaseBody.indexOf('select activation_epoch.*');
+const leaseSwitchIndex = epochLeaseBody.indexOf('perform feature_switch.feature_key');
+const leaseRecoveryIndex = epochLeaseBody.indexOf('recover_expired_private_live_prepared');
+const leaseInitialAuthorityIndex = epochLeaseBody.indexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
+const leaseDispatchIndex = epochLeaseBody.indexOf('lease_private_live_deposit_by_provider');
+const leaseRecheckIndex = epochLeaseBody.lastIndexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
+const leaseTimeIndex = epochLeaseBody.indexOf('checked_at := pg_catalog.clock_timestamp()');
+const leaseBindingIndex = epochLeaseBody.indexOf(
+  'insert into app.private_live_deposit_execution_epoch_bindings',
+);
+assert.ok(
+  leaseControlIndex >= 0 &&
+    leaseControlIndex < leaseEpochIndex &&
+    leaseEpochIndex < leaseSwitchIndex &&
+    leaseSwitchIndex < leaseRecoveryIndex &&
+    leaseRecoveryIndex < leaseInitialAuthorityIndex &&
+    leaseInitialAuthorityIndex < leaseDispatchIndex &&
+    leaseDispatchIndex < leaseRecheckIndex &&
+    leaseRecheckIndex < leaseTimeIndex &&
+    leaseTimeIndex < leaseBindingIndex,
+  'execution lease must recover before provider authority and bind TeleBirr only after post-lock recheck',
+);
+assert.match(epochLeaseBody, /leased\.provider_code_snapshot = 'cbe_birr'/);
+assert.match(epochLeaseBody, /A CBE Birr execution cannot carry TeleBirr activation authority/);
+assert.match(
+  epochLeaseBody,
+  /leased\.lease_expires_at > authority\.expires_at/,
+  'the complete legacy lease window must fit inside the activation epoch',
+);
+
+const epochFenceBody = executionEpochFunctionBody(
+  'fence_private_live_deposit_execution_final_action',
+);
+const fenceControlIndex = epochFenceBody.indexOf('select activation_control.current_epoch');
+const fenceEpochIndex = epochFenceBody.indexOf('select activation_epoch.*');
+const fenceSwitchIndex = epochFenceBody.indexOf('perform feature_switch.feature_key');
+const fenceProviderIndex = epochFenceBody.indexOf(
+  'from app.private_live_deposit_pilot_reservations',
+);
+const fenceInitialAuthorityIndex = epochFenceBody.indexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
+const fenceDelegateIndex = epochFenceBody.indexOf('fence_private_live_deposit_pre_epoch');
+const fenceBindingIndex = epochFenceBody.indexOf(
+  'from app.private_live_deposit_execution_epoch_bindings',
+);
+const fenceRecheckIndex = epochFenceBody.lastIndexOf(
+  'current_private_trusted_telebirr_activation_epoch()',
+);
+const fenceTimeIndex = epochFenceBody.lastIndexOf('checked_at := pg_catalog.clock_timestamp()');
+assert.ok(
+  fenceControlIndex >= 0 &&
+    fenceControlIndex < fenceEpochIndex &&
+    fenceEpochIndex < fenceSwitchIndex &&
+    fenceSwitchIndex < fenceProviderIndex &&
+    fenceProviderIndex < fenceInitialAuthorityIndex &&
+    fenceInitialAuthorityIndex < fenceDelegateIndex &&
+    fenceEpochIndex < fenceDelegateIndex &&
+    fenceDelegateIndex < fenceBindingIndex &&
+    fenceBindingIndex < fenceRecheckIndex &&
+    fenceRecheckIndex < fenceTimeIndex,
+  'execution fence must resolve provider under global locks and validate TeleBirr binding afterward',
+);
+assert.match(epochFenceBody, /provider_code = 'cbe_birr'/);
+assert.match(epochFenceBody, /provider_code = 'telebirr'/);
+assert.match(
+  epochFenceBody,
+  /fenced\.final_action_fenced_at \+ interval '10 seconds' > authority\.expires_at/,
+  'the complete browser final-action window must fit inside the activation epoch',
+);
+assert.match(
+  executionEpochMigration,
+  /revoke all on function[^]*recover_expired_private_live_prepared[^]*lease_private_live_deposit_by_provider[^]*lease_private_live_deposit_pre_epoch[^]*fence_private_live_deposit_pre_epoch[^]*from public, anon, authenticated, service_role/,
+  'recovery, provider dispatch, and renamed pre-epoch OIDs must be owner-only',
+);
+assert.doesNotMatch(
+  executionEpochMigration,
+  /grant execute on function app\.(?:recover_expired_private_live_prepared|lease_private_live_deposit_by_provider|lease_private_live_deposit_pre_epoch|fence_private_live_deposit_pre_epoch)/,
+  'no recovery, dispatch, or pre-epoch implementation may regain a runtime grant',
+);
+const recoveryBody = executionEpochFunctionBody('recover_expired_private_live_prepared');
+assert.match(recoveryBody, /set status = 'cancelled_before_action'/);
+assert.match(recoveryBody, /set status = 'execution_review'/);
+assert.doesNotMatch(recoveryBody, /status = 'queued'|insert into app\.deposit_execution_attempts/);
+const providerLeaseBody = executionEpochFunctionBody('lease_private_live_deposit_by_provider');
+assert.match(providerLeaseBody, /provider_member\.provider_code_snapshot = 'cbe_birr'/);
+assert.match(
+  providerLeaseBody,
+  /p_allow_telebirr[^]*provider_member\.provider_code_snapshot = 'telebirr'/,
+);
+assert.match(
+  providerLeaseBody,
+  /join app\.feature_switches selected_provider_switch[^]*selected_provider_switch\.feature_key =[^]*provider_member\.provider_code_snapshot \|\| '_authoritative_verification'[^]*selected_provider_switch\.mode = 'live'[^]*order by execution_job\.priority desc/u,
+  'fresh execution selection must join its exact provider lane before queue ordering',
+);
+assert.doesNotMatch(
+  providerLeaseBody,
+  /left join app\.feature_switches provider_switch[^]*provider_switch\.mode <> 'live'[^]*then\s+return/iu,
+  'a disabled lane must not suppress independently live providers in the same pilot',
+);
+assert.match(providerLeaseBody, /pilot_reservation\.deposit_intent_id = deposit_intent\.id/);
+assert.match(providerLeaseBody, /payment_provider\.code = provider_member\.provider_code_snapshot/);
+const mixedProviderStatusBody = executionEpochFunctionBody(
+  'get_private_live_deposit_pilot_status_by_admin_id',
+);
+assert.match(
+  mixedProviderStatusBody,
+  /exists \([^]*from app\.private_live_deposit_pilot_providers provider_member[^]*join app\.feature_switches configured_provider_switch[^]*configured_provider_switch\.feature_key =[^]*provider_member\.provider_code_snapshot \|\|[^]*'_authoritative_verification'[^]*configured_provider_switch\.mode = 'live'[^]*provider_member\.pilot_revision_id = pilot\.id/iu,
+  'status must count a live lane only when that exact provider is configured in the pilot',
+);
+assert.doesNotMatch(
+  mixedProviderStatusBody,
+  /not exists \([^]*private_live_deposit_pilot_providers[^]*provider_switch\.mode <> 'live'/iu,
+  'status must not require every configured provider lane to be live',
+);
+assert.match(
+  executionEpochMigration,
+  /create or replace function app\.get_private_live_deposit_pilot_status_by_admin_id\([^]*security definer\s+set search_path = pg_catalog/iu,
+  'the replacement owner-status implementation must preserve its hardened routine contract',
+);
+assert.match(
+  executionEpochMigration,
+  /grant execute on function app\.lease_next_private_live_deposit_execution\(uuid, integer\)[^]*to fetanagent_deposit_executor/,
+);
+assert.match(
+  executionEpochMigration,
+  /grant execute on function app\.fence_private_live_deposit_execution_final_action\([^]*\)[^]*to fetanagent_deposit_executor/,
+);
+
+const migrationLockIndex = activationEpochMigration.indexOf(
+  'lock table app.feature_switches in share row exclusive mode',
+);
+const migrationPreflightIndex = activationEpochMigration.indexOf(
+  'do $trusted_telebirr_activation_preflight$',
+);
+const switchGuardIndex = activationEpochMigration.indexOf(
+  'create trigger feature_switches_00_trusted_telebirr_activation_lock',
+);
+const migrationRevalidationIndex = activationEpochMigration.indexOf(
+  'do $trusted_telebirr_activation_revalidation$',
+);
+assert.ok(migrationLockIndex >= 0, 'activation preflight must hold the switch table');
+assert.ok(
+  migrationLockIndex < migrationPreflightIndex &&
+    migrationPreflightIndex < switchGuardIndex &&
+    switchGuardIndex < migrationRevalidationIndex,
+  'migration must lock switches before preflight and revalidate after guard installation',
+);
+assert.equal(
+  [...activationEpochMigration.matchAll(/safe_switch_count <> 5/gu)].length,
+  2,
+  'migration must evaluate the non-live switch prerequisite before and after guard installation',
+);
+const activationSwitchTrigger = /create trigger (feature_switches_\S+activation_lock)/u.exec(
+  activationEpochMigration,
+);
+const readinessSwitchTrigger =
+  /create trigger (feature_switches_serialize_kemerbet_readiness)/u.exec(readinessCohortMigration);
+assert.ok(activationSwitchTrigger && readinessSwitchTrigger);
+assert.ok(
+  activationSwitchTrigger[1].localeCompare(readinessSwitchTrigger[1]) < 0,
+  'activation authority trigger must run before the readiness serialization trigger',
+);
+
+const renamedActivationInternals = [
+  ...activationEpochMigration.matchAll(/\brename to\s+([a-z][a-z0-9_]*)/gu),
+].map((match) => match[1]);
+assert.equal(renamedActivationInternals.length, 3);
+for (const identifier of renamedActivationInternals) {
+  assert.ok(
+    Buffer.byteLength(identifier, 'utf8') <= 63,
+    `PostgreSQL would truncate activation internal ${identifier}`,
+  );
+}
+
+const currentEpochBody = migrationFunctionBody('current_private_trusted_telebirr_activation_epoch');
+const currentControlLockIndex = currentEpochBody.indexOf('select activation_control.current_epoch');
+const currentEpochLockIndex = currentEpochBody.indexOf('select activation_epoch.*');
+const currentSwitchLockIndex = currentEpochBody.indexOf('perform feature_switch.feature_key');
+const currentPilotLockIndex = currentEpochBody.indexOf('select pilot_revision.*');
+const currentTimeIndex = currentEpochBody.indexOf('checked_at := pg_catalog.clock_timestamp()');
+assert.ok(
+  currentControlLockIndex >= 0 &&
+    currentControlLockIndex < currentEpochLockIndex &&
+    currentEpochLockIndex < currentSwitchLockIndex &&
+    currentSwitchLockIndex < currentPilotLockIndex &&
+    currentPilotLockIndex < currentTimeIndex,
+  'operation-time authority must lock control, epoch, switches, and pilot before reading time',
+);
+
+for (const ownerFunction of ['arm_private_live_deposit_pilot', 'stop_private_live_deposit_pilot']) {
+  const body = migrationFunctionBody(ownerFunction);
+  const authorityLockIndex = body.indexOf('lock_private_trusted_telebirr_activation_authority()');
+  const readinessLockIndex = body.indexOf('perform gate.singleton');
+  const legacyDelegateIndex = body.indexOf(`${ownerFunction}_by_admin_id`);
+  assert.ok(
+    authorityLockIndex >= 0 &&
+      authorityLockIndex < readinessLockIndex &&
+      readinessLockIndex < legacyDelegateIndex,
+    `${ownerFunction} must lock authority and readiness before its legacy switch/pilot sequence`,
+  );
+}
+
+const companionArmBody = migrationFunctionBody(
+  'arm_companion_verified_private_live_telebirr_pilot',
+);
+const companionAuthorityIndex = companionArmBody.indexOf(
+  'lock_private_trusted_telebirr_activation_authority()',
+);
+const companionSwitchIndex = companionArmBody.indexOf('perform feature_switch.feature_key');
+const companionPilotIndex = companionArmBody.indexOf('perform pilot_revision.id');
+const companionReadinessIndex = companionArmBody.indexOf('perform gate.singleton');
+const companionGateIndex = companionArmBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+assert.ok(
+  companionAuthorityIndex >= 0 &&
+    companionAuthorityIndex < companionReadinessIndex &&
+    companionReadinessIndex < companionSwitchIndex &&
+    companionSwitchIndex < companionPilotIndex &&
+    companionPilotIndex < companionGateIndex,
+  'companion arm must lock authority, readiness, switches, and pilot before opening its context',
+);
+
+const ownerStopBody = migrationFunctionBody('stop_private_live_deposit_pilot');
+const ownerStopAuthorityIndex = ownerStopBody.indexOf(
+  'lock_private_trusted_telebirr_activation_authority()',
+);
+const ownerStopSwitchIndex = ownerStopBody.indexOf('perform feature_switch.feature_key');
+const ownerStopPilotIndex = ownerStopBody.indexOf('perform pilot_revision.id');
+const ownerStopReadinessIndex = ownerStopBody.indexOf('perform gate.singleton');
+const ownerStopGateIndex = ownerStopBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+assert.ok(
+  ownerStopAuthorityIndex >= 0 &&
+    ownerStopAuthorityIndex < ownerStopReadinessIndex &&
+    ownerStopReadinessIndex < ownerStopSwitchIndex &&
+    ownerStopSwitchIndex < ownerStopPilotIndex &&
+    ownerStopPilotIndex < ownerStopGateIndex,
+  'Owner stop must lock authority, readiness, switches, and pilot before opening its context',
+);
+
+const emergencyBody = migrationFunctionBody('request_private_trusted_telebirr_emergency_disable');
+const emergencyIntentReads = [
+  ...emergencyBody.matchAll(/from app\.private_trusted_telebirr_emergency_disable_intents/gu),
+];
+const emergencyControlLockIndex = emergencyBody.indexOf('perform activation_control.control_key');
+const emergencyEpochLockIndex = emergencyBody.indexOf('select activation_epoch.*');
+const emergencyReadinessIndex = emergencyBody.indexOf(
+  'update app.private_owner_kemerbet_readiness_cohort_gate',
+);
+const emergencySwitchLockIndex = emergencyBody.indexOf('perform feature_switch.feature_key');
+const emergencyPilotLockIndex = emergencyBody.indexOf('perform pilot_revision.id');
+const emergencyTimeIndex = emergencyBody.indexOf('emergency_at := pg_catalog.clock_timestamp()');
+assert.equal(
+  emergencyIntentReads.length,
+  2,
+  'emergency replay must be checked around control lock',
+);
+assert.ok(
+  emergencyIntentReads[0].index < emergencyControlLockIndex &&
+    emergencyControlLockIndex < emergencyEpochLockIndex &&
+    emergencyEpochLockIndex < emergencyIntentReads[1].index &&
+    emergencyIntentReads[1].index < emergencyReadinessIndex &&
+    emergencyReadinessIndex < emergencySwitchLockIndex &&
+    emergencySwitchLockIndex < emergencyPilotLockIndex &&
+    emergencyPilotLockIndex < emergencyTimeIndex,
+  'emergency disable must preserve replay and global lock/time order',
+);
 
 assert.match(productionDisableSql, /fetanagent_trusted_telebirr_verifier_runtime with/);
 assert.match(productionDisableSql, /nologin noinherit/);
@@ -586,5 +979,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, fixed-off process gates, no activation/provision/renewal route, strict inert status, bounded DAG-independent emergency jobs, and the documented shared-route blocker',
+  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, epoch-bound verifier and execution authority, fixed-off process gates, no activation/provision/renewal route, strict inert status, bounded DAG-independent emergency jobs, and the documented shared-route blocker',
 );

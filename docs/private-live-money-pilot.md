@@ -111,12 +111,27 @@ The exact pilot revision must be checked at every authority transition:
    expiry, rechecks current Player-ID eligibility, checks per-deposit/per-player/aggregate/count
    limits, reserves the pilot budget, globally claims the provider reference, and enqueues exactly
    one execution command in one transaction.
-4. **Execution lease.** An execution job without the exact pilot reservation cannot be leased.
+4. **Execution lease.** An execution job without the exact pilot reservation and provider
+   membership cannot be leased. The database dispatches from that immutable lineage: CBE Birr keeps
+   the existing pilot boundary and receives no TeleBirr epoch binding, while a TeleBirr job is
+   immutably bound to the current database activation epoch and its complete lease window must end
+   no later than that epoch. Each candidate must join the authoritative-verification switch derived
+   from its own configured provider snapshot in `live` mode before priority ordering. A disabled or
+   stale higher-priority TeleBirr lane therefore cannot starve an independently live CBE Birr lane.
+   The public executor contract remains unchanged; provider dispatch, epoch, and expiry remain
+   private database facts.
 5. **Final-action fence.** Immediately before the irreversible KemerBet action, the database
    rechecks that the pilot is still armed, unexpired, within budget, and bound to the same Player ID,
-   amount, intent, claim, and execution attempt.
+   amount, intent, claim, and execution attempt. It also requires the lease's exact epoch to remain
+   current, unrevoked, free of emergency intent, and long-lived enough for the existing ten-second
+   browser action window. An epoch advance never promotes an older lease.
 6. **Reconciliation.** Once a final action is fenced, uncertainty never causes a blind retry. The
-   job remains blocked for exact KemerBet-history reconciliation even if the Owner stops the pilot.
+   job remains blocked for exact KemerBet-history reconciliation even if the Owner stops the pilot
+   or its activation epoch expires or is revoked. Cancellation and reconciliation are deliberately
+   not gated by current activation authority. A fresh executor poll may also adopt exactly one
+   expired `prepared` attempt after stop, pilot expiry, or natural epoch expiry, but that
+   recovery-only transition can only cancel the attempt into review; it cannot lease new work,
+   create another epoch binding, or mint final-action authority.
 
 Checks at the API or UI are useful for early rejection but never replace the database and executor
 checks.
@@ -144,6 +159,11 @@ Provider readiness is independent:
 
 A provider can be enabled for the pilot only after its own complete source/parser/receiver test
 matrix passes. Success for one provider cannot enable the other.
+
+The aggregate Owner status follows the same per-lane rule. It reports `financiallyActive: true`
+only when the common pilot/payment/execution switches are exact and at least one provider configured
+in that pilot has its own authoritative-verification switch live. It does not require every
+configured provider to be live, and a live switch for an unconfigured provider never counts.
 
 ## Operator authorization and eligibility
 

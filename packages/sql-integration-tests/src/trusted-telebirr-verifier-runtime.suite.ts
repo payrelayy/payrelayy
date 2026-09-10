@@ -13,11 +13,19 @@ const verifierGroup = 'fetanagent_trusted_telebirr_verifier';
 const verifierRuntime = 'fetanagent_trusted_telebirr_verifier_runtime';
 const authorityFunction =
   'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)';
+const authorityBeforeActivationFunction =
+  'app.load_private_live_telebirr_verification_authority_pre_epoch(uuid,uuid,timestamp with time zone)';
 const completionFunction =
   'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
+const completionBeforeActivationFunction =
+  'app.complete_private_live_telebirr_verification_pre_epoch(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const stagedEvidenceFunction = 'app.load_next_private_live_telebirr_staged_evidence()';
+const stagedEvidenceBeforeActivationFunction =
+  'app.load_next_private_live_telebirr_staged_evidence_pre_epoch()';
 const quarantineFunction =
   'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)';
+const currentActivationEpochFunction = 'app.current_private_trusted_telebirr_activation_epoch()';
+const activationAuthorityLockFunction = 'app.lock_private_trusted_telebirr_activation_authority()';
 const internalCompletionFunction =
   'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)';
 const sessionGuardFunction = 'app.require_trusted_telebirr_verifier_session()';
@@ -238,6 +246,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
     it('grants exactly four hardened routines with no base-object or extension authority', async () => {
       const client = getClient();
       const functions = await client.query<{
+        readonly configuration: readonly string[] | null;
         readonly group_execute: boolean;
         readonly hardened: boolean;
         readonly runtime_execute: boolean;
@@ -245,8 +254,8 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       }>(`
         select routine.oid::regprocedure::text as signature,
                routine.prosecdef
-                 and routine.proowner = 'postgres'::regrole
-                 and routine.proconfig = array['search_path=pg_catalog']::text[] as hardened,
+                 and routine.proowner = 'postgres'::regrole as hardened,
+               routine.proconfig as configuration,
                has_function_privilege('${verifierGroup}', routine.oid, 'EXECUTE')
                  as group_execute,
                has_function_privilege('${verifierRuntime}', routine.oid, 'EXECUTE')
@@ -260,27 +269,121 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       expect(functions.rows).toEqual([
         {
           signature: completionFunction,
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
         },
         {
           signature: stagedEvidenceFunction,
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
         },
         {
           signature: authorityFunction,
+          configuration: ['search_path=""'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
         },
         {
           signature: quarantineFunction,
+          configuration: ['search_path=pg_catalog'],
           hardened: true,
           group_execute: true,
           runtime_execute: true,
+        },
+      ]);
+
+      const activationInterlocks = await client.query<{
+        readonly configuration: readonly string[] | null;
+        readonly group_execute: boolean;
+        readonly hardened: boolean;
+        readonly identifier_within_limit: boolean;
+        readonly owner_only_acl: boolean;
+        readonly runtime_execute: boolean;
+        readonly signature: string;
+      }>(
+        `
+        select routine.oid::regprocedure::text as signature,
+               routine.prosecdef
+                 and routine.proowner = 'postgres'::regrole as hardened,
+               routine.proconfig as configuration,
+               pg_catalog.octet_length(routine.proname::text)
+                 <= pg_catalog.current_setting('max_identifier_length')::integer
+                   as identifier_within_limit,
+               has_function_privilege('${verifierGroup}', requested.signature, 'EXECUTE')
+                 as group_execute,
+               has_function_privilege('${verifierRuntime}', requested.signature, 'EXECUTE')
+                 as runtime_execute,
+               not exists (
+                 select 1
+                   from aclexplode(coalesce(
+                     routine.proacl, acldefault('f', routine.proowner)
+                   )) privilege
+                  where privilege.grantee <> routine.proowner
+               ) as owner_only_acl
+          from unnest($1::text[]) requested(signature)
+          join pg_proc routine on routine.oid = requested.signature::regprocedure
+         order by routine.oid::regprocedure::text
+      `,
+        [
+          [
+            completionBeforeActivationFunction,
+            currentActivationEpochFunction,
+            stagedEvidenceBeforeActivationFunction,
+            authorityBeforeActivationFunction,
+            activationAuthorityLockFunction,
+          ],
+        ],
+      );
+      expect(activationInterlocks.rows).toEqual([
+        {
+          signature: completionBeforeActivationFunction,
+          configuration: ['search_path=pg_catalog'],
+          hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
+        },
+        {
+          signature: currentActivationEpochFunction,
+          configuration: ['search_path=""'],
+          hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
+        },
+        {
+          signature: stagedEvidenceBeforeActivationFunction,
+          configuration: ['search_path=pg_catalog'],
+          hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
+        },
+        {
+          signature: authorityBeforeActivationFunction,
+          configuration: ['search_path=pg_catalog'],
+          hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
+        },
+        {
+          signature: activationAuthorityLockFunction,
+          configuration: ['search_path=""'],
+          hardened: true,
+          identifier_within_limit: true,
+          group_execute: false,
+          runtime_execute: false,
+          owner_only_acl: true,
         },
       ]);
 
@@ -807,12 +910,15 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         await client.query('begin');
         try {
           await client.query(`set local role ${role}`);
-          const result = await client.query<{ readonly authority: unknown }>(`
-            select app.load_private_live_telebirr_verification_authority(
+          const failure = await currentSessionCallFailure(
+            client,
+            `select app.load_private_live_telebirr_verification_authority(
               '${randomUUID()}'::uuid, '${randomUUID()}'::uuid, null
-            ) as authority
-          `);
-          expect(result.rows).toEqual([{ authority: null }]);
+            )`,
+          );
+          expect(failure.message).toContain(
+            'The trusted TeleBirr activation epoch is not currently authorized.',
+          );
         } finally {
           await client.query('rollback');
         }
@@ -870,7 +976,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         expect(second.authority_state_digest).toBe(first.authority_state_digest);
         expect(Date.parse(second.captured_at)).toBeGreaterThan(Date.parse(first.captured_at));
         expect(first.pilot_state).toBe('armed');
-        expect(first.signer_fingerprint).toBe(`sha256:${'d'.repeat(64)}`);
+        expect(first.signer_fingerprint).toBe(pilot.assignmentSignerPublicKeyDigest);
         expect(first.device_fingerprint).toBe(`sha256:${'e'.repeat(64)}`);
         expect(first.signer_fingerprint).not.toBe(first.device_fingerprint);
         expect(first.submitting_customer_id).toBe(pilot.submittingCustomerId);
@@ -1059,12 +1165,15 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
              to ${verifierRuntime}`,
         );
         await client.query(`set session authorization ${verifierRuntime}`);
-        const beforeMargin = await client.query<{ readonly authority: unknown }>(`
-          select app.load_private_live_telebirr_verification_authority(
+        const beforeMargin = await currentSessionCallFailure(
+          client,
+          `select app.load_private_live_telebirr_verification_authority(
             '${randomUUID()}'::uuid, '${randomUUID()}'::uuid, null
-          ) as authority
-        `);
-        expect(beforeMargin.rows).toEqual([{ authority: null }]);
+          )`,
+        );
+        expect(beforeMargin.message).toContain(
+          'The trusted TeleBirr activation epoch is not currently authorized.',
+        );
 
         await client.query(`select pg_temp.shorten_trusted_telebirr_runtime_validity()`);
 
@@ -1118,7 +1227,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
         `
         select pg_get_functiondef($1::regprocedure) as definition
       `,
-        [authorityFunction],
+        [authorityBeforeActivationFunction],
       );
       const definition = source.rows[0]?.definition ?? '';
       expect(definition).toContain('perform app.require_trusted_telebirr_verifier_session()');
@@ -1150,112 +1259,21 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
       expect(completionSource.rows[0]?.definition ?? '').toContain(
         'perform app.require_trusted_telebirr_verifier_session()',
       );
+      expect(completionSource.rows[0]?.definition ?? '').toContain(
+        'app.current_private_trusted_telebirr_activation_epoch()',
+      );
 
       await client.query('begin');
       try {
-        const pilotRevisionId = randomUUID();
-        const configurationDigest = `sha256:${'a'.repeat(64)}`;
-        await client.query(`
-          update app.feature_switches
-             set mode = case
-               when feature_key in (
-                 'deposit_execution', 'payment_verification',
-                 'private_live_deposit_pilot', 'telebirr_authoritative_verification'
-               ) then 'live' else mode end
-           where feature_key in (
-             'cbe_birr_authoritative_verification', 'deposit_execution',
-             'payment_verification', 'private_live_deposit_pilot',
-             'telebirr_authoritative_verification'
-           )
-        `);
-        await client.query(
-          `
-          update app.feature_switches
-             set settings = jsonb_build_object(
-               'contract_version', 1,
-               'pilot_revision_id', $1::text,
-               'configuration_digest', $2::text
-             )
-           where feature_key = 'private_live_deposit_pilot'
-        `,
-          [pilotRevisionId, configurationDigest],
+        const failure = await currentSessionCallFailure(
+          client,
+          `update app.feature_switches
+              set mode = 'live'
+            where feature_key = 'telebirr_authoritative_verification'`,
         );
-        const telebirrOnly = await client.query<{ readonly live_count: number }>(`
-          select count(*)::integer as live_count
-            from app.feature_switches
-           where feature_key in (
-             'deposit_execution', 'payment_verification',
-             'private_live_deposit_pilot', 'telebirr_authoritative_verification'
-           ) and mode = 'live'
-        `);
-        expect(telebirrOnly.rows).toEqual([{ live_count: 4 }]);
-        const cbeDisabled = await client.query<{ readonly mode: string }>(`
-          select mode from app.feature_switches
-           where feature_key = 'cbe_birr_authoritative_verification'
-        `);
-        expect(cbeDisabled.rows).toEqual([{ mode: 'disabled' }]);
-        const exactSettings = await client.query<{ readonly accepted: boolean }>(
-          `
-          select (
-            select settings = jsonb_build_object(
-              'contract_version', 1,
-              'pilot_revision_id', $1::text,
-              'configuration_digest', $2::text
-            )
-              from app.feature_switches
-             where feature_key = 'private_live_deposit_pilot'
-          ) and (
-            select settings = '{}'::jsonb
-              from app.feature_switches
-             where feature_key = 'telebirr_authoritative_verification'
-          ) as accepted
-        `,
-          [pilotRevisionId, configurationDigest],
+        expect(failure.message).toContain(
+          'A current trusted TeleBirr activation epoch is required for live switches.',
         );
-        expect(exactSettings.rows).toEqual([{ accepted: true }]);
-        const wrongSettings = await client.query<{
-          readonly wrong_digest_accepted: boolean;
-          readonly wrong_pilot_accepted: boolean;
-        }>(
-          `
-          select settings = jsonb_build_object(
-                   'contract_version', 1,
-                   'pilot_revision_id', $1::text,
-                   'configuration_digest', $2::text
-                 ) as wrong_pilot_accepted,
-                 settings = jsonb_build_object(
-                   'contract_version', 1,
-                   'pilot_revision_id', $3::text,
-                   'configuration_digest', $4::text
-                 ) as wrong_digest_accepted
-            from app.feature_switches
-           where feature_key = 'private_live_deposit_pilot'
-        `,
-          [randomUUID(), configurationDigest, pilotRevisionId, `sha256:${'b'.repeat(64)}`],
-        );
-        expect(wrongSettings.rows).toEqual([
-          { wrong_pilot_accepted: false, wrong_digest_accepted: false },
-        ]);
-
-        await client.query(`
-          update app.feature_switches set mode = case
-            when feature_key = 'telebirr_authoritative_verification' then 'disabled'
-            when feature_key = 'cbe_birr_authoritative_verification' then 'live'
-            else mode end
-           where feature_key in (
-             'cbe_birr_authoritative_verification',
-             'telebirr_authoritative_verification'
-           )
-        `);
-        const wrongProvider = await client.query<{ readonly live_count: number }>(`
-          select count(*)::integer as live_count
-            from app.feature_switches
-           where feature_key in (
-             'deposit_execution', 'payment_verification',
-             'private_live_deposit_pilot', 'telebirr_authoritative_verification'
-           ) and mode = 'live'
-        `);
-        expect(wrongProvider.rows).toEqual([{ live_count: 3 }]);
       } finally {
         await client.query('rollback');
       }

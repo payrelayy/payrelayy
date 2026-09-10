@@ -69,7 +69,7 @@ export function registerStagingContinuousAvailabilitySqlTests(getClient: () => C
       }
     });
 
-    for (const [name, mutation] of [
+    for (const [name, mutation, bypassSwitchImmutability] of [
       ['expired login', "alter role fetanagent_player_actions_runtime valid until '2000-01-01'"],
       [
         'near-expiry login',
@@ -94,6 +94,7 @@ export function registerStagingContinuousAvailabilitySqlTests(getClient: () => C
       [
         'missing financial switch',
         "delete from app.feature_switches where feature_key = 'telebirr_authoritative_verification'",
+        true,
       ],
     ] as const) {
       it(`rejects ${name} without making partial lifetime changes`, async () => {
@@ -101,7 +102,13 @@ export function registerStagingContinuousAvailabilitySqlTests(getClient: () => C
         await client.query('begin');
         try {
           await prepare(client);
+          if (bypassSwitchImmutability) {
+            await client.query("set local session_replication_role = 'replica'");
+          }
           await client.query(mutation);
+          if (bypassSwitchImmutability) {
+            await client.query("set local session_replication_role = 'origin'");
+          }
           const before = await snapshot(client);
           await client.query('savepoint availability_attempt');
           await expect(client.query(sql)).rejects.toThrow();

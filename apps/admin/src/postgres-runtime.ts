@@ -158,6 +158,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.require_companion_verified_private_live_telebirr_pilot(uuid,uuid)', 'execute') as internal_private_live_pilot_companion_assertion_denied,
     has_function_privilege(current_user, 'app.stop_private_live_deposit_pilot(uuid,uuid,text)', 'execute') as private_live_pilot_stop_allowed,
     has_function_privilege(current_user, 'app.get_private_live_deposit_pilot_status(uuid,uuid)', 'execute') as private_live_pilot_status_allowed,
+    has_function_privilege(current_user, 'app.request_private_trusted_telebirr_emergency_disable(uuid,bigint,uuid,text)', 'execute') as trusted_telebirr_emergency_disable_allowed,
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)', 'execute') as companion_device_pairing_issue_allowed,
     has_function_privilege(current_user, 'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)', 'execute') as companion_device_revoke_allowed,
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)', 'execute') as companion_lookup_issue_allowed,
@@ -211,7 +212,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 34
+      select count(*) = 35
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -247,6 +248,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)'::regprocedure,
           'app.stop_private_live_deposit_pilot(uuid,uuid,text)'::regprocedure,
           'app.get_private_live_deposit_pilot_status(uuid,uuid)'::regprocedure
+          ,'app.request_private_trusted_telebirr_emergency_disable(uuid,bigint,uuid,text)'::regprocedure
           ,'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)'::regprocedure
           ,'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)'::regprocedure

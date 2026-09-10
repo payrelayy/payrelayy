@@ -63,7 +63,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     const executeCountSql = OWNER_CONTROL_PREFLIGHT_SQL.split(
       'as exact_app_execute_count',
     )[0]!.split('as recorder_denied,')[1]!;
-    expect(executeCountSql).toMatch(/select count\(\*\) = 34\s*\+/u);
+    expect(executeCountSql).toMatch(/select count\(\*\) = 35\s*\+/u);
     for (const signature of [
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',
@@ -142,6 +142,12 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.get_private_live_deposit_pilot_status(uuid,uuid)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "has_function_privilege(current_user, 'app.request_private_trusted_telebirr_emergency_disable(uuid,bigint,uuid,text)', 'execute') as trusted_telebirr_emergency_disable_allowed",
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "'app.request_private_trusted_telebirr_emergency_disable(uuid,bigint,uuid,text)'::regprocedure",
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_receiver_accounts(uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(

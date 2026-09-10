@@ -46,11 +46,15 @@ export const COMPANION_AUTHORITATIVE_EXECUTION_STATUS_TRANSCRIPT =
   'agent-platform-companion-authoritative-execution-status-transcript-v2' as const;
 export const COMPANION_EXECUTION_MAX_ENROLLMENT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const COMPANION_EXECUTION_MAX_ASSIGNMENT_LIFETIME_MS = 2 * 60 * 1_000;
-export const COMPANION_EXECUTION_MAX_AUTHORITY_LIFETIME_MS = 15_000;
+export const COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS = 10_000;
+export const COMPANION_EXECUTION_MAX_AUTHORITY_LIFETIME_MS =
+  COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS;
 export const COMPANION_EXECUTION_MAX_STATUS_LIFETIME_MS = 10_000;
 export const COMPANION_EXECUTION_MAX_ROUND_TRIP_TIME_MS = 10_000;
 export const COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS = 2_000;
 export const COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS = 5 * 60 * 1_000;
+export const COMPANION_EXECUTION_POSTGRES_BIGINT_MAX = '9223372036854775807' as const;
+export const COMPANION_EXECUTION_POSTGRES_INTEGER_MAX = '2147483647' as const;
 
 export interface ExecutionEnrollmentBody {
   readonly contractVersion: typeof COMPANION_EXECUTION_CONTRACT_VERSION;
@@ -236,9 +240,10 @@ export interface ExecutionResultBody {
   readonly requestNonceDigest: string | null;
   readonly outcome: ExecutionResultOutcome;
   readonly finalActionStarted: boolean;
+  readonly finalActionStartedAt: string | null;
   readonly providerResponseDigest: string | null;
   readonly evidenceDigest: string;
-  readonly deviceObservedAt: string;
+  readonly reportedAt: string;
 }
 
 export interface SignedExecutionResult {
@@ -343,7 +348,7 @@ export interface TrustedRoundTripContext {
 export interface ExecutionAssignmentVerificationContext extends TrustedExecutionIdentityContext {
   readonly signedExecutionEnrollment: unknown;
   readonly roundTrip: TrustedRoundTripContext;
-  readonly consumedReplayIdentities?: readonly string[];
+  readonly consumedReplayIdentities: readonly string[];
 }
 
 export interface OneUseActionAuthorityVerificationContext extends TrustedExecutionIdentityContext {
@@ -351,14 +356,14 @@ export interface OneUseActionAuthorityVerificationContext extends TrustedExecuti
   readonly signedExecutionAssignment: unknown;
   readonly expectedRequestNonceDigest: string;
   readonly roundTrip: TrustedRoundTripContext;
-  readonly consumedReplayIdentities?: readonly string[];
+  readonly consumedReplayIdentities: readonly string[];
 }
 
 export interface ExecutionResultVerificationContext extends TrustedExecutionIdentityContext {
   readonly signedExecutionEnrollment: unknown;
   readonly signedExecutionAssignment: unknown;
   readonly signedOneUseActionAuthority: unknown | null;
-  readonly consumedReplayIdentities?: readonly string[];
+  readonly consumedReplayIdentities: readonly string[];
 }
 
 export interface AuthoritativeExecutionStatusVerificationContext extends TrustedExecutionIdentityContext {
@@ -369,7 +374,40 @@ export interface AuthoritativeExecutionStatusVerificationContext extends Trusted
   readonly expectedQueryNonceDigest: string;
   readonly minimumStatusSequence: string;
   readonly roundTrip: TrustedRoundTripContext;
-  readonly consumedReplayIdentities?: readonly string[];
+  readonly consumedReplayIdentities: readonly string[];
+}
+
+/**
+ * Authentication output only. It deliberately carries literal false action authority and requires
+ * a separate, external atomic replay-consumption transition before any action can be considered.
+ */
+export interface CryptographicallyVerifiedOneUseActionAuthority {
+  readonly verificationKind: 'cryptographically_verified_one_use_action_authority';
+  readonly grantsActionAuthority: false;
+  readonly atomicReplayConsumptionRequired: true;
+  readonly authorityBodyDigest: string;
+  readonly replayIdentity: string;
+  readonly signedServerActionDeadline: string;
+  readonly monotonicActionDeadlineMs: number;
+  readonly verifiedAtTrustedTime: string;
+  readonly responseReceivedMonotonicMs: number;
+}
+
+/**
+ * A receipt supplied by the eventual durable runtime after an atomic check-and-consume operation.
+ * This package cannot create or substantiate the receipt because it intentionally has no storage.
+ */
+export interface ExternalAtomicReplayConsumptionReceipt {
+  readonly receiptKind: 'external_atomic_replay_consumption';
+  readonly replayIdentity: string;
+  readonly authorityBodyDigest: string;
+  readonly consumedExactlyOnce: true;
+}
+
+export interface ImmediateActionDeadlineRecheckContext {
+  readonly trustedNow: string;
+  readonly monotonicNowMs: number;
+  readonly atomicConsumptionReceipt: ExternalAtomicReplayConsumptionReceipt;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -383,6 +421,10 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const P1363_PATTERN = /^[A-Za-z0-9_-]{86}$/u;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const MAX_P256_SPKI_BYTES = 91;
+const P256_ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+const P256_HALF_ORDER = P256_ORDER / 2n;
+const POSTGRES_BIGINT_MAX = BigInt(COMPANION_EXECUTION_POSTGRES_BIGINT_MAX);
+const POSTGRES_INTEGER_MAX = BigInt(COMPANION_EXECUTION_POSTGRES_INTEGER_MAX);
 
 const enrollmentBodyKeys = [
   'contractVersion',
@@ -526,9 +568,10 @@ const resultBodyKeys = [
   'requestNonceDigest',
   'outcome',
   'finalActionStarted',
+  'finalActionStartedAt',
   'providerResponseDigest',
   'evidenceDigest',
-  'deviceObservedAt',
+  'reportedAt',
 ] as const;
 
 const statusBodyKeys = [
@@ -606,6 +649,15 @@ const deviceEnvelopeKeys = [
   'signature',
 ] as const;
 
+const atomicConsumptionReceiptKeys = [
+  'receiptKind',
+  'replayIdentity',
+  'authorityBodyDigest',
+  'consumedExactlyOnce',
+] as const;
+
+const cryptographicallyVerifiedAuthorities = new WeakSet<object>();
+
 function isPlainNonProxyRecord(value: unknown): value is UnknownRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || isProxy(value)) {
     return false;
@@ -647,8 +699,21 @@ function opaque(value: unknown): string | undefined {
   return typeof value === 'string' && OPAQUE_ID_PATTERN.test(value) ? value : undefined;
 }
 
+function boundedDecimal(value: unknown, maximum: bigint): string | undefined {
+  if (typeof value !== 'string' || !DECIMAL_ID_PATTERN.test(value)) return undefined;
+  try {
+    return BigInt(value) <= maximum ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function decimal(value: unknown): string | undefined {
-  return typeof value === 'string' && DECIMAL_ID_PATTERN.test(value) ? value : undefined;
+  return boundedDecimal(value, POSTGRES_BIGINT_MAX);
+}
+
+function postgresInteger(value: unknown): string | undefined {
+  return boundedDecimal(value, POSTGRES_INTEGER_MAX);
 }
 
 function digest(value: unknown): string | undefined {
@@ -669,6 +734,10 @@ function timestamp(value: unknown): string | undefined {
   }
   const parsed = new Date(value);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value ? value : undefined;
+}
+
+function nullableTimestamp(value: unknown): string | null | undefined {
+  return value === null ? null : timestamp(value);
 }
 
 function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
@@ -739,10 +808,31 @@ function parseP256PrivateKey(value: unknown): ParsedP256PrivateKey | undefined {
   }
 }
 
+function p256Scalar(bytes: Uint8Array): bigint {
+  return BigInt(`0x${Buffer.from(bytes).toString('hex')}`);
+}
+
+function p256ScalarBytes(value: bigint): Buffer {
+  return Buffer.from(value.toString(16).padStart(64, '0'), 'hex');
+}
+
+function normalizedLowSP1363Bytes(value: Uint8Array): Buffer | undefined {
+  const bytes = Buffer.from(value);
+  if (bytes.byteLength !== 64) return undefined;
+  const r = p256Scalar(bytes.subarray(0, 32));
+  const s = p256Scalar(bytes.subarray(32));
+  if (r <= 0n || r >= P256_ORDER || s <= 0n || s >= P256_ORDER) return undefined;
+  const lowS = s > P256_HALF_ORDER ? P256_ORDER - s : s;
+  return Buffer.concat([p256ScalarBytes(r), p256ScalarBytes(lowS)]);
+}
+
 function parseSignature(value: unknown): string | undefined {
   if (typeof value !== 'string' || !P1363_PATTERN.test(value)) return undefined;
   const bytes = Buffer.from(value, 'base64url');
-  return bytes.byteLength === 64 && bytes.toString('base64url') === value ? value : undefined;
+  const normalized = normalizedLowSP1363Bytes(bytes);
+  return normalized && normalized.equals(bytes) && bytes.toString('base64url') === value
+    ? value
+    : undefined;
 }
 
 function scalarText(value: Scalar): string {
@@ -785,14 +875,16 @@ function verifyP1363Signature(
   key: KeyObject | undefined,
 ): boolean {
   try {
+    const canonicalSignature = parseSignature(encodedSignature);
     return Boolean(
       transcript &&
       key &&
+      canonicalSignature &&
       verifyP256(
         'sha256',
         transcript,
         { key, dsaEncoding: 'ieee-p1363' },
-        Buffer.from(encodedSignature, 'base64url'),
+        Buffer.from(canonicalSignature, 'base64url'),
       ),
     );
   } catch {
@@ -807,10 +899,12 @@ function signP1363Transcript(
   try {
     const key = parseP256PrivateKey(keyCandidate);
     if (!transcript || !key) return undefined;
-    const encoded = signP256('sha256', transcript, {
+    const raw = signP256('sha256', transcript, {
       key: key.key,
       dsaEncoding: 'ieee-p1363',
-    }).toString('base64url');
+    });
+    const normalized = normalizedLowSP1363Bytes(raw);
+    const encoded = normalized?.toString('base64url');
     return parseSignature(encoded);
   } catch {
     return undefined;
@@ -844,7 +938,7 @@ function exactDenseDigestArray(value: unknown): readonly string[] | undefined {
 }
 
 function replayIsFresh(identity: string, consumedCandidate: unknown): boolean {
-  if (consumedCandidate === undefined) return true;
+  if (consumedCandidate === undefined) return false;
   const consumed = exactDenseDigestArray(consumedCandidate);
   return Boolean(consumed && !consumed.includes(identity));
 }
@@ -894,7 +988,7 @@ export function decodeExecutionEnrollmentBody(
     const devicePublicKeySpkiSha256 = digest(own(candidate, 'devicePublicKeySpkiSha256'));
     const platformAgentAccountId = opaque(own(candidate, 'platformAgentAccountId'));
     const pilotId = opaque(own(candidate, 'pilotId'));
-    const pilotRevision = decimal(own(candidate, 'pilotRevision'));
+    const pilotRevision = postgresInteger(own(candidate, 'pilotRevision'));
     const pilotConfigDigest = digest(own(candidate, 'pilotConfigDigest'));
     const maxAssignmentLifetimeMs = boundedInteger(
       own(candidate, 'maxAssignmentLifetimeMs'),
@@ -1024,7 +1118,7 @@ export function decodeExecutionAssignmentBody(
     const deviceKeyId = opaque(own(candidate, 'deviceKeyId'));
     const executionSignerKeyId = opaque(own(candidate, 'executionSignerKeyId'));
     const pilotId = opaque(own(candidate, 'pilotId'));
-    const pilotRevision = decimal(own(candidate, 'pilotRevision'));
+    const pilotRevision = postgresInteger(own(candidate, 'pilotRevision'));
     const pilotConfigDigest = digest(own(candidate, 'pilotConfigDigest'));
     const pilotReservationId = opaque(own(candidate, 'pilotReservationId'));
     const pilotReservationDigest = digest(own(candidate, 'pilotReservationDigest'));
@@ -1134,7 +1228,7 @@ export function decodeOneUseActionAuthorityBody(
     const deviceKeyId = opaque(own(candidate, 'deviceKeyId'));
     const executionSignerKeyId = opaque(own(candidate, 'executionSignerKeyId'));
     const pilotId = opaque(own(candidate, 'pilotId'));
-    const pilotRevision = decimal(own(candidate, 'pilotRevision'));
+    const pilotRevision = postgresInteger(own(candidate, 'pilotRevision'));
     const pilotConfigDigest = digest(own(candidate, 'pilotConfigDigest'));
     const pilotReservationId = opaque(own(candidate, 'pilotReservationId'));
     const pilotReservationDigest = digest(own(candidate, 'pilotReservationDigest'));
@@ -1180,8 +1274,10 @@ export function decodeOneUseActionAuthorityBody(
       !databaseAuthorityIssuedAt ||
       !serverValidUntil ||
       Date.parse(databaseAuthorityIssuedAt) < Date.parse(databaseFencedAt) ||
-      Date.parse(databaseAuthorityIssuedAt) - Date.parse(databaseFencedAt) >
-        COMPANION_EXECUTION_MAX_ROUND_TRIP_TIME_MS ||
+      Date.parse(databaseAuthorityIssuedAt) - Date.parse(databaseFencedAt) >=
+        COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS ||
+      Date.parse(serverValidUntil) >
+        Date.parse(databaseFencedAt) + COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS ||
       !validLifetime(
         databaseAuthorityIssuedAt,
         serverValidUntil,
@@ -1261,7 +1357,7 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
     const deviceKeyId = opaque(own(candidate, 'deviceKeyId'));
     const executionSignerKeyId = opaque(own(candidate, 'executionSignerKeyId'));
     const pilotId = opaque(own(candidate, 'pilotId'));
-    const pilotRevision = decimal(own(candidate, 'pilotRevision'));
+    const pilotRevision = postgresInteger(own(candidate, 'pilotRevision'));
     const pilotConfigDigest = digest(own(candidate, 'pilotConfigDigest'));
     const pilotReservationId = opaque(own(candidate, 'pilotReservationId'));
     const pilotReservationDigest = digest(own(candidate, 'pilotReservationDigest'));
@@ -1271,9 +1367,10 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
     const requestNonceDigest = nullableDigest(own(candidate, 'requestNonceDigest'));
     const outcome = own(candidate, 'outcome');
     const finalActionStarted = own(candidate, 'finalActionStarted');
+    const finalActionStartedAt = nullableTimestamp(own(candidate, 'finalActionStartedAt'));
     const providerResponseDigest = nullableDigest(own(candidate, 'providerResponseDigest'));
     const evidenceDigest = digest(own(candidate, 'evidenceDigest'));
-    const deviceObservedAt = timestamp(own(candidate, 'deviceObservedAt'));
+    const reportedAt = timestamp(own(candidate, 'reportedAt'));
     const authorityPresent =
       typeof authorityId === 'string' &&
       typeof authorityBodyDigest === 'string' &&
@@ -1289,14 +1386,21 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
     const outcomeSemantics =
       (outcome === 'submission_attempted' &&
         finalActionStarted === true &&
+        typeof finalActionStartedAt === 'string' &&
         authorityPresent &&
+        typeof reportedAt === 'string' &&
+        Date.parse(reportedAt) >= Date.parse(finalActionStartedAt) &&
         typeof providerResponseDigest === 'string') ||
       (outcome === 'local_uncertain' &&
         finalActionStarted === true &&
+        typeof finalActionStartedAt === 'string' &&
         authorityPresent &&
+        typeof reportedAt === 'string' &&
+        Date.parse(reportedAt) >= Date.parse(finalActionStartedAt) &&
         providerResponseDigest !== undefined) ||
       (outcome === 'refused_before_fence' &&
         finalActionStarted === false &&
+        finalActionStartedAt === null &&
         authorityAbsent &&
         providerResponseDigest === null);
     if (
@@ -1329,9 +1433,10 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
       fenceId === undefined ||
       fenceNonceDigest === undefined ||
       requestNonceDigest === undefined ||
+      finalActionStartedAt === undefined ||
       providerResponseDigest === undefined ||
       !evidenceDigest ||
-      !deviceObservedAt ||
+      !reportedAt ||
       !outcomeSemantics
     ) {
       return undefined;
@@ -1372,9 +1477,10 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
       requestNonceDigest,
       outcome: outcome as ExecutionResultOutcome,
       finalActionStarted: finalActionStarted as boolean,
+      finalActionStartedAt,
       providerResponseDigest,
       evidenceDigest,
-      deviceObservedAt,
+      reportedAt,
     });
   } catch {
     return undefined;
@@ -1398,7 +1504,7 @@ function validAuthoritativeStateCombination(
     reconciliation === 'not_required' &&
     terminal === 'refused'
   ) {
-    return resultDigest === null && responseDigest === null;
+    return resultDigest === null && responseDigest === null && evidenceDigest === null;
   }
   if (!authorityPresent || fence === 'not_acquired') return false;
   if (
@@ -1407,7 +1513,7 @@ function validAuthoritativeStateCombination(
     reconciliation === 'pending' &&
     terminal === 'non_terminal'
   ) {
-    return resultDigest === null && responseDigest === null;
+    return resultDigest === null && responseDigest === null && evidenceDigest === null;
   }
   if (
     fence === 'consumed' &&
@@ -1477,7 +1583,7 @@ export function decodeAuthoritativeExecutionStatusBody(
     const deviceKeyId = opaque(own(candidate, 'deviceKeyId'));
     const executionSignerKeyId = opaque(own(candidate, 'executionSignerKeyId'));
     const pilotId = opaque(own(candidate, 'pilotId'));
-    const pilotRevision = decimal(own(candidate, 'pilotRevision'));
+    const pilotRevision = postgresInteger(own(candidate, 'pilotRevision'));
     const pilotConfigDigest = digest(own(candidate, 'pilotConfigDigest'));
     const pilotReservationId = opaque(own(candidate, 'pilotReservationId'));
     const pilotReservationDigest = digest(own(candidate, 'pilotReservationDigest'));
@@ -2200,10 +2306,12 @@ function serverEnvelopeSignatureIsValid<T>(
   );
 }
 
+type ChainValidityMode = 'currently_actionable' | 'historically_authenticated';
+
 function verifyEnrollmentChainCore(
   candidate: unknown,
   context: TrustedExecutionIdentityContext,
-  requireCurrentlyValid: boolean,
+  validityMode: ChainValidityMode,
 ): VerifiedEnrollmentChain | undefined {
   try {
     const enrollment = decodeSignedExecutionEnrollment(candidate);
@@ -2262,7 +2370,7 @@ function verifyEnrollmentChainCore(
       Date.parse(enrollment.body.issuedAt) < Date.parse(certificate.body.issuedAt) ||
       Date.parse(enrollment.body.validFrom) < Date.parse(certificate.body.validFrom) ||
       Date.parse(enrollment.body.validUntil) > Date.parse(certificate.body.validUntil) ||
-      (requireCurrentlyValid &&
+      (validityMode === 'currently_actionable' &&
         (nowMs < Date.parse(certificate.body.validFrom) ||
           nowMs >= Date.parse(certificate.body.validUntil) ||
           nowMs < Date.parse(enrollment.body.validFrom) ||
@@ -2280,7 +2388,7 @@ export function verifySignedExecutionEnrollment(
   candidate: unknown,
   context: TrustedExecutionIdentityContext,
 ): boolean {
-  return Boolean(verifyEnrollmentChainCore(candidate, context, true));
+  return Boolean(verifyEnrollmentChainCore(candidate, context, 'currently_actionable'));
 }
 
 const assignmentEnrollmentBindingKeys = [
@@ -2339,9 +2447,9 @@ function verifyAssignmentChainCore(
   candidate: unknown,
   signedEnrollment: unknown,
   context: TrustedExecutionIdentityContext,
-  requireCurrentlyValid: boolean,
+  validityMode: ChainValidityMode,
 ): VerifiedAssignmentChain | undefined {
-  const chain = verifyEnrollmentChainCore(signedEnrollment, context, requireCurrentlyValid);
+  const chain = verifyEnrollmentChainCore(signedEnrollment, context, validityMode);
   const assignment = decodeSignedExecutionAssignment(candidate);
   if (!chain || !assignment) return undefined;
   const enrollment = chain.enrollment;
@@ -2381,7 +2489,7 @@ export function verifySignedExecutionAssignment(
       candidate,
       context.signedExecutionEnrollment,
       context,
-      true,
+      'currently_actionable',
     );
     if (!chain) return false;
     const roundTrip = trustedRoundTrip(context.roundTrip, chain.enrollment.body.maxRoundTripTimeMs);
@@ -2410,13 +2518,13 @@ function verifyAuthorityChainCore(
   signedAssignment: unknown,
   signedEnrollment: unknown,
   context: TrustedExecutionIdentityContext,
-  requireCurrentlyValid: boolean,
+  validityMode: ChainValidityMode,
 ): VerifiedAuthorityChain | undefined {
   const chain = verifyAssignmentChainCore(
     signedAssignment,
     signedEnrollment,
     context,
-    requireCurrentlyValid,
+    validityMode,
   );
   const authority = decodeSignedOneUseActionAuthority(candidate);
   if (!chain || !authority) return undefined;
@@ -2437,6 +2545,12 @@ function verifyAuthorityChainCore(
     ) ||
     Date.parse(authority.body.databaseFencedAt) < Date.parse(assignment.body.serverNotBefore) ||
     Date.parse(authority.body.serverValidUntil) > Date.parse(assignment.body.serverValidUntil) ||
+    Date.parse(authority.body.databaseAuthorityIssuedAt) >=
+      Date.parse(authority.body.databaseFencedAt) +
+        COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS ||
+    Date.parse(authority.body.serverValidUntil) >
+      Date.parse(authority.body.databaseFencedAt) +
+        COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS ||
     Date.parse(authority.body.serverValidUntil) -
       Date.parse(authority.body.databaseAuthorityIssuedAt) >
       chain.enrollment.body.maxAuthorityLifetimeMs
@@ -2446,33 +2560,157 @@ function verifyAuthorityChainCore(
   return Object.freeze({ ...chain, authority });
 }
 
-export function verifySignedOneUseActionAuthority(
+export function verifySignedOneUseActionAuthorityCryptographically(
   candidate: unknown,
   context: OneUseActionAuthorityVerificationContext,
-): boolean {
+): CryptographicallyVerifiedOneUseActionAuthority | undefined {
   try {
     const chain = verifyAuthorityChainCore(
       candidate,
       context.signedExecutionAssignment,
       context.signedExecutionEnrollment,
       context,
-      true,
+      'currently_actionable',
     );
     const expectedRequestNonceDigest = digest(context.expectedRequestNonceDigest);
-    if (!chain || !expectedRequestNonceDigest) return false;
+    if (!chain || !expectedRequestNonceDigest) return undefined;
     const roundTrip = trustedRoundTrip(context.roundTrip, chain.enrollment.body.maxRoundTripTimeMs);
     const now = chain.trustedNowMs;
     const body = chain.authority.body;
     const issuedAt = Date.parse(body.databaseAuthorityIssuedAt);
+    const fencedAt = Date.parse(body.databaseFencedAt);
+    const signedServerDeadline = Math.min(
+      Date.parse(body.serverValidUntil),
+      Date.parse(chain.assignment.body.serverValidUntil),
+      fencedAt + COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS,
+    );
+    const monotonicRequestStartedMs = boundedInteger(
+      context.roundTrip.monotonicRequestStartedMs,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const monotonicResponseReceivedMs = boundedInteger(
+      context.roundTrip.monotonicResponseReceivedMs,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
     const replay = deriveOneUseActionAuthorityReplayIdentity(chain.authority);
+    const hardMonotonicDeadline =
+      monotonicRequestStartedMs === undefined
+        ? undefined
+        : monotonicRequestStartedMs + COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS;
+    const conservativeWallNow = now + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS;
+    const remainingSignedMilliseconds = signedServerDeadline - conservativeWallNow;
+    const monotonicActionDeadlineMs =
+      monotonicResponseReceivedMs === undefined ||
+      hardMonotonicDeadline === undefined ||
+      !Number.isSafeInteger(hardMonotonicDeadline)
+        ? undefined
+        : Math.min(
+            hardMonotonicDeadline,
+            monotonicResponseReceivedMs + remainingSignedMilliseconds,
+          );
+    if (
+      roundTrip === undefined ||
+      monotonicRequestStartedMs === undefined ||
+      monotonicResponseReceivedMs === undefined ||
+      monotonicActionDeadlineMs === undefined ||
+      monotonicResponseReceivedMs >= hardMonotonicDeadline! ||
+      monotonicResponseReceivedMs >= monotonicActionDeadlineMs ||
+      body.requestNonceDigest !== expectedRequestNonceDigest ||
+      issuedAt >= fencedAt + COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS ||
+      issuedAt < now - roundTrip - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      issuedAt > now + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      conservativeWallNow >= signedServerDeadline ||
+      !replay ||
+      !replayIsFresh(replay, context.consumedReplayIdentities)
+    ) {
+      return undefined;
+    }
+    const verified = Object.freeze({
+      verificationKind: 'cryptographically_verified_one_use_action_authority' as const,
+      grantsActionAuthority: false as const,
+      atomicReplayConsumptionRequired: true as const,
+      authorityBodyDigest: chain.authority.bodyDigest,
+      replayIdentity: replay,
+      signedServerActionDeadline: new Date(signedServerDeadline).toISOString(),
+      monotonicActionDeadlineMs,
+      verifiedAtTrustedTime: new Date(now).toISOString(),
+      responseReceivedMonotonicMs: monotonicResponseReceivedMs,
+    });
+    cryptographicallyVerifiedAuthorities.add(verified);
+    return verified;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Fail-closed compatibility shim. Cryptographic verification alone cannot establish one-use
+ * action authority; use `verifySignedOneUseActionAuthorityCryptographically`, atomically consume
+ * its replay identity outside this storage-free package, and perform the immediate deadline check.
+ */
+export function verifySignedOneUseActionAuthority(
+  _candidate: unknown,
+  _context: OneUseActionAuthorityVerificationContext,
+): false {
+  return false;
+}
+
+/**
+ * Rechecks only the signed and monotonic deadlines after the caller reports an external atomic
+ * replay transition. Returning true authenticates deadline freshness; it still does not itself
+ * prove that the external receipt is durable or grant action authority.
+ */
+export function recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(
+  verification: unknown,
+  context: ImmediateActionDeadlineRecheckContext,
+): boolean {
+  try {
+    if (
+      !isPlainNonProxyRecord(verification) ||
+      !cryptographicallyVerifiedAuthorities.has(verification) ||
+      own(verification, 'verificationKind') !==
+        'cryptographically_verified_one_use_action_authority' ||
+      own(verification, 'grantsActionAuthority') !== false ||
+      own(verification, 'atomicReplayConsumptionRequired') !== true ||
+      !isPlainNonProxyRecord(context?.atomicConsumptionReceipt) ||
+      !hasExactEnumerableDataKeys(context.atomicConsumptionReceipt, atomicConsumptionReceiptKeys) ||
+      own(context.atomicConsumptionReceipt, 'receiptKind') !==
+        'external_atomic_replay_consumption' ||
+      own(context.atomicConsumptionReceipt, 'consumedExactlyOnce') !== true ||
+      own(context.atomicConsumptionReceipt, 'replayIdentity') !==
+        own(verification, 'replayIdentity') ||
+      own(context.atomicConsumptionReceipt, 'authorityBodyDigest') !==
+        own(verification, 'authorityBodyDigest')
+    ) {
+      return false;
+    }
+    const now = trustedNow(context.trustedNow);
+    const monotonicNow = boundedInteger(context.monotonicNowMs, 0, Number.MAX_SAFE_INTEGER);
+    const verifiedAt = trustedNow(own(verification, 'verifiedAtTrustedTime'));
+    const signedDeadline = trustedNow(own(verification, 'signedServerActionDeadline'));
+    const responseReceived = boundedInteger(
+      own(verification, 'responseReceivedMonotonicMs'),
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const monotonicDeadline = boundedInteger(
+      own(verification, 'monotonicActionDeadlineMs'),
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
     return Boolean(
-      roundTrip !== undefined &&
-      body.requestNonceDigest === expectedRequestNonceDigest &&
-      issuedAt >= now - roundTrip - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
-      issuedAt <= now + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
-      now < Date.parse(body.serverValidUntil) &&
-      replay &&
-      replayIsFresh(replay, context.consumedReplayIdentities),
+      now !== undefined &&
+      monotonicNow !== undefined &&
+      verifiedAt !== undefined &&
+      signedDeadline !== undefined &&
+      responseReceived !== undefined &&
+      monotonicDeadline !== undefined &&
+      now >= verifiedAt &&
+      now + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS < signedDeadline &&
+      monotonicNow >= responseReceived &&
+      monotonicNow < monotonicDeadline,
     );
   } catch {
     return false;
@@ -2503,13 +2741,13 @@ function verifyResultChainCore(
   signedAssignment: unknown,
   signedEnrollment: unknown,
   context: TrustedExecutionIdentityContext,
-  requireCurrentlyValid: boolean,
+  validityMode: ChainValidityMode,
 ): VerifiedResultChain | undefined {
   const chain = verifyAssignmentChainCore(
     signedAssignment,
     signedEnrollment,
     context,
-    requireCurrentlyValid,
+    validityMode,
   );
   const result = decodeSignedExecutionResult(candidate);
   if (!chain || !result) return undefined;
@@ -2541,12 +2779,43 @@ function verifyResultChainCore(
       assignment,
       chain.enrollment,
       context,
-      requireCurrentlyValid,
+      validityMode,
     );
     if (!authorityChain || !resultMatchesAuthority(result.body, authorityChain.authority)) {
       return undefined;
     }
     authority = authorityChain.authority;
+  }
+  const reportedAt = Date.parse(result.body.reportedAt);
+  if (authority) {
+    const finalActionStartedAt =
+      result.body.finalActionStartedAt === null
+        ? Number.NaN
+        : Date.parse(result.body.finalActionStartedAt);
+    const strictActionDeadline = Math.min(
+      Date.parse(authority.body.serverValidUntil),
+      Date.parse(assignment.body.serverValidUntil),
+      Date.parse(authority.body.databaseFencedAt) +
+        COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS,
+    );
+    if (
+      !Number.isFinite(finalActionStartedAt) ||
+      finalActionStartedAt < Date.parse(authority.body.databaseFencedAt) ||
+      finalActionStartedAt < Date.parse(authority.body.databaseAuthorityIssuedAt) ||
+      finalActionStartedAt >= strictActionDeadline ||
+      reportedAt < finalActionStartedAt ||
+      reportedAt - finalActionStartedAt > COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS
+    ) {
+      return undefined;
+    }
+  } else if (
+    reportedAt <
+      Date.parse(assignment.body.serverIssuedAt) - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS ||
+    reportedAt >
+      Date.parse(assignment.body.serverValidUntil) +
+        COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS
+  ) {
+    return undefined;
   }
   return Object.freeze({ ...chain, result, authority });
 }
@@ -2562,22 +2831,13 @@ export function verifySignedExecutionResult(
       context.signedExecutionAssignment,
       context.signedExecutionEnrollment,
       context,
-      true,
+      'historically_authenticated',
     );
     if (!chain) return false;
-    const observedAt = Date.parse(chain.result.body.deviceObservedAt);
-    const assignment = chain.assignment.body;
-    const earliest =
-      Date.parse(assignment.serverIssuedAt) - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS;
-    const authorityDeadline = chain.authority
-      ? Date.parse(chain.authority.body.serverValidUntil)
-      : Date.parse(assignment.serverValidUntil);
+    const reportedAt = Date.parse(chain.result.body.reportedAt);
     const replay = deriveExecutionResultReplayIdentity(chain.result);
     return Boolean(
-      observedAt >= earliest &&
-      observedAt <= authorityDeadline + COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS &&
-      observedAt <= chain.trustedNowMs + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
-      chain.trustedNowMs - observedAt <= COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS &&
+      reportedAt <= chain.trustedNowMs + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
       replay &&
       replayIsFresh(replay, context.consumedReplayIdentities),
     );
@@ -2611,7 +2871,7 @@ export function verifySignedAuthoritativeExecutionStatus(
       context.signedExecutionAssignment,
       context.signedExecutionEnrollment,
       context,
-      true,
+      'historically_authenticated',
     );
     const status = decodeSignedAuthoritativeExecutionStatus(candidate);
     const expectedQueryNonceDigest = digest(context.expectedQueryNonceDigest);
@@ -2646,7 +2906,7 @@ export function verifySignedAuthoritativeExecutionStatus(
         chain.assignment,
         chain.enrollment,
         context,
-        true,
+        'historically_authenticated',
       );
       if (!authorityChain || !statusMatchesAuthority(status.body, authorityChain.authority)) {
         return false;
@@ -2654,6 +2914,7 @@ export function verifySignedAuthoritativeExecutionStatus(
       authority = authorityChain.authority;
     }
 
+    let historicalResult: SignedExecutionResult | null = null;
     if (status.body.executionResultBodyDigest === null) {
       if (context.signedExecutionResult !== null) return false;
     } else {
@@ -2663,7 +2924,7 @@ export function verifySignedAuthoritativeExecutionStatus(
         chain.assignment,
         chain.enrollment,
         context,
-        true,
+        'historically_authenticated',
       );
       if (
         !resultChain ||
@@ -2677,6 +2938,7 @@ export function verifySignedAuthoritativeExecutionStatus(
       ) {
         return false;
       }
+      historicalResult = resultChain.result;
     }
 
     const roundTrip = trustedRoundTrip(context.roundTrip, chain.enrollment.body.maxRoundTripTimeMs);
@@ -2685,10 +2947,15 @@ export function verifySignedAuthoritativeExecutionStatus(
     const replay = deriveAuthoritativeExecutionStatusReplayIdentity(status);
     return Boolean(
       roundTrip !== undefined &&
+      observedAt >= Date.parse(chain.assignment.body.serverIssuedAt) &&
+      (!authority || observedAt >= Date.parse(authority.body.databaseFencedAt)) &&
+      (!authority || observedAt >= Date.parse(authority.body.databaseAuthorityIssuedAt)) &&
+      (!historicalResult || observedAt >= Date.parse(historicalResult.body.reportedAt)) &&
       observedAt >= issuedAt - roundTrip - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
       issuedAt >= chain.trustedNowMs - roundTrip - COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
       issuedAt <= chain.trustedNowMs + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS &&
-      chain.trustedNowMs < Date.parse(status.body.serverValidUntil) &&
+      chain.trustedNowMs + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS <
+        Date.parse(status.body.serverValidUntil) &&
       replay &&
       replayIsFresh(replay, context.consumedReplayIdentities),
     );

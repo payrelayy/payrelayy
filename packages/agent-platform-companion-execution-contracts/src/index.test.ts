@@ -24,6 +24,7 @@ import {
   COMPANION_EXECUTION_CAPABILITY,
   COMPANION_EXECUTION_CONTRACT_VERSION,
   COMPANION_EXECUTION_CURRENCY_CODE,
+  COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS,
   COMPANION_EXECUTION_DIGEST_ALGORITHM,
   COMPANION_EXECUTION_ENROLLMENT_TRANSCRIPT,
   COMPANION_EXECUTION_PLATFORM_CODE,
@@ -31,6 +32,8 @@ import {
   COMPANION_EXECUTION_RESULT_TRANSCRIPT,
   COMPANION_EXECUTION_SIGNATURE_ALGORITHM,
   COMPANION_EXECUTION_SIGNATURE_ENCODING,
+  COMPANION_EXECUTION_POSTGRES_BIGINT_MAX,
+  COMPANION_EXECUTION_POSTGRES_INTEGER_MAX,
   COMPANION_ONE_USE_ACTION_AUTHORITY_TRANSCRIPT,
   canonicalAuthoritativeExecutionStatusBodyBytes,
   canonicalExecutionAssignmentBodyBytes,
@@ -63,11 +66,13 @@ import {
   signExecutionEnrollment,
   signExecutionResult,
   signOneUseActionAuthority,
+  recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption,
   verifySignedAuthoritativeExecutionStatus,
   verifySignedExecutionAssignment,
   verifySignedExecutionEnrollment,
   verifySignedExecutionResult,
   verifySignedOneUseActionAuthority,
+  verifySignedOneUseActionAuthorityCryptographically,
   type AuthoritativeExecutionStatusBody,
   type AuthoritativeExecutionStatusVerificationContext,
   type ExecutionAssignmentBody,
@@ -106,6 +111,29 @@ function keyPair(namedCurve = 'prime256v1'): KeyFixture {
 const sha = (value: string): string => `sha256:${value.repeat(64)}`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const NOW = '2026-09-10T12:00:06.500Z';
+const P256_ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+
+function signatureWithS(signature: string, choose: (s: bigint) => bigint): string {
+  const bytes = Buffer.from(signature, 'base64url');
+  const s = BigInt(`0x${bytes.subarray(32).toString('hex')}`);
+  return Buffer.concat([
+    bytes.subarray(0, 32),
+    Buffer.from(choose(s).toString(16).padStart(64, '0'), 'hex'),
+  ]).toString('base64url');
+}
+
+function signatureWithR(signature: string, replacement: bigint): string {
+  const bytes = Buffer.from(signature, 'base64url');
+  return Buffer.concat([
+    Buffer.from(replacement.toString(16).padStart(64, '0'), 'hex'),
+    bytes.subarray(32),
+  ]).toString('base64url');
+}
+
+const lowS = (signature: string): string =>
+  signatureWithS(signature, (s) => (s > P256_ORDER / 2n ? P256_ORDER - s : s));
+const highSTwin = (signature: string): string =>
+  signatureWithS(signature, (s) => (s > P256_ORDER / 2n ? s : P256_ORDER - s));
 
 const noMoneySafety: CompanionNoMoneySafety = {
   accountMutationAllowed: false,
@@ -179,11 +207,12 @@ function signedNoMoneyCertificate(
     signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
     signerKeyId,
     body,
-    signature: sign(
-      'sha256',
-      canonicalCompanionEnrollmentCertificateSignatureBytes(body, signerKeyId)!,
-      { key: noMoneyServer.privateKey, dsaEncoding: 'ieee-p1363' },
-    ).toString('base64url'),
+    signature: lowS(
+      sign('sha256', canonicalCompanionEnrollmentCertificateSignatureBytes(body, signerKeyId)!, {
+        key: noMoneyServer.privateKey,
+        dsaEncoding: 'ieee-p1363',
+      }).toString('base64url'),
+    ),
   };
 }
 
@@ -355,9 +384,10 @@ function resultBody(
     requestNonceDigest: authority?.body.requestNonceDigest ?? null,
     outcome: authority ? 'submission_attempted' : 'refused_before_fence',
     finalActionStarted: authority !== null,
+    finalActionStartedAt: authority ? '2026-09-10T12:00:05.000Z' : null,
     providerResponseDigest: authority ? sha('8') : null,
     evidenceDigest: sha('9'),
-    deviceObservedAt: '2026-09-10T12:00:06.000Z',
+    reportedAt: '2026-09-10T12:00:06.000Z',
     ...overrides,
   };
 }
@@ -456,6 +486,7 @@ function fixture(): Fixture {
     ...identity,
     signedExecutionEnrollment: enrollment,
     roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 3_000 },
+    consumedReplayIdentities: [],
   };
   const authorityContext: OneUseActionAuthorityVerificationContext = {
     ...identity,
@@ -463,12 +494,14 @@ function fixture(): Fixture {
     signedExecutionAssignment: assignment,
     expectedRequestNonceDigest: authority.body.requestNonceDigest,
     roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 3_000 },
+    consumedReplayIdentities: [],
   };
   const resultContext: ExecutionResultVerificationContext = {
     ...identity,
     signedExecutionEnrollment: enrollment,
     signedExecutionAssignment: assignment,
     signedOneUseActionAuthority: authority,
+    consumedReplayIdentities: [],
   };
   const statusContext: AuthoritativeExecutionStatusVerificationContext = {
     ...identity,
@@ -479,6 +512,7 @@ function fixture(): Fixture {
     expectedQueryNonceDigest: status.body.queryNonceDigest,
     minimumStatusSequence: status.body.statusSequence,
     roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 3_000 },
+    consumedReplayIdentities: [],
   };
   return {
     noMoneyServer,
@@ -498,12 +532,20 @@ function fixture(): Fixture {
   };
 }
 
+function cryptographicallyVerifiesAuthority(
+  candidate: unknown,
+  context: OneUseActionAuthorityVerificationContext,
+): boolean {
+  return Boolean(verifySignedOneUseActionAuthorityCryptographically(candidate, context));
+}
+
 describe('dormant companion execution v2 contracts', () => {
   it('signs, decodes, and verifies the complete five-artifact chain', () => {
     const value = fixture();
     expect(verifySignedExecutionEnrollment(value.enrollment, value.identity)).toBe(true);
     expect(verifySignedExecutionAssignment(value.assignment, value.assignmentContext)).toBe(true);
-    expect(verifySignedOneUseActionAuthority(value.authority, value.authorityContext)).toBe(true);
+    expect(cryptographicallyVerifiesAuthority(value.authority, value.authorityContext)).toBe(true);
+    expect(verifySignedOneUseActionAuthority(value.authority, value.authorityContext)).toBe(false);
     expect(verifySignedExecutionResult(value.result, value.resultContext)).toBe(true);
     expect(verifySignedAuthoritativeExecutionStatus(value.status, value.statusContext)).toBe(true);
     expect(decodeSignedOneUseActionAuthority(value.status)).toBeUndefined();
@@ -543,6 +585,44 @@ describe('dormant companion execution v2 contracts', () => {
       digestAuthoritativeExecutionStatusBody(value.status.body),
     ];
     expect(new Set(bodyDigests).size).toBe(5);
+  });
+
+  it('normalizes every generated P-256 signature to low-S and rejects its high-S twin', () => {
+    const value = fixture();
+    const artifacts: readonly [
+      (
+        | SignedExecutionEnrollment
+        | SignedExecutionAssignment
+        | SignedOneUseActionAuthority
+        | SignedExecutionResult
+        | SignedAuthoritativeExecutionStatus
+      ),
+      (candidate: unknown) => unknown,
+    ][] = [
+      [value.enrollment, decodeSignedExecutionEnrollment],
+      [value.assignment, decodeSignedExecutionAssignment],
+      [value.authority, decodeSignedOneUseActionAuthority],
+      [value.result, decodeSignedExecutionResult],
+      [value.status, decodeSignedAuthoritativeExecutionStatus],
+    ];
+    for (const [artifact, decoder] of artifacts) {
+      const bytes = Buffer.from(artifact.signature, 'base64url');
+      const s = BigInt(`0x${bytes.subarray(32).toString('hex')}`);
+      expect(s).toBeGreaterThan(0n);
+      expect(s).toBeLessThanOrEqual(P256_ORDER / 2n);
+      const twin = highSTwin(artifact.signature);
+      expect(twin).not.toBe(artifact.signature);
+      expect(decoder({ ...artifact, signature: twin })).toBeUndefined();
+      expect(
+        decoder({ ...artifact, signature: Buffer.alloc(64).toString('base64url') }),
+      ).toBeUndefined();
+      expect(
+        decoder({ ...artifact, signature: signatureWithS(artifact.signature, () => P256_ORDER) }),
+      ).toBeUndefined();
+      expect(
+        decoder({ ...artifact, signature: signatureWithR(artifact.signature, P256_ORDER) }),
+      ).toBeUndefined();
+    }
   });
 
   it('rejects unknown, missing, accessor, proxy, and type-confused body input', () => {
@@ -632,11 +712,11 @@ describe('dormant companion execution v2 contracts', () => {
       }),
     ).toBe(false);
 
+    const tamperedCertificateSignature = Buffer.from(value.certificate.signature, 'base64url');
+    tamperedCertificateSignature[0] ^= 1;
     const tamperedCertificate = {
       ...clone(value.certificate),
-      signature: `${value.certificate.signature.slice(0, -1)}${
-        value.certificate.signature.endsWith('A') ? 'B' : 'A'
-      }`,
+      signature: tamperedCertificateSignature.toString('base64url'),
     };
     expect(
       verifySignedExecutionEnrollment(value.enrollment, {
@@ -644,6 +724,20 @@ describe('dormant companion execution v2 contracts', () => {
         signedNoMoneyCertificate: tamperedCertificate,
       }),
     ).toBe(false);
+  });
+
+  it('accepts a valid high-S legacy v1 certificate while v2 artifacts require low-S', () => {
+    const value = fixture();
+    const legacyHighSCertificate = {
+      ...value.certificate,
+      signature: highSTwin(value.certificate.signature),
+    };
+    expect(
+      verifySignedExecutionEnrollment(value.enrollment, {
+        ...value.identity,
+        signedNoMoneyCertificate: legacyHighSCertificate,
+      }),
+    ).toBe(true);
   });
 
   it('rejects padded execution public keys and non-P256 signing keys', () => {
@@ -775,7 +869,7 @@ describe('dormant companion execution v2 contracts', () => {
     for (const [field, replacement] of mutations) {
       const signed = clone(value.authority) as unknown as Record<string, unknown>;
       signed.body = { ...value.authority.body, [field]: replacement };
-      expect(verifySignedOneUseActionAuthority(signed, value.authorityContext), field).toBe(false);
+      expect(cryptographicallyVerifiesAuthority(signed, value.authorityContext), field).toBe(false);
     }
     for (const [field, replacement] of mutations.filter(
       ([field]) => field !== 'fenceId' && field !== 'fenceNonceDigest',
@@ -785,7 +879,7 @@ describe('dormant companion execution v2 contracts', () => {
         value.executionSigner.privateKey,
       );
       expect(
-        resigned && verifySignedOneUseActionAuthority(resigned, value.authorityContext),
+        resigned && cryptographicallyVerifiesAuthority(resigned, value.authorityContext),
         `resigned ${field}`,
       ).not.toBe(true);
     }
@@ -796,7 +890,7 @@ describe('dormant companion execution v2 contracts', () => {
       }),
     ).toBeUndefined();
     expect(
-      verifySignedOneUseActionAuthority(value.authority, {
+      cryptographicallyVerifiesAuthority(value.authority, {
         ...value.authorityContext,
         expectedRequestNonceDigest: sha('f'),
       }),
@@ -811,8 +905,8 @@ describe('dormant companion execution v2 contracts', () => {
       }),
       value.executionSigner.privateKey,
     )!;
-    expect(decodeSignedOneUseActionAuthority(overEnrollmentLimit)).toBeDefined();
-    expect(verifySignedOneUseActionAuthority(overEnrollmentLimit, value.authorityContext)).toBe(
+    expect(decodeSignedOneUseActionAuthority(overEnrollmentLimit)).toBeUndefined();
+    expect(cryptographicallyVerifiesAuthority(overEnrollmentLimit, value.authorityContext)).toBe(
       false,
     );
     expect(
@@ -828,19 +922,165 @@ describe('dormant companion execution v2 contracts', () => {
       }),
       value.executionSigner.privateKey,
     )!;
-    expect(verifySignedOneUseActionAuthority(stale, value.authorityContext)).toBe(false);
+    expect(cryptographicallyVerifiesAuthority(stale, value.authorityContext)).toBe(false);
     expect(
-      verifySignedOneUseActionAuthority(value.authority, {
+      cryptographicallyVerifiesAuthority(value.authority, {
         ...value.authorityContext,
         roundTrip: { monotonicRequestStartedMs: 0, monotonicResponseReceivedMs: 5_001 },
       }),
     ).toBe(false);
     const replay = deriveOneUseActionAuthorityReplayIdentity(value.authority)!;
     expect(
-      verifySignedOneUseActionAuthority(value.authority, {
+      cryptographicallyVerifiesAuthority(value.authority, {
         ...value.authorityContext,
         consumedReplayIdentities: [replay],
       }),
+    ).toBe(false);
+  });
+
+  it('caps authority at the strict database fence and assignment deadlines', () => {
+    const value = fixture();
+    expect(
+      decodeOneUseActionAuthorityBody({
+        ...value.authority.body,
+        databaseAuthorityIssuedAt: '2026-09-10T12:00:14.000Z',
+        serverValidUntil: '2026-09-10T12:00:14.001Z',
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeOneUseActionAuthorityBody({
+        ...value.authority.body,
+        serverValidUntil: '2026-09-10T12:00:14.001Z',
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeOneUseActionAuthorityBody({
+        ...value.authority.body,
+        serverValidUntil: '2026-09-10T12:00:14.000Z',
+      }),
+    ).toBeDefined();
+
+    const earlierAssignment = signExecutionAssignment(
+      assignmentBody(value.enrollment, {
+        serverValidUntil: '2026-09-10T12:00:09.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    const assignmentOverrun = signOneUseActionAuthority(
+      authorityBody(earlierAssignment, {
+        serverValidUntil: '2026-09-10T12:00:10.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      cryptographicallyVerifiesAuthority(assignmentOverrun, {
+        ...value.authorityContext,
+        signedExecutionAssignment: earlierAssignment,
+        expectedRequestNonceDigest: assignmentOverrun.body.requestNonceDigest,
+      }),
+    ).toBe(false);
+  });
+
+  it('spends RTT from the fence-request monotonic deadline and shortens for clock uncertainty', () => {
+    const value = fixture();
+    const longRttEnrollment = signExecutionEnrollment(
+      enrollmentBody(value.certificate, value.executionSigner, { maxRoundTripTimeMs: 10_000 }),
+      value.executionSigner.privateKey,
+    )!;
+    const assignment = signExecutionAssignment(
+      assignmentBody(longRttEnrollment),
+      value.executionSigner.privateKey,
+    )!;
+    const authority = signOneUseActionAuthority(
+      authorityBody(assignment),
+      value.executionSigner.privateKey,
+    )!;
+    const context: OneUseActionAuthorityVerificationContext = {
+      ...value.identity,
+      signedExecutionEnrollment: longRttEnrollment,
+      signedExecutionAssignment: assignment,
+      expectedRequestNonceDigest: authority.body.requestNonceDigest,
+      roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 11_000 },
+      consumedReplayIdentities: [],
+    };
+    expect(verifySignedOneUseActionAuthorityCryptographically(authority, context)).toBeUndefined();
+
+    const verified = verifySignedOneUseActionAuthorityCryptographically(value.authority, {
+      ...value.authorityContext,
+    })!;
+    expect(verified).toMatchObject({
+      grantsActionAuthority: false,
+      atomicReplayConsumptionRequired: true,
+      monotonicActionDeadlineMs: 4_500,
+      responseReceivedMonotonicMs: 3_000,
+    });
+    const receipt = {
+      receiptKind: 'external_atomic_replay_consumption' as const,
+      replayIdentity: verified.replayIdentity,
+      authorityBodyDigest: verified.authorityBodyDigest,
+      consumedExactlyOnce: true as const,
+    };
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
+        trustedNow: '2026-09-10T12:00:07.000Z',
+        monotonicNowMs: 3_500,
+        atomicConsumptionReceipt: receipt,
+      }),
+    ).toBe(true);
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
+        trustedNow: '2026-09-10T12:00:08.000Z',
+        monotonicNowMs: 3_500,
+        atomicConsumptionReceipt: receipt,
+      }),
+    ).toBe(false);
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
+        trustedNow: '2026-09-10T12:00:07.000Z',
+        monotonicNowMs: verified.monotonicActionDeadlineMs,
+        atomicConsumptionReceipt: receipt,
+      }),
+    ).toBe(false);
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
+        trustedNow: '2026-09-10T12:00:07.000Z',
+        monotonicNowMs: 3_500,
+        atomicConsumptionReceipt: { ...receipt, replayIdentity: sha('f') },
+      }),
+    ).toBe(false);
+  });
+
+  it('fails every replay-sensitive verifier closed when replay state is omitted', () => {
+    const value = fixture();
+    const { consumedReplayIdentities: _assignmentReplay, ...assignmentContext } =
+      value.assignmentContext;
+    const { consumedReplayIdentities: _authorityReplay, ...authorityContext } =
+      value.authorityContext;
+    const { consumedReplayIdentities: _resultReplay, ...resultContext } = value.resultContext;
+    const { consumedReplayIdentities: _statusReplay, ...statusContext } = value.statusContext;
+    expect(
+      verifySignedExecutionAssignment(
+        value.assignment,
+        assignmentContext as ExecutionAssignmentVerificationContext,
+      ),
+    ).toBe(false);
+    expect(
+      verifySignedOneUseActionAuthorityCryptographically(
+        value.authority,
+        authorityContext as OneUseActionAuthorityVerificationContext,
+      ),
+    ).toBeUndefined();
+    expect(
+      verifySignedExecutionResult(
+        value.result,
+        resultContext as ExecutionResultVerificationContext,
+      ),
+    ).toBe(false);
+    expect(
+      verifySignedAuthoritativeExecutionStatus(
+        value.status,
+        statusContext as AuthoritativeExecutionStatusVerificationContext,
+      ),
     ).toBe(false);
   });
 
@@ -937,6 +1177,18 @@ describe('dormant companion execution v2 contracts', () => {
         finalActionStarted: false,
       }),
     ).toBeUndefined();
+    expect(
+      decodeExecutionResultBody({
+        ...value.result.body,
+        finalActionStartedAt: null,
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeExecutionResultBody({
+        ...refused.body,
+        finalActionStartedAt: '2026-09-10T12:00:05.000Z',
+      }),
+    ).toBeUndefined();
   });
 
   it('binds results to the device, exact assignment, exact authority, time, and replay identity', () => {
@@ -959,7 +1211,7 @@ describe('dormant companion execution v2 contracts', () => {
 
     const future = signExecutionResult(
       resultBody(value.assignment, value.authority, {
-        deviceObservedAt: '2026-09-10T12:00:09.000Z',
+        reportedAt: '2026-09-10T12:00:09.000Z',
       }),
       value.device.privateKey,
     )!;
@@ -969,6 +1221,78 @@ describe('dormant companion execution v2 contracts', () => {
       verifySignedExecutionResult(value.result, {
         ...value.resultContext,
         consumedReplayIdentities: [replay],
+      }),
+    ).toBe(false);
+  });
+
+  it('orders action start at or after authority issuance and before every action deadline', () => {
+    const value = fixture();
+    for (const finalActionStartedAt of [
+      '2026-09-10T12:00:03.999Z',
+      '2026-09-10T12:00:04.000Z',
+      '2026-09-10T12:00:04.099Z',
+      value.authority.body.serverValidUntil,
+    ]) {
+      const result = signExecutionResult(
+        resultBody(value.assignment, value.authority, {
+          finalActionStartedAt,
+          reportedAt: '2026-09-10T12:00:06.000Z',
+        }),
+        value.device.privateKey,
+      )!;
+      expect(verifySignedExecutionResult(result, value.resultContext), finalActionStartedAt).toBe(
+        false,
+      );
+    }
+    const exactlyAtAuthorityIssuance = signExecutionResult(
+      resultBody(value.assignment, value.authority, {
+        resultId: 'execution-result-issued-boundary',
+        finalActionStartedAt: value.authority.body.databaseAuthorityIssuedAt,
+        reportedAt: '2026-09-10T12:00:06.000Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(verifySignedExecutionResult(exactlyAtAuthorityIssuance, value.resultContext)).toBe(true);
+    const lastValidMillisecond = signExecutionResult(
+      resultBody(value.assignment, value.authority, {
+        finalActionStartedAt: '2026-09-10T12:00:09.999Z',
+        reportedAt: '2026-09-10T12:00:10.000Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(lastValidMillisecond, {
+        ...value.resultContext,
+        trustedNow: '2026-09-10T12:00:10.000Z',
+      }),
+    ).toBe(true);
+
+    const reportingLimit = signExecutionResult(
+      resultBody(value.assignment, value.authority, {
+        resultId: 'execution-result-limit',
+        finalActionStartedAt: '2026-09-10T12:00:05.000Z',
+        reportedAt: '2026-09-10T12:05:05.000Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(reportingLimit, {
+        ...value.resultContext,
+        trustedNow: reportingLimit.body.reportedAt,
+      }),
+    ).toBe(true);
+    const reportingOverrun = signExecutionResult(
+      resultBody(value.assignment, value.authority, {
+        resultId: 'execution-result-overrun',
+        finalActionStartedAt: '2026-09-10T12:00:05.000Z',
+        reportedAt: '2026-09-10T12:05:05.001Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(reportingOverrun, {
+        ...value.resultContext,
+        trustedNow: reportingOverrun.body.reportedAt,
       }),
     ).toBe(false);
   });
@@ -1027,6 +1351,130 @@ describe('dormant companion execution v2 contracts', () => {
         signedExecutionResult: uncertainResult,
       }),
     ).toBe(true);
+  });
+
+  it('authenticates delayed result and fresh status convergence after enrollment expiry', () => {
+    const value = fixture();
+    const enrollment = signExecutionEnrollment(
+      enrollmentBody(value.certificate, value.executionSigner, {
+        validUntil: '2026-09-10T12:00:07.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    const assignment = signExecutionAssignment(
+      assignmentBody(enrollment, {
+        serverValidUntil: '2026-09-10T12:00:07.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    const authority = signOneUseActionAuthority(
+      authorityBody(assignment, {
+        serverValidUntil: '2026-09-10T12:00:06.500Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    const result = signExecutionResult(
+      resultBody(assignment, authority, {
+        finalActionStartedAt: '2026-09-10T12:00:05.000Z',
+        reportedAt: '2026-09-10T12:00:06.000Z',
+      }),
+      value.device.privateKey,
+    )!;
+    const expiredIdentity = {
+      ...value.identity,
+      trustedNow: '2026-09-11T10:00:01.000Z',
+    };
+    expect(verifySignedExecutionEnrollment(enrollment, expiredIdentity)).toBe(false);
+    expect(
+      verifySignedOneUseActionAuthorityCryptographically(authority, {
+        ...expiredIdentity,
+        signedExecutionEnrollment: enrollment,
+        signedExecutionAssignment: assignment,
+        expectedRequestNonceDigest: authority.body.requestNonceDigest,
+        roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 3_000 },
+        consumedReplayIdentities: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      verifySignedExecutionResult(result, {
+        ...expiredIdentity,
+        signedExecutionEnrollment: enrollment,
+        signedExecutionAssignment: assignment,
+        signedOneUseActionAuthority: authority,
+        consumedReplayIdentities: [],
+      }),
+    ).toBe(true);
+
+    const status = signAuthoritativeExecutionStatus(
+      statusBody(assignment, authority, result, {
+        databaseObservedAt: '2026-09-11T10:00:01.000Z',
+        serverIssuedAt: '2026-09-11T10:00:01.100Z',
+        serverValidUntil: '2026-09-11T10:00:05.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(status, {
+        ...expiredIdentity,
+        signedExecutionEnrollment: enrollment,
+        signedExecutionAssignment: assignment,
+        signedOneUseActionAuthority: authority,
+        signedExecutionResult: result,
+        expectedQueryNonceDigest: status.body.queryNonceDigest,
+        minimumStatusSequence: status.body.statusSequence,
+        roundTrip: { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 3_000 },
+        consumedReplayIdentities: [],
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects authoritative database observations ordered before assignment, fence, or result', () => {
+    const value = fixture();
+    const beforeAssignment = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, null, null, {
+        databaseObservedAt: '2026-09-10T11:59:59.999Z',
+        serverIssuedAt: '2026-09-10T12:00:00.100Z',
+        serverValidUntil: '2026-09-10T12:00:04.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(beforeAssignment, {
+        ...value.statusContext,
+        trustedNow: '2026-09-10T12:00:00.500Z',
+        signedOneUseActionAuthority: null,
+        signedExecutionResult: null,
+        expectedQueryNonceDigest: beforeAssignment.body.queryNonceDigest,
+        minimumStatusSequence: beforeAssignment.body.statusSequence,
+      }),
+    ).toBe(false);
+
+    const beforeFence = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, value.result, {
+        databaseObservedAt: '2026-09-10T12:00:03.999Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(verifySignedAuthoritativeExecutionStatus(beforeFence, value.statusContext)).toBe(false);
+
+    const beforeAuthorityIssuance = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, value.result, {
+        databaseObservedAt: '2026-09-10T12:00:04.050Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(beforeAuthorityIssuance, value.statusContext),
+    ).toBe(false);
+
+    const beforeResult = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, value.result, {
+        databaseObservedAt: '2026-09-10T12:00:05.999Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(verifySignedAuthoritativeExecutionStatus(beforeResult, value.statusContext)).toBe(false);
+    expect(verifySignedAuthoritativeExecutionStatus(value.status, value.statusContext)).toBe(true);
   });
 
   it('never lets status decode or verify as authority and strictly binds freshness and DB evidence', () => {
@@ -1120,6 +1568,54 @@ describe('dormant companion execution v2 contracts', () => {
     ];
     expect(replayIdentities.every(Boolean)).toBe(true);
     expect(new Set(replayIdentities).size).toBe(replayIdentities.length);
+  });
+
+  it('bounds database decimal identifiers to PostgreSQL bigint and integer domains', () => {
+    const value = fixture();
+    const bigintOverrun = (BigInt(COMPANION_EXECUTION_POSTGRES_BIGINT_MAX) + 1n).toString();
+    const integerOverrun = (BigInt(COMPANION_EXECUTION_POSTGRES_INTEGER_MAX) + 1n).toString();
+    expect(
+      decodeExecutionAssignmentBody({
+        ...value.assignment.body,
+        activationEpoch: COMPANION_EXECUTION_POSTGRES_BIGINT_MAX,
+      }),
+    ).toBeDefined();
+    expect(
+      decodeExecutionAssignmentBody({
+        ...value.assignment.body,
+        activationEpoch: bigintOverrun,
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeExecutionEnrollmentBody({
+        ...value.enrollment.body,
+        pilotRevision: COMPANION_EXECUTION_POSTGRES_INTEGER_MAX,
+      }),
+    ).toBeDefined();
+    expect(
+      decodeExecutionEnrollmentBody({
+        ...value.enrollment.body,
+        pilotRevision: integerOverrun,
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeAuthoritativeExecutionStatusBody({
+        ...value.status.body,
+        statusSequence: COMPANION_EXECUTION_POSTGRES_BIGINT_MAX,
+      }),
+    ).toBeDefined();
+    expect(
+      decodeAuthoritativeExecutionStatusBody({
+        ...value.status.body,
+        statusSequence: bigintOverrun,
+      }),
+    ).toBeUndefined();
+    for (const invalid of ['0', '-1', '01', '99999999999999999999']) {
+      expect(
+        decodeExecutionAssignmentBody({ ...value.assignment.body, activationEpoch: invalid }),
+        invalid,
+      ).toBeUndefined();
+    }
   });
 
   it('remains a dormant contract-only package with no runtime, DB, provider, or secret access', () => {

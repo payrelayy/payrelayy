@@ -970,7 +970,11 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         } finally {
           await runtimeClient.end().catch(() => undefined);
         }
-        expect(runtimeConnectionErrors.length).toBeLessThanOrEqual(1);
+        expect(runtimeConnectionErrors.length).toBeGreaterThanOrEqual(1);
+        expect(runtimeConnectionErrors.length).toBeLessThanOrEqual(2);
+        for (const error of runtimeConnectionErrors) {
+          expect(error.message).toMatch(/closed|terminat/iu);
+        }
 
         expect(await readStatus()).toEqual({
           activeRuntimeSessions: 0,

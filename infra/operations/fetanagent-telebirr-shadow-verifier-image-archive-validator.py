@@ -250,6 +250,11 @@ def validate_legacy_v1_config_blobs(
             or HEX_DIGEST.fullmatch(config["id"]) is None
             or config.get("os") != "linux"
             or config.get("architecture") not in (None, "amd64")
+            or "created" not in config
+            or (
+                config.get("created") is not None
+                and not isinstance(config.get("created"), str)
+            )
             or ("config" in config and not isinstance(config.get("config"), dict))
             or (
                 "container_config" in config
@@ -294,12 +299,26 @@ def validate_legacy_v1_config_blobs(
     expected_projection = {
         key: image_config[key] for key in projection_fields if key in image_config
     }
+    # Moby's V1Image.Created field intentionally has no `omitempty`. Docker save
+    # therefore serializes it as null when the authoritative OCI config omits it.
+    expected_projection["created"] = image_config.get("created")
     top_config = configs_by_id[ordered_ids[-1]]
     observed_projection = {
         key: top_config[key] for key in projection_fields if key in top_config
     }
     if observed_projection != expected_projection:
         refuse("Docker legacy v1 top config does not match the runtime image config")
+
+    for index, legacy_id in enumerate(ordered_ids[:-1]):
+        expected_fields = {"created", "id", "os"}
+        if index > 0:
+            expected_fields.add("parent")
+        legacy_config = configs_by_id[legacy_id]
+        if (
+            set(legacy_config) != expected_fields
+            or legacy_config["created"] != "1970-01-01T00:00:00Z"
+        ):
+            refuse("Docker legacy v1 intermediate config is not Moby-generated")
 
 
 def validate_oci_archive(

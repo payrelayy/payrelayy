@@ -195,6 +195,9 @@ def hybrid_archive(
                         for key in validator.LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
                         if key in config_value
                     },
+                    # Moby's legacy V1Image JSON always includes Created, even
+                    # when the authoritative OCI image config omitted it.
+                    "created": config_value.get("created"),
                     "id": "b" * 64,
                 }
             ]
@@ -323,6 +326,31 @@ class ArchiveValidatorTests(unittest.TestCase):
             with self.subTest(path=path):
                 with self.assertRaises(RuntimeError):
                     validator.validate(str(self.keep(path)), TAG, RELEASE)
+
+    def test_rejects_legacy_top_config_not_bound_to_runtime_config(self) -> None:
+        config_value = json.loads(runtime_config())
+        hostile_config = {
+            **{
+                key: config_value[key]
+                for key in validator.LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
+                if key in config_value
+            },
+            "created": config_value.get("created"),
+            "id": "b" * 64,
+        }
+        hostile_config["config"] = {
+            **hostile_config["config"],
+            "User": "0:0",
+        }
+        path = self.keep(
+            hybrid_archive(
+                include_layer_sources=True,
+                include_repositories=True,
+                legacy_configs_override=[hostile_config],
+            )
+        )
+        with self.assertRaisesRegex(RuntimeError, "does not match the runtime image config"):
+            validator.validate(str(path), TAG, RELEASE)
 
     def test_accepts_singular_legacy_docker_save(self) -> None:
         result = validator.validate(str(self.keep(legacy_archive())), TAG, RELEASE)

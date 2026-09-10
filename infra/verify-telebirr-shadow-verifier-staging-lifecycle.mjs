@@ -24,6 +24,7 @@ const [
   sqlRunnerDockerfile,
   sqlCatalog,
   sqlLifecycleSuite,
+  sqlCompose,
   packageText,
 ] = await Promise.all([
   read('infra/compose.telebirr-shadow-verifier.yaml'),
@@ -42,6 +43,7 @@ const [
   read('infra/Dockerfile.sql-integration'),
   read('packages/sql-integration-tests/src/catalog-baseline.test.ts'),
   read('packages/sql-integration-tests/src/staging-telebirr-shadow-verifier-lifecycle.suite.ts'),
+  read('infra/compose.sql-integration.yaml'),
   read('package.json'),
 ]);
 
@@ -119,8 +121,17 @@ assert.match(sqlIntegrationWorkflow, /^\s{2}pull_request:\r?$/mu);
 assert.match(sqlIntegrationWorkflow, /pnpm test:sql/u);
 assert.match(
   sqlRunnerDockerfile,
-  /apt-get install --yes --no-install-recommends postgresql-client/u,
+  /postgres:17\.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad AS runner/u,
 );
+assert.match(sqlRunnerDockerfile, /psql --version.*17\\\.4/u);
+assert.match(sqlRunnerDockerfile, /psql --help=commands/u);
+assert.match(sqlRunnerDockerfile, /ENV HOME=\/home\/node/u);
+assert.match(sqlRunnerDockerfile, /ENTRYPOINT \["\/usr\/bin\/env", "-u", "PGDATA"/u);
+assert.doesNotMatch(sqlRunnerDockerfile, /apt-get|postgresql-client/u);
+assert.match(sqlCompose, /POSTGRES_HOST_AUTH_METHOD: scram-sha-256/u);
+assert.match(sqlCompose, /POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256/u);
+assert.match(sqlCompose, /SQL_INTEGRATION_POSTGRES_PASSWORD: TEST-ONLY-NOT-A-SECRET/u);
+assert.doesNotMatch(sqlCompose, /POSTGRES_HOST_AUTH_METHOD: trust/u);
 for (const scriptName of [
   'staging-telebirr-shadow-verifier-provision.sql',
   'staging-telebirr-shadow-verifier-status.sql',
@@ -138,11 +149,19 @@ assert.match(
 );
 assert.match(sqlLifecycleSuite, /projectRef: productionProjectRef/u);
 assert.match(sqlLifecycleSuite, /setRole: ownerControlRole/u);
-assert.match(sqlLifecycleSuite, /unsafe financial switch/u);
+assert.match(sqlLifecycleSuite, /unsafe financial precondition/u);
 assert.match(sqlLifecycleSuite, /too many connections/iu);
-assert.match(sqlLifecycleSuite, /runPsql\(disableScript\)/u);
+assert.match(sqlLifecycleSuite, /executePsql\(disableScript\)/u);
 assert.match(sqlLifecycleSuite, /relation_access_count/u);
 assert.match(sqlLifecycleSuite, /readNoMoneySnapshot/u);
+assert.match(sqlLifecycleSuite, /PGPASSFILE: '\/dev\/null'/u);
+assert.match(sqlLifecycleSuite, /PGSERVICEFILE: '\/dev\/null'/u);
+assert.match(sqlLifecycleSuite, /password authentication failed/iu);
+assert.match(sqlLifecycleSuite, /VALID UNTIL expires/u);
+assert.match(sqlLifecycleSuite, /non_system_schema_usage_exact/u);
+assert.match(sqlLifecycleSuite, /no_non_system_schema_create/u);
+assert.match(sqlLifecycleSuite, /allowed_functions_execution_private/u);
+assert.match(sqlLifecycleSuite, /default_function_execution_private/u);
 
 const failedHostCleanup = jobBody('failed-deploy-host-cleanup');
 const failedDatabaseCleanup = jobBody('failed-deploy-database-cleanup');
@@ -182,6 +201,8 @@ assert.match(finalDatabase, /runtimeLogin == "bounded"/u);
 assert.match(finalDatabase, /activeRuntimeSessions == 1/u);
 assert.match(finalDatabase, /financialBoundary == "dry_run"/u);
 assert.match(finalDatabase, /executorBoundary == "disabled"/u);
+assert.equal((workflow.match(/"\$PGHOST" == "\$STAGING_POOLER_HOST"/gu) ?? []).length, 5);
+assert.equal((workflow.match(/"\$PGUSER" == "postgres\.\$STAGING_PROJECT_REF"/gu) ?? []).length, 5);
 
 assert.match(compose, /FETANAGENT_TELEBIRR_SHADOW_VERIFIER_IMAGE_ID/u);
 assert.match(compose, /^\s{4}pull_policy: never$/mu);
@@ -253,6 +274,7 @@ assert.match(archiveValidatorTests, /test_rejects_archive_identity_tag_and_relea
 assert.match(provision, /begin transaction isolation level serializable/u);
 assert.match(provision, /fetanagent:staging:telebirr-shadow-verifier-runtime/u);
 assert.match(provision, /for share/u);
+assert.match(provision, /set local password_encryption = 'scram-sha-256'/u);
 assert.match(provision, /mode = 'disabled'/u);
 assert.match(provision, /mode = 'dry_run'/u);
 assert.match(provision, /alter role fetanagent_telebirr_shadow_verifier_runtime with\s+login/iu);
@@ -266,6 +288,7 @@ assert.doesNotMatch(provision, /(?:insert\s+into|update|delete\s+from)\s+app\./i
 for (const operationalSql of [provision, status, disable]) {
   assert.match(operationalSql, /\\getenv confirmed_project_ref STAGING_PROJECT_REF/u);
   assert.match(operationalSql, /'spzpiyxheappsfyswewl'/u);
+  assert.match(operationalSql, /does not identify the connected database/u);
   assert.match(operationalSql, /current_user = 'postgres' and session_user = 'postgres'/u);
 }
 
@@ -281,6 +304,8 @@ assert.doesNotMatch(
 assert.match(disable, /alter role fetanagent_telebirr_shadow_verifier_runtime with\s+nologin/iu);
 assert.match(disable, /password null valid until 'infinity'/u);
 assert.match(disable, /pg_terminate_backend/u);
+assert.match(disable, /activity\.pid = activity_pid/u);
+assert.match(disable, /pg_stat_clear_snapshot\(\)[\s\S]*activity\.pid = activity_pid/u);
 assert.match(disable, /financialSwitchesChanged', false/u);
 assert.doesNotMatch(
   disable,
@@ -295,6 +320,9 @@ assert.match(runbook, /root-owned public key/iu);
 assert.match(runbook, /every unrelated Docker tag/iu);
 assert.match(runbook, /final, separate administrator database status query/iu);
 assert.match(runbook, /does not apply a\s+migration/iu);
+assert.match(runbook, /workflow-supplied assertion, not a database identity marker/iu);
+assert.match(runbook, /Never\s+run it from a standalone shell/iu);
+assert.match(runbook, /Every tested provision refusal occurs\s+before role mutation/iu);
 assert.match(
   packageJson.scripts['test:infra'],
   /node infra\/verify-telebirr-shadow-verifier-staging-lifecycle\.mjs/u,

@@ -165,10 +165,14 @@ or unreachable host. A remaining installed release is inert once the login is di
 be reused for another deployment. If either cleanup side cannot be
 proved, treat it as an operator incident: run `stop` again, use the DigitalOcean root console for
 the exact helper if SSH is unavailable, and use the existing staging database emergency route to
-set `STAGING_PROJECT_REF=spzpiyxheappsfyswewl` and run only
-`infra/sql/staging-telebirr-shadow-verifier-disable.sql`. Never start the container directly,
-extend the login beyond 24 hours, use a pooler URL in the runtime file, expose a port, enable either
-live gate, or bypass the checksum-bound helper.
+run only `infra/sql/staging-telebirr-shadow-verifier-disable.sql`. The SQL file's
+`STAGING_PROJECT_REF` check is a workflow-supplied assertion, not a database identity marker. Never
+run it from a standalone shell based on that value alone. Before any emergency manual invocation,
+independently verify that the selected connection coordinates are the reviewed staging session
+pooler host, port `5432`, database `postgres`, and user
+`postgres.spzpiyxheappsfyswewl`; then set `STAGING_PROJECT_REF=spzpiyxheappsfyswewl`. Never start the
+container directly, extend the login beyond 24 hours, use a pooler URL in the runtime file, expose a
+port, enable either live gate, or bypass the checksum-bound helper.
 
 Local verification is non-mutating:
 
@@ -181,8 +185,11 @@ node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
 ```
 
 The pull-request `Disposable SQL integration` job also runs the three exact operational SQL files
-against its internal, disposable PostgreSQL 17 database. It proves wrong-project and wrong-operator
-refusal, the exact dry-run switch boundary, one bounded 24-hour runtime connection, unchanged
-function-only ACLs, failed-provision rollback, status before/during/after, and disablement with
-session termination. The isolated runner contains no production database URL or credential and
-publishes no database port.
+against its internal, disposable PostgreSQL 17 database over fixed test-only SCRAM authentication.
+It proves refusal of a wrong workflow-supplied project assertion and wrong operator, the exact
+dry-run switch boundary, correct-password login, wrong-password and expired-password refusal, one
+bounded 24-hour runtime connection, the complete effective function-only catalog contract, status
+before/during/after, and disablement with session termination. Every tested provision refusal occurs
+before role mutation and leaves the role and no-money state unchanged; this suite does not install a
+production fault hook merely to manufacture a post-mutation rollback. The isolated runner contains
+no production database URL or credential and publishes no database port.

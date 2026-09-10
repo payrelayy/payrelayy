@@ -9662,6 +9662,7 @@ registerStagingContinuousAvailabilitySqlTests(() => client);
 registerStagingTelebirrShadowVerifierLifecycleSqlTests(
   () => client,
   () => ownerAdminId,
+  () => environment.administratorPassword,
   (password) =>
     new Client({
       application_name: 'fetanagent_shadow_lifecycle_sql_integration',

@@ -6,7 +6,7 @@ select :'confirmed_project_ref' = 'spzpiyxheappsfyswewl'
 \gset
 \if :staging_target_confirmed
 \else
-  \warn 'The exact staging project must be confirmed by the deployment workflow.'
+  \warn 'The workflow-supplied staging project assertion is missing or incorrect; it does not identify the connected database.'
   select 1 / 0 as rejected;
 \endif
 

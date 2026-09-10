@@ -6,7 +6,7 @@ select :'confirmed_project_ref' = 'spzpiyxheappsfyswewl'
 \gset
 \if :staging_target_confirmed
 \else
-  \warn 'The exact staging project must be confirmed by the deployment workflow.'
+  \warn 'The workflow-supplied staging project assertion is missing or incorrect; it does not identify the connected database.'
   select 1 / 0 as rejected;
 \endif
 
@@ -71,7 +71,20 @@ begin
        and activity.pid <> pg_catalog.pg_backend_pid()
   loop
     if not pg_catalog.pg_terminate_backend(activity_pid, 5000) then
-      raise exception 'A shadow-verifier session could not be terminated safely.';
+      -- A pooled session can end on its own between enumeration and signalling. Treat that exact
+      -- disappearance as success, but still fail if the same shadow PID remains observable.
+      perform pg_catalog.pg_stat_clear_snapshot();
+      if exists (
+        select 1
+          from pg_catalog.pg_stat_activity activity
+         where activity.pid = activity_pid
+           and activity.usename in (
+             'fetanagent_telebirr_shadow_verifier',
+             'fetanagent_telebirr_shadow_verifier_runtime'
+           )
+      ) then
+        raise exception 'A shadow-verifier session could not be terminated safely.';
+      end if;
     end if;
   end loop;
 

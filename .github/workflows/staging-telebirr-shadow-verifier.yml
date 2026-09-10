@@ -389,6 +389,8 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           export TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD="$(<"$TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD_FILE")"
           result="$(psql -X --quiet --tuples-only --no-align \
@@ -467,6 +469,8 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
           result="$(psql -X --quiet --tuples-only --no-align \
             --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
           jq -e '
@@ -576,6 +580,8 @@ jobs:
           chmod 0600 "$ca_file"
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$ca_file"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
           psql -X --quiet --file=infra/sql/staging-telebirr-shadow-verifier-disable.sql >/dev/null
           result="$(psql -X --quiet --tuples-only --no-align \
             --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
@@ -632,6 +638,8 @@ jobs:
             -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
           timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
             "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status '$RELEASE_SHA' '${RELEASE_SHA:0:12}'"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
           result="$(psql -X --quiet --tuples-only --no-align \
             --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
           jq -e '
@@ -713,6 +721,8 @@ jobs:
           chmod 0600 "$ca_file"
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$ca_file"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
           disable_result="$(psql -X --quiet --tuples-only --no-align \
             --file=infra/sql/staging-telebirr-shadow-verifier-disable.sql)"
           jq -e '

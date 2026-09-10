@@ -25,6 +25,9 @@ const exactVerifierFunctions = [
   'app.load_private_telebirr_shadow_verification_authority(uuid,uuid,timestamp with time zone)',
   'app.quarantine_private_telebirr_shadow_staged_evidence(uuid,uuid,text,text)',
 ].sort();
+const exactVerifierFunctionOids = exactVerifierFunctions
+  .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
+  .join(', ');
 const financialSwitches = [
   'payment_verification',
   'deposit_execution',
@@ -77,11 +80,30 @@ type RuntimeStateRow = {
   readonly rolvaliduntil: string | null;
 };
 
-function runPsql(script: string, options: PsqlOptions = {}): Promise<string> {
+function runPsql(
+  script: string,
+  administratorPassword: string,
+  options: PsqlOptions = {},
+): Promise<string> {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
-    STAGING_PROJECT_REF: options.projectRef ?? stagingProjectRef,
   };
+  for (const name of Object.keys(environment)) {
+    if (
+      /^PG[A-Z0-9_]*$/iu.test(name) ||
+      name === 'DATABASE_URL' ||
+      name === 'NONCE_RETENTION_DATABASE_URL'
+    ) {
+      delete environment[name];
+    }
+  }
+  Object.assign(environment, {
+    PGPASSFILE: '/dev/null',
+    PGPASSWORD: administratorPassword,
+    PGSERVICEFILE: '/dev/null',
+    PGSSLMODE: 'disable',
+    STAGING_PROJECT_REF: options.projectRef ?? stagingProjectRef,
+  });
 
   if (options.runtimePassword === undefined) {
     delete environment.TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD;
@@ -191,8 +213,13 @@ async function readNoMoneySnapshot(client: Client): Promise<string> {
   return result.rows[0]!.snapshot;
 }
 
-async function readLifecycleStatus(options: PsqlOptions = {}): Promise<LifecycleStatus> {
-  return parseLastJsonLine<LifecycleStatus>(await runPsql(statusScript, options));
+async function readLifecycleStatus(
+  administratorPassword: string,
+  options: PsqlOptions = {},
+): Promise<LifecycleStatus> {
+  return parseLastJsonLine<LifecycleStatus>(
+    await runPsql(statusScript, administratorPassword, options),
+  );
 }
 
 async function disableRuntimeDirectly(client: Client): Promise<void> {
@@ -383,7 +410,53 @@ async function withFixture(
   }
 }
 
-async function expectExactLifecycleAcl(client: Client): Promise<void> {
+async function expectExactLifecycleAcl(
+  client: Client,
+  runtimeLoginExpected: boolean,
+): Promise<void> {
+  const roles = await client.query<{
+    readonly rolbypassrls: boolean;
+    readonly rolcanlogin: boolean;
+    readonly rolconnlimit: number;
+    readonly rolcreatedb: boolean;
+    readonly rolcreaterole: boolean;
+    readonly rolinherit: boolean;
+    readonly rolname: string;
+    readonly rolreplication: boolean;
+    readonly rolsuper: boolean;
+  }>(`
+    select role.rolname, role.rolcanlogin, role.rolinherit, role.rolsuper,
+           role.rolcreatedb, role.rolcreaterole, role.rolreplication,
+           role.rolbypassrls, role.rolconnlimit
+      from pg_catalog.pg_roles role
+     where role.rolname in ('${verifierGroup}', '${verifierRuntime}')
+     order by role.rolname
+  `);
+  expect(roles.rows).toEqual([
+    {
+      rolbypassrls: false,
+      rolcanlogin: false,
+      rolconnlimit: 2,
+      rolcreatedb: false,
+      rolcreaterole: false,
+      rolinherit: false,
+      rolname: verifierGroup,
+      rolreplication: false,
+      rolsuper: false,
+    },
+    {
+      rolbypassrls: false,
+      rolcanlogin: runtimeLoginExpected,
+      rolconnlimit: 1,
+      rolcreatedb: false,
+      rolcreaterole: false,
+      rolinherit: false,
+      rolname: verifierRuntime,
+      rolreplication: false,
+      rolsuper: false,
+    },
+  ]);
+
   const membership = await client.query<{
     readonly admin_option: boolean;
     readonly group_role: string;
@@ -413,6 +486,64 @@ async function expectExactLifecycleAcl(client: Client): Promise<void> {
     },
   ]);
 
+  const boundary = await client.query<{
+    readonly app_schema_boundary_allowed: boolean;
+    readonly database_boundary_allowed: boolean;
+    readonly group_usage_allowed_set_denied: boolean;
+    readonly no_non_system_schema_create: boolean;
+    readonly non_system_schema_usage_exact: boolean;
+  }>(`
+    select pg_catalog.pg_has_role(
+             '${verifierRuntime}', '${verifierGroup}', 'USAGE'
+           )
+           and not pg_catalog.pg_has_role(
+             '${verifierRuntime}', '${verifierGroup}', 'SET'
+           ) as group_usage_allowed_set_denied,
+           pg_catalog.has_database_privilege(
+             '${verifierRuntime}', pg_catalog.current_database(), 'CONNECT'
+           )
+           and pg_catalog.has_database_privilege(
+             '${verifierRuntime}', pg_catalog.current_database(), 'TEMP'
+           )
+           and not pg_catalog.has_database_privilege(
+             '${verifierRuntime}', pg_catalog.current_database(), 'CREATE'
+           ) as database_boundary_allowed,
+           pg_catalog.has_schema_privilege('${verifierRuntime}', 'app', 'USAGE')
+           and not pg_catalog.has_schema_privilege(
+             '${verifierRuntime}', 'app', 'CREATE'
+           ) as app_schema_boundary_allowed,
+           (
+             select coalesce(
+               pg_catalog.array_agg(namespace.nspname order by namespace.nspname),
+               '{}'::text[]
+             ) = array['app', 'public']::text[]
+               from pg_catalog.pg_namespace namespace
+              where namespace.nspname not in ('pg_catalog', 'information_schema')
+                and namespace.nspname !~ '^pg_(toast|temp)'
+                and pg_catalog.has_schema_privilege(
+                  '${verifierRuntime}', namespace.oid, 'USAGE'
+                )
+           ) as non_system_schema_usage_exact,
+           not exists (
+             select 1
+               from pg_catalog.pg_namespace namespace
+              where namespace.nspname not in ('pg_catalog', 'information_schema')
+                and namespace.nspname !~ '^pg_(toast|temp)'
+                and pg_catalog.has_schema_privilege(
+                  '${verifierRuntime}', namespace.oid, 'CREATE'
+                )
+           ) as no_non_system_schema_create
+  `);
+  expect(boundary.rows).toEqual([
+    {
+      app_schema_boundary_allowed: true,
+      database_boundary_allowed: true,
+      group_usage_allowed_set_denied: true,
+      no_non_system_schema_create: true,
+      non_system_schema_usage_exact: true,
+    },
+  ]);
+
   const functions = await client.query<{
     readonly hardened: boolean;
     readonly signature: string;
@@ -423,8 +554,10 @@ async function expectExactLifecycleAcl(client: Client): Promise<void> {
              and routine.proconfig = array['search_path=pg_catalog']::text[] as hardened
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
-     where namespace.nspname = 'app'
-       and pg_catalog.has_function_privilege('${verifierGroup}', routine.oid, 'EXECUTE')
+     where namespace.nspname not in ('pg_catalog', 'information_schema')
+       and namespace.nspname !~ '^pg_(toast|temp)'
+       and pg_catalog.has_schema_privilege('${verifierRuntime}', namespace.oid, 'USAGE')
+       and pg_catalog.has_function_privilege('${verifierRuntime}', routine.oid, 'EXECUTE')
      order by signature
   `);
   expect(functions.rows).toEqual(
@@ -432,17 +565,17 @@ async function expectExactLifecycleAcl(client: Client): Promise<void> {
   );
 
   const forbiddenAccess = await client.query<{
-    readonly database_create: boolean;
     readonly relation_access_count: number;
   }>(`
-    select pg_catalog.has_database_privilege(
-             '${verifierRuntime}', pg_catalog.current_database(), 'CREATE'
-           ) as database_create,
-           (
+    select (
              select count(*)::integer
                from pg_catalog.pg_class relation
                join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
-              where namespace.nspname = 'app'
+              where namespace.nspname not in ('pg_catalog', 'information_schema')
+                and namespace.nspname !~ '^pg_(toast|temp)'
+                and pg_catalog.has_schema_privilege(
+                  '${verifierRuntime}', namespace.oid, 'USAGE'
+                )
                 and relation.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
                 and (
                   pg_catalog.has_table_privilege(
@@ -461,19 +594,74 @@ async function expectExactLifecycleAcl(client: Client): Promise<void> {
                 )
            ) as relation_access_count
   `);
-  expect(forbiddenAccess.rows).toEqual([{ database_create: false, relation_access_count: 0 }]);
+  expect(forbiddenAccess.rows).toEqual([{ relation_access_count: 0 }]);
+
+  const functionAcl = await client.query<{
+    readonly allowed_functions_execution_private: boolean;
+    readonly default_function_execution_private: boolean;
+  }>(`
+    select not exists (
+             select 1
+               from pg_catalog.pg_proc routine
+               cross join lateral pg_catalog.aclexplode(
+                 coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+               ) privilege
+              where routine.oid in (${exactVerifierFunctionOids})
+                and privilege.privilege_type = 'EXECUTE'
+                and privilege.grantee not in (
+                  routine.proowner,
+                  (select role.oid from pg_catalog.pg_roles role
+                    where role.rolname = '${verifierGroup}')
+                )
+           ) as allowed_functions_execution_private,
+           exists (
+             select 1
+               from pg_catalog.pg_default_acl defaults
+               join pg_catalog.pg_roles owner on owner.oid = defaults.defaclrole
+              where owner.rolname = 'postgres'
+                and defaults.defaclnamespace = 0
+                and defaults.defaclobjtype = 'f'
+                and not exists (
+                  select 1
+                    from pg_catalog.aclexplode(defaults.defaclacl) privilege
+                   where privilege.grantee = 0
+                     and privilege.privilege_type = 'EXECUTE'
+                )
+           ) and not exists (
+             select 1
+               from pg_catalog.pg_default_acl defaults
+               join pg_catalog.pg_roles owner on owner.oid = defaults.defaclrole
+               cross join lateral pg_catalog.aclexplode(defaults.defaclacl) privilege
+              where owner.rolname = 'postgres'
+                and defaults.defaclobjtype = 'f'
+                and privilege.grantee = 0
+                and privilege.privilege_type = 'EXECUTE'
+           ) as default_function_execution_private
+  `);
+  expect(functionAcl.rows).toEqual([
+    {
+      allowed_functions_execution_private: true,
+      default_function_execution_private: true,
+    },
+  ]);
 }
 
 export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
   getClient: () => Client,
   getOwnerAdminId: () => string,
+  getAdministratorPassword: () => string,
   createRuntimeClient: (password: string) => Client,
 ): void {
   describe('staging TeleBirr shadow-verifier operational SQL lifecycle', () => {
-    it('binds every script to the exact staging target and exact postgres operator', async () => {
+    const executePsql = (script: string, options: PsqlOptions = {}): Promise<string> =>
+      runPsql(script, getAdministratorPassword(), options);
+    const readStatus = (options: PsqlOptions = {}): Promise<LifecycleStatus> =>
+      readLifecycleStatus(getAdministratorPassword(), options);
+
+    it('requires the workflow staging assertion and exact postgres operator', async () => {
       const client = getClient();
       await withFixture(client, getOwnerAdminId(), async () => {
-        expect(await readLifecycleStatus()).toEqual({
+        expect(await readStatus()).toEqual({
           activeRuntimeSessions: 0,
           deploymentTarget: 'staging',
           executorBoundary: 'disabled',
@@ -487,33 +675,35 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         const beforeNoMoney = await readNoMoneySnapshot(client);
         for (const script of [provisionScript, statusScript, disableScript]) {
           await expect(
-            runPsql(script, {
+            executePsql(script, {
               projectRef: productionProjectRef,
               runtimePassword: '1'.repeat(64),
             }),
-          ).rejects.toThrow(/exact staging project/iu);
+          ).rejects.toThrow(/workflow-supplied staging project assertion/iu);
           await expect(
-            runPsql(script, {
+            executePsql(script, {
               runtimePassword: '1'.repeat(64),
               setRole: ownerControlRole,
             }),
           ).rejects.toThrow(/administrator session identity is not exact/iu);
         }
         await expect(
-          runPsql(provisionScript, { runtimePassword: 'not-a-canonical-runtime-credential' }),
+          executePsql(provisionScript, {
+            runtimePassword: 'not-a-canonical-runtime-credential',
+          }),
         ).rejects.toThrow(/credential is not canonical/iu);
         expect(await readRuntimeState(client)).toEqual(beforeRuntime);
         expect(await readNoMoneySnapshot(client)).toBe(beforeNoMoney);
       });
     });
 
-    it('refuses an unsafe financial switch and rolls the failed provision transaction back', async () => {
+    it('refuses an unsafe financial precondition without changing role or no-money state', async () => {
       const client = getClient();
       await withFixture(
         client,
         getOwnerAdminId(),
         async () => {
-          expect(await readLifecycleStatus()).toMatchObject({
+          expect(await readStatus()).toMatchObject({
             activeRuntimeSessions: 0,
             executorBoundary: 'disabled',
             financialBoundary: 'unsafe',
@@ -522,7 +712,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
           const beforeRuntime = await readRuntimeState(client);
           const beforeNoMoney = await readNoMoneySnapshot(client);
           await expect(
-            runPsql(provisionScript, {
+            executePsql(provisionScript, {
               runtimePassword: '2'.repeat(64),
             }),
           ).rejects.toThrow(/disabled financial boundary/iu);
@@ -538,14 +728,14 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
       await withFixture(client, getOwnerAdminId(), async () => {
         const runtimePassword = '3'.repeat(64);
         const beforeNoMoney = await readNoMoneySnapshot(client);
-        expect(await readLifecycleStatus()).toMatchObject({
+        expect(await readStatus()).toMatchObject({
           activeRuntimeSessions: 0,
           executorBoundary: 'disabled',
           financialBoundary: 'dry_run',
           runtimeLogin: 'disabled',
         });
 
-        expect(parseLastJsonLine(await runPsql(provisionScript, { runtimePassword }))).toEqual({
+        expect(parseLastJsonLine(await executePsql(provisionScript, { runtimePassword }))).toEqual({
           deploymentTarget: 'staging',
           financialBoundary: 'dry_run',
           operation: 'shadow_verifier_bounded_runtime_provision',
@@ -553,7 +743,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
           schemaVersion: 1,
         });
 
-        expect(await readLifecycleStatus()).toEqual({
+        expect(await readStatus()).toEqual({
           activeRuntimeSessions: 0,
           deploymentTarget: 'staging',
           executorBoundary: 'disabled',
@@ -565,7 +755,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         const bounded = await client.query<{
           readonly exact_shape: boolean;
           readonly expected_ttl: boolean;
-          readonly password_set: boolean;
+          readonly password_scram: boolean;
         }>(`
           select role.rolcanlogin
                    and not role.rolinherit
@@ -578,21 +768,30 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
                  role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '23 hours 55 minutes'
                    and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
                    as expected_ttl,
-                 auth.rolpassword is not null as password_set
+                 auth.rolpassword like 'SCRAM-SHA-256$%' as password_scram
             from pg_catalog.pg_roles role
             join pg_catalog.pg_authid auth on auth.oid = role.oid
            where role.rolname = '${verifierRuntime}'
         `);
         expect(bounded.rows).toEqual([
-          { exact_shape: true, expected_ttl: true, password_set: true },
+          { exact_shape: true, expected_ttl: true, password_scram: true },
         ]);
-        await expectExactLifecycleAcl(client);
+        await expectExactLifecycleAcl(client, true);
 
         const beforeReplay = await readRuntimeState(client);
-        await expect(runPsql(provisionScript, { runtimePassword: '4'.repeat(64) })).rejects.toThrow(
-          /not disabled cleanly/iu,
-        );
+        await expect(
+          executePsql(provisionScript, { runtimePassword: '4'.repeat(64) }),
+        ).rejects.toThrow(/not disabled cleanly/iu);
         expect(await readRuntimeState(client)).toEqual(beforeReplay);
+
+        const wrongPasswordClient = createRuntimeClient('9'.repeat(64));
+        try {
+          await expect(wrongPasswordClient.connect()).rejects.toThrow(
+            /password authentication failed/iu,
+          );
+        } finally {
+          await wrongPasswordClient.end().catch(() => undefined);
+        }
 
         const runtimeClient = createRuntimeClient(runtimePassword);
         const runtimeConnectionErrors: Error[] = [];
@@ -605,7 +804,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
           await excessRuntimeClient.end().catch(() => undefined);
         }
 
-        expect(await readLifecycleStatus()).toMatchObject({
+        expect(await readStatus()).toMatchObject({
           activeRuntimeSessions: 1,
           executorBoundary: 'disabled',
           financialBoundary: 'dry_run',
@@ -613,7 +812,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         });
 
         try {
-          expect(parseLastJsonLine(await runPsql(disableScript))).toEqual({
+          expect(parseLastJsonLine(await executePsql(disableScript))).toEqual({
             deploymentTarget: 'staging',
             financialSwitchesChanged: false,
             operation: 'shadow_verifier_runtime_disable',
@@ -626,7 +825,7 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         }
         expect(runtimeConnectionErrors.length).toBeLessThanOrEqual(1);
 
-        expect(await readLifecycleStatus()).toEqual({
+        expect(await readStatus()).toEqual({
           activeRuntimeSessions: 0,
           deploymentTarget: 'staging',
           executorBoundary: 'disabled',
@@ -647,7 +846,51 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
           rolsuper: false,
           rolvaliduntil: 'infinity',
         });
-        await expectExactLifecycleAcl(client);
+        await expectExactLifecycleAcl(client, false);
+        expect(await readNoMoneySnapshot(client)).toBe(beforeNoMoney);
+      });
+    });
+
+    it('rejects the correct credential after VALID UNTIL expires, then disables cleanly', async () => {
+      const client = getClient();
+      await withFixture(client, getOwnerAdminId(), async () => {
+        const runtimePassword = '5'.repeat(64);
+        const beforeNoMoney = await readNoMoneySnapshot(client);
+        expect(parseLastJsonLine(await executePsql(provisionScript, { runtimePassword }))).toEqual({
+          deploymentTarget: 'staging',
+          financialBoundary: 'dry_run',
+          operation: 'shadow_verifier_bounded_runtime_provision',
+          runtimeLogin: 'bounded_24_hours',
+          schemaVersion: 1,
+        });
+        await expectExactLifecycleAcl(client, true);
+
+        await client.query(`
+          alter role ${verifierRuntime}
+            valid until '2000-01-01 00:00:00+00'
+        `);
+        expect(await readStatus()).toMatchObject({
+          activeRuntimeSessions: 0,
+          executorBoundary: 'disabled',
+          financialBoundary: 'dry_run',
+          runtimeLogin: 'unsafe',
+        });
+
+        const expiredClient = createRuntimeClient(runtimePassword);
+        try {
+          await expect(expiredClient.connect()).rejects.toThrow(/password authentication failed/iu);
+        } finally {
+          await expiredClient.end().catch(() => undefined);
+        }
+
+        expect(parseLastJsonLine(await executePsql(disableScript))).toEqual({
+          deploymentTarget: 'staging',
+          financialSwitchesChanged: false,
+          operation: 'shadow_verifier_runtime_disable',
+          runtimeLogin: 'disabled',
+          schemaVersion: 1,
+        });
+        await expectExactLifecycleAcl(client, false);
         expect(await readNoMoneySnapshot(client)).toBe(beforeNoMoney);
       });
     });

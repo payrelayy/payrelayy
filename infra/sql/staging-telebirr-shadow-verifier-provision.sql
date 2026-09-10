@@ -7,7 +7,7 @@ select :'confirmed_project_ref' = 'spzpiyxheappsfyswewl'
 \gset
 \if :staging_target_confirmed
 \else
-  \warn 'The exact staging project must be confirmed by the deployment workflow.'
+  \warn 'The workflow-supplied staging project assertion is missing or incorrect; it does not identify the connected database.'
   select 1 / 0 as rejected;
 \endif
 
@@ -16,6 +16,7 @@ set local search_path = pg_catalog;
 set local statement_timeout = '15s';
 set local lock_timeout = '2s';
 set local idle_in_transaction_session_timeout = '15s';
+set local password_encryption = 'scram-sha-256';
 
 select current_user = 'postgres' and session_user = 'postgres'
   as administrator_session_ready

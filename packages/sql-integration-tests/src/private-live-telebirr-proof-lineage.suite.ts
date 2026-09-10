@@ -247,6 +247,51 @@ async function resolveTelebirrBoundary(
   };
 }
 
+export async function activateTrustedTelebirrEpoch(
+  client: Client,
+  ownerAdminId: string,
+  pilot: PreparedPilot,
+): Promise<number> {
+  const current = await client.query<{ readonly next_epoch: string }>(`
+    select current_epoch + 1 as next_epoch
+      from app.private_trusted_telebirr_activation_control
+     where control_key = 'trusted_telebirr_financial_authority'
+     for update
+  `);
+  expect(current.rows).toHaveLength(1);
+  const nextEpoch = Number(current.rows[0]!.next_epoch);
+
+  const inserted = await client.query<{ readonly epoch: string }>(
+    `insert into app.private_trusted_telebirr_activation_epochs (
+       epoch, authority_state, pilot_revision_id, configuration_digest,
+       active_from, expires_at, activated_by_admin_id, activated_at
+     ) values (
+       $1::bigint, 'active', $2::uuid, $3::text, $4::timestamptz, $5::timestamptz,
+       $6::uuid, clock_timestamp()
+     )
+     returning epoch`,
+    [
+      nextEpoch,
+      pilot.pilotRevisionId,
+      pilot.configurationDigest,
+      pilot.activeFrom,
+      pilot.expiresAt,
+      ownerAdminId,
+    ],
+  );
+  expect(inserted.rows).toEqual([{ epoch: String(nextEpoch) }]);
+
+  const advanced = await client.query<{ readonly current_epoch: string }>(
+    `update app.private_trusted_telebirr_activation_control
+        set current_epoch = $1::bigint
+      where control_key = 'trusted_telebirr_financial_authority'
+      returning current_epoch`,
+    [nextEpoch],
+  );
+  expect(advanced.rows).toEqual([{ current_epoch: String(nextEpoch) }]);
+  return nextEpoch;
+}
+
 export async function prepareTelebirrPilot(
   client: Client,
   ownerAdminId: string,
@@ -312,6 +357,7 @@ export async function prepareTelebirrPilot(
     requestKey,
   };
   await armPilot(client, ownerAdminId, pilot);
+  await activateTrustedTelebirrEpoch(client, ownerAdminId, pilot);
 
   const activated = await client.query<{ readonly feature_key: string }>(`
     update app.feature_switches

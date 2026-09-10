@@ -13,10 +13,20 @@ therefore remains the migration-created `NOLOGIN`, passwordless scaffold unless 
 administrator operation outside this lifecycle has made the database unsafe.
 
 This conservative boundary is required because checking financial switches and then starting a
-poller are separate cross-system operations. A switch writer could commit live work between those
-events. A future activation design must introduce one shared database state machine or epoch that
-is enforced by the verifier's work-loading function and every relevant feature-switch writer. An
-additional read before process start is not an atomic interlock and is not accepted here.
+poller are separate cross-system operations. The database foundation now defines one shared
+database state machine or epoch, enforces it at the verifier loader, authority reader, completion
+boundary, and every relevant feature-switch write, and provides an idempotent Owner emergency
+intent/revocation transaction. It seeds only immutable epoch zero in `disabled` state and provides
+no live-activation writer. An additional read before process start is not an atomic interlock and
+is not accepted here.
+
+Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
+the singleton pointer, and change the complete TeleBirr switch set in the same database
+transaction. The deferred complete-set constraint rejects a transaction that leaves TeleBirr live
+with a partial or mismatched switch set. The lock order is activation control, epoch, pilot, then
+feature switches; host orchestration must never be treated as authority. Expiry, revocation, pilot
+drift, switch drift, or the mere presence of emergency intent makes work loading empty and rejects
+authority reads and completion of leases obtained earlier.
 
 The production verifier remains separate from `compose.production.yaml`. Its staged service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct
@@ -115,9 +125,11 @@ off. Thus an operation racing with emergency intent cannot use this lifecycle to
 verifier. Direct root Docker access is outside the delegated workflow/helper authority and remains
 an administrator incident boundary.
 
-Emergency disable deliberately does not rewrite global financial switches. The absent verifier
-container plus the passwordless `NOLOGIN` role and terminated sessions stop this consumer without
-authorizing or modifying the deposit executor, provider switches, or any final action.
+The host `emergency-disable` workflow deliberately does not rewrite global financial switches. The
+database Owner emergency boundary is separate: once a future live epoch exists, it atomically
+records append-only intent, revokes that exact expected epoch, stops its pilot, and disables all
+five provider/pilot/payment/execution switches. Neither route can activate an epoch, enable a
+runtime login, start a verifier, or authorize a final action.
 
 Never use direct Docker or PostgreSQL administration to bypass these controls, reuse a staging
 credential/key, add a public route, mount the Docker socket, add executor material, or reintroduce a
@@ -131,9 +143,10 @@ Before a future production activation can even be proposed, all of these remain 
 2. Install and attest the exact stage/status/emergency-only helper and command-scoped sudoers digest.
 3. Complete Android device pairing and independently review the public-key pin manifest.
 4. Stage the exact disabled release and prove the container, login, password, and sessions absent.
-5. Design and review a shared database activation state/epoch enforced by the work loader and every
-   payment/deposit/verification feature-switch writer, including emergency intent and crash recovery.
-6. Add any activation and bounded-login provisioning only in that later separately confirmed change.
+5. Review and apply the disabled-only database epoch foundation, including its switch interlock,
+   lease-to-authority and authority-to-completion tests, and independent emergency route.
+6. Add any live-epoch creation and bounded-login provisioning only in a later separately confirmed
+   change; the foundation intentionally contains neither.
 7. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.
 8. Obtain another separate financial confirmation before any live feature-switch operation or
    actual deposit. Verifier staging is not authorization to execute or move money.

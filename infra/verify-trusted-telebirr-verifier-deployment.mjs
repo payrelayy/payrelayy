@@ -29,6 +29,7 @@ const [
   productionRunbook,
   productionDisableSql,
   productionInspectSql,
+  activationEpochMigration,
 ] = await Promise.all([
   read('Dockerfile'),
   read('infra/compose.trusted-telebirr-verifier.yaml'),
@@ -49,6 +50,7 @@ const [
   read('infra/production-trusted-telebirr-verifier.md'),
   read('infra/sql/production-trusted-telebirr-verifier-disable.sql'),
   read('infra/sql/production-trusted-telebirr-verifier-inspect.sql'),
+  read('supabase/migrations/20260910154104_trusted_telebirr_activation_epoch_foundation.sql'),
 ]);
 const manifest = JSON.parse(manifestText);
 
@@ -556,13 +558,46 @@ assert.match(productionTunnel, /ConnectionAttempts=1/);
 assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 
 assert.match(productionRunbook, /Production activation is deliberately unavailable/);
-assert.match(productionRunbook, /shared database state machine or epoch/);
+assert.match(productionRunbook, /shared\s+database state machine or epoch/);
 assert.match(productionRunbook, /There is no same-release renewal path/);
 assert.match(productionRunbook, /two DAG-independent protected jobs/);
 assert.match(productionRunbook, /share a VM\/SSH failure domain/);
 assert.match(productionRunbook, /database emergency-revocation route that does not depend/);
 assert.doesNotMatch(productionRunbook, /ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY/);
 assert.doesNotMatch(productionRunbook, /Renewal is .*activate-verifier/);
+
+assert.match(activationEpochMigration, /values \(0\)/);
+assert.match(
+  activationEpochMigration,
+  /create table app\.private_trusted_telebirr_activation_epochs/,
+);
+assert.match(
+  activationEpochMigration,
+  /create table app\.private_trusted_telebirr_emergency_disable_intents/,
+);
+assert.match(
+  activationEpochMigration,
+  /create constraint trigger feature_switches_trusted_telebirr_complete_set/,
+);
+assert.match(activationEpochMigration, /deferrable initially deferred/);
+assert.match(activationEpochMigration, /current_private_trusted_telebirr_activation_epoch\(\)/);
+assert.match(activationEpochMigration, /request_private_trusted_telebirr_emergency_disable/);
+assert.match(
+  activationEpochMigration,
+  /load_next_private_live_telebirr_staged_evidence_before_activation_epoch/,
+);
+assert.match(
+  activationEpochMigration,
+  /load_private_live_telebirr_verification_authority_before_activation_epoch/,
+);
+assert.match(
+  activationEpochMigration,
+  /complete_private_live_telebirr_verification_before_activation_epoch/,
+);
+assert.doesNotMatch(
+  activationEpochMigration,
+  /create function app\.activate_private_trusted_telebirr|grant execute on function app\.current_private_trusted/,
+);
 
 assert.match(productionDisableSql, /fetanagent_trusted_telebirr_verifier_runtime with/);
 assert.match(productionDisableSql, /nologin noinherit/);

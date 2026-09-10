@@ -27,6 +27,7 @@ import { registerStagingContinuousAvailabilitySqlTests } from './staging-continu
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
 import { registerTelebirrShadowVerificationSqlTests } from './telebirr-shadow-verification.suite.js';
+import { registerTrustedTelebirrActivationEpochSqlTests } from './trusted-telebirr-activation-epoch.suite.js';
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
@@ -6831,7 +6832,7 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
       {
         signature:
-          'app.load_private_live_telebirr_verification_authority(uuid,uuid,timestamp with time zone)',
+          'app.load_private_live_telebirr_verification_authority_before_activation_epoch(uuid,uuid,timestamp with time zone)',
       },
       {
         signature:
@@ -9626,6 +9627,10 @@ registerTelebirrDeviceStateRuntimeSqlTests(
   () => ownerAdminId,
 );
 registerTelebirrShadowVerificationSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerTrustedTelebirrActivationEpochSqlTests(
   () => client,
   () => ownerAdminId,
 );

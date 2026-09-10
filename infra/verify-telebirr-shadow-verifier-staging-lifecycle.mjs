@@ -20,6 +20,10 @@ const [
   runbook,
   qualityWorkflow,
   imageSmokeWorkflow,
+  sqlIntegrationWorkflow,
+  sqlRunnerDockerfile,
+  sqlCatalog,
+  sqlLifecycleSuite,
   packageText,
 ] = await Promise.all([
   read('infra/compose.telebirr-shadow-verifier.yaml'),
@@ -34,6 +38,10 @@ const [
   read('infra/staging-telebirr-shadow-verifier.md'),
   read('.github/workflows/quality.yml'),
   read('.github/workflows/telebirr-shadow-verifier-image-smoke.yml'),
+  read('.github/workflows/sql-integration.yml'),
+  read('infra/Dockerfile.sql-integration'),
+  read('packages/sql-integration-tests/src/catalog-baseline.test.ts'),
+  read('packages/sql-integration-tests/src/staging-telebirr-shadow-verifier-lifecycle.suite.ts'),
   read('package.json'),
 ]);
 
@@ -107,6 +115,34 @@ assert.match(
   imageSmokeWorkflow,
   /fetanagent-telebirr-shadow-verifier-image-archive-validator\.py[\s\\]*\n\s+"\$archive" "\$release_tag" "\$GITHUB_SHA"/u,
 );
+assert.match(sqlIntegrationWorkflow, /^\s{2}pull_request:\r?$/mu);
+assert.match(sqlIntegrationWorkflow, /pnpm test:sql/u);
+assert.match(
+  sqlRunnerDockerfile,
+  /apt-get install --yes --no-install-recommends postgresql-client/u,
+);
+for (const scriptName of [
+  'staging-telebirr-shadow-verifier-provision.sql',
+  'staging-telebirr-shadow-verifier-status.sql',
+  'staging-telebirr-shadow-verifier-disable.sql',
+]) {
+  assert.match(
+    sqlRunnerDockerfile,
+    new RegExp(`COPY infra/sql/${scriptName.replaceAll('.', '\\.')}`, 'u'),
+  );
+  assert.match(sqlLifecycleSuite, new RegExp(scriptName.replaceAll('.', '\\.'), 'u'));
+}
+assert.match(
+  sqlCatalog,
+  /registerStagingTelebirrShadowVerifierLifecycleSqlTests\([\s\S]*fetanagent_telebirr_shadow_verifier_runtime/u,
+);
+assert.match(sqlLifecycleSuite, /projectRef: productionProjectRef/u);
+assert.match(sqlLifecycleSuite, /setRole: ownerControlRole/u);
+assert.match(sqlLifecycleSuite, /unsafe financial switch/u);
+assert.match(sqlLifecycleSuite, /too many connections/iu);
+assert.match(sqlLifecycleSuite, /runPsql\(disableScript\)/u);
+assert.match(sqlLifecycleSuite, /relation_access_count/u);
+assert.match(sqlLifecycleSuite, /readNoMoneySnapshot/u);
 
 const failedHostCleanup = jobBody('failed-deploy-host-cleanup');
 const failedDatabaseCleanup = jobBody('failed-deploy-database-cleanup');
@@ -226,6 +262,12 @@ assert.match(provision, /membership\.inherit_option/u);
 assert.match(provision, /not membership\.set_option/u);
 assert.match(provision, /not membership\.admin_option/u);
 assert.doesNotMatch(provision, /(?:insert\s+into|update|delete\s+from)\s+app\./iu);
+
+for (const operationalSql of [provision, status, disable]) {
+  assert.match(operationalSql, /\\getenv confirmed_project_ref STAGING_PROJECT_REF/u);
+  assert.match(operationalSql, /'spzpiyxheappsfyswewl'/u);
+  assert.match(operationalSql, /current_user = 'postgres' and session_user = 'postgres'/u);
+}
 
 assert.match(status, /transaction isolation level serializable read only/u);
 assert.match(status, /activeRuntimeSessions/u);

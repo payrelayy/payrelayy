@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { QueryResultRow } from 'pg';
+import { Client, type QueryResultRow } from 'pg';
 
 import {
   createSqlIntegrationClient,
@@ -25,6 +25,7 @@ import { registerPrivateLiveExecutionActivationEpochSqlTests } from './private-l
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
+import { registerStagingTelebirrShadowVerifierLifecycleSqlTests } from './staging-telebirr-shadow-verifier-lifecycle.suite.js';
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
 import { registerTelebirrShadowVerificationSqlTests } from './telebirr-shadow-verification.suite.js';
@@ -9658,6 +9659,20 @@ registerTrustedTelebirrVerifierRuntimeSqlTests(
 );
 registerPublicTelegramActionOnboardingSqlTests(() => client);
 registerStagingContinuousAvailabilitySqlTests(() => client);
+registerStagingTelebirrShadowVerifierLifecycleSqlTests(
+  () => client,
+  () => ownerAdminId,
+  (password) =>
+    new Client({
+      application_name: 'fetanagent_shadow_lifecycle_sql_integration',
+      database: 'postgres',
+      host: environment.host,
+      password,
+      port: 5432,
+      ssl: false,
+      user: 'fetanagent_telebirr_shadow_verifier_runtime',
+    }),
+);
 registerVerificationSettlementSqlTests(
   () => client,
   () => createSqlIntegrationClient(environment),

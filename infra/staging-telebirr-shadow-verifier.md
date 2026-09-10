@@ -136,8 +136,10 @@ retried. Keep its database login disabled (the independent cleanup does this) an
 authenticated root console for explicit incident review/removal before selecting a new commit.
 
 The workflow then grants only the existing shadow runtime a random 64-hex password and a 24-hour
-`VALID UNTIL`. It changes no feature switch. A direct verify-full runtime login through the VM must
-pass before release transfer. Startup succeeds only when the application catalog preflight and
+`VALID UNTIL`. Provisioning is intentionally one-shot while that login is bounded: a replay fails
+without rotating its credential or expiry, and the runtime must be disabled before a new deployment.
+It changes no feature switch. A direct verify-full runtime login through the VM must pass before
+release transfer. Startup succeeds only when the application catalog preflight and
 loopback readiness probe pass. Host status rechecks the signed image identities/commit, receipt,
 project-wide container and network counts, exact image Config, user, command, read-only filesystem,
 capabilities, port bindings, network, health, restart count, and every safety environment value.
@@ -163,7 +165,8 @@ or unreachable host. A remaining installed release is inert once the login is di
 be reused for another deployment. If either cleanup side cannot be
 proved, treat it as an operator incident: run `stop` again, use the DigitalOcean root console for
 the exact helper if SSH is unavailable, and use the existing staging database emergency route to
-run only `infra/sql/staging-telebirr-shadow-verifier-disable.sql`. Never start the container directly,
+set `STAGING_PROJECT_REF=spzpiyxheappsfyswewl` and run only
+`infra/sql/staging-telebirr-shadow-verifier-disable.sql`. Never start the container directly,
 extend the login beyond 24 hours, use a pooler URL in the runtime file, expose a port, enable either
 live gate, or bypass the checksum-bound helper.
 
@@ -176,3 +179,10 @@ python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archi
 node infra/verify-telebirr-shadow-verifier-deployment.mjs
 node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
 ```
+
+The pull-request `Disposable SQL integration` job also runs the three exact operational SQL files
+against its internal, disposable PostgreSQL 17 database. It proves wrong-project and wrong-operator
+refusal, the exact dry-run switch boundary, one bounded 24-hour runtime connection, unchanged
+function-only ACLs, failed-provision rollback, status before/during/after, and disablement with
+session termination. The isolated runner contains no production database URL or credential and
+publishes no database port.

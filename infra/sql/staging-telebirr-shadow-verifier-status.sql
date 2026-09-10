@@ -1,4 +1,14 @@
 \set ON_ERROR_STOP on
+\getenv confirmed_project_ref STAGING_PROJECT_REF
+
+select :'confirmed_project_ref' = 'spzpiyxheappsfyswewl'
+  as staging_target_confirmed
+\gset
+\if :staging_target_confirmed
+\else
+  \warn 'The exact staging project must be confirmed by the deployment workflow.'
+  select 1 / 0 as rejected;
+\endif
 
 begin transaction isolation level serializable read only;
 set local search_path = pg_catalog;

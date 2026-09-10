@@ -1,10 +1,14 @@
 \set ON_ERROR_STOP on
+\getenv confirmed_project_ref STAGING_PROJECT_REF
 
-begin transaction isolation level serializable;
-set local search_path = pg_catalog;
-set local statement_timeout = '15s';
-set local lock_timeout = '2s';
-set local idle_in_transaction_session_timeout = '15s';
+select :'confirmed_project_ref' = 'spzpiyxheappsfyswewl'
+  as staging_target_confirmed
+\gset
+\if :staging_target_confirmed
+\else
+  \warn 'The exact staging project must be confirmed by the deployment workflow.'
+  select 1 / 0 as rejected;
+\endif
 
 select current_user = 'postgres' and session_user = 'postgres'
   as administrator_session_ready
@@ -14,6 +18,12 @@ select current_user = 'postgres' and session_user = 'postgres'
   \warn 'The staging administrator session identity is not exact.'
   select 1 / 0 as rejected;
 \endif
+
+begin transaction isolation level serializable;
+set local search_path = pg_catalog;
+set local statement_timeout = '15s';
+set local lock_timeout = '2s';
+set local idle_in_transaction_session_timeout = '15s';
 
 select pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)
@@ -33,6 +43,15 @@ set local search_path = pg_catalog;
 set local statement_timeout = '15s';
 set local lock_timeout = '2s';
 set local idle_in_transaction_session_timeout = '15s';
+
+select current_user = 'postgres' and session_user = 'postgres'
+  as administrator_session_ready
+\gset
+\if :administrator_session_ready
+\else
+  \warn 'The staging administrator session identity is not exact.'
+  select 1 / 0 as rejected;
+\endif
 
 select pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)

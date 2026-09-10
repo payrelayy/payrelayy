@@ -20,7 +20,10 @@ WORKDIR /workspace
 ENV CI=true
 ENV SQL_INTEGRATION_RUNNER_SENTINEL=fetanagent-sql-integration-image-v1
 
-RUN install --directory --owner=root --group=root --mode=0755 /usr/local/share/fetanagent \
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends postgresql-client \
+  && rm -rf /var/lib/apt/lists/* \
+  && install --directory --owner=root --group=root --mode=0755 /usr/local/share/fetanagent \
   && printf '%s\n' "$SQL_INTEGRATION_RUNNER_SENTINEL" > /usr/local/share/fetanagent/sql-integration-runner \
   && chmod 0444 /usr/local/share/fetanagent/sql-integration-runner
 
@@ -29,6 +32,12 @@ COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/sql-integration-tests ./packages/sql-integration-tests
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY infra/sql/staging-runtimes-enable-continuous.sql ./infra/sql/staging-runtimes-enable-continuous.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-provision.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-provision.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-status.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-status.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-disable.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-disable.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
 COPY supabase/migrations ./supabase/migrations

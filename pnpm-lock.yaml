@@ -237,6 +237,9 @@ importers:
       '@fetanagent/agent-platform-companion-contracts':
         specifier: workspace:*
         version: link:../../packages/agent-platform-companion-contracts
+      '@fetanagent/agent-platform-companion-execution-contracts':
+        specifier: workspace:*
+        version: link:../../packages/agent-platform-companion-execution-contracts
       '@fetanagent/agent-platform-kemerbet':
         specifier: workspace:*
         version: link:../../packages/agent-platform-kemerbet

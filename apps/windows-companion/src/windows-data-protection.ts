@@ -8,6 +8,8 @@ const DPAPI_ENTROPY = Object.freeze({
   'device-signing-key': 'FetanAgent Windows Companion\0Device signing key\0v1',
   'local-identity': 'FetanAgent Windows Companion\0KemerBet local identity\0v1',
   'lookup-ledger': 'FetanAgent Windows Companion\0Exact-five lookup ledger\0v1',
+  'execution-v2-crash-evidence':
+    'FetanAgent Windows Companion\0Execution v2 local crash evidence\0v2',
 } as const);
 
 export type WindowsDataProtectionPurpose = keyof typeof DPAPI_ENTROPY;

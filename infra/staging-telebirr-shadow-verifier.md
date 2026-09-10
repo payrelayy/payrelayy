@@ -155,9 +155,15 @@ That requires its own Owner approval and the existing authenticated intake path.
 `stop` launches two DAG-independent jobs after the same target validation. Host removal targets
 every container and network carrying the exact Compose project label, uses bounded SSH, and repeats
 its absence scans so service-label orphans cannot survive a redeploy.
-Database disablement has no SSH or VM dependency and uses the staging session pooler. It commits
-`NOLOGIN` and password removal before terminating pooled sessions, then proves both roles are
-unprivileged/passwordless and no session remains. It does not rewrite financial switches.
+Database disablement has no SSH or VM dependency and uses the staging session pooler. It acquires
+the exact session-scoped shadow lifecycle advisory lock under the bounded lock timeout, commits
+`NOLOGIN` and password removal, terminates pooled sessions in a second transaction, commits the
+final role/session postconditions, and only then requires one successful explicit unlock. Provision
+uses a transaction-scoped advisory lock on the same exact key, so neither workflow nor standalone
+provisioning can re-enable a role anywhere inside that two-transaction disablement window. With
+`ON_ERROR_STOP`, an earlier SQL or postcondition failure closes the psql session and PostgreSQL
+releases the session lock as the fail-safe; no failure path reports the success JSON. Disablement
+does not rewrite financial switches.
 
 If deployment fails after login provisioning, two separate `always()` cleanup jobs attempt
 exact-label host removal and database disablement; the database cleanup cannot be skipped by a hung
@@ -189,7 +195,10 @@ against its internal, disposable PostgreSQL 17 database over fixed test-only SCR
 It proves refusal of a wrong workflow-supplied project assertion and wrong operator, the exact
 dry-run switch boundary, correct-password login, wrong-password and expired-password refusal, one
 bounded 24-hour runtime connection, the complete effective function-only catalog contract, status
-before/during/after, and disablement with session termination. Every tested provision refusal occurs
-before role mutation and leaves the role and no-money state unchanged; this suite does not install a
-production fault hook merely to manufacture a post-mutation rollback. The isolated runner contains
-no production database URL or credential and publishes no database port.
+before/during/after, and disablement with session termination. A deterministic disposable
+concurrency case holds the same session-scoped lifecycle key across transaction boundaries, proves
+the provision script waits on its conflicting transaction lock without changing the role or
+no-money state, then proves it proceeds only after the explicit unlock. Every tested provision
+refusal occurs before role mutation and leaves the role and no-money state unchanged; the suite adds
+no production hook or backdoor to manufacture concurrency or a post-mutation rollback. The isolated
+runner contains no production database URL or credential and publishes no database port.

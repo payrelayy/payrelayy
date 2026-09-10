@@ -51,6 +51,7 @@ const packageJson = JSON.parse(packageText);
 const composeDigest = sha256(compose);
 const helperDigest = sha256(helper);
 const archiveValidatorDigest = sha256(archiveValidator);
+const lifecycleLockKeyPattern = String.raw`pg_catalog\.hashtextextended\(\s*'fetanagent:staging:telebirr-shadow-verifier-runtime'\s*,\s*0\s*\)`;
 const jobBody = (name) => {
   const body = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][a-z0-9-]*:\n/u)[0];
   assert.ok(body, `workflow job ${name} is missing`);
@@ -273,6 +274,17 @@ assert.match(archiveValidatorTests, /test_rejects_archive_identity_tag_and_relea
 
 assert.match(provision, /begin transaction isolation level serializable/u);
 assert.match(provision, /fetanagent:staging:telebirr-shadow-verifier-runtime/u);
+assert.equal(
+  (
+    provision.match(
+      new RegExp(
+        `pg_catalog\\.pg_advisory_xact_lock\\(\\s*${lifecycleLockKeyPattern}\\s*\\)`,
+        'gu',
+      ),
+    ) ?? []
+  ).length,
+  1,
+);
 assert.match(provision, /for share/u);
 assert.match(provision, /set local password_encryption = 'scram-sha-256'/u);
 assert.match(provision, /mode = 'disabled'/u);
@@ -303,6 +315,29 @@ assert.doesNotMatch(
 
 assert.match(disable, /alter role fetanagent_telebirr_shadow_verifier_runtime with\s+nologin/iu);
 assert.match(disable, /password null valid until 'infinity'/u);
+assert.equal((disable.match(/pg_catalog\.pg_advisory_xact_lock\(/gu) ?? []).length, 0);
+assert.equal(
+  (
+    disable.match(
+      new RegExp(`pg_catalog\\.pg_advisory_lock\\(\\s*${lifecycleLockKeyPattern}\\s*\\)`, 'gu'),
+    ) ?? []
+  ).length,
+  1,
+);
+assert.equal(
+  (
+    disable.match(
+      new RegExp(`pg_catalog\\.pg_advisory_unlock\\(\\s*${lifecycleLockKeyPattern}\\s*\\)`, 'gu'),
+    ) ?? []
+  ).length,
+  1,
+);
+assert.match(disable, /^\\set ON_ERROR_STOP on$/mu);
+assert.match(
+  disable,
+  /as shadow_lifecycle_lock_released\s*\\gset\s*\\if :shadow_lifecycle_lock_released/iu,
+);
+assert.match(disable, /lifecycle advisory lock was not released exactly once/iu);
 assert.match(disable, /pg_terminate_backend/u);
 assert.match(disable, /activity\.pid = activity_pid/u);
 assert.match(disable, /pg_stat_clear_snapshot\(\)[\s\S]*activity\.pid = activity_pid/u);
@@ -311,6 +346,47 @@ assert.doesNotMatch(
   disable,
   /(?:insert\s+into|update|delete\s+from)\s+app\.|alter table|create /iu,
 );
+
+const disableSessionLock = disable.indexOf('select pg_catalog.pg_advisory_lock(');
+const disableRoleMutation = disable.indexOf('alter role fetanagent_telebirr_shadow_verifier with');
+const disableFirstCommit = disable.indexOf('commit;', disableRoleMutation);
+const disableSecondBegin = disable.indexOf(
+  'begin transaction isolation level serializable;',
+  disableFirstCommit + 1,
+);
+const disableSessionTermination = disable.indexOf('pg_catalog.pg_terminate_backend');
+const disableFinalPostcondition = disable.indexOf(
+  "raise exception 'The shadow-verifier role disablement is incomplete.'",
+);
+const disableSecondCommit = disable.indexOf('commit;', disableFinalPostcondition);
+const disableSessionUnlock = disable.indexOf('select pg_catalog.pg_advisory_unlock(');
+const disableSuccessResult = disable.indexOf("'operation', 'shadow_verifier_runtime_disable'");
+const disableLifecycleOrder = [
+  disableSessionLock,
+  disableRoleMutation,
+  disableFirstCommit,
+  disableSecondBegin,
+  disableSessionTermination,
+  disableFinalPostcondition,
+  disableSecondCommit,
+  disableSessionUnlock,
+  disableSuccessResult,
+];
+assert.ok(disableLifecycleOrder.every((position) => position >= 0));
+assert.deepEqual(
+  disableLifecycleOrder.toSorted((left, right) => left - right),
+  disableLifecycleOrder,
+);
+
+assert.match(
+  sqlLifecycleSuite,
+  /serializes provision behind the session-scoped disable lifecycle lock across transaction boundaries/u,
+);
+assert.match(sqlLifecycleSuite, /waitForProvisionAdvisoryWaiter/u);
+assert.match(sqlLifecycleSuite, /activity\.wait_event = 'advisory'/u);
+assert.match(sqlLifecycleSuite, /activity\.query like '%pg_advisory_xact_lock%'/u);
+assert.match(sqlLifecycleSuite, /pg_catalog\.pg_blocking_pids/u);
+assert.match(sqlLifecycleSuite, /pg_catalog\.pg_advisory_unlock/u);
 
 assert.match(runbook, /PLAN STAGING SHADOW VERIFIER/u);
 assert.match(runbook, /DEPLOY STAGING SHADOW VERIFIER NO MONEY/u);
@@ -322,12 +398,15 @@ assert.match(runbook, /final, separate administrator database status query/iu);
 assert.match(runbook, /does not apply a\s+migration/iu);
 assert.match(runbook, /workflow-supplied assertion, not a database identity marker/iu);
 assert.match(runbook, /Never\s+run it from a standalone shell/iu);
-assert.match(runbook, /Every tested provision refusal occurs\s+before role mutation/iu);
+assert.match(runbook, /Every tested provision\s+refusal occurs\s+before role mutation/iu);
+assert.match(runbook, /session-scoped shadow lifecycle advisory lock/iu);
+assert.match(runbook, /transaction-scoped advisory lock on the same exact key/iu);
+assert.match(runbook, /ON_ERROR_STOP[\s\S]*fail-safe/iu);
 assert.match(
   packageJson.scripts['test:infra'],
   /node infra\/verify-telebirr-shadow-verifier-staging-lifecycle\.mjs/u,
 );
 
 console.log(
-  'TeleBirr shadow verifier staging lifecycle verified: manual exact-commit plan/deploy/status/stop, root-trusted signed single-image archive, final database no-money proof, bounded one-connection runtime, live/KemerBet gates off, no public ingress, and fail-closed dual cleanup',
+  'TeleBirr shadow verifier staging lifecycle verified: manual exact-commit plan/deploy/status/stop, root-trusted signed single-image archive, final database no-money proof, bounded one-connection runtime, serialized two-transaction disablement, live/KemerBet gates off, no public ingress, and fail-closed dual cleanup',
 );

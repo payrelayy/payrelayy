@@ -25,7 +25,11 @@ set local statement_timeout = '15s';
 set local lock_timeout = '2s';
 set local idle_in_transaction_session_timeout = '15s';
 
-select pg_catalog.pg_advisory_xact_lock(
+-- This session-scoped lock intentionally survives the first COMMIT. Provisioning takes the same
+-- key transaction-scoped, so it cannot re-enable either role between credential removal, pooled
+-- session termination, and the final postconditions. ON_ERROR_STOP disconnects this psql session
+-- after any failure, which is the fail-safe release path before the explicit end-of-script unlock.
+select pg_catalog.pg_advisory_lock(
   pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)
 );
 
@@ -52,10 +56,6 @@ select current_user = 'postgres' and session_user = 'postgres'
   \warn 'The staging administrator session identity is not exact.'
   select 1 / 0 as rejected;
 \endif
-
-select pg_catalog.pg_advisory_xact_lock(
-  pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)
-);
 
 do $fetanagent$
 declare
@@ -114,6 +114,20 @@ begin
 end
 $fetanagent$;
 
+commit;
+
+-- Keep the session lock through the durable commit of every disablement postcondition. Refuse to
+-- report success unless this session releases the one lock acquisition exactly here at the end.
+select pg_catalog.pg_advisory_unlock(
+  pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)
+) as shadow_lifecycle_lock_released
+\gset
+\if :shadow_lifecycle_lock_released
+\else
+  \warn 'The shadow-verifier lifecycle advisory lock was not released exactly once.'
+  select 1 / 0 as rejected;
+\endif
+
 \pset format unaligned
 \pset tuples_only on
 select pg_catalog.jsonb_build_object(
@@ -123,5 +137,3 @@ select pg_catalog.jsonb_build_object(
   'runtimeLogin', 'disabled',
   'financialSwitchesChanged', false
 )::text;
-
-commit;

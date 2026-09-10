@@ -10,6 +10,8 @@ const productionProjectRef = 'xzztugbgtulptnbpoelr';
 const verifierGroup = 'fetanagent_telebirr_shadow_verifier';
 const verifierRuntime = 'fetanagent_telebirr_shadow_verifier_runtime';
 const ownerControlRole = 'fetanagent_owner_control';
+const lifecycleAdvisoryLockName = 'fetanagent:staging:telebirr-shadow-verifier-runtime';
+const disposablePsqlApplicationName = 'fetanagent_shadow_lifecycle_psql';
 const provisionScript = fileURLToPath(
   new URL('../../../infra/sql/staging-telebirr-shadow-verifier-provision.sql', import.meta.url),
 );
@@ -98,6 +100,7 @@ function runPsql(
     }
   }
   Object.assign(environment, {
+    PGAPPNAME: disposablePsqlApplicationName,
     PGPASSFILE: '/dev/null',
     PGPASSWORD: administratorPassword,
     PGSERVICEFILE: '/dev/null',
@@ -220,6 +223,32 @@ async function readLifecycleStatus(
   return parseLastJsonLine<LifecycleStatus>(
     await runPsql(statusScript, administratorPassword, options),
   );
+}
+
+async function waitForProvisionAdvisoryWaiter(client: Client): Promise<number> {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    const activity = await client.query<{ readonly pid: number }>(
+      `
+      select activity.pid
+        from pg_catalog.pg_stat_activity activity
+       where activity.datname = pg_catalog.current_database()
+         and activity.usename = 'postgres'
+         and activity.application_name = $1::text
+         and activity.wait_event_type = 'Lock'
+         and activity.wait_event = 'advisory'
+         and activity.query like '%pg_advisory_xact_lock%'
+         and activity.query like '%fetanagent:staging:telebirr-shadow-verifier-runtime%'
+       order by activity.backend_start desc
+       limit 1
+    `,
+      [disposablePsqlApplicationName],
+    );
+    if (activity.rows[0] !== undefined) {
+      return activity.rows[0].pid;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('Provisioning never reached the expected advisory-lock wait.');
 }
 
 async function disableRuntimeDirectly(client: Client): Promise<void> {
@@ -721,6 +750,102 @@ export function registerStagingTelebirrShadowVerifierLifecycleSqlTests(
         },
         true,
       );
+    });
+
+    it('serializes provision behind the session-scoped disable lifecycle lock across transaction boundaries', async () => {
+      const client = getClient();
+      await withFixture(client, getOwnerAdminId(), async () => {
+        const runtimePassword = '6'.repeat(64);
+        const beforeRuntime = await readRuntimeState(client);
+        const beforeNoMoney = await readNoMoneySnapshot(client);
+        let lifecycleLockHeld = false;
+        let provisionAttempt:
+          | Promise<
+              | { readonly kind: 'fulfilled'; readonly output: string }
+              | { readonly error: unknown; readonly kind: 'rejected' }
+            >
+          | undefined;
+
+        try {
+          await client.query('begin');
+          await client.query(
+            `select pg_catalog.pg_advisory_lock(pg_catalog.hashtextextended($1::text, 0))`,
+            [lifecycleAdvisoryLockName],
+          );
+          lifecycleLockHeld = true;
+          await client.query('commit');
+
+          provisionAttempt = executePsql(provisionScript, { runtimePassword }).then(
+            (output) => ({ kind: 'fulfilled' as const, output }),
+            (error: unknown) => ({ error, kind: 'rejected' as const }),
+          );
+          const waiterPid = await waitForProvisionAdvisoryWaiter(client);
+
+          // The lock was acquired in the prior transaction. A complete additional transaction must
+          // not release it or allow the standalone provision script to cross its xact-lock fence.
+          await client.query('begin');
+          await client.query('select 1');
+          await client.query('commit');
+          const stillWaiting = await client.query<{ readonly waiting: boolean }>(
+            `
+            select activity.wait_event_type = 'Lock'
+                     and activity.wait_event = 'advisory'
+                     and pg_catalog.pg_backend_pid() = any (
+                       pg_catalog.pg_blocking_pids(activity.pid)
+                     ) as waiting
+              from pg_catalog.pg_stat_activity activity
+             where activity.pid = $1::integer
+               and activity.application_name = $2::text
+          `,
+            [waiterPid, disposablePsqlApplicationName],
+          );
+          expect(stillWaiting.rows).toEqual([{ waiting: true }]);
+          expect(await readRuntimeState(client)).toEqual(beforeRuntime);
+          expect(await readNoMoneySnapshot(client)).toBe(beforeNoMoney);
+
+          const unlocked = await client.query<{ readonly released: boolean }>(
+            `
+            select pg_catalog.pg_advisory_unlock(
+              pg_catalog.hashtextextended($1::text, 0)
+            ) as released
+          `,
+            [lifecycleAdvisoryLockName],
+          );
+          expect(unlocked.rows).toEqual([{ released: true }]);
+          lifecycleLockHeld = false;
+
+          const provisionOutcome = await provisionAttempt;
+          if (provisionOutcome.kind === 'rejected') {
+            throw provisionOutcome.error;
+          }
+          expect(parseLastJsonLine(provisionOutcome.output)).toMatchObject({
+            operation: 'shadow_verifier_bounded_runtime_provision',
+            runtimeLogin: 'bounded_24_hours',
+          });
+          expect(parseLastJsonLine(await executePsql(disableScript))).toEqual({
+            deploymentTarget: 'staging',
+            financialSwitchesChanged: false,
+            operation: 'shadow_verifier_runtime_disable',
+            runtimeLogin: 'disabled',
+            schemaVersion: 1,
+          });
+          expect(await readRuntimeState(client)).toEqual(beforeRuntime);
+          expect(await readNoMoneySnapshot(client)).toBe(beforeNoMoney);
+        } finally {
+          if (lifecycleLockHeld) {
+            await client.query(
+              `select pg_catalog.pg_advisory_unlock(
+                pg_catalog.hashtextextended($1::text, 0)
+              )`,
+              [lifecycleAdvisoryLockName],
+            );
+          }
+          if (provisionAttempt !== undefined) {
+            await provisionAttempt;
+          }
+          await disableRuntimeDirectly(client);
+        }
+      });
     });
 
     it('provisions one bounded login, refuses replay, then revokes and terminates it without money changes', async () => {

@@ -36,6 +36,8 @@ select :'shadow_runtime_password' ~ '^[0-9a-f]{64}$'
   select 1 / 0 as rejected;
 \endif
 
+-- This transaction lock conflicts with disablement's session-scoped lock on the exact same key.
+-- Provisioning therefore cannot interleave with either disablement transaction or its postconditions.
 select pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('fetanagent:staging:telebirr-shadow-verifier-runtime', 0)
 );

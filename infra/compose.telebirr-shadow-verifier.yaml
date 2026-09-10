@@ -1,14 +1,14 @@
 name: fetanagent-telebirr-shadow-verifier
 
 # This service is absent from ordinary `docker compose up`. Its exact dry-run and live-gate-off
-# environment is part of the no-money boundary; the two explicit enable inputs only authorize the
-# isolated shadow observer. It publishes no port and receives work only from PostgreSQL staging.
+# environment is part of the no-money boundary. Only the isolated shadow observer is enabled. It
+# publishes no port and receives work only from PostgreSQL staging.
 services:
   telebirr-shadow-verifier:
     profiles: [telebirr-shadow-verifier]
     platform: linux/amd64
-    image: ${FETANAGENT_TELEBIRR_SHADOW_VERIFIER_IMAGE_REFERENCE:?set the reviewed repository@sha256 immutable image reference}
-    pull_policy: always
+    image: ${FETANAGENT_TELEBIRR_SHADOW_VERIFIER_IMAGE_ID:?set the release-recorded sha256 image ID}
+    pull_policy: never
     init: true
     user: '10001:10001'
     restart: unless-stopped
@@ -34,8 +34,8 @@ services:
     environment:
       NODE_ENV: production
       FINANCIAL_ACTIONS_MODE: dry_run
-      INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED: ${FETANAGENT_INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED:?set true only for the reviewed no-money shadow observation}
-      TELEBIRR_SHADOW_VERIFICATION_ENABLED: ${FETANAGENT_TELEBIRR_SHADOW_VERIFICATION_ENABLED:?set true only for the reviewed no-money shadow observation}
+      INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED: 'true'
+      TELEBIRR_SHADOW_VERIFICATION_ENABLED: 'true'
       TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false'
       KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'
       TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET: staging
@@ -95,3 +95,6 @@ configs:
 networks:
   telebirr_shadow_verifier_egress:
     driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false

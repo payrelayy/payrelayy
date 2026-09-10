@@ -245,6 +245,7 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
          where routine.oid in (
            'app.recover_expired_private_live_prepared()'::regprocedure,
            'app.lease_private_live_deposit_by_provider(uuid,integer,boolean)'::regprocedure,
+           'app.get_private_live_deposit_pilot_status_by_admin_id(uuid,uuid)'::regprocedure,
            'app.lease_private_live_deposit_pre_epoch(uuid,integer)'::regprocedure,
            'app.fence_private_live_deposit_pre_epoch(uuid,uuid,uuid,uuid,uuid)'::regprocedure,
            'app.lease_next_private_live_deposit_execution(uuid,integer)'::regprocedure,
@@ -253,7 +254,7 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
          )
          order by signature
       `);
-      expect(routines.rows).toHaveLength(6);
+      expect(routines.rows).toHaveLength(7);
       for (const row of routines.rows) {
         expect(row.owner_name).toBe('postgres');
         expect(row.public_allowed).toBe(false);
@@ -263,11 +264,15 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
         const ownerOnlyInternal =
           row.signature.includes('_pre_epoch') ||
           row.signature.includes('recover_expired_private_live_prepared') ||
-          row.signature.includes('lease_private_live_deposit_by_provider');
+          row.signature.includes('lease_private_live_deposit_by_provider') ||
+          row.signature.includes('get_private_live_deposit_pilot_status_by_admin_id');
         if (ownerOnlyInternal) {
           expect(row).toMatchObject({
             configuration: [
-              row.signature.includes('_pre_epoch') ? 'search_path=pg_catalog' : 'search_path=',
+              row.signature.includes('_pre_epoch') ||
+              row.signature.includes('get_private_live_deposit_pilot_status_by_admin_id')
+                ? 'search_path=pg_catalog'
+                : 'search_path=',
             ],
             direct_grantees: [],
             executor_allowed: false,
@@ -314,6 +319,29 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
         'pilot_reservation_id',
         'pilot_configuration_digest',
         'pilot_authorization_token',
+      ]);
+      const ownerStatus = routines.rows.find((row) =>
+        row.signature.includes('get_private_live_deposit_pilot_status_by_admin_id'),
+      );
+      expect(ownerStatus?.result_columns).toEqual([
+        'pilot_revision_id',
+        'revision',
+        'contract_version',
+        'pilot_status',
+        'switch_mode',
+        'configuration_digest',
+        'financially_active',
+        'within_active_window',
+        'player_count',
+        'submitting_customer_count',
+        'provider_count',
+        'reserved_deposit_count',
+        'reserved_amount_minor',
+        'maximum_reservation_count',
+        'maximum_aggregate_minor',
+        'expires_at',
+        'stopped_at',
+        'stop_reason_code',
       ]);
 
       const activationWriters = await client.query(`
@@ -648,6 +676,97 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
             attempt_status: 'cancelled_before_action',
             binding_count: 1,
             deposit_status: 'execution_review',
+            job_status: 'cancelled',
+          },
+        ]);
+      });
+    });
+
+    it('recovers an expired prepared TeleBirr attempt after natural epoch expiry without new authority', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await prepareQueuedExecution(client, getOwnerAdminId());
+        const lease = await leaseExecution(client, 30);
+
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(
+          `update app.deposit_jobs
+              set lease_expires_at = pg_catalog.clock_timestamp() - interval '1 hour'
+            where id = $1::uuid`,
+          [lease.execution_job_id],
+        );
+        await client.query(
+          `update app.private_trusted_telebirr_activation_epochs
+              set active_from = pg_catalog.clock_timestamp() - interval '2 hours',
+                  activated_at = pg_catalog.clock_timestamp() - interval '2 hours',
+                  expires_at = pg_catalog.clock_timestamp() - interval '1 hour'
+            where epoch = $1::bigint`,
+          [fixture.epoch],
+        );
+        await client.query(
+          `update app.private_live_deposit_pilot_revisions
+              set active_from = pg_catalog.clock_timestamp() - interval '2 hours',
+                  expires_at = pg_catalog.clock_timestamp() - interval '1 hour'
+            where id = $1::uuid`,
+          [fixture.pilot.pilotRevisionId],
+        );
+        await client.query("set local session_replication_role = 'origin'");
+
+        const recovered = await queryAsExecutor<LeaseRow>(
+          client,
+          'select * from app.lease_next_private_live_deposit_execution($1::uuid, 30)',
+          [randomUUID()],
+        );
+        expect(recovered).toHaveLength(1);
+        expect(recovered[0]).toMatchObject({
+          deposit_intent_id: lease.deposit_intent_id,
+          execution_attempt_id: lease.execution_attempt_id,
+          execution_job_id: null,
+          lease_disposition: 'recovered_expired_prepared',
+          lease_expires_at: null,
+          lease_token: null,
+          pilot_authorization_token: null,
+          pilot_revision_id: null,
+        });
+
+        const terminal = await client.query<{
+          readonly attempt_count: number;
+          readonly attempt_status: string;
+          readonly binding_count: number;
+          readonly deposit_status: string;
+          readonly final_action_fenced_at: Date | null;
+          readonly job_lease_token: string | null;
+          readonly job_status: string;
+        }>(
+          `select execution_attempt.status::text as attempt_status,
+                  execution_attempt.final_action_fenced_at,
+                  execution_job.status::text as job_status,
+                  execution_job.lease_token::text as job_lease_token,
+                  deposit_intent.status::text as deposit_status,
+                  (select pg_catalog.count(*)::integer
+                     from app.deposit_execution_attempts counted_attempt
+                    where counted_attempt.deposit_intent_id = deposit_intent.id)
+                    as attempt_count,
+                  (select pg_catalog.count(*)::integer
+                     from app.private_live_deposit_execution_epoch_bindings epoch_binding
+                    where epoch_binding.execution_attempt_id = execution_attempt.id)
+                    as binding_count
+             from app.deposit_execution_attempts execution_attempt
+             join app.deposit_jobs execution_job
+               on execution_job.id = execution_attempt.deposit_job_id
+             join app.deposit_intents deposit_intent
+               on deposit_intent.id = execution_attempt.deposit_intent_id
+            where execution_attempt.id = $1::uuid`,
+          [lease.execution_attempt_id],
+        );
+        expect(terminal.rows).toEqual([
+          {
+            attempt_count: 1,
+            attempt_status: 'cancelled_before_action',
+            binding_count: 1,
+            deposit_status: 'execution_review',
+            final_action_fenced_at: null,
+            job_lease_token: null,
             job_status: 'cancelled',
           },
         ]);

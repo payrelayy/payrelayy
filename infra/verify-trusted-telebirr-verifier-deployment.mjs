@@ -104,7 +104,7 @@ function migrationFunctionBody(name) {
 
 function executionEpochFunctionBody(name) {
   const match = new RegExp(
-    `create function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
     'u',
   ).exec(executionEpochMigration);
   assert.ok(match, `missing execution-epoch function ${name}`);
@@ -583,7 +583,7 @@ assert.match(productionRunbook, /Production activation is deliberately unavailab
 assert.match(productionRunbook, /shared\s+database state machine or epoch/);
 assert.match(
   productionRunbook,
-  /TeleBirr execution\s+lease records\s+an immutable attempt-to-epoch binding/,
+  /TeleBirr execution\s+lease records\s+an immutable\s+attempt-to-epoch binding/,
 );
 assert.match(productionRunbook, /Cancellation and\s+reconciliation deliberately remain usable/);
 assert.match(productionRunbook, /There is no same-release renewal path/);
@@ -776,8 +776,36 @@ assert.match(
   providerLeaseBody,
   /p_allow_telebirr[^]*provider_member\.provider_code_snapshot = 'telebirr'/,
 );
+assert.match(
+  providerLeaseBody,
+  /join app\.feature_switches selected_provider_switch[^]*selected_provider_switch\.feature_key =[^]*provider_member\.provider_code_snapshot \|\| '_authoritative_verification'[^]*selected_provider_switch\.mode = 'live'[^]*order by execution_job\.priority desc/u,
+  'fresh execution selection must join its exact provider lane before queue ordering',
+);
+assert.doesNotMatch(
+  providerLeaseBody,
+  /left join app\.feature_switches provider_switch[^]*provider_switch\.mode <> 'live'[^]*then\s+return/iu,
+  'a disabled lane must not suppress independently live providers in the same pilot',
+);
 assert.match(providerLeaseBody, /pilot_reservation\.deposit_intent_id = deposit_intent\.id/);
 assert.match(providerLeaseBody, /payment_provider\.code = provider_member\.provider_code_snapshot/);
+const mixedProviderStatusBody = executionEpochFunctionBody(
+  'get_private_live_deposit_pilot_status_by_admin_id',
+);
+assert.match(
+  mixedProviderStatusBody,
+  /exists \([^]*from app\.private_live_deposit_pilot_providers provider_member[^]*join app\.feature_switches configured_provider_switch[^]*configured_provider_switch\.feature_key =[^]*provider_member\.provider_code_snapshot \|\|[^]*'_authoritative_verification'[^]*configured_provider_switch\.mode = 'live'[^]*provider_member\.pilot_revision_id = pilot\.id/iu,
+  'status must count a live lane only when that exact provider is configured in the pilot',
+);
+assert.doesNotMatch(
+  mixedProviderStatusBody,
+  /not exists \([^]*private_live_deposit_pilot_providers[^]*provider_switch\.mode <> 'live'/iu,
+  'status must not require every configured provider lane to be live',
+);
+assert.match(
+  executionEpochMigration,
+  /create or replace function app\.get_private_live_deposit_pilot_status_by_admin_id\([^]*security definer\s+set search_path = pg_catalog/iu,
+  'the replacement owner-status implementation must preserve its hardened routine contract',
+);
 assert.match(
   executionEpochMigration,
   /grant execute on function app\.lease_next_private_live_deposit_execution\(uuid, integer\)[^]*to fetanagent_deposit_executor/,

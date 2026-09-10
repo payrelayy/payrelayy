@@ -18,9 +18,12 @@ database state machine or epoch, enforces it at the verifier loader, authority r
 boundary, every relevant feature-switch write, and the private-live execution lease and final-action
 fence, and provides an idempotent Owner emergency intent/revocation transaction. Immutable pilot
 reservation/provider lineage dispatches the shared public executor API: CBE Birr retains its
-existing pilot boundary and receives no TeleBirr epoch binding; each TeleBirr execution lease records
-an immutable attempt-to-epoch binding, its complete lease window must fit inside that epoch, and the
-same epoch must still be current with ten seconds remaining when final action is fenced. It seeds
+existing pilot boundary and receives no TeleBirr epoch binding; each queued candidate must join its
+own configured provider's exact live switch before priority ordering, so a disabled TeleBirr lane
+cannot starve an independently live CBE lane. Each TeleBirr execution lease records an immutable
+attempt-to-epoch binding, its complete lease window must fit inside that epoch, and the same epoch
+must still be current with ten seconds remaining when final action is fenced. Owner aggregate status
+uses the same any-configured-live-lane rule and never counts an unconfigured live switch. It seeds
 only immutable epoch zero in `disabled` state and provides no live-activation writer. An additional
 read before process start is not an atomic interlock and is not accepted here.
 
@@ -37,7 +40,8 @@ the mere presence of emergency intent makes work loading empty and rejects verif
 verification completion, and final-action fencing for leases obtained earlier. Cancellation and
 reconciliation deliberately remain usable after disable so uncertainty can only tighten. The
 executor lease entrypoint also retains one recovery-only path after stop/expiry: it may adopt an
-expired `prepared` attempt and cancel it into review, but cannot issue a new lease or action fence.
+expired `prepared` attempt and cancel it into review, but cannot issue a new lease, epoch binding, or
+action fence. Natural activation-epoch expiry has the same convergence path.
 
 The production verifier remains separate from `compose.production.yaml`. Its staged service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct

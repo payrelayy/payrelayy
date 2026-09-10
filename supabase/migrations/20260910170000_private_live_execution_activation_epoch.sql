@@ -349,16 +349,7 @@ begin
         from app.feature_switches financial_switch
        where financial_switch.feature_key in ('deposit_execution', 'payment_verification')
          and financial_switch.mode = 'live'
-    ) <> 2
-    or exists (
-      select 1
-        from app.private_live_deposit_pilot_providers provider_member
-        left join app.feature_switches provider_switch
-          on provider_switch.feature_key =
-            provider_member.provider_code_snapshot || '_authoritative_verification'
-       where provider_member.pilot_revision_id = pilot.id
-         and (provider_switch.feature_key is null or provider_switch.mode <> 'live')
-    ) then
+    ) <> 2 then
     return;
   end if;
 
@@ -401,6 +392,10 @@ begin
          and provider_member.provider_code_snapshot = 'telebirr'
        )
      )
+    join app.feature_switches selected_provider_switch
+      on selected_provider_switch.feature_key =
+           provider_member.provider_code_snapshot || '_authoritative_verification'
+     and selected_provider_switch.mode = 'live'
     join app.payment_providers payment_provider
       on payment_provider.id = provider_member.payment_provider_id
      and payment_provider.code = provider_member.provider_code_snapshot
@@ -563,6 +558,124 @@ begin
          authorization.pilot_configuration_digest,
          authorization.pilot_authorization_token,
          claimed_provider_code;
+end;
+$$;
+
+-- Preserve the existing owner-status OID and return contract while aligning its aggregate signal
+-- with provider dispatch: a mixed pilot is financially active when at least one provider actually
+-- configured in that pilot has its exact authoritative-verification lane live. A live switch for
+-- an unconfigured provider cannot satisfy this EXISTS because membership is the driving relation.
+create or replace function app.get_private_live_deposit_pilot_status_by_admin_id(
+  p_actor_admin_id uuid,
+  p_pilot_revision_id uuid
+)
+returns table (
+  pilot_revision_id uuid,
+  revision integer,
+  contract_version smallint,
+  pilot_status text,
+  switch_mode text,
+  configuration_digest text,
+  financially_active boolean,
+  within_active_window boolean,
+  player_count integer,
+  submitting_customer_count integer,
+  provider_count integer,
+  reserved_deposit_count integer,
+  reserved_amount_minor bigint,
+  maximum_reservation_count smallint,
+  maximum_aggregate_minor bigint,
+  expires_at timestamptz,
+  stopped_at timestamptz,
+  stop_reason_code text
+)
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  checked_at timestamptz;
+begin
+  perform app.require_active_owner_for_private_live_deposit_pilot(p_actor_admin_id);
+
+  checked_at := pg_catalog.clock_timestamp();
+
+  return query
+  select pilot.id,
+         pilot.revision,
+         pilot.contract_version,
+         pilot.status,
+         pilot_switch.mode::text,
+         pilot.configuration_digest,
+         (
+           pilot.status = 'armed'
+           and checked_at >= pilot.active_from
+           and checked_at < pilot.expires_at
+           and pilot_switch.mode = 'live'
+           and pilot_switch.settings = pg_catalog.jsonb_build_object(
+             'contract_version', 1,
+             'pilot_revision_id', pilot.id,
+             'configuration_digest', pilot.configuration_digest
+           )
+           and (
+             select pg_catalog.count(*) = 2
+               from app.feature_switches financial_switch
+              where financial_switch.feature_key in (
+                'deposit_execution',
+                'payment_verification'
+              )
+                and financial_switch.mode = 'live'
+           )
+           and exists (
+             select 1
+               from app.private_live_deposit_pilot_providers provider_member
+               join app.feature_switches configured_provider_switch
+                 on configured_provider_switch.feature_key =
+                      provider_member.provider_code_snapshot ||
+                      '_authoritative_verification'
+                and configured_provider_switch.mode = 'live'
+              where provider_member.pilot_revision_id = pilot.id
+           )
+         ),
+         (checked_at >= pilot.active_from and checked_at < pilot.expires_at),
+         (
+           select pg_catalog.count(*)::integer
+             from app.private_live_deposit_pilot_players member
+            where member.pilot_revision_id = pilot.id
+         ),
+         (
+           select pg_catalog.count(*)::integer
+             from app.private_live_deposit_pilot_customers member
+            where member.pilot_revision_id = pilot.id
+         ),
+         (
+           select pg_catalog.count(*)::integer
+             from app.private_live_deposit_pilot_providers member
+            where member.pilot_revision_id = pilot.id
+         ),
+         (
+           select pg_catalog.count(*)::integer
+             from app.private_live_deposit_pilot_reservations reservation
+            where reservation.pilot_revision_id = pilot.id
+         ),
+         (
+           select coalesce(pg_catalog.sum(reservation.amount_minor), 0)::bigint
+             from app.private_live_deposit_pilot_reservations reservation
+            where reservation.pilot_revision_id = pilot.id
+         ),
+         pilot.maximum_reservation_count,
+         pilot.maximum_aggregate_minor,
+         pilot.expires_at,
+         pilot.stopped_at,
+         pilot.stop_reason_code
+    from app.private_live_deposit_pilot_revisions pilot
+    join app.feature_switches pilot_switch
+      on pilot_switch.feature_key = 'private_live_deposit_pilot'
+   where pilot.id = p_pilot_revision_id;
+
+  if not found then
+    raise exception 'The private live-deposit pilot is unavailable.';
+  end if;
 end;
 $$;
 
@@ -1051,6 +1164,8 @@ alter function app.reject_private_live_execution_epoch_binding_truncate() owner 
 alter function app.recover_expired_private_live_prepared() owner to postgres;
 alter function app.lease_private_live_deposit_by_provider(uuid, integer, boolean)
   owner to postgres;
+alter function app.get_private_live_deposit_pilot_status_by_admin_id(uuid, uuid)
+  owner to postgres;
 alter function app.lease_private_live_deposit_pre_epoch(uuid, integer) owner to postgres;
 alter function app.fence_private_live_deposit_pre_epoch(uuid, uuid, uuid, uuid, uuid)
   owner to postgres;
@@ -1082,6 +1197,7 @@ revoke all on function
   app.reject_private_live_execution_epoch_binding_truncate(),
   app.recover_expired_private_live_prepared(),
   app.lease_private_live_deposit_by_provider(uuid, integer, boolean),
+  app.get_private_live_deposit_pilot_status_by_admin_id(uuid, uuid),
   app.lease_private_live_deposit_pre_epoch(uuid, integer),
   app.fence_private_live_deposit_pre_epoch(uuid, uuid, uuid, uuid, uuid),
   app.lease_next_private_live_deposit_execution(uuid, integer),
@@ -1114,7 +1230,9 @@ comment on table app.private_live_deposit_execution_epoch_bindings is
 comment on function app.recover_expired_private_live_prepared() is
   'Owner-only recovery primitive for exactly one expired prepared private-live execution. It can only cancel into review and contains no fresh lease path.';
 comment on function app.lease_private_live_deposit_by_provider(uuid, integer, boolean) is
-  'Owner-only provider-aware fresh lease primitive. Immutable reservation lineage selects CBE Birr or, only when explicitly allowed by its caller, TeleBirr; it performs no expired-work recovery.';
+  'Owner-only provider-aware fresh lease primitive. Immutable reservation lineage and its exact live provider switch select CBE Birr or, only when explicitly allowed by its caller, TeleBirr; it performs no expired-work recovery.';
+comment on function app.get_private_live_deposit_pilot_status_by_admin_id(uuid, uuid) is
+  'Owner-only private-pilot aggregate status. Financial activity requires both common financial switches and at least one exact live provider lane configured in this pilot; unconfigured live lanes never count.';
 comment on function app.lease_next_private_live_deposit_execution(uuid, integer) is
   'Provider-dispatched private-live executor lease. CBE Birr retains existing pilot authority without an epoch binding; TeleBirr requires and atomically records the current activation epoch; expired prepared work remains recoverable after disable.';
 comment on function app.fence_private_live_deposit_execution_final_action(

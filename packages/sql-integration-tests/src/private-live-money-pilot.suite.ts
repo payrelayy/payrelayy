@@ -24,6 +24,16 @@ export type PreparedPilot = PilotPrerequisites & {
   readonly requestKey: string;
 };
 
+type ProviderBoundary = {
+  readonly paymentProviderId: string;
+  readonly receiverAccountId: string;
+  readonly receiverAccountVersion: number;
+};
+
+type MixedProviderPilot = PreparedPilot & {
+  readonly telebirrBoundary: ProviderBoundary;
+};
+
 type SettlementLineage = {
   readonly depositIntentId: string;
   readonly evidenceId: string;
@@ -437,6 +447,124 @@ export async function preparePilot(
     expiresAt,
     pilotRevisionId: rows[0]!.pilot_revision_id,
     requestKey,
+  };
+}
+
+async function ensureTelebirrBoundary(client: Client): Promise<ProviderBoundary> {
+  let boundary = await client.query<{
+    readonly payment_provider_id: string;
+    readonly receiver_account_id: string;
+    readonly receiver_account_version: number;
+  }>(`
+    select provider.id as payment_provider_id,
+           receiver.id as receiver_account_id,
+           receiver.version as receiver_account_version
+      from app.payment_providers provider
+      join app.receiver_accounts receiver
+        on receiver.provider_id = provider.id
+       and receiver.status = 'active'
+     where provider.code = 'telebirr'
+       and provider.status = 'active'
+  `);
+
+  if (boundary.rows.length === 0) {
+    await client.query(`
+      insert into app.receiver_accounts (
+        provider_id,
+        version,
+        account_holder_name,
+        account_reference_ciphertext,
+        verification_reference_ciphertext,
+        account_reference_masked,
+        instructions
+      )
+      select provider.id,
+             coalesce((
+               select max(receiver.version) + 1
+                 from app.receiver_accounts receiver
+                where receiver.provider_id = provider.id
+             ), 1),
+             'Synthetic Mixed Pilot TeleBirr Receiver',
+             'synthetic-mixed-pilot-telebirr-account-ciphertext',
+             'synthetic-mixed-pilot-telebirr-verification-ciphertext',
+             '****7002',
+             jsonb_build_object('customer_message', 'Synthetic SQL fixture only')
+        from app.payment_providers provider
+       where provider.code = 'telebirr'
+         and provider.status = 'active'
+    `);
+    boundary = await client.query(`
+      select provider.id as payment_provider_id,
+             receiver.id as receiver_account_id,
+             receiver.version as receiver_account_version
+        from app.payment_providers provider
+        join app.receiver_accounts receiver
+          on receiver.provider_id = provider.id
+         and receiver.status = 'active'
+       where provider.code = 'telebirr'
+         and provider.status = 'active'
+    `);
+  }
+
+  expect(boundary.rows).toHaveLength(1);
+  return {
+    paymentProviderId: boundary.rows[0]!.payment_provider_id,
+    receiverAccountId: boundary.rows[0]!.receiver_account_id,
+    receiverAccountVersion: boundary.rows[0]!.receiver_account_version,
+  };
+}
+
+async function prepareMixedProviderPilot(
+  client: Client,
+  ownerAdminId: string,
+): Promise<MixedProviderPilot> {
+  const prerequisites = await createPilotPrerequisites(client);
+  const telebirrBoundary = await ensureTelebirrBoundary(client);
+  const requestKey = randomUUID();
+  const activeFrom = new Date(Date.now() - 30_000);
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1_000);
+  const prepared = await queryAsMigrationOwner<{ readonly pilot_revision_id: string }>(
+    client,
+    `select app.prepare_private_live_deposit_pilot(
+       $1::uuid,
+       $2::uuid,
+       array['cbe_birr', 'telebirr']::text[],
+       $3::text[],
+       $4::uuid[],
+       2500::bigint,
+       2500000::bigint,
+       2500000::bigint,
+       12500000::bigint,
+       5::smallint,
+       $5::timestamptz,
+       $6::timestamptz
+     ) as pilot_revision_id`,
+    [
+      ownerAdminId,
+      requestKey,
+      prerequisites.playerIds,
+      [prerequisites.ownerCustomerId, prerequisites.submittingCustomerId],
+      activeFrom,
+      expiresAt,
+    ],
+  );
+  expect(prepared).toHaveLength(1);
+  const manifest = await client.query<{ readonly configuration_digest: string }>(
+    `select configuration_digest
+       from app.private_live_deposit_pilot_revisions
+      where id = $1::uuid`,
+    [prepared[0]!.pilot_revision_id],
+  );
+  expect(manifest.rows).toHaveLength(1);
+
+  return {
+    ...prerequisites,
+    activeFrom,
+    configurationDigest: manifest.rows[0]!.configuration_digest,
+    expiresAt,
+    pilotRevisionId: prepared[0]!.pilot_revision_id,
+    requestKey,
+    telebirrBoundary,
   };
 }
 
@@ -1650,6 +1778,204 @@ export function registerPrivateLiveMoneyPilotSqlTests(
             deposit_status: 'execution_review',
             job_status: 'cancelled',
             review_count: 1,
+          },
+        ]);
+      });
+    });
+
+    it('skips a disabled higher-priority TeleBirr lane and leases lower-priority CBE in a mixed pilot', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareMixedProviderPilot(client, getOwnerAdminId());
+        await armPilot(client, getOwnerAdminId(), pilot);
+        await activateSyntheticPilot(client);
+
+        const cbeOnlyStatus = await queryAsMigrationOwner<{
+          readonly financially_active: boolean;
+          readonly provider_count: number;
+        }>(
+          client,
+          `select financially_active, provider_count
+             from app.get_private_live_deposit_pilot_status($1::uuid, $2::uuid)`,
+          [getOwnerAdminId(), pilot.pilotRevisionId],
+        );
+        expect(cbeOnlyStatus).toEqual([{ financially_active: true, provider_count: 2 }]);
+
+        // Exercise inverse status without creating TeleBirr authority. Replica mode is confined
+        // to this rolled-back fixture; no execution call occurs while this synthetic state exists.
+        const inverseStatusSavepoint = `mixed_provider_inverse_${sha256(randomUUID()).slice(0, 12)}`;
+        await client.query(`savepoint ${inverseStatusSavepoint}`);
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(`
+          update app.feature_switches
+             set mode = case
+               when feature_key = 'telebirr_authoritative_verification'
+                 then 'live'::app.feature_mode
+               when feature_key = 'cbe_birr_authoritative_verification'
+                 then 'disabled'::app.feature_mode
+               else mode
+             end
+           where feature_key in (
+             'cbe_birr_authoritative_verification',
+             'telebirr_authoritative_verification'
+           )
+        `);
+        await client.query("set local session_replication_role = 'origin'");
+        const telebirrOnlyStatus = await queryAsMigrationOwner<{
+          readonly financially_active: boolean;
+        }>(
+          client,
+          `select financially_active
+             from app.get_private_live_deposit_pilot_status($1::uuid, $2::uuid)`,
+          [getOwnerAdminId(), pilot.pilotRevisionId],
+        );
+        expect(telebirrOnlyStatus).toEqual([{ financially_active: true }]);
+
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(
+          `delete from app.private_live_deposit_pilot_providers
+            where pilot_revision_id = $1::uuid
+              and payment_provider_id = $2::uuid`,
+          [pilot.pilotRevisionId, pilot.telebirrBoundary.paymentProviderId],
+        );
+        await client.query("set local session_replication_role = 'origin'");
+        const unconfiguredLiveStatus = await queryAsMigrationOwner<{
+          readonly financially_active: boolean;
+        }>(
+          client,
+          `select financially_active
+             from app.get_private_live_deposit_pilot_status($1::uuid, $2::uuid)`,
+          [getOwnerAdminId(), pilot.pilotRevisionId],
+        );
+        expect(unconfiguredLiveStatus).toEqual([{ financially_active: false }]);
+        await client.query(`rollback to savepoint ${inverseStatusSavepoint}`);
+        await client.query(`release savepoint ${inverseStatusSavepoint}`);
+
+        const higherPriorityLineage = await createSettlementLineage(client, pilot, {
+          playerIndex: 0,
+        });
+        const higherPrioritySettlement = await settlePrivatePilot(client, higherPriorityLineage);
+        expect(higherPrioritySettlement).toHaveLength(1);
+        const lowerPriorityLineage = await createSettlementLineage(client, pilot, {
+          playerIndex: 1,
+        });
+        const lowerPrioritySettlement = await settlePrivatePilot(client, lowerPriorityLineage);
+        expect(lowerPrioritySettlement).toHaveLength(1);
+
+        // Convert the first synthetic lineage to the pilot's exact TeleBirr provider snapshot.
+        // Trigger bypass is test-only; foreign keys/check constraints still apply. The disabled
+        // lane, not its queue position, must keep this job out of SKIP LOCKED selection.
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(
+          `update app.deposit_intents deposit_intent
+              set payment_provider_id = $1::uuid,
+                  receiver_account_id = $2::uuid,
+                  receiver_account_version = $3::integer,
+                  receiver_account_holder_name_snapshot = receiver.account_holder_name,
+                  receiver_account_masked_snapshot = receiver.account_reference_masked,
+                  receiver_instructions_snapshot = receiver.instructions
+             from app.receiver_accounts receiver
+            where deposit_intent.id = $4::uuid
+              and receiver.id = $2::uuid
+              and receiver.provider_id = $1::uuid
+              and receiver.version = $3::integer`,
+          [
+            pilot.telebirrBoundary.paymentProviderId,
+            pilot.telebirrBoundary.receiverAccountId,
+            pilot.telebirrBoundary.receiverAccountVersion,
+            higherPriorityLineage.depositIntentId,
+          ],
+        );
+        await client.query(
+          `update app.private_live_deposit_pilot_proofs
+              set payment_provider_id = $1::uuid,
+                  provider_code_snapshot = 'telebirr',
+                  candidate_reference_ciphertext = pg_catalog.replace(
+                    candidate_reference_ciphertext,
+                    'v2.cbe_birr.',
+                    'v2.telebirr.'
+                  )
+            where id = $2::uuid`,
+          [pilot.telebirrBoundary.paymentProviderId, higherPriorityLineage.proofId],
+        );
+        await client.query(
+          `update app.provider_payment_evidence
+              set payment_provider_id = $1::uuid,
+                  matched_receiver_account_id = $2::uuid,
+                  matched_receiver_account_version = $3::integer
+            where id = $4::uuid`,
+          [
+            pilot.telebirrBoundary.paymentProviderId,
+            pilot.telebirrBoundary.receiverAccountId,
+            pilot.telebirrBoundary.receiverAccountVersion,
+            higherPriorityLineage.evidenceId,
+          ],
+        );
+        await client.query(
+          `update app.private_live_deposit_pilot_reservations
+              set payment_provider_id = $1::uuid,
+                  receiver_account_id = $2::uuid,
+                  receiver_account_version = $3::integer
+            where deposit_intent_id = $4::uuid`,
+          [
+            pilot.telebirrBoundary.paymentProviderId,
+            pilot.telebirrBoundary.receiverAccountId,
+            pilot.telebirrBoundary.receiverAccountVersion,
+            higherPriorityLineage.depositIntentId,
+          ],
+        );
+        await client.query(
+          `update app.deposit_jobs
+              set priority = case
+                when id = $1::uuid then 32767::smallint
+                when id = $2::uuid then 0::smallint
+                else priority
+              end
+            where id in ($1::uuid, $2::uuid)`,
+          [
+            higherPrioritySettlement[0]!.execution_job_id,
+            lowerPrioritySettlement[0]!.execution_job_id,
+          ],
+        );
+        await client.query("set local session_replication_role = 'origin'");
+
+        const lease = await queryAsRole<LeaseRow>(
+          client,
+          'fetanagent_deposit_executor',
+          `select * from app.lease_next_private_live_deposit_execution($1::uuid, 300)`,
+          [randomUUID()],
+        );
+        expect(lease).toHaveLength(1);
+        expect(lease[0]).toMatchObject({
+          deposit_intent_id: lowerPriorityLineage.depositIntentId,
+          execution_job_id: lowerPrioritySettlement[0]!.execution_job_id,
+          lease_disposition: 'execution',
+          pilot_revision_id: pilot.pilotRevisionId,
+          player_id: pilot.playerIds[1],
+        });
+
+        const dispatchState = await client.query<{
+          readonly cbe_binding_count: number;
+          readonly telebirr_attempt_count: number;
+          readonly telebirr_job_status: string;
+        }>(
+          `select
+             (select pg_catalog.count(*)::integer
+                from app.private_live_deposit_execution_epoch_bindings epoch_binding
+               where epoch_binding.execution_attempt_id = $1::uuid) as cbe_binding_count,
+             (select pg_catalog.count(*)::integer
+                from app.deposit_execution_attempts execution_attempt
+               where execution_attempt.deposit_job_id = $2::uuid) as telebirr_attempt_count,
+             (select execution_job.status::text
+                from app.deposit_jobs execution_job
+               where execution_job.id = $2::uuid) as telebirr_job_status`,
+          [lease[0]!.execution_attempt_id, higherPrioritySettlement[0]!.execution_job_id],
+        );
+        expect(dispatchState.rows).toEqual([
+          {
+            cbe_binding_count: 0,
+            telebirr_attempt_count: 0,
+            telebirr_job_status: 'queued',
           },
         ]);
       });

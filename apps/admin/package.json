@@ -17,7 +17,7 @@
     "db:preflight": "node dist/database-preflight-cli.js",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run src --passWithNoTests"
   },
   "devDependencies": {
     "@types/pg": "8.21.0"

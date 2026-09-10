@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "pnpm run build && vitest run --passWithNoTests"
+    "test": "pnpm run build && vitest run src --passWithNoTests --no-file-parallelism"
   },
   "dependencies": {
     "pdfjs-dist": "6.2.108"

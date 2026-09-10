@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:preflight": "tsx src/database-preflight-cli.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run src --passWithNoTests"
   },
   "devDependencies": {
     "@types/pg": "8.21.0"

@@ -411,7 +411,7 @@ describe('customer-web Player-ID ownership-proof prerequisite contract', () => {
       },
       scripts: {
         build: 'tsc -p tsconfig.json',
-        test: 'vitest run --passWithNoTests',
+        test: 'vitest run src --passWithNoTests',
       },
     });
     for (const key of [

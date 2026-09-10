@@ -17,7 +17,7 @@
     "db:player-actions-preflight": "tsx src/player-action-database-preflight-cli.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run src --passWithNoTests"
   },
   "devDependencies": {
     "@types/pg": "8.21.0"

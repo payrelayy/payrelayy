@@ -14,7 +14,7 @@
     "db:preflight": "tsx src/catalog-preflight-cli.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run src --passWithNoTests"
   },
   "devDependencies": {
     "@types/pg": "8.21.0"

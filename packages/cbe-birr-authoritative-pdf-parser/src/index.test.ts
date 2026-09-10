@@ -744,8 +744,9 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     const successOutcome = await runRealIsolatedChild(syntheticReceiptPdf());
     expect(successOutcome).toMatchObject({ state: 'message', cleanupConfirmed: true });
 
+    const bomb = await syntheticFlateOperatorBombPdf();
     const bombStartedAt = performance.now();
-    const bombOutcome = await runRealIsolatedChild(await syntheticFlateOperatorBombPdf());
+    const bombOutcome = await runRealIsolatedChild(bomb);
     expect(bombOutcome).toMatchObject({ cleanupConfirmed: true });
     expect(['timeout', 'failure']).toContain(bombOutcome.state);
     expect(performance.now() - bombStartedAt).toBeLessThan(

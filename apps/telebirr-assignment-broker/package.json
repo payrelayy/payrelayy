@@ -15,6 +15,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/telebirr-assignment-broker-main.js",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run src --passWithNoTests"
   }
 }

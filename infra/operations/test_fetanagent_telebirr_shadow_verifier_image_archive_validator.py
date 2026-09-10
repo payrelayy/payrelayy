@@ -190,14 +190,7 @@ def hybrid_archive(
         legacy_configs = (
             [
                 {
-                    **{
-                        key: config_value[key]
-                        for key in validator.LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
-                        if key in config_value
-                    },
-                    # Moby's legacy V1Image JSON always includes Created, even
-                    # when the authoritative OCI image config omitted it.
-                    "created": config_value.get("created"),
+                    **validator.moby_v1_top_projection(config_value),
                     "id": "b" * 64,
                 }
             ]
@@ -330,12 +323,7 @@ class ArchiveValidatorTests(unittest.TestCase):
     def test_rejects_legacy_top_config_not_bound_to_runtime_config(self) -> None:
         config_value = json.loads(runtime_config())
         hostile_config = {
-            **{
-                key: config_value[key]
-                for key in validator.LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
-                if key in config_value
-            },
-            "created": config_value.get("created"),
+            **validator.moby_v1_top_projection(config_value),
             "id": "b" * 64,
         }
         hostile_config["config"] = {
@@ -351,6 +339,46 @@ class ArchiveValidatorTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "does not match the runtime image config"):
             validator.validate(str(path), TAG, RELEASE)
+
+    def test_accepts_exact_moby_legacy_intermediate_chain(self) -> None:
+        config_value = json.loads(runtime_config())
+        legacy_ids = [character * 64 for character in ("1", "2", "3")]
+        empty_container_config = validator.moby_container_config_projection({})
+        legacy_configs = [
+            {
+                "created": "1970-01-01T00:00:00Z",
+                "container_config": empty_container_config,
+                "id": legacy_ids[0],
+                "os": "linux",
+            },
+            {
+                "created": "1970-01-01T00:00:00Z",
+                "container_config": empty_container_config,
+                "id": legacy_ids[1],
+                "parent": legacy_ids[0],
+                "os": "linux",
+            },
+            {
+                **validator.moby_v1_top_projection(config_value),
+                "id": legacy_ids[2],
+                "parent": legacy_ids[1],
+            },
+        ]
+        files: dict[str, bytes] = {}
+        for legacy_config in legacy_configs:
+            value = encoded(legacy_config)
+            digest = hashlib.sha256(value).hexdigest()
+            files[f"blobs/sha256/{digest}"] = value
+        path = self.keep(write_archive(files))
+        with tarfile.open(path, mode="r") as archive:
+            members_by_name = {member.name: member for member in archive.getmembers()}
+            validator.validate_legacy_v1_config_blobs(
+                archive,
+                members_by_name,
+                set(files),
+                len(legacy_configs),
+                config_value,
+            )
 
     def test_accepts_singular_legacy_docker_save(self) -> None:
         result = validator.validate(str(self.keep(legacy_archive())), TAG, RELEASE)

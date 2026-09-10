@@ -54,6 +54,35 @@ LEGACY_V1_CONFIG_FIELDS = {
     "os",
     "Size",
 }
+LEGACY_CONTAINER_CONFIG_ALWAYS_SERIALIZED_DEFAULTS = {
+    "Hostname": "",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": False,
+    "AttachStdout": False,
+    "AttachStderr": False,
+    "Tty": False,
+    "OpenStdin": False,
+    "StdinOnce": False,
+    "Env": None,
+    "Cmd": None,
+    "Image": "",
+    "Volumes": None,
+    "WorkingDir": "",
+    "Entrypoint": None,
+    "OnBuild": None,
+    "Labels": None,
+}
+LEGACY_CONTAINER_CONFIG_OPTIONAL_FIELDS = {
+    "ExposedPorts",
+    "Healthcheck",
+    "ArgsEscaped",
+    "NetworkDisabled",
+    "MacAddress",
+    "StopSignal",
+    "StopTimeout",
+    "Shell",
+}
 
 
 def refuse(message: str) -> None:
@@ -222,6 +251,71 @@ def validate_runtime_config(config_bytes: bytes, expected_release: str) -> dict[
     return image
 
 
+def moby_container_config_projection(value: object) -> dict[str, object]:
+    """Project OCI Config JSON through Moby's legacy container.Config encoding."""
+    if not isinstance(value, dict) or not set(value).issubset(
+        set(LEGACY_CONTAINER_CONFIG_ALWAYS_SERIALIZED_DEFAULTS)
+        | LEGACY_CONTAINER_CONFIG_OPTIONAL_FIELDS
+    ):
+        refuse("image container Config is outside Moby's reviewed legacy schema")
+
+    projection: dict[str, object] = {}
+    for field, default in LEGACY_CONTAINER_CONFIG_ALWAYS_SERIALIZED_DEFAULTS.items():
+        field_value = value.get(field, default)
+        if field_value is None and isinstance(default, (bool, str)):
+            field_value = default
+        projection[field] = field_value
+
+    for field in ("ExposedPorts", "Shell"):
+        field_value = value.get(field)
+        if field_value:
+            projection[field] = field_value
+    for field in ("Healthcheck", "StopTimeout"):
+        field_value = value.get(field)
+        if field_value is not None:
+            projection[field] = field_value
+    for field in ("ArgsEscaped", "NetworkDisabled"):
+        if value.get(field) is True:
+            projection[field] = True
+    for field in ("MacAddress", "StopSignal"):
+        field_value = value.get(field)
+        if isinstance(field_value, str) and field_value:
+            projection[field] = field_value
+    return projection
+
+
+def moby_v1_top_projection(image_config: Mapping[str, object]) -> dict[str, object]:
+    """Build the auxiliary top V1Image projection written by Moby docker save."""
+    runtime = image_config.get("config")
+    if not isinstance(runtime, dict):
+        refuse("image runtime Config is not an object")
+    raw_container_config = image_config.get("container_config")
+    if raw_container_config is None:
+        raw_container_config = {}
+
+    projection: dict[str, object] = {
+        "created": image_config.get("created"),
+        "container_config": moby_container_config_projection(raw_container_config),
+        "config": moby_container_config_projection(runtime),
+    }
+    for field in (
+        "comment",
+        "container",
+        "docker_version",
+        "author",
+        "architecture",
+        "variant",
+        "os",
+    ):
+        field_value = image_config.get(field)
+        if field_value not in (None, ""):
+            projection[field] = field_value
+    size = image_config.get("Size")
+    if size not in (None, 0):
+        projection["Size"] = size
+    return projection
+
+
 def validate_legacy_v1_config_blobs(
     archive: tarfile.TarFile,
     members_by_name: Mapping[str, tarfile.TarInfo],
@@ -296,12 +390,7 @@ def validate_legacy_v1_config_blobs(
         refuse("Docker legacy v1 config parent chain is disconnected")
 
     projection_fields = LEGACY_V1_CONFIG_FIELDS - {"id", "parent"}
-    expected_projection = {
-        key: image_config[key] for key in projection_fields if key in image_config
-    }
-    # Moby's V1Image.Created field intentionally has no `omitempty`. Docker save
-    # therefore serializes it as null when the authoritative OCI config omits it.
-    expected_projection["created"] = image_config.get("created")
+    expected_projection = moby_v1_top_projection(image_config)
     top_config = configs_by_id[ordered_ids[-1]]
     observed_projection = {
         key: top_config[key] for key in projection_fields if key in top_config
@@ -310,14 +399,16 @@ def validate_legacy_v1_config_blobs(
         refuse("Docker legacy v1 top config does not match the runtime image config")
 
     for index, legacy_id in enumerate(ordered_ids[:-1]):
-        expected_fields = {"created", "id", "os"}
+        expected_config: dict[str, object] = {
+            "created": "1970-01-01T00:00:00Z",
+            "container_config": moby_container_config_projection({}),
+            "id": legacy_id,
+            "os": "linux",
+        }
         if index > 0:
-            expected_fields.add("parent")
+            expected_config["parent"] = ordered_ids[index - 1]
         legacy_config = configs_by_id[legacy_id]
-        if (
-            set(legacy_config) != expected_fields
-            or legacy_config["created"] != "1970-01-01T00:00:00Z"
-        ):
+        if legacy_config != expected_config:
             refuse("Docker legacy v1 intermediate config is not Moby-generated")
 
 

@@ -7,22 +7,40 @@ const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => readFile(`${repositoryRoot}${path}`, 'utf8');
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 
-const [compose, helper, sudoers, workflow, provision, status, disable, runbook, packageText] =
-  await Promise.all([
-    read('infra/compose.telebirr-shadow-verifier.yaml'),
-    read('infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh'),
-    read('infra/operations/fetanagent-telebirr-shadow-verifier-helper.sudoers'),
-    read('.github/workflows/staging-telebirr-shadow-verifier.yml'),
-    read('infra/sql/staging-telebirr-shadow-verifier-provision.sql'),
-    read('infra/sql/staging-telebirr-shadow-verifier-status.sql'),
-    read('infra/sql/staging-telebirr-shadow-verifier-disable.sql'),
-    read('infra/staging-telebirr-shadow-verifier.md'),
-    read('package.json'),
-  ]);
+const [
+  compose,
+  helper,
+  archiveValidator,
+  archiveValidatorTests,
+  sudoers,
+  workflow,
+  provision,
+  status,
+  disable,
+  runbook,
+  qualityWorkflow,
+  imageSmokeWorkflow,
+  packageText,
+] = await Promise.all([
+  read('infra/compose.telebirr-shadow-verifier.yaml'),
+  read('infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh'),
+  read('infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py'),
+  read('infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py'),
+  read('infra/operations/fetanagent-telebirr-shadow-verifier-helper.sudoers'),
+  read('.github/workflows/staging-telebirr-shadow-verifier.yml'),
+  read('infra/sql/staging-telebirr-shadow-verifier-provision.sql'),
+  read('infra/sql/staging-telebirr-shadow-verifier-status.sql'),
+  read('infra/sql/staging-telebirr-shadow-verifier-disable.sql'),
+  read('infra/staging-telebirr-shadow-verifier.md'),
+  read('.github/workflows/quality.yml'),
+  read('.github/workflows/telebirr-shadow-verifier-image-smoke.yml'),
+  read('package.json'),
+]);
 
 const packageJson = JSON.parse(packageText);
 const composeDigest = sha256(compose);
 const helperDigest = sha256(helper);
+const archiveValidatorDigest = sha256(archiveValidator);
 const jobBody = (name) => {
   const body = workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][a-z0-9-]*:\n/u)[0];
   assert.ok(body, `workflow job ${name} is missing`);
@@ -30,6 +48,10 @@ const jobBody = (name) => {
 };
 
 assert.match(helper, new RegExp(`EXPECTED_COMPOSE_SHA256='${composeDigest}'`, 'u'));
+assert.match(
+  helper,
+  new RegExp(`EXPECTED_ARCHIVE_VALIDATOR_SHA256='${archiveValidatorDigest}'`, 'u'),
+);
 assert.equal((sudoers.match(new RegExp(`sha256:${helperDigest}`, 'gu')) ?? []).length, 8);
 assert.doesNotMatch(sudoers, /NOPASSWD:\s*ALL|\/bin\/(?:ba)?sh|docker/u);
 
@@ -47,13 +69,48 @@ assert.match(workflow, /openssl rand -hex 32/u);
 assert.match(workflow, /staging-telebirr-shadow-verifier-provision\.sql/u);
 assert.match(workflow, /staging-runtime-login-preflight\.sql/u);
 assert.match(workflow, /fetanagent-staging-direct-database-tunnel\.sh/u);
+assert.equal(
+  (workflow.match(/fetanagent-telebirr-shadow-verifier-image-archive-validator\.py/gu) ?? [])
+    .length,
+  2,
+);
+assert.match(workflow, /test_fetanagent_telebirr_shadow_verifier_image_archive_validator\.py/u);
+assert.match(workflow, /TELEBIRR_SHADOW_VERIFIER_RELEASE_SIGNING_PRIVATE_KEY_PEM/u);
+assert.match(workflow, /fetanagent\.telebirr-shadow-verifier\.staging-release\.v1/u);
+assert.match(workflow, /imageArchiveSha256/u);
+assert.match(workflow, /imageConfigDigest/u);
+assert.match(workflow, /imageManifestDigest/u);
+assert.match(workflow, /dsaEncoding: 'der'/u);
+assert.match(workflow, /trap cleanup_unpublished_protected EXIT/u);
+assert.match(workflow, /protected_published=true/u);
+assert.match(
+  workflow,
+  /image_archive_sha256: \$\{\{ steps\.bundle\.outputs\.image_archive_sha256 \}\}/u,
+);
+assert.match(
+  workflow,
+  /BUILT_IMAGE_ARCHIVE_SHA256: \$\{\{ needs\.build\.outputs\.image_archive_sha256 \}\}/u,
+);
+assert.match(workflow, /"\$archive_digest" == "\$BUILT_IMAGE_ARCHIVE_SHA256"/u);
 assert.match(workflow, /staging-telebirr-shadow-verifier-disable\.sql/gu);
 assert.match(workflow, /always\(\)[\s\S]*needs\.deploy\.result != 'success'/u);
 assert.match(workflow, /activeRuntimeSessions == 1/u);
 assert.doesNotMatch(workflow, /workflow_call|repository_dispatch|curl\s+.*(?:kemerbet|telebirr)/iu);
+assert.match(qualityWorkflow, /^\s{2}pull_request:\r?$/mu);
+assert.match(
+  qualityWorkflow,
+  /python3 -I infra\/operations\/test_fetanagent_telebirr_shadow_verifier_image_archive_validator\.py/u,
+);
+assert.match(imageSmokeWorkflow, /^\s{2}pull_request:\r?$/mu);
+assert.match(imageSmokeWorkflow, /docker save --output "\$archive" "\$release_image"/u);
+assert.match(
+  imageSmokeWorkflow,
+  /fetanagent-telebirr-shadow-verifier-image-archive-validator\.py[\s\\]*\n\s+"\$archive" "\$release_tag" "\$GITHUB_SHA"/u,
+);
 
 const failedHostCleanup = jobBody('failed-deploy-host-cleanup');
 const failedDatabaseCleanup = jobBody('failed-deploy-database-cleanup');
+const deploy = jobBody('deploy');
 const stopHost = jobBody('stop-host');
 const stopDatabase = jobBody('stop-database');
 for (const hostOnlyJob of [failedHostCleanup, stopHost]) {
@@ -75,6 +132,20 @@ assert.doesNotMatch(failedHostCleanup, /needs\.deploy\.outputs|cleanup_required/
 assert.doesNotMatch(failedDatabaseCleanup, /needs\.deploy\.outputs|cleanup_required/u);
 assert.match(failedHostCleanup, /needs\.build\.result == 'success'/u);
 assert.match(failedDatabaseCleanup, /needs\.build\.result == 'success'/u);
+const hostStartIndex = deploy.indexOf('Transfer, install, start, and attest the exact release');
+const finalDatabaseIndex = deploy.indexOf(
+  'Require the final database no-money and one-session attestation',
+);
+const evidenceIndex = deploy.indexOf('Record the no-money deployment evidence');
+assert.ok(
+  hostStartIndex >= 0 && finalDatabaseIndex > hostStartIndex && evidenceIndex > finalDatabaseIndex,
+);
+const finalDatabase = deploy.slice(finalDatabaseIndex, evidenceIndex);
+assert.match(finalDatabase, /staging-telebirr-shadow-verifier-status\.sql/u);
+assert.match(finalDatabase, /runtimeLogin == "bounded"/u);
+assert.match(finalDatabase, /activeRuntimeSessions == 1/u);
+assert.match(finalDatabase, /financialBoundary == "dry_run"/u);
+assert.match(finalDatabase, /executorBoundary == "disabled"/u);
 
 assert.match(compose, /FETANAGENT_TELEBIRR_SHADOW_VERIFIER_IMAGE_ID/u);
 assert.match(compose, /^\s{4}pull_policy: never$/mu);
@@ -102,6 +173,16 @@ for (const exact of [
 }
 assert.match(helper, /org\.opencontainers\.image\.revision/u);
 assert.match(helper, /\.Config\.ExposedPorts/u);
+assert.match(helper, /\.Config\.Entrypoint == \["docker-entrypoint\.sh"\]/u);
+assert.match(helper, /\.Config\.WorkingDir == "\/workspace"/u);
+assert.match(helper, /RELEASE_SIGNING_PUBLIC_KEY='\/etc\/fetanagent\//u);
+assert.match(helper, /openssl dgst -sha256 -verify/u);
+assert.match(helper, /image archive does not match the signed digest/u);
+assert.match(helper, /loading the signed image changed an unrelated Docker tag/u);
+assert.match(helper, /INSTALL_IMAGE_WAS_ABSENT='true'/u);
+assert.match(helper, /INSTALL_RELEASE_PUBLISHED='true'/u);
+assert.match(helper, /docker_local image rm -- "\$INSTALL_LOADED_IMAGE_TAG"/u);
+assert.match(helper, /docker --host "\$DOCKER_SOCKET" network rm/u);
 assert.match(helper, /HostConfig\.PortBindings/u);
 assert.match(helper, /FINANCIAL_ACTIONS_MODE=dry_run/u);
 assert.match(helper, /TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false/u);
@@ -111,6 +192,27 @@ assert.match(helper, /container rm --force/u);
 assert.match(helper, /require_no_project_containers/u);
 assert.match(helper, /an active shadow-verifier release must be explicitly stopped first/u);
 assert.doesNotMatch(helper, /feature_switches|alter role|\bpsql\b/iu);
+
+assert.match(archiveValidator, /docker-save-legacy-v1/u);
+assert.match(archiveValidator, /docker-save-oci-v1/u);
+assert.match(archiveValidator, /len\(docker_manifest\) != 1/u);
+assert.match(archiveValidator, /runtime\.get\("Entrypoint"\) != EXPECTED_ENTRYPOINT/u);
+assert.match(archiveValidator, /def hash_exact/u);
+assert.match(archiveValidator, /stream\.read\(1024 \* 1024\)/u);
+assert.doesNotMatch(archiveValidator, /stream\.read\(MAX_(?:ARCHIVE|LAYER)_BYTES/u);
+assert.match(archiveValidatorTests, /test_accepts_singular_legacy_docker_save/u);
+assert.match(archiveValidatorTests, /test_accepts_singular_oci_backed_docker_save/u);
+assert.match(archiveValidatorTests, /test_rejects_multiple_tags/u);
+assert.match(archiveValidatorTests, /test_rejects_non_object_oci_descriptors/u);
+assert.match(archiveValidatorTests, /test_rejects_non_object_config_descriptors/u);
+assert.match(archiveValidatorTests, /test_rejects_non_object_image_configs/u);
+assert.match(
+  archiveValidatorTests,
+  /test_rejects_unsafe_members_duplicate_names_and_extra_payloads/u,
+);
+assert.match(archiveValidatorTests, /test_rejects_blob_digest_and_descriptor_size_mismatches/u);
+assert.match(archiveValidatorTests, /test_rejects_wrong_or_financial_runtime_config/u);
+assert.match(archiveValidatorTests, /test_rejects_archive_identity_tag_and_release_mismatches/u);
 
 assert.match(provision, /begin transaction isolation level serializable/u);
 assert.match(provision, /fetanagent:staging:telebirr-shadow-verifier-runtime/u);
@@ -147,6 +249,9 @@ assert.match(runbook, /PLAN STAGING SHADOW VERIFIER/u);
 assert.match(runbook, /DEPLOY STAGING SHADOW VERIFIER NO MONEY/u);
 assert.match(runbook, /STATUS STAGING SHADOW VERIFIER/u);
 assert.match(runbook, /STOP STAGING SHADOW VERIFIER/u);
+assert.match(runbook, /root-owned public key/iu);
+assert.match(runbook, /every unrelated Docker tag/iu);
+assert.match(runbook, /final, separate administrator database status query/iu);
 assert.match(runbook, /does not apply a\s+migration/iu);
 assert.match(
   packageJson.scripts['test:infra'],
@@ -154,5 +259,5 @@ assert.match(
 );
 
 console.log(
-  'TeleBirr shadow verifier staging lifecycle verified: manual exact-commit plan/deploy/status/stop, immutable image ID, bounded one-connection runtime, dry-run-only process, live/KemerBet gates off, no public ingress, and fail-closed dual cleanup',
+  'TeleBirr shadow verifier staging lifecycle verified: manual exact-commit plan/deploy/status/stop, root-trusted signed single-image archive, final database no-money proof, bounded one-connection runtime, live/KemerBet gates off, no public ingress, and fail-closed dual cleanup',
 );

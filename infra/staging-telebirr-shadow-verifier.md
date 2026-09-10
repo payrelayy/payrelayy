@@ -43,11 +43,22 @@ root console. GitHub Actions cannot install or widen its own root capability.
 1. Use only a merged `main` commit whose Quality workflow passed.
 2. Copy `infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh` to
    `/usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper` as `root:root` mode `0755`.
-3. Verify its SHA-256 against the reviewed commit.
-4. Validate
+3. Copy `infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py` to
+   `/usr/local/libexec/fetanagent-telebirr-shadow-verifier-image-archive-validator` as `root:root`
+   mode `0444`. Verify both file digests against the reviewed helper constants.
+4. From an offline administrator workstation, create one P-256 release-signing key. Store its
+   private PEM only as the protected GitHub environment secret documented below. Through the
+   authenticated DigitalOcean root console, install only the matching public PEM at
+   `/etc/fetanagent/telebirr-shadow-verifier-release-signing-public-key.pem` as `root:root` mode
+   `0444`. Independently compare the canonical 91-byte SPKI DER SHA-256 on both sides. The
+   `fetanagent-admin` SSH identity must not be able to replace this key or the validator.
+5. Verify the helper SHA-256 against the reviewed commit.
+6. Validate
    `infra/operations/fetanagent-telebirr-shadow-verifier-helper.sudoers` with `visudo -cf`, then
    install it under `/etc/sudoers.d` as `root:root` mode `0440`.
-5. Run the helper's checksum-bound `verify` command as `fetanagent-admin`. Do not grant general
+7. Run the helper's checksum-bound `verify` and `preflight` commands as `fetanagent-admin`.
+   `preflight` must prove the root-owned key and validator before accepting an incoming release.
+   Do not grant general
    Docker, shell, PostgreSQL, or filesystem sudo authority.
 
 The helper accepts only `verify`, `preflight`, `prepare-incoming`, `discard`, `install`, `start`,
@@ -58,14 +69,15 @@ money-action primitive.
 
 The existing `staging` GitHub environment supplies:
 
-| Name                                              | Kind     | Purpose                                                                                   |
-| ------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `SUPABASE_DB_PASSWORD`                            | secret   | Short administrator session used only by the checked-in role provision/status/disable SQL |
-| `SUPABASE_CA_CERTIFICATE_PEM`                     | secret   | Reviewed CA for verify-full PostgreSQL TLS                                                |
-| `STAGING_VM_HOST`                                 | secret   | Exact staging VM SSH hostname                                                             |
-| `STAGING_VM_KNOWN_HOSTS`                          | secret   | Pinned SSH host key entry                                                                 |
-| `STAGING_VM_SSH_PRIVATE_KEY`                      | secret   | Existing restricted deployment identity                                                   |
-| `TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_V1_BASE64` | variable | Canonical public-only assignment-signer/device pin manifest                               |
+| Name                                                       | Kind     | Purpose                                                                                   |
+| ---------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `SUPABASE_DB_PASSWORD`                                     | secret   | Short administrator session used only by the checked-in role provision/status/disable SQL |
+| `SUPABASE_CA_CERTIFICATE_PEM`                              | secret   | Reviewed CA for verify-full PostgreSQL TLS                                                |
+| `STAGING_VM_HOST`                                          | secret   | Exact staging VM SSH hostname                                                             |
+| `STAGING_VM_KNOWN_HOSTS`                                   | secret   | Pinned SSH host key entry                                                                 |
+| `STAGING_VM_SSH_PRIVATE_KEY`                               | secret   | Existing restricted deployment identity                                                   |
+| `TELEBIRR_SHADOW_VERIFIER_RELEASE_SIGNING_PRIVATE_KEY_PEM` | secret   | Offline-created P-256 key used only to sign the canonical staging release manifest        |
+| `TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_V1_BASE64`          | variable | Canonical public-only assignment-signer/device pin manifest                               |
 
 The pin manifest contains no private key. Before deployment, independently record its digest as
 `sha256:<64 lowercase hex>` and compare it with the workflow input.
@@ -93,18 +105,45 @@ For `deploy`, provide the independently reviewed pin-manifest digest. For every 
 ## Deployment and evidence
 
 `deploy` builds from the exact workflow commit without protected inputs, records the full OCI
-revision label, saves a one-use image archive, and transfers it only after the installed helper
-passes its digest, Droplet identity, direct IPv6 database route, empty container inventory, and
-inactive-receipt checks. The helper records the loaded Docker content ID (`sha256:...`); Compose uses
-that ID with `pull_policy: never`.
+revision label, saves a one-use image archive, and validates the actual archive before upload. The
+validator accepts only one exact legacy or OCI-backed `docker save` image and tag, streams layer
+hashing under a 1 GiB archive ceiling, and requires the exact user, command, entrypoint, working
+directory, labels, healthcheck, no-port Config, and no embedded credential or financial setting.
+The PR-triggered Quality job runs the hostile archive fixtures, and the image-smoke job validates a
+real runner-produced `docker save` archive before this manual workflow can be merged.
+After protected-environment approval, the workflow validates the downloaded archive again and
+requires its format, image identities, byte digest, and size to equal the build job's independent
+outputs before it signs a canonical domain-separated manifest binding the staging target, commit,
+repository/tag, config and image-manifest digests, every archive byte and its size, Compose digest,
+and public pin digest. The helper accepts the archive only when that signature chains to the
+separately installed root-owned public key. The restricted SSH identity cannot mint a replacement
+manifest.
+
+Transfer occurs only after the installed helper passes its own digest, the root-owned validator
+digest and signing key, Droplet identity, direct IPv6 database route, empty project-wide container
+and network inventory, and inactive-receipt checks. The helper records the loaded Docker content ID
+(`sha256:...`); Compose uses that ID with `pull_policy: never`. It also proves the image tag did not
+already exist and compares every unrelated Docker tag before and after load, preventing an archive
+from overwriting another repository mapping.
+
+If installation fails before the immutable release directory is published, the helper removes the
+new tag/image only after proving the tag was absent before load, still resolves to the signed image
+identity, has no container holder, and has no unrelated tag. It never removes an image it cannot
+prove was created by that attempt. Once the release directory is atomically published, installation
+has reached a durable `installed-but-not-started` terminal state: a later incoming-directory cleanup
+or status failure does not erase its image or immutable evidence, and the same commit cannot be
+retried. Keep its database login disabled (the independent cleanup does this) and use the
+authenticated root console for explicit incident review/removal before selecting a new commit.
 
 The workflow then grants only the existing shadow runtime a random 64-hex password and a 24-hour
 `VALID UNTIL`. It changes no feature switch. A direct verify-full runtime login through the VM must
 pass before release transfer. Startup succeeds only when the application catalog preflight and
-loopback readiness probe pass. Host status rechecks the image ID/commit, receipt, container count,
-user, command, read-only filesystem, capabilities, port bindings, network, health, restart count,
-and every safety environment value. Database status independently reports only bounded state and
-counts.
+loopback readiness probe pass. Host status rechecks the signed image identities/commit, receipt,
+project-wide container and network counts, exact image Config, user, command, read-only filesystem,
+capabilities, port bindings, network, health, restart count, and every safety environment value.
+Deployment is not successful until a final, separate administrator database status query after
+host startup proves the login is bounded, exactly one runtime session exists, the financial
+boundary remains `dry_run`, and the executor remains disabled.
 
 Do not treat a successful deployment as permission to stage evidence or run a shadow observation.
 That requires its own Owner approval and the existing authenticated intake path.
@@ -112,7 +151,8 @@ That requires its own Owner approval and the existing authenticated intake path.
 ## Stop and failure recovery
 
 `stop` launches two DAG-independent jobs after the same target validation. Host removal targets
-only the exact Compose project/service labels, uses bounded SSH, and repeats its absence scan.
+every container and network carrying the exact Compose project label, uses bounded SSH, and repeats
+its absence scans so service-label orphans cannot survive a redeploy.
 Database disablement has no SSH or VM dependency and uses the staging session pooler. It commits
 `NOLOGIN` and password removal before terminating pooled sessions, then proves both roles are
 unprivileged/passwordless and no session remains. It does not rewrite financial switches.
@@ -132,6 +172,7 @@ Local verification is non-mutating:
 ```powershell
 pnpm --filter "@fetanagent/trusted-telebirr-verifier..." run build
 pnpm --filter @fetanagent/trusted-telebirr-verifier run test
+python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py
 node infra/verify-telebirr-shadow-verifier-deployment.mjs
 node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
 ```

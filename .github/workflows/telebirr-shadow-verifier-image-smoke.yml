@@ -30,9 +30,19 @@ jobs:
           SHADOW_IMAGE: fetanagent-telebirr-shadow-verifier:ci
         run: |
           set -euo pipefail
+          release_tag="${GITHUB_SHA:0:12}"
+          release_image="fetanagent-telebirr-shadow-verifier:$release_tag"
+          archive="$RUNNER_TEMP/fetanagent-telebirr-shadow-verifier-image-smoke.tar"
           docker build --pull=false --target telebirr-shadow-verifier \
             --build-arg "VCS_REF=$GITHUB_SHA" \
-            --tag "$SHADOW_IMAGE" .
+            --tag "$release_image" .
+
+          docker save --output "$archive" "$release_image"
+          python3 -I \
+            infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py \
+            "$archive" "$release_tag" "$GITHUB_SHA"
+          docker tag "$release_image" "$SHADOW_IMAGE"
+          docker image rm "$release_image"
 
           test "$(docker image inspect "$SHADOW_IMAGE" --format '{{.Config.User}}')" = \
             '10001:10001'

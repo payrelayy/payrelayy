@@ -51,7 +51,10 @@ The repository provides:
 - [`compose.telebirr-shadow-verifier.yaml`](compose.telebirr-shadow-verifier.yaml): a separate
   explicit-profile-only, dry-run-only authenticated shadow observer. It uses a distinct no-login
   runtime/function surface and append-only lineage, publishes no port, fixes both live-money gates
-  off, and can record only advisory outcomes with null financial IDs and false settlement;
+  off, and can record only advisory outcomes with null financial IDs and false settlement. Its
+  staging lifecycle requires a root-trusted signature over the exact single-image archive and a
+  final post-start database no-money attestation; see
+  [`staging-telebirr-shadow-verifier.md`](staging-telebirr-shadow-verifier.md);
 - [`.github/workflows/customer-web-image-smoke.yml`](../.github/workflows/customer-web-image-smoke.yml):
   builds the real customer-web image, verifies its non-root identity and immutable revision label,
   requires the credential-free production entrypoint to fail closed, and probes the built app only

@@ -102,6 +102,12 @@ jobs:
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    outputs:
+      image_archive_format: ${{ steps.bundle.outputs.image_archive_format }}
+      image_config_digest: ${{ steps.bundle.outputs.image_config_digest }}
+      image_manifest_digest: ${{ steps.bundle.outputs.image_manifest_digest }}
+      image_archive_sha256: ${{ steps.bundle.outputs.image_archive_sha256 }}
+      image_archive_size: ${{ steps.bundle.outputs.image_archive_size }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -113,6 +119,7 @@ jobs:
           set -euo pipefail
           node infra/verify-telebirr-shadow-verifier-deployment.mjs
           node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
+          python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py
           bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
       - name: Build and inspect the exact commit image
@@ -127,14 +134,43 @@ jobs:
           [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "$GITHUB_SHA" ]]
           [[ "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" == \
             '["node","apps/trusted-telebirr-verifier/dist/telebirr-shadow-verifier-main.js"]' ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')" == \
+            '["docker-entrypoint.sh"]' ]]
+          [[ "$(docker image inspect "$image" --format '{{.Config.WorkingDir}}')" == '/workspace' ]]
           [[ "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" == 'null' ]]
       - name: Save the one-use image bundle
+        id: bundle
         if: inputs.mode == 'deploy'
         shell: bash
         run: |
           set -euo pipefail
-          docker save --output "$RUNNER_TEMP/fetanagent-telebirr-shadow-verifier-image.tar" \
+          archive="$RUNNER_TEMP/fetanagent-telebirr-shadow-verifier-image.tar"
+          docker save --output "$archive" \
             "fetanagent-telebirr-shadow-verifier:${GITHUB_SHA:0:12}"
+          identity="$(python3 -I \
+            infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py \
+            "$archive" "${GITHUB_SHA:0:12}" "$GITHUB_SHA")"
+          jq -e '
+            type == "object" and
+            keys_unsorted == ["archiveFormat", "imageConfigDigest", "imageManifestDigest"] and
+            (.archiveFormat == "docker-save-oci-v1" or .archiveFormat == "docker-save-legacy-v1") and
+            (.imageConfigDigest | test("^sha256:[0-9a-f]{64}$")) and
+            (.imageManifestDigest | test("^sha256:[0-9a-f]{64}$")) and
+            .imageConfigDigest != .imageManifestDigest
+          ' <<<"$identity" >/dev/null
+          runtime_id="$(docker image inspect \
+            "fetanagent-telebirr-shadow-verifier:${GITHUB_SHA:0:12}" --format '{{.Id}}')"
+          jq -e --arg runtime "$runtime_id" '
+            if .archiveFormat == "docker-save-legacy-v1"
+            then $runtime == .imageConfigDigest
+            else ($runtime == .imageConfigDigest or $runtime == .imageManifestDigest)
+            end
+          ' <<<"$identity" >/dev/null
+          echo "image_archive_format=$(jq -er '.archiveFormat' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_config_digest=$(jq -er '.imageConfigDigest' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_manifest_digest=$(jq -er '.imageManifestDigest' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_archive_sha256=sha256:$(sha256sum "$archive" | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+          echo "image_archive_size=$(stat --format='%s' "$archive")" >>"$GITHUB_OUTPUT"
       - name: Upload the one-use image bundle
         if: inputs.mode == 'deploy'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -169,17 +205,35 @@ jobs:
           PIN_MANIFEST_BASE64: ${{ vars.TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          RELEASE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.TELEBIRR_SHADOW_VERIFIER_RELEASE_SIGNING_PRIVATE_KEY_PEM }}
           STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
           STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
           STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
           CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+          BUILT_IMAGE_ARCHIVE_FORMAT: ${{ needs.build.outputs.image_archive_format }}
+          BUILT_IMAGE_CONFIG_DIGEST: ${{ needs.build.outputs.image_config_digest }}
+          BUILT_IMAGE_MANIFEST_DIGEST: ${{ needs.build.outputs.image_manifest_digest }}
+          BUILT_IMAGE_ARCHIVE_SHA256: ${{ needs.build.outputs.image_archive_sha256 }}
+          BUILT_IMAGE_ARCHIVE_SIZE: ${{ needs.build.outputs.image_archive_size }}
         run: |
           set -euo pipefail
           umask 077
-          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$PIN_MANIFEST_BASE64" ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" &&
+            -n "$PIN_MANIFEST_BASE64" && -n "$RELEASE_SIGNING_PRIVATE_KEY_PEM" ]]
           [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           protected="$RUNNER_TEMP/telebirr-shadow-verifier-protected"
           install -d -m 0700 "$protected"
+          protected_published=false
+          signing_private=''
+          cleanup_unpublished_protected() {
+            if [[ -n "$signing_private" ]]; then rm -f -- "$signing_private"; fi
+            if [[ "$protected_published" != true && -d "$protected" && ! -L "$protected" &&
+              "$(realpath -- "$protected")" == "$protected" ]]; then
+              find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            fi
+          }
+          trap cleanup_unpublished_protected EXIT
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
@@ -222,9 +276,87 @@ jobs:
             ids.add(pin.keyId); digests.add(digest); bytes.fill(0); canonical.fill(0);
           }
           NODE
+          archive="$RUNNER_TEMP/release/fetanagent-telebirr-shadow-verifier-image.tar"
+          identity="$(python3 -I \
+            infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py \
+            "$archive" "${GITHUB_SHA:0:12}" "$GITHUB_SHA")"
+          archive_format="$(jq -er '.archiveFormat' <<<"$identity")"
+          image_config_digest="$(jq -er '.imageConfigDigest' <<<"$identity")"
+          image_manifest_digest="$(jq -er '.imageManifestDigest' <<<"$identity")"
+          archive_digest="sha256:$(sha256sum "$archive" | awk '{print $1}')"
+          archive_size="$(stat --format='%s' "$archive")"
+          compose_digest="sha256:$(sha256sum infra/compose.telebirr-shadow-verifier.yaml | awk '{print $1}')"
+          [[ "$archive_format" == "$BUILT_IMAGE_ARCHIVE_FORMAT" &&
+            "$image_config_digest" == "$BUILT_IMAGE_CONFIG_DIGEST" &&
+            "$image_manifest_digest" == "$BUILT_IMAGE_MANIFEST_DIGEST" &&
+            "$archive_digest" == "$BUILT_IMAGE_ARCHIVE_SHA256" &&
+            "$archive_size" == "$BUILT_IMAGE_ARCHIVE_SIZE" ]]
+          signing_private="$protected/release-signing-private-key.pem"
+          printf '%s\n' "$RELEASE_SIGNING_PRIVATE_KEY_PEM" >"$signing_private"
+          chmod 0600 "$signing_private"
+          unset RELEASE_SIGNING_PRIVATE_KEY_PEM
+          node --input-type=module - \
+            "$signing_private" \
+            "$protected/telebirr-shadow-verifier-release.v1.json" \
+            "$protected/telebirr-shadow-verifier-release.v1.sig" \
+            "$GITHUB_SHA" "$archive_format" "$image_config_digest" "$image_manifest_digest" \
+            "$archive_digest" "$archive_size" "$compose_digest" "$CONFIRMED_PIN_DIGEST" <<'NODE'
+          import {
+            createPrivateKey,
+            createPublicKey,
+            sign,
+            verify,
+          } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const [
+            privatePath, manifestPath, signaturePath, releaseCommit, imageArchiveFormat,
+            imageConfigDigest, imageManifestDigest, imageArchiveSha256, imageArchiveSizeText,
+            composeSha256, pinManifestSha256,
+          ] = process.argv.slice(2);
+          const digest = /^sha256:[0-9a-f]{64}$/;
+          const imageArchiveSize = Number(imageArchiveSizeText);
+          if (!/^[0-9a-f]{40}$/.test(releaseCommit) ||
+              !['docker-save-oci-v1', 'docker-save-legacy-v1'].includes(imageArchiveFormat) ||
+              !digest.test(imageConfigDigest) || !digest.test(imageManifestDigest) ||
+              imageConfigDigest === imageManifestDigest || !digest.test(imageArchiveSha256) ||
+              !Number.isSafeInteger(imageArchiveSize) || imageArchiveSize < 1 ||
+              imageArchiveSize > 1_073_741_824 || !digest.test(composeSha256) ||
+              !digest.test(pinManifestSha256)) process.exit(1);
+          const manifest = {
+            schemaVersion: 1,
+            purpose: 'fetanagent.telebirr-shadow-verifier.staging-release.v1',
+            deploymentTarget: 'staging',
+            releaseCommit,
+            imageRepository: 'fetanagent-telebirr-shadow-verifier',
+            imageTag: releaseCommit.slice(0, 12),
+            imageArchiveFormat,
+            imageConfigDigest,
+            imageManifestDigest,
+            imageArchiveSha256,
+            imageArchiveSize,
+            composeSha256,
+            pinManifestSha256,
+          };
+          const payload = Buffer.from(JSON.stringify(manifest));
+          const privateKey = createPrivateKey(readFileSync(privatePath));
+          if (privateKey.asymmetricKeyType !== 'ec' ||
+              privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') process.exit(1);
+          const publicKey = createPublicKey(privateKey);
+          const publicDer = Buffer.from(publicKey.export({ format: 'der', type: 'spki' }));
+          if (publicDer.length !== 91) process.exit(1);
+          const signature = sign('sha256', payload, { key: privateKey, dsaEncoding: 'der' });
+          if (signature.length < 64 || signature.length > 80 ||
+              !verify('sha256', payload, publicKey, signature)) process.exit(1);
+          writeFileSync(manifestPath, payload, { flag: 'wx', mode: 0o600 });
+          writeFileSync(signaturePath, signature, { flag: 'wx', mode: 0o600 });
+          payload.fill(0); signature.fill(0); publicDer.fill(0);
+          NODE
+          rm -f -- "$signing_private"
+          signing_private=''
           echo "protected=$protected" >>"$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >>"$GITHUB_OUTPUT"
           echo "helper_sha=$(sha256sum infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+          protected_published=true
       - name: Verify the installed helper and require an empty host boundary
         shell: bash
         env:
@@ -313,12 +445,38 @@ jobs:
             "$PROTECTED/supabase-ca.crt" \
             "$PROTECTED/telebirr-shadow-verifier-database-url" \
             "$PROTECTED/telebirr-shadow-verifier-pins.v1.json" \
+            "$PROTECTED/telebirr-shadow-verifier-release.v1.json" \
+            "$PROTECTED/telebirr-shadow-verifier-release.v1.sig" \
             "fetanagent-admin@$VM_HOST:$incoming/"
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           timeout --signal=TERM --kill-after=5s 120s ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+      - name: Require the final database no-money and one-session attestation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_final_deploy_attestation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "shadow_verifier_status" and
+            .deploymentTarget == "staging" and .runtimeLogin == "bounded" and
+            .activeRuntimeSessions == 1 and .financialBoundary == "dry_run" and
+            .executorBoundary == "disabled"
+          ' <<<"$result" >/dev/null
       - name: Record the no-money deployment evidence
-        run: echo 'One immutable shadow-verifier container is healthy with a 24-hour one-connection login, dry-run-only behavior, both live gates off, and no public ingress.' >>"$GITHUB_STEP_SUMMARY"
+        run: echo 'One signed immutable shadow-verifier container is healthy; the final database proof shows a bounded login, exactly one session, dry-run-only behavior, and a disabled executor; both live gates remain off and no public ingress exists.' >>"$GITHUB_STEP_SUMMARY"
       - name: Discard incoming and runner-local protected material
         if: always()
         shell: bash
@@ -342,7 +500,7 @@ jobs:
           fi
 
   failed-deploy-host-cleanup:
-    name: Remove any failed-deploy shadow container independently
+    name: Remove any failed-deploy shadow project resources independently
     if: >-
       always() && inputs.mode == 'deploy' &&
       needs.validate-target.result == 'success' &&
@@ -357,7 +515,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Stop exact-label containers without any database dependency
+      - name: Stop project-label containers and networks without any database dependency
         shell: bash
         env:
           STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
@@ -485,7 +643,7 @@ jobs:
           echo 'Status passed: the exact release is healthy; runtime login bounded; one session; dry-run boundary; executor disabled.' >>"$GITHUB_STEP_SUMMARY"
 
   stop-host:
-    name: Stop exact-label host containers independently
+    name: Stop project-label host containers and networks independently
     if: inputs.mode == 'stop'
     needs: validate-target
     runs-on: ubuntu-24.04
@@ -496,7 +654,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Remove exact-label containers without any database dependency
+      - name: Remove project-label containers and networks without any database dependency
         shell: bash
         env:
           RELEASE_SHA: ${{ inputs.confirm_release_commit_sha }}
@@ -518,7 +676,7 @@ jobs:
             -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
           timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
             "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper stop '$RELEASE_SHA'"
-          echo 'Host stop passed: every exact-label shadow-verifier container is absent.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Host stop passed: every shadow-verifier project container and network is absent.' >>"$GITHUB_STEP_SUMMARY"
 
   stop-database:
     name: Revoke runtime login and sessions independently

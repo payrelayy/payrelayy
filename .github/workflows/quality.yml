@@ -53,6 +53,11 @@ jobs:
       - name: Check formatting
         run: pnpm lint
 
+      - name: Test the hostile image archive validator
+        shell: bash
+        run: |
+          python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py
+
       - name: Verify staging beta infrastructure contract
         shell: bash
         run: |

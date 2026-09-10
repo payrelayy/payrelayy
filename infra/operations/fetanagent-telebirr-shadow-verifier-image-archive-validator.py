@@ -315,19 +315,27 @@ def validate_oci_archive(
         layer_paths.append(f"blobs/sha256/{layer_digest.removeprefix('sha256:')}")
     if docker_entry.get("Layers") != layer_paths:
         refuse("Docker and OCI layer inventories differ")
-    if "LayerSources" in docker_entry:
-        layer_sources = docker_entry.get("LayerSources")
+    has_repositories = "repositories" in members_by_name
+    diff_ids: list[str] | None = None
+    if "LayerSources" in docker_entry or has_repositories:
         rootfs = image_config.get("rootfs")
-        diff_ids = rootfs.get("diff_ids") if isinstance(rootfs, dict) else None
+        raw_diff_ids = rootfs.get("diff_ids") if isinstance(rootfs, dict) else None
         if (
-            not isinstance(layer_sources, dict)
-            or not isinstance(rootfs, dict)
+            not isinstance(rootfs, dict)
             or set(rootfs) != {"type", "diff_ids"}
             or rootfs.get("type") != "layers"
-            or not isinstance(diff_ids, list)
-            or len(diff_ids) != len(layers)
-            or any(not is_digest(diff_id) for diff_id in diff_ids)
-            or len(set(diff_ids)) != len(diff_ids)
+            or not isinstance(raw_diff_ids, list)
+            or len(raw_diff_ids) != len(layers)
+            or any(not is_digest(diff_id) for diff_id in raw_diff_ids)
+            or len(set(raw_diff_ids)) != len(raw_diff_ids)
+        ):
+            refuse("image rootfs does not bind the exact Docker layer inventory")
+        diff_ids = raw_diff_ids
+    if "LayerSources" in docker_entry:
+        layer_sources = docker_entry.get("LayerSources")
+        if (
+            not isinstance(layer_sources, dict)
+            or diff_ids is None
             or layer_sources
             != {
                 diff_id: layer
@@ -346,6 +354,17 @@ def validate_oci_archive(
         f"blobs/sha256/{image_manifest_digest.removeprefix('sha256:')}",
         *layer_paths,
     }
+    if has_repositories:
+        if diff_ids is None:
+            refuse("Docker repositories map has no exact rootfs identity")
+        repositories = parse_json(
+            member_bytes(archive, members_by_name, "repositories"), "Docker repositories"
+        )
+        if repositories != {
+            IMAGE_REPOSITORY: {expected_tag: diff_ids[-1].removeprefix("sha256:")}
+        }:
+            refuse("Docker repositories map contains another tag or layer identity")
+        expected_files.add("repositories")
     observed_files = {member.name for member in members_by_name.values() if member.isfile()}
     if observed_files != expected_files:
         refuse("OCI Docker archive contains an unrelated image or payload")
@@ -488,7 +507,7 @@ def validate(archive_path: str, expected_tag: str, expected_release: str) -> dic
         has_index = "index.json" in members_by_name
         has_layout = "oci-layout" in members_by_name
         has_repositories = "repositories" in members_by_name
-        if has_index and has_layout and not has_repositories:
+        if has_index and has_layout:
             return validate_oci_archive(
                 archive,
                 members_by_name,

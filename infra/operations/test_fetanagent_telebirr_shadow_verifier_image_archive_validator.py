@@ -95,9 +95,11 @@ def hybrid_archive(
     config_root=DEFAULT,
     descriptor_size_delta=0,
     include_layer_sources=False,
+    include_repositories=False,
     layer_sources_override=DEFAULT,
     layer_payload_override=DEFAULT,
     parent=DEFAULT,
+    repositories_override=DEFAULT,
     extra_files=None,
     repo_tags=None,
 ) -> pathlib.Path:
@@ -177,6 +179,12 @@ def hybrid_archive(
     }
     if extra_files is not None:
         files.update(extra_files)
+    if include_repositories:
+        files["repositories"] = encoded(
+            {validator.IMAGE_REPOSITORY: {TAG: diff_id.removeprefix("sha256:")}}
+            if repositories_override is DEFAULT
+            else repositories_override
+        )
     return write_archive(files)
 
 
@@ -249,6 +257,7 @@ class ArchiveValidatorTests(unittest.TestCase):
                 self.keep(
                     hybrid_archive(
                         include_layer_sources=True,
+                        include_repositories=True,
                         parent=f"sha256:{'c' * 64}",
                     )
                 )
@@ -262,6 +271,7 @@ class ArchiveValidatorTests(unittest.TestCase):
         hostile_archives = [
             hybrid_archive(include_layer_sources=True, layer_sources_override={}),
             hybrid_archive(include_layer_sources=True, layer_sources_override=[]),
+            hybrid_archive(include_repositories=True, repositories_override={}),
             hybrid_archive(parent="not-a-digest"),
         ]
         for path in hostile_archives:

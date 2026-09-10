@@ -469,7 +469,7 @@ begin
     raise exception 'A current trusted TeleBirr activation epoch is required for live switches.';
   end if;
 
-  if new.settings <> case
+  if new.settings <> (case
     when new.feature_key = 'private_live_deposit_pilot'
       then pg_catalog.jsonb_build_object(
         'contract_version', 1,
@@ -477,7 +477,7 @@ begin
         'configuration_digest', pilot.configuration_digest
       )
     else '{}'::jsonb
-  end then
+  end) then
     raise exception 'The live switch does not match the trusted TeleBirr activation epoch.';
   end if;
 

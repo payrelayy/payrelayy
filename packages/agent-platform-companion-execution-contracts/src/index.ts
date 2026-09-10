@@ -202,7 +202,10 @@ export interface SignedOneUseActionAuthority {
 }
 
 export type ExecutionResultOutcome =
-  'submission_attempted' | 'local_uncertain' | 'refused_before_fence';
+  | 'submission_attempted'
+  | 'local_uncertain'
+  | 'post_fence_no_local_action'
+  | 'refused_before_fence';
 
 export interface ExecutionResultBody {
   readonly contractVersion: typeof COMPANION_EXECUTION_CONTRACT_VERSION;
@@ -657,6 +660,7 @@ const atomicConsumptionReceiptKeys = [
 ] as const;
 
 const cryptographicallyVerifiedAuthorities = new WeakSet<object>();
+const successfullyRecheckedAuthorities = new WeakSet<object>();
 
 function isPlainNonProxyRecord(value: unknown): value is UnknownRecord {
   if (typeof value !== 'object' || value === null || Array.isArray(value) || isProxy(value)) {
@@ -1398,6 +1402,12 @@ export function decodeExecutionResultBody(candidate: unknown): ExecutionResultBo
         typeof reportedAt === 'string' &&
         Date.parse(reportedAt) >= Date.parse(finalActionStartedAt) &&
         providerResponseDigest !== undefined) ||
+      (outcome === 'post_fence_no_local_action' &&
+        finalActionStarted === false &&
+        finalActionStartedAt === null &&
+        authorityPresent &&
+        typeof reportedAt === 'string' &&
+        providerResponseDigest === null) ||
       (outcome === 'refused_before_fence' &&
         finalActionStarted === false &&
         finalActionStartedAt === null &&
@@ -1529,7 +1539,15 @@ function validAuthoritativeStateCombination(
     reconciliation === 'uncertain' &&
     terminal === 'uncertain'
   ) {
-    return resultDigest !== null && evidenceDigest !== null;
+    return evidenceDigest !== null;
+  }
+  if (
+    fence === 'consumed' &&
+    attempt === 'local_uncertain' &&
+    reconciliation === 'succeeded' &&
+    terminal === 'succeeded'
+  ) {
+    return resultDigest === null && responseDigest !== null && evidenceDigest !== null;
   }
   if (
     fence === 'consumed' &&
@@ -2161,6 +2179,12 @@ export function signAuthoritativeExecutionStatus(
   ) as SignedAuthoritativeExecutionStatus | undefined;
 }
 
+/**
+ * Deterministic integrity binding only. Player identifiers are typically low entropy, so this
+ * digest is dictionary-enumerable and provides no confidentiality or pseudonymization. Keep it
+ * inside a strict trusted boundary and out of logs/telemetry, or use a separately versioned keyed
+ * digest before any wider exposure.
+ */
 export function digestCompanionExecutionPlayerId(playerIdCandidate: unknown): string | undefined {
   return typeof playerIdCandidate === 'string' && PLAYER_ID_PATTERN.test(playerIdCandidate)
     ? sha256(
@@ -2659,8 +2683,9 @@ export function verifySignedOneUseActionAuthority(
 
 /**
  * Rechecks only the signed and monotonic deadlines after the caller reports an external atomic
- * replay transition. Returning true authenticates deadline freshness; it still does not itself
- * prove that the external receipt is durable or grant action authority.
+ * replay transition. A successful verification object can pass this check only once in this
+ * process as defense in depth. Returning true still does not prove that the external receipt is
+ * durable, replace database idempotency, or grant action authority.
  */
 export function recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(
   verification: unknown,
@@ -2670,6 +2695,7 @@ export function recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(
     if (
       !isPlainNonProxyRecord(verification) ||
       !cryptographicallyVerifiedAuthorities.has(verification) ||
+      successfullyRecheckedAuthorities.has(verification) ||
       own(verification, 'verificationKind') !==
         'cryptographically_verified_one_use_action_authority' ||
       own(verification, 'grantsActionAuthority') !== false ||
@@ -2700,7 +2726,7 @@ export function recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(
       0,
       Number.MAX_SAFE_INTEGER,
     );
-    return Boolean(
+    const valid = Boolean(
       now !== undefined &&
       monotonicNow !== undefined &&
       verifiedAt !== undefined &&
@@ -2712,6 +2738,9 @@ export function recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(
       monotonicNow >= responseReceived &&
       monotonicNow < monotonicDeadline,
     );
+    if (!valid) return false;
+    successfullyRecheckedAuthorities.add(verification);
+    return true;
   } catch {
     return false;
   }
@@ -2787,7 +2816,15 @@ function verifyResultChainCore(
     authority = authorityChain.authority;
   }
   const reportedAt = Date.parse(result.body.reportedAt);
-  if (authority) {
+  if (authority && result.body.outcome === 'post_fence_no_local_action') {
+    const authorityIssuedAt = Date.parse(authority.body.databaseAuthorityIssuedAt);
+    if (
+      reportedAt < authorityIssuedAt ||
+      reportedAt - authorityIssuedAt > COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS
+    ) {
+      return undefined;
+    }
+  } else if (authority) {
     const finalActionStartedAt =
       result.body.finalActionStartedAt === null
         ? Number.NaN
@@ -2855,6 +2892,32 @@ function statusMatchesAuthority(
     status.authorityBodyDigest === authority.bodyDigest &&
     status.fenceId === authority.body.fenceId
   );
+}
+
+function resultOutcomeMatchesAuthoritativeState(
+  result: ExecutionResultBody,
+  status: AuthoritativeExecutionStatusBody,
+): boolean {
+  if (result.outcome === 'submission_attempted') {
+    return status.databaseAttemptState === 'submission_attempted';
+  }
+  if (result.outcome === 'local_uncertain') {
+    return (
+      status.databaseFenceState === 'consumed' &&
+      status.databaseAttemptState === 'local_uncertain' &&
+      status.databaseReconciliationState === 'uncertain' &&
+      status.terminalState === 'uncertain'
+    );
+  }
+  if (result.outcome === 'post_fence_no_local_action') {
+    return (
+      status.databaseFenceState === 'consumed' &&
+      status.databaseAttemptState === 'local_uncertain' &&
+      status.databaseReconciliationState === 'uncertain' &&
+      status.terminalState === 'uncertain'
+    );
+  }
+  return false;
 }
 
 /**
@@ -2931,10 +2994,7 @@ export function verifySignedAuthoritativeExecutionStatus(
         status.body.executionResultBodyDigest !== resultChain.result.bodyDigest ||
         status.body.providerResponseDigest !== resultChain.result.body.providerResponseDigest ||
         status.body.evidenceDigest !== resultChain.result.body.evidenceDigest ||
-        (status.body.databaseAttemptState === 'submission_attempted' &&
-          resultChain.result.body.outcome !== 'submission_attempted') ||
-        (status.body.databaseAttemptState === 'local_uncertain' &&
-          resultChain.result.body.outcome !== 'local_uncertain')
+        !resultOutcomeMatchesAuthoritativeState(resultChain.result.body, status.body)
       ) {
         return false;
       }

@@ -392,6 +392,21 @@ function resultBody(
   };
 }
 
+function postFenceNoLocalActionBody(
+  assignment: SignedExecutionAssignment,
+  authority: SignedOneUseActionAuthority | null,
+  overrides: Partial<ExecutionResultBody> = {},
+): ExecutionResultBody {
+  return resultBody(assignment, authority, {
+    resultId: 'execution-result-no-local-action',
+    outcome: 'post_fence_no_local_action',
+    finalActionStarted: false,
+    finalActionStartedAt: null,
+    providerResponseDigest: null,
+    ...overrides,
+  });
+}
+
 function statusBody(
   assignment: SignedExecutionAssignment,
   authority: SignedOneUseActionAuthority | null,
@@ -1005,21 +1020,52 @@ describe('dormant companion execution v2 contracts', () => {
     };
     expect(verifySignedOneUseActionAuthorityCryptographically(authority, context)).toBeUndefined();
 
-    const verified = verifySignedOneUseActionAuthorityCryptographically(value.authority, {
-      ...value.authorityContext,
-    })!;
+    const freshVerification = () =>
+      verifySignedOneUseActionAuthorityCryptographically(value.authority, {
+        ...value.authorityContext,
+      })!;
+    const receiptFor = (verification: ReturnType<typeof freshVerification>) => ({
+      receiptKind: 'external_atomic_replay_consumption' as const,
+      replayIdentity: verification.replayIdentity,
+      authorityBodyDigest: verification.authorityBodyDigest,
+      consumedExactlyOnce: true as const,
+    });
+
+    const expiredAfterAtomicConsumption = freshVerification();
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(expiredAfterAtomicConsumption, {
+        trustedNow: '2026-09-10T12:00:08.000Z',
+        monotonicNowMs: 3_500,
+        atomicConsumptionReceipt: receiptFor(expiredAfterAtomicConsumption),
+      }),
+    ).toBe(false);
+
+    const monotonicBoundary = freshVerification();
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(monotonicBoundary, {
+        trustedNow: '2026-09-10T12:00:07.000Z',
+        monotonicNowMs: monotonicBoundary.monotonicActionDeadlineMs,
+        atomicConsumptionReceipt: receiptFor(monotonicBoundary),
+      }),
+    ).toBe(false);
+
+    const wrongReceipt = freshVerification();
+    expect(
+      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(wrongReceipt, {
+        trustedNow: '2026-09-10T12:00:07.000Z',
+        monotonicNowMs: 3_500,
+        atomicConsumptionReceipt: { ...receiptFor(wrongReceipt), replayIdentity: sha('f') },
+      }),
+    ).toBe(false);
+
+    const verified = freshVerification();
     expect(verified).toMatchObject({
       grantsActionAuthority: false,
       atomicReplayConsumptionRequired: true,
       monotonicActionDeadlineMs: 4_500,
       responseReceivedMonotonicMs: 3_000,
     });
-    const receipt = {
-      receiptKind: 'external_atomic_replay_consumption' as const,
-      replayIdentity: verified.replayIdentity,
-      authorityBodyDigest: verified.authorityBodyDigest,
-      consumedExactlyOnce: true as const,
-    };
+    const receipt = receiptFor(verified);
     expect(
       recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
         trustedNow: '2026-09-10T12:00:07.000Z',
@@ -1029,7 +1075,7 @@ describe('dormant companion execution v2 contracts', () => {
     ).toBe(true);
     expect(
       recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
-        trustedNow: '2026-09-10T12:00:08.000Z',
+        trustedNow: '2026-09-10T12:00:07.000Z',
         monotonicNowMs: 3_500,
         atomicConsumptionReceipt: receipt,
       }),
@@ -1037,15 +1083,8 @@ describe('dormant companion execution v2 contracts', () => {
     expect(
       recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
         trustedNow: '2026-09-10T12:00:07.000Z',
-        monotonicNowMs: verified.monotonicActionDeadlineMs,
-        atomicConsumptionReceipt: receipt,
-      }),
-    ).toBe(false);
-    expect(
-      recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption(verified, {
-        trustedNow: '2026-09-10T12:00:07.000Z',
         monotonicNowMs: 3_500,
-        atomicConsumptionReceipt: { ...receipt, replayIdentity: sha('f') },
+        atomicConsumptionReceipt: { ...receipt },
       }),
     ).toBe(false);
   });
@@ -1225,6 +1264,70 @@ describe('dormant companion execution v2 contracts', () => {
     ).toBe(false);
   });
 
+  it('represents a consumed fence with no local action only as signed reconciliation evidence', () => {
+    const value = fixture();
+    const body = postFenceNoLocalActionBody(value.assignment, value.authority);
+    const result = signExecutionResult(body, value.device.privateKey)!;
+    expect(decodeExecutionResultBody(body)).toBeDefined();
+    expect(verifySignedExecutionResult(result, value.resultContext)).toBe(true);
+
+    const exactlyAtAuthorityIssuance = signExecutionResult(
+      postFenceNoLocalActionBody(value.assignment, value.authority, {
+        resultId: 'execution-result-no-local-action-boundary',
+        reportedAt: value.authority.body.databaseAuthorityIssuedAt,
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(exactlyAtAuthorityIssuance, {
+        ...value.resultContext,
+        trustedNow: exactlyAtAuthorityIssuance.body.reportedAt,
+      }),
+    ).toBe(true);
+
+    for (const invalid of [
+      postFenceNoLocalActionBody(value.assignment, null),
+      { ...body, finalActionStarted: true },
+      { ...body, finalActionStartedAt: value.authority.body.databaseAuthorityIssuedAt },
+      { ...body, providerResponseDigest: sha('8') },
+      { ...body, evidenceDigest: null },
+    ]) {
+      expect(decodeExecutionResultBody(invalid)).toBeUndefined();
+    }
+
+    const beforeAuthorityIssuance = signExecutionResult(
+      postFenceNoLocalActionBody(value.assignment, value.authority, {
+        reportedAt: '2026-09-10T12:00:04.099Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(beforeAuthorityIssuance, {
+        ...value.resultContext,
+        trustedNow: beforeAuthorityIssuance.body.reportedAt,
+      }),
+    ).toBe(false);
+
+    const reportingOverrun = signExecutionResult(
+      postFenceNoLocalActionBody(value.assignment, value.authority, {
+        reportedAt: '2026-09-10T12:05:04.101Z',
+      }),
+      value.device.privateKey,
+    )!;
+    expect(
+      verifySignedExecutionResult(reportingOverrun, {
+        ...value.resultContext,
+        trustedNow: reportingOverrun.body.reportedAt,
+      }),
+    ).toBe(false);
+
+    expect(decodeSignedOneUseActionAuthority(result)).toBeUndefined();
+    expect(decodeOneUseActionAuthorityBody(result.body)).toBeUndefined();
+    expect(
+      verifySignedOneUseActionAuthorityCryptographically(result, value.authorityContext),
+    ).toBeUndefined();
+  });
+
   it('orders action start at or after authority issuance and before every action deadline', () => {
     const value = fixture();
     for (const finalActionStartedAt of [
@@ -1351,6 +1454,170 @@ describe('dormant companion execution v2 contracts', () => {
         signedExecutionResult: uncertainResult,
       }),
     ).toBe(true);
+  });
+
+  it('maps a post-fence no-local-action result only to consumed uncertain reconciliation', () => {
+    const value = fixture();
+    const result = signExecutionResult(
+      postFenceNoLocalActionBody(value.assignment, value.authority),
+      value.device.privateKey,
+    )!;
+    const uncertainStatus = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, result, {
+        databaseFenceState: 'consumed',
+        databaseAttemptState: 'local_uncertain',
+        databaseReconciliationState: 'uncertain',
+        terminalState: 'uncertain',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(uncertainStatus, {
+        ...value.statusContext,
+        signedExecutionResult: result,
+      }),
+    ).toBe(true);
+
+    const falselyAttempted = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, result, {
+        databaseFenceState: 'consumed',
+        databaseAttemptState: 'submission_attempted',
+        databaseReconciliationState: 'pending',
+        terminalState: 'non_terminal',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(decodeSignedAuthoritativeExecutionStatus(falselyAttempted)).toBeDefined();
+    expect(
+      verifySignedAuthoritativeExecutionStatus(falselyAttempted, {
+        ...value.statusContext,
+        signedExecutionResult: result,
+      }),
+    ).toBe(false);
+
+    const postFenceRefusal = statusBody(value.assignment, value.authority, null, {
+      databaseFenceState: 'consumed',
+      databaseAttemptState: 'refused_before_fence',
+      databaseReconciliationState: 'not_required',
+      terminalState: 'refused',
+      executionResultBodyDigest: null,
+      providerResponseDigest: null,
+      evidenceDigest: null,
+    });
+    expect(decodeAuthoritativeExecutionStatusBody(postFenceRefusal)).toBeUndefined();
+    expect(
+      decodeAuthoritativeExecutionStatusBody({
+        ...uncertainStatus.body,
+        databaseReconciliationState: 'retry',
+      }),
+    ).toBeUndefined();
+    expect(decodeSignedOneUseActionAuthority(uncertainStatus)).toBeUndefined();
+    expect(decodeOneUseActionAuthorityBody(uncertainStatus.body)).toBeUndefined();
+  });
+
+  it('converges result-less post-fence crashes only through uncertain or proven reconciliation', () => {
+    const value = fixture();
+    const crashUncertain = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, null, {
+        statusId: 'authoritative-status-crash',
+        databaseFenceState: 'consumed',
+        databaseAttemptState: 'local_uncertain',
+        databaseReconciliationState: 'uncertain',
+        terminalState: 'uncertain',
+        executionResultBodyDigest: null,
+        providerResponseDigest: null,
+        evidenceDigest: sha('b'),
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(crashUncertain, {
+        ...value.statusContext,
+        signedExecutionResult: null,
+        expectedQueryNonceDigest: crashUncertain.body.queryNonceDigest,
+        minimumStatusSequence: crashUncertain.body.statusSequence,
+      }),
+    ).toBe(true);
+    expect(
+      decodeAuthoritativeExecutionStatusBody({
+        ...crashUncertain.body,
+        evidenceDigest: null,
+      }),
+    ).toBeUndefined();
+
+    const laterAmbiguous = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, null, {
+        statusId: 'authoritative-status-ambiguous',
+        statusSequence: '8',
+        databaseFenceState: 'consumed',
+        databaseAttemptState: 'local_uncertain',
+        databaseReconciliationState: 'uncertain',
+        terminalState: 'uncertain',
+        executionResultBodyDigest: null,
+        providerResponseDigest: sha('c'),
+        evidenceDigest: sha('d'),
+        databaseObservedAt: '2026-09-10T12:00:07.000Z',
+        serverIssuedAt: '2026-09-10T12:00:07.100Z',
+        serverValidUntil: '2026-09-10T12:00:11.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(laterAmbiguous, {
+        ...value.statusContext,
+        trustedNow: '2026-09-10T12:00:07.500Z',
+        signedExecutionResult: null,
+        expectedQueryNonceDigest: laterAmbiguous.body.queryNonceDigest,
+        minimumStatusSequence: laterAmbiguous.body.statusSequence,
+      }),
+    ).toBe(true);
+    expect(laterAmbiguous.body.terminalState).toBe('uncertain');
+
+    const laterSucceeded = signAuthoritativeExecutionStatus(
+      statusBody(value.assignment, value.authority, null, {
+        statusId: 'authoritative-status-reconciled',
+        statusSequence: '9',
+        databaseFenceState: 'consumed',
+        databaseAttemptState: 'local_uncertain',
+        databaseReconciliationState: 'succeeded',
+        terminalState: 'succeeded',
+        executionResultBodyDigest: null,
+        providerResponseDigest: sha('e'),
+        evidenceDigest: sha('f'),
+        databaseObservedAt: '2026-09-10T12:00:08.000Z',
+        serverIssuedAt: '2026-09-10T12:00:08.100Z',
+        serverValidUntil: '2026-09-10T12:00:12.000Z',
+      }),
+      value.executionSigner.privateKey,
+    )!;
+    expect(
+      verifySignedAuthoritativeExecutionStatus(laterSucceeded, {
+        ...value.statusContext,
+        trustedNow: '2026-09-10T12:00:08.500Z',
+        signedExecutionResult: null,
+        expectedQueryNonceDigest: laterSucceeded.body.queryNonceDigest,
+        minimumStatusSequence: laterSucceeded.body.statusSequence,
+      }),
+    ).toBe(true);
+
+    for (const invalid of [
+      { ...laterSucceeded.body, providerResponseDigest: null },
+      {
+        ...laterSucceeded.body,
+        databaseReconciliationState: 'failed',
+        terminalState: 'failed',
+      },
+      {
+        ...laterSucceeded.body,
+        databaseAttemptState: 'submission_attempted',
+        databaseReconciliationState: 'failed',
+        terminalState: 'failed',
+      },
+    ]) {
+      expect(decodeAuthoritativeExecutionStatusBody(invalid)).toBeUndefined();
+    }
+    expect(decodeSignedOneUseActionAuthority(crashUncertain)).toBeUndefined();
+    expect(decodeSignedOneUseActionAuthority(laterSucceeded)).toBeUndefined();
   });
 
   it('authenticates delayed result and fresh status convergence after enrollment expiry', () => {

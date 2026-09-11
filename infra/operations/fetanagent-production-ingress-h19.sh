@@ -12,6 +12,7 @@ readonly CONTINUOUS_SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availa
 readonly H19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v19'
 readonly H20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
 readonly H21_PARENT='/var/lib/fetanagent/h19-stable-nine-guard-bridge-v21'
+readonly H22_PARENT='/var/lib/fetanagent/h19-terminal-receipt-order-guard-bridge-v22'
 readonly TRANSITION_PARENT='/var/lib/fetanagent/production-gateway-staging-route-v1'
 readonly PRODUCTION_ROOT='/srv/fetanagent/production'
 readonly PRODUCTION_RELEASE_ROOT="$PRODUCTION_ROOT/releases"
@@ -239,17 +240,17 @@ PY
 read_h19_record() {
   local output
   output="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$TRANSITION_PARENT" \
-    "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" "$CONTINUOUS_SUDOERS" \
-    "$INSTALLED_PATH" <<'PY'
+    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$H22_PARENT" \
+    "$TRANSITION_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
+    "$CONTINUOUS_SUDOERS" "$INSTALLED_PATH" <<'PY'
 import hashlib
 import os
 import re
 import stat
 import sys
 
-h19_parent, h20_parent, h21_parent, transition_parent, helper, finalizer, sudoers, guard = \
-    sys.argv[1:]
+h19_parent, h20_parent, h21_parent, h22_parent, transition_parent, helper, finalizer, \
+    sudoers, guard = sys.argv[1:]
 release_re = re.compile(r'[0-9a-f]{40}')
 sha_re = re.compile(r'[0-9a-f]{64}')
 protected = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
@@ -269,6 +270,13 @@ legacy_raw_nine_sha = '6aa4f35860635609b54e0884810b16fdb10a39275b687a8f678e5af86
 canonical_nine_sha = 'a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9'
 baseline_gateway_image = 'sha256:72f13d02d86c41d0b6fd1dd86d2827c16442f417ec5ef61c983eae297f57a209'
 candidate_gateway_image = 'sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8'
+h21_release_expected = 'ac0df375fb2ef6257d30c39f6cb4c2fa1dab01e2'
+h21_intent_sha = 'e28e67e611ca8ece8cdddaa9c98634c0fb93324d547d50aa771920c89e59cc18'
+h21_completion_sha = '15e1c3e5860aa6355f85be4114a5146f20e2683b1eb5da9b8351baf7a6b6d9ea'
+h21_guard_sha = 'a4e31a95bfb4826634069cdc31f745ed53cccb0db2cc01578851ac8330623813'
+terminal_receipt_sha = 'd33d2e51852fabdfd8f750bfd16118fe987e8b4201483b1cc2f688063047d559'
+post_production_sha = '72a619a6418030098a2ebb862d35d48f56118de886ae6ef88b09a782b29d2aac'
+post_ingress_sha = '98e3464ba86981b592c678d65b58eb10e747f9cb18a7b25cd6e697a2f27f6d89'
 h18_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
 h18_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
 h18_sudoers_sha = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958'
@@ -525,8 +533,12 @@ try:
     if (
         len(h21_intent) != 29
         or len(h21_completion) != 30
+        or h21_release != h21_release_expected
+        or digest(h21_intent_data) != h21_intent_sha
+        or digest(h21_completion_data) != h21_completion_sha
         or sha_re.fullmatch(h21_successor_guard_sha) is None
         or h21_successor_guard_sha == h20_guard_sha
+        or h21_successor_guard_sha != h21_guard_sha
         or h21_intent != h21_expected
         or h21_completion[0] != h21_intent[0]
         or h21_completion[1] != 'state=stable-nine-guard-installed'
@@ -536,7 +548,6 @@ try:
         or h21_completion_data != ('\n'.join(h21_completion) + '\n').encode('ascii')
         or digest(h21_archived_guard) != h20_guard_sha
         or digest(h21_archived_transition) != interrupted_intent_sha
-        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != h21_successor_guard_sha
     ):
         raise RuntimeError()
 
@@ -572,12 +583,92 @@ try:
     if live_transition != h21_archived_transition:
         raise RuntimeError()
 
+    h22_children = os.listdir(h22_parent)
+    if len(h22_children) != 1 or release_re.fullmatch(h22_children[0]) is None:
+        raise RuntimeError()
+    h22_release = h22_children[0]
+    if h22_release in (protected, h19_release, h20_release, h21_release):
+        raise RuntimeError()
+    exact_dir(h22_parent, [h22_release])
+    h22_root = f'{h22_parent}/{h22_release}'
+    exact_dir(h22_root, [
+        'completed-v1', 'intent-v1', 'predecessor-ingress-guard',
+        'terminal-transition-receipt',
+    ])
+    h22_intent_data = exact_file(f'{h22_root}/intent-v1', 0o600, 4096)
+    h22_completion_data = exact_file(f'{h22_root}/completed-v1', 0o600, 4096)
+    h22_archived_guard = exact_file(
+        f'{h22_root}/predecessor-ingress-guard', 0o400, 2 * 1024 * 1024
+    )
+    h22_archived_receipt = exact_file(
+        f'{h22_root}/terminal-transition-receipt', 0o400, 8192
+    )
+    h22_intent = h22_intent_data.decode('ascii').splitlines()
+    h22_completion = h22_completion_data.decode('ascii').splitlines()
+    h22_successor_guard_sha = (
+        h22_intent[9].split('=', 1)[1] if len(h22_intent) > 9 else ''
+    )
+    h22_expected = [
+        'contract=fetanagent-h19-terminal-receipt-order-guard-bridge-v22',
+        'state=authorized',
+        f'bridge_release={h22_release}',
+        f'h21_bridge_release={h21_release_expected}',
+        f'h21_bridge_intent_sha256={h21_intent_sha}',
+        f'h21_bridge_completion_sha256={h21_completion_sha}',
+        f'h19_bridge_release={h19_release}',
+        f'candidate_gateway_release={h19_release}',
+        f'predecessor_ingress_guard_sha256={h21_guard_sha}',
+        f'successor_ingress_guard_sha256={h22_successor_guard_sha}',
+        f'transition_intent_sha256={interrupted_intent_sha}',
+        f'terminal_transition_receipt_sha256={terminal_receipt_sha}',
+        f'post_production_boundary_sha256={post_production_sha}',
+        f'post_shared_ingress_sha256={post_ingress_sha}',
+        f'post_tls_leaf_sha256={tls_sha}',
+        f'candidate_gateway_image_id={candidate_gateway_image}',
+        'correction=sorted-terminal-receipt-entry-order',
+        'transition_terminal_evidence_preserved=true',
+        'production_runtime_mutation=false',
+        'database_mutation=false',
+        'financial_actions_mode=disabled',
+        'transfer_enabled=false',
+        'amount_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        len(h22_intent) != 24
+        or len(h22_completion) != 25
+        or sha_re.fullmatch(h22_successor_guard_sha) is None
+        or h22_successor_guard_sha == h21_guard_sha
+        or h22_intent != h22_expected
+        or h22_completion[0] != h22_intent[0]
+        or h22_completion[1] != 'state=terminal-receipt-order-guard-installed'
+        or h22_completion[2:24] != h22_intent[2:24]
+        or h22_completion[24] != f'bridge_intent_sha256={digest(h22_intent_data)}'
+        or h22_intent_data != ('\n'.join(h22_intent) + '\n').encode('ascii')
+        or h22_completion_data != ('\n'.join(h22_completion) + '\n').encode('ascii')
+        or digest(h22_archived_guard) != h21_guard_sha
+        or digest(h22_archived_receipt) != terminal_receipt_sha
+        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != h22_successor_guard_sha
+    ):
+        raise RuntimeError()
+
+    exact_dir(transition_parent, [h19_release])
+    exact_dir(transition_terminal, ['completed-v1', 'intent-v1'])
+    live_terminal_receipt = exact_file(
+        f'{transition_terminal}/completed-v1', 0o600, 8192
+    )
+    if (
+        digest(live_terminal_receipt) != terminal_receipt_sha
+        or live_terminal_receipt != h22_archived_receipt
+    ):
+        raise RuntimeError()
+
     print(h19_release)
     print(h19_release)
     print(successor_helper_sha)
     print(successor_finalizer_sha)
     print(successor_sudoers_sha)
-    print(h21_successor_guard_sha)
+    print(h22_successor_guard_sha)
     print(h18_release)
     print(h18_intent_sha)
     print(h18_completion_sha)
@@ -590,12 +681,14 @@ try:
     print(interrupted_intent_sha)
     print(legacy_raw_nine_sha)
     print(canonical_nine_sha)
+    print(h22_release)
+    print(terminal_receipt_sha)
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 1
   mapfile -t H19_RECORD <<<"$output"
-  [[ "${#H19_RECORD[@]}" -eq 18 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
+  [[ "${#H19_RECORD[@]}" -eq 20 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
     "${H19_RECORD[1]}" =~ ^[0-9a-f]{40}$ ]] || return 1
   local value
   for value in "${H19_RECORD[@]:2}"; do
@@ -1029,7 +1122,8 @@ try:
     value=os.lstat(root)
     if (not stat.S_ISDIR(value.st_mode) or
         (value.st_uid,value.st_gid,stat.S_IMODE(value.st_mode))!=(0,0,0o700) or
-        os.path.realpath(root)!=root or sorted(os.listdir(root))!=['intent-v1',terminal]):
+        os.path.realpath(root)!=root or
+        sorted(os.listdir(root))!=sorted(['intent-v1',terminal])):
         raise RuntimeError()
     intent_data=read(f'{root}/intent-v1'); terminal_data=read(f'{root}/{terminal}')
     intent=intent_data.decode('ascii').splitlines(); result=terminal_data.decode('ascii').splitlines()

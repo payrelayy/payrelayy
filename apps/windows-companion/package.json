@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@fetanagent/agent-platform-companion-contracts": "workspace:*",
+    "@fetanagent/agent-platform-companion-execution-contracts": "workspace:*",
     "@fetanagent/agent-platform-kemerbet": "workspace:*",
     "playwright-core": "1.62.1"
   },

@@ -17,8 +17,12 @@ would leave an apparently live service with expired credentials.
 - Only the four existing non-financial application logins use `VALID UNTIL 'infinity'`.
 - Passwords remain protected and revocable; role memberships, RLS, connection limits, and grants
   are unchanged. Credential rotation still requires the reviewed stopped deployment procedure.
-- Executor/verifier logins remain disabled and their lifetimes are not extended. Financial switches,
-  customer sessions, signed capabilities, pairing leases, and supervised pilot limits are unchanged.
+- Executor/verifier logins remain disabled and their lifetimes are not extended. All six real-money
+  switches must be disabled with empty settings. The private pilot may be disabled or remain in its
+  exact armed `dry_run` configuration; `live`, unbound, or malformed pilot settings are rejected.
+  This availability conversion does not revive or extend the pilot window, so the exact bound
+  `dry_run` posture remains acceptable after that separate pilot window has expired.
+  Customer sessions, signed capabilities, pairing leases, and supervised pilot limits are unchanged.
 - Ordinary `deploy-and-smoke` preserves the legacy helper's bounded startup guard, then runs the
   continuous-lifetime SQL and checksum-bound timer finalizer after healthy core startup. Completion
   requires an inactive, boot-disabled timer with no next trigger. The finalizer and its exact sudo
@@ -47,7 +51,8 @@ would leave an apparently live service with expired credentials.
    `confirm_no_financial_activation=continuous-availability-no-money`. The workflow validates release
    ancestry, both installed helper digests, and the healthy deployed service set with the read-only
    `preflight` before executing the transaction through the existing
-   protected Supabase administrator connection. It prints only role lifetimes and switch counts,
+   protected Supabase administrator connection. It prints only role lifetimes and a redacted
+   no-money boundary summary (non-disabled real-money count and dry-run pilot count),
    then invokes the exact finalizer to disable the old timer automatically. No root SSH credential
    is added to GitHub, and no generic shell or `systemctl` sudo permission is granted.
 4. Run the workflow in `inspect` mode again and verify HTTPS and Telegram availability. The installed

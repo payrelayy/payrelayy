@@ -68,13 +68,47 @@ device.fetanagent.com {
 		}
 	}
 
-	@telebirr_device_bridge {
+	# BEGIN exact TeleBirr device routing contract
+	@staging_telebirr_device_bridge {
 		method POST
 		path /v1/telebirr/device/enrollments:pair /v1/telebirr/device/assignments:poll /v1/telebirr/device/heartbeat /v1/telebirr/device/observations:upload
-		header Content-Type application/vnd.fetanagent.telebirr-device-bridge+json
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-device-bridge+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "staging"`
+	}
+	@production_telebirr_device_bridge {
+		method POST
+		path /v1/telebirr/device/enrollments:pair /v1/telebirr/device/assignments:poll /v1/telebirr/device/heartbeat /v1/telebirr/device/observations:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-device-bridge+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+	@invalid_telebirr_device_target {
+		method POST
+		path /v1/telebirr/device/enrollments:pair /v1/telebirr/device/assignments:poll /v1/telebirr/device/heartbeat /v1/telebirr/device/observations:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-device-bridge+json"`
+		header X-FetanAgent-Deployment-Target *
+	}
+	@legacy_telebirr_device_bridge {
+		method POST
+		path /v1/telebirr/device/enrollments:pair /v1/telebirr/device/assignments:poll /v1/telebirr/device/heartbeat /v1/telebirr/device/observations:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-device-bridge+json"`
+		header !X-FetanAgent-Deployment-Target
 	}
 
-	handle @telebirr_device_bridge {
+	# Placeholder equality sees repeated request fields as one comma-joined value.
+	# Exact staging/production values therefore match only one semantic value;
+	# duplicates, comma lists, case-confused values, and every other present value
+	# fall through to the rejecting target branch before the header-absent legacy route.
+	handle @staging_telebirr_device_bridge {
+		request_body {
+			max_size 256KiB
+		}
+		reverse_proxy staging-device-pilot-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+
+	handle @production_telebirr_device_bridge {
 		request_body {
 			max_size 256KiB
 		}
@@ -85,6 +119,23 @@ device.fetanagent.com {
 			}
 		}
 	}
+
+	handle @invalid_telebirr_device_target {
+		respond 404
+	}
+
+	handle @legacy_telebirr_device_bridge {
+		request_body {
+			max_size 256KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+	# END exact TeleBirr device routing contract
 
 	respond 404
 }

@@ -44,7 +44,7 @@ object VerifierRuntimeComposition {
         certificate = certificate,
         trustedServerSpkiDer = profile.serverSignerPublicKeySpkiDer(),
         identity = identity,
-        exchange = FixedDeviceBridgeHttpsExchange(),
+        exchange = FixedDeviceBridgeHttpsExchange(BuildConfig.VERIFIER_DEPLOYMENT_TARGET),
         appVersion = BuildConfig.VERSION_NAME,
       )
 
@@ -79,7 +79,7 @@ object VerifierRuntimeComposition {
     return DevicePairingCoordinator(
       profile = profile,
       store = provisioningStore(context),
-      exchange = FixedDeviceBridgeHttpsExchange(),
+      exchange = FixedDeviceBridgeHttpsExchange(BuildConfig.VERIFIER_DEPLOYMENT_TARGET),
     )
   }
 

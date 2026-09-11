@@ -65,6 +65,7 @@ jobs:
           node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
+          bash -n infra/operations/install-fetanagent-telebirr-device-pilot-helper-v2.sh
           bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \
@@ -153,6 +154,7 @@ jobs:
           docker run --rm --read-only \
             --env FETANAGENT_COMPANION_BRIDGE_UPSTREAM=production-companion-device-bridge:8085 \
             fetanagent-gateway:ci caddy validate --config /etc/caddy/Caddyfile
+          node infra/test-telebirr-gateway-routing.mjs fetanagent-gateway:ci
 
       - name: Build and test
         run: pnpm test

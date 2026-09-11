@@ -21,6 +21,7 @@ internal data class DeviceBridgeHttpsResponse(
 internal fun interface DeviceBridgeHttpsExecutor {
   fun execute(
     url: URL,
+    deploymentTarget: String,
     contentType: String,
     body: ByteArray,
     connectTimeoutMillis: Int,
@@ -36,8 +37,13 @@ internal fun interface DeviceBridgeHttpsExecutor {
  * authentication boundary above TLS.
  */
 class FixedDeviceBridgeHttpsExchange internal constructor(
+  private val deploymentTarget: String = PRODUCTION_DEPLOYMENT_TARGET,
   private val executor: DeviceBridgeHttpsExecutor = PlatformDeviceBridgeHttpsExecutor,
 ) : DeviceBridgeExchange {
+  init {
+    require(deploymentTarget in allowedDeploymentTargets) { "Unsupported deployment target" }
+  }
+
   override fun post(path: String, contentType: String, body: ByteArray): DeviceBridgeRawResponse {
     require(path in allowedPaths) { "Unsupported device bridge path" }
     require(contentType == DeviceBridgeProtocol.CONTENT_TYPE) { "Unsupported content type" }
@@ -58,6 +64,7 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
       try {
         executor.execute(
           url,
+          deploymentTarget,
           contentType,
           body,
           CONNECT_TIMEOUT_MILLIS,
@@ -95,16 +102,22 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
     )
   }
 
-  override fun toString(): String = "FixedDeviceBridgeHttpsExchange(origin=$ORIGIN_HOST)"
+  override fun toString(): String =
+    "FixedDeviceBridgeHttpsExchange(origin=$ORIGIN_HOST,target=$deploymentTarget)"
 
   companion object {
     const val ORIGIN_HOST = "device.fetanagent.com"
+    const val DEPLOYMENT_TARGET_HEADER = "X-FetanAgent-Deployment-Target"
+    const val STAGING_DEPLOYMENT_TARGET = "staging"
+    const val PRODUCTION_DEPLOYMENT_TARGET = "production"
     const val CONNECT_TIMEOUT_MILLIS = 5_000
     const val READ_TIMEOUT_MILLIS = 15_000
     const val MAX_REQUEST_BYTES = 256 * 1_024
     const val MAX_RESPONSE_BYTES = 256 * 1_024
     const val ERROR_CONTENT_TYPE = "application/json; charset=utf-8"
     private const val HTTPS_PORT = 443
+    private val allowedDeploymentTargets =
+      setOf(STAGING_DEPLOYMENT_TARGET, PRODUCTION_DEPLOYMENT_TARGET)
     private val allowedPaths =
       setOf(
         DeviceBridgeProtocol.PAIRING_PATH,
@@ -118,6 +131,7 @@ class FixedDeviceBridgeHttpsExchange internal constructor(
 internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
   override fun execute(
     url: URL,
+    deploymentTarget: String,
     contentType: String,
     body: ByteArray,
     connectTimeoutMillis: Int,
@@ -128,6 +142,10 @@ internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
     require(url.host == FixedDeviceBridgeHttpsExchange.ORIGIN_HOST)
     require(url.port == 443)
     require(url.userInfo == null && url.query == null && url.ref == null)
+    require(
+      deploymentTarget == FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET ||
+        deploymentTarget == FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET,
+    )
     require(contentType == DeviceBridgeProtocol.CONTENT_TYPE)
     require(body.isNotEmpty() && body.size <= FixedDeviceBridgeHttpsExchange.MAX_REQUEST_BYTES)
 
@@ -146,6 +164,10 @@ internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
       connection.setRequestProperty("Accept", DeviceBridgeProtocol.CONTENT_TYPE)
       connection.setRequestProperty("Accept-Encoding", "identity")
       connection.setRequestProperty("Content-Type", contentType)
+      connection.setRequestProperty(
+        FixedDeviceBridgeHttpsExchange.DEPLOYMENT_TARGET_HEADER,
+        deploymentTarget,
+      )
       connection.setRequestProperty("User-Agent", "FetanAgent-TeleBirr-Verifier/1")
       connection.outputStream.use { output ->
         output.write(body)

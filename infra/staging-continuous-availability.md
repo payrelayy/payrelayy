@@ -152,9 +152,23 @@ short, stopped-runtime transition.
 
 After H18 is installed, stopped-state and cleanup checks preserve exactly this shared ingress, require
 the two healthy production endpoints, reject every other endpoint or lookalike network, and remove
-only individually classified empty staging networks by full Docker ID. The separate device-pilot
-stack may not share this production alias; it must remain stopped until it has a reviewed,
-non-conflicting ingress contract. A changed or missing shared contract fails closed.
+only individually classified empty staging networks by full Docker ID. The device pilot now has a
+separate reviewed contract: its service and network alias are both `staging-device-pilot-bridge`,
+while the production bridge remains `telebirr-device-bridge`. The production gateway selects staging
+only for the exact code-owned staging target header. While the pilot is running, the shared ingress
+therefore has exactly three endpoints: production gateway, production bridge, and staging pilot
+bridge. The installed H18 continuous-availability helper intentionally requires the production
+gateway and production TeleBirr bridge to carry one identical revision. A gateway-only route
+promotion therefore does **not** become H18-compatible merely by stopping the pilot. Do not promote
+the route or run this pilot until a separately reviewed H19 helper successor is installed while the
+current all-baseline, two-endpoint boundary is intact. H19 must preserve every H18 network, endpoint,
+container, volume, timer, provenance, and no-money invariant while accepting only two
+production-ingress pairs: the current all-baseline pair, or the exact reviewed gateway revision and
+Caddyfile digest with the protected baseline production bridge release. Its authenticated root
+transition must rotate the checksum-bound continuous-availability finalizer at the same time. After
+H19, install the route through a separately reviewed gateway-only operation; never use a full
+production deployment to hand the alias or network to staging. A changed, missing, or extra endpoint
+still fails closed.
 
 ## Verification and security trade-off
 

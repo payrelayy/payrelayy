@@ -330,6 +330,7 @@ assert.match(publicSmoke, /"\$code" == '404'/u);
 
 for (const name of [
   'resolve_h18_record',
+  'expiry_guard_snapshot',
   'stopped_staging_boundary_digest',
   'production_boundary_digest',
   'shared_ingress_boundary_digest',
@@ -348,6 +349,23 @@ for (const name of [
 ]) {
   shellFunction(installer, name);
 }
+const expiryGuardSnapshot = shellFunction(installer, 'expiry_guard_snapshot');
+for (const invariant of [
+  'loaded:loaded',
+  'not-found:not-found',
+  'root:root:644:1',
+  '! -e "$TIMER_PATH" && ! -L "$TIMER_PATH"',
+  '! -e "$SERVICE_PATH" && ! -L "$SERVICE_PATH"',
+]) {
+  assert.ok(
+    expiryGuardSnapshot.includes(invariant),
+    `missing stopped expiry-guard invariant: ${invariant}`,
+  );
+}
+assert.match(
+  shellFunction(installer, 'stopped_staging_boundary_digest'),
+  /systemd_snapshot="\$\(expiry_guard_snapshot\)"/u,
+);
 assertInOrder(
   installer,
   [
@@ -440,6 +458,74 @@ const bash =
     : 'bash';
 assert.ok(bash);
 let executableChecks = 0;
+for (const [name, timerLoad, serviceLoad, residue, pass] of [
+  ['fully absent expiry pair', 'not-found', 'not-found', 'none', true],
+  ['absent expiry pair with timer residue', 'not-found', 'not-found', 'timer', false],
+  ['mixed absent and loaded expiry pair', 'not-found', 'loaded', 'none', false],
+  ['loaded inactive and disabled expiry pair', 'loaded', 'loaded', 'pair', true],
+  ['loaded expiry pair with missing unit files', 'loaded', 'loaded', 'none', false],
+]) {
+  const result = spawnSync(bash, ['-s'], {
+    input: `set -euo pipefail
+fixture_root="$(mktemp -d)"
+trap 'rm -rf -- "$fixture_root"' EXIT
+TIMER='expiry.timer'
+SERVICE='expiry.service'
+TIMER_PATH="$fixture_root/$TIMER"
+SERVICE_PATH="$fixture_root/$SERVICE"
+[[ '${residue}' != timer ]] || printf residue >"$TIMER_PATH"
+if [[ '${residue}' == pair ]]; then
+  printf timer >"$TIMER_PATH"
+  printf service >"$SERVICE_PATH"
+fi
+realpath() {
+  [[ "$1" == -- && $# == 2 ]] || return 90
+  printf '%s\n' "$2"
+}
+stat() {
+  [[ "$1" == "--format=%U:%G:%a:%h" && $# == 2 ]] || return 90
+  printf '%s\n' 'root:root:644:1'
+}
+systemctl() {
+  [[ "$1" == show ]] || return 91
+  local property="\${2#--property=}"
+  if [[ "$3" == --value ]]; then
+    case "$property:$4" in
+      LoadState:$TIMER) printf '%s\n' '${timerLoad}' ;;
+      LoadState:$SERVICE) printf '%s\n' '${serviceLoad}' ;;
+      ActiveState:*) printf '%s\n' inactive ;;
+      UnitFileState:$TIMER)
+        [[ '${timerLoad}' == loaded ]] && printf '%s\n' disabled || printf '\n'
+        ;;
+      UnitFileState:$SERVICE) printf '\n' ;;
+      FragmentPath:$TIMER)
+        [[ '${timerLoad}' == loaded ]] && printf '%s\n' "$TIMER_PATH" || printf '\n'
+        ;;
+      FragmentPath:$SERVICE)
+        [[ '${serviceLoad}' == loaded ]] && printf '%s\n' "$SERVICE_PATH" || printf '\n'
+        ;;
+      NextElapseUSecRealtime:*|DropInPaths:*) printf '\n' ;;
+      *) return 92 ;;
+    esac
+    return
+  fi
+  [[ "$property" == 'LoadState,ActiveState,UnitFileState,NextElapseUSecRealtime,DropInPaths' &&
+    "$3" == "$TIMER" && "$4" == "$SERVICE" ]] || return 93
+  printf '%s\n' \
+    'LoadState=${timerLoad}' 'ActiveState=inactive' 'UnitFileState=' \
+    'NextElapseUSecRealtime=' 'DropInPaths=' '' \
+    'LoadState=${serviceLoad}' 'ActiveState=inactive' 'UnitFileState=' 'DropInPaths='
+}
+${expiryGuardSnapshot}
+expiry_guard_snapshot >/dev/null
+`,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+  executableChecks += 1;
+}
+
 const causal = shellFunction(installer, 'require_causal_topology');
 const allowed = new Set([
   'absent:old:old:missing:old:missing:active',

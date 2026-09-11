@@ -31,6 +31,8 @@ readonly SESSION_CONTROL_VOLUME='fetanagent-staging-beta_kemerbet_session_contro
 readonly STAGING_DIRECT_DATABASE_HOST='db.spzpiyxheappsfyswewl.supabase.co'
 readonly TIMER='fetanagent-staging-runtime-expiry-stop.timer'
 readonly SERVICE='fetanagent-staging-runtime-expiry-stop.service'
+readonly TIMER_PATH="/etc/systemd/system/$TIMER"
+readonly SERVICE_PATH="/etc/systemd/system/$SERVICE"
 readonly PROTECTED_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
 readonly SHARED_NETWORK='fetanagent-telebirr-device-ingress'
 readonly SHARED_NETWORK_ID='5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'
@@ -383,6 +385,44 @@ require_no_staging_runtime() {
   done
 }
 
+expiry_guard_snapshot() {
+  local path service_load timer_load
+  timer_load="$(systemctl show --property=LoadState --value "$TIMER")" || return 1
+  service_load="$(systemctl show --property=LoadState --value "$SERVICE")" || return 1
+  case "$timer_load:$service_load" in
+    loaded:loaded)
+      for path in "$TIMER_PATH" "$SERVICE_PATH"; do
+        [[ ! -L "$path" && -f "$path" && "$(realpath -- "$path")" == "$path" &&
+          "$(stat --format='%U:%G:%a:%h' "$path")" == 'root:root:644:1' ]] || return 1
+      done
+      [[ "$(systemctl show --property=FragmentPath --value "$TIMER")" == "$TIMER_PATH" &&
+        "$(systemctl show --property=ActiveState --value "$TIMER")" == inactive &&
+        "$(systemctl show --property=UnitFileState --value "$TIMER")" == disabled &&
+        -z "$(systemctl show --property=NextElapseUSecRealtime --value "$TIMER")" &&
+        -z "$(systemctl show --property=DropInPaths --value "$TIMER")" &&
+        "$(systemctl show --property=FragmentPath --value "$SERVICE")" == "$SERVICE_PATH" &&
+        "$(systemctl show --property=ActiveState --value "$SERVICE")" == inactive &&
+        -z "$(systemctl show --property=DropInPaths --value "$SERVICE")" ]] || return 1
+      ;;
+    not-found:not-found)
+      [[ ! -e "$TIMER_PATH" && ! -L "$TIMER_PATH" &&
+        ! -e "$SERVICE_PATH" && ! -L "$SERVICE_PATH" &&
+        "$(systemctl show --property=ActiveState --value "$TIMER")" == inactive &&
+        -z "$(systemctl show --property=UnitFileState --value "$TIMER")" &&
+        -z "$(systemctl show --property=FragmentPath --value "$TIMER")" &&
+        -z "$(systemctl show --property=NextElapseUSecRealtime --value "$TIMER")" &&
+        -z "$(systemctl show --property=DropInPaths --value "$TIMER")" &&
+        "$(systemctl show --property=ActiveState --value "$SERVICE")" == inactive &&
+        -z "$(systemctl show --property=UnitFileState --value "$SERVICE")" &&
+        -z "$(systemctl show --property=FragmentPath --value "$SERVICE")" &&
+        -z "$(systemctl show --property=DropInPaths --value "$SERVICE")" ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  systemctl show --property=LoadState,ActiveState,UnitFileState,\
+NextElapseUSecRealtime,DropInPaths "$TIMER" "$SERVICE" | LC_ALL=C sort
+}
+
 stopped_staging_boundary_digest() {
   local addresses database_addresses holders mountpoint mountpoint_stat namespace_networks
   local network_inventory port_inventory project_networks routes systemd_snapshot volume volumes
@@ -419,16 +459,7 @@ stopped_staging_boundary_digest() {
     mountpoint_stat="$(stat --format='%d:%i:%u:%g:%a:%h' "$mountpoint")" || return 1
     snapshot+="$volume|$mountpoint_stat"$'\n'
   done
-  systemd_snapshot="$(systemctl show --property=LoadState,ActiveState,UnitFileState,\
-NextElapseUSecRealtime,DropInPaths "$TIMER" "$SERVICE" | LC_ALL=C sort)" || return 1
-  [[ "$(systemctl show --property=LoadState --value "$TIMER")" == loaded &&
-    "$(systemctl show --property=ActiveState --value "$TIMER")" == inactive &&
-    "$(systemctl show --property=UnitFileState --value "$TIMER")" == disabled &&
-    -z "$(systemctl show --property=NextElapseUSecRealtime --value "$TIMER")" &&
-    -z "$(systemctl show --property=DropInPaths --value "$TIMER")" &&
-    "$(systemctl show --property=LoadState --value "$SERVICE")" == loaded &&
-    "$(systemctl show --property=ActiveState --value "$SERVICE")" == inactive &&
-    -z "$(systemctl show --property=DropInPaths --value "$SERVICE")" ]] || return 1
+  systemd_snapshot="$(expiry_guard_snapshot)" || return 1
   addresses="$(ip -6 -o address show scope global | LC_ALL=C sort -u)" || return 1
   routes="$(ip -6 route show default | LC_ALL=C sort -u)" || return 1
   database_addresses="$(getent ahostsv6 "$STAGING_DIRECT_DATABASE_HOST" | LC_ALL=C sort -u)" || return 1

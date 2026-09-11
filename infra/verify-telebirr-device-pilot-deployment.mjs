@@ -27,7 +27,7 @@ const deployHelper = await readFile(
   'utf8',
 );
 const helperInstaller = await readFile(
-  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v2.sh`,
+  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v3.sh`,
   'utf8',
 );
 const androidTransport = await readFile(
@@ -261,7 +261,7 @@ assert.match(
 );
 assert.match(
   qualityWorkflow,
-  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh/u,
+  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v3\.sh/u,
 );
 assert.match(
   qualityWorkflow,
@@ -404,6 +404,7 @@ assert.match(deployHelper, /EXPECTED_SUDO_USER='fetanagent-admin'/u);
 assert.match(deployHelper, /FINANCIAL_ACTIONS_MODE|compose\.telebirr-device-pilot\.yaml/u);
 for (const [name, value] of [
   ['PRODUCTION_RELEASE', '69be82ac3e49ff8c63c64c9aa7926e0046b48a10'],
+  ['PRODUCTION_GATEWAY_RELEASE', '90b1f059577682b6bc458d239f6bdcb591077085'],
   ['INGRESS_NETWORK_ID', '5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'],
   [
     'INGRESS_NETWORK_CONFIG_HASH',
@@ -588,7 +589,12 @@ assert.match(
 assert.match(
   deployHelper,
   /require_production_endpoint_boundary\(\)[\s\S]*?\/fetanagent-production-gateway-1[\s\S]*?\/fetanagent-production-telebirr-device-bridge-1[\s\S]*?org\.opencontainers\.image\.title[\s\S]*?FINANCIAL_ACTIONS_MODE=dry_run[\s\S]*?KEMERBET_EXECUTOR_ENABLED=false[\s\S]*?KEMERBET_FINAL_ACTION_ENABLED=false/u,
-  'the two production endpoints must retain their exact H18-derived identity and no-money shape',
+  'the two production endpoints must retain their exact H19-derived identity and no-money shape',
+);
+assert.match(
+  deployHelper,
+  /require_production_ingress\(\)[\s\S]*?validate_commit_and_tag "\$pilot_commit_sha" "\$pilot_image_tag"[\s\S]*?require_production_endpoint_boundary "\$PRODUCTION_GATEWAY_RELEASE"[\s\S]*?require_shared_ingress_boundary "\$STAGING_BRIDGE_SERVICE"[\s\S]*?"\$pilot_commit_sha" "\$pilot_image_tag"/u,
+  'pilot release identity must be independent from the exact terminal H19 gateway release',
 );
 for (const command of ['start', 'ready', 'stop', 'stop-active', 'rollback']) {
   assert.match(deployHelper, new RegExp(`^  ${command}\\)$`, 'mu'));
@@ -611,8 +617,13 @@ assert.match(
 );
 assert.match(
   deployHelper,
-  /start_release\(\)[\s\S]*?\[\[ ! -e "\$ACTIVE_RECEIPT" && ! -L "\$ACTIVE_RECEIPT" \]\][\s\S]*?require_production_ingress stopped "\$commit_sha" "\$image_tag"[\s\S]*?production_ingress_runtime_digest "\$commit_sha"[\s\S]*?run_pilot_compose[\s\S]*?production_ingress_runtime_digest "\$commit_sha"/u,
-  'start must bind the route revision and preserve the full production runtime digest',
+  /start_release\(\)[\s\S]*?\[\[ ! -e "\$ACTIVE_RECEIPT" && ! -L "\$ACTIVE_RECEIPT" \]\][\s\S]*?require_production_ingress stopped "\$commit_sha" "\$image_tag"[\s\S]*?production_ingress_runtime_digest "\$PRODUCTION_GATEWAY_RELEASE"[\s\S]*?run_pilot_compose[\s\S]*?production_ingress_runtime_digest "\$PRODUCTION_GATEWAY_RELEASE"/u,
+  'start must bind the terminal H19 route revision and preserve the full production runtime digest',
+);
+assert.doesNotMatch(
+  deployHelper,
+  /production_ingress_runtime_digest "\$commit_sha"|require_production_endpoint_boundary "\$(?:next_)?commit_sha"/u,
+  'a device release must never be mistaken for the independently deployed gateway release',
 );
 assert.doesNotMatch(deployHelper, /run_gateway_compose|STAGING_PROJECT|gateway-rollback-v1/u);
 assert.match(
@@ -763,13 +774,13 @@ assert.match(
 );
 assert.match(
   helperInstaller,
-  /PREVIOUS_HELPER_SHA256='69f422e98ec9816b608ef0b5fdacb2a223274883ae10979501b25b07abbed4b3'/u,
+  /PREVIOUS_HELPER_SHA256='344462ff1cf9fd445440aca4808bb412dff8fef03bba38092ed05ea0e7db2985'/u,
 );
 assert.match(helperInstaller, /run directly in the authenticated DigitalOcean root console/u);
 assert.match(helperInstaller, /"\$0" == "\$INSTALLER"/u);
 assert.match(
   helperInstaller,
-  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v2\.sh:f/u,
+  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v3\.sh:f/u,
 );
 assert.match(helperInstaller, /flock --exclusive --nonblock 9/u);
 assert.match(helperInstaller, /mv -f -- "\$TARGET_INSTALLING" "\$TARGET"/u);

@@ -1,13 +1,13 @@
 # This digest pins the staging-only no-money shadow-verifier lifecycle helper. The helper has no
 # feature-switch, migration, provider, KemerBet, executor, settlement, or money-action command.
 Cmnd_Alias FETANAGENT_STAGING_TELEBIRR_SHADOW_VERIFIER = \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper preflight *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper prepare-incoming *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper discard *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper install *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper start *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status *, \
-  sha256:0004c81e4c9b1d0b3cbf5283c8700f7f0665db3def2ea99d04f7d0e5c46a48a1 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper stop *
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper preflight *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper prepare-incoming *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper discard *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper install *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper start *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status *, \
+  sha256:12dde1484d5b182ef9cdfed72ba90e90738f8832d114948cb6ac048b33ef5c52 /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper stop *
 
 fetanagent-admin ALL=(root) NOPASSWD: FETANAGENT_STAGING_TELEBIRR_SHADOW_VERIFIER

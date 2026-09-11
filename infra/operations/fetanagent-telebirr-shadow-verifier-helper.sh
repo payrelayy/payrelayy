@@ -40,6 +40,25 @@ docker_local() {
     docker --host "$DOCKER_SOCKET" "$@"
 }
 
+invoked_from_installed_file() {
+  local invoked_path="$1" argument expected_sudo_command="$HELPER_PATH"
+  local installed_identity executing_identity
+  shift
+  [[ "$invoked_path" == "$HELPER_PATH" ]] && return 0
+  for argument in "$@"; do
+    [[ -n "$argument" && "$argument" != *[[:space:]]* ]] || return 1
+    expected_sudo_command+=" $argument"
+  done
+  # Digest-bound sudo may execute this script through its verified open descriptor.
+  [[ "${SUDO_USER:-}" == "$EXPECTED_SUDO_USER" &&
+    "${SUDO_COMMAND:-}" == "$expected_sudo_command" &&
+    "$invoked_path" =~ ^/(proc/self/fd|dev/fd)/[0-9]+$ &&
+    -f "$invoked_path" ]] || return 1
+  installed_identity="$(stat --format='%u:%g:%a:%h:%d:%i' -- "$HELPER_PATH")" || return 1
+  executing_identity="$(stat -L --format='%u:%g:%a:%h:%d:%i' -- "$invoked_path")" || return 1
+  [[ "$executing_identity" == "$installed_identity" ]]
+}
+
 validate_release_identity() {
   local commit_sha="$1" image_tag="$2"
   [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || die 'the release commit is not canonical'
@@ -50,11 +69,12 @@ validate_release_identity() {
 require_installed_helper() {
   [[ "$EUID" -eq 0 ]] || die 'the helper must run as root through sudo'
   [[ "${SUDO_USER:-}" == "$EXPECTED_SUDO_USER" ]] || die 'the sudo caller is not authorized'
-  [[ "$0" == "$HELPER_PATH" ]] || die 'the helper must run from its installed path'
   [[ ! -L "$HELPER_PATH" && -f "$HELPER_PATH" &&
     "$(realpath -- "$HELPER_PATH")" == "$HELPER_PATH" &&
     "$(stat --format='%U:%G:%a:%h' "$HELPER_PATH")" == 'root:root:755:1' ]] ||
     die 'the installed helper metadata is unsafe'
+  invoked_from_installed_file "$0" "$@" ||
+    die 'the helper invocation does not identify its installed file'
 }
 
 require_root_trust_material() {
@@ -718,7 +738,7 @@ stop_release() {
   if [[ -f "$ACTIVE_RECEIPT" && ! -L "$ACTIVE_RECEIPT" ]]; then rm -f -- "$ACTIVE_RECEIPT"; fi
 }
 
-require_installed_helper
+require_installed_helper "$@"
 [[ -z "${DOCKER_HOST:-}" && -z "${DOCKER_CONTEXT:-}" ]] || die 'Docker overrides are forbidden'
 
 case "${1:-}" in

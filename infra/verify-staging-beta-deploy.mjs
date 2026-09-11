@@ -6691,8 +6691,8 @@ const retirementSafeResetBoundary = extractShellFunction(
 for (const safeResetContract of [
   /require_kemerbet_v1_retirement_expiry_guard_disarmed/,
   /container ls --all --quiet/,
-  /network ls --quiet/,
-  /\[\[ -z "\$containers" && -z "\$networks" \]\]/,
+  /\[\[ -z "\$containers" \]\]/,
+  /require_stopped_project_network_boundary/,
   /require_kemerbet_recheck_transients_absent/,
   /require_kemerbet_v1_retirement_durable_volumes/,
 ]) {
@@ -8419,7 +8419,7 @@ const v3SuccessorStoppedDurableBoundary = extractShellFunction(
 );
 for (const stoppedDurableContract of [
   /container ls --all --quiet/u,
-  /network ls --quiet/u,
+  /require_stopped_project_network_boundary/u,
   /require_kemerbet_recheck_transients_absent/u,
   /volume ls --quiet/u,
   /KEMERBET_PROFILE_VOLUME/u,
@@ -8436,8 +8436,7 @@ assertInOrder(
   [
     'containers=',
     '[[ -z "$containers" ]]',
-    'networks=',
-    '[[ -z "$networks" ]]',
+    'require_stopped_project_network_boundary',
     'require_kemerbet_recheck_transients_absent',
     'project_volumes=',
     '[[ "$project_volumes" == "$expected_volumes" ]]',
@@ -8898,7 +8897,7 @@ const retirementReinstallBoundary = extractShellFunction(
 assert.match(retirementReinstallBoundary, /require_kemerbet_v1_retirement_durable_volumes/);
 assert.match(
   retirementReinstallBoundary,
-  /container ls --all --quiet[\s\S]*?network ls --quiet[\s\S]*?\[\[ -z "\$containers" && -z "\$networks" \]\]/u,
+  /container ls --all --quiet[\s\S]*?\[\[ -z "\$containers" \]\][\s\S]*?require_stopped_project_network_boundary/u,
 );
 assert.match(retirementReinstallBoundary, /require_kemerbet_recheck_transients_absent/);
 const stopJob = /\n  stop:\n([\s\S]*)$/u.exec(workflow)?.[1];
@@ -10124,7 +10123,8 @@ assert.ok(
   helper.indexOf('require_owner_kemerbet_receipt_service_access', longLivedStart) > longLivedStart,
   'the live Owner process must prove read-only receipt access after long-lived startup',
 );
-assert.match(helper, /docker_local network rm \$networks/);
+assert.match(helper, /docker_local network rm "\$network_id"/);
+assert.doesNotMatch(helper, /docker_local network rm \$networks/);
 assert.match(helper, /EXPIRY_STOP_SERVICE='fetanagent-staging-runtime-expiry-stop\.service'/);
 assert.match(helper, /EXPIRY_STOP_TIMER='fetanagent-staging-runtime-expiry-stop\.timer'/);
 const expiryArmHelper = /arm_expiry_stop\(\) \(([\s\S]*?)\n\)/u.exec(helper)?.[1];
@@ -10204,7 +10204,8 @@ const bestEffortSecretRemoval =
 assert.ok(bestEffortRuntimeRemoval && bestEffortSecretRemoval);
 for (const contract of [
   /container rm --force \$containers[^\n]*\|\| cleanup_status=1/,
-  /network rm \$networks[^\n]*\|\| cleanup_status=1/,
+  /remove_disposable_project_networks_best_effort \|\| cleanup_status=1/,
+  /require_stopped_project_network_boundary \|\| cleanup_status=1/,
   /remaining=/,
   /return "\$cleanup_status"/,
 ]) {

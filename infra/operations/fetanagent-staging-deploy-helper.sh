@@ -11,6 +11,7 @@ readonly RELEASE_ROOT='/srv/fetanagent/releases'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROJECT_NAME='fetanagent-staging-beta'
 readonly PRODUCTION_PROJECT_NAME='fetanagent-production'
+readonly PRODUCTION_PROTECTED_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
 readonly SHARED_TELEBIRR_INGRESS_NETWORK='fetanagent-telebirr-device-ingress'
 readonly SHARED_TELEBIRR_INGRESS_NETWORK_ID='5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'
 readonly SHARED_TELEBIRR_INGRESS_CONFIG_HASH='ac7f178b6d4280a708b951cb93740b0f8323fb2cb2c75d05cf040f44e2c34209'
@@ -66,6 +67,12 @@ readonly KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-q
 readonly KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT='/var/lib/fetanagent/kemerbet-security-recovery-preview-bridge-v16'
 readonly KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT='/var/lib/fetanagent/kemerbet-continuous-availability-helper-bridge-v17'
 readonly KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT='/var/lib/fetanagent/shared-telebirr-ingress-helper-bridge-v18'
+readonly KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v19'
+readonly STAGING_TELEBIRR_ROUTE_INGRESS_GUARD='/usr/local/sbin/fetanagent-production-ingress-h19'
+readonly STAGING_CONTINUOUS_FINALIZER='/usr/local/sbin/fetanagent-staging-continuous-availability'
+readonly STAGING_CONTINUOUS_SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availability'
+readonly PRODUCTION_BASELINE_GATEWAY_CADDYFILE_SHA256='181992c8958397d63a7ae34137d51d4186ce0383c8cfd2bf8df137da11e12f24'
+readonly PRODUCTION_STAGING_ROUTE_GATEWAY_CADDYFILE_SHA256='afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
 readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing'
@@ -217,7 +224,8 @@ require_shared_telebirr_ingress_network_contract() {
   local container_name container_residue endpoint_contract
   local endpoint_id endpoint_id_contract endpoint_ids endpoint_ipv4 endpoint_ipv6 endpoint_mac
   local endpoint_name endpoint_residue endpoint_role inspection inspection_after inspection_digest
-  local network_id production_revision='' project revision service seen_roles=''
+  local network_id production_gateway_revision='' production_telebirr_bridge_revision=''
+  local project revision service seen_roles=''
   local production_gateway_seen='false' production_telebirr_bridge_seen='false'
   network_id="$(shared_telebirr_ingress_network_id)" || return 1
   inspection="$(docker_local network inspect "$network_id")" || return 1
@@ -393,17 +401,23 @@ require_shared_telebirr_ingress_network_contract() {
       seen_roles="${seen_roles:+$seen_roles|}$endpoint_role"
       revision="$(jq -r '.[0].Config.Labels["org.opencontainers.image.revision"]' \
         <<<"$container_inspection")" || return 1
-      if [[ "$project" == "$PRODUCTION_PROJECT_NAME" ]]; then
-        if [[ -z "$production_revision" ]]; then
-          production_revision="$revision"
-        else
-          [[ "$revision" == "$production_revision" ]] || return 1
-        fi
-      fi
+      case "$endpoint_role" in
+        production-gateway) production_gateway_revision="$revision" ;;
+        production-telebirr-device-bridge) production_telebirr_bridge_revision="$revision" ;;
+        *) return 1 ;;
+      esac
     done <<<"$endpoint_ids"
   fi
   [[ "$production_gateway_seen" == 'true' &&
-    "$production_telebirr_bridge_seen" == 'true' ]] || return 1
+    "$production_telebirr_bridge_seen" == 'true' &&
+    "$production_telebirr_bridge_revision" == "$PRODUCTION_PROTECTED_RELEASE" ]] || return 1
+  case "$production_gateway_revision" in
+    "$PRODUCTION_PROTECTED_RELEASE") ;;
+    "$KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE")
+      [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]] || return 1
+      ;;
+    *) return 1 ;;
+  esac
   inspection_after="$(docker_local network inspect "$network_id")" || return 1
   [[ "$(jq -S -c '.[0]' <<<"$inspection_after" | sha256sum | awk '{print $1}')" == \
     "$inspection_digest" ]] || return 1
@@ -426,6 +440,25 @@ require_shared_telebirr_ingress_network_contract() {
       NetworkSettings: {Networks: .NetworkSettings.Networks, Ports: .NetworkSettings.Ports}
     })' <<<"$container_inspection_after" | sha256sum | awk '{print $1}')" == \
     "$container_inspection_digest" ]] || return 1
+  require_h19_production_ingress_guard "$production_gateway_revision"
+}
+
+require_h19_production_ingress_guard() {
+  local expected_gateway_release="$1" guard_digest
+  [[ "$expected_gateway_release" == "$PRODUCTION_PROTECTED_RELEASE" ||
+    ( "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' &&
+      "$expected_gateway_release" == "$KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE" ) ]] || return 1
+  [[ ! -L "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" &&
+    -f "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" &&
+    "$(realpath -- "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD")" == \
+      "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" &&
+    "$(stat --format='%U:%G:%a:%h' "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD")" == \
+      'root:root:755:1' ]] || return 1
+  guard_digest="$(sha256sum -- "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" | awk '{print $1}')" ||
+    return 1
+  [[ "$guard_digest" == "$KEMERBET_H19_INGRESS_GUARD_SHA256" ]] || return 1
+  env -i PATH="$SAFE_PATH" HOME='/root' SUDO_USER="$EXPECTED_SUDO_USER" \
+    "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" inspect "$expected_gateway_release"
 }
 
 remove_disposable_project_networks_best_effort() {
@@ -4307,6 +4340,20 @@ KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE=''
 KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER=''
 KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256=''
 KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_INTENT_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_COMPLETION_SHA256=''
+KEMERBET_H19_ROUTE_BRIDGE_STATE='absent'
+KEMERBET_H19_ROUTE_BRIDGE_RELEASE=''
+KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE=''
+KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256=''
+KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+KEMERBET_H19_ROUTE_BRIDGE_H18_RELEASE=''
+KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER=''
+KEMERBET_H19_ROUTE_BRIDGE_H18_INTENT_SHA256=''
+KEMERBET_H19_ROUTE_BRIDGE_H18_COMPLETION_SHA256=''
+KEMERBET_H19_CONTINUOUS_FINALIZER_SHA256=''
+KEMERBET_H19_CONTINUOUS_SUDOERS_SHA256=''
+KEMERBET_H19_INGRESS_GUARD_SHA256=''
 
 inspect_kemerbet_h16_preview_bridge() {
   local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
@@ -4644,6 +4691,243 @@ PY
   KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT}/${inspection_lines[1]}/predecessor-helper"
 }
 
+inspect_kemerbet_h19_route_bridge() {
+  local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
+  local -a inspection_lines=()
+  KEMERBET_H19_ROUTE_BRIDGE_STATE='absent'
+  KEMERBET_H19_ROUTE_BRIDGE_RELEASE=''
+  KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE=''
+  KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256=''
+  KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+  KEMERBET_H19_ROUTE_BRIDGE_H18_RELEASE=''
+  KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER=''
+  KEMERBET_H19_ROUTE_BRIDGE_H18_INTENT_SHA256=''
+  KEMERBET_H19_ROUTE_BRIDGE_H18_COMPLETION_SHA256=''
+  KEMERBET_H19_CONTINUOUS_FINALIZER_SHA256=''
+  KEMERBET_H19_CONTINUOUS_SUDOERS_SHA256=''
+  KEMERBET_H19_INGRESS_GUARD_SHA256=''
+  if [[ ! -e "$KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT" &&
+    ! -L "$KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT" ]]; then
+    return 0
+  fi
+  KEMERBET_H19_ROUTE_BRIDGE_STATE='invalid'
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT" "$helper_path" \
+    "$helper_mode" "$STAGING_CONTINUOUS_FINALIZER" "$STAGING_CONTINUOUS_SUDOERS" \
+    "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+parent, helper, helper_mode_text, finalizer, sudoers, ingress_guard = sys.argv[1:]
+helper_mode = int(helper_mode_text, 8)
+release_pattern = re.compile(r'[0-9a-f]{40}')
+sha_pattern = re.compile(r'[0-9a-f]{64}')
+protected_release = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
+predecessor_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
+predecessor_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
+predecessor_sudoers_sha = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958'
+baseline_caddy_sha = '181992c8958397d63a7ae34137d51d4186ce0383c8cfd2bf8df137da11e12f24'
+candidate_caddy_sha = 'afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, mode, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, mode)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        reject()
+
+
+def exact_file(path, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, mode, 1)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size <= 0
+            or before.st_size > maximum
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = os.pread(descriptor, maximum + 1, 0)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            len(data) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            reject()
+        return data
+    finally:
+        os.close(descriptor)
+
+
+try:
+    children = os.listdir(parent)
+    if len(children) != 1 or release_pattern.fullmatch(children[0]) is None:
+        reject()
+    bridge_release = children[0]
+    root = f'{parent}/{bridge_release}'
+    exact_directory(parent, 0o700, [bridge_release])
+    exact_directory(root, 0o700, [
+        'completed-v1',
+        'intent-v1',
+        'predecessor-continuous-finalizer',
+        'predecessor-continuous-sudoers',
+        'predecessor-helper',
+    ])
+    intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
+    completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
+    predecessor_helper = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    predecessor_finalizer = exact_file(
+        f'{root}/predecessor-continuous-finalizer', 0o400, 2 * 1024 * 1024
+    )
+    predecessor_sudoers = exact_file(
+        f'{root}/predecessor-continuous-sudoers', 0o400, 64 * 1024
+    )
+    helper_data = exact_file(helper, helper_mode, 2 * 1024 * 1024)
+    finalizer_data = exact_file(finalizer, 0o755, 2 * 1024 * 1024)
+    sudoers_data = exact_file(sudoers, 0o440, 64 * 1024)
+    ingress_guard_data = exact_file(ingress_guard, 0o755, 2 * 1024 * 1024)
+    intent = intent_data.decode('ascii').splitlines()
+    completion = completion_data.decode('ascii').splitlines()
+    candidate_release = intent[3].split('=', 1)[1] if len(intent) > 3 else ''
+    h18_release = intent[4].split('=', 1)[1] if len(intent) > 4 else ''
+    successor_helper_sha = intent[6].split('=', 1)[1] if len(intent) > 6 else ''
+    successor_finalizer_sha = intent[8].split('=', 1)[1] if len(intent) > 8 else ''
+    successor_sudoers_sha = intent[10].split('=', 1)[1] if len(intent) > 10 else ''
+    guard_sha = intent[11].split('=', 1)[1] if len(intent) > 11 else ''
+    h18_intent_sha = intent[12].split('=', 1)[1] if len(intent) > 12 else ''
+    h18_completion_sha = intent[13].split('=', 1)[1] if len(intent) > 13 else ''
+    stopped_boundary_sha = intent[14].split('=', 1)[1] if len(intent) > 14 else ''
+    baseline_boundary_sha = intent[15].split('=', 1)[1] if len(intent) > 15 else ''
+    shared_boundary_sha = intent[16].split('=', 1)[1] if len(intent) > 16 else ''
+    baseline_tls_sha = intent[17].split('=', 1)[1] if len(intent) > 17 else ''
+    if (
+        len(intent) != 32
+        or len(completion) != 33
+        or intent[0] != 'contract=fetanagent-staging-telebirr-route-helper-bridge-v19'
+        or intent[1] != 'state=authorized'
+        or intent[2] != f'bridge_release={bridge_release}'
+        or not intent[3].startswith('candidate_gateway_release=')
+        or release_pattern.fullmatch(candidate_release) is None
+        or candidate_release != bridge_release
+        or candidate_release == protected_release
+        or not intent[4].startswith('h18_bridge_release=')
+        or release_pattern.fullmatch(h18_release) is None
+        or h18_release in (protected_release, bridge_release, candidate_release)
+        or intent[5] != f'predecessor_helper_sha256={predecessor_helper_sha}'
+        or not intent[6].startswith('successor_helper_sha256=')
+        or sha_pattern.fullmatch(successor_helper_sha) is None
+        or successor_helper_sha == predecessor_helper_sha
+        or intent[7] != f'predecessor_continuous_finalizer_sha256={predecessor_finalizer_sha}'
+        or not intent[8].startswith('successor_continuous_finalizer_sha256=')
+        or sha_pattern.fullmatch(successor_finalizer_sha) is None
+        or successor_finalizer_sha == predecessor_finalizer_sha
+        or intent[9] != f'predecessor_continuous_sudoers_sha256={predecessor_sudoers_sha}'
+        or not intent[10].startswith('successor_continuous_sudoers_sha256=')
+        or sha_pattern.fullmatch(successor_sudoers_sha) is None
+        or successor_sudoers_sha == predecessor_sudoers_sha
+        or not intent[11].startswith('ingress_guard_sha256=')
+        or sha_pattern.fullmatch(guard_sha) is None
+        or not intent[12].startswith('h18_bridge_intent_sha256=')
+        or sha_pattern.fullmatch(h18_intent_sha) is None
+        or not intent[13].startswith('h18_bridge_completion_sha256=')
+        or sha_pattern.fullmatch(h18_completion_sha) is None
+        or not intent[14].startswith('stopped_staging_boundary_sha256=')
+        or sha_pattern.fullmatch(stopped_boundary_sha) is None
+        or not intent[15].startswith('baseline_production_boundary_sha256=')
+        or sha_pattern.fullmatch(baseline_boundary_sha) is None
+        or not intent[16].startswith('baseline_shared_ingress_boundary_sha256=')
+        or sha_pattern.fullmatch(shared_boundary_sha) is None
+        or not intent[17].startswith('baseline_tls_leaf_sha256=')
+        or sha_pattern.fullmatch(baseline_tls_sha) is None
+        or intent[18:] != [
+            f'baseline_gateway_caddyfile_sha256={baseline_caddy_sha}',
+            f'candidate_gateway_caddyfile_sha256={candidate_caddy_sha}',
+            'staging_runtime_stopped=true',
+            'shared_ingress_network=fetanagent-telebirr-device-ingress',
+            'shared_ingress_network_id=5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738',
+            f'protected_production_release={protected_release}',
+            'accepted_production_ingress_states=baseline-or-reviewed-gateway-only',
+            'continuous_pair_rotated=true',
+            'production_runtime_mutation=false',
+            'database_mutation=false',
+            'financial_actions_mode=disabled',
+            'transfer_enabled=false',
+            'amount_enabled=false',
+            'money_moved=false',
+        ]
+        or completion[0] != intent[0]
+        or completion[1] != 'state=route-helper-pair-installed'
+        or completion[2:32] != intent[2:32]
+        or completion[32] != f'bridge_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+        or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+        or hashlib.sha256(predecessor_helper).hexdigest() != predecessor_helper_sha
+        or hashlib.sha256(predecessor_finalizer).hexdigest() != predecessor_finalizer_sha
+        or hashlib.sha256(predecessor_sudoers).hexdigest() != predecessor_sudoers_sha
+        or hashlib.sha256(helper_data).hexdigest() != successor_helper_sha
+        or hashlib.sha256(finalizer_data).hexdigest() != successor_finalizer_sha
+        or hashlib.sha256(sudoers_data).hexdigest() != successor_sudoers_sha
+        or hashlib.sha256(ingress_guard_data).hexdigest() != guard_sha
+    ):
+        reject()
+    sys.stdout.write(
+        f'active\n{bridge_release}\n{candidate_release}\n{successor_helper_sha}\n'
+        f'{predecessor_helper_sha}\n{h18_release}\n{h18_intent_sha}\n'
+        f'{h18_completion_sha}\n{successor_finalizer_sha}\n{successor_sudoers_sha}\n'
+        f'{guard_sha}\n'
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 11 &&
+    "${inspection_lines[0]}" == 'active' &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[2]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[5]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[7]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[8]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[9]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[10]}" =~ ^[0-9a-f]{64}$ ]] || return 0
+  KEMERBET_H19_ROUTE_BRIDGE_STATE="${inspection_lines[0]}"
+  KEMERBET_H19_ROUTE_BRIDGE_RELEASE="${inspection_lines[1]}"
+  KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE="${inspection_lines[2]}"
+  KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256="${inspection_lines[3]}"
+  KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[4]}"
+  KEMERBET_H19_ROUTE_BRIDGE_H18_RELEASE="${inspection_lines[5]}"
+  KEMERBET_H19_ROUTE_BRIDGE_H18_INTENT_SHA256="${inspection_lines[6]}"
+  KEMERBET_H19_ROUTE_BRIDGE_H18_COMPLETION_SHA256="${inspection_lines[7]}"
+  KEMERBET_H19_CONTINUOUS_FINALIZER_SHA256="${inspection_lines[8]}"
+  KEMERBET_H19_CONTINUOUS_SUDOERS_SHA256="${inspection_lines[9]}"
+  KEMERBET_H19_INGRESS_GUARD_SHA256="${inspection_lines[10]}"
+  KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT}/${inspection_lines[1]}/predecessor-helper"
+}
+
 inspect_kemerbet_h18_shared_ingress_bridge() {
   local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
   local -a inspection_lines=()
@@ -4655,6 +4939,8 @@ inspect_kemerbet_h18_shared_ingress_bridge() {
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER=''
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256=''
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_INTENT_SHA256=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_COMPLETION_SHA256=''
   if [[ ! -e "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT" &&
     ! -L "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT" ]]; then
     return 0
@@ -4806,20 +5092,24 @@ try:
     sys.stdout.write(
         f'active\n{bridge_release}\n{successor_sha}\n{predecessor_sha}\n{h17_release}\n'
         f'{h17_intent_sha}\n{h17_completion_sha}\n'
+        f'{hashlib.sha256(intent_data).hexdigest()}\n'
+        f'{hashlib.sha256(completion_data).hexdigest()}\n'
     )
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"
-  [[ "${#inspection_lines[@]}" -eq 7 &&
+  [[ "${#inspection_lines[@]}" -eq 9 &&
     "${inspection_lines[0]}" == 'active' &&
     "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
     "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
     "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
     "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ &&
     "${inspection_lines[5]}" =~ ^[0-9a-f]{64}$ &&
-    "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ ]] || return 0
+    "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[7]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[8]}" =~ ^[0-9a-f]{64}$ ]] || return 0
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE="${inspection_lines[0]}"
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_RELEASE="${inspection_lines[1]}"
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
@@ -4827,6 +5117,8 @@ PY
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE="${inspection_lines[4]}"
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256="${inspection_lines[5]}"
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256="${inspection_lines[6]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_INTENT_SHA256="${inspection_lines[7]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_COMPLETION_SHA256="${inspection_lines[8]}"
   KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT}/${inspection_lines[1]}/predecessor-helper"
 }
 
@@ -5708,7 +6000,17 @@ PY
   KEMERBET_H14_RECOVERY_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H14_RECOVERY_PROFILE_ID="${inspection_lines[3]}"
   current_helper_sha="${inspection_lines[4]}"
-  inspect_kemerbet_h18_shared_ingress_bridge
+  inspect_kemerbet_h19_route_bridge
+  [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" != 'invalid' ]] || {
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+    return 0
+  }
+  if [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then
+    inspect_kemerbet_h18_shared_ingress_bridge \
+      "$KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER" 400
+  else
+    inspect_kemerbet_h18_shared_ingress_bridge
+  fi
   [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" != 'invalid' ]] || {
     KEMERBET_H14_RECOVERY_STATE='invalid'
     return 0
@@ -5754,16 +6056,34 @@ PY
         "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256" == \
           "$KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256" &&
         "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256" == \
-          "$KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256" &&
-        "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+          "$KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256" ]] || {
         KEMERBET_H14_RECOVERY_STATE='invalid'
         return 0
       }
+      if [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then
+        [[ "$KEMERBET_H19_ROUTE_BRIDGE_H18_RELEASE" == \
+            "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_RELEASE" &&
+          "$KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
+            "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" &&
+          "$KEMERBET_H19_ROUTE_BRIDGE_H18_INTENT_SHA256" == \
+            "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_INTENT_SHA256" &&
+          "$KEMERBET_H19_ROUTE_BRIDGE_H18_COMPLETION_SHA256" == \
+            "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_COMPLETION_SHA256" &&
+          "$KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+          KEMERBET_H14_RECOVERY_STATE='invalid'
+          return 0
+        }
+      elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" != \
+        "$current_helper_sha" ]]; then
+        KEMERBET_H14_RECOVERY_STATE='invalid'
+        return 0
+      fi
     elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" != "$current_helper_sha" ]]; then
       KEMERBET_H14_RECOVERY_STATE='invalid'
       return 0
     fi
-  elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+  elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ||
+    "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then
     KEMERBET_H14_RECOVERY_STATE='invalid'
     return 0
   elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
@@ -5798,7 +6118,9 @@ inspect_kemerbet_v2_v3_successor_gate() {
     fi
     KEMERBET_V2_V3_SUCCESSOR_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
     KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H14_RECOVERY_HELPER_SHA256"
-    if [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+    if [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256"
+    elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
       KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256"
     elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
       KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256"

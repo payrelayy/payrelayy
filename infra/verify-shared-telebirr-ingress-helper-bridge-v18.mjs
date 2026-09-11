@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -10,16 +9,13 @@ const bridgePath = 'infra/operations/fetanagent-shared-telebirr-ingress-helper-b
 const helperPath = 'infra/operations/fetanagent-staging-deploy-helper.sh';
 const bridge = normalized(bridgePath);
 const helper = normalized(helperPath);
-const continuousFinalizer = normalized(
-  'infra/operations/fetanagent-staging-continuous-availability.sh',
-);
-const continuousSudoers = normalized(
-  'infra/operations/fetanagent-staging-continuous-availability.sudoers',
-);
 const packageJson = normalized('package.json');
-const helperSha256 = createHash('sha256').update(helper).digest('hex');
-const continuousFinalizerSha256 = createHash('sha256').update(continuousFinalizer).digest('hex');
-const continuousSudoersSha256 = createHash('sha256').update(continuousSudoers).digest('hex');
+// H18 is a historical bridge once H19 exists. Its installer must retain the
+// exact artifacts it installed rather than following the current successor files.
+const helperSha256 = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267';
+const continuousFinalizerSha256 =
+  '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea';
+const continuousSudoersSha256 = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958';
 
 const predecessorHelperSha256 = '77e4822a0827413290fba94747698536b6af5bca3f2f7cdc58975dce390f7c84';
 const productionRelease = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10';
@@ -329,7 +325,9 @@ assert.match(h18Parser, /completion\[2:23\] != intent\[2:23\]/u);
 assert.match(h18Parser, /hashlib\.sha256\(intent_data\)\.hexdigest\(\)/u);
 assert.match(h18Parser, /hashlib\.sha256\(predecessor_data\)\.hexdigest\(\) != predecessor_sha/u);
 assert.match(h18Parser, /hashlib\.sha256\(helper_data\)\.hexdigest\(\) != successor_sha/u);
-assert.match(h18Parser, /"\$\{#inspection_lines\[@\]\}" -eq 7/u);
+assert.match(h18Parser, /"\$\{#inspection_lines\[@\]\}" -eq 9/u);
+assert.match(h18Parser, /hashlib\.sha256\(intent_data\)\.hexdigest\(\)/u);
+assert.match(h18Parser, /hashlib\.sha256\(completion_data\)\.hexdigest\(\)/u);
 for (const field of intentFields.slice(11).filter((field) => !field.includes('$'))) {
   assert.match(h18Parser, new RegExp(field, 'u'));
 }
@@ -350,7 +348,7 @@ assertInOrder(
     '"$KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256"',
     '"$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256" ==',
     '"$KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256"',
-    '"$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" == "$current_helper_sha"',
+    'elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" !=',
   ],
   'the H14 gate must validate H18 through H17, H16, and H14 in order',
 );
@@ -728,7 +726,9 @@ chmod 600 "$helper_target"
     executableChecks += 1;
   }
 
-  const h18FallbackStart = h14Gate.indexOf('  inspect_kemerbet_h18_shared_ingress_bridge\n');
+  const h18FallbackStart = h14Gate.indexOf(
+    `  if [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then\n`,
+  );
   const h18FallbackEnd = h14Gate.indexOf(
     `  [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" != 'invalid' ]]`,
     h18FallbackStart,
@@ -753,6 +753,8 @@ mkdir -m 700 "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT/unexpec
 printf '%s\\n' '#!/usr/bin/env bash' >"$HELPER_PATH"
 chmod 755 "$HELPER_PATH"
 fallback_called='false'
+KEMERBET_H19_ROUTE_BRIDGE_STATE='absent'
+KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER=''
 inspect_kemerbet_h17_availability_bridge() { fallback_called='true'; }
 ${h18Parser}
 check_malformed_h18() {

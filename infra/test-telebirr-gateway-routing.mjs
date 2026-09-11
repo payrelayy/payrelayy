@@ -87,6 +87,8 @@ ${routingBlock}
     '/data:rw,noexec,nosuid,nodev,size=1m,mode=1777',
     '--cap-drop',
     'ALL',
+    '--cap-add',
+    'NET_BIND_SERVICE',
     '--security-opt',
     'no-new-privileges:true',
     '--mount',

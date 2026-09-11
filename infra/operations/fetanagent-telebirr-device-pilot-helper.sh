@@ -749,23 +749,88 @@ require_shared_ingress_boundary() {
     "$inspection_digest" ]] || die 'the shared ingress network changed during inspection'
 }
 
+classify_pilot_bridge_ingress_record() {
+  local bridge_service="$1" expected_name="$PILOT_PROJECT-$bridge_service-1"
+  jq -er --arg network "$INGRESS_NETWORK" --arg network_id "$INGRESS_NETWORK_ID" \
+    --arg gateway "$INGRESS_NETWORK_IPV4_GATEWAY" --arg service "$bridge_service" \
+    --arg name "$expected_name" '
+    if length != 1 or (.[0].NetworkSettings.Networks | type) != "object" then
+      "invalid"
+    else
+      .[0].NetworkSettings.Networks as $networks |
+      if ($networks | keys) == [] then
+        "detached"
+      elif ($networks | keys) != [$network] then
+        "invalid"
+      else
+        $networks[$network] as $endpoint |
+        if (
+          $endpoint.NetworkID == $network_id and
+          ($endpoint.Aliases | type) == "array" and
+          (($endpoint.Aliases | unique | sort) == ([$name, $service] | sort))
+        ) then
+          if (
+            $endpoint.IPAMConfig == {} and
+            $endpoint.Links == null and
+            $endpoint.DriverOpts == null and
+            $endpoint.GwPriority == 0 and
+            $endpoint.EndpointID == "" and
+            $endpoint.Gateway == "" and
+            $endpoint.IPAddress == "" and
+            $endpoint.IPPrefixLen == 0 and
+            $endpoint.IPv6Gateway == "" and
+            $endpoint.GlobalIPv6Address == "" and
+            $endpoint.GlobalIPv6PrefixLen == 0 and
+            $endpoint.MacAddress == ""
+          ) then
+            "detached"
+          elif (
+            ($endpoint.IPAMConfig == null or $endpoint.IPAMConfig == {}) and
+            $endpoint.Links == null and
+            $endpoint.DriverOpts == null and
+            $endpoint.GwPriority == 0 and
+            ($endpoint.EndpointID | type) == "string" and
+            ($endpoint.EndpointID | test("^[0-9a-f]{64}$")) and
+            $endpoint.Gateway == $gateway and
+            ($endpoint.IPAddress | type) == "string" and
+            ($endpoint.IPAddress | test("^172\\.23\\.[0-9]{1,3}\\.[0-9]{1,3}$")) and
+            $endpoint.IPPrefixLen == 16 and
+            $endpoint.IPv6Gateway == "" and
+            $endpoint.GlobalIPv6Address == "" and
+            $endpoint.GlobalIPv6PrefixLen == 0 and
+            ($endpoint.MacAddress | type) == "string" and
+            ($endpoint.MacAddress | test("^([0-9a-f]{2}:){5}[0-9a-f]{2}$"))
+          ) then
+            "attached"
+          else
+            "invalid"
+          end
+        else
+          "invalid"
+        end
+      end
+    end
+  '
+}
+
 require_current_shared_ingress_boundary() {
-  local bridge_service="$1" commit_sha="$2" image_tag="$3" bridge attached
+  local bridge_service="$1" commit_sha="$2" image_tag="$3" bridge inspection attachment_state
   bridge="$(optional_container_for_service "$PILOT_PROJECT" "$bridge_service")"
   if [[ -z "$bridge" ]]; then
     require_shared_ingress_boundary
     return
   fi
-  attached="$(docker_local container inspect "$bridge" --format \
-    "{{if index .NetworkSettings.Networks \"$INGRESS_NETWORK\"}}true{{else}}false{{end}}")" ||
-    die 'the pilot bridge shared-ingress attachment state could not be read'
-  case "$attached" in
-    true)
+  inspection="$(docker_local container inspect "$bridge")" ||
+    die 'the pilot bridge shared-ingress record could not be read'
+  attachment_state="$(classify_pilot_bridge_ingress_record "$bridge_service" <<<"$inspection")" ||
+    die 'the pilot bridge shared-ingress record could not be classified'
+  case "$attachment_state" in
+    attached)
       require_shared_ingress_boundary \
         "$bridge_service" "$commit_sha" "$image_tag" recoverable
       ;;
-    false) require_shared_ingress_boundary ;;
-    *) die 'the pilot bridge shared-ingress attachment state is invalid' ;;
+    detached) require_shared_ingress_boundary ;;
+    *) die 'the pilot bridge shared-ingress record is partial or inconsistent' ;;
   esac
 }
 

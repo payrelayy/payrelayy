@@ -228,6 +228,11 @@ Compose-owned database-egress networks. Network cleanup accepts no extra project
 endpoint, no lookalike name/label shape, and removes each validated network only by its full Docker
 ID. The helper must prove the exact production gateway and bridge container identities survived and
 that the shared ingress returned to its two production endpoints before removing the active receipt.
+Docker can retain the shared-ingress key on an exited bridge after removing its network endpoint. The
+helper treats that record as detached only when its network ID and unique alias set remain exact,
+`IPAMConfig` is empty, link/driver options are null, gateway priority is zero, and every endpoint ID,
+gateway, address, prefix, and MAC field is blank or zero. Any partial or inconsistent retained record
+fails closed; the shared network must still contain only the two production endpoints.
 Preserve Caddy state, the two named socket volumes, sealed historical releases, and database evidence;
 do not roll back the production gateway from this staging workflow.
 

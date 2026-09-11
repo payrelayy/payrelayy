@@ -157,7 +157,11 @@ separate reviewed contract: its service and network alias are both `staging-devi
 while the production bridge remains `telebirr-device-bridge`. The production gateway selects staging
 only for the exact code-owned staging target header. While the pilot is running, the shared ingress
 therefore has exactly three endpoints: production gateway, production bridge, and staging pilot
-bridge. The installed H18 continuous-availability helper intentionally requires the production
+bridge. An exited pilot bridge may retain Docker's inert network-key metadata after its endpoint has
+already disappeared from the network. Only the exact blank/zero endpoint record with the pinned
+network identity and expected unique aliases is equivalent to detachment; any partially populated
+record rejects, and the shared network must then have exactly the two production endpoints. The
+installed H18 continuous-availability helper intentionally requires the production
 gateway and production TeleBirr bridge to carry one identical revision. A gateway-only route
 promotion therefore does **not** become H18-compatible merely by stopping the pilot. Do not promote
 the route or run this pilot until a separately reviewed H19 helper successor is installed while the

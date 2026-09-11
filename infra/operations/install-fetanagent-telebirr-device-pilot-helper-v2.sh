@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-readonly EXPECTED_HELPER_SHA256='246e4fca167fd68b263880888792b88cca4da2fdee143937e360d28de827a7d3'
+readonly EXPECTED_HELPER_SHA256='344462ff1cf9fd445440aca4808bb412dff8fef03bba38092ed05ea0e7db2985'
 readonly PREVIOUS_HELPER_SHA256='69f422e98ec9816b608ef0b5fdacb2a223274883ae10979501b25b07abbed4b3'
 readonly STAGING_ROOT='/root/fetanagent-telebirr-device-pilot-helper-v2'
 readonly SOURCE="$STAGING_ROOT/fetanagent-telebirr-device-pilot-helper.sh"

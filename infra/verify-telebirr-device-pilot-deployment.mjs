@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -425,9 +426,160 @@ assert.match(
 );
 assert.match(
   deployHelper,
-  /require_current_shared_ingress_boundary\(\)[\s\S]*?index \.NetworkSettings\.Networks[\s\S]*?recoverable/u,
-  'stale-release recovery must classify a pilot bridge by its exact shared-network attachment, not merely its running state',
+  /classify_pilot_bridge_ingress_record\(\)[\s\S]*?\$endpoint\.IPAMConfig == \{\}[\s\S]*?\$endpoint\.EndpointID == ""[\s\S]*?\$endpoint\.GlobalIPv6PrefixLen == 0[\s\S]*?"detached"[\s\S]*?\$endpoint\.EndpointID \| test\("\^\[0-9a-f\]\{64\}\$"\)[\s\S]*?"attached"/u,
+  'stale-release recovery must distinguish the exact retained blank Docker record from a live endpoint',
 );
+assert.match(
+  deployHelper,
+  /require_current_shared_ingress_boundary\(\)[\s\S]*?classify_pilot_bridge_ingress_record[\s\S]*?attached\)[\s\S]*?recoverable[\s\S]*?detached\) require_shared_ingress_boundary[\s\S]*?partial or inconsistent/u,
+  'only an exact live endpoint may require three network members; absent or exact blank records require the production-only boundary',
+);
+const ingressRecordClassifier =
+  /classify_pilot_bridge_ingress_record\(\) \{[\s\S]*?--arg name "\$expected_name" '\r?\n([\s\S]*?)\r?\n  '\r?\n\}/u.exec(
+    deployHelper,
+  )?.[1];
+assert.ok(ingressRecordClassifier, 'the exact pilot ingress-record jq classifier is absent');
+let ingressClassifierCases = 0;
+const jqExecutable =
+  process.env.FETANAGENT_TEST_JQ_BINARY ?? (process.platform === 'win32' ? '' : 'jq');
+if (jqExecutable) {
+  const ingressNetwork = 'fetanagent-telebirr-device-ingress';
+  const ingressNetworkId = '5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738';
+  const ingressGateway = '172.23.0.1';
+  const legacyService = 'telebirr-device-bridge';
+  const legacyName = `fetanagent-telebirr-device-pilot-${legacyService}-1`;
+  const stagingService = 'staging-device-pilot-bridge';
+  const stagingName = `fetanagent-telebirr-device-pilot-${stagingService}-1`;
+  const retainedEndpoint = {
+    IPAMConfig: {},
+    Links: null,
+    Aliases: [legacyName, legacyService, legacyService],
+    MacAddress: '',
+    DriverOpts: null,
+    GwPriority: 0,
+    NetworkID: ingressNetworkId,
+    EndpointID: '',
+    Gateway: '',
+    IPAddress: '',
+    IPPrefixLen: 0,
+    IPv6Gateway: '',
+    GlobalIPv6Address: '',
+    GlobalIPv6PrefixLen: 0,
+    DNSNames: [legacyName, legacyService],
+  };
+  const attachedEndpoint = {
+    ...structuredClone(retainedEndpoint),
+    IPAMConfig: null,
+    Aliases: [legacyName, legacyService],
+    MacAddress: '02:42:ac:17:00:05',
+    EndpointID: 'a'.repeat(64),
+    Gateway: ingressGateway,
+    IPAddress: '172.23.0.5',
+    IPPrefixLen: 16,
+  };
+  const runClassifier = (label, service, name, networks, expected) => {
+    const result = spawnSync(
+      jqExecutable,
+      [
+        '-er',
+        '--arg',
+        'network',
+        ingressNetwork,
+        '--arg',
+        'network_id',
+        ingressNetworkId,
+        '--arg',
+        'gateway',
+        ingressGateway,
+        '--arg',
+        'service',
+        service,
+        '--arg',
+        'name',
+        name,
+        ingressRecordClassifier,
+      ],
+      {
+        input: JSON.stringify([{ NetworkSettings: { Networks: networks } }]),
+        encoding: 'utf8',
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+    assert.equal(result.stdout.trim(), expected, label);
+    ingressClassifierCases += 1;
+  };
+  runClassifier('absent ingress record is detached', legacyService, legacyName, {}, 'detached');
+  runClassifier(
+    'live duplicate-alias blank ingress record is detached',
+    legacyService,
+    legacyName,
+    { [ingressNetwork]: retainedEndpoint },
+    'detached',
+  );
+  const stagingRetainedEndpoint = structuredClone(retainedEndpoint);
+  stagingRetainedEndpoint.Aliases = [stagingName, stagingService];
+  stagingRetainedEndpoint.DNSNames = [stagingName, stagingService];
+  runClassifier(
+    'new-service blank ingress record is detached',
+    stagingService,
+    stagingName,
+    { [ingressNetwork]: stagingRetainedEndpoint },
+    'detached',
+  );
+  runClassifier(
+    'complete ingress endpoint is attached',
+    legacyService,
+    legacyName,
+    { [ingressNetwork]: attachedEndpoint },
+    'attached',
+  );
+
+  for (const [label, mutate] of [
+    ['partial endpoint id', (value) => (value.EndpointID = 'b'.repeat(64))],
+    ['partial gateway', (value) => (value.Gateway = ingressGateway)],
+    ['partial address', (value) => (value.IPAddress = '172.23.0.6')],
+    ['partial prefix', (value) => (value.IPPrefixLen = 16)],
+    ['partial MAC', (value) => (value.MacAddress = '02:42:ac:17:00:06')],
+    ['partial IPv6 gateway', (value) => (value.IPv6Gateway = 'fd00::1')],
+    ['partial global IPv6', (value) => (value.GlobalIPv6Address = 'fd00::2')],
+    ['partial IPv6 prefix', (value) => (value.GlobalIPv6PrefixLen = 64)],
+    ['wrong network identity', (value) => (value.NetworkID = 'b'.repeat(64))],
+    ['missing alias', (value) => (value.Aliases = [legacyName])],
+    ['extra alias', (value) => value.Aliases.push('lookalike')],
+    ['non-live IPAM shape', (value) => (value.IPAMConfig = null)],
+    ['nonempty IPAM configuration', (value) => (value.IPAMConfig = { IPv4Address: '172.23.0.6' })],
+    ['non-null links', (value) => (value.Links = [])],
+    ['non-null driver options', (value) => (value.DriverOpts = {})],
+    ['nonzero gateway priority', (value) => (value.GwPriority = 1)],
+  ]) {
+    const invalidEndpoint = structuredClone(retainedEndpoint);
+    mutate(invalidEndpoint);
+    runClassifier(
+      `retained record rejects ${label}`,
+      legacyService,
+      legacyName,
+      { [ingressNetwork]: invalidEndpoint },
+      'invalid',
+    );
+  }
+  const incompleteAttachedEndpoint = structuredClone(attachedEndpoint);
+  incompleteAttachedEndpoint.Gateway = '';
+  runClassifier(
+    'attached record rejects a missing gateway',
+    legacyService,
+    legacyName,
+    { [ingressNetwork]: incompleteAttachedEndpoint },
+    'invalid',
+  );
+  runClassifier(
+    'record rejects an additional network',
+    legacyService,
+    legacyName,
+    { [ingressNetwork]: retainedEndpoint, lookalike: retainedEndpoint },
+    'invalid',
+  );
+}
 assert.match(
   deployHelper,
   /\$expected_state == "recoverable"[\s\S]*?\.State\.Status == "created"[\s\S]*?\.State\.Status == "exited"[\s\S]*?\.State\.Running == false/u,
@@ -681,5 +833,5 @@ assert.ok(
 );
 
 console.log(
-  'TeleBirr device pilot deployment verified: three isolated no-money services, read-only socket consumers, database-free ingress, and exact HTTPS routes.',
+  `TeleBirr device pilot deployment verified: three isolated no-money services, read-only socket consumers, database-free ingress, exact HTTPS routes, and ${ingressClassifierCases} executable ingress-record cases.`,
 );

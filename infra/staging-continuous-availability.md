@@ -170,9 +170,11 @@ container, volume, timer, provenance, and no-money invariant while accepting onl
 production-ingress pairs: the current all-baseline pair, or the exact reviewed gateway revision and
 Caddyfile digest with the protected baseline production bridge release. Its authenticated root
 transition must rotate the checksum-bound continuous-availability finalizer at the same time. After
-H19, install the route through a separately reviewed gateway-only operation; never use a full
-production deployment to hand the alias or network to staging. A changed, missing, or extra endpoint
-still fails closed.
+H19, follow the authenticated install and gateway-only transition in
+[`production-gateway-staging-telebirr-route-h19.md`](./production-gateway-staging-telebirr-route-h19.md);
+never use a full production deployment to hand the alias or network to staging. The H19 candidate
+gateway revision is the final H19 merged-main SHA, not the earlier route-PR branch SHA. A changed,
+missing, or extra endpoint still fails closed.
 
 ## Verification and security trade-off
 

@@ -726,7 +726,9 @@ chmod 600 "$helper_target"
     executableChecks += 1;
   }
 
-  const h18FallbackStart = h14Gate.indexOf('  inspect_kemerbet_h18_shared_ingress_bridge\n');
+  const h18FallbackStart = h14Gate.indexOf(
+    `  if [[ "$KEMERBET_H19_ROUTE_BRIDGE_STATE" == 'active' ]]; then\n`,
+  );
   const h18FallbackEnd = h14Gate.indexOf(
     `  [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" != 'invalid' ]]`,
     h18FallbackStart,
@@ -751,6 +753,8 @@ mkdir -m 700 "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT/unexpec
 printf '%s\\n' '#!/usr/bin/env bash' >"$HELPER_PATH"
 chmod 755 "$HELPER_PATH"
 fallback_called='false'
+KEMERBET_H19_ROUTE_BRIDGE_STATE='absent'
+KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER=''
 inspect_kemerbet_h17_availability_bridge() { fallback_called='true'; }
 ${h18Parser}
 check_malformed_h18() {

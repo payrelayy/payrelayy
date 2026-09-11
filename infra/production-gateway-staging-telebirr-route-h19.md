@@ -9,7 +9,7 @@ action.
 Its exact source dependency is the reviewed staging-ingress change from pull request `#291`, head
 `6dc6ed1274a099b8676ef0de2d713fcb23b71e87`. That head's product Caddyfile is LF-pinned at
 `afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616`; the final H19 branch must
-contain those same bytes. Its device-pilot helper is
+contain those same bytes. The helper installed during the historical H19 transition was
 `344462ff1cf9fd445440aca4808bb412dff8fef03bba38092ed05ea0e7db2985`, and its helper-v2 installer is
 `9caffaf3e8c78ad623a741a76f6e5829f60975345eb5d7e90d614ddffd105950`. The PR head is provenance
 for review, not the runtime release identity.
@@ -28,10 +28,12 @@ The installed H19 helper and root-owned ingress guard accept only these two publ
    The other nine production containers, including `telebirr-device-bridge`, remain exactly at
    `69be82ac3e49ff8c63c64c9aa7926e0046b48a10`.
 
-The H19 bridge release and candidate gateway revision must be the same final 40-character H19 merge
-SHA. This is intentional: staging and device-pilot workflows require the gateway route revision to
-match the workflow's reviewed current `main`. Do not use the device-route PR's pre-merge branch SHA or
-an H19 pre-merge SHA as the installed release identity.
+The H19 bridge release and candidate gateway revision had to be the same final 40-character H19 merge
+SHA during that one-time gateway transition. After H19 reached its terminal receipt, later
+device-pilot releases must not pretend to be gateway releases: the device-pilot helper pins the
+terminal H19 gateway revision and its Caddyfile separately from each reviewed device-pilot `main`
+revision. Do not use the device-route PR's pre-merge branch SHA or an H19 pre-merge SHA as the
+installed gateway release identity.
 
 Both states retain the exact ten-service inventory, rootless `10001:10001` users, read-only filesystems,
 capability drops, health and restart boundaries, gateway ports 80/443, the gateway's three networks,

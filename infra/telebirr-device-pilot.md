@@ -96,19 +96,21 @@ Do not select the pilot profile until every item below is true:
 7. `FINANCIAL_ACTIONS_MODE=dry_run` and every KemerBet/final-action/private-live-pilot switch remain
    disabled. Deployment of this stack is not permission to relax them.
 
-### One-time helper-v2 installation
+### One-time helper-v3 installation
 
 The workflow is checksum-bound to the installed root helper, so install the reviewed successor once
-after this change is merged and before either `stop` or `deploy-and-smoke`. In the authenticated
+after this change is merged and before either `stop` or `deploy-and-smoke`. Helper v3 keeps the
+device-pilot release identity independent from the already-installed terminal H19 gateway release;
+it pins both identities and the reviewed Caddyfile bytes separately. In the authenticated
 DigitalOcean root console, create the fixed directory
-`/root/fetanagent-telebirr-device-pilot-helper-v2` as `root:root` mode `0700`. Stage the merged
+`/root/fetanagent-telebirr-device-pilot-helper-v3` as `root:root` mode `0700`. Stage the merged
 `fetanagent-telebirr-device-pilot-helper.sh` there as `root:root` mode `0600`, and stage
-`install-fetanagent-telebirr-device-pilot-helper-v2.sh` in that same directory as `root:root` mode
+`install-fetanagent-telebirr-device-pilot-helper-v3.sh` in that same directory as `root:root` mode
 `0700`. Leave no other directory entry. Verify both files against the reviewed GitHub blobs, then run
 the installer at that exact path directly as root. Do not invoke it through `sudo` or an SSH
 deployment identity.
 
-The installer accepts only the exact predecessor helper digest or an already-installed exact
+The installer accepts only the exact helper-v2 predecessor digest or an already-installed exact
 successor, takes the same deployment mutation lock, preserves the unchanged sudoers fragment, and
 atomically replaces only `/usr/local/sbin/fetanagent-telebirr-device-pilot-helper`. It does not call
 Docker or PostgreSQL. If it reports an interrupted `.installing` or `.previous` file, preserve that

@@ -10,6 +10,7 @@ readonly PILOT_RELEASE_ROOT='/var/lib/fetanagent/telebirr-device-pilot'
 readonly PILOT_PROJECT='fetanagent-telebirr-device-pilot'
 readonly PRODUCTION_PROJECT='fetanagent-production'
 readonly PRODUCTION_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
+readonly PRODUCTION_GATEWAY_RELEASE='90b1f059577682b6bc458d239f6bdcb591077085'
 readonly INGRESS_NETWORK='fetanagent-telebirr-device-ingress'
 readonly INGRESS_NETWORK_ID='5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'
 readonly INGRESS_NETWORK_CONFIG_HASH='ac7f178b6d4280a708b951cb93740b0f8323fb2cb2c75d05cf040f44e2c34209'
@@ -536,7 +537,7 @@ require_production_endpoint_boundary() {
       else false end)
     )
   ' <<<"$inspection" >/dev/null ||
-    die 'the production gateway or TeleBirr bridge is outside the exact H18-derived boundary'
+    die 'the production gateway or TeleBirr bridge is outside the exact terminal H19 boundary'
 
   gateway_revision="$(jq -r '.[] | select(
     .Config.Labels["com.docker.compose.service"] == "gateway"
@@ -835,14 +836,14 @@ require_current_shared_ingress_boundary() {
 }
 
 require_production_ingress() {
-  local expected_pilot_state="$1" expected_gateway_revision="$2" pilot_image_tag="$3"
-  validate_commit_and_tag "$expected_gateway_revision" "$pilot_image_tag"
-  require_production_endpoint_boundary "$expected_gateway_revision"
+  local expected_pilot_state="$1" pilot_commit_sha="$2" pilot_image_tag="$3"
+  validate_commit_and_tag "$pilot_commit_sha" "$pilot_image_tag"
+  require_production_endpoint_boundary "$PRODUCTION_GATEWAY_RELEASE"
   case "$expected_pilot_state" in
     stopped) require_shared_ingress_boundary ;;
     running)
       require_shared_ingress_boundary "$STAGING_BRIDGE_SERVICE" \
-        "$expected_gateway_revision" "$pilot_image_tag"
+        "$pilot_commit_sha" "$pilot_image_tag"
       ;;
     *) die 'the expected pilot ingress state is invalid' ;;
   esac
@@ -885,7 +886,7 @@ require_preflight_ingress() {
   validate_stoppable_release "$active_release" "$active_commit_sha" "$active_image_tag"
   bridge_service="$(bridge_service_for_release "$active_release")"
   require_stoppable_pilot_inventory "$bridge_service" "$active_commit_sha" "$active_image_tag"
-  require_production_endpoint_boundary "$next_commit_sha"
+  require_production_endpoint_boundary "$PRODUCTION_GATEWAY_RELEASE"
   require_current_shared_ingress_boundary \
     "$bridge_service" "$active_commit_sha" "$active_image_tag"
 }
@@ -1008,12 +1009,12 @@ start_release() {
     die 'another active TeleBirr device release is already recorded'
   require_no_pilot_containers 'unrecorded TeleBirr pilot containers block activation'
   require_production_ingress stopped "$commit_sha" "$image_tag"
-  production_fingerprint_before="$(production_ingress_runtime_digest "$commit_sha")" ||
+  production_fingerprint_before="$(production_ingress_runtime_digest "$PRODUCTION_GATEWAY_RELEASE")" ||
     die 'the pre-start production ingress runtime digest could not be captured'
   run_pilot_compose "$release" "$commit_sha" "$image_tag" \
     up -d --no-build --wait --wait-timeout 120
   ready "$commit_sha" "$image_tag"
-  production_fingerprint_after="$(production_ingress_runtime_digest "$commit_sha")" ||
+  production_fingerprint_after="$(production_ingress_runtime_digest "$PRODUCTION_GATEWAY_RELEASE")" ||
     die 'the post-start production ingress runtime digest could not be captured'
   [[ "$production_fingerprint_after" == "$production_fingerprint_before" ]] ||
     die 'the production ingress runtime changed during the pilot start'
@@ -1050,9 +1051,9 @@ stop_release() {
   validate_stoppable_release "$release" "$commit_sha" "$image_tag"
   bridge_service="$(bridge_service_for_release "$release")"
   require_stoppable_pilot_inventory "$bridge_service" "$commit_sha" "$image_tag"
-  require_production_endpoint_boundary
+  require_production_endpoint_boundary "$PRODUCTION_GATEWAY_RELEASE"
   require_current_shared_ingress_boundary "$bridge_service" "$commit_sha" "$image_tag"
-  production_fingerprint_before="$(production_ingress_runtime_digest)" ||
+  production_fingerprint_before="$(production_ingress_runtime_digest "$PRODUCTION_GATEWAY_RELEASE")" ||
     die 'the pre-stop production ingress runtime digest could not be captured'
   if [[ -e "$ACTIVE_RECEIPT" || -L "$ACTIVE_RECEIPT" ]]; then
     [[ "$(read_active_commit)" == "$commit_sha" ]] ||
@@ -1062,9 +1063,9 @@ stop_release() {
     rm --stop --force "$bridge_service" telebirr-device-state-broker telebirr-assignment-broker
   require_no_pilot_containers 'the exact TeleBirr pilot containers remained after stop'
   remove_exact_empty_pilot_networks "$commit_sha"
-  require_production_endpoint_boundary
+  require_production_endpoint_boundary "$PRODUCTION_GATEWAY_RELEASE"
   require_shared_ingress_boundary
-  production_fingerprint_after="$(production_ingress_runtime_digest)" ||
+  production_fingerprint_after="$(production_ingress_runtime_digest "$PRODUCTION_GATEWAY_RELEASE")" ||
     die 'the post-stop production ingress runtime digest could not be captured'
   [[ "$production_fingerprint_after" == "$production_fingerprint_before" ]] ||
     die 'the production ingress runtime changed during the pilot stop'

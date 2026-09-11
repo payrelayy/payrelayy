@@ -1002,11 +1002,27 @@ assertInOrder(
     'require_ipv6_host_ready',
     'require_port_3002_free',
     'docker_local container ls',
-    'docker_local network ls',
+    'require_stopped_project_network_boundary',
   ],
   'Fresh-host start must prove the exact commit, host network, free Owner port, and empty Compose project before launch',
 );
 assert.doesNotMatch(freshStartGate, /\b(?:rm|mv|stop|disable|kill|prune)\b/);
+const stoppedNetworkBoundary = functionBody(
+  deployHelper,
+  'require_stopped_project_network_boundary',
+);
+assertInOrder(
+  stoppedNetworkBoundary,
+  [
+    'shared_telebirr_ingress_network_id',
+    'docker_local network ls',
+    '[[ "$project_networks" == "$shared_id" ]]',
+    '[[ -z "$namespace_networks" ]]',
+    'require_shared_telebirr_ingress_network_contract',
+  ],
+  'Fresh-host readiness must delegate to the exact preserved shared-ingress boundary',
+);
+assert.doesNotMatch(stoppedNetworkBoundary, /docker_local network rm/u);
 assert.doesNotMatch(
   freshStartGate,
   /require_helper_rotation_overlay|require_legacy_stopped|require_transition_retired/,

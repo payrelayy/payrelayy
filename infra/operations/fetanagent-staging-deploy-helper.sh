@@ -10,6 +10,13 @@ readonly HELPER_PATH='/usr/local/sbin/fetanagent-staging-deploy-helper'
 readonly RELEASE_ROOT='/srv/fetanagent/releases'
 readonly SECRET_ROOT='/srv/fetanagent/secrets/staging'
 readonly PROJECT_NAME='fetanagent-staging-beta'
+readonly PRODUCTION_PROJECT_NAME='fetanagent-production'
+readonly SHARED_TELEBIRR_INGRESS_NETWORK='fetanagent-telebirr-device-ingress'
+readonly SHARED_TELEBIRR_INGRESS_NETWORK_ID='5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'
+readonly SHARED_TELEBIRR_INGRESS_CONFIG_HASH='ac7f178b6d4280a708b951cb93740b0f8323fb2cb2c75d05cf040f44e2c34209'
+readonly SHARED_TELEBIRR_INGRESS_COMPOSE_VERSION='5.1.4'
+readonly SHARED_TELEBIRR_INGRESS_IPV4_SUBNET='172.23.0.0/16'
+readonly SHARED_TELEBIRR_INGRESS_IPV4_GATEWAY='172.23.0.1'
 readonly LEGACY_BRAND='pay''replayy'
 readonly LEGACY_ADMIN="${LEGACY_BRAND}-admin"
 readonly LEGACY_HOME="/home/$LEGACY_ADMIN"
@@ -58,6 +65,7 @@ readonly KEMERBET_V3_RECHECK_BRIDGE_V13_PARENT='/var/lib/fetanagent/kemerbet-rea
 readonly KEMERBET_QUARANTINE_RECOVERY_V14_PARENT='/var/lib/fetanagent/kemerbet-quarantine-recovery-v14'
 readonly KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT='/var/lib/fetanagent/kemerbet-security-recovery-preview-bridge-v16'
 readonly KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT='/var/lib/fetanagent/kemerbet-continuous-availability-helper-bridge-v17'
+readonly KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT='/var/lib/fetanagent/shared-telebirr-ingress-helper-bridge-v18'
 readonly KEMERBET_QUARANTINE_RECOVERY_PROFILE_ACK_NAME='kemerbet-quarantine-recovery-profile-prepared-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_NAME='kemerbet-readiness-cohort-security-recovery-failed-terminal-v1'
 readonly KEMERBET_QUARANTINE_RECOVERY_TERMINAL_MARKER_INSTALLING_NAME='.kemerbet-readiness-cohort-security-recovery-failed-terminal-v1.installing'
@@ -194,6 +202,340 @@ docker_local() {
     HOME='/root' \
     DOCKER_HOST="$LOCAL_DOCKER_SOCKET" \
     docker --host "$LOCAL_DOCKER_SOCKET" "$@"
+}
+
+shared_telebirr_ingress_network_id() {
+  local network_id
+  network_id="$(docker_local network ls --quiet --no-trunc \
+    --filter "name=^${SHARED_TELEBIRR_INGRESS_NETWORK}$")" || return 1
+  [[ "$network_id" == "$SHARED_TELEBIRR_INGRESS_NETWORK_ID" ]] || return 1
+  printf '%s' "$network_id"
+}
+
+require_shared_telebirr_ingress_network_contract() {
+  local container_contract container_inspection container_inspection_after container_inspection_digest
+  local container_name container_residue endpoint_contract
+  local endpoint_id endpoint_id_contract endpoint_ids endpoint_ipv4 endpoint_ipv6 endpoint_mac
+  local endpoint_name endpoint_residue endpoint_role inspection inspection_after inspection_digest
+  local network_id production_revision='' project revision service seen_roles=''
+  local production_gateway_seen='false' production_telebirr_bridge_seen='false'
+  network_id="$(shared_telebirr_ingress_network_id)" || return 1
+  inspection="$(docker_local network inspect "$network_id")" || return 1
+  jq -e \
+    --arg gateway "$SHARED_TELEBIRR_INGRESS_IPV4_GATEWAY" \
+    --arg config_hash "$SHARED_TELEBIRR_INGRESS_CONFIG_HASH" \
+    --arg compose_version "$SHARED_TELEBIRR_INGRESS_COMPOSE_VERSION" \
+    --arg id "$network_id" \
+    --arg name "$SHARED_TELEBIRR_INGRESS_NETWORK" \
+    --arg network_label 'telebirr_device_ingress' \
+    --arg project "$PROJECT_NAME" \
+    --arg subnet "$SHARED_TELEBIRR_INGRESS_IPV4_SUBNET" '
+      length == 1 and
+      .[0].Id == $id and
+      .[0].Name == $name and
+      .[0].Scope == "local" and
+      .[0].Driver == "bridge" and
+      .[0].EnableIPv6 == false and
+      .[0].Internal == true and
+      .[0].Attachable == false and
+      .[0].Ingress == false and
+      .[0].ConfigOnly == false and
+      .[0].Options == {} and
+      (.[0].Labels | keys | sort) == [
+        "com.docker.compose.config-hash",
+        "com.docker.compose.network",
+        "com.docker.compose.project",
+        "com.docker.compose.version"
+      ] and
+      .[0].Labels["com.docker.compose.config-hash"] == $config_hash and
+      .[0].Labels["com.docker.compose.network"] == $network_label and
+      .[0].Labels["com.docker.compose.project"] == $project and
+      .[0].Labels["com.docker.compose.version"] == $compose_version and
+      .[0].IPAM.Driver == "default" and
+      .[0].IPAM.Options == null and
+      .[0].IPAM.Config == [{"Subnet": $subnet, "Gateway": $gateway}] and
+      ((.[0].Containers // {}) | type) == "object"
+    ' <<<"$inspection" >/dev/null || return 1
+  inspection_digest="$(jq -S -c '.[0]' <<<"$inspection" | sha256sum | awk '{print $1}')" ||
+    return 1
+  [[ "$inspection_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+  container_inspection="$(docker_local container inspect \
+    "$PRODUCTION_PROJECT_NAME-gateway-1" \
+    "$PRODUCTION_PROJECT_NAME-telebirr-device-bridge-1")" || return 1
+  container_inspection_digest="$(jq -S -c 'sort_by(.Name) | map({
+      Id, Image, Name, RestartCount,
+      Config: {
+        User: .Config.User, Image: .Config.Image, Entrypoint: .Config.Entrypoint,
+        Cmd: .Config.Cmd, Env: .Config.Env, ExposedPorts: .Config.ExposedPorts,
+        Labels: .Config.Labels
+      },
+      HostConfig: {PortBindings: .HostConfig.PortBindings},
+      State: {
+        Status: .State.Status, Running: .State.Running, Paused: .State.Paused,
+        Restarting: .State.Restarting, Dead: .State.Dead, OOMKilled: .State.OOMKilled,
+        Health: .State.Health.Status
+      },
+      NetworkSettings: {Networks: .NetworkSettings.Networks, Ports: .NetworkSettings.Ports}
+    })' <<<"$container_inspection" | sha256sum | awk '{print $1}')" || return 1
+  [[ "$container_inspection_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+
+  endpoint_ids="$(jq -r '.[0].Containers // {} | keys[]' <<<"$inspection" | LC_ALL=C sort)" ||
+    return 1
+  if [[ -n "$endpoint_ids" ]]; then
+    while IFS= read -r endpoint_id; do
+      [[ "$endpoint_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+      endpoint_contract="$(jq -r --arg id "$endpoint_id" '
+        .[0].Containers[$id] |
+        [.Name, .EndpointID, .MacAddress, .IPv4Address, .IPv6Address] | @tsv
+      ' <<<"$inspection")" || return 1
+      IFS=$'\t' read -r endpoint_name endpoint_id_contract endpoint_mac endpoint_ipv4 \
+        endpoint_ipv6 endpoint_residue <<<"$endpoint_contract"
+      [[ -z "${endpoint_residue:-}" && "$endpoint_name" =~ ^[a-z0-9][a-z0-9_.-]*$ &&
+        "$endpoint_id_contract" =~ ^[0-9a-f]{64}$ &&
+        "$endpoint_mac" =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ &&
+        "$endpoint_ipv4" =~ ^172\.23\.([0-9]{1,3})\.([0-9]{1,3})/16$ &&
+        -z "$endpoint_ipv6" ]] || return 1
+
+      container_inspection="$(docker_local container inspect "$endpoint_id")" || return 1
+      container_contract="$(jq -r --arg id "$endpoint_id" \
+        --arg endpoint_id "$endpoint_id_contract" \
+        --arg endpoint_ipv4 "$endpoint_ipv4" \
+        --arg endpoint_ipv6 "$endpoint_ipv6" \
+        --arg endpoint_mac "$endpoint_mac" \
+        --arg network "$SHARED_TELEBIRR_INGRESS_NETWORK" \
+        --arg network_id "$network_id" '
+        if length == 1 and
+          .[0].Id == $id and
+          .[0].State.Running == true and
+          .[0].State.Paused == false and
+          .[0].State.Restarting == false and
+          .[0].State.Dead == false and
+          .[0].State.OOMKilled == false and
+          .[0].State.Health.Status == "healthy" and
+          .[0].Config.Labels["com.docker.compose.container-number"] == "1" and
+          .[0].Config.Labels["com.docker.compose.oneoff"] == "False" and
+          .[0].NetworkSettings.Networks[$network].NetworkID == $network_id and
+          .[0].NetworkSettings.Networks[$network].EndpointID == $endpoint_id and
+          .[0].NetworkSettings.Networks[$network].MacAddress == $endpoint_mac and
+          ((.[0].NetworkSettings.Networks[$network].IPAddress + "/" +
+            (.[0].NetworkSettings.Networks[$network].IPPrefixLen | tostring)) ==
+            $endpoint_ipv4) and
+          .[0].NetworkSettings.Networks[$network].GlobalIPv6Address == $endpoint_ipv6 and
+          .[0].NetworkSettings.Networks[$network].GlobalIPv6PrefixLen == 0
+        then [
+          .[0].Config.Labels["com.docker.compose.project"],
+          .[0].Config.Labels["com.docker.compose.service"],
+          .[0].Name
+        ] | @tsv
+        else empty end
+      ' <<<"$container_inspection")" || return 1
+      IFS=$'\t' read -r project service container_name container_residue <<<"$container_contract"
+      [[ -z "${container_residue:-}" && -n "$project" && -n "$service" &&
+        -n "$container_name" && "${container_name#/}" == "$endpoint_name" ]] || return 1
+          case "$project:$service:$container_name" in
+        "$PRODUCTION_PROJECT_NAME:gateway:/$PRODUCTION_PROJECT_NAME-gateway-1")
+          endpoint_role='production-gateway'
+          production_gateway_seen='true'
+          jq -e --arg project "$PRODUCTION_PROJECT_NAME" '
+            .[0].Config.User == "10001:10001" and
+            (.[0].Config.Labels["org.opencontainers.image.revision"] | test("^[0-9a-f]{40}$")) and
+            .[0].Config.Labels["org.opencontainers.image.title"] == "fetanagent-gateway" and
+            .[0].Config.Image == ("fetanagent-gateway:" +
+              (.[0].Config.Labels["org.opencontainers.image.revision"][0:12])) and
+            .[0].Config.Entrypoint == null and
+            .[0].Config.Cmd == ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"] and
+            (.[0].NetworkSettings.Networks | keys | sort) == [
+              "fetanagent-companion-device-ingress",
+              "fetanagent-production_public_application",
+              "fetanagent-telebirr-device-ingress"
+            ] and
+            all(.[0].NetworkSettings.Networks[];
+              (.Aliases | unique | sort) == ["fetanagent-production-gateway-1", "gateway"]) and
+            .[0].HostConfig.PortBindings == {
+              "443/tcp": [{"HostIp": "", "HostPort": "443"}],
+              "80/tcp": [{"HostIp": "", "HostPort": "80"}]
+            } and
+            .[0].Config.Labels["com.docker.compose.project"] == $project
+          ' <<<"$container_inspection" >/dev/null || return 1
+          ;;
+        "$PRODUCTION_PROJECT_NAME:telebirr-device-bridge:/$PRODUCTION_PROJECT_NAME-telebirr-device-bridge-1")
+          endpoint_role='production-telebirr-device-bridge'
+          production_telebirr_bridge_seen='true'
+          jq -e --arg project "$PRODUCTION_PROJECT_NAME" '
+            .[0].Config.User == "10001:10001" and
+            (.[0].Config.Labels["org.opencontainers.image.revision"] | test("^[0-9a-f]{40}$")) and
+            .[0].Config.Labels["org.opencontainers.image.title"] == "fetanagent-telebirr-device-bridge" and
+            .[0].Config.Image == ("fetanagent-telebirr-device-bridge:" +
+              (.[0].Config.Labels["org.opencontainers.image.revision"][0:12])) and
+            .[0].Config.Entrypoint == ["docker-entrypoint.sh"] and
+            .[0].Config.Cmd == ["node", "apps/telebirr-device-bridge/dist/telebirr-device-bridge-main.js"] and
+            ([.[0].Config.Env[] | select(startswith("FINANCIAL_ACTIONS_MODE="))] ==
+              ["FINANCIAL_ACTIONS_MODE=dry_run"]) and
+            ([.[0].Config.Env[] | select(startswith("KEMERBET_EXECUTOR_ENABLED="))] ==
+              ["KEMERBET_EXECUTOR_ENABLED=false"]) and
+            ([.[0].Config.Env[] | select(startswith("KEMERBET_FINAL_ACTION_ENABLED="))] ==
+              ["KEMERBET_FINAL_ACTION_ENABLED=false"]) and
+            (.[0].NetworkSettings.Networks | keys) == ["fetanagent-telebirr-device-ingress"] and
+            (.[0].NetworkSettings.Networks["fetanagent-telebirr-device-ingress"].Aliases |
+              unique | sort) == [
+                "fetanagent-production-telebirr-device-bridge-1",
+                "telebirr-device-bridge"
+              ] and
+            .[0].HostConfig.PortBindings == {} and
+            .[0].Config.ExposedPorts == null and
+            .[0].NetworkSettings.Ports == {} and
+            .[0].Config.Labels["com.docker.compose.project"] == $project
+          ' <<<"$container_inspection" >/dev/null || return 1
+          ;;
+        *) return 1 ;;
+      esac
+      [[ "|$seen_roles|" != *"|$endpoint_role|"* ]] || return 1
+      seen_roles="${seen_roles:+$seen_roles|}$endpoint_role"
+      revision="$(jq -r '.[0].Config.Labels["org.opencontainers.image.revision"]' \
+        <<<"$container_inspection")" || return 1
+      if [[ "$project" == "$PRODUCTION_PROJECT_NAME" ]]; then
+        if [[ -z "$production_revision" ]]; then
+          production_revision="$revision"
+        else
+          [[ "$revision" == "$production_revision" ]] || return 1
+        fi
+      fi
+    done <<<"$endpoint_ids"
+  fi
+  [[ "$production_gateway_seen" == 'true' &&
+    "$production_telebirr_bridge_seen" == 'true' ]] || return 1
+  inspection_after="$(docker_local network inspect "$network_id")" || return 1
+  [[ "$(jq -S -c '.[0]' <<<"$inspection_after" | sha256sum | awk '{print $1}')" == \
+    "$inspection_digest" ]] || return 1
+  container_inspection_after="$(docker_local container inspect \
+    "$PRODUCTION_PROJECT_NAME-gateway-1" \
+    "$PRODUCTION_PROJECT_NAME-telebirr-device-bridge-1")" || return 1
+  [[ "$(jq -S -c 'sort_by(.Name) | map({
+      Id, Image, Name, RestartCount,
+      Config: {
+        User: .Config.User, Image: .Config.Image, Entrypoint: .Config.Entrypoint,
+        Cmd: .Config.Cmd, Env: .Config.Env, ExposedPorts: .Config.ExposedPorts,
+        Labels: .Config.Labels
+      },
+      HostConfig: {PortBindings: .HostConfig.PortBindings},
+      State: {
+        Status: .State.Status, Running: .State.Running, Paused: .State.Paused,
+        Restarting: .State.Restarting, Dead: .State.Dead, OOMKilled: .State.OOMKilled,
+        Health: .State.Health.Status
+      },
+      NetworkSettings: {Networks: .NetworkSettings.Networks, Ports: .NetworkSettings.Ports}
+    })' <<<"$container_inspection_after" | sha256sum | awk '{print $1}')" == \
+    "$container_inspection_digest" ]] || return 1
+}
+
+remove_disposable_project_networks_best_effort() {
+  local cleanup_status=0 expected_internal expected_label inspection named_ids network_id
+  local network_ids network_name
+  network_ids="$(docker_local network ls --quiet --no-trunc \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
+  for network_name in \
+    "$KEMERBET_RECHECK_CONTROL_NETWORK" \
+    "$KEMERBET_RECHECK_PROXY_NETWORK" \
+    "$KEMERBET_RECHECK_EGRESS_NETWORK" \
+    "${PROJECT_NAME}_owner_control_service" \
+    "${PROJECT_NAME}_staging_service"; do
+    named_ids="$(docker_local network ls --quiet --no-trunc \
+      --filter "name=^${network_name}$")" || return 1
+    if [[ -n "$named_ids" ]]; then
+      network_ids="${network_ids:+$network_ids$'\n'}$named_ids"
+    fi
+  done
+  network_ids="$(awk 'NF' <<<"$network_ids" | LC_ALL=C sort -u)" || return 1
+  if [[ -n "$network_ids" ]]; then
+    while IFS= read -r network_id; do
+      if [[ ! "$network_id" =~ ^[0-9a-f]{64}$ ]]; then
+        cleanup_status=1
+        continue
+      fi
+      if ! inspection="$(docker_local network inspect "$network_id")"; then
+        cleanup_status=1
+        continue
+      fi
+      network_name="$(jq -r 'if length == 1 then .[0].Name else empty end' \
+        <<<"$inspection")" || {
+        cleanup_status=1
+        continue
+      }
+      if [[ "$network_name" == "$SHARED_TELEBIRR_INGRESS_NETWORK" ]]; then
+        [[ "$network_id" == "$(shared_telebirr_ingress_network_id)" ]] || cleanup_status=1
+        continue
+      fi
+      case "$network_name" in
+        "$KEMERBET_RECHECK_CONTROL_NETWORK")
+          expected_internal='true'
+          expected_label='kemerbet_readiness_control'
+          ;;
+        "$KEMERBET_RECHECK_PROXY_NETWORK")
+          expected_internal='true'
+          expected_label='kemerbet_readiness_proxy'
+          ;;
+        "$KEMERBET_RECHECK_EGRESS_NETWORK")
+          expected_internal='false'
+          expected_label='kemerbet_readiness_egress'
+          ;;
+        "${PROJECT_NAME}_owner_control_service")
+          expected_internal='false'
+          expected_label='owner_control_service'
+          ;;
+        "${PROJECT_NAME}_staging_service")
+          expected_internal='false'
+          expected_label='staging_service'
+          ;;
+        *)
+          cleanup_status=1
+          continue
+          ;;
+      esac
+      if ! jq -e --arg id "$network_id" --argjson internal "$expected_internal" \
+        --arg label "$expected_label" \
+        --arg name "$network_name" --arg project "$PROJECT_NAME" '
+          length == 1 and
+          .[0].Id == $id and
+          .[0].Name == $name and
+          .[0].Scope == "local" and
+          .[0].Driver == "bridge" and
+          .[0].EnableIPv6 == true and
+          .[0].Internal == $internal and
+          .[0].Attachable == false and
+          .[0].Ingress == false and
+          .[0].ConfigOnly == false and
+          (.[0].Labels | keys | sort) == [
+            "com.docker.compose.config-hash",
+            "com.docker.compose.network",
+            "com.docker.compose.project",
+            "com.docker.compose.version"
+          ] and
+          (.[0].Labels["com.docker.compose.config-hash"] | test("^[0-9a-f]{64}$")) and
+          .[0].Labels["com.docker.compose.project"] == $project and
+          .[0].Labels["com.docker.compose.network"] == $label and
+          (.[0].Labels["com.docker.compose.version"] |
+            test("^[0-9]+\\.[0-9]+\\.[0-9]+([+~-][0-9A-Za-z._-]+)?$")) and
+          ((.[0].Containers // {}) | length) == 0
+        ' <<<"$inspection" >/dev/null; then
+        cleanup_status=1
+        continue
+      fi
+      docker_local network rm "$network_id" >/dev/null || cleanup_status=1
+    done <<<"$network_ids"
+  fi
+  return "$cleanup_status"
+}
+
+require_stopped_project_network_boundary() {
+  local namespace_networks project_networks shared_id
+  shared_id="$(shared_telebirr_ingress_network_id)" || return 1
+  project_networks="$(docker_local network ls --quiet --no-trunc \
+    --filter "label=com.docker.compose.project=$PROJECT_NAME" | LC_ALL=C sort)" || return 1
+  [[ "$project_networks" == "$shared_id" ]] || return 1
+  namespace_networks="$(docker_local network ls --quiet --no-trunc \
+    --filter "name=^${PROJECT_NAME}_")" || return 1
+  [[ -z "$namespace_networks" ]] || return 1
+  require_shared_telebirr_ingress_network_contract
 }
 
 validate_commit_and_tag() {
@@ -2394,7 +2736,7 @@ kemerbet_v1_retirement_release_asset_digest() {
 }
 
 require_kemerbet_v1_retirement_reinstall_boundary() {
-  local policy="${1:-initial}" containers networks
+  local policy="${1:-initial}" containers
   case "$policy" in
     initial) require_kemerbet_v1_retirement_disposable_inputs_absent || return 1 ;;
     resume)
@@ -2407,21 +2749,19 @@ require_kemerbet_v1_retirement_reinstall_boundary() {
   require_kemerbet_v1_retirement_expiry_guard_disarmed || return 1
   containers="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
-  networks="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
-  [[ -z "$containers" && -z "$networks" ]] || return 1
+  [[ -z "$containers" ]] || return 1
+  require_stopped_project_network_boundary || return 1
   require_kemerbet_recheck_transients_absent || return 1
   require_kemerbet_v1_retirement_durable_volumes
 }
 
 require_kemerbet_v1_retirement_safe_reset_boundary() {
-  local containers networks
+  local containers
   require_kemerbet_v1_retirement_expiry_guard_disarmed || return 1
   containers="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
-  networks="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")" || return 1
-  [[ -z "$containers" && -z "$networks" ]] || return 1
+  [[ -z "$containers" ]] || return 1
+  require_stopped_project_network_boundary || return 1
   require_kemerbet_recheck_transients_absent || return 1
   require_kemerbet_v1_retirement_durable_volumes
 }
@@ -3957,6 +4297,16 @@ KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256=''
 KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256=''
 KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE=''
 KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256=''
+KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE='absent'
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_RELEASE=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256=''
+KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256=''
 
 inspect_kemerbet_h16_preview_bridge() {
   local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
@@ -4124,7 +4474,7 @@ PY
 }
 
 inspect_kemerbet_h17_availability_bridge() {
-  local inspection
+  local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
   local -a inspection_lines=()
   KEMERBET_H17_AVAILABILITY_BRIDGE_STATE='absent'
   KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE=''
@@ -4132,20 +4482,24 @@ inspect_kemerbet_h17_availability_bridge() {
   KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256=''
   KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE=''
   KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256=''
+  KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256=''
   if [[ ! -e "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" &&
     ! -L "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" ]]; then
     return 0
   fi
   KEMERBET_H17_AVAILABILITY_BRIDGE_STATE='invalid'
   inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" "$HELPER_PATH" <<'PY'
+    "$KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT" "$helper_path" \
+    "$helper_mode" <<'PY'
 import hashlib
 import os
 import re
 import stat
 import sys
 
-parent, helper = sys.argv[1:]
+parent, helper, helper_mode_text = sys.argv[1:]
+helper_mode = int(helper_mode_text, 8)
 release_pattern = re.compile(r'[0-9a-f]{40}')
 sha_pattern = re.compile(r'[0-9a-f]{64}')
 runtime_release = '70d46b9642c7d1fd781fd7200289b7a2fff068ec'
@@ -4222,7 +4576,7 @@ try:
     intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
     completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
     predecessor_data = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
-    helper_data = exact_file(helper, 0o755, 2 * 1024 * 1024)
+    helper_data = exact_file(helper, helper_mode, 2 * 1024 * 1024)
     intent = intent_data.decode('ascii').splitlines()
     completion = completion_data.decode('ascii').splitlines()
     h16_release = intent[4].split('=', 1)[1] if len(intent) > 4 else ''
@@ -4264,24 +4618,216 @@ try:
         reject()
     sys.stdout.write(
         f'active\n{bridge_release}\n{successor_sha}\n{predecessor_sha}\n{h16_release}\n'
+        f'{hashlib.sha256(intent_data).hexdigest()}\n'
+        f'{hashlib.sha256(completion_data).hexdigest()}\n'
     )
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 0
   mapfile -t inspection_lines <<<"$inspection"
-  [[ "${#inspection_lines[@]}" -eq 5 &&
+  [[ "${#inspection_lines[@]}" -eq 7 &&
     "${inspection_lines[0]}" == 'active' &&
     "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
     "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
     "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
-    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ ]] || return 0
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[5]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ ]] || return 0
   KEMERBET_H17_AVAILABILITY_BRIDGE_STATE="${inspection_lines[0]}"
   KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE="${inspection_lines[1]}"
   KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[3]}"
   KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE="${inspection_lines[4]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256="${inspection_lines[5]}"
+  KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256="${inspection_lines[6]}"
   KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT}/${inspection_lines[1]}/predecessor-helper"
+}
+
+inspect_kemerbet_h18_shared_ingress_bridge() {
+  local helper_mode="${2:-755}" helper_path="${1:-$HELPER_PATH}" inspection
+  local -a inspection_lines=()
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE='absent'
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_RELEASE=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER_SHA256=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256=''
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256=''
+  if [[ ! -e "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT" &&
+    ! -L "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT" ]]; then
+    return 0
+  fi
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE='invalid'
+  inspection="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT" "$helper_path" \
+    "$helper_mode" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+parent, helper, helper_mode_text = sys.argv[1:]
+helper_mode = int(helper_mode_text, 8)
+release_pattern = re.compile(r'[0-9a-f]{40}')
+sha_pattern = re.compile(r'[0-9a-f]{64}')
+predecessor_sha = '77e4822a0827413290fba94747698536b6af5bca3f2f7cdc58975dce390f7c84'
+
+
+def reject():
+    raise RuntimeError()
+
+
+def exact_directory(path, mode, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, mode)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        reject()
+
+
+def exact_file(path, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, mode, 1)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size > maximum
+            or os.path.realpath(path) != path
+        ):
+            reject()
+        data = bytearray()
+        while len(data) <= maximum:
+            chunk = os.read(descriptor, maximum + 1 - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            len(data) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+                before.st_nlink, before.st_size, before.st_mtime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid,
+                after.st_nlink, after.st_size, after.st_mtime_ns)
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            reject()
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
+try:
+    parent_value = os.lstat(parent)
+    if (
+        not stat.S_ISDIR(parent_value.st_mode)
+        or (parent_value.st_uid, parent_value.st_gid, stat.S_IMODE(parent_value.st_mode))
+        != (0, 0, 0o700)
+        or os.path.realpath(parent) != parent
+    ):
+        reject()
+    children = os.listdir(parent)
+    if len(children) != 1 or release_pattern.fullmatch(children[0]) is None:
+        reject()
+    bridge_release = children[0]
+    root = f'{parent}/{bridge_release}'
+    exact_directory(parent, 0o700, [bridge_release])
+    exact_directory(root, 0o700, ['completed-v1', 'intent-v1', 'predecessor-helper'])
+    intent_data = exact_file(f'{root}/intent-v1', 0o600, 4096)
+    completion_data = exact_file(f'{root}/completed-v1', 0o600, 4096)
+    predecessor_data = exact_file(f'{root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    helper_data = exact_file(helper, helper_mode, 2 * 1024 * 1024)
+    intent = intent_data.decode('ascii').splitlines()
+    completion = completion_data.decode('ascii').splitlines()
+    h17_release = intent[3].split('=', 1)[1] if len(intent) > 3 else ''
+    successor_sha = intent[5].split('=', 1)[1] if len(intent) > 5 else ''
+    h17_intent_sha = intent[6].split('=', 1)[1] if len(intent) > 6 else ''
+    h17_completion_sha = intent[7].split('=', 1)[1] if len(intent) > 7 else ''
+    stopped_boundary_sha = intent[8].split('=', 1)[1] if len(intent) > 8 else ''
+    production_boundary_sha = intent[9].split('=', 1)[1] if len(intent) > 9 else ''
+    shared_ingress_boundary_sha = intent[10].split('=', 1)[1] if len(intent) > 10 else ''
+    if (
+        len(intent) != 23
+        or len(completion) != 24
+        or intent[0] != 'contract=fetanagent-shared-telebirr-ingress-helper-bridge-v18'
+        or intent[1] != 'state=authorized'
+        or intent[2] != f'bridge_release={bridge_release}'
+        or not intent[3].startswith('h17_bridge_release=')
+        or release_pattern.fullmatch(h17_release) is None
+        or bridge_release == h17_release
+        or intent[4] != f'predecessor_helper_sha256={predecessor_sha}'
+        or not intent[5].startswith('successor_helper_sha256=')
+        or sha_pattern.fullmatch(successor_sha) is None
+        or successor_sha == predecessor_sha
+        or not intent[6].startswith('h17_bridge_intent_sha256=')
+        or sha_pattern.fullmatch(h17_intent_sha) is None
+        or not intent[7].startswith('h17_bridge_completion_sha256=')
+        or sha_pattern.fullmatch(h17_completion_sha) is None
+        or not intent[8].startswith('stopped_boundary_sha256=')
+        or sha_pattern.fullmatch(stopped_boundary_sha) is None
+        or not intent[9].startswith('production_boundary_sha256=')
+        or sha_pattern.fullmatch(production_boundary_sha) is None
+        or not intent[10].startswith('shared_ingress_boundary_sha256=')
+        or sha_pattern.fullmatch(shared_ingress_boundary_sha) is None
+        or intent[11:] != [
+            'staging_runtime_stopped=true',
+            'shared_ingress_network=fetanagent-telebirr-device-ingress',
+            'shared_ingress_network_id=5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738',
+            'shared_ingress_contract=exact',
+            'production_release=69be82ac3e49ff8c63c64c9aa7926e0046b48a10',
+            'production_endpoint_set=exact',
+            'production_runtime_mutation=false',
+            'database_mutation=false',
+            'financial_actions_mode=disabled',
+            'transfer_enabled=false',
+            'amount_enabled=false',
+            'money_moved=false',
+        ]
+        or completion[0] != intent[0]
+        or completion[1] != 'state=shared-ingress-helper-installed'
+        or completion[2:23] != intent[2:23]
+        or completion[23] != f'bridge_intent_sha256={hashlib.sha256(intent_data).hexdigest()}'
+        or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+        or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+        or hashlib.sha256(predecessor_data).hexdigest() != predecessor_sha
+        or hashlib.sha256(helper_data).hexdigest() != successor_sha
+    ):
+        reject()
+    sys.stdout.write(
+        f'active\n{bridge_release}\n{successor_sha}\n{predecessor_sha}\n{h17_release}\n'
+        f'{h17_intent_sha}\n{h17_completion_sha}\n'
+    )
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 0
+  mapfile -t inspection_lines <<<"$inspection"
+  [[ "${#inspection_lines[@]}" -eq 7 &&
+    "${inspection_lines[0]}" == 'active' &&
+    "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[2]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[4]}" =~ ^[0-9a-f]{40}$ &&
+    "${inspection_lines[5]}" =~ ^[0-9a-f]{64}$ &&
+    "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ ]] || return 0
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE="${inspection_lines[0]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_RELEASE="${inspection_lines[1]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256="${inspection_lines[2]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[3]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE="${inspection_lines[4]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256="${inspection_lines[5]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256="${inspection_lines[6]}"
+  KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT}/${inspection_lines[1]}/predecessor-helper"
 }
 
 inspect_kemerbet_h14_recovery_gate() {
@@ -5162,7 +5708,17 @@ PY
   KEMERBET_H14_RECOVERY_HELPER_SHA256="${inspection_lines[2]}"
   KEMERBET_H14_RECOVERY_PROFILE_ID="${inspection_lines[3]}"
   current_helper_sha="${inspection_lines[4]}"
-  inspect_kemerbet_h17_availability_bridge
+  inspect_kemerbet_h18_shared_ingress_bridge
+  [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" != 'invalid' ]] || {
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+    return 0
+  }
+  if [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+    inspect_kemerbet_h17_availability_bridge \
+      "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER" 400
+  else
+    inspect_kemerbet_h17_availability_bridge
+  fi
   [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" != 'invalid' ]] || {
     KEMERBET_H14_RECOVERY_STATE='invalid'
     return 0
@@ -5186,11 +5742,30 @@ PY
       "$KEMERBET_H17_AVAILABILITY_BRIDGE_H16_RELEASE" == \
         "$KEMERBET_H16_PREVIEW_BRIDGE_RELEASE" &&
       "$KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
-        "$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256" &&
-      "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+        "$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256" ]] || {
       KEMERBET_H14_RECOVERY_STATE='invalid'
       return 0
     }
+    if [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+      [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_RELEASE" == \
+          "$KEMERBET_H17_AVAILABILITY_BRIDGE_RELEASE" &&
+        "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_PREDECESSOR_HELPER_SHA256" == \
+          "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" &&
+        "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_INTENT_SHA256" == \
+          "$KEMERBET_H17_AVAILABILITY_BRIDGE_INTENT_SHA256" &&
+        "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_H17_COMPLETION_SHA256" == \
+          "$KEMERBET_H17_AVAILABILITY_BRIDGE_COMPLETION_SHA256" &&
+        "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256" == "$current_helper_sha" ]] || {
+        KEMERBET_H14_RECOVERY_STATE='invalid'
+        return 0
+      }
+    elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" != "$current_helper_sha" ]]; then
+      KEMERBET_H14_RECOVERY_STATE='invalid'
+      return 0
+    fi
+  elif [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+    KEMERBET_H14_RECOVERY_STATE='invalid'
+    return 0
   elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
     [[ "$KEMERBET_H14_RECOVERY_STATE" == 'cohort-prepared' &&
       "$KEMERBET_H16_PREVIEW_BRIDGE_H14_RELEASE" == "$KEMERBET_H14_RECOVERY_RELEASE" &&
@@ -5223,7 +5798,9 @@ inspect_kemerbet_v2_v3_successor_gate() {
     fi
     KEMERBET_V2_V3_SUCCESSOR_RELEASE="$KEMERBET_H14_RECOVERY_RELEASE"
     KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H14_RECOVERY_HELPER_SHA256"
-    if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
+    if [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]; then
+      KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256"
+    elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]; then
       KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256"
     elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]; then
       KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256"
@@ -16488,7 +17065,7 @@ wait_for_kemerbet_recheck_service_healthy() {
   return 1
 }
 remove_project_runtime_best_effort() {
-  local cleanup_status=0 containers='' networks='' remaining=''
+  local cleanup_status=0 containers='' remaining=''
   if ! containers="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
     cleanup_status=1
@@ -16496,13 +17073,9 @@ remove_project_runtime_best_effort() {
     # Container identifiers returned by Docker contain only hexadecimal characters and newlines.
     docker_local container rm --force $containers >/dev/null || cleanup_status=1
   fi
-  if ! networks="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
-    cleanup_status=1
-  elif [[ -n "$networks" ]]; then
-    # Network identifiers returned by Docker contain only hexadecimal characters and newlines.
-    docker_local network rm $networks >/dev/null || cleanup_status=1
-  fi
+  # Preserve the exact internal TeleBirr ingress shared with the production and device stacks.
+  # Remove only individually classified, empty, disposable staging networks.
+  remove_disposable_project_networks_best_effort || cleanup_status=1
   remove_kemerbet_recheck_profile_snapshot_volume || cleanup_status=1
   remove_kemerbet_recheck_rpc_capabilities || cleanup_status=1
   if ! remaining="$(docker_local container ls --all --quiet \
@@ -16511,12 +17084,7 @@ remove_project_runtime_best_effort() {
   elif [[ -n "$remaining" ]]; then
     cleanup_status=1
   fi
-  if ! remaining="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")"; then
-    cleanup_status=1
-  elif [[ -n "$remaining" ]]; then
-    cleanup_status=1
-  fi
+  require_stopped_project_network_boundary || cleanup_status=1
   return "$cleanup_status"
 }
 
@@ -17674,7 +18242,7 @@ require_private_start_cutover_ready() {
 
 require_fresh_host_start_ready() {
   local commit_sha="$1"
-  local containers networks
+  local containers
 
   validate_commit_and_tag "$commit_sha" "${commit_sha:0:12}"
   require_fresh_host_identity
@@ -17686,25 +18254,20 @@ require_fresh_host_start_ready() {
     die 'the fresh-host FetanAgent container inventory could not be inspected'
   [[ -z "$containers" ]] || die 'fresh-host startup requires an empty FetanAgent project'
 
-  networks="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
-    die 'the fresh-host FetanAgent network inventory could not be inspected'
-  [[ -z "$networks" ]] || die 'fresh-host startup requires no existing FetanAgent networks'
+  require_stopped_project_network_boundary ||
+    die 'fresh-host startup requires only the exact preserved shared TeleBirr ingress network'
 }
 
 require_kemerbet_v3_successor_stopped_durable_boundary() {
-  local containers expected_volumes networks project_volumes session_holders
+  local containers expected_volumes project_volumes session_holders
 
   containers="$(docker_local container ls --all --quiet \
     --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
     die 'the KemerBet v3 successor project container inventory could not be inspected'
   [[ -z "$containers" ]] ||
     die 'the KemerBet v3 successor project must be fully stopped'
-  networks="$(docker_local network ls --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT_NAME")" ||
-    die 'the KemerBet v3 successor project network inventory could not be inspected'
-  [[ -z "$networks" ]] ||
-    die 'the KemerBet v3 successor project must have no network'
+  require_stopped_project_network_boundary ||
+    die 'the KemerBet v3 successor must retain only the exact shared TeleBirr ingress network'
   require_kemerbet_recheck_transients_absent ||
     die 'the stopped KemerBet v3 successor retained a recheck runtime boundary'
 

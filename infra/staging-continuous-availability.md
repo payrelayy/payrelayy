@@ -102,6 +102,55 @@ Rerun the same merged script with the same three arguments; its interrupted-pref
 the exact predecessor-to-successor promotion. After successful promotion, the normal deployment
 upgrades the checksum-bound continuous finalizer and deploys the reviewed release.
 
+### One-time H18 shared-ingress helper promotion
+
+The H17 helper assumed that a fully stopped staging project had no Compose-owned Docker networks.
+That assumption is no longer true on the current host: staging created the internal
+`fetanagent-telebirr-device-ingress` network, while the production gateway and production TeleBirr
+device bridge legitimately remain attached to it. A normal staging stop must remove staging
+containers and disposable staging networks without deleting or disconnecting this shared ingress.
+
+Before restarting staging, run the reviewed
+`infra/operations/fetanagent-shared-telebirr-ingress-helper-bridge-v18.sh` once from the DigitalOcean
+root console. Stage that script and the successor helper from the exact merged commit in its required
+root-owned directory, verify their SHA-256 values, and pass the merged commit, helper digest, and the
+script's exact no-money confirmation. The bridge requires staging to remain stopped, the complete
+H17/H16/H14 helper-evidence chain, the disabled expiry timer, the exact two durable staging volumes,
+the exact H17 continuous-finalizer/sudoers pair, fresh-host IPv6 and database resolution, TCP port
+3002 to be free, no namespaced network residue, the exact current production release, and the exact
+shared-network identity and isolated endpoint set. The production TeleBirr bridge must have only the
+shared internal network and no host-published port; the gateway must have exactly its three reviewed
+networks and only the 80/443 host bindings. The
+current network ID, Compose configuration hash, `172.23.0.0/16` subnet, and `172.23.0.1` gateway are
+intentionally pinned because this is a one-use preservation operation for the existing host, not a
+portable network-recreation contract.
+
+Under the shared staging mutation lock, the bridge temporarily disables only the deployment-helper
+sudo grant, appends an immutable H18 predecessor/successor record, replaces only the reviewed helper,
+re-attests the unchanged production runtime and ingress network, and restores the exact grant. It
+does not start, stop, reconnect, or remove a container or network; alter a database role; contact a
+payment provider; enable Transfer or Amount entry; or move money. If it stops after disabling the
+grant, rerun the exact same bridge with the same three arguments. Do not restore sudoers, edit the
+evidence, or recreate the network manually.
+
+The H18 helper has a new digest, so the checksum-bound continuous-availability finalizer and its two
+sudo capabilities must be upgraded from their exact H17 digests before the next deployment. Stage
+`fetanagent-staging-continuous-availability.sh` and
+`fetanagent-staging-continuous-availability.sudoers` from the same merged commit in the existing
+root-owned continuity-install directory shape, then run the reviewed
+`install-staging-continuous-availability.sh`. The installer accepts only the recorded historical
+finalizer/sudoers pairs or the exact new pair; mixed and unknown states fail before replacement. It
+publishes same-directory resumable temporary copies with atomic renames and directory synchronization,
+so interruption after either file can be recovered by rerunning the identical install. The
+old finalizer safely rejects H18 rather than operating against an unrecognized helper during this
+short, stopped-runtime transition.
+
+After H18 is installed, stopped-state and cleanup checks preserve exactly this shared ingress, require
+the two healthy production endpoints, reject every other endpoint or lookalike network, and remove
+only individually classified empty staging networks by full Docker ID. The separate device-pilot
+stack may not share this production alias; it must remain stopped until it has a reviewed,
+non-conflicting ingress contract. A changed or missing shared contract fails closed.
+
 ## Verification and security trade-off
 
 The disposable PostgreSQL suite executes the actual operational SQL and checks that only four expiry

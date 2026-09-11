@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -10,8 +9,9 @@ const installer = normalized(
   'infra/operations/fetanagent-kemerbet-continuous-availability-helper-bridge-v17.sh',
 );
 const helper = normalized('infra/operations/fetanagent-staging-deploy-helper.sh');
-const helperSha256 = createHash('sha256').update(helper).digest('hex');
 const predecessorHelperSha256 = 'da555f29ac6260e1dff6c969218eb55ea9bd66c8167600e3ecc700118c8ea9e6';
+const historicalSuccessorHelperSha256 =
+  '77e4822a0827413290fba94747698536b6af5bca3f2f7cdc58975dce390f7c84';
 const runtimeRelease = '70d46b9642c7d1fd781fd7200289b7a2fff068ec';
 const parent = '/var/lib/fetanagent/kemerbet-continuous-availability-helper-bridge-v17';
 const confirmation =
@@ -69,8 +69,11 @@ assert.match(
 );
 assert.match(
   installer,
-  new RegExp(`^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${helperSha256}'$`, 'mu'),
-  'the H17 installer must pin the exact LF-normalized successor helper',
+  new RegExp(
+    `^readonly REVIEWED_SUCCESSOR_HELPER_SHA256='${historicalSuccessorHelperSha256}'$`,
+    'mu',
+  ),
+  'the historical H17 installer must retain its exact reviewed successor helper',
 );
 assert.match(installer, new RegExp(`^readonly CONFIRMATION='${confirmation}'$`, 'mu'));
 assert.match(installer, /"\$PROVIDED_CONFIRMATION" == "\$CONFIRMATION"/u);
@@ -191,10 +194,17 @@ assert.match(
 );
 assert.match(h17Parser, /runtime_release = '70d46b9642c7d1fd781fd7200289b7a2fff068ec'/u);
 assert.match(h17Parser, new RegExp(predecessorHelperSha256, 'u'));
+assert.match(
+  h17Parser,
+  /local helper_mode="\$\{2:-755\}" helper_path="\$\{1:-\$HELPER_PATH\}" inspection/u,
+);
 assert.match(h17Parser, /len\(intent\) != 16/u);
 assert.match(h17Parser, /len\(completion\) != 17/u);
 assert.match(h17Parser, /hashlib\.sha256\(predecessor_data\)\.hexdigest\(\) != predecessor_sha/u);
 assert.match(h17Parser, /hashlib\.sha256\(helper_data\)\.hexdigest\(\) != successor_sha/u);
+assert.match(h17Parser, /hashlib\.sha256\(intent_data\)\.hexdigest\(\)/u);
+assert.match(h17Parser, /hashlib\.sha256\(completion_data\)\.hexdigest\(\)/u);
+assert.match(h17Parser, /"\$\{#inspection_lines\[@\]\}" -eq 7/u);
 for (const field of fields.slice(7)) assert.match(h17Parser, new RegExp(field, 'u'));
 assert.match(h16Parser, /local helper_mode="\$\{2:-755\}" helper_path="\$\{1:-\$HELPER_PATH\}"/u);
 assert.match(
@@ -205,24 +215,27 @@ assert.match(h14Gate, /"\$KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER" 4
 assertInOrder(
   h14Gate,
   [
+    'inspect_kemerbet_h18_shared_ingress_bridge',
     'inspect_kemerbet_h17_availability_bridge',
     `[[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" != 'invalid' ]]`,
     `if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]`,
     'inspect_kemerbet_h16_preview_bridge',
     '"$KEMERBET_H17_AVAILABILITY_BRIDGE_PREDECESSOR_HELPER_SHA256" ==',
     '"$KEMERBET_H16_PREVIEW_BRIDGE_HELPER_SHA256"',
-    '"$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" == "$current_helper_sha"',
+    `elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256" != "$current_helper_sha" ]]`,
   ],
-  'the H14 gate must validate H16 through the archived predecessor and bind H17 to the current helper',
+  'the H14 gate must validate H16 through the archived predecessor and retain the direct H17 fallback',
 );
 assertInOrder(
   successorGate,
   [
-    `if [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]`,
+    `if [[ "$KEMERBET_H18_SHARED_INGRESS_BRIDGE_STATE" == 'active' ]]`,
+    'KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H18_SHARED_INGRESS_BRIDGE_HELPER_SHA256"',
+    `elif [[ "$KEMERBET_H17_AVAILABILITY_BRIDGE_STATE" == 'active' ]]`,
     'KEMERBET_V2_V3_SUCCESSOR_HELPER_SHA256="$KEMERBET_H17_AVAILABILITY_BRIDGE_HELPER_SHA256"',
     `elif [[ "$KEMERBET_H16_PREVIEW_BRIDGE_STATE" == 'active' ]]`,
   ],
-  'the successor gate must prefer the terminal H17 helper identity while retaining H16 fallback',
+  'the successor gate must retain H18, H17, and H16 helper provenance order',
 );
 
 const bash =
@@ -241,5 +254,5 @@ for (const file of [
 }
 
 console.info(
-  `KemerBet H17 continuous-availability helper bridge contracts verified; successor helper ${helperSha256}.`,
+  `KemerBet H17 continuous-availability helper bridge contracts verified; historical successor ${historicalSuccessorHelperSha256}.`,
 );

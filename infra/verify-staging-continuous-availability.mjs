@@ -6,6 +6,21 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
+const assertInOrder = (source, needles, message) => {
+  let cursor = -1;
+  for (const needle of needles) {
+    const found = source.indexOf(needle, cursor + 1);
+    assert.ok(found > cursor, `${message}: missing or out of order: ${needle}`);
+    cursor = found;
+  }
+};
+const pythonHeredocShellFunction = (source, name) => {
+  const start = source.indexOf(`${name}() {`);
+  assert.notEqual(start, -1, `missing shell function ${name}`);
+  const end = source.indexOf('\nPY\n}', start);
+  assert.notEqual(end, -1, `unterminated Python-heredoc shell function ${name}`);
+  return source.slice(start, end + '\nPY\n}'.length);
+};
 const workflow = read('.github/workflows/staging-continuous-availability.yml');
 const operation = read('infra/operations/fetanagent-staging-continuous-availability.sh');
 const sql = read('infra/sql/staging-runtimes-enable-continuous.sql');
@@ -65,10 +80,60 @@ assert.match(installer, /visudo -cf/);
 assert.match(installer, /different sudo capability already exists; no files were replaced/);
 assert.match(installer, /verify_predecessor "\$TARGET" "\$PREDECESSOR_FINALIZER_SHA" 755/);
 assert.match(installer, /verify_predecessor "\$SUDOERS" "\$PREDECESSOR_SUDOERS_SHA" 440/);
+assert.match(
+  installer,
+  /H17_FINALIZER_SHA='8e7e00aa8f83b08bb07a7b09c7d0ade3c89b4014c82d7047a7677a96b13b78d5'/,
+);
+assert.match(
+  installer,
+  /H17_SUDOERS_SHA='6a00778d52e4f2e58596ab8c287eebad0069f4997ef4439fa775115d8f7aabc0'/,
+);
+assert.match(installer, /verify_predecessor "\$TARGET" "\$H17_FINALIZER_SHA" 755/);
+assert.match(installer, /verify_predecessor "\$SUDOERS" "\$H17_SUDOERS_SHA" 440/);
+assert.match(installer, /target_state='absent'/);
+assert.match(installer, /sudoers_state='absent'/);
+assert.match(installer, /target_installing_state='absent'/);
+assert.match(installer, /sudoers_installing_state='absent'/);
+assert.match(
+  installer,
+  /case "\$target_state:\$sudoers_state:\$target_installing_state:\$sudoers_installing_state" in/,
+);
+assert.match(installer, /h17:h17:absent:absent\|h17:h17:prefix:absent/);
+assert.match(installer, /successor:h17:absent:absent\|successor:h17:absent:prefix/);
+assert.match(installer, /successor:successor:absent:absent/);
+assert.match(installer, /do not form one exact resumable release pair; no files were replaced/);
 assert.ok(
   installer.indexOf('different sudo capability already exists') <
-    installer.indexOf('install -o root -g root -m 0755'),
+    installer.indexOf('prepare_copy_resumably "$STAGED/finalizer.sh"'),
 );
+assert.ok(
+  installer.indexOf(
+    'case "$target_state:$sudoers_state:$target_installing_state:$sudoers_installing_state" in',
+  ) < installer.indexOf('prepare_copy_resumably "$STAGED/finalizer.sh"'),
+);
+assert.match(
+  installer,
+  /readonly TARGET_INSTALLING='\/usr\/local\/sbin\/\.fetanagent-staging-continuous-availability\.installing'/,
+);
+assert.match(
+  installer,
+  /readonly SUDOERS_INSTALLING='\/etc\/sudoers\.d\/\.fetanagent-staging-continuous-availability\.installing'/,
+);
+assert.match(installer, /existing != expected\[:len\(existing\)\]/);
+assertInOrder(
+  installer,
+  [
+    'prepare_copy_resumably "$STAGED/finalizer.sh"',
+    'mv -- "$TARGET_INSTALLING" "$TARGET"',
+    'sync -f /usr/local/sbin',
+    'prepare_copy_resumably "$STAGED/finalizer.sudoers"',
+    'visudo -cf "$SUDOERS_INSTALLING"',
+    'mv -- "$SUDOERS_INSTALLING" "$SUDOERS"',
+    'sync -f /etc/sudoers.d',
+  ],
+  'the finalizer pair must publish by resumable same-directory atomic renames',
+);
+assert.doesNotMatch(installer, /install -o root -g root -m 0(?:755|440)/);
 assert.doesNotMatch(installer, /\b(?:psql|systemctl|docker|rm)\s/);
 assert.match(operation, /invoked_from_installed_file "\$0"/);
 assert.match(operation, /"\$\{SUDO_COMMAND:-\}" == "\$INSTALLED_PATH \$MODE \$RELEASE_SHA"/);
@@ -304,6 +369,164 @@ const bash =
       )
     : 'bash';
 assert.ok(bash, 'Bash is required to test the real systemd disarm function.');
+const requireCopyPrefixFunction = pythonHeredocShellFunction(installer, 'require_copy_prefix');
+const prepareCopyResumablyFunction = pythonHeredocShellFunction(
+  installer,
+  'prepare_copy_resumably',
+);
+if (process.platform !== 'win32') {
+  let copyRunner;
+  if (process.getuid?.() === 0) {
+    copyRunner = { command: bash, args: ['-s'] };
+  } else {
+    const unshare = spawnSync('unshare', ['--user', '--map-root-user', 'true'], {
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    if (unshare.status === 0) {
+      copyRunner = {
+        command: 'unshare',
+        args: ['--user', '--map-root-user', bash, '-s'],
+      };
+    } else {
+      const sudo = spawnSync('sudo', ['-n', '--', 'true'], {
+        encoding: 'utf8',
+        timeout: 10000,
+      });
+      if (sudo.status === 0) {
+        copyRunner = { command: 'sudo', args: ['-n', '--', bash, '-s'] };
+      }
+    }
+  }
+  assert.ok(
+    copyRunner,
+    'The real copy helpers require a root or mapped-root temporary-file test environment.',
+  );
+  const copyFixturePrefix = `set -euo pipefail
+umask 077
+${requireCopyPrefixFunction}
+${prepareCopyResumablyFunction}
+fixture_root="$(mktemp -d)"
+[[ "$fixture_root" == /tmp/* && ! -L "$fixture_root" && -d "$fixture_root" ]]
+cleanup_copy_fixture() {
+  chmod -R u+rwX "$fixture_root" 2>/dev/null || true
+  rm -rf -- "$fixture_root"
+}
+trap cleanup_copy_fixture EXIT
+source_file="$fixture_root/source"
+target_file="$fixture_root/target"
+printf 'fetanagent-copy-prefix-v1\\000binary\\377tail\\n' >"$source_file"
+chmod 600 "$source_file"
+expected_sha="$(sha256sum -- "$source_file" | awk '{print $1}')"
+`;
+  for (const [name, fixture] of [
+    [
+      'resumable copy completes a valid byte prefix',
+      `head -c 11 "$source_file" >"$target_file"
+chmod 755 "$target_file"
+require_copy_prefix "$source_file" 600 "$target_file" 755 "$expected_sha"
+prepare_copy_resumably "$source_file" 600 "$target_file" 755 "$expected_sha"
+cmp -s -- "$source_file" "$target_file"
+[[ "$(stat --format='%a:%h' "$target_file")" == '755:1' ]]
+require_copy_prefix "$source_file" 600 "$target_file" 755 "$expected_sha"`,
+    ],
+    [
+      'resumable copy rejects a corrupt byte prefix',
+      `printf 'X' >"$target_file"
+chmod 755 "$target_file"
+before="$(sha256sum -- "$target_file" | awk '{print $1}')"
+! require_copy_prefix "$source_file" 600 "$target_file" 755 "$expected_sha"
+! prepare_copy_resumably "$source_file" 600 "$target_file" 755 "$expected_sha"
+[[ "$(sha256sum -- "$target_file" | awk '{print $1}')" == "$before" ]]`,
+    ],
+    [
+      'resumable copy rejects an oversized target',
+      `cp -- "$source_file" "$target_file"
+printf 'X' >>"$target_file"
+chmod 755 "$target_file"
+before="$(sha256sum -- "$target_file" | awk '{print $1}')"
+! require_copy_prefix "$source_file" 600 "$target_file" 755 "$expected_sha"
+! prepare_copy_resumably "$source_file" 600 "$target_file" 755 "$expected_sha"
+[[ "$(sha256sum -- "$target_file" | awk '{print $1}')" == "$before" ]]`,
+    ],
+    [
+      'resumable copy rejects a partial target with the wrong mode',
+      `head -c 11 "$source_file" >"$target_file"
+chmod 700 "$target_file"
+before="$(sha256sum -- "$target_file" | awk '{print $1}')"
+! require_copy_prefix "$source_file" 600 "$target_file" 755 "$expected_sha"
+! prepare_copy_resumably "$source_file" 600 "$target_file" 755 "$expected_sha"
+[[ "$(sha256sum -- "$target_file" | awk '{print $1}')" == "$before" ]]
+[[ "$(stat --format='%a' "$target_file")" == '700' ]]`,
+    ],
+  ]) {
+    const result = spawnSync(copyRunner.command, copyRunner.args, {
+      input: `${copyFixturePrefix}\n${fixture}\n`,
+      encoding: 'utf8',
+      timeout: 30000,
+    });
+    assert.equal(result.status, 0, `${name}: ${result.stderr || result.stdout}`);
+    checks += 1;
+  }
+}
+const installerStateCase =
+  /case "\$target_state:\$sudoers_state:\$target_installing_state:\$sudoers_installing_state" in[\s\S]*?\nesac/u.exec(
+    installer,
+  )?.[0];
+assert.ok(installerStateCase);
+for (const [name, states, pass] of [
+  ['fresh pair', ['absent', 'absent', 'absent', 'absent'], true],
+  ['fresh target prefix', ['absent', 'absent', 'prefix', 'absent'], true],
+  ['historical predecessor pair', ['predecessor', 'predecessor', 'absent', 'absent'], true],
+  [
+    'historical predecessor target prefix',
+    ['predecessor', 'predecessor', 'prefix', 'absent'],
+    true,
+  ],
+  ['preflight pair', ['preflight', 'preflight', 'absent', 'absent'], true],
+  ['preflight target prefix', ['preflight', 'preflight', 'prefix', 'absent'], true],
+  ['H17 pair', ['h17', 'h17', 'absent', 'absent'], true],
+  ['H17 target prefix', ['h17', 'h17', 'prefix', 'absent'], true],
+  ['successor after fresh target rename', ['successor', 'absent', 'absent', 'absent'], true],
+  ['successor fresh sudo prefix', ['successor', 'absent', 'absent', 'prefix'], true],
+  [
+    'successor after historical predecessor rename',
+    ['successor', 'predecessor', 'absent', 'absent'],
+    true,
+  ],
+  [
+    'successor historical predecessor sudo prefix',
+    ['successor', 'predecessor', 'absent', 'prefix'],
+    true,
+  ],
+  ['successor after preflight rename', ['successor', 'preflight', 'absent', 'absent'], true],
+  ['successor preflight sudo prefix', ['successor', 'preflight', 'absent', 'prefix'], true],
+  ['successor after target rename', ['successor', 'h17', 'absent', 'absent'], true],
+  ['successor sudo prefix', ['successor', 'h17', 'absent', 'prefix'], true],
+  ['completed successor pair', ['successor', 'successor', 'absent', 'absent'], true],
+  ['cross-generation pair', ['h17', 'predecessor', 'absent', 'absent'], false],
+  ['sudo prefix before target rename', ['h17', 'h17', 'absent', 'prefix'], false],
+  ['both temporary copies', ['h17', 'h17', 'prefix', 'prefix'], false],
+  ['stale target prefix after rename', ['successor', 'h17', 'prefix', 'absent'], false],
+  ['stale sudo prefix after completion', ['successor', 'successor', 'absent', 'prefix'], false],
+  ['sudo prefix on fresh pair', ['absent', 'absent', 'absent', 'prefix'], false],
+]) {
+  const [targetState, sudoersState, targetInstallingState, sudoersInstallingState] = states;
+  const result = spawnSync(bash, ['-s'], {
+    input: `set -euo pipefail
+die() { exit 1; }
+target_state='${targetState}'
+sudoers_state='${sudoersState}'
+target_installing_state='${targetInstallingState}'
+sudoers_installing_state='${sudoersInstallingState}'
+${installerStateCase}
+`,
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, pass ? 0 : 1, `${name}: ${result.stderr}`);
+  checks += 1;
+}
 for (const [name, release, armedState, continuousState, pass, expectedTrace] of [
   ['component guard accepts the bounded timer first', 'a'.repeat(40), 'exact', 'reject', true, 'A'],
   [

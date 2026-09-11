@@ -38,7 +38,7 @@ readonly SERVICE='fetanagent-staging-runtime-expiry-stop.service'
 readonly LOCK_ROOT='/run/fetanagent-staging-deploy-helper'
 readonly LOCK="$LOCK_ROOT/mutation.lock"
 readonly HELPER='/usr/local/sbin/fetanagent-staging-deploy-helper'
-readonly HELPER_SHA='b4a5975f97be388b8862e8d21c207815f02708e6476fa5e79b795825b3a01381'
+readonly HELPER_SHA='8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4'
 
 [[ ! -L "$HELPER" && -f "$HELPER" && "$(stat --format='%U:%G:%a:%h' "$HELPER")" == 'root:root:755:1' &&
   "$(sha256sum "$HELPER" | awk '{print $1}')" == "$HELPER_SHA" ]] ||

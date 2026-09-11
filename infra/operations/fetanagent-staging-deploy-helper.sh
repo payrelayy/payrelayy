@@ -68,6 +68,7 @@ readonly KEMERBET_SECURITY_RECOVERY_PREVIEW_BRIDGE_V16_PARENT='/var/lib/fetanage
 readonly KEMERBET_CONTINUOUS_AVAILABILITY_HELPER_BRIDGE_V17_PARENT='/var/lib/fetanagent/kemerbet-continuous-availability-helper-bridge-v17'
 readonly KEMERBET_SHARED_TELEBIRR_INGRESS_HELPER_BRIDGE_V18_PARENT='/var/lib/fetanagent/shared-telebirr-ingress-helper-bridge-v18'
 readonly KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v19'
+readonly KEMERBET_H19_CANONICAL_CAP_GUARD_BRIDGE_V20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
 readonly STAGING_TELEBIRR_ROUTE_INGRESS_GUARD='/usr/local/sbin/fetanagent-production-ingress-h19'
 readonly STAGING_CONTINUOUS_FINALIZER='/usr/local/sbin/fetanagent-staging-continuous-availability'
 readonly STAGING_CONTINUOUS_SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availability'
@@ -4706,6 +4707,38 @@ inspect_kemerbet_h19_route_bridge() {
   KEMERBET_H19_CONTINUOUS_FINALIZER_SHA256=''
   KEMERBET_H19_CONTINUOUS_SUDOERS_SHA256=''
   KEMERBET_H19_INGRESS_GUARD_SHA256=''
+  if [[ -e "$KEMERBET_H19_CANONICAL_CAP_GUARD_BRIDGE_V20_PARENT" ||
+    -L "$KEMERBET_H19_CANONICAL_CAP_GUARD_BRIDGE_V20_PARENT" ]]; then
+    KEMERBET_H19_ROUTE_BRIDGE_STATE='invalid'
+    inspection="$(env -i PATH="$SAFE_PATH" HOME='/root' SUDO_USER="$EXPECTED_SUDO_USER" \
+      "$STAGING_TELEBIRR_ROUTE_INGRESS_GUARD" record)" || return 0
+    mapfile -t inspection_lines <<<"$inspection"
+    [[ "${#inspection_lines[@]}" -eq 11 &&
+      "${inspection_lines[0]}" == 'active' &&
+      "${inspection_lines[1]}" =~ ^[0-9a-f]{40}$ &&
+      "${inspection_lines[2]}" =~ ^[0-9a-f]{40}$ &&
+      "${inspection_lines[3]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[4]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[5]}" =~ ^[0-9a-f]{40}$ &&
+      "${inspection_lines[6]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[7]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[8]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[9]}" =~ ^[0-9a-f]{64}$ &&
+      "${inspection_lines[10]}" =~ ^[0-9a-f]{64}$ ]] || return 0
+    KEMERBET_H19_ROUTE_BRIDGE_STATE="${inspection_lines[0]}"
+    KEMERBET_H19_ROUTE_BRIDGE_RELEASE="${inspection_lines[1]}"
+    KEMERBET_H19_CANDIDATE_GATEWAY_RELEASE="${inspection_lines[2]}"
+    KEMERBET_H19_ROUTE_BRIDGE_HELPER_SHA256="${inspection_lines[3]}"
+    KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER_SHA256="${inspection_lines[4]}"
+    KEMERBET_H19_ROUTE_BRIDGE_H18_RELEASE="${inspection_lines[5]}"
+    KEMERBET_H19_ROUTE_BRIDGE_H18_INTENT_SHA256="${inspection_lines[6]}"
+    KEMERBET_H19_ROUTE_BRIDGE_H18_COMPLETION_SHA256="${inspection_lines[7]}"
+    KEMERBET_H19_CONTINUOUS_FINALIZER_SHA256="${inspection_lines[8]}"
+    KEMERBET_H19_CONTINUOUS_SUDOERS_SHA256="${inspection_lines[9]}"
+    KEMERBET_H19_INGRESS_GUARD_SHA256="${inspection_lines[10]}"
+    KEMERBET_H19_ROUTE_BRIDGE_PREDECESSOR_HELPER="${KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT}/${inspection_lines[1]}/predecessor-helper"
+    return 0
+  fi
   if [[ ! -e "$KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT" &&
     ! -L "$KEMERBET_STAGING_TELEBIRR_ROUTE_HELPER_BRIDGE_V19_PARENT" ]]; then
     return 0

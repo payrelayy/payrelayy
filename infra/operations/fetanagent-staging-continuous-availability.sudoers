@@ -1,2 +1,2 @@
-fetanagent-admin ALL=(root) NOPASSWD: sha256:a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39 /usr/local/sbin/fetanagent-staging-continuous-availability preflight *
-fetanagent-admin ALL=(root) NOPASSWD: sha256:a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39 /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry *
+fetanagent-admin ALL=(root) NOPASSWD: sha256:1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f /usr/local/sbin/fetanagent-staging-continuous-availability preflight *
+fetanagent-admin ALL=(root) NOPASSWD: sha256:1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry *

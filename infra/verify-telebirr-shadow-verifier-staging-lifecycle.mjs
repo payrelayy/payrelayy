@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -65,6 +66,7 @@ assert.match(
 );
 assert.equal((sudoers.match(new RegExp(`sha256:${helperDigest}`, 'gu')) ?? []).length, 8);
 assert.doesNotMatch(sudoers, /NOPASSWD:\s*ALL|\/bin\/(?:ba)?sh|docker/u);
+assert.doesNotMatch(sudoers, /fdexec=never/u);
 
 assert.match(workflow, /^on:\r?\n\s{2}workflow_dispatch:/mu);
 assert.doesNotMatch(workflow, /^\s{2}(?:push|pull_request|schedule|workflow_run):/mu);
@@ -249,7 +251,138 @@ assert.match(helper, /bridge\|true\|false\|false/u);
 assert.match(helper, /container rm --force/u);
 assert.match(helper, /require_no_project_containers/u);
 assert.match(helper, /an active shadow-verifier release must be explicitly stopped first/u);
+assert.match(helper, /invoked_from_installed_file "\$0" "\$@"/u);
+assert.match(helper, /^require_installed_helper "\$@"$/mu);
+assert.match(helper, /"\$\{SUDO_COMMAND:-\}" == "\$expected_sudo_command"/u);
+assert.match(helper, /"\$argument" != \*\[\[:space:\]\]\*/u);
+assert.match(helper, /\^\/\(proc\/self\/fd\|dev\/fd\)\/\[0-9\]\+\$/u);
+assert.match(helper, /stat -L --format='%u:%g:%a:%h:%d:%i' -- "\$invoked_path"/u);
+assert.match(helper, /the helper invocation does not identify its installed file/u);
+assert.doesNotMatch(helper, /"\$0" == "\$HELPER_PATH"/u);
 assert.doesNotMatch(helper, /feature_switches|alter role|\bpsql\b/iu);
+
+if (process.platform !== 'win32') {
+  const invocationFunction = /invoked_from_installed_file\(\) \{[\s\S]*?\n\}/u.exec(helper)?.[0];
+  assert.ok(invocationFunction);
+  const digest = 'a'.repeat(64);
+  for (const [name, helperPath, invokedPath, sudoUser, sudoCommand, invocation, pass] of [
+    [
+      'installed path',
+      '/bin/bash',
+      '$HELPER_PATH',
+      'fetanagent-admin',
+      '',
+      `verify ${digest}`,
+      true,
+    ],
+    [
+      'sudo digest proc descriptor',
+      '/bin/bash',
+      '/proc/self/fd/7',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      true,
+    ],
+    [
+      'sudo digest dev descriptor',
+      '/bin/bash',
+      '/dev/fd/7',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      true,
+    ],
+    [
+      'unrelated descriptor',
+      '/bin/bash',
+      '/dev/fd/8',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'stale helper descriptor',
+      '/bin/sh',
+      '/dev/fd/7',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'different invoking identity',
+      '/bin/bash',
+      '/dev/fd/7',
+      'unrelated-user',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'missing original command',
+      '/bin/bash',
+      '/dev/fd/7',
+      'fetanagent-admin',
+      '',
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'different original command',
+      '/bin/bash',
+      '/dev/fd/7',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest} extra`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'non-descriptor alias',
+      '/bin/bash',
+      '/tmp/unreviewed-shadow-helper',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'noncanonical proc descriptor',
+      '/bin/bash',
+      '/proc/$$/fd/7',
+      'fetanagent-admin',
+      `$HELPER_PATH verify ${digest}`,
+      `verify ${digest}`,
+      false,
+    ],
+    [
+      'whitespace-bearing argument',
+      '/bin/bash',
+      '/dev/fd/7',
+      'fetanagent-admin',
+      '$HELPER_PATH verify value with spaces',
+      "verify 'value with spaces'",
+      false,
+    ],
+  ]) {
+    const result = spawnSync('/bin/bash', ['-s'], {
+      input: `set -euo pipefail
+HELPER_PATH=${helperPath}
+EXPECTED_SUDO_USER=fetanagent-admin
+SUDO_USER=${sudoUser}
+SUDO_COMMAND="${sudoCommand}"
+exec 7</bin/bash
+exec 8</etc/hosts
+${invocationFunction}
+invoked_from_installed_file "${invokedPath}" ${invocation}
+`,
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+    assert.equal(result.status === 0, pass, `${name}: ${result.stderr}`);
+  }
+}
 
 assert.match(archiveValidator, /docker-save-legacy-v1/u);
 assert.match(archiveValidator, /docker-save-oci-v1/u);
@@ -392,6 +525,13 @@ assert.match(runbook, /PLAN STAGING SHADOW VERIFIER/u);
 assert.match(runbook, /DEPLOY STAGING SHADOW VERIFIER NO MONEY/u);
 assert.match(runbook, /STATUS STAGING SHADOW VERIFIER/u);
 assert.match(runbook, /STOP STAGING SHADOW VERIFIER/u);
+assert.match(runbook, /checksum-bound descriptor execution/iu);
+assert.match(runbook, /\/proc\/self\/fd\/N.*\/dev\/fd\/N/su);
+assert.match(runbook, /fdexec=never/u);
+assert.match(runbook, /exact sudo-reported original command/iu);
+assert.match(runbook, /device, and inode match the canonical\s+root-owned installed helper/iu);
+assert.match(runbook, /intermediate mismatch denies every helper command/iu);
+assert.match(runbook, /sudoers fdexec documentation/iu);
 assert.match(runbook, /root-owned public key/iu);
 assert.match(runbook, /every unrelated Docker tag/iu);
 assert.match(runbook, /final, separate administrator database status query/iu);

@@ -61,6 +61,17 @@ root console. GitHub Actions cannot install or widen its own root capability.
    Do not grant general
    Docker, shell, PostgreSQL, or filesystem sudo authority.
 
+Keep sudo's default checksum-bound descriptor execution enabled. When sudo verifies a script digest,
+it may invoke the interpreter with an open `/proc/self/fd/N` or `/dev/fd/N` path instead of the
+installed pathname. The helper accepts either its exact installed pathname or those descriptor
+forms only for the dedicated sudo identity, the exact sudo-reported original command, and an
+executing file whose owner, group, mode, link count, device, and inode match the canonical
+root-owned installed helper. Do not configure `fdexec=never`, and test `verify` through the real
+`fetanagent-admin` sudo grant rather than only through a direct root shell. Replace an installed
+helper and its digest-pinned sudoers policy together from the authenticated root console; either
+intermediate mismatch denies every helper command. See the
+[sudoers fdexec documentation](https://www.sudo.ws/docs/man/1.9.14/sudoers.man.pdf).
+
 The helper accepts only `verify`, `preflight`, `prepare-incoming`, `discard`, `install`, `start`,
 `status`, and `stop`. It has no SQL, migration, feature-switch, provider, executor, settlement, or
 money-action primitive.

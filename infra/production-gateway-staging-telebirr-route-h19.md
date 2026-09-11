@@ -95,8 +95,11 @@ root:root 0600 fetanagent-production-ingress-h19.next
 
 Verify each SHA-256 against the final merged files. Keep staging and the TeleBirr device pilot stopped.
 The production stack must still be the exact all-baseline H18 state, the expiry timer must remain
-inactive and disabled, the two durable staging volumes must be holder-free, and the gateway-transition
-namespace must not exist. Run the staged installer directly as root with:
+in a coherent stopped state, the two durable staging volumes must be holder-free, and the
+gateway-transition namespace must not exist. H19 accepts either the exact root-owned, loaded,
+inactive, disabled timer/service pair left by continuous-availability finalization or the exact fully
+absent pair produced by the staging helper's `stop` command. A mixed pair or filesystem residue fails
+closed. Run the staged installer directly as root with:
 
 ```text
 fetanagent-staging-telebirr-route-helper-bridge-v19.sh \

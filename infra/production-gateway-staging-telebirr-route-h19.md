@@ -166,6 +166,50 @@ chain. Its only accepted runtime capability value is Docker's canonical
 the identical H20 installer and arguments. Do not edit either provenance record or restore a sudo
 grant manually.
 
+## H21 stable immutable-nine recovery
+
+The first authorized gateway transition published its exact intent and then failed closed before
+Compose ran. No container changed. The failure came from hashing Docker's complete inspection object
+for the nine non-gateway services: health-check log entries rotate continuously, and Docker can return
+the same mount array in different orders. Those volatile representations made an unchanged runtime
+produce different SHA-256 values.
+
+H21 preserves that interrupted intent byte-for-byte. It archives the H20 ingress guard and the sealed
+transition intent, then replaces only the guard with a version that removes
+`.State.Health.Log`, sorts every `.Mounts` array by all mount identity fields, and sorts containers by
+name before hashing. The H21 record binds the legacy raw digest
+`6aa4f35860635609b54e0884810b16fdb10a39275b687a8f678e5af86ed00c42` to the independently repeated
+canonical digest `a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9` only for the archived intent
+whose SHA-256 is `b0dd0ff0f66d961448e6e214feea8806627bf9f5aac1995436b2105f3fce6537`.
+No other recorded digest receives that translation.
+
+Stage these two files from the exact merged H21 commit in a root-owned mode-`0700` directory named
+`/root/fetanagent-h19-stable-nine-guard-bridge-v21-H21_MERGE_SHA/`:
+
+```text
+root:root 0700 fetanagent-h19-stable-nine-guard-bridge-v21.sh
+root:root 0600 fetanagent-production-ingress-h19.next
+```
+
+Run the staged installer directly as root:
+
+```text
+fetanagent-h19-stable-nine-guard-bridge-v21.sh \
+  H21_MERGE_SHA \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  b0dd0ff0f66d961448e6e214feea8806627bf9f5aac1995436b2105f3fce6537 \
+  a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9 \
+  sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8 \
+  I-UNDERSTAND-THIS-CORRECTS-H19-STABLE-NINE-DIGEST-WITH-NO-PRODUCTION-OR-MONEY-MUTATION
+```
+
+The installer isolates the staging deployment grant, acquires the existing shared mutation lock,
+requires the exact H19 and H20 evidence chain, and rechecks the protected baseline, shared ingress,
+TLS leaf, stopped staging projects, canonical nine-service digest, and interrupted intent. It performs
+no Compose or database operation. The grant is restored only after the installed successor guard's
+`recovery-inspect` mode independently accepts the full state. If installation is interrupted, rerun
+the identical staged installer and arguments; never edit the transition or provenance records.
+
 ## Build and gateway-only transition
 
 Build the production gateway image from the final H19 merged commit using the existing reviewed image
@@ -236,6 +280,7 @@ node infra/verify-telebirr-device-pilot-deployment.mjs
 node infra/verify-shared-telebirr-ingress-helper-bridge-v18.mjs
 node infra/verify-staging-telebirr-route-helper-bridge-v19.mjs
 node infra/verify-h19-canonical-cap-guard-bridge-v20.mjs
+node infra/verify-h19-stable-nine-guard-bridge-v21.mjs
 pnpm test:infra
 pnpm lint
 ```
@@ -250,3 +295,8 @@ The H20 verifier additionally binds all four corrected successor digests to repo
 their predecessors to the exact terminal H19 chain, tests every allowed and rejected recovery
 topology, requires immutable H19 evidence, and checks that the correction contains no production
 container, database, provider, or money mutation.
+
+The H21 verifier pins the successor guard to repository bytes, verifies the one-record legacy-to-
+canonical digest bridge, checks deterministic health-log removal and mount/container ordering,
+requires byte-for-byte preservation of the interrupted transition intent, and confirms the installer
+contains no Compose, Supabase, database, or money action.

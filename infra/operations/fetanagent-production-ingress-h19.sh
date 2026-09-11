@@ -10,6 +10,7 @@ readonly STAGING_HELPER='/usr/local/sbin/fetanagent-staging-deploy-helper'
 readonly CONTINUOUS_FINALIZER='/usr/local/sbin/fetanagent-staging-continuous-availability'
 readonly CONTINUOUS_SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availability'
 readonly H19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v19'
+readonly H20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
 readonly TRANSITION_PARENT='/var/lib/fetanagent/production-gateway-staging-route-v1'
 readonly PRODUCTION_ROOT='/srv/fetanagent/production'
 readonly PRODUCTION_RELEASE_ROOT="$PRODUCTION_ROOT/releases"
@@ -57,7 +58,7 @@ require_exact_droplet() {
       "$METADATA/interfaces/public/0/ipv4/address")" == "$EXPECTED_PUBLIC_IPV4" ]]
 }
 
-read_h19_record() {
+read_h19_record_v19() {
   local output
   output="$(env -i PATH="$SAFE_PATH" python3 -I - \
     "$H19_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
@@ -232,6 +233,248 @@ PY
   done
 }
 
+read_h19_record() {
+  local output
+  output="$(env -i PATH="$SAFE_PATH" python3 -I - \
+    "$H19_PARENT" "$H20_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
+    "$CONTINUOUS_SUDOERS" "$INSTALLED_PATH" <<'PY'
+import hashlib
+import os
+import re
+import stat
+import sys
+
+h19_parent, h20_parent, helper, finalizer, sudoers, guard = sys.argv[1:]
+release_re = re.compile(r'[0-9a-f]{40}')
+sha_re = re.compile(r'[0-9a-f]{64}')
+protected = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
+h19_release = '90b1f059577682b6bc458d239f6bdcb591077085'
+h19_intent_sha = '51e0f03017e8986d5bd76bbb97759437d86011ce448c34999ef1bb9836d056a3'
+h19_completion_sha = 'fdccf275bb43f95ea140411c0cee044a6c8e13d884dae640c64123936a8119d5'
+h19_helper_sha = 'b4a5975f97be388b8862e8d21c207815f02708e6476fa5e79b795825b3a01381'
+h19_finalizer_sha = 'a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39'
+h19_sudoers_sha = '5e92a8c42d6b44ae22fa837efc9b35e54033a00a1e830a7bad8de2d3382f3796'
+h19_guard_sha = '13e6f430d1fb6e83736265055bed9569431403411e5d459fd86c1d32b00adced'
+h18_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
+h18_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
+h18_sudoers_sha = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958'
+stopped_sha = 'e6bc16831fd5172076bd02b655dfa1605cf622aa23bf576e1a28b8ee4e3502b5'
+production_sha = '5dad1d4193f55450bb0b50c5132fd3ae91c64e6978cb6318bbfdbdb0846b7b00'
+ingress_sha = 'c1161bba74e998ddc1282e23b7e269dcd4b552e0e39532d914ace73b1c05378a'
+tls_sha = '2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8'
+baseline_caddy = '181992c8958397d63a7ae34137d51d4186ce0383c8cfd2bf8df137da11e12f24'
+candidate_caddy = 'afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
+
+
+def exact_file(path, mode, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(descriptor)
+        named = os.lstat(path)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode), before.st_nlink)
+            != (0, 0, mode, 1)
+            or (before.st_dev, before.st_ino) != (named.st_dev, named.st_ino)
+            or before.st_size <= 0
+            or before.st_size > maximum
+            or os.path.realpath(path) != path
+        ):
+            raise RuntimeError()
+        data = os.pread(descriptor, maximum + 1, 0)
+        after = os.fstat(descriptor)
+        named_after = os.lstat(path)
+        if (
+            len(data) != before.st_size
+            or (
+                before.st_dev, before.st_ino, before.st_mode, before.st_uid,
+                before.st_gid, before.st_nlink, before.st_size, before.st_mtime_ns,
+            )
+            != (
+                after.st_dev, after.st_ino, after.st_mode, after.st_uid,
+                after.st_gid, after.st_nlink, after.st_size, after.st_mtime_ns,
+            )
+            or (after.st_dev, after.st_ino) != (named_after.st_dev, named_after.st_ino)
+        ):
+            raise RuntimeError()
+        return data
+    finally:
+        os.close(descriptor)
+
+
+def exact_dir(path, entries):
+    value = os.lstat(path)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (0, 0, 0o700)
+        or os.path.realpath(path) != path
+        or sorted(os.listdir(path)) != entries
+    ):
+        raise RuntimeError()
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+try:
+    exact_dir(h19_parent, [h19_release])
+    h19_root = f'{h19_parent}/{h19_release}'
+    exact_dir(h19_root, [
+        'completed-v1', 'intent-v1', 'predecessor-continuous-finalizer',
+        'predecessor-continuous-sudoers', 'predecessor-helper',
+    ])
+    h19_intent_data = exact_file(f'{h19_root}/intent-v1', 0o600, 4096)
+    h19_completion_data = exact_file(f'{h19_root}/completed-v1', 0o600, 4096)
+    h19_archived_helper = exact_file(f'{h19_root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    h19_archived_finalizer = exact_file(
+        f'{h19_root}/predecessor-continuous-finalizer', 0o400, 2 * 1024 * 1024
+    )
+    h19_archived_sudoers = exact_file(
+        f'{h19_root}/predecessor-continuous-sudoers', 0o400, 64 * 1024
+    )
+    if (
+        digest(h19_intent_data) != h19_intent_sha
+        or digest(h19_completion_data) != h19_completion_sha
+        or digest(h19_archived_helper) != h18_helper_sha
+        or digest(h19_archived_finalizer) != h18_finalizer_sha
+        or digest(h19_archived_sudoers) != h18_sudoers_sha
+    ):
+        raise RuntimeError()
+    h19_intent = h19_intent_data.decode('ascii').splitlines()
+    h18_release = h19_intent[4].split('=', 1)[1] if len(h19_intent) > 4 else ''
+    h18_intent_sha = h19_intent[12].split('=', 1)[1] if len(h19_intent) > 12 else ''
+    h18_completion_sha = h19_intent[13].split('=', 1)[1] if len(h19_intent) > 13 else ''
+    if (
+        release_re.fullmatch(h18_release) is None
+        or sha_re.fullmatch(h18_intent_sha) is None
+        or sha_re.fullmatch(h18_completion_sha) is None
+    ):
+        raise RuntimeError()
+
+    h20_children = os.listdir(h20_parent)
+    if len(h20_children) != 1 or release_re.fullmatch(h20_children[0]) is None:
+        raise RuntimeError()
+    h20_release = h20_children[0]
+    if h20_release in (protected, h19_release):
+        raise RuntimeError()
+    exact_dir(h20_parent, [h20_release])
+    h20_root = f'{h20_parent}/{h20_release}'
+    exact_dir(h20_root, [
+        'completed-v1', 'intent-v1', 'predecessor-continuous-finalizer',
+        'predecessor-continuous-sudoers', 'predecessor-helper',
+        'predecessor-ingress-guard',
+    ])
+    intent_data = exact_file(f'{h20_root}/intent-v1', 0o600, 4096)
+    completion_data = exact_file(f'{h20_root}/completed-v1', 0o600, 4096)
+    archived_helper = exact_file(f'{h20_root}/predecessor-helper', 0o400, 2 * 1024 * 1024)
+    archived_finalizer = exact_file(
+        f'{h20_root}/predecessor-continuous-finalizer', 0o400, 2 * 1024 * 1024
+    )
+    archived_sudoers = exact_file(
+        f'{h20_root}/predecessor-continuous-sudoers', 0o400, 64 * 1024
+    )
+    archived_guard = exact_file(
+        f'{h20_root}/predecessor-ingress-guard', 0o400, 2 * 1024 * 1024
+    )
+    intent = intent_data.decode('ascii').splitlines()
+    completion = completion_data.decode('ascii').splitlines()
+    successor_helper_sha = intent[8].split('=', 1)[1] if len(intent) > 8 else ''
+    successor_finalizer_sha = intent[10].split('=', 1)[1] if len(intent) > 10 else ''
+    successor_sudoers_sha = intent[12].split('=', 1)[1] if len(intent) > 12 else ''
+    successor_guard_sha = intent[14].split('=', 1)[1] if len(intent) > 14 else ''
+    expected = [
+        'contract=fetanagent-h19-canonical-cap-guard-bridge-v20',
+        'state=authorized',
+        f'bridge_release={h20_release}',
+        f'h19_bridge_release={h19_release}',
+        f'candidate_gateway_release={h19_release}',
+        f'h19_bridge_intent_sha256={h19_intent_sha}',
+        f'h19_bridge_completion_sha256={h19_completion_sha}',
+        f'predecessor_helper_sha256={h19_helper_sha}',
+        f'successor_helper_sha256={successor_helper_sha}',
+        f'predecessor_continuous_finalizer_sha256={h19_finalizer_sha}',
+        f'successor_continuous_finalizer_sha256={successor_finalizer_sha}',
+        f'predecessor_continuous_sudoers_sha256={h19_sudoers_sha}',
+        f'successor_continuous_sudoers_sha256={successor_sudoers_sha}',
+        f'predecessor_ingress_guard_sha256={h19_guard_sha}',
+        f'successor_ingress_guard_sha256={successor_guard_sha}',
+        f'stopped_staging_boundary_sha256={stopped_sha}',
+        f'baseline_production_boundary_sha256={production_sha}',
+        f'baseline_shared_ingress_boundary_sha256={ingress_sha}',
+        f'baseline_tls_leaf_sha256={tls_sha}',
+        f'baseline_gateway_caddyfile_sha256={baseline_caddy}',
+        f'candidate_gateway_caddyfile_sha256={candidate_caddy}',
+        'staging_runtime_stopped=true',
+        'shared_ingress_network=fetanagent-telebirr-device-ingress',
+        'shared_ingress_network_id=5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738',
+        f'protected_production_release={protected}',
+        'accepted_production_ingress_states=baseline-or-reviewed-gateway-only',
+        'correction=docker-capability-canonicalization',
+        'h19_terminal_evidence_preserved=true',
+        'continuous_pair_rotated=true',
+        'production_runtime_mutation=false',
+        'database_mutation=false',
+        'financial_actions_mode=disabled',
+        'transfer_enabled=false',
+        'amount_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        len(intent) != 35
+        or len(completion) != 36
+        or any(sha_re.fullmatch(value) is None for value in (
+            successor_helper_sha, successor_finalizer_sha,
+            successor_sudoers_sha, successor_guard_sha,
+        ))
+        or successor_helper_sha == h19_helper_sha
+        or successor_finalizer_sha == h19_finalizer_sha
+        or successor_sudoers_sha == h19_sudoers_sha
+        or successor_guard_sha == h19_guard_sha
+        or intent != expected
+        or completion[0] != intent[0]
+        or completion[1] != 'state=canonical-cap-guard-installed'
+        or completion[2:35] != intent[2:35]
+        or completion[35] != f'bridge_intent_sha256={digest(intent_data)}'
+        or intent_data != ('\n'.join(intent) + '\n').encode('ascii')
+        or completion_data != ('\n'.join(completion) + '\n').encode('ascii')
+        or digest(archived_helper) != h19_helper_sha
+        or digest(archived_finalizer) != h19_finalizer_sha
+        or digest(archived_sudoers) != h19_sudoers_sha
+        or digest(archived_guard) != h19_guard_sha
+        or digest(exact_file(helper, 0o755, 2 * 1024 * 1024)) != successor_helper_sha
+        or digest(exact_file(finalizer, 0o755, 2 * 1024 * 1024)) != successor_finalizer_sha
+        or digest(exact_file(sudoers, 0o440, 64 * 1024)) != successor_sudoers_sha
+        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != successor_guard_sha
+    ):
+        raise RuntimeError()
+    print(h19_release)
+    print(h19_release)
+    print(successor_helper_sha)
+    print(successor_finalizer_sha)
+    print(successor_sudoers_sha)
+    print(successor_guard_sha)
+    print(h18_release)
+    print(h18_intent_sha)
+    print(h18_completion_sha)
+    print(production_sha)
+    print(ingress_sha)
+    print(tls_sha)
+    print(h19_intent_sha)
+    print(h19_completion_sha)
+except Exception:
+    raise SystemExit(1)
+PY
+)" || return 1
+  mapfile -t H19_RECORD <<<"$output"
+  [[ "${#H19_RECORD[@]}" -eq 14 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[1]}" =~ ^[0-9a-f]{40}$ ]] || return 1
+  local value
+  for value in "${H19_RECORD[@]:2}"; do
+    [[ "$value" =~ ^[0-9a-f]{64}$ || "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+  done
+}
+
 production_container_ids() {
   docker_local container ls --all --quiet --no-trunc \
     --filter "label=com.docker.compose.project=$PRODUCTION_PROJECT" | LC_ALL=C sort
@@ -282,7 +525,7 @@ require_production_contract() {
              startswith("KEMERBET_FINAL_ACTION_ENABLED="))] | length) == 0 and
            ([.Config.Env[] | select(startswith("FETANAGENT_COMPANION_BRIDGE_UPSTREAM="))] ==
              ["FETANAGENT_COMPANION_BRIDGE_UPSTREAM=production-companion-device-bridge:8085"]) and
-           .HostConfig.CapAdd == ["NET_BIND_SERVICE"] and
+           .HostConfig.CapAdd == ["CAP_NET_BIND_SERVICE"] and
            (.HostConfig.Binds | sort) == [
              "/var/lib/fetanagent-gateway/config:/config:rw",
              "/var/lib/fetanagent-gateway/data:/data:rw"
@@ -1071,6 +1314,15 @@ read_h19_record || die 'the completed H19 provenance and installed release pair 
 
 mode="${1:-}"
 case "$mode" in
+  record)
+    [[ $# -eq 1 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == 'fetanagent-admin' ) ]] ||
+      die 'record inspection requires a trusted caller and no arguments'
+    printf '%s\n' \
+      'active' "${H19_RECORD[0]}" "${H19_RECORD[1]}" "${H19_RECORD[2]}" \
+      '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267' \
+      "${H19_RECORD[6]}" "${H19_RECORD[7]}" "${H19_RECORD[8]}" \
+      "${H19_RECORD[3]}" "${H19_RECORD[4]}" "${H19_RECORD[5]}"
+    ;;
   inspect)
     [[ $# -eq 2 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == 'fetanagent-admin' ) ]] ||
       die 'inspect requires one expected gateway release and a trusted caller'
@@ -1220,5 +1472,5 @@ case "$mode" in
     require_current_state "$PROTECTED_RELEASE" || die 'the rolled-back baseline did not re-attest'
     printf '%s\n' 'H19 gateway transition rolled back to the protected baseline; money moved=false.'
     ;;
-  *) die 'expected inspect, transition, or rollback' ;;
+  *) die 'expected record, inspect, transition, or rollback' ;;
 esac

@@ -117,6 +117,55 @@ environment overrides, acquires the shared mutation lock, performs no production
 restores the deployment capability only after the new helper itself revalidates the full H19→H18→H17
 →H16→H14 chain and baseline ingress state.
 
+## H20 canonical-capability correction
+
+Docker Compose accepts `NET_BIND_SERVICE` in YAML but Docker reports the resulting runtime capability
+as `CAP_NET_BIND_SERVICE` in container inspection. The original H19 guard compared the runtime value
+to the Compose spelling and therefore rejected the otherwise exact protected production baseline. It
+failed closed before any production mutation and left the staging deployment grant disabled, as
+designed.
+
+H20 corrects that comparison without rewriting or deleting H19 evidence and without authorizing a new
+gateway candidate. The H19 candidate remains
+`90b1f059577682b6bc458d239f6bdcb591077085`. H20 is a separate provenance release for the operational
+correction only. Its installer requires the exact terminal H19 release, H19 intent SHA-256
+`51e0f03017e8986d5bd76bbb97759437d86011ce448c34999ef1bb9836d056a3`, H19 completion SHA-256
+`fdccf275bb43f95ea140411c0cee044a6c8e13d884dae640c64123936a8119d5`, and all four H19 artifact
+digests. It also requires the production, shared-ingress, TLS, stopped-staging, and Caddyfile
+fingerprints sealed by H19.
+
+Stage these five files from the exact merged H20 correction commit in a root-owned mode-`0700`
+directory named `/root/fetanagent-h19-canonical-cap-guard-bridge-v20-H20_MERGE_SHA/`:
+
+```text
+root:root 0700 fetanagent-h19-canonical-cap-guard-bridge-v20.sh
+root:root 0600 fetanagent-staging-deploy-helper.next
+root:root 0600 fetanagent-staging-continuous-availability.next
+root:root 0600 fetanagent-staging-continuous-availability.sudoers.next
+root:root 0600 fetanagent-production-ingress-h19.next
+```
+
+Run the staged installer directly as root:
+
+```text
+fetanagent-h19-canonical-cap-guard-bridge-v20.sh \
+  H20_MERGE_SHA \
+  SUCCESSOR_HELPER_SHA256 \
+  SUCCESSOR_CONTINUOUS_FINALIZER_SHA256 \
+  SUCCESSOR_CONTINUOUS_SUDOERS_SHA256 \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  I-UNDERSTAND-THIS-CORRECTS-H19-CAPABILITY-CANONICALIZATION-WITH-NO-PRODUCTION-OR-MONEY-MUTATION
+```
+
+The H20 transaction archives the exact H19 helper, continuous finalizer, continuous sudoers, and
+ingress guard; publishes a root-only record linked to the immutable H19 intent and completion;
+atomically rotates the corrected four-file checksum chain; revalidates the unchanged H19 baseline;
+and restores the disabled deployment grant only after the installed helper and guard attest the full
+chain. Its only accepted runtime capability value is Docker's canonical
+`["CAP_NET_BIND_SERVICE"]`; the non-canonical inspection value remains rejected. If interrupted, rerun
+the identical H20 installer and arguments. Do not edit either provenance record or restore a sudo
+grant manually.
+
 ## Build and gateway-only transition
 
 Build the production gateway image from the final H19 merged commit using the existing reviewed image
@@ -186,6 +235,7 @@ node infra/test-telebirr-gateway-routing.mjs fetanagent-gateway:ci
 node infra/verify-telebirr-device-pilot-deployment.mjs
 node infra/verify-shared-telebirr-ingress-helper-bridge-v18.mjs
 node infra/verify-staging-telebirr-route-helper-bridge-v19.mjs
+node infra/verify-h19-canonical-cap-guard-bridge-v20.mjs
 pnpm test:infra
 pnpm lint
 ```
@@ -195,3 +245,8 @@ and rejected installation topologies, checks exact provenance field order and le
 two-state revision logic and image-ID binding, and rejects production-wide compose, database, or money
 operations. The gateway routing suite separately executes the Caddy matcher matrix, including
 duplicate-header and malformed-target adversarial cases.
+
+The H20 verifier additionally binds all four corrected successor digests to repository bytes, binds
+their predecessors to the exact terminal H19 chain, tests every allowed and rejected recovery
+topology, requires immutable H19 evidence, and checks that the correction contains no production
+container, database, provider, or money mutation.

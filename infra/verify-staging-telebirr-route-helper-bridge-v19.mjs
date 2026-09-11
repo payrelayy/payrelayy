@@ -45,6 +45,10 @@ const protectedRelease = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10';
 const predecessorHelper = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267';
 const predecessorFinalizer = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea';
 const predecessorSudoers = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958';
+const h19SuccessorHelper = 'b4a5975f97be388b8862e8d21c207815f02708e6476fa5e79b795825b3a01381';
+const h19SuccessorFinalizer = 'a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39';
+const h19SuccessorSudoers = '5e92a8c42d6b44ae22fa837efc9b35e54033a00a1e830a7bad8de2d3382f3796';
+const h19IngressGuard = '13e6f430d1fb6e83736265055bed9569431403411e5d459fd86c1d32b00adced';
 const baselineCaddy = '181992c8958397d63a7ae34137d51d4186ce0383c8cfd2bf8df137da11e12f24';
 const candidateCaddy = 'afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616';
 const networkId = '5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738';
@@ -52,10 +56,10 @@ const protectedCompose = '98d7e763754868ba978d5c042c722664a1c1aec6f85e9011410d74
 
 assert.equal(caddyDigest, candidateCaddy, 'H19 must pin the exact reviewed LF Caddyfile');
 for (const [name, digest] of [
-  ['REVIEWED_SUCCESSOR_HELPER_SHA256', helperDigest],
-  ['REVIEWED_SUCCESSOR_FINALIZER_SHA256', finalizerDigest],
-  ['REVIEWED_SUCCESSOR_SUDOERS_SHA256', sudoersDigest],
-  ['REVIEWED_INGRESS_GUARD_SHA256', guardDigest],
+  ['REVIEWED_SUCCESSOR_HELPER_SHA256', h19SuccessorHelper],
+  ['REVIEWED_SUCCESSOR_FINALIZER_SHA256', h19SuccessorFinalizer],
+  ['REVIEWED_SUCCESSOR_SUDOERS_SHA256', h19SuccessorSudoers],
+  ['REVIEWED_INGRESS_GUARD_SHA256', h19IngressGuard],
 ]) {
   assert.match(installer, new RegExp(`^readonly ${name}='${digest}'$`, 'mu'));
 }
@@ -205,6 +209,7 @@ for (const invariant of [
   'KEMERBET_FINAL_ACTION_ENABLED=false',
   '.HostConfig.ReadonlyRootfs == true',
   '.HostConfig.CapDrop == ["ALL"]',
+  '.HostConfig.CapAdd == ["CAP_NET_BIND_SERVICE"]',
   'FETANAGENT_COMPANION_BRIDGE_UPSTREAM=production-companion-device-bridge:8085',
   '/var/lib/fetanagent-gateway/config:/config:rw',
   '/var/lib/fetanagent-gateway/data:/data:rw',
@@ -219,6 +224,7 @@ for (const invariant of [
 ]) {
   assert.ok(productionContract.includes(invariant), `missing production invariant: ${invariant}`);
 }
+assert.doesNotMatch(productionContract, /\.HostConfig\.CapAdd == \["NET_BIND_SERVICE"\]/u);
 assert.match(shellFunction(guard, 'production_inspection'), /"\$\{#PRODUCTION_IDS\[@\]\}" -eq 10/u);
 for (const name of [
   'production_boundary_digest',
@@ -298,7 +304,7 @@ const terminalRecord = shellFunction(guard, 'require_transition_record');
 assert.match(terminalRecord, /len\(intent\)!=22 or len\(result\)!=27/u);
 assert.match(terminalRecord, /expected_post_image = candidate_image if state == 'completed'/u);
 assert.match(terminalRecord, /result\[25\]!=f'post_gateway_image_id=\{expected_post_image\}'/u);
-const h19GuardRecord = shellFunction(guard, 'read_h19_record');
+const h19GuardRecord = shellFunction(guard, 'read_h19_record_v19');
 for (const archiveInvariant of [
   'hashlib.sha256(archived_helper).hexdigest() != predecessor_helper',
   'hashlib.sha256(archived_finalizer).hexdigest() != predecessor_finalizer',

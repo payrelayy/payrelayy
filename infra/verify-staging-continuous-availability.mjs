@@ -35,22 +35,97 @@ const expectedRoles = [
   'fetanagent_owner_control_runtime',
   'fetanagent_player_actions_runtime',
 ];
+const expectedFeatureSwitches = [
+  'cbe_birr_authoritative_verification',
+  'deposit_execution',
+  'payment_verification',
+  'private_live_deposit_pilot',
+  'telebirr_authoritative_verification',
+  'withdrawal_collection',
+  'withdrawal_validation',
+];
 const changedRoles = [...sql.matchAll(/^alter role (\w+) valid until 'infinity';$/gm)].map(
   (match) => match[1],
 );
 assert.deepEqual(changedRoles, expectedRoles);
 assert.equal((sql.match(/\balter\s+role\b/gi) ?? []).length, 4);
 assert.doesNotMatch(sql, /\b(?:password|grant|revoke|create\s+role|update|delete|insert)\s/iu);
-assert.match(sql, /lock table app\.feature_switches in share mode/);
+assert.match(sql, /^begin transaction isolation level read committed;$/mu);
+assert.doesNotMatch(sql, /lock table app\.feature_switches/iu);
+const lockedSwitchList =
+  /perform feature_switch\.feature_key[\s\S]*?where feature_switch\.feature_key in \(([\s\S]*?)\)[\s\S]*?order by feature_switch\.feature_key[\s\S]*?for share;/u.exec(
+    sql,
+  )?.[1];
+assert.ok(lockedSwitchList);
+assert.deepEqual(
+  [...lockedSwitchList.matchAll(/'([^']+)'/gu)].map((match) => match[1]).sort(),
+  expectedFeatureSwitches,
+);
+assert.match(
+  sql,
+  /perform feature_switch\.feature_key[\s\S]*?order by feature_switch\.feature_key[\s\S]*?for share;[\s\S]*?get diagnostics locked_feature_switch_count = row_count;/u,
+);
+assert.match(
+  sql,
+  /if pilot_mode = 'dry_run' then[\s\S]*?where pilot\.status = 'armed'[\s\S]*?order by pilot\.id[\s\S]*?for share;[\s\S]*?get diagnostics armed_pilot_count = row_count;/u,
+);
 assert.match(sql, /interval '5 minutes'/);
 assert.match(sql, /membership\.inherit_option/);
 assert.match(sql, /not membership\.set_option/);
 assert.match(sql, /not membership\.admin_option/);
-assert.match(sql, /<> 7/);
+assert.match(
+  sql,
+  /feature_key <> 'private_live_deposit_pilot'[\s\S]*?mode = 'disabled'[\s\S]*?settings = '\{\}'::jsonb\) = 6/u,
+);
+assert.match(sql, /switch_state\.mode = 'dry_run'/u);
+assert.match(sql, /'contract_version', 1/u);
+assert.match(sql, /'pilot_revision_id', pilot\.id/u);
+assert.match(sql, /'configuration_digest', pilot\.configuration_digest/u);
+assert.match(sql, /if no_money_feature_boundary_safe is not true then/u);
+assert.doesNotMatch(sql, /where (?:feature_switch\.)?mode <> 'disabled'\) then/iu);
+assert.doesNotMatch(sql, /pilot\.(?:active_from|expires_at)/iu);
+assertInOrder(
+  sql,
+  [
+    'perform feature_switch.feature_key',
+    "if pilot_mode = 'dry_run' then",
+    'select (select count(*) from feature_boundary) = 7',
+    'if no_money_feature_boundary_safe is not true then',
+    "alter role fetanagent_beta_admission_runtime valid until 'infinity';",
+  ],
+  'The locked no-money proof must complete before any role lifetime changes',
+);
 assert.match(sql, /fetanagent_deposit_executor_runtime/);
 assert.match(sql, /fetanagent_trusted_telebirr_verifier_runtime/);
 assert.match(inspection, /begin transaction read only/);
 assert.doesNotMatch(inspection, /\b(?:alter|update|delete|insert|grant|revoke)\b/iu);
+const inspectedSwitchList =
+  /from app\.feature_switches as feature_switch[\s\S]*?where feature_switch\.feature_key in \(([\s\S]*?)\)/u.exec(
+    inspection,
+  )?.[1];
+assert.ok(inspectedSwitchList);
+assert.deepEqual(
+  [...inspectedSwitchList.matchAll(/'([^']+)'/gu)].map((match) => match[1]).sort(),
+  expectedFeatureSwitches,
+);
+assert.match(inspection, /no_money_feature_boundary_safe/u);
+assert.match(inspection, /non_disabled_real_money_switches/u);
+assert.match(inspection, /dry_run_pilot_switches/u);
+assert.match(
+  inspection,
+  /feature_key <> 'private_live_deposit_pilot'[\s\S]*?mode = 'disabled'[\s\S]*?settings = '\{\}'::jsonb\) = 6/u,
+);
+assert.match(inspection, /switch_state\.mode = 'dry_run'/u);
+assert.match(inspection, /'contract_version', 1/u);
+assert.match(inspection, /'pilot_revision_id', pilot\.id/u);
+assert.match(inspection, /'configuration_digest', pilot\.configuration_digest/u);
+assert.doesNotMatch(inspection, /pilot\.(?:active_from|expires_at)/iu);
+assert.doesNotMatch(inspection, /mode = 'live'/iu);
+assert.doesNotMatch(
+  inspection,
+  /from app\.feature_switches(?:\s+as)?\s+\w+[\s\S]{0,160}?mode <> 'disabled'/iu,
+);
+assert.match(inspection, /\\if :no_money_feature_boundary_safe/u);
 assert.match(workflow, /group: fetanagent-staging-beta-deploy/);
 assert.match(workflow, /cancel-in-progress: false/);
 assert.match(workflow, /environment: staging/);

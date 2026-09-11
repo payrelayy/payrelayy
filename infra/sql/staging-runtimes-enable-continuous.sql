@@ -2,17 +2,52 @@
 
 -- Operational policy change, not a schema migration. Passwords, memberships,
 -- permissions, connection limits, and financial authority are not changed.
-begin;
+begin transaction isolation level read committed;
 set local statement_timeout = '15s';
 set local lock_timeout = '5s';
 set local search_path = pg_catalog;
 
-lock table app.feature_switches in share mode;
-
 do $fetanagent$
 declare
   expected record;
+  locked_feature_switch_count integer;
+  pilot_mode app.feature_mode;
+  armed_pilot_count integer := 0;
+  no_money_feature_boundary_safe boolean;
 begin
+  perform feature_switch.feature_key
+    from app.feature_switches as feature_switch
+   where feature_switch.feature_key in (
+     'payment_verification',
+     'deposit_execution',
+     'withdrawal_validation',
+     'withdrawal_collection',
+     'cbe_birr_authoritative_verification',
+     'telebirr_authoritative_verification',
+     'private_live_deposit_pilot'
+   )
+   order by feature_switch.feature_key
+   for share;
+  get diagnostics locked_feature_switch_count = row_count;
+  if locked_feature_switch_count <> 7 then
+    raise exception 'The exact seven-row no-money feature boundary is absent.';
+  end if;
+
+  select feature_switch.mode
+    into pilot_mode
+    from app.feature_switches as feature_switch
+   where feature_switch.feature_key = 'private_live_deposit_pilot';
+
+  if pilot_mode = 'dry_run' then
+    perform pilot.id
+      from app.private_live_deposit_pilot_revisions as pilot
+     where pilot.status = 'armed'
+       and pilot.configuration_digest is not null
+     order by pilot.id
+     for share;
+    get diagnostics armed_pilot_count = row_count;
+  end if;
+
   for expected in
     select * from (values
       ('fetanagent_beta_admission_runtime', 'fetanagent_beta_admission', 1),
@@ -66,13 +101,60 @@ begin
     raise exception 'Continuous availability cannot activate or extend financial runtimes.';
   end if;
 
-  if (select count(*) from app.feature_switches
-      where feature_key in ('payment_verification', 'deposit_execution',
-        'withdrawal_validation', 'withdrawal_collection', 'private_live_deposit_pilot',
-        'telebirr_authoritative_verification', 'cbe_birr_authoritative_verification')
-        and mode = 'disabled') <> 7
-    or exists (select 1 from app.feature_switches where mode <> 'disabled') then
-    raise exception 'Continuous availability requires every financial switch to remain disabled.';
+  with feature_boundary as materialized (
+    select feature_switch.feature_key,
+           feature_switch.mode,
+           feature_switch.settings
+      from app.feature_switches as feature_switch
+     where feature_switch.feature_key in (
+       'payment_verification',
+       'deposit_execution',
+       'withdrawal_validation',
+       'withdrawal_collection',
+       'cbe_birr_authoritative_verification',
+       'telebirr_authoritative_verification',
+       'private_live_deposit_pilot'
+     )
+  ), armed_pilot as materialized (
+    select pilot.id,
+           pilot.configuration_digest
+      from app.private_live_deposit_pilot_revisions as pilot
+     where pilot.status = 'armed'
+       and pilot.configuration_digest is not null
+  )
+  select (select count(*) from feature_boundary) = 7
+     and (select count(*)
+            from feature_boundary
+           where feature_key <> 'private_live_deposit_pilot'
+             and mode = 'disabled'
+             and settings = '{}'::jsonb) = 6
+     and (
+       exists (
+         select 1
+           from feature_boundary
+          where feature_key = 'private_live_deposit_pilot'
+            and mode = 'disabled'
+            and settings = '{}'::jsonb
+       )
+       or (
+         armed_pilot_count = 1
+         and (select count(*) from armed_pilot) = 1
+         and (select count(*)
+                from feature_boundary as switch_state
+                join armed_pilot as pilot
+                  on switch_state.feature_key = 'private_live_deposit_pilot'
+               where switch_state.mode = 'dry_run'
+                 and switch_state.settings = pg_catalog.jsonb_build_object(
+                   'contract_version', 1,
+                   'pilot_revision_id', pilot.id,
+                   'configuration_digest', pilot.configuration_digest
+                 )) = 1
+       )
+     )
+    into no_money_feature_boundary_safe;
+
+  if no_money_feature_boundary_safe is not true then
+    raise exception 'Continuous availability requires six disabled real-money switches and only an exact disabled or armed dry-run pilot.';
   end if;
 end
 $fetanagent$;

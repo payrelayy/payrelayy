@@ -2550,9 +2550,12 @@ Before any downtime, the workflow verifies the installed continuous-availability
 and its single permitted sudo command. After the four private-core services pass their existing
 startup/readiness checks, `staging-runtimes-enable-continuous.sql` changes only their application roles'
 `VALID UNTIL` fields to `infinity`. It validates exact non-administrative attributes, one narrow
-membership per role, all seven disabled financial switches, and disabled executor/verifier logins
-before changing anything. Passwords, permission grants, connection limits, and financial role
-lifetimes are unchanged. The checksum-bound finalizer then independently verifies the live release
+membership per role, six disabled real-money switches, an exact disabled or armed dry-run pilot,
+and disabled executor/verifier logins before changing anything. A dry-run pilot must match the sole
+armed revision's ID and configuration digest; `live` and malformed pilot settings are rejected. The
+conversion does not revive or extend the independently enforced pilot time window.
+Passwords, permission grants, connection limits, and financial role lifetimes are unchanged. The
+checksum-bound finalizer then independently verifies the live release
 and non-expiring database roles before disabling the old timer, including boot enablement and its
 next trigger. Only then is ordinary deployment complete.
 

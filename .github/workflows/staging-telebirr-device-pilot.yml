@@ -103,8 +103,7 @@ jobs:
           for target in \
             telebirr-assignment-broker \
             telebirr-device-state-broker \
-            telebirr-device-bridge \
-            gateway
+            telebirr-device-bridge
           do
             docker build --pull=false --target "$target" \
               --build-arg "VCS_REF=$GITHUB_SHA" \
@@ -120,12 +119,8 @@ jobs:
             test "$(docker image inspect "fetanagent-$target:$tag" \
               --format '{{json .Config.ExposedPorts}}')" = 'null'
           done
-          docker run --rm --network none --read-only --cap-drop ALL \
-            --cap-add NET_BIND_SERVICE \
-            --security-opt no-new-privileges:true "fetanagent-gateway:$tag" \
-            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
-      - name: Seal the four deployment images
+      - name: Seal the three no-money deployment images
         if: inputs.mode == 'deploy-and-smoke'
         shell: bash
         run: |
@@ -134,8 +129,7 @@ jobs:
           docker save --output "$RUNNER_TEMP/fetanagent-telebirr-images.tar" \
             "fetanagent-telebirr-assignment-broker:$tag" \
             "fetanagent-telebirr-device-state-broker:$tag" \
-            "fetanagent-telebirr-device-bridge:$tag" \
-            "fetanagent-gateway:$tag"
+            "fetanagent-telebirr-device-bridge:$tag"
 
       - name: Upload the one-run sealed image bundle
         if: inputs.mode == 'deploy-and-smoke'
@@ -454,7 +448,7 @@ jobs:
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts")
           scp "${ssh_opts[@]}" \
             "$RUNNER_TEMP/release/fetanagent-telebirr-images.tar" \
-            infra/compose.telebirr-device-pilot.yaml infra/compose.staging-beta.yaml \
+            infra/compose.telebirr-device-pilot.yaml \
             "$PROTECTED/supabase-ca.crt" "$PROTECTED/assignment.spki.der" \
             "$PROTECTED/bridge-runtime-manifest.v1.json" \
             "$PROTECTED/assignment-database-url" "$PROTECTED/reference-opening-key.v1.json" \
@@ -465,7 +459,7 @@ jobs:
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
             "chmod 0600 '$incoming'/* && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
-      - name: Start the exact gateway and three-service Android transport
+      - name: Start the exact three-service Android transport behind production ingress
         id: activate
         shell: bash
         env:
@@ -581,7 +575,7 @@ jobs:
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           remote_status=0
           ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper stop '$GITHUB_SHA' '${GITHUB_SHA:0:12}'" || remote_status=$?
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-device-pilot-helper stop-active" || remote_status=$?
           fetanagent_open_staging_direct_database_tunnel \
             "$protected" "$STAGING_VM_HOST" "$PGHOST" "$PGPORT"
           psql -X --quiet --file=infra/sql/staging-telebirr-device-pilot-disable.sql >/dev/null

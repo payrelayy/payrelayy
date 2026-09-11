@@ -10,11 +10,40 @@ import org.junit.Test
 
 class FixedDeviceBridgeHttpsExchangeTest {
   @Test
+  fun `accepts only code-owned production or staging routing targets`() {
+    FixedDeviceBridgeHttpsExchange(FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET)
+    FixedDeviceBridgeHttpsExchange(FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET)
+    assertThrows(IllegalArgumentException::class.java) {
+      FixedDeviceBridgeHttpsExchange("inert")
+    }
+    assertThrows(IllegalArgumentException::class.java) {
+      FixedDeviceBridgeHttpsExchange("Staging")
+    }
+  }
+
+  @Test
   fun `posts only to the immutable origin with bounded transport settings`() {
     var captured: CapturedRequest? = null
     val exchange =
-      FixedDeviceBridgeHttpsExchange { url, contentType, body, connect, read, maximum ->
-        captured = CapturedRequest(url, contentType, body.copyOf(), connect, read, maximum)
+      FixedDeviceBridgeHttpsExchange(FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET) {
+          url,
+          deploymentTarget,
+          contentType,
+          body,
+          connect,
+          read,
+          maximum,
+        ->
+        captured =
+          CapturedRequest(
+            url,
+            deploymentTarget,
+            contentType,
+            body.copyOf(),
+            connect,
+            read,
+            maximum,
+          )
         exactResponse()
       }
 
@@ -32,6 +61,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
     assertEquals(DeviceBridgeProtocol.ASSIGNMENT_POLL_PATH, request.url.path)
     assertEquals(null, request.url.query)
     assertEquals(null, request.url.userInfo)
+    assertEquals(FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET, request.deploymentTarget)
     assertEquals(DeviceBridgeProtocol.CONTENT_TYPE, request.contentType)
     assertTrue(request.body.contentEquals(byteArrayOf(1, 2, 3)))
     assertEquals(FixedDeviceBridgeHttpsExchange.CONNECT_TIMEOUT_MILLIS, request.connectTimeout)
@@ -45,7 +75,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
   fun `permits exactly the four protocol paths`() {
     val observed = mutableListOf<String>()
     val exchange =
-      FixedDeviceBridgeHttpsExchange { url, _, _, _, _, _ ->
+      FixedDeviceBridgeHttpsExchange { url, _, _, _, _, _, _ ->
         observed += url.path
         exactResponse()
       }
@@ -68,7 +98,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
   @Test
   fun `accepts only the bridge server exact error media type for error responses`() {
     val response =
-      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ ->
+      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _, _ ->
           DeviceBridgeHttpsResponse(
             401,
             listOf(FixedDeviceBridgeHttpsExchange.ERROR_CONTENT_TYPE),
@@ -90,7 +120,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
   fun `rejects invalid request metadata before transport`() {
     var called = false
     val exchange =
-      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ ->
+      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _, _ ->
         called = true
         exactResponse()
       }
@@ -164,7 +194,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
         ),
       )
     invalidResponses.forEach { response ->
-      val exchange = FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ -> response }
+      val exchange = FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _, _ -> response }
       assertThrows(DeviceBridgeRetryableException::class.java) {
         exchange.post(
           DeviceBridgeProtocol.HEARTBEAT_PATH,
@@ -178,7 +208,9 @@ class FixedDeviceBridgeHttpsExchangeTest {
   @Test
   fun `maps transport failures to retryable and keeps diagnostics redacted`() {
     val exchange =
-      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ -> throw IOException("secret response") }
+      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _, _ ->
+        throw IOException("secret response")
+      }
     val failure =
       assertThrows(DeviceBridgeRetryableException::class.java) {
         exchange.post(
@@ -195,7 +227,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
     )
 
     val denied =
-      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _ ->
+      FixedDeviceBridgeHttpsExchange { _, _, _, _, _, _, _ ->
         throw SecurityException("secret policy")
       }
     assertThrows(DeviceBridgeRetryableException::class.java) {
@@ -217,6 +249,7 @@ class FixedDeviceBridgeHttpsExchangeTest {
 
   private data class CapturedRequest(
     val url: URL,
+    val deploymentTarget: String,
     val contentType: String,
     val body: ByteArray,
     val connectTimeout: Int,

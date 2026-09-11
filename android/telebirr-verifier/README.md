@@ -12,6 +12,14 @@ release fails at build time unless it receives both reviewed public P-256 signer
 key IDs, an explicit `pairing_only` or `evidence_only` mode, and the separately protected Android
 PKCS12 signing identity. The two server private keys are never Android build inputs.
 
+Enabled builds also bind the HTTPS request to their code-owned `staging` or `production` deployment
+target through `X-FetanAgent-Deployment-Target`. The public gateway uses only the exact `staging`
+value to select the uniquely named no-money staging bridge; production retains its existing route
+and service alias for the exact `production` value or a header-absent legacy build. Any other,
+case-confused, comma-list, or repeated target value receives `404` without reaching either
+upstream. The target is not editable in the UI, and backend signatures/keys remain the authorization
+boundary after routing.
+
 The compatibility engine still requires an injected protected-reference binding verifier. The new
 private-pilot protocol closes that contract mismatch without changing the compatibility API: a
 trusted server must sign an expiring assignment that contains the exact raw lookup reference, its

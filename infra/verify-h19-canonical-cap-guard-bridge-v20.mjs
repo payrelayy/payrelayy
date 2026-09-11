@@ -40,6 +40,7 @@ const h19Helper = 'b4a5975f97be388b8862e8d21c207815f02708e6476fa5e79b795825b3a01
 const h19Finalizer = 'a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39';
 const h19Sudoers = '5e92a8c42d6b44ae22fa837efc9b35e54033a00a1e830a7bad8de2d3382f3796';
 const h19Guard = '13e6f430d1fb6e83736265055bed9569431403411e5d459fd86c1d32b00adced';
+const h20Guard = '4481190534fb41f057f0f3c716d74ba1f6445da009d491936c1098bdaa756f5a';
 const stopped = 'e6bc16831fd5172076bd02b655dfa1605cf622aa23bf576e1a28b8ee4e3502b5';
 const production = '5dad1d4193f55450bb0b50c5132fd3ae91c64e6978cb6318bbfdbdb0846b7b00';
 const ingress = 'c1161bba74e998ddc1282e23b7e269dcd4b552e0e39532d914ace73b1c05378a';
@@ -49,7 +50,7 @@ for (const [name, digest] of [
   ['REVIEWED_SUCCESSOR_HELPER_SHA256', helperDigest],
   ['REVIEWED_SUCCESSOR_FINALIZER_SHA256', finalizerDigest],
   ['REVIEWED_SUCCESSOR_SUDOERS_SHA256', sudoersDigest],
-  ['REVIEWED_INGRESS_GUARD_SHA256', guardDigest],
+  ['REVIEWED_INGRESS_GUARD_SHA256', h20Guard],
   ['PREDECESSOR_HELPER_SHA256', h19Helper],
   ['PREDECESSOR_FINALIZER_SHA256', h19Finalizer],
   ['PREDECESSOR_SUDOERS_SHA256', h19Sudoers],
@@ -208,7 +209,7 @@ SUCCESSOR_FINALIZER_SHA256=${finalizerDigest}
 PREDECESSOR_SUDOERS_SHA256=${h19Sudoers}
 SUCCESSOR_SUDOERS_SHA256=${sudoersDigest}
 PREDECESSOR_INGRESS_GUARD_SHA256=${h19Guard}
-INGRESS_GUARD_SHA256=${guardDigest}
+INGRESS_GUARD_SHA256=${h20Guard}
 BASELINE_STOPPED_STAGING_BOUNDARY_SHA256=${stopped}
 BASELINE_PRODUCTION_BOUNDARY_SHA256=${production}
 BASELINE_SHARED_INGRESS_BOUNDARY_SHA256=${ingress}
@@ -241,7 +242,7 @@ assert.deepEqual(producedIntent, [
   `predecessor_continuous_sudoers_sha256=${h19Sudoers}`,
   `successor_continuous_sudoers_sha256=${sudoersDigest}`,
   `predecessor_ingress_guard_sha256=${h19Guard}`,
-  `successor_ingress_guard_sha256=${guardDigest}`,
+  `successor_ingress_guard_sha256=${h20Guard}`,
   `stopped_staging_boundary_sha256=${stopped}`,
   `baseline_production_boundary_sha256=${production}`,
   `baseline_shared_ingress_boundary_sha256=${ingress}`,
@@ -334,5 +335,5 @@ assert.match(
 );
 
 console.log(
-  `FetanAgent H20 canonical-cap guard bridge contracts and ${executableChecks} topology cases verified; helper ${helperDigest}; guard ${guardDigest}.`,
+  `FetanAgent H20 canonical-cap guard bridge contracts and ${executableChecks} topology cases verified; helper ${helperDigest}; historical guard ${h20Guard}; current guard ${guardDigest}.`,
 );

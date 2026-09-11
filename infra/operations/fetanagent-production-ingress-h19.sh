@@ -11,6 +11,7 @@ readonly CONTINUOUS_FINALIZER='/usr/local/sbin/fetanagent-staging-continuous-ava
 readonly CONTINUOUS_SUDOERS='/etc/sudoers.d/fetanagent-staging-continuous-availability'
 readonly H19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v19'
 readonly H20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
+readonly H21_PARENT='/var/lib/fetanagent/h19-stable-nine-guard-bridge-v21'
 readonly TRANSITION_PARENT='/var/lib/fetanagent/production-gateway-staging-route-v1'
 readonly PRODUCTION_ROOT='/srv/fetanagent/production'
 readonly PRODUCTION_RELEASE_ROOT="$PRODUCTION_ROOT/releases"
@@ -19,6 +20,8 @@ readonly PRODUCTION_PROJECT='fetanagent-production'
 readonly PROTECTED_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
 readonly BASELINE_CADDY_SHA256='181992c8958397d63a7ae34137d51d4186ce0383c8cfd2bf8df137da11e12f24'
 readonly CANDIDATE_CADDY_SHA256='afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
+readonly BASELINE_GATEWAY_IMAGE_ID='sha256:72f13d02d86c41d0b6fd1dd86d2827c16442f417ec5ef61c983eae297f57a209'
+readonly CANDIDATE_GATEWAY_IMAGE_ID='sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8'
 readonly PROTECTED_COMPOSE_SHA256='98d7e763754868ba978d5c042c722664a1c1aec6f85e9011410d74e5d5f1928c'
 readonly SHARED_NETWORK='fetanagent-telebirr-device-ingress'
 readonly SHARED_NETWORK_ID='5b3dc890fad4f062ac570e4bbc66f950d002b536843b2630473eb817537af738'
@@ -236,15 +239,17 @@ PY
 read_h19_record() {
   local output
   output="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$H19_PARENT" "$H20_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
-    "$CONTINUOUS_SUDOERS" "$INSTALLED_PATH" <<'PY'
+    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$TRANSITION_PARENT" \
+    "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" "$CONTINUOUS_SUDOERS" \
+    "$INSTALLED_PATH" <<'PY'
 import hashlib
 import os
 import re
 import stat
 import sys
 
-h19_parent, h20_parent, helper, finalizer, sudoers, guard = sys.argv[1:]
+h19_parent, h20_parent, h21_parent, transition_parent, helper, finalizer, sudoers, guard = \
+    sys.argv[1:]
 release_re = re.compile(r'[0-9a-f]{40}')
 sha_re = re.compile(r'[0-9a-f]{64}')
 protected = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
@@ -255,6 +260,15 @@ h19_helper_sha = 'b4a5975f97be388b8862e8d21c207815f02708e6476fa5e79b795825b3a013
 h19_finalizer_sha = 'a1951a5559ef735e507b762369861fd71fefbde518a415f8c928956f7e20df39'
 h19_sudoers_sha = '5e92a8c42d6b44ae22fa837efc9b35e54033a00a1e830a7bad8de2d3382f3796'
 h19_guard_sha = '13e6f430d1fb6e83736265055bed9569431403411e5d459fd86c1d32b00adced'
+h20_release_expected = 'db8ca9889a63045f4da403eebb028618a400407f'
+h20_intent_sha = '369ac69c0492e870101281af499edf51181bc3b4d4c84b2361ebd1ad053cfb88'
+h20_completion_sha = '37446dca1a59fb190299addf3679f2d4a2be27b8af5c52ad8dffc84232425f62'
+h20_guard_sha = '4481190534fb41f057f0f3c716d74ba1f6445da009d491936c1098bdaa756f5a'
+interrupted_intent_sha = 'b0dd0ff0f66d961448e6e214feea8806627bf9f5aac1995436b2105f3fce6537'
+legacy_raw_nine_sha = '6aa4f35860635609b54e0884810b16fdb10a39275b687a8f678e5af86ed00c42'
+canonical_nine_sha = 'a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9'
+baseline_gateway_image = 'sha256:72f13d02d86c41d0b6fd1dd86d2827c16442f417ec5ef61c983eae297f57a209'
+candidate_gateway_image = 'sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8'
 h18_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
 h18_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
 h18_sudoers_sha = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958'
@@ -423,6 +437,9 @@ try:
     if (
         len(intent) != 35
         or len(completion) != 36
+        or h20_release != h20_release_expected
+        or digest(intent_data) != h20_intent_sha
+        or digest(completion_data) != h20_completion_sha
         or any(sha_re.fullmatch(value) is None for value in (
             successor_helper_sha, successor_finalizer_sha,
             successor_sudoers_sha, successor_guard_sha,
@@ -431,6 +448,7 @@ try:
         or successor_finalizer_sha == h19_finalizer_sha
         or successor_sudoers_sha == h19_sudoers_sha
         or successor_guard_sha == h19_guard_sha
+        or successor_guard_sha != h20_guard_sha
         or intent != expected
         or completion[0] != intent[0]
         or completion[1] != 'state=canonical-cap-guard-installed'
@@ -445,15 +463,121 @@ try:
         or digest(exact_file(helper, 0o755, 2 * 1024 * 1024)) != successor_helper_sha
         or digest(exact_file(finalizer, 0o755, 2 * 1024 * 1024)) != successor_finalizer_sha
         or digest(exact_file(sudoers, 0o440, 64 * 1024)) != successor_sudoers_sha
-        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != successor_guard_sha
     ):
         raise RuntimeError()
+
+    h21_children = os.listdir(h21_parent)
+    if len(h21_children) != 1 or release_re.fullmatch(h21_children[0]) is None:
+        raise RuntimeError()
+    h21_release = h21_children[0]
+    if h21_release in (protected, h19_release, h20_release):
+        raise RuntimeError()
+    exact_dir(h21_parent, [h21_release])
+    h21_root = f'{h21_parent}/{h21_release}'
+    exact_dir(h21_root, [
+        'completed-v1', 'intent-v1', 'interrupted-transition-intent',
+        'predecessor-ingress-guard',
+    ])
+    h21_intent_data = exact_file(f'{h21_root}/intent-v1', 0o600, 4096)
+    h21_completion_data = exact_file(f'{h21_root}/completed-v1', 0o600, 4096)
+    h21_archived_guard = exact_file(
+        f'{h21_root}/predecessor-ingress-guard', 0o400, 2 * 1024 * 1024
+    )
+    h21_archived_transition = exact_file(
+        f'{h21_root}/interrupted-transition-intent', 0o400, 8192
+    )
+    h21_intent = h21_intent_data.decode('ascii').splitlines()
+    h21_completion = h21_completion_data.decode('ascii').splitlines()
+    h21_successor_guard_sha = (
+        h21_intent[9].split('=', 1)[1] if len(h21_intent) > 9 else ''
+    )
+    h21_expected = [
+        'contract=fetanagent-h19-stable-nine-guard-bridge-v21',
+        'state=authorized',
+        f'bridge_release={h21_release}',
+        f'h20_bridge_release={h20_release_expected}',
+        f'h20_bridge_intent_sha256={h20_intent_sha}',
+        f'h20_bridge_completion_sha256={h20_completion_sha}',
+        f'h19_bridge_release={h19_release}',
+        f'candidate_gateway_release={h19_release}',
+        f'predecessor_ingress_guard_sha256={h20_guard_sha}',
+        f'successor_ingress_guard_sha256={h21_successor_guard_sha}',
+        f'interrupted_transition_intent_sha256={interrupted_intent_sha}',
+        f'legacy_raw_immutable_nine_sha256={legacy_raw_nine_sha}',
+        f'canonical_immutable_nine_sha256={canonical_nine_sha}',
+        'immutable_nine_canonicalization=drop-health-log-sort-mounts-and-containers',
+        f'baseline_production_boundary_sha256={production_sha}',
+        f'baseline_shared_ingress_boundary_sha256={ingress_sha}',
+        f'baseline_tls_leaf_sha256={tls_sha}',
+        f'baseline_gateway_image_id={baseline_gateway_image}',
+        f'candidate_gateway_image_id={candidate_gateway_image}',
+        f'protected_production_release={protected}',
+        'transition_contract=fetanagent-production-gateway-staging-route-v1',
+        'interrupted_transition_state=authorized',
+        'transition_evidence_preserved=true',
+        'production_runtime_mutation=false',
+        'database_mutation=false',
+        'financial_actions_mode=disabled',
+        'transfer_enabled=false',
+        'amount_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        len(h21_intent) != 29
+        or len(h21_completion) != 30
+        or sha_re.fullmatch(h21_successor_guard_sha) is None
+        or h21_successor_guard_sha == h20_guard_sha
+        or h21_intent != h21_expected
+        or h21_completion[0] != h21_intent[0]
+        or h21_completion[1] != 'state=stable-nine-guard-installed'
+        or h21_completion[2:29] != h21_intent[2:29]
+        or h21_completion[29] != f'bridge_intent_sha256={digest(h21_intent_data)}'
+        or h21_intent_data != ('\n'.join(h21_intent) + '\n').encode('ascii')
+        or h21_completion_data != ('\n'.join(h21_completion) + '\n').encode('ascii')
+        or digest(h21_archived_guard) != h20_guard_sha
+        or digest(h21_archived_transition) != interrupted_intent_sha
+        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != h21_successor_guard_sha
+    ):
+        raise RuntimeError()
+
+    transition_installing = f'{transition_parent}/.installing-{h19_release}'
+    transition_terminal = f'{transition_parent}/{h19_release}'
+    installing_names = {
+        ('intent-v1',),
+        ('completed-v1.installing', 'intent-v1'),
+        ('completed-v1', 'intent-v1'),
+        ('intent-v1', 'rolled-back-v1.installing'),
+        ('intent-v1', 'rolled-back-v1'),
+    }
+    terminal_names = {
+        ('completed-v1', 'intent-v1'),
+        ('intent-v1', 'rolled-back-v1'),
+    }
+    if os.path.lexists(transition_installing):
+        exact_dir(transition_parent, [f'.installing-{h19_release}'])
+        names = tuple(sorted(os.listdir(transition_installing)))
+        if names not in installing_names:
+            raise RuntimeError()
+        exact_dir(transition_installing, list(names))
+        live_transition = exact_file(f'{transition_installing}/intent-v1', 0o600, 8192)
+    elif os.path.lexists(transition_terminal):
+        exact_dir(transition_parent, [h19_release])
+        names = tuple(sorted(os.listdir(transition_terminal)))
+        if names not in terminal_names:
+            raise RuntimeError()
+        exact_dir(transition_terminal, list(names))
+        live_transition = exact_file(f'{transition_terminal}/intent-v1', 0o600, 8192)
+    else:
+        raise RuntimeError()
+    if live_transition != h21_archived_transition:
+        raise RuntimeError()
+
     print(h19_release)
     print(h19_release)
     print(successor_helper_sha)
     print(successor_finalizer_sha)
     print(successor_sudoers_sha)
-    print(successor_guard_sha)
+    print(h21_successor_guard_sha)
     print(h18_release)
     print(h18_intent_sha)
     print(h18_completion_sha)
@@ -462,12 +586,16 @@ try:
     print(tls_sha)
     print(h19_intent_sha)
     print(h19_completion_sha)
+    print(h21_release)
+    print(interrupted_intent_sha)
+    print(legacy_raw_nine_sha)
+    print(canonical_nine_sha)
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 1
   mapfile -t H19_RECORD <<<"$output"
-  [[ "${#H19_RECORD[@]}" -eq 14 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
+  [[ "${#H19_RECORD[@]}" -eq 18 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
     "${H19_RECORD[1]}" =~ ^[0-9a-f]{40}$ ]] || return 1
   local value
   for value in "${H19_RECORD[@]:2}"; do
@@ -666,8 +794,21 @@ immutable_nine_digest() {
       "telebirr-device-bridge", "telebirr-device-state-broker"
     ]
   ' <<<"$inspection" >/dev/null || return 1
-  jq -S -c 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway")) |
+  jq -S -c 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway") |
+      del(.State.Health.Log) |
+      .Mounts |= sort_by([
+        .Type,.Name,.Source,.Destination,.Driver,.Mode,.RW,.Propagation
+      ])) |
     sort_by(.Name)' <<<"$inspection" | sha256sum | awk '{print $1}'
+}
+
+expected_immutable_nine_digest() {
+  local recorded="$1"
+  if [[ "$recorded" == "${H19_RECORD[16]}" ]]; then
+    printf '%s' "${H19_RECORD[17]}"
+  else
+    printf '%s' "$recorded"
+  fi
 }
 
 shared_ingress_digest() {
@@ -1323,6 +1464,36 @@ case "$mode" in
       "${H19_RECORD[6]}" "${H19_RECORD[7]}" "${H19_RECORD[8]}" \
       "${H19_RECORD[3]}" "${H19_RECORD[4]}" "${H19_RECORD[5]}"
     ;;
+  recovery-inspect)
+    [[ $# -eq 1 && -z "${SUDO_USER:-}" ]] ||
+      die 'recovery-inspect requires direct root and no arguments'
+    [[ "$(transition_state)" == 'interrupted' ]] ||
+      die 'recovery-inspect requires the exact interrupted transition state'
+    transition_data="$(read_interrupted_transition_intent)" ||
+      die 'the interrupted transition intent is not exact'
+    mapfile -t intent <<<"$transition_data"
+    [[ "${#intent[@]}" -eq 6 && "${intent[0]}" == "$CANDIDATE_GATEWAY_IMAGE_ID" &&
+      "${intent[1]}" == "${H19_RECORD[9]}" && "${intent[2]}" == "${H19_RECORD[16]}" &&
+      "${intent[3]}" == "${H19_RECORD[10]}" && "${intent[4]}" == "${H19_RECORD[11]}" &&
+      "${intent[5]}" == "$BASELINE_GATEWAY_IMAGE_ID" ]] ||
+      die 'the interrupted transition does not match the H21 recovery bridge'
+    require_staging_absent || die 'staging and the device pilot must remain stopped'
+    require_candidate_image "${intent[0]}" || die 'the sealed candidate image is not exact'
+    require_production_contract "$PROTECTED_RELEASE" ||
+      die 'the protected production contract changed before recovery'
+    [[ "$(gateway_image_id)" == "$BASELINE_GATEWAY_IMAGE_ID" &&
+      "$(gateway_caddy_sha256)" == "$BASELINE_CADDY_SHA256" ]] ||
+      die 'the protected gateway is not the exact pre-transition baseline'
+    require_shared_ingress || die 'the shared-ingress endpoint set changed before recovery'
+    [[ "$(production_boundary_digest)" == "${H19_RECORD[9]}" &&
+      "$(immutable_nine_digest)" == "${H19_RECORD[17]}" &&
+      "$(shared_ingress_digest)" == "${H19_RECORD[10]}" &&
+      "$(tls_leaf_digest)" == "${H19_RECORD[11]}" ]] ||
+      die 'a protected boundary changed before recovery'
+    public_smoke "$PROTECTED_RELEASE" || die 'the protected public route smoke failed'
+    printf '%s\n' \
+      'H21 gateway recovery verified: interrupted intent preserved; stable nine unchanged; baseline gateway active; money moved=false.'
+    ;;
   inspect)
     [[ $# -eq 2 && ( -z "${SUDO_USER:-}" || "${SUDO_USER:-}" == 'fetanagent-admin' ) ]] ||
       die 'inspect requires one expected gateway release and a trusted caller'
@@ -1368,7 +1539,7 @@ case "$mode" in
     pre_ingress="${intent[3]}"
     pre_tls="${intent[4]}"
     baseline_gateway_image_id="${intent[5]}"
-    [[ "$(immutable_nine_digest)" == "$pre_immutable" ]] ||
+    [[ "$(immutable_nine_digest)" == "$(expected_immutable_nine_digest "$pre_immutable")" ]] ||
       die 'an immutable production service changed during transition'
     current_gateway="$(current_gateway_revision)" || die 'the interrupted gateway identity is invalid'
     require_recoverable_gateway_revision "$current_gateway" ||
@@ -1390,7 +1561,7 @@ case "$mode" in
     require_shared_ingress || die 'the candidate shared-ingress endpoint set is invalid'
     [[ "$(gateway_caddy_sha256)" == "$CANDIDATE_CADDY_SHA256" ]] ||
       die 'the candidate gateway Caddyfile is not exact'
-    [[ "$(immutable_nine_digest)" == "$pre_immutable" ]] ||
+    [[ "$(immutable_nine_digest)" == "$(expected_immutable_nine_digest "$pre_immutable")" ]] ||
       die 'an immutable production service changed during cutover'
     [[ "$(tls_leaf_digest)" == "$pre_tls" ]] || die 'the public TLS leaf changed during cutover'
     public_smoke "${H19_RECORD[1]}" || die 'the candidate public route smoke failed'
@@ -1432,7 +1603,7 @@ case "$mode" in
     pre_ingress="${intent[3]}"
     pre_tls="${intent[4]}"
     baseline_gateway_image_id="${intent[5]}"
-    [[ "$(immutable_nine_digest)" == "$pre_immutable" ]] ||
+    [[ "$(immutable_nine_digest)" == "$(expected_immutable_nine_digest "$pre_immutable")" ]] ||
       die 'an immutable production service changed; rollback refused'
     require_baseline_image "$baseline_gateway_image_id" ||
       die 'the protected rollback image is not the image sealed before cutover'
@@ -1450,7 +1621,8 @@ case "$mode" in
     require_production_contract "$PROTECTED_RELEASE" || die 'the restored baseline contract is invalid'
     require_shared_ingress || die 'the restored shared-ingress endpoint set is invalid'
     [[ "$(gateway_caddy_sha256)" == "$BASELINE_CADDY_SHA256" &&
-      "$(immutable_nine_digest)" == "$pre_immutable" && "$(tls_leaf_digest)" == "$pre_tls" ]] ||
+      "$(immutable_nine_digest)" == "$(expected_immutable_nine_digest "$pre_immutable")" &&
+      "$(tls_leaf_digest)" == "$pre_tls" ]] ||
       die 'the restored baseline did not preserve the protected boundary'
     public_smoke "$PROTECTED_RELEASE" || die 'the restored public route smoke failed'
     post_production="$(production_boundary_digest)"
@@ -1472,5 +1644,5 @@ case "$mode" in
     require_current_state "$PROTECTED_RELEASE" || die 'the rolled-back baseline did not re-attest'
     printf '%s\n' 'H19 gateway transition rolled back to the protected baseline; money moved=false.'
     ;;
-  *) die 'expected record, inspect, transition, or rollback' ;;
+  *) die 'expected record, recovery-inspect, inspect, transition, or rollback' ;;
 esac

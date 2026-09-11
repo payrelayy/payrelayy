@@ -210,6 +210,50 @@ no Compose or database operation. The grant is restored only after the installed
 `recovery-inspect` mode independently accepts the full state. If installation is interrupted, rerun
 the identical staged installer and arguments; never edit the transition or provenance records.
 
+## H22 terminal receipt ordering correction
+
+The resumed H19 transition replaced only the production gateway and reached the exact healthy
+candidate state. It published completion receipt
+`d33d2e51852fabdfd8f750bfd16118fe987e8b4201483b1cc2f688063047d559`, whose post-transition
+production and shared-ingress fingerprints are respectively
+`72a619a6418030098a2ebb862d35d48f56118de886ae6ef88b09a782b29d2aac` and
+`98e3464ba86981b592c678d65b58eb10e747f9cb18a7b25cd6e697a2f27f6d89`. The final attestation then
+failed closed because the receipt parser sorted the directory entries but compared them with the
+unsorted list `intent-v1, completed-v1`. The files and the candidate runtime were valid; only that
+comparison order was invalid.
+
+H22 archives the installed H21 guard and the completed transition receipt byte-for-byte, publishes a
+root-only provenance record, and atomically replaces only the guard with a parser that compares both
+sides in canonical sorted order. It requires the exact H21 intent and completion hashes, exact
+terminal transition hashes, exact candidate gateway image and Caddyfile, exact post-transition
+production/shared-ingress/TLS fingerprints, unchanged canonical nine-service digest, and absent
+staging and pilot projects. It cannot invoke Compose and contains no database or financial action.
+
+Stage these two files from the exact merged H22 commit in a root-owned mode-`0700` directory named
+`/root/fetanagent-h19-terminal-receipt-order-guard-bridge-v22-H22_MERGE_SHA/`:
+
+```text
+root:root 0700 fetanagent-h19-terminal-receipt-order-guard-bridge-v22.sh
+root:root 0600 fetanagent-production-ingress-h19.next
+```
+
+Run the staged installer directly as root:
+
+```text
+fetanagent-h19-terminal-receipt-order-guard-bridge-v22.sh \
+  H22_MERGE_SHA \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  d33d2e51852fabdfd8f750bfd16118fe987e8b4201483b1cc2f688063047d559 \
+  sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8 \
+  I-UNDERSTAND-THIS-CORRECTS-H19-TERMINAL-RECEIPT-ORDER-WITH-NO-PRODUCTION-OR-MONEY-MUTATION
+```
+
+The installer temporarily isolates the staging deployment grant and holds the shared mutation lock
+while it seals and installs the guard-only correction. It restores the grant only after the new
+guard's `inspect 90b1f059577682b6bc458d239f6bdcb591077085` mode independently accepts the existing
+candidate and completed receipt. If interrupted, rerun the identical staged installer and arguments;
+do not rerun the terminal gateway transition and do not edit either receipt.
+
 ## Build and gateway-only transition
 
 Build the production gateway image from the final H19 merged commit using the existing reviewed image
@@ -281,6 +325,7 @@ node infra/verify-shared-telebirr-ingress-helper-bridge-v18.mjs
 node infra/verify-staging-telebirr-route-helper-bridge-v19.mjs
 node infra/verify-h19-canonical-cap-guard-bridge-v20.mjs
 node infra/verify-h19-stable-nine-guard-bridge-v21.mjs
+node infra/verify-h19-terminal-receipt-order-guard-bridge-v22.mjs
 pnpm test:infra
 pnpm lint
 ```
@@ -300,3 +345,8 @@ The H21 verifier pins the successor guard to repository bytes, verifies the one-
 canonical digest bridge, checks deterministic health-log removal and mount/container ordering,
 requires byte-for-byte preservation of the interrupted transition intent, and confirms the installer
 contains no Compose, Supabase, database, or money action.
+
+The H22 verifier binds the new guard to repository bytes, pins the H21 predecessor and completed H19
+receipt, checks the canonical terminal-entry comparison, validates the guard-only transactional
+ordering and exact 24-field intent, and confirms the installer contains no Compose, Supabase,
+database, production-runtime, or money action.

@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const normalized = (path) => readFileSync(resolve(path), 'utf8').replaceAll('\r\n', '\n');
-const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const shellFunction = (source, name) => {
   const start = source.indexOf(`${name}() {`);
   assert.notEqual(start, -1, `missing shell function ${name}`);
@@ -25,13 +23,13 @@ const assertInOrder = (source, needles, message) => {
 const installer = normalized('infra/operations/fetanagent-h19-stable-nine-guard-bridge-v21.sh');
 const guard = normalized('infra/operations/fetanagent-production-ingress-h19.sh');
 const packageJson = normalized('package.json');
-const guardDigest = sha256(guard);
 
 const h19Release = '90b1f059577682b6bc458d239f6bdcb591077085';
 const h20Release = 'db8ca9889a63045f4da403eebb028618a400407f';
 const h20Intent = '369ac69c0492e870101281af499edf51181bc3b4d4c84b2361ebd1ad053cfb88';
 const h20Completion = '37446dca1a59fb190299addf3679f2d4a2be27b8af5c52ad8dffc84232425f62';
 const predecessorGuard = '4481190534fb41f057f0f3c716d74ba1f6445da009d491936c1098bdaa756f5a';
+const h21Guard = 'a4e31a95bfb4826634069cdc31f745ed53cccb0db2cc01578851ac8330623813';
 const interruptedIntent = 'b0dd0ff0f66d961448e6e214feea8806627bf9f5aac1995436b2105f3fce6537';
 const legacyRawNine = '6aa4f35860635609b54e0884810b16fdb10a39275b687a8f678e5af86ed00c42';
 const canonicalNine = 'a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9';
@@ -48,7 +46,7 @@ for (const [name, value] of [
   ['H20_COMPLETION_SHA256', h20Completion],
   ['H19_RELEASE', h19Release],
   ['PREDECESSOR_GUARD_SHA256', predecessorGuard],
-  ['REVIEWED_SUCCESSOR_GUARD_SHA256', guardDigest],
+  ['REVIEWED_SUCCESSOR_GUARD_SHA256', h21Guard],
   ['REVIEWED_INTERRUPTED_INTENT_SHA256', interruptedIntent],
   ['LEGACY_RAW_NINE_SHA256', legacyRawNine],
   ['REVIEWED_CANONICAL_NINE_SHA256', canonicalNine],
@@ -72,17 +70,24 @@ for (const invariant of [
   `interrupted_intent_sha = '${interruptedIntent}'`,
   `legacy_raw_nine_sha = '${legacyRawNine}'`,
   `canonical_nine_sha = '${canonicalNine}'`,
+  `h21_release_expected = 'ac0df375fb2ef6257d30c39f6cb4c2fa1dab01e2'`,
+  `h21_intent_sha = 'e28e67e611ca8ece8cdddaa9c98634c0fb93324d547d50aa771920c89e59cc18'`,
+  `h21_completion_sha = '15e1c3e5860aa6355f85be4114a5146f20e2683b1eb5da9b8351baf7a6b6d9ea'`,
+  `h21_guard_sha = '${h21Guard}'`,
   'predecessor-ingress-guard',
   'interrupted-transition-intent',
   'state=stable-nine-guard-installed',
   'immutable_nine_canonicalization=drop-health-log-sort-mounts-and-containers',
   'live_transition != h21_archived_transition',
-  'digest(exact_file(guard, 0o755',
+  'h21_successor_guard_sha != h21_guard_sha',
 ]) {
   assert.ok(recordReader.includes(invariant), `missing H21 record invariant: ${invariant}`);
 }
-assert.match(guard, /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$TRANSITION_PARENT"/u);
-assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 18/u);
+assert.match(
+  guard,
+  /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$H22_PARENT"\s+\\\s+"\$TRANSITION_PARENT"/u,
+);
+assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 20/u);
 
 const canonicalDigest = shellFunction(guard, 'immutable_nine_digest');
 assert.match(canonicalDigest, /del\(\.State\.Health\.Log\)/u);
@@ -199,7 +204,7 @@ H20_INTENT_SHA256=${h20Intent}
 H20_COMPLETION_SHA256=${h20Completion}
 H19_RELEASE=${h19Release}
 PREDECESSOR_GUARD_SHA256=${predecessorGuard}
-SUCCESSOR_GUARD_SHA256=${guardDigest}
+SUCCESSOR_GUARD_SHA256=${h21Guard}
 INTERRUPTED_INTENT_SHA256=${interruptedIntent}
 LEGACY_RAW_NINE_SHA256=${legacyRawNine}
 CANONICAL_NINE_SHA256=${canonicalNine}
@@ -228,7 +233,7 @@ assert.deepEqual(producedIntent, [
   `h19_bridge_release=${h19Release}`,
   `candidate_gateway_release=${h19Release}`,
   `predecessor_ingress_guard_sha256=${predecessorGuard}`,
-  `successor_ingress_guard_sha256=${guardDigest}`,
+  `successor_ingress_guard_sha256=${h21Guard}`,
   `interrupted_transition_intent_sha256=${interruptedIntent}`,
   `legacy_raw_immutable_nine_sha256=${legacyRawNine}`,
   `canonical_immutable_nine_sha256=${canonicalNine}`,
@@ -275,5 +280,5 @@ assert.match(
 );
 
 console.log(
-  `FetanAgent H21 stable-nine guard bridge contracts verified; predecessor ${predecessorGuard}; successor ${guardDigest}; canonical nine ${canonicalNine}.`,
+  `FetanAgent H21 stable-nine guard bridge contracts verified; predecessor ${predecessorGuard}; historical successor ${h21Guard}; canonical nine ${canonicalNine}.`,
 );

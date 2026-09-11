@@ -228,6 +228,9 @@ sides in canonical sorted order. It requires the exact H21 intent and completion
 terminal transition hashes, exact candidate gateway image and Caddyfile, exact post-transition
 production/shared-ingress/TLS fingerprints, unchanged canonical nine-service digest, and absent
 staging and pilot projects. It cannot invoke Compose and contains no database or financial action.
+The H22 preflight canonicalizes that nine-service digest by excluding both health-log history and
+Docker's transient `ExecIDs` list, which is populated briefly while an ordinary health check runs;
+all durable container configuration, state, mounts, and network identity remain fingerprinted.
 
 Stage these two files from the exact merged H22 commit in a root-owned mode-`0700` directory named
 `/root/fetanagent-h19-terminal-receipt-order-guard-bridge-v22-H22_MERGE_SHA/`:
@@ -348,5 +351,6 @@ contains no Compose, Supabase, database, or money action.
 
 The H22 verifier binds the new guard to repository bytes, pins the H21 predecessor and completed H19
 receipt, checks the canonical terminal-entry comparison, validates the guard-only transactional
-ordering and exact 24-field intent, and confirms the installer contains no Compose, Supabase,
-database, production-runtime, or money action.
+ordering and exact 24-field intent, excludes transient health-check `ExecIDs` from its otherwise exact
+nine-service preflight, and confirms the installer contains no Compose, Supabase, database,
+production-runtime, or money action.

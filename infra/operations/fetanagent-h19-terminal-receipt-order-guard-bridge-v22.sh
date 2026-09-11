@@ -29,7 +29,7 @@ readonly REVIEWED_SUCCESSOR_GUARD_SHA256='0b4a9b31a893073e725bfc97fc6ef3f6589fd9
 readonly POST_PRODUCTION_BOUNDARY_SHA256='72a619a6418030098a2ebb862d35d48f56118de886ae6ef88b09a782b29d2aac'
 readonly POST_SHARED_INGRESS_SHA256='98e3464ba86981b592c678d65b58eb10e747f9cb18a7b25cd6e697a2f27f6d89'
 readonly TLS_LEAF_SHA256='2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8'
-readonly CANONICAL_NINE_SHA256='a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9'
+readonly CANONICAL_NINE_SHA256='c3b49d74c01931601c829ddcf9d9d0edc237afe88fb0768794d5349549136f70'
 readonly REVIEWED_CANDIDATE_IMAGE_ID='sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8'
 readonly CANDIDATE_CADDY_SHA256='afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
 readonly PROTECTED_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
@@ -282,7 +282,7 @@ canonical_nine_digest() {
     ]
   ' <<<"$inspection" >/dev/null || return 1
   jq -S -c 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway") |
-      del(.State.Health.Log) |
+      del(.ExecIDs,.State.Health.Log) |
       .Mounts |= sort_by([.Type,.Name,.Source,.Destination,.Driver,.Mode,.RW,.Propagation])) |
     sort_by(.Name)' <<<"$inspection" | sha256sum | awk '{print $1}'
 }

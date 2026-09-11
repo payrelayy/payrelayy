@@ -44,7 +44,7 @@ const terminalReceipt = 'd33d2e51852fabdfd8f750bfd16118fe987e8b4201483b1cc2f6880
 const postProduction = '72a619a6418030098a2ebb862d35d48f56118de886ae6ef88b09a782b29d2aac';
 const postIngress = '98e3464ba86981b592c678d65b58eb10e747f9cb18a7b25cd6e697a2f27f6d89';
 const tls = '2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8';
-const canonicalNine = 'a72b855a5b59e2169b9bbdca1dce03aa8dec17b16082fa83b0dc55b1910c90c9';
+const canonicalNine = 'c3b49d74c01931601c829ddcf9d9d0edc237afe88fb0768794d5349549136f70';
 const candidateImage = 'sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8';
 const candidateCaddy = 'afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616';
 const protectedRelease = '69be82ac3e49ff8c63c64c9aa7926e0046b48a10';
@@ -173,6 +173,11 @@ assertInOrder(
 );
 assert.doesNotMatch(installer, /docker_local\s+(?:compose|create|start|stop|rm|run)\b/u);
 assert.doesNotMatch(installer, /supabase|psql|migration|edge function/iu);
+assert.match(
+  shellFunction(installer, 'canonical_nine_digest'),
+  /del\(\.ExecIDs,\.State\.Health\.Log\)/u,
+  'active health-check exec IDs must be excluded from the H22 preflight fingerprint',
+);
 assert.match(installer, /production_runtime_mutation=false/u);
 assert.match(installer, /database_mutation=false/u);
 assert.match(installer, /financial_actions_mode=disabled/u);

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 const expectedHost = 'postgres';
 const expectedMode = 'local-disposable';
 const expectedMigrationsDirectory = '/workspace/supabase/migrations';
+const expectedPostgresPassword = 'TEST-ONLY-NOT-A-SECRET-fetanagent-sql-admin-v1';
 const expectedRunnerMarker = 'fetanagent-sql-integration-image-v1';
 const expectedRunnerMarkerPath = '/usr/local/share/fetanagent/sql-integration-runner';
 
@@ -37,6 +38,7 @@ function assertImageBakedRunnerAttestation(environment: NodeJS.ProcessEnv): void
 }
 
 export interface SqlIntegrationEnvironment {
+  readonly administratorPassword: typeof expectedPostgresPassword;
   readonly host: typeof expectedHost;
   readonly migrationsDirectory: typeof expectedMigrationsDirectory;
 }
@@ -60,11 +62,16 @@ export function readSqlIntegrationEnvironment(
     throw new Error('SQL integration must use only the internal postgres hostname.');
   }
 
+  if (environment.SQL_INTEGRATION_POSTGRES_PASSWORD !== expectedPostgresPassword) {
+    throw new Error('SQL integration must use only the fixed disposable administrator credential.');
+  }
+
   if (environment.SQL_INTEGRATION_MIGRATIONS_DIRECTORY !== expectedMigrationsDirectory) {
     throw new Error('SQL integration migrations directory must be the bundled checked-in source.');
   }
 
   return {
+    administratorPassword: expectedPostgresPassword,
     host: expectedHost,
     migrationsDirectory: expectedMigrationsDirectory,
   };
@@ -75,6 +82,7 @@ export function createSqlIntegrationClient(environment: SqlIntegrationEnvironmen
     application_name: 'fetanagent_sql_integration',
     database: 'postgres',
     host: environment.host,
+    password: environment.administratorPassword,
     port: 5432,
     ssl: false,
     user: 'postgres',

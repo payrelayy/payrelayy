@@ -1,0 +1,740 @@
+name: Staging TeleBirr no-money shadow verifier
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan, deploy, inspect, or stop the no-money shadow verifier
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - deploy
+          - status
+          - stop
+      confirm_staging_project_ref:
+        description: Type the exact staging Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full main commit SHA containing this lifecycle
+        required: true
+        type: string
+      confirm_release_commit_sha:
+        description: For deploy/status/stop type the exact release SHA; for plan type not-applicable
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact staging DigitalOcean Droplet ID
+        required: true
+        type: string
+      confirm_pin_manifest_sha256:
+        description: For deploy type the reviewed public pin digest; otherwise type not-applicable
+        required: true
+        type: string
+      confirm_operation:
+        description: Type the exact operation phrase documented in the shadow-verifier runbook
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-beta-deploy
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_DROPLET_ID: '593344964'
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  STAGING_DIRECT_DATABASE_HOST: db.spzpiyxheappsfyswewl.supabase.co
+  STAGING_DATABASE_TUNNEL_PORT: '15432'
+  SHADOW_RUNTIME_ROLE: fetanagent_telebirr_shadow_verifier_runtime
+
+jobs:
+  validate-target:
+    name: Validate exact no-money staging operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main, exact staging target, release, and operation phrase
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+          CONFIRMED_MAIN_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_RELEASE: ${{ inputs.confirm_release_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_MAIN_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" && "$CONFIRMED_PROJECT" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
+          case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
+            'plan:PLAN STAGING SHADOW VERIFIER')
+              [[ "$CONFIRMED_RELEASE" == 'not-applicable' && "$CONFIRMED_PIN_DIGEST" == 'not-applicable' ]]
+              ;;
+            'deploy:DEPLOY STAGING SHADOW VERIFIER NO MONEY')
+              [[ "$CONFIRMED_RELEASE" == "$GITHUB_SHA" ]]
+              [[ "$CONFIRMED_PIN_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+              ;;
+            'status:STATUS STAGING SHADOW VERIFIER')
+              [[ "$CONFIRMED_RELEASE" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_PIN_DIGEST" == 'not-applicable' ]]
+              ;;
+            'stop:STOP STAGING SHADOW VERIFIER')
+              [[ "$CONFIRMED_RELEASE" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_PIN_DIGEST" == 'not-applicable' ]]
+              ;;
+            *)
+              echo '::error::The selected shadow-verifier operation was not confirmed exactly.'
+              exit 1
+              ;;
+          esac
+
+  build:
+    name: Build and inspect the exact ingress-free shadow image
+    if: inputs.mode == 'plan' || inputs.mode == 'deploy'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      image_archive_format: ${{ steps.bundle.outputs.image_archive_format }}
+      image_config_digest: ${{ steps.bundle.outputs.image_config_digest }}
+      image_manifest_digest: ${{ steps.bundle.outputs.image_manifest_digest }}
+      image_archive_sha256: ${{ steps.bundle.outputs.image_archive_sha256 }}
+      image_archive_size: ${{ steps.bundle.outputs.image_archive_size }}
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the staging shadow lifecycle statically
+        shell: bash
+        run: |
+          set -euo pipefail
+          node infra/verify-telebirr-shadow-verifier-deployment.mjs
+          node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
+          python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py
+          bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
+          bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
+      - name: Build and inspect the exact commit image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          image="fetanagent-telebirr-shadow-verifier:$tag"
+          docker build --pull=false --target telebirr-shadow-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$image" .
+          [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
+          [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "$GITHUB_SHA" ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" == \
+            '["node","apps/trusted-telebirr-verifier/dist/telebirr-shadow-verifier-main.js"]' ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.Entrypoint}}')" == \
+            '["docker-entrypoint.sh"]' ]]
+          [[ "$(docker image inspect "$image" --format '{{.Config.WorkingDir}}')" == '/workspace' ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" == 'null' ]]
+      - name: Save the one-use image bundle
+        id: bundle
+        if: inputs.mode == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/fetanagent-telebirr-shadow-verifier-image.tar"
+          docker save --output "$archive" \
+            "fetanagent-telebirr-shadow-verifier:${GITHUB_SHA:0:12}"
+          identity="$(python3 -I \
+            infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py \
+            "$archive" "${GITHUB_SHA:0:12}" "$GITHUB_SHA")"
+          jq -e '
+            type == "object" and
+            keys_unsorted == ["archiveFormat", "imageConfigDigest", "imageManifestDigest"] and
+            (.archiveFormat == "docker-save-oci-v1" or .archiveFormat == "docker-save-legacy-v1") and
+            (.imageConfigDigest | test("^sha256:[0-9a-f]{64}$")) and
+            (.imageManifestDigest | test("^sha256:[0-9a-f]{64}$")) and
+            .imageConfigDigest != .imageManifestDigest
+          ' <<<"$identity" >/dev/null
+          runtime_id="$(docker image inspect \
+            "fetanagent-telebirr-shadow-verifier:${GITHUB_SHA:0:12}" --format '{{.Id}}')"
+          jq -e --arg runtime "$runtime_id" '
+            if .archiveFormat == "docker-save-legacy-v1"
+            then $runtime == .imageConfigDigest
+            else ($runtime == .imageConfigDigest or $runtime == .imageManifestDigest)
+            end
+          ' <<<"$identity" >/dev/null
+          echo "image_archive_format=$(jq -er '.archiveFormat' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_config_digest=$(jq -er '.imageConfigDigest' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_manifest_digest=$(jq -er '.imageManifestDigest' <<<"$identity")" >>"$GITHUB_OUTPUT"
+          echo "image_archive_sha256=sha256:$(sha256sum "$archive" | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+          echo "image_archive_size=$(stat --format='%s' "$archive")" >>"$GITHUB_OUTPUT"
+      - name: Upload the one-use image bundle
+        if: inputs.mode == 'deploy'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: staging-telebirr-shadow-verifier-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-telebirr-shadow-verifier-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deploy:
+    name: Deploy one bounded no-money shadow release
+    if: inputs.mode == 'deploy'
+    needs: [validate-target, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: staging
+    steps:
+      - name: Check out exact deployment contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the exact image bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: staging-telebirr-shadow-verifier-${{ github.sha }}
+          path: ${{ runner.temp }}/release
+      - name: Validate and stage protected deployment inputs
+        id: protected
+        shell: bash
+        env:
+          PIN_MANIFEST_BASE64: ${{ vars.TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          RELEASE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.TELEBIRR_SHADOW_VERIFIER_RELEASE_SIGNING_PRIVATE_KEY_PEM }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+          BUILT_IMAGE_ARCHIVE_FORMAT: ${{ needs.build.outputs.image_archive_format }}
+          BUILT_IMAGE_CONFIG_DIGEST: ${{ needs.build.outputs.image_config_digest }}
+          BUILT_IMAGE_MANIFEST_DIGEST: ${{ needs.build.outputs.image_manifest_digest }}
+          BUILT_IMAGE_ARCHIVE_SHA256: ${{ needs.build.outputs.image_archive_sha256 }}
+          BUILT_IMAGE_ARCHIVE_SIZE: ${{ needs.build.outputs.image_archive_size }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" &&
+            -n "$PIN_MANIFEST_BASE64" && -n "$RELEASE_SIGNING_PRIVATE_KEY_PEM" ]]
+          [[ "$STAGING_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          protected="$RUNNER_TEMP/telebirr-shadow-verifier-protected"
+          install -d -m 0700 "$protected"
+          protected_published=false
+          signing_private=''
+          cleanup_unpublished_protected() {
+            if [[ -n "$signing_private" ]]; then rm -f -- "$signing_private"; fi
+            if [[ "$protected_published" != true && -d "$protected" && ! -L "$protected" &&
+              "$(realpath -- "$protected")" == "$protected" ]]; then
+              find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            fi
+          }
+          trap cleanup_unpublished_protected EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/telebirr-shadow-verifier-pins.v1.json"
+          openssl rand -hex 32 >"$protected/runtime-password"
+          runtime_password="$(<"$protected/runtime-password")"
+          [[ "$runtime_password" =~ ^[0-9a-f]{64}$ ]]
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$SHADOW_RUNTIME_ROLE" "$runtime_password" "$STAGING_DIRECT_DATABASE_HOST" \
+            >"$protected/telebirr-shadow-verifier-database-url"
+          unset runtime_password
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$STAGING_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          [[ "sha256:$(sha256sum "$protected/telebirr-shadow-verifier-pins.v1.json" | awk '{print $1}')" == \
+            "$CONFIRMED_PIN_DIGEST" ]]
+          node --input-type=module - "$protected/telebirr-shadow-verifier-pins.v1.json" <<'NODE'
+          import { createHash, createPublicKey } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const text = readFileSync(process.argv[2], 'utf8');
+          const manifest = JSON.parse(text);
+          if (JSON.stringify(manifest) !== text ||
+              Object.keys(manifest).join(',') !== 'contractVersion,assignmentSigners,devices' ||
+              manifest.contractVersion !== 1 || !Array.isArray(manifest.assignmentSigners) ||
+              !Array.isArray(manifest.devices) || manifest.assignmentSigners.length < 1 ||
+              manifest.assignmentSigners.length > 16 || manifest.devices.length < 1 ||
+              manifest.devices.length > 16) process.exit(1);
+          const ids = new Set(); const digests = new Set();
+          for (const pin of [...manifest.assignmentSigners, ...manifest.devices]) {
+            if (Object.keys(pin).join(',') !== 'keyId,publicKeySpkiDerBase64' ||
+                !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(pin.keyId) || ids.has(pin.keyId)) process.exit(1);
+            const bytes = Buffer.from(pin.publicKeySpkiDerBase64, 'base64');
+            const key = createPublicKey({ key: bytes, format: 'der', type: 'spki' });
+            const canonical = Buffer.from(key.export({ format: 'der', type: 'spki' }));
+            const digest = createHash('sha256').update(bytes).digest('hex');
+            if (bytes.toString('base64') !== pin.publicKeySpkiDerBase64 || bytes.length !== 91 ||
+                !bytes.equals(canonical) || key.asymmetricKeyType !== 'ec' ||
+                key.asymmetricKeyDetails?.namedCurve !== 'prime256v1' || digests.has(digest)) process.exit(1);
+            ids.add(pin.keyId); digests.add(digest); bytes.fill(0); canonical.fill(0);
+          }
+          NODE
+          archive="$RUNNER_TEMP/release/fetanagent-telebirr-shadow-verifier-image.tar"
+          identity="$(python3 -I \
+            infra/operations/fetanagent-telebirr-shadow-verifier-image-archive-validator.py \
+            "$archive" "${GITHUB_SHA:0:12}" "$GITHUB_SHA")"
+          archive_format="$(jq -er '.archiveFormat' <<<"$identity")"
+          image_config_digest="$(jq -er '.imageConfigDigest' <<<"$identity")"
+          image_manifest_digest="$(jq -er '.imageManifestDigest' <<<"$identity")"
+          archive_digest="sha256:$(sha256sum "$archive" | awk '{print $1}')"
+          archive_size="$(stat --format='%s' "$archive")"
+          compose_digest="sha256:$(sha256sum infra/compose.telebirr-shadow-verifier.yaml | awk '{print $1}')"
+          [[ "$archive_format" == "$BUILT_IMAGE_ARCHIVE_FORMAT" &&
+            "$image_config_digest" == "$BUILT_IMAGE_CONFIG_DIGEST" &&
+            "$image_manifest_digest" == "$BUILT_IMAGE_MANIFEST_DIGEST" &&
+            "$archive_digest" == "$BUILT_IMAGE_ARCHIVE_SHA256" &&
+            "$archive_size" == "$BUILT_IMAGE_ARCHIVE_SIZE" ]]
+          signing_private="$protected/release-signing-private-key.pem"
+          printf '%s\n' "$RELEASE_SIGNING_PRIVATE_KEY_PEM" >"$signing_private"
+          chmod 0600 "$signing_private"
+          unset RELEASE_SIGNING_PRIVATE_KEY_PEM
+          node --input-type=module - \
+            "$signing_private" \
+            "$protected/telebirr-shadow-verifier-release.v1.json" \
+            "$protected/telebirr-shadow-verifier-release.v1.sig" \
+            "$GITHUB_SHA" "$archive_format" "$image_config_digest" "$image_manifest_digest" \
+            "$archive_digest" "$archive_size" "$compose_digest" "$CONFIRMED_PIN_DIGEST" <<'NODE'
+          import {
+            createPrivateKey,
+            createPublicKey,
+            sign,
+            verify,
+          } from 'node:crypto';
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const [
+            privatePath, manifestPath, signaturePath, releaseCommit, imageArchiveFormat,
+            imageConfigDigest, imageManifestDigest, imageArchiveSha256, imageArchiveSizeText,
+            composeSha256, pinManifestSha256,
+          ] = process.argv.slice(2);
+          const digest = /^sha256:[0-9a-f]{64}$/;
+          const imageArchiveSize = Number(imageArchiveSizeText);
+          if (!/^[0-9a-f]{40}$/.test(releaseCommit) ||
+              !['docker-save-oci-v1', 'docker-save-legacy-v1'].includes(imageArchiveFormat) ||
+              !digest.test(imageConfigDigest) || !digest.test(imageManifestDigest) ||
+              imageConfigDigest === imageManifestDigest || !digest.test(imageArchiveSha256) ||
+              !Number.isSafeInteger(imageArchiveSize) || imageArchiveSize < 1 ||
+              imageArchiveSize > 1_073_741_824 || !digest.test(composeSha256) ||
+              !digest.test(pinManifestSha256)) process.exit(1);
+          const manifest = {
+            schemaVersion: 1,
+            purpose: 'fetanagent.telebirr-shadow-verifier.staging-release.v1',
+            deploymentTarget: 'staging',
+            releaseCommit,
+            imageRepository: 'fetanagent-telebirr-shadow-verifier',
+            imageTag: releaseCommit.slice(0, 12),
+            imageArchiveFormat,
+            imageConfigDigest,
+            imageManifestDigest,
+            imageArchiveSha256,
+            imageArchiveSize,
+            composeSha256,
+            pinManifestSha256,
+          };
+          const payload = Buffer.from(JSON.stringify(manifest));
+          const privateKey = createPrivateKey(readFileSync(privatePath));
+          if (privateKey.asymmetricKeyType !== 'ec' ||
+              privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') process.exit(1);
+          const publicKey = createPublicKey(privateKey);
+          const publicDer = Buffer.from(publicKey.export({ format: 'der', type: 'spki' }));
+          if (publicDer.length !== 91) process.exit(1);
+          const signature = sign('sha256', payload, { key: privateKey, dsaEncoding: 'der' });
+          if (signature.length < 64 || signature.length > 80 ||
+              !verify('sha256', payload, publicKey, signature)) process.exit(1);
+          writeFileSync(manifestPath, payload, { flag: 'wx', mode: 0o600 });
+          writeFileSync(signaturePath, signature, { flag: 'wx', mode: 0o600 });
+          payload.fill(0); signature.fill(0); publicDer.fill(0);
+          NODE
+          rm -f -- "$signing_private"
+          signing_private=''
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$STAGING_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+          protected_published=true
+      - name: Verify the installed helper and require an empty host boundary
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "test \"\$(id -u)\" -ne 0 && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper preflight '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper prepare-incoming '$GITHUB_SHA'"
+      - name: Provision the single 24-hour no-money runtime login
+        id: provision
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD_FILE: ${{ steps.protected.outputs.protected }}/runtime-password
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_runtime_provision
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          export TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD="$(<"$TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD_FILE")"
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-provision.sql)"
+          unset TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "shadow_verifier_bounded_runtime_provision" and
+            .deploymentTarget == "staging" and
+            .financialBoundary == "dry_run" and
+            .runtimeLogin == "bounded_24_hours"
+          ' <<<"$result" >/dev/null
+      - name: Prove the bounded login over the direct staging route
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGHOST: ${{ env.STAGING_DIRECT_DATABASE_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.STAGING_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: ${{ env.SHADOW_RUNTIME_ROLE }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_runtime_login_preflight
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          export PGPASSWORD="$(<"$PROTECTED/runtime-password")"
+          source infra/operations/fetanagent-staging-direct-database-tunnel.sh
+          fetanagent_open_staging_direct_database_tunnel "$PROTECTED" "$VM_HOST" "$PGHOST" "$PGPORT"
+          trap fetanagent_close_staging_direct_database_tunnel EXIT
+          psql -X --quiet --set=expected_runtime_role="$SHADOW_RUNTIME_ROLE" \
+            --file=infra/sql/staging-runtime-login-preflight.sql >/dev/null
+          unset PGPASSWORD
+      - name: Transfer, install, start, and attest the exact release
+        id: start
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          incoming="/tmp/fetanagent-telebirr-shadow-verifier-$GITHUB_SHA"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          timeout --signal=TERM --kill-after=5s 120s scp "${ssh_opts[@]}" \
+            "$RUNNER_TEMP/release/fetanagent-telebirr-shadow-verifier-image.tar" \
+            infra/compose.telebirr-shadow-verifier.yaml \
+            "$PROTECTED/supabase-ca.crt" \
+            "$PROTECTED/telebirr-shadow-verifier-database-url" \
+            "$PROTECTED/telebirr-shadow-verifier-pins.v1.json" \
+            "$PROTECTED/telebirr-shadow-verifier-release.v1.json" \
+            "$PROTECTED/telebirr-shadow-verifier-release.v1.sig" \
+            "fetanagent-admin@$VM_HOST:$incoming/"
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          timeout --signal=TERM --kill-after=5s 120s ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper start '$GITHUB_SHA' '${GITHUB_SHA:0:12}' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status '$GITHUB_SHA' '${GITHUB_SHA:0:12}'"
+      - name: Require the final database no-money and one-session attestation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.protected }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_final_deploy_attestation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "shadow_verifier_status" and
+            .deploymentTarget == "staging" and .runtimeLogin == "bounded" and
+            .activeRuntimeSessions == 1 and .financialBoundary == "dry_run" and
+            .executorBoundary == "disabled"
+          ' <<<"$result" >/dev/null
+      - name: Record the no-money deployment evidence
+        run: echo 'One signed immutable shadow-verifier container is healthy; the final database proof shows a bounded login, exactly one session, dry-run-only behavior, and a disabled executor; both live gates remain off and no public ingress exists.' >>"$GITHUB_STEP_SUMMARY"
+      - name: Discard incoming and runner-local protected material
+        if: always()
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PROTECTED:-}" && -f "$PROTECTED/deploy-key" && -f "$PROTECTED/known-hosts" ]]; then
+            ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+              -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+            timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+              "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper discard '$GITHUB_SHA'" >/dev/null 2>&1 || true
+          fi
+          if [[ -n "${PROTECTED:-}" && ( -e "$PROTECTED" || -L "$PROTECTED" ) ]]; then
+            [[ -d "$PROTECTED" && ! -L "$PROTECTED" && "$(realpath -- "$PROTECTED")" == "$PROTECTED" ]]
+            find -P "$PROTECTED" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$PROTECTED"
+          fi
+
+  failed-deploy-host-cleanup:
+    name: Remove any failed-deploy shadow project resources independently
+    if: >-
+      always() && inputs.mode == 'deploy' &&
+      needs.validate-target.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.deploy.result != 'success'
+    needs: [validate-target, build, deploy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Check out exact cleanup contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Stop project-label containers and networks without any database dependency
+        shell: bash
+        env:
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/telebirr-shadow-verifier-failed-host-cleanup"
+          install -d -m 0700 "$protected"
+          trap 'find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete; rmdir -- "$protected"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh | awk '{print $1}')"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper stop '$GITHUB_SHA' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper discard '$GITHUB_SHA'"
+
+  failed-deploy-database-cleanup:
+    name: Revoke any failed-deploy runtime login independently
+    if: >-
+      always() && inputs.mode == 'deploy' &&
+      needs.validate-target.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.deploy.result != 'success'
+    needs: [validate-target, build, deploy]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Check out exact cleanup contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Disable and verify the runtime without any host dependency
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_failed_deploy_database_cleanup
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          ca_file="$RUNNER_TEMP/telebirr-shadow-verifier-failed-database-cleanup-ca.crt"
+          trap 'rm -f -- "$ca_file"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
+          psql -X --quiet --file=infra/sql/staging-telebirr-shadow-verifier-disable.sql >/dev/null
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
+          jq -e '
+            .runtimeLogin == "disabled" and .activeRuntimeSessions == 0 and
+            .executorBoundary == "disabled"
+          ' <<<"$result" >/dev/null
+
+  status:
+    name: Attest the exact running host and database boundary
+    if: inputs.mode == 'status'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - name: Check out exact status contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Attest one exact healthy container and bounded database session
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.confirm_release_commit_sha }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_status
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/telebirr-shadow-verifier-status"
+          install -d -m 0700 "$protected"
+          trap 'find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete; rmdir -- "$protected"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected"/*
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+          helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh | awk '{print $1}')"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper status '$RELEASE_SHA' '${RELEASE_SHA:0:12}'"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
+          result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "shadow_verifier_status" and
+            .deploymentTarget == "staging" and .runtimeLogin == "bounded" and
+            .activeRuntimeSessions == 1 and .financialBoundary == "dry_run" and
+            .executorBoundary == "disabled"
+          ' <<<"$result" >/dev/null
+          echo 'Status passed: the exact release is healthy; runtime login bounded; one session; dry-run boundary; executor disabled.' >>"$GITHUB_STEP_SUMMARY"
+
+  stop-host:
+    name: Stop project-label host containers and networks independently
+    if: inputs.mode == 'stop'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Check out exact stop contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Remove project-label containers and networks without any database dependency
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.confirm_release_commit_sha }}
+          STAGING_VM_HOST: ${{ secrets.STAGING_VM_HOST }}
+          STAGING_VM_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+          STAGING_VM_SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$RUNNER_TEMP/telebirr-shadow-verifier-host-stop"
+          install -d -m 0700 "$protected"
+          trap 'find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete; rmdir -- "$protected"' EXIT
+          printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          helper_sha="$(sha256sum infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh | awk '{print $1}')"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ConnectTimeout=5 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          timeout --signal=TERM --kill-after=5s 60s ssh "${ssh_opts[@]}" "fetanagent-admin@$STAGING_VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper verify '$helper_sha' && sudo -n /usr/local/sbin/fetanagent-telebirr-shadow-verifier-helper stop '$RELEASE_SHA'"
+          echo 'Host stop passed: every shadow-verifier project container and network is absent.' >>"$GITHUB_STEP_SUMMARY"
+
+  stop-database:
+    name: Revoke runtime login and sessions independently
+    if: inputs.mode == 'stop'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Check out exact stop contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Disable and verify the database without any host dependency
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.STAGING_POOLER_HOST }}
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.STAGING_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_shadow_verifier_database_stop
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          ca_file="$RUNNER_TEMP/telebirr-shadow-verifier-database-stop-ca.crt"
+          trap 'rm -f -- "$ca_file"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+          [[ "$PGHOST" == "$STAGING_POOLER_HOST" && "$PGPORT" == '5432' && \
+             "$PGDATABASE" == 'postgres' && "$PGUSER" == "postgres.$STAGING_PROJECT_REF" ]]
+          disable_result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-disable.sql)"
+          jq -e '
+            .schemaVersion == 1 and .operation == "shadow_verifier_runtime_disable" and
+            .deploymentTarget == "staging" and .runtimeLogin == "disabled" and
+            .financialSwitchesChanged == false
+          ' <<<"$disable_result" >/dev/null
+          status_result="$(psql -X --quiet --tuples-only --no-align \
+            --file=infra/sql/staging-telebirr-shadow-verifier-status.sql)"
+          jq -e '
+            .runtimeLogin == "disabled" and .activeRuntimeSessions == 0 and
+            (.financialBoundary == "dry_run" or .financialBoundary == "disabled") and
+            .executorBoundary == "disabled"
+          ' <<<"$status_result" >/dev/null
+          echo 'Database stop passed: runtime NOLOGIN/passwordless; zero sessions; no financial switch changed.' >>"$GITHUB_STEP_SUMMARY"

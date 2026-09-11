@@ -13,14 +13,27 @@ COPY packages/sql-integration-tests/package.json ./packages/sql-integration-test
 
 RUN pnpm install --frozen-lockfile --filter @fetanagent/sql-integration-tests...
 
-FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS runner
+# This content-addressed stage supplies the exact psql 17.4 client. Its server entrypoint is
+# replaced below; no PostgreSQL daemon or data directory is used by the test runner.
+FROM --platform=linux/amd64 postgres:17.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad AS runner
 
 WORKDIR /workspace
 
 ENV CI=true
 ENV SQL_INTEGRATION_RUNNER_SENTINEL=fetanagent-sql-integration-image-v1
 
-RUN install --directory --owner=root --group=root --mode=0755 /usr/local/share/fetanagent \
+COPY --from=dependencies /usr/local/bin/node /usr/local/bin/node
+
+RUN test "$(node --version)" = 'v22.17.1' \
+  && psql --version | grep --extended-regexp --quiet '^psql \(PostgreSQL\) 17\.4([ .]|$)' \
+  && psql --help=commands >/tmp/psql-commands \
+  && grep --fixed-strings --quiet '\getenv' /tmp/psql-commands \
+  && grep --fixed-strings --quiet '\if' /tmp/psql-commands \
+  && grep --fixed-strings --quiet '\warn' /tmp/psql-commands \
+  && rm -f -- /tmp/psql-commands \
+  && groupadd --gid 10001 node \
+  && useradd --uid 10001 --gid 10001 --create-home --shell /bin/false node \
+  && install --directory --owner=root --group=root --mode=0755 /usr/local/share/fetanagent \
   && printf '%s\n' "$SQL_INTEGRATION_RUNNER_SENTINEL" > /usr/local/share/fetanagent/sql-integration-runner \
   && chmod 0444 /usr/local/share/fetanagent/sql-integration-runner
 
@@ -29,6 +42,12 @@ COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/sql-integration-tests ./packages/sql-integration-tests
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY infra/sql/staging-runtimes-enable-continuous.sql ./infra/sql/staging-runtimes-enable-continuous.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-provision.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-provision.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-status.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-status.sql
+COPY infra/sql/staging-telebirr-shadow-verifier-disable.sql \
+  ./infra/sql/staging-telebirr-shadow-verifier-disable.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
 COPY supabase/migrations ./supabase/migrations
@@ -40,6 +59,13 @@ RUN install --directory --owner=node --group=node --mode=0700 \
 
 WORKDIR /workspace/packages/sql-integration-tests
 
+ENV HOME=/home/node
+
 USER node
+
+# The client image declares PGDATA/PG version metadata. Remove that inherited PG-prefixed metadata
+# before the harness's own environment attestation runs; individual psql children receive only the
+# explicit disposable connection variables assembled by the test suite.
+ENTRYPOINT ["/usr/bin/env", "-u", "PGDATA", "-u", "PG_MAJOR", "-u", "PG_VERSION", "-u", "PG_SHA256"]
 
 CMD ["./node_modules/.bin/vitest", "run", "--config", "vitest.config.ts"]

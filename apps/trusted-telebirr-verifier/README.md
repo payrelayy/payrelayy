@@ -84,6 +84,8 @@ observations into append-only advisory outcomes and accepts completion only when
 financial IDs are null and `settlement_created=false`. See
 [`../../docs/telebirr-shadow-verification.md`](../../docs/telebirr-shadow-verification.md) for the
 exact intake RPC, seven-gate predicate, redacted status surface, and no-money deployment boundary.
+The manual, immutable staging plan/deploy/status/stop lifecycle is documented separately in
+[`../../infra/staging-telebirr-shadow-verifier.md`](../../infra/staging-telebirr-shadow-verifier.md).
 
 ## Existing database and verifier safety
 
@@ -125,4 +127,5 @@ pnpm --filter "@fetanagent/trusted-telebirr-verifier..." run build
 pnpm --filter @fetanagent/trusted-telebirr-verifier run test
 node infra/verify-trusted-telebirr-verifier-deployment.mjs
 node infra/verify-telebirr-shadow-verifier-deployment.mjs
+node infra/verify-telebirr-shadow-verifier-staging-lifecycle.mjs
 ```

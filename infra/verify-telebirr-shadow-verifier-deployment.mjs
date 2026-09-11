@@ -65,7 +65,9 @@ assert.match(
 assert.doesNotMatch(image, /\bEXPOSE\b|docker\.sock|\/run\/(?:secrets|configs)/u);
 
 assert.match(compose, /^\s{4}profiles: \[telebirr-shadow-verifier\]$/mu);
-assert.match(compose, /repository@sha256 immutable image reference/u);
+assert.match(compose, /release-recorded sha256 image ID/u);
+assert.match(compose, /FETANAGENT_TELEBIRR_SHADOW_VERIFIER_IMAGE_ID/u);
+assert.match(compose, /^\s{4}pull_policy: never$/mu);
 assert.match(compose, /^\s{4}user: '10001:10001'$/mu);
 assert.match(compose, /^\s{4}read_only: true$/mu);
 assert.match(compose, /^\s{6}- ALL$/mu);
@@ -73,13 +75,16 @@ assert.match(compose, /^\s{6}- no-new-privileges:true$/mu);
 assert.match(compose, /^\s{6}FINANCIAL_ACTIONS_MODE: dry_run$/mu);
 assert.match(compose, /^\s{6}TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false'$/mu);
 assert.match(compose, /^\s{6}KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED: 'false'$/mu);
-assert.match(compose, /INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED: \$\{[^\r\n]+:\?[^\r\n]+\}/u);
-assert.match(compose, /TELEBIRR_SHADOW_VERIFICATION_ENABLED: \$\{[^\r\n]+:\?[^\r\n]+\}/u);
+assert.match(compose, /^\s{6}INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED: 'true'$/mu);
+assert.match(compose, /^\s{6}TELEBIRR_SHADOW_VERIFICATION_ENABLED: 'true'$/mu);
 assert.match(compose, /telebirr_shadow_verifier_database_url/u);
 assert.match(compose, /telebirr_shadow_verifier_pins\.v1\.json/u);
 assert.match(compose, /127\.0\.0\.1:8092\/readyz/u);
 assert.match(compose, /mode: 0400/u);
 assert.equal((compose.match(/mode: 0444/gu) ?? []).length, 2);
+assert.match(compose, /^\s{4}enable_ipv6: true$/mu);
+assert.match(compose, /^\s{4}internal: false$/mu);
+assert.match(compose, /^\s{4}attachable: false$/mu);
 assert.doesNotMatch(
   compose,
   /^\s+(?:ports|expose|build|privileged|network_mode|pid|ipc):|docker\.sock|\/var\/run\/docker/imu,

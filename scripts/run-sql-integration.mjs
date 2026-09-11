@@ -100,6 +100,15 @@ async function assertStaticComposeBoundary() {
     throw new Error('SQL integration Compose file must use only the internal postgres hostname.');
   }
 
+  if (
+    composeSource.includes('postgres_host_auth_method: trust') ||
+    !composeSource.includes('postgres_host_auth_method: scram-sha-256') ||
+    !composeSource.includes('postgres_initdb_args: --auth-host=scram-sha-256') ||
+    !composeSource.includes('sql_integration_postgres_password:')
+  ) {
+    throw new Error('SQL integration Compose must enforce its fixed disposable SCRAM boundary.');
+  }
+
   if (!composeSource.includes('internal: true')) {
     throw new Error('SQL integration Compose network must remain internal.');
   }

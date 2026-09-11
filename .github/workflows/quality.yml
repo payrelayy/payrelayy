@@ -53,6 +53,11 @@ jobs:
       - name: Check formatting
         run: pnpm lint
 
+      - name: Test the hostile image archive validator
+        shell: bash
+        run: |
+          python3 -I infra/operations/test_fetanagent_telebirr_shadow_verifier_image_archive_validator.py
+
       - name: Verify staging beta infrastructure contract
         shell: bash
         run: |
@@ -60,6 +65,7 @@ jobs:
           node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
+          bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \
           FETANAGENT_VCS_REF="${GITHUB_SHA}" \

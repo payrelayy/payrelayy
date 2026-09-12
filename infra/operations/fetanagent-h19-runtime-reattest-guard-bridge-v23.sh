@@ -17,7 +17,8 @@ readonly H22_RELEASE='50bd429d58645cf8fde6f9a9757faac689cf864c'
 readonly H22_INTENT_SHA256='67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e27'
 readonly H22_COMPLETION_SHA256='5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1'
 readonly H22_GUARD_SHA256='0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
-readonly REVIEWED_SUCCESSOR_GUARD_SHA256='16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23'
+readonly REVIEWED_SUCCESSOR_GUARD_SHA256='e7d5ca3a9cc44eccbda7039de78aa2d1e9ef2ba19dab8458cba0faa5e6d7568c'
+readonly INTERRUPTED_BRIDGE_RELEASE='837f3addad1e1acf9707099c0590824739e8c788'
 readonly H20_HELPER_SHA256='8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4'
 readonly H20_FINALIZER_SHA256='1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f'
 readonly H20_SUDOERS_SHA256='0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807'
@@ -60,22 +61,31 @@ die() {
   exit 1
 }
 
-[[ $# -eq 3 || $# -eq 4 ]] ||
-  die 'expected the H23 release, successor guard digest, exact confirmation, and optional preflight mode'
+[[ $# -eq 4 || $# -eq 5 ]] ||
+  die 'expected the interrupted H23 release, successor guard digest, exact confirmation, correction release, and optional preflight mode'
 readonly BRIDGE_RELEASE="$1"
 readonly SUCCESSOR_GUARD_SHA256="$2"
 readonly PROVIDED_CONFIRMATION="$3"
-readonly MODE="${4:-apply}"
+readonly CORRECTION_RELEASE="$4"
+readonly MODE="${5:-apply}"
 readonly STAGING_ROOT="/root/fetanagent-h19-runtime-reattest-guard-bridge-v23-$BRIDGE_RELEASE"
 readonly STAGED_INSTALLER="$STAGING_ROOT/$SCRIPT_BASENAME"
 readonly STAGED_GUARD="$STAGING_ROOT/fetanagent-production-ingress-h19.next"
 readonly H23_ROOT="$H23_PARENT/$BRIDGE_RELEASE"
 readonly H23_INSTALLING="$H23_PARENT/.installing-$BRIDGE_RELEASE"
 
-[[ "$BRIDGE_RELEASE" =~ ^[0-9a-f]{40}$ && "$BRIDGE_RELEASE" != "$PROTECTED_RELEASE" &&
+[[ "$BRIDGE_RELEASE" == "$INTERRUPTED_BRIDGE_RELEASE" &&
+  "$BRIDGE_RELEASE" =~ ^[0-9a-f]{40}$ && "$BRIDGE_RELEASE" != "$PROTECTED_RELEASE" &&
   "$BRIDGE_RELEASE" != "$H19_RELEASE" && "$BRIDGE_RELEASE" != "$H22_RELEASE" &&
   "$BRIDGE_RELEASE" != "$APPROVED_BOT_RELEASE" ]] ||
-  die 'H23 requires one distinct full release SHA for correction provenance'
+  die 'H23 resume requires the exact interrupted bridge release'
+[[ "$CORRECTION_RELEASE" =~ ^[0-9a-f]{40}$ &&
+  "$CORRECTION_RELEASE" != "$BRIDGE_RELEASE" &&
+  "$CORRECTION_RELEASE" != "$PROTECTED_RELEASE" &&
+  "$CORRECTION_RELEASE" != "$H19_RELEASE" &&
+  "$CORRECTION_RELEASE" != "$H22_RELEASE" &&
+  "$CORRECTION_RELEASE" != "$APPROVED_BOT_RELEASE" ]] ||
+  die 'H23 resume requires one distinct full correction release SHA'
 [[ "$SUCCESSOR_GUARD_SHA256" == "$REVIEWED_SUCCESSOR_GUARD_SHA256" &&
   "$SUCCESSOR_GUARD_SHA256" != "$H22_GUARD_SHA256" ]] ||
   die 'the H23 successor guard digest is invalid or unchanged'
@@ -521,7 +531,11 @@ expected_completion() {
   local intent_sha
   intent_sha="$(expected_intent | sha256sum | awk '{print $1}')" || return 1
   expected_intent | awk 'NR == 2 {$0="state=runtime-reattest-guard-installed"} {print}'
-  printf 'bridge_intent_sha256=%s\n' "$intent_sha"
+  printf '%s\n' \
+    "bridge_intent_sha256=$intent_sha" \
+    'resumed_after_archive_initializer_failure=true' \
+    "resume_correction_release=$CORRECTION_RELEASE" \
+    'resume_correction=split-dependent-local-initializers'
 }
 
 require_expected_record() {
@@ -551,7 +565,9 @@ publish_record() {
 }
 
 archive_predecessor_guard() {
-  local target="$H23_INSTALLING/predecessor-ingress-guard" temporary="$target.installing"
+  local target temporary
+  target="$H23_INSTALLING/predecessor-ingress-guard"
+  temporary="$target.installing"
   if [[ -e "$target" || -L "$target" ]]; then
     [[ ! -e "$temporary" && ! -L "$temporary" ]] || return 1
     require_exact_file "$target" "$H22_GUARD_SHA256" 400
@@ -636,12 +652,17 @@ if [[ "$guard" == old ]]; then
   require_predecessor_record_output || die 'the installed H22 guard rejected its provenance chain'
 fi
 case "$state:$guard" in
-  absent:old|empty-parent:old|installing:old|installing:new|completed:new) ;;
-  *) die 'the H23 evidence and installed-guard topology is causally invalid' ;;
+  installing:old|installing:new)
+    require_disabled_deploy_grant ||
+      die 'an interrupted H23 resume requires the isolated staging deployment grant'
+    ;;
+  completed:new)
+    require_terminal_record || die 'the terminal H23 record is invalid'
+    require_active_deploy_grant || require_disabled_deploy_grant ||
+      die 'the completed H23 deployment grant is not in an exact recoverable state'
+    ;;
+  *) die 'the H23 resume evidence and installed-guard topology is causally invalid' ;;
 esac
-if [[ "$state" == completed ]]; then require_terminal_record || die 'the terminal H23 record is invalid'; fi
-require_active_deploy_grant || require_disabled_deploy_grant ||
-  die 'the staging deployment grant is not in an exact recoverable state'
 
 if [[ "$MODE" == preflight ]]; then
   printf '%s\n' \
@@ -661,18 +682,7 @@ disable_deploy_grant || die 'the staging deployment capability could not be isol
 
 state="$(namespace_state)" || die 'the H23 namespace changed unexpectedly'
 if [[ "$state" != completed ]]; then
-  if [[ "$state" == absent ]]; then
-    install -d -o root -g root -m 0700 "$H23_PARENT" || die 'the H23 parent could not be created'
-    sync -f "$(dirname -- "$H23_PARENT")"
-    state=empty-parent
-  fi
-  if [[ "$state" == empty-parent ]]; then
-    install -d -o root -g root -m 0700 "$H23_INSTALLING" ||
-      die 'the H23 installing root could not be created'
-    sync -f "$H23_PARENT"
-    state=installing
-  fi
-  [[ "$state" == installing ]] || die 'the H23 installing namespace is invalid'
+  [[ "$state" == installing ]] || die 'the interrupted H23 installing namespace is invalid'
   publish_record "$H23_INSTALLING" intent-v1 expected_intent || die 'the H23 intent could not be sealed'
   archive_predecessor_guard || die 'the H22 guard could not be archived'
   install_successor_guard || die 'the H23 successor guard could not be installed atomically'

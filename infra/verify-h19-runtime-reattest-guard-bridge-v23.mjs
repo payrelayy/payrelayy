@@ -35,6 +35,7 @@ const h22Release = '50bd429d58645cf8fde6f9a9757faac689cf864c';
 const h22Intent = '67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e27';
 const h22Completion = '5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1';
 const h22Guard = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17';
+const interruptedBridgeRelease = '837f3addad1e1acf9707099c0590824739e8c788';
 const helper = '8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4';
 const finalizer = '1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f';
 const sudoers = '0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807';
@@ -53,6 +54,7 @@ for (const [name, value] of [
   ['H22_COMPLETION_SHA256', h22Completion],
   ['H22_GUARD_SHA256', h22Guard],
   ['REVIEWED_SUCCESSOR_GUARD_SHA256', guardDigest],
+  ['INTERRUPTED_BRIDGE_RELEASE', interruptedBridgeRelease],
   ['H20_HELPER_SHA256', helper],
   ['H20_FINALIZER_SHA256', finalizer],
   ['H20_SUDOERS_SHA256', sudoers],
@@ -80,6 +82,7 @@ for (const invariant of [
   `h22_intent_sha = '${h22Intent}'`,
   `h22_completion_sha = '${h22Completion}'`,
   `h22_guard_sha = '${h22Guard}'`,
+  `interrupted_h23_release = '${interruptedBridgeRelease}'`,
   `approved_bot_release = '${botRelease}'`,
   `approved_bot_image = '${botImage}'`,
   `reattested_production_sha = '${production}'`,
@@ -93,6 +96,9 @@ for (const invariant of [
   'print(h23_successor_guard_sha)',
   'print(approved_bot_release)',
   'print(approved_bot_image)',
+  'resumed_after_archive_initializer_failure=true',
+  'resume_correction_release=',
+  'resume_correction=split-dependent-local-initializers',
 ]) {
   assert.ok(recordReader.includes(invariant), `missing H23 record invariant: ${invariant}`);
 }
@@ -189,7 +195,7 @@ const intentFields = [
 assertInOrder(shellFunction(installer, 'expected_intent'), intentFields, 'H23 intent');
 assert.match(
   shellFunction(installer, 'expected_completion'),
-  /state=runtime-reattest-guard-installed/u,
+  /state=runtime-reattest-guard-installed[\s\S]*resumed_after_archive_initializer_failure=true[\s\S]*resume_correction_release=\$CORRECTION_RELEASE[\s\S]*resume_correction=split-dependent-local-initializers/u,
 );
 assertInOrder(
   installer,
@@ -229,6 +235,12 @@ assertInOrder(
   'H23 read-only preflight boundary',
 );
 assert.match(installer, /\[\[ "\$MODE" == apply \|\| "\$MODE" == preflight \]\]/u);
+assert.match(installer, /"\$BRIDGE_RELEASE" == "\$INTERRUPTED_BRIDGE_RELEASE"/u);
+assert.doesNotMatch(
+  installer,
+  /local\s+target="[^"]+"\s+temporary="\$target\.installing"/u,
+  'dependent local initializers must be assigned separately under set -u',
+);
 
 const bash =
   process.platform === 'win32'
@@ -245,9 +257,11 @@ for (const path of [
   assert.equal(result.status, 0, `${path}: ${result.stderr}`);
 }
 
-const bridgeRelease = '1'.repeat(40);
+const bridgeRelease = interruptedBridgeRelease;
+const correctionRelease = '2'.repeat(40);
 const shellVariables = `set -euo pipefail
 BRIDGE_RELEASE=${bridgeRelease}
+CORRECTION_RELEASE=${correctionRelease}
 H22_RELEASE=${h22Release}
 H22_INTENT_SHA256=${h22Intent}
 H22_COMPLETION_SHA256=${h22Completion}
@@ -311,18 +325,54 @@ expected_completion
 });
 assert.equal(completionResult.status, 0, completionResult.stderr);
 const producedCompletion = completionResult.stdout.trimEnd().split('\n');
-assert.equal(producedCompletion.length, 28);
+assert.equal(producedCompletion.length, 31);
 assert.equal(producedCompletion[1], 'state=runtime-reattest-guard-installed');
 assert.deepEqual(producedCompletion.slice(2, 27), producedIntent.slice(2, 27));
 assert.equal(
   producedCompletion[27],
   `bridge_intent_sha256=${sha256(`${producedIntent.join('\n')}\n`)}`,
 );
+assert.deepEqual(producedCompletion.slice(28), [
+  'resumed_after_archive_initializer_failure=true',
+  `resume_correction_release=${correctionRelease}`,
+  'resume_correction=split-dependent-local-initializers',
+]);
+
+const archiveProbe = spawnSync(bash, ['-s'], {
+  input: `set -euo pipefail
+H23_INSTALLING="$(mktemp -d)"
+trap 'rm -rf -- "$H23_INSTALLING"' EXIT
+H22_GUARD_SHA256=${h22Guard}
+touch "$H23_INSTALLING/predecessor-ingress-guard"
+require_exact_file() { return 0; }
+${shellFunction(installer, 'archive_predecessor_guard')}
+archive_predecessor_guard
+`,
+  encoding: 'utf8',
+  timeout: 10000,
+});
+assert.equal(
+  archiveProbe.status,
+  0,
+  `the predecessor archive must execute under set -u: ${archiveProbe.stderr}`,
+);
 
 assert.match(runbook, /## H23 exact no-money runtime re-attestation/u);
+const h23Runbook = runbook.slice(
+  runbook.indexOf('## H23 exact no-money runtime re-attestation'),
+  runbook.indexOf('## Build and gateway-only transition'),
+);
 assert.match(
-  runbook,
-  /SUCCESSOR_INGRESS_GUARD_SHA256[\s\S]*?preflight[\s\S]*?without the `preflight` argument/u,
+  h23Runbook,
+  /837f3addad1e1acf9707099c0590824739e8c788[\s\S]*?SUCCESSOR_INGRESS_GUARD_SHA256[\s\S]*?H23_RESUME_CORRECTION_MERGE_SHA[\s\S]*?preflight[\s\S]*?without the final `preflight` argument/u,
+);
+assert.doesNotMatch(
+  runbook.slice(
+    runbook.indexOf('## H20 canonical-capability correction'),
+    runbook.indexOf('## H21 stable immutable-nine recovery'),
+  ),
+  /runtime-reattest-guard-bridge-v23|preflight/u,
+  'the H23 recovery procedure must not appear in the historical H20 instructions',
 );
 assert.match(
   v22Verifier,

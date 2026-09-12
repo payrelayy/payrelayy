@@ -292,8 +292,10 @@ The first apply of H23 release `837f3addad1e1acf9707099c0590824739e8c788` stoppe
 `set -u` after publishing its exact intent and isolating the staging grant, but before archiving or
 replacing the H22 guard. Its dependent `local` initializers are now split into separate assignments.
 The resumed completion preserves that intent byte-for-byte and additionally records the distinct
-merged correction release and the exact initializer correction; neither the partial intent nor any
-H19-H22 evidence is rewritten or removed.
+merged correction release, the corrected installed-guard digest, and the exact initializer
+correction. The intent therefore keeps its originally reviewed `16ff39bf…` successor digest while
+the completion explicitly binds the corrected successor; neither the partial intent nor any H19-H22
+evidence is rewritten or removed.
 
 Stage the two corrected files from the exact merged resume-correction commit in the existing
 root-owned mode-`0700` directory
@@ -422,7 +424,7 @@ nine-service preflight, and confirms the installer contains no Compose, Supabase
 production-runtime, or money action.
 
 The H23 verifier binds the successor guard and exact approved bot/runtime fingerprints to repository
-bytes, proves that H19-H22 and the interrupted 27-field intent remain immutable, checks the 31-field
+bytes, proves that H19-H22 and the interrupted 27-field intent remain immutable, checks the 32-field
 resumed completion and executable predecessor-archive regression, requires exact no-money and
 security flags for every service, and rejects Compose, Supabase, database, production-runtime, or
 money actions in the installer.

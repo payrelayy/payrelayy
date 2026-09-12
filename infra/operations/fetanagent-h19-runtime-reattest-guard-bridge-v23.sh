@@ -17,8 +17,9 @@ readonly H22_RELEASE='50bd429d58645cf8fde6f9a9757faac689cf864c'
 readonly H22_INTENT_SHA256='67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e27'
 readonly H22_COMPLETION_SHA256='5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1'
 readonly H22_GUARD_SHA256='0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
-readonly REVIEWED_SUCCESSOR_GUARD_SHA256='e7d5ca3a9cc44eccbda7039de78aa2d1e9ef2ba19dab8458cba0faa5e6d7568c'
+readonly REVIEWED_SUCCESSOR_GUARD_SHA256='351156b4d6d18d1f7920ebee7b8817ca937d126faabf9863f31d8811662dd759'
 readonly INTERRUPTED_BRIDGE_RELEASE='837f3addad1e1acf9707099c0590824739e8c788'
+readonly INTERRUPTED_SUCCESSOR_GUARD_SHA256='16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23'
 readonly H20_HELPER_SHA256='8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4'
 readonly H20_FINALIZER_SHA256='1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f'
 readonly H20_SUDOERS_SHA256='0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807'
@@ -507,7 +508,7 @@ expected_intent() {
     "h19_bridge_release=$H19_RELEASE" \
     "candidate_gateway_release=$H19_RELEASE" \
     "predecessor_ingress_guard_sha256=$H22_GUARD_SHA256" \
-    "successor_ingress_guard_sha256=$SUCCESSOR_GUARD_SHA256" \
+    "successor_ingress_guard_sha256=$INTERRUPTED_SUCCESSOR_GUARD_SHA256" \
     "approved_telegram_bot_release=$APPROVED_BOT_RELEASE" \
     "approved_telegram_bot_image_id=$APPROVED_BOT_IMAGE_ID" \
     "reattested_production_boundary_sha256=$REATTESTED_PRODUCTION_SHA256" \
@@ -535,6 +536,7 @@ expected_completion() {
     "bridge_intent_sha256=$intent_sha" \
     'resumed_after_archive_initializer_failure=true' \
     "resume_correction_release=$CORRECTION_RELEASE" \
+    "resume_successor_ingress_guard_sha256=$SUCCESSOR_GUARD_SHA256" \
     'resume_correction=split-dependent-local-initializers'
 }
 

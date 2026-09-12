@@ -283,6 +283,7 @@ h22_intent_sha = '67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e
 h22_completion_sha = '5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1'
 h22_guard_sha = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
 interrupted_h23_release = '837f3addad1e1acf9707099c0590824739e8c788'
+interrupted_h23_guard_sha = '16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23'
 approved_bot_release = 'bcc479be0f2e807203df5612d380002fd6df2ee5'
 approved_bot_image = 'sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467c90fd73e3'
 reattested_production_sha = 'fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5'
@@ -699,11 +700,14 @@ try:
     )
     h23_intent = h23_intent_data.decode('ascii').splitlines()
     h23_completion = h23_completion_data.decode('ascii').splitlines()
-    h23_successor_guard_sha = (
+    h23_intended_guard_sha = (
         h23_intent[9].split('=', 1)[1] if len(h23_intent) > 9 else ''
     )
     h23_correction_release = (
         h23_completion[29].split('=', 1)[1] if len(h23_completion) > 29 else ''
+    )
+    h23_successor_guard_sha = (
+        h23_completion[30].split('=', 1)[1] if len(h23_completion) > 30 else ''
     )
     h23_expected = [
         'contract=fetanagent-h19-runtime-reattest-guard-bridge-v23',
@@ -715,7 +719,7 @@ try:
         f'h19_bridge_release={h19_release}',
         f'candidate_gateway_release={h19_release}',
         f'predecessor_ingress_guard_sha256={h22_guard_sha}',
-        f'successor_ingress_guard_sha256={h23_successor_guard_sha}',
+        f'successor_ingress_guard_sha256={h23_intended_guard_sha}',
         f'approved_telegram_bot_release={approved_bot_release}',
         f'approved_telegram_bot_image_id={approved_bot_image}',
         f'reattested_production_boundary_sha256={reattested_production_sha}',
@@ -736,10 +740,11 @@ try:
     ]
     if (
         len(h23_intent) != 27
-        or len(h23_completion) != 31
+        or len(h23_completion) != 32
         or h23_release != interrupted_h23_release
+        or h23_intended_guard_sha != interrupted_h23_guard_sha
         or sha_re.fullmatch(h23_successor_guard_sha) is None
-        or h23_successor_guard_sha == h22_guard_sha
+        or h23_successor_guard_sha in (h22_guard_sha, h23_intended_guard_sha)
         or release_re.fullmatch(h23_correction_release) is None
         or h23_correction_release in (
             protected, h19_release, h20_release, h21_release, h22_release,
@@ -752,7 +757,10 @@ try:
         or h23_completion[27] != f'bridge_intent_sha256={digest(h23_intent_data)}'
         or h23_completion[28] != 'resumed_after_archive_initializer_failure=true'
         or h23_completion[29] != f'resume_correction_release={h23_correction_release}'
-        or h23_completion[30] != 'resume_correction=split-dependent-local-initializers'
+        or h23_completion[30] != (
+            f'resume_successor_ingress_guard_sha256={h23_successor_guard_sha}'
+        )
+        or h23_completion[31] != 'resume_correction=split-dependent-local-initializers'
         or h23_intent_data != ('\n'.join(h23_intent) + '\n').encode('ascii')
         or h23_completion_data != ('\n'.join(h23_completion) + '\n').encode('ascii')
         or digest(h23_archived_guard) != h22_guard_sha

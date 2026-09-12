@@ -17,7 +17,7 @@ readonly H22_RELEASE='50bd429d58645cf8fde6f9a9757faac689cf864c'
 readonly H22_INTENT_SHA256='67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e27'
 readonly H22_COMPLETION_SHA256='5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1'
 readonly H22_GUARD_SHA256='0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
-readonly REVIEWED_SUCCESSOR_GUARD_SHA256='076b660659ca8197b2bdee4a4f8547a788c8295d9ad0afbba0f35c64781c453f'
+readonly REVIEWED_SUCCESSOR_GUARD_SHA256='16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23'
 readonly H20_HELPER_SHA256='8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4'
 readonly H20_FINALIZER_SHA256='1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f'
 readonly H20_SUDOERS_SHA256='0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807'
@@ -28,7 +28,7 @@ readonly APPROVED_BOT_IMAGE_ID='sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac4
 readonly CANDIDATE_GATEWAY_IMAGE_ID='sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8'
 readonly CANDIDATE_CADDY_SHA256='afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616'
 readonly REATTESTED_PRODUCTION_SHA256='fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5'
-readonly REATTESTED_NINE_SHA256='b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53'
+readonly REATTESTED_NINE_SHA256='0b5c68c61794dadb0098470829ce581e6d8f9eec5ffc57429a5d438f72d846d6'
 readonly REATTESTED_INGRESS_SHA256='770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb'
 readonly TLS_LEAF_SHA256='2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8'
 readonly PROTECTED_RELEASE='69be82ac3e49ff8c63c64c9aa7926e0046b48a10'
@@ -335,7 +335,7 @@ immutable_nine_digest() {
   jq -e 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway")) |
     length == 9' <<<"$inspection" >/dev/null || return 1
   jq -S -c 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway") |
-      del(.State.Health.Log) |
+      del(.ExecIDs,.State.Health.Log) |
       .Mounts |= sort_by([.Type,.Name,.Source,.Destination,.Driver,.Mode,.RW,.Propagation])) |
     sort_by(.Name)' <<<"$inspection" | sha256sum | awk '{print $1}'
 }

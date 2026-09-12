@@ -287,7 +287,8 @@ admits only the existing H19 candidate gateway, the approved bot image
 protected releases, the exact healthy/security configuration, and these observed fingerprints:
 
 - production boundary: `fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5`;
-- immutable nine-service boundary: `b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53`;
+- stable immutable nine-service boundary (excluding transient Docker `ExecIDs` and health logs):
+  `0b5c68c61794dadb0098470829ce581e6d8f9eec5ffc57429a5d438f72d846d6`;
 - shared ingress: `770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb`;
 - TLS leaf: `2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8`.
 

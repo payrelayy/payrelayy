@@ -285,7 +285,7 @@ h22_guard_sha = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f1
 approved_bot_release = 'bcc479be0f2e807203df5612d380002fd6df2ee5'
 approved_bot_image = 'sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467c90fd73e3'
 reattested_production_sha = 'fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5'
-reattested_nine_sha = 'b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53'
+reattested_nine_sha = '0b5c68c61794dadb0098470829ce581e6d8f9eec5ffc57429a5d438f72d846d6'
 reattested_ingress_sha = '770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb'
 h18_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
 h18_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
@@ -998,7 +998,7 @@ immutable_nine_digest() {
     ]
   ' <<<"$inspection" >/dev/null || return 1
   jq -S -c 'map(select(.Config.Labels["com.docker.compose.service"] != "gateway") |
-      del(.State.Health.Log) |
+      del(.ExecIDs,.State.Health.Log) |
       .Mounts |= sort_by([
         .Type,.Name,.Source,.Destination,.Driver,.Mode,.RW,.Propagation
       ])) |

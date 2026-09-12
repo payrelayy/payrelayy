@@ -64,6 +64,11 @@ export type TelegramPrivateActionEnvelope =
       readonly playerId: string;
     })
   | (TelegramPrivateActionIdentity & {
+      readonly kind: 'telebirr_deposit_destination_command';
+      /** Destination selection only; the database independently re-checks current eligibility. */
+      readonly playerId: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'deposit_intent_command';
       /** Explicit account selection prevents ambiguity when one customer owns several Player IDs. */
       readonly playerId: string;
@@ -97,7 +102,11 @@ export type TelegramPrivateActionEnvelope =
       readonly depositToken: string;
     });
 
-/** Safe bot-visible result. It never contains a raw database UUID, Player ID, raw callback token, or state. */
+/**
+ * Safe bot-visible result. It never contains a raw database UUID, Player ID, raw callback token,
+ * or state. A complete receiver reference is present only when the database and API independently
+ * confirm that customer payments are currently accepted.
+ */
 export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
@@ -115,6 +124,26 @@ export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
       readonly outcome: 'player_id_exists';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'telebirr_deposit_preview';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly receiverAccountHolderName: string;
+      readonly receiverAccountMasked: string;
+      readonly acceptsPayments: false;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'telebirr_deposit_destination';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly receiverAccountHolderName: string;
+      /** Complete digits for the authenticated customer's immediate payment instruction. */
+      readonly receiverAccountReference: string;
+      readonly receiverAccountMasked: string;
+      readonly acceptsPayments: true;
     }
   | {
       readonly version: 1;

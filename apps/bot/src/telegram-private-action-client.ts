@@ -38,6 +38,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function validReceiverPresentation(value: Record<string, unknown>): boolean {
+  return (
+    value.providerCode === 'telebirr' &&
+    value.providerName === 'TeleBirr' &&
+    typeof value.receiverAccountHolderName === 'string' &&
+    value.receiverAccountHolderName === value.receiverAccountHolderName.trim() &&
+    Array.from(value.receiverAccountHolderName).length >= 2 &&
+    Array.from(value.receiverAccountHolderName).length <= 160 &&
+    !/[\u0000-\u001f\u007f]/u.test(value.receiverAccountHolderName) &&
+    typeof value.receiverAccountMasked === 'string' &&
+    /^\*{3}[0-9]{4}$/u.test(value.receiverAccountMasked)
+  );
+}
+
 function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.outcome !== 'string')
     return undefined;
@@ -72,6 +86,25 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     keys.length === 4 &&
     isCustomerDepositStatusProjection(value.depositStatus) &&
     (value.financialMode === 'dry_run' || value.financialMode === 'live')
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'telebirr_deposit_preview' &&
+    keys.length === 7 &&
+    validReceiverPresentation(value) &&
+    value.acceptsPayments === false
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'telebirr_deposit_destination' &&
+    keys.length === 8 &&
+    validReceiverPresentation(value) &&
+    typeof value.receiverAccountReference === 'string' &&
+    /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
+    value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
+    value.acceptsPayments === true
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }

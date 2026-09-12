@@ -1095,7 +1095,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly twelve non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly thirteen non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1142,6 +1142,7 @@ describe('disposable SQL migration baseline', () => {
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+      'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
@@ -6846,6 +6847,7 @@ describe('disposable SQL migration baseline', () => {
         signature:
           'app.prepare_private_live_deposit_pilot_by_admin_id(uuid,uuid,text[],text[],uuid[],bigint,bigint,bigint,bigint,smallint,timestamp with time zone,timestamp with time zone)',
       },
+      { signature: 'app.prepare_telegram_telebirr_destination(uuid,text,text)' },
       { signature: 'app.require_private_live_deposit_pilot_authorization(uuid,uuid)' },
       { signature: 'app.require_private_owner_kemerbet_readiness_claim_current(uuid)' },
       { signature: 'app.reserve_private_live_deposit_pilot_claim(uuid)' },

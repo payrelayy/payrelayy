@@ -7,6 +7,7 @@ const ALLOWED_FUNCTIONS = [
   'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
   'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
   'app.submit_telegram_player_registration_input(uuid,text,text)',
+  'app.prepare_telegram_telebirr_destination(uuid,text,text)',
   'app.expire_telegram_player_registration_action(uuid,text)',
   'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
   'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',

@@ -180,6 +180,31 @@ describe('Telegram Player ID capability protection', () => {
     ).toThrow('semantic consumer is invalid');
   });
 
+  it('domain-separates a TeleBirr destination lookup from Player-ID registration', () => {
+    const destination = createTelegramActionSemanticHmac({
+      consumer: 'prepare_telegram_telebirr_destination',
+      originInboundEventId,
+      playerId: ' PLAYER-DEMO-42 ',
+      semanticHmacSecret: keys.semanticHmacSecret,
+    });
+    const retry = createTelegramActionSemanticHmac({
+      consumer: 'prepare_telegram_telebirr_destination',
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      semanticHmacSecret: keys.semanticHmacSecret,
+    });
+    const registration = createTelegramActionSemanticHmac({
+      consumer: 'submit_player_registration_input',
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      semanticHmacSecret: keys.semanticHmacSecret,
+    });
+
+    expect(destination).toBe(retry);
+    expect(destination).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(destination).not.toBe(registration);
+  });
+
   it('binds amount-free proof semantics to the provider, destination, and v2 protected reference', () => {
     const base = {
       consumer: 'capture_dry_run_deposit_proof' as const,

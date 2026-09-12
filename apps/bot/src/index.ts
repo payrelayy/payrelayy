@@ -13,6 +13,7 @@ import {
   isTelegramGuidedDepositStartCallback,
   isTelegramGuidedDepositStartCommand,
   isTelegramPrivateHelpCommand,
+  reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
@@ -23,6 +24,7 @@ import {
 } from './telegram-private-action.js';
 import {
   TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+  TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
 } from './telegram-guided-deposit.js';
@@ -57,19 +59,31 @@ const apiIngress = config.apiIngress;
 
 async function deliverPlayerAction(
   action: TelegramPrivateActionEnvelope,
-  reply: (text: string, keyboard?: InlineKeyboard) => Promise<unknown>,
+  reply: (
+    text: string,
+    keyboard?: InlineKeyboard,
+    forceReplyPlaceholder?: string,
+  ) => Promise<unknown>,
 ): Promise<void> {
   if (!playerActions.enabled) return;
   try {
     const presentation = presentTelegramPlayerIdFlowResult(
       await deliverTelegramPrivateActionWithRetry(action, playerActions),
+      action.kind === 'telebirr_deposit_destination_command'
+        ? { selectedPlayerId: action.playerId }
+        : {},
     );
     if (presentation.kind === 'message') {
       await reply(presentation.text);
       return;
     }
+    if (presentation.kind === 'force_reply') {
+      await reply(presentation.text, undefined, presentation.placeholder);
+      return;
+    }
     const keyboard = new InlineKeyboard();
-    for (const button of presentation.menu.buttons) {
+    for (const [index, button] of presentation.menu.buttons.entries()) {
+      if (index > 0) keyboard.row();
       keyboard.text(button.text, button.callbackData);
     }
     await reply(presentation.menu.text, keyboard);
@@ -81,7 +95,8 @@ async function deliverPlayerAction(
     await reply(
       action.kind === 'deposit_proof_status_command' || action.kind === 'deposit_status_command'
         ? TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT
-        : action.kind === 'deposit_proof_command'
+        : action.kind === 'deposit_proof_command' ||
+            action.kind === 'telebirr_deposit_destination_command'
           ? message('en', 'depositUnavailable')
           : message('en', 'playerActionUnavailable'),
     );
@@ -162,9 +177,40 @@ bot.on('message', async (context) => {
         reply_markup: {
           force_reply: true,
           selective: true,
-          input_field_placeholder: 'Player ID, then transaction number',
+          input_field_placeholder: 'KemerBet Player ID',
         },
       });
+      return;
+    }
+    const destinationSubmission = reduceTelegramGuidedDepositDestinationSubmission({
+      ...metadata,
+      text,
+      replyToMessage:
+        'reply_to_message' in context.message ? context.message.reply_to_message : undefined,
+    });
+    if (destinationSubmission) {
+      if (destinationSubmission.kind === 'action') {
+        await deliverPlayerAction(
+          destinationSubmission.action,
+          (replyText, keyboard, forceReplyPlaceholder) =>
+            context.reply(
+              replyText,
+              forceReplyPlaceholder
+                ? {
+                    reply_markup: {
+                      force_reply: true,
+                      selective: true,
+                      input_field_placeholder: forceReplyPlaceholder,
+                    },
+                  }
+                : keyboard
+                  ? { reply_markup: keyboard }
+                  : undefined,
+            ),
+        );
+      } else {
+        await context.reply(TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT);
+      }
       return;
     }
     const guidedSubmission = reduceTelegramGuidedDepositProofSubmission({
@@ -175,8 +221,23 @@ bot.on('message', async (context) => {
     });
     if (guidedSubmission) {
       if (guidedSubmission.kind === 'action') {
-        await deliverPlayerAction(guidedSubmission.action, (replyText, keyboard) =>
-          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        await deliverPlayerAction(
+          guidedSubmission.action,
+          (replyText, keyboard, forceReplyPlaceholder) =>
+            context.reply(
+              replyText,
+              forceReplyPlaceholder
+                ? {
+                    reply_markup: {
+                      force_reply: true,
+                      selective: true,
+                      input_field_placeholder: forceReplyPlaceholder,
+                    },
+                  }
+                : keyboard
+                  ? { reply_markup: keyboard }
+                  : undefined,
+            ),
         );
       } else {
         await context.reply(
@@ -285,7 +346,7 @@ if (playerActions.enabled) {
         reply_markup: {
           force_reply: true,
           selective: true,
-          input_field_placeholder: 'Player ID, then transaction number',
+          input_field_placeholder: 'KemerBet Player ID',
         },
       });
       return;
@@ -296,8 +357,21 @@ if (playerActions.enabled) {
       }
       return;
     }
-    await deliverPlayerAction(action, (replyText, keyboard) =>
-      context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+    await deliverPlayerAction(action, (replyText, keyboard, forceReplyPlaceholder) =>
+      context.reply(
+        replyText,
+        forceReplyPlaceholder
+          ? {
+              reply_markup: {
+                force_reply: true,
+                selective: true,
+                input_field_placeholder: forceReplyPlaceholder,
+              },
+            }
+          : keyboard
+            ? { reply_markup: keyboard }
+            : undefined,
+      ),
     );
   });
 }

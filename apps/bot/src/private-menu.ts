@@ -1,5 +1,4 @@
 import { parseTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
-import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import {
   TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
@@ -35,7 +34,7 @@ export function renderPlayerRegistrationMenu(capabilityCallbackData: string): Pr
         callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
       },
       {
-        text: message(DEFAULT_LOCALE, 'addKemerBetPlayerId'),
+        text: '🎮 Add Player ID',
         callbackData: capabilityCallbackData,
       },
     ],

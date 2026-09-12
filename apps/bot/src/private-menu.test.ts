@@ -15,15 +15,14 @@ describe('English-only private customer menu', () => {
 
     expect(menu).toEqual({
       text: [
-        'What would you like to do?',
+        'Welcome to FetanAgent 👋',
         '',
-        'To deposit, tap 💰 Deposit with TeleBirr.',
-        'The bot will ask for your KemerBet Player ID and TeleBirr transaction number.',
-        'Automatic credit is not enabled yet.',
+        'Deposit from TeleBirr to KemerBet in a few simple steps.',
+        'Choose an option below.',
       ].join('\n'),
       buttons: [
-        { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
-        { text: 'Add KemerBet Player ID', callbackData },
+        { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
+        { text: '🎮 Add Player ID', callbackData },
       ],
     });
     expect(Buffer.byteLength(menu.buttons[0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);

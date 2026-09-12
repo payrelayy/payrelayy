@@ -8,6 +8,7 @@ import {
   isTelegramGuidedDepositStartCommand,
   isTelegramPrivateHelpCommand,
   reduceTelegramDepositIntentCommand,
+  reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofCommand,
   reduceTelegramDepositProofStatusCallbackAction,
@@ -18,8 +19,10 @@ import {
   reduceTelegramRootMenuAction,
 } from './telegram-private-action.js';
 import {
+  TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  buildTelegramTelebirrPaymentPrompt,
 } from './telegram-guided-deposit.js';
 
 const privateMetadata = {
@@ -99,13 +102,88 @@ describe('private Telegram action reducers', () => {
     ).toBe(false);
   });
 
-  it('turns one two-line prompt reply into the existing protected TeleBirr action', () => {
+  it('turns the first one-value reply into a destination lookup', () => {
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      }),
+    ).toEqual({
+      kind: 'action',
+      action: {
+        version: 1,
+        kind: 'telebirr_deposit_destination_command',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+        playerId: 'PLAYER-DEMO-42',
+      },
+    });
+  });
+
+  it('does not accept malformed Player IDs or customer-authored wizard prompts', () => {
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER DEMO 42',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      }),
+    ).toEqual({ kind: 'invalid_input' });
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: false },
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('turns a one-value payment reply into the existing protected TeleBirr action', () => {
+    const paymentPrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'SYNTB00000001',
+        replyToMessage: { text: paymentPrompt, from: { is_bot: true } },
+      }),
+    ).toEqual({
+      kind: 'action',
+      action: {
+        version: 1,
+        kind: 'deposit_proof_command',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+        providerCode: 'telebirr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'SYNTB00000001',
+      },
+    });
+  });
+
+  it('keeps the previous two-line prompt safe during a rolling deployment', () => {
     expect(
       reduceTelegramGuidedDepositProofSubmission({
         ...privateMetadata,
         text: 'PLAYER-DEMO-42\nSYNTB00000001',
         replyToMessage: {
-          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          text: TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
           from: { is_bot: true },
         },
       }),
@@ -134,7 +212,7 @@ describe('private Telegram action reducers', () => {
         'Transaction ID: SYNTB00000001.',
       ].join('\n'),
       replyToMessage: {
-        text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+        text: TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
         from: { is_bot: true },
       },
     });
@@ -167,7 +245,7 @@ describe('private Telegram action reducers', () => {
 
   it('fails a malformed or ambiguous guided reply without echoing any candidate', () => {
     const replyToMessage = {
-      text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+      text: TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
       from: { is_bot: true },
     };
     expect(

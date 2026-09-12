@@ -270,6 +270,37 @@ describe('private Telegram action transport contract', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('accepts only an exact TeleBirr destination-selection envelope', async () => {
+    const destinationAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'telebirr_deposit_destination_command',
+      updateId: '123456',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en',
+      playerId: 'PLAYER-DEMO-42',
+    };
+    const valid = signedRequest(destinationAction);
+    await expect(
+      verifyTelegramPrivateActionRequest(valid.request, valid.rawBody, verificationOptions()),
+    ).resolves.toEqual(destinationAction);
+
+    for (const malformedAction of [
+      { ...destinationAction, playerId: ' PLAYER-DEMO-42' },
+      { ...destinationAction, playerId: 'PLAYER DEMO 42' },
+      { ...destinationAction, providerCode: 'telebirr' },
+    ]) {
+      const malformed = signedRequest(malformedAction as unknown as TelegramPrivateActionEnvelope);
+      await expect(
+        verifyTelegramPrivateActionRequest(
+          malformed.request,
+          malformed.rawBody,
+          verificationOptions(),
+        ),
+      ).resolves.toBeUndefined();
+    }
+  });
+
   it('accepts only strict deposit, protected-reference, and status commands', async () => {
     const depositAction: TelegramPrivateActionEnvelope = {
       version: 1,

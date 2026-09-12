@@ -4,8 +4,11 @@ import {
   isRecognizedTelegramDepositCommand,
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
+  isTelegramGuidedDepositStartCallback,
+  isTelegramGuidedDepositStartCommand,
   isTelegramPrivateHelpCommand,
   reduceTelegramDepositIntentCommand,
+  reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofCommand,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositReferenceCommand,
@@ -14,6 +17,10 @@ import {
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
 } from './telegram-private-action.js';
+import {
+  TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+} from './telegram-guided-deposit.js';
 
 const privateMetadata = {
   updateId: 123456,
@@ -66,6 +73,117 @@ describe('private Telegram action reducers', () => {
         callbackData: `${callbackData}x`.repeat(2),
       }),
     ).toBeUndefined();
+  });
+
+  it('recognizes the non-authoritative guided deposit button and exact /deposit entry point', () => {
+    expect(
+      isTelegramGuidedDepositStartCallback({
+        ...privateMetadata,
+        callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+      }),
+    ).toBe(true);
+    expect(Buffer.byteLength(TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA, 'utf8')).toBeLessThanOrEqual(
+      64,
+    );
+    expect(
+      isTelegramGuidedDepositStartCallback({
+        ...privateMetadata,
+        callbackData: `${TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA}.extra`,
+      }),
+    ).toBe(false);
+    expect(isTelegramGuidedDepositStartCommand({ ...privateMetadata, command: '/deposit' })).toBe(
+      true,
+    );
+    expect(
+      isTelegramGuidedDepositStartCommand({ ...privateMetadata, command: '/deposit anything' }),
+    ).toBe(false);
+  });
+
+  it('turns one two-line prompt reply into the existing protected TeleBirr action', () => {
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42\nSYNTB00000001',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      }),
+    ).toEqual({
+      kind: 'action',
+      action: {
+        version: 1,
+        kind: 'deposit_proof_command',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+        providerCode: 'telebirr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'SYNTB00000001',
+      },
+    });
+  });
+
+  it('accepts receipt text after the first Player-ID token without forwarding receipt details', () => {
+    const result = reduceTelegramGuidedDepositProofSubmission({
+      ...privateMetadata,
+      text: [
+        'PLAYER-DEMO-42',
+        'Synthetic receiver paid ETB 900.00.',
+        'Transaction ID: SYNTB00000001.',
+      ].join('\n'),
+      replyToMessage: {
+        text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+        from: { is_bot: true },
+      },
+    });
+    expect(result).toMatchObject({
+      kind: 'action',
+      action: { playerId: 'PLAYER-DEMO-42', transactionReference: 'SYNTB00000001' },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/Synthetic receiver|900\.00/);
+  });
+
+  it('does not treat ordinary text or a forged customer prompt as a guided deposit', () => {
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42\nSYNTB00000001',
+        replyToMessage: undefined,
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42\nSYNTB00000001',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: false },
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('fails a malformed or ambiguous guided reply without echoing any candidate', () => {
+    const replyToMessage = {
+      text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+      from: { is_bot: true },
+    };
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'only-one-value',
+        replyToMessage,
+      }),
+    ).toEqual({ kind: 'invalid_input' });
+    const ambiguous = reduceTelegramGuidedDepositProofSubmission({
+      ...privateMetadata,
+      text: 'PLAYER-DEMO-42\nTransaction ID: SYNTB00000001. Invoice No. SYNTB00000002.',
+      replyToMessage,
+    });
+    expect(ambiguous).toEqual({ kind: 'selection_required' });
+    expect(JSON.stringify(ambiguous)).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
   it('rejects unsafe chat identities and control-character Player ID text', () => {

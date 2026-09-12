@@ -54,23 +54,23 @@ runtime restarts. The migration and API's eleven-function preflight shipped toge
 processing. Details are in [`telegram-deposit-proof-tracking.md`](telegram-deposit-proof-tracking.md)
 and the [cloud release evidence](telegram-deposit-cloud-release-2026-09-03.md).
 
-The deployed release also accepts a TeleBirr receipt URL or pasted SMS after the explicit
-`/deposit telebirr <Player ID>` prefix. It extracts one bounded candidate locally, preserves the
-existing proof/tracking identity, and requires explicit resubmission when multiple IDs are found.
+The bot now puts **Deposit with TeleBirr** first in `/menu`. The same stateless Force Reply prompt is
+available through `/deposit`; the customer sends the Player ID on the first line and the TeleBirr
+transaction number, receipt URL, or SMS after it. It extracts one bounded candidate locally,
+preserves the existing proof/tracking identity, and requires explicit resubmission when multiple IDs are found.
 It does not fetch customer URLs, trust pasted amounts, add live verification, or change a financial
 gate. CBE Birr still accepts only a direct reference. The delivered executor image additionally rejects stale
 final-action authority after a delayed fence response or browser preparation and at the click/request
 boundary; expired or uncertain fenced attempts remain reconciliation-only. The executor service
 itself remains stopped. These release checks do not establish a completed pilot transaction.
 
-The remaining guided-flow baseline is:
-`apps/bot/src/index.ts` wires `/start`, `/menu`, Player-ID actions, the amount-free
-`/deposit <provider> <Player ID> <transaction reference>` command (with the TeleBirr text-input
-extension above), and `/deposit_status`.
-`apps/bot/src/private-menu.ts` renders only Add KemerBet Player ID. The proof command reaches a
-dry-run-only API capture; its new status operation is separate from the legacy deposit-intent
-lookup. Preserve that explicit distinction when implementing live proof lineage, guided buttons,
-and durable completion notifications. Do not promote old simulation records into live payments.
+`apps/bot/src/index.ts` wires `/start`, `/menu`, Player-ID actions, the button-first TeleBirr prompt,
+the legacy amount-free `/deposit <provider> <Player ID> <transaction reference>` compatibility
+command, and `/deposit_status`. The one-reply prompt keeps no bot-local draft: every required value
+arrives in the same Telegram update and reaches the existing dry-run-only API capture. Its status
+operation remains separate from the legacy deposit-intent lookup. Preserve that explicit
+distinction when implementing live proof lineage, saved Player-ID buttons, and durable completion
+notifications. Do not promote old simulation records into live payments.
 The guided draft/resume/cancel boundary must be durable and identity-bound; the existing
 Player-ID registration action tables are registration-specific and must not be repurposed by merely
 adding an enum value or storing deposit state in bot memory.

@@ -7,17 +7,19 @@ create a financial job, or activate the KemerBet companion.
 
 ## Customer flow
 
-1. A customer submits the existing `/deposit telebirr PLAYER_ID TRANSACTION_ID` or
-   `/deposit cbe_birr PLAYER_ID TRANSACTION_ID` command. The existing capture authorization and
-   dry-run restrictions still apply. For TeleBirr, the final argument may also be a pasted receipt
-   URL or the full SMS text, including line breaks; the bot extracts only a transaction-ID candidate.
+1. A customer sends `/menu`, taps **💰 Deposit with TeleBirr**, and replies to the bot's prompt
+   with the destination KemerBet Player ID on the first line and the TeleBirr transaction number on
+   the next line. Sending `/deposit` opens the same prompt. The reply can contain a receipt URL or
+   full SMS after the first Player-ID token; the bot extracts only one transaction-ID candidate.
+   The legacy `/deposit telebirr PLAYER_ID TRANSACTION_ID` and CBE Birr commands remain accepted for
+   compatibility, but are no longer shown as the normal customer path.
 2. The acknowledgement displays a `p1.<opaque token>` tracking reference and a **Check status**
    button. No amount, raw payment reference, or Player ID is encoded into that reference.
 3. The customer can press the button or send `/deposit_status p1.<opaque token>` in their private
    chat. Repeated checks and a restarted bot use the same persisted proof request.
-4. The response identifies the payment provider and says the proof was received in simulation.
-   It explicitly states that no payment was verified or credited. `/help` and `/deposit` explain
-   the current command format and simulation boundary.
+4. The response identifies the payment provider and says the reference was received in staging.
+   It explicitly states that no payment was verified, credited, or moved. `/help` explains the
+   button-first flow and the staging boundary without requiring command syntax.
 
 An unknown request, a request belonging to another customer or Telegram identity, and an
 unavailable request receive the same customer-facing status-unavailable response. A copied button
@@ -26,6 +28,9 @@ or tracking reference is not authorization to view a proof.
 ## TeleBirr receipt URL and SMS input
 
 The bot uses the shared, versioned TeleBirr candidate extractor through its candidate-only export.
+The guided prompt is a Telegram Force Reply and all required input arrives in one update, so the bot
+does not retain a Player ID, reference, or draft in local memory. It accepts either two lines or a
+Player-ID token followed by the bounded receipt text.
 It scans both receipt paths and supported transaction/invoice labels, even when a pasted message
 starts with a URL. Repeated occurrences of the same normalized ID produce one candidate. Distinct
 candidates produce a fixed **More than one transaction ID was found. No proof was submitted.**
@@ -90,9 +95,9 @@ financial switch does not turn these records into live requests or change their 
 The later live intake must define its own explicit proof-to-verification-to-deposit lineage and
 customer projection. It must not promote or backfill historical simulation proofs.
 
-The guided multi-step deposit conversation, saved Player-ID selection, receiver instructions, file
-and OCR input, live verifier composition, companion execution integration, and durable completion
-notifications remain separate implementation work. A guided flow must persist its draft and
-exact-once step receipts in the backend; it must not reinterpret registration text through a
-bot-local in-memory wizard. These input/tracking slices neither claim nor substitute for those
-capabilities.
+Saved Player-ID buttons, receiver instructions, file and OCR input, live verifier composition,
+companion execution integration, and durable completion notifications remain separate
+implementation work. Any later multi-step flow must persist its draft and exact-once step receipts
+in the backend; it must not reinterpret registration text through a bot-local in-memory wizard. The
+current one-reply prompt is only a stateless usability layer over the existing authenticated proof
+action and neither claims nor substitutes for those capabilities.

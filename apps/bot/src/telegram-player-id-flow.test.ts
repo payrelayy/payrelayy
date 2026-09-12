@@ -9,7 +9,7 @@ import {
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
-  it('renders only the opaque API capability in the one-button menu', () => {
+  it('renders the guided deposit before the opaque Player-ID action', () => {
     const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
       compactCapabilityId: 'AAAAAAAAAAAAAAAAAAAAAA',
       token: '_____________________w',
@@ -19,8 +19,16 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: 'Manage your KemerBet Player ID, or submit a dry-run proof with /deposit PROVIDER PLAYER_ID TRANSACTION_ID.',
-        buttons: [{ text: 'Add KemerBet Player ID', callbackData }],
+        text: [
+          'What would you like to do?',
+          '',
+          'For a TeleBirr deposit, tap Deposit and follow the short prompt.',
+          'Staging test: do not send new money. Nothing will be credited or moved.',
+        ].join('\n'),
+        buttons: [
+          { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
+          { text: 'Add KemerBet Player ID', callbackData },
+        ],
       },
     });
   });
@@ -70,7 +78,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['deposit_input_invalid', '/deposit cbe_birr PLAYER_ID TRANSACTION_ID'],
+    ['deposit_input_invalid', 'Tap 💰 Deposit with TeleBirr'],
     ['deposit_unavailable', 'No payment action was started'],
     ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
@@ -137,11 +145,11 @@ describe('Telegram Player-ID flow presentation', () => {
         kind: 'menu',
         menu: {
           text: [
-            'SIMULATION ONLY — proof received.',
-            'Provider: TeleBirr.',
+            '✅ Test reference received.',
+            'Payment method: TeleBirr.',
             'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
-            'Check progress with /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
-            'No payment was verified or credited. Do not send money for this simulation.',
+            'To check it later, send /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
+            'Staging test: no payment was verified, credited, or moved.',
           ].join('\n'),
           buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
         },
@@ -163,33 +171,28 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'message',
       text: [
-        'NO-MONEY VERIFICATION ONLY — TeleBirr proof queued for a shadow check.',
-        'No payment has been marked verified or credited.',
-        'This check cannot create a deposit, execute a transfer, or move money.',
+        '✅ Reference received.',
+        'FetanAgent is checking it in staging.',
+        'Nothing was credited or moved during this test.',
       ].join('\n'),
     });
-    expect(JSON.stringify(presentation)).not.toMatch(/player|reference|token|uuid|amount/iu);
+    expect(JSON.stringify(presentation)).not.toMatch(/player|SYNTB|token|uuid|amount/iu);
     expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
   });
 
-  it('explains the available proof and tracking commands without requesting money', () => {
-    expect(telegramDepositHelpText()).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
-    expect(telegramDepositHelpText()).toContain('/deposit telebirr PLAYER_ID TRANSACTION_ID');
-    expect(telegramDepositHelpText()).toContain('/deposit cbe_birr PLAYER_ID TRANSACTION_ID');
+  it('explains the button-first flow and tracking without requiring command syntax', () => {
+    expect(telegramDepositHelpText()).toContain('Tap 💰 Deposit with TeleBirr');
+    expect(telegramDepositHelpText()).toContain('first line');
+    expect(telegramDepositHelpText()).toContain('second line');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
-    expect(telegramDepositHelpText()).toContain('No payment is verified or credited');
-    expect(telegramDepositHelpText()).toContain('receipt URL or the full SMS text');
-    expect(telegramDepositHelpText()).toContain('URLs are not opened');
-    expect(telegramDepositHelpText()).toContain('Photos and PDF files are not supported yet');
+    expect(telegramDepositHelpText()).toContain('Nothing will be credited or moved');
+    expect(telegramDepositHelpText()).toContain('receipt link or the full SMS');
+    expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');
   });
 
   it('asks the customer to choose one reference without exposing the candidate list', () => {
-    expect(telegramDepositReferenceSelectionText()).toContain('No proof was submitted.');
-    expect(telegramDepositReferenceSelectionText()).toContain(
-      'SIMULATION ONLY — DO NOT SEND MONEY.',
-    );
-    expect(telegramDepositReferenceSelectionText()).toContain(
-      '/deposit telebirr PLAYER_ID TRANSACTION_ID',
-    );
+    expect(telegramDepositReferenceSelectionText()).toContain('Nothing was submitted.');
+    expect(telegramDepositReferenceSelectionText()).toContain('only the transaction number');
+    expect(telegramDepositReferenceSelectionText()).not.toContain('PLAYER_ID TRANSACTION_ID');
   });
 });

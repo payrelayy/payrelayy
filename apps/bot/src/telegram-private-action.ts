@@ -15,6 +15,11 @@ import {
   isBoundedTelegramDepositProofText,
   reduceTelegramDepositProofInput,
 } from './telegram-deposit-proof-input.js';
+import {
+  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  isTelegramGuidedDepositPromptReply,
+  parseTelegramGuidedDepositInput,
+} from './telegram-guided-deposit.js';
 
 export interface TelegramPrivateActionMetadata {
   readonly updateId: number;
@@ -43,6 +48,11 @@ export interface TelegramPlayerIdTextMetadata extends TelegramPrivateActionMetad
 
 export interface TelegramDepositCommandMetadata extends TelegramPrivateActionMetadata {
   readonly command: unknown;
+}
+
+export interface TelegramGuidedDepositReplyMetadata extends TelegramPrivateActionMetadata {
+  readonly text: unknown;
+  readonly replyToMessage: unknown;
 }
 
 const MAXIMUM_TELEGRAM_IDENTIFIER = 9_007_199_254_740_991;
@@ -125,6 +135,23 @@ export function isRecognizedTelegramDepositProofStatusCallback(
     typeof metadata.callbackData === 'string' &&
     /^dps1(?:\.|$)/u.test(metadata.callbackData)
   );
+}
+
+/** The fixed callback opens a prompt only; it is not an action capability or API request. */
+export function isTelegramGuidedDepositStartCallback(
+  metadata: TelegramPlayerRegistrationCallbackMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    metadata.callbackData === TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA
+  );
+}
+
+/** `/deposit` is the discoverable guided entry point; argument-bearing legacy commands still work. */
+export function isTelegramGuidedDepositStartCommand(
+  metadata: TelegramDepositCommandMetadata,
+): boolean {
+  return toTelegramPrivateActionIdentity(metadata) !== undefined && metadata.command === '/deposit';
 }
 
 /** Help contains no customer data and is available only in the matching private chat. */
@@ -218,6 +245,32 @@ export type TelegramDepositProofSubmission =
     }
   | { readonly kind: 'selection_required' }
   | { readonly kind: 'invalid_input' };
+
+/**
+ * Convert one explicit reply to the bot's guided prompt into the established protected action.
+ * This is stateless: all required customer input is present in the new Telegram update, so no
+ * Player ID or payment reference is retained in bot memory between messages.
+ */
+export function reduceTelegramGuidedDepositProofSubmission(
+  metadata: TelegramGuidedDepositReplyMetadata,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || !isTelegramGuidedDepositPromptReply(metadata.replyToMessage)) return undefined;
+  const guidedInput = parseTelegramGuidedDepositInput(metadata.text);
+  if (!guidedInput) return { kind: 'invalid_input' };
+  const proofInput = reduceTelegramDepositProofInput('telebirr', guidedInput.proofText);
+  if (proofInput.kind !== 'candidate') return proofInput;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: guidedInput.playerId,
+      transactionReference: proofInput.transactionReference,
+    },
+  };
+}
 
 /**
  * Parse an explicit, amount-free proof command. TeleBirr additionally accepts receipt URL/SMS

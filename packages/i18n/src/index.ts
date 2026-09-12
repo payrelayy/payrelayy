@@ -32,7 +32,7 @@ export const messages = {
     en: 'FetanAgent private beta is temporarily unavailable. Please try again shortly.',
   },
   playerRegistrationMenu: {
-    en: 'Manage your KemerBet Player ID, or submit a dry-run proof with /deposit PROVIDER PLAYER_ID TRANSACTION_ID.',
+    en: 'Choose Deposit to start, or add a KemerBet Player ID.',
   },
   addKemerBetPlayerId: {
     en: 'Add KemerBet Player ID',

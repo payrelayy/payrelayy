@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT } from './telegram-guided-deposit.js';
+
 const runtime = vi.hoisted(() => ({
   actionDeliveries: [] as unknown[],
   actionResult: { version: 1, outcome: 'player_id_pending' } as unknown,
@@ -275,7 +277,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('For app or account-access help, use /support.');
-    expect(context.replies[0]).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(context.replies[0]).toContain('Tap 💰 Deposit with TeleBirr');
     expect(context.replies[0]).toContain('/deposit_status');
   });
 
@@ -364,6 +366,33 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('renders Deposit as the first root-menu action', async () => {
+    await loadComposition(false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+    };
+    const context = messageContext('/menu');
+    let keyboard: { buttons: { text: string; callbackData: string }[] } | undefined;
+    await runtime.messageHandler!({
+      ...context,
+      reply: async (text: string, options?: { reply_markup: typeof keyboard }) => {
+        context.replies.push(text);
+        keyboard = options?.reply_markup;
+      },
+    });
+
+    expect(context.replies[0]).toContain('tap Deposit');
+    expect(keyboard?.buttons).toEqual([
+      { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
+      {
+        text: 'Add KemerBet Player ID',
+        callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      },
+    ]);
+  });
+
   it('preserves beta invite-token admission as a handled short-circuit', async () => {
     runtime.admissionOutcome = 'admitted';
     await loadComposition(true, true);
@@ -409,6 +438,113 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies).toEqual([
       'Player ID saved — pending validation. It cannot be used for a deposit yet.',
     ]);
+  });
+
+  it.each(['command', 'button'] as const)(
+    'opens the same Force Reply deposit prompt from the %s entry point',
+    async (entryPoint) => {
+      await loadComposition(false, true);
+      const replies: { text: string; options?: unknown }[] = [];
+      const reply = async (text: string, options?: unknown) => {
+        replies.push({ text, options });
+      };
+
+      if (entryPoint === 'command') {
+        await runtime.messageHandler!({ ...messageContext('/deposit'), reply });
+      } else {
+        const answerCallbackQuery = vi.fn(async () => {});
+        await runtime.callbackHandler!({
+          ...messageContext(''),
+          update: { update_id: 123457 },
+          callbackQuery: { data: 'gd1.telebirr' },
+          answerCallbackQuery,
+          reply,
+        });
+        expect(answerCallbackQuery).toHaveBeenCalledOnce();
+      }
+
+      expect(replies).toEqual([
+        {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          options: {
+            reply_markup: {
+              force_reply: true,
+              selective: true,
+              input_field_placeholder: 'Player ID, then transaction number',
+            },
+          },
+        },
+      ]);
+      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    },
+  );
+
+  it('submits a two-line prompt reply without provider or command syntax', async () => {
+    await loadComposition(false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'telebirr_shadow_verification_queued',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'verification_queued',
+      verificationMode: 'shadow_no_money',
+    };
+    const context = messageContext('PLAYER-DEMO-42\nSYNTB00000001');
+    await runtime.messageHandler!({
+      ...context,
+      message: {
+        text: 'PLAYER-DEMO-42\nSYNTB00000001',
+        reply_to_message: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      },
+    });
+
+    expect(runtime.actionDeliveries).toEqual([
+      {
+        version: 1,
+        kind: 'deposit_proof_command',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+        providerCode: 'telebirr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'SYNTB00000001',
+      },
+    ]);
+    expect(context.replies).toEqual([
+      [
+        '✅ Reference received.',
+        'FetanAgent is checking it in staging.',
+        'Nothing was credited or moved during this test.',
+      ].join('\n'),
+    ]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('keeps an invalid guided reply local and does not disclose it', async () => {
+    await loadComposition(false, true);
+    const unsafeInput = 'PLAYER-DEMO-42\nPRIVATE-INVALID-REFERENCE';
+    const context = messageContext(unsafeInput);
+    await runtime.messageHandler!({
+      ...context,
+      message: {
+        text: unsafeInput,
+        reply_to_message: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      },
+    });
+
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(context.replies).toHaveLength(1);
+    expect(context.replies[0]).toContain("I couldn't read those two details");
+    expect(context.replies[0]).not.toMatch(/PLAYER-DEMO|PRIVATE-INVALID/);
   });
 
   it('rejects malformed deposit input without echoing it or falling through to ingress', async () => {
@@ -458,7 +594,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       ]);
       expect(runtime.ingressDeliveries).toHaveLength(0);
       expect(context.replies[0]).toContain('p1.AAAAAAAAAAAAAAAAAAAAAA');
-      expect(context.replies[0]).toContain('No payment was verified or credited');
+      expect(context.replies[0]).toContain('no payment was verified, credited, or moved');
       expect(JSON.stringify(context.replies)).not.toMatch(
         /SYNTB|PLAYER-DEMO|900|5\.00|https:|Synthetic Receiver/,
       );
@@ -475,9 +611,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
     expect(context.replies).toEqual([
-      expect.stringContaining('More than one transaction ID was found. No proof was submitted.'),
+      expect.stringContaining('more than one TeleBirr transaction number'),
     ]);
-    expect(context.replies[0]).toContain('/deposit telebirr PLAYER_ID TRANSACTION_ID');
+    expect(context.replies[0]).toContain('Send /deposit');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO|example\.invalid/);
   });
 
@@ -489,7 +625,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(context.replies[0]).toContain('Do not send new money');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -591,7 +727,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     }
     expect(malformed.replies).toEqual(unavailable.replies);
     expect(failed.replies).toEqual(unavailable.replies);
-    expect(malformed.replies[0]).toContain('Deposit status is unavailable.');
+    expect(malformed.replies[0]).toContain('could not load that deposit status');
     expect(malformed.replies[0]).not.toContain('private-invalid-input');
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
@@ -606,16 +742,17 @@ describe('Telegram admission, private action, and ingress composition', () => {
       answerCallbackQuery,
     });
     expect(answerCallbackQuery).toHaveBeenCalledOnce();
-    expect(context.replies[0]).toContain('Deposit status is unavailable.');
+    expect(context.replies[0]).toContain('could not load that deposit status');
     expect(context.replies[0]).not.toContain('private-invalid-input');
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
-  it.each(['/help', '/deposit'])('shows current simulation guidance for %s', async (command) => {
+  it('/help shows the button-first staging guidance', async () => {
     await loadComposition(false, true);
-    const context = messageContext(command);
+    const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
+    expect(context.replies[0]).toContain('Tap 💰 Deposit with TeleBirr');
+    expect(context.replies[0]).toContain('Do not send new money');
     expect(context.replies[0]).toContain('/deposit_status');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

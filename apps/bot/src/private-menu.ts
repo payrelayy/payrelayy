@@ -1,6 +1,12 @@
 import { parseTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
+import {
+  TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
+  TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
+  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+} from './telegram-guided-deposit.js';
+
 export interface PrivateTelegramMenuButton {
   readonly text: string;
   readonly callbackData: string;
@@ -12,8 +18,9 @@ export interface PrivateTelegramMenu {
 }
 
 /**
- * The bot only renders an API-supplied opaque callback. It cannot mint a capability or attach an
- * arbitrary action string, and this renderer is intentionally not connected to a live handler.
+ * The privileged Player-ID action always uses the API-supplied opaque callback. The fixed deposit
+ * callback below has no authority: it only opens a local reply prompt, and the completed input
+ * still crosses the existing authenticated API and database boundary.
  */
 export function renderPlayerRegistrationMenu(capabilityCallbackData: string): PrivateTelegramMenu {
   if (!parseTelegramPlayerRegistrationCapabilityCallback(capabilityCallbackData)) {
@@ -21,8 +28,12 @@ export function renderPlayerRegistrationMenu(capabilityCallbackData: string): Pr
   }
 
   return {
-    text: message(DEFAULT_LOCALE, 'playerRegistrationMenu'),
+    text: TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
     buttons: [
+      {
+        text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
+        callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+      },
       {
         text: message(DEFAULT_LOCALE, 'addKemerBetPlayerId'),
         callbackData: capabilityCallbackData,

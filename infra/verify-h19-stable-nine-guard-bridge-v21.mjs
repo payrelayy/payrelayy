@@ -85,9 +85,9 @@ for (const invariant of [
 }
 assert.match(
   guard,
-  /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$H22_PARENT"\s+\\\s+"\$TRANSITION_PARENT"/u,
+  /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$H22_PARENT" "\$H23_PARENT"\s+\\\s+"\$TRANSITION_PARENT"/u,
 );
-assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 20/u);
+assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 30/u);
 
 const canonicalDigest = shellFunction(guard, 'immutable_nine_digest');
 assert.match(canonicalDigest, /del\(\.State\.Health\.Log\)/u);

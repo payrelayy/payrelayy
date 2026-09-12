@@ -13,6 +13,7 @@ readonly H19_PARENT='/var/lib/fetanagent/staging-telebirr-route-helper-bridge-v1
 readonly H20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
 readonly H21_PARENT='/var/lib/fetanagent/h19-stable-nine-guard-bridge-v21'
 readonly H22_PARENT='/var/lib/fetanagent/h19-terminal-receipt-order-guard-bridge-v22'
+readonly H23_PARENT='/var/lib/fetanagent/h19-runtime-reattest-guard-bridge-v23'
 readonly TRANSITION_PARENT='/var/lib/fetanagent/production-gateway-staging-route-v1'
 readonly PRODUCTION_ROOT='/srv/fetanagent/production'
 readonly PRODUCTION_RELEASE_ROOT="$PRODUCTION_ROOT/releases"
@@ -240,7 +241,7 @@ PY
 read_h19_record() {
   local output
   output="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$H22_PARENT" \
+    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$H22_PARENT" "$H23_PARENT" \
     "$TRANSITION_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
     "$CONTINUOUS_SUDOERS" "$INSTALLED_PATH" <<'PY'
 import hashlib
@@ -249,7 +250,7 @@ import re
 import stat
 import sys
 
-h19_parent, h20_parent, h21_parent, h22_parent, transition_parent, helper, finalizer, \
+h19_parent, h20_parent, h21_parent, h22_parent, h23_parent, transition_parent, helper, finalizer, \
     sudoers, guard = sys.argv[1:]
 release_re = re.compile(r'[0-9a-f]{40}')
 sha_re = re.compile(r'[0-9a-f]{64}')
@@ -277,6 +278,15 @@ h21_guard_sha = 'a4e31a95bfb4826634069cdc31f745ed53cccb0db2cc01578851ac833062381
 terminal_receipt_sha = 'd33d2e51852fabdfd8f750bfd16118fe987e8b4201483b1cc2f688063047d559'
 post_production_sha = '72a619a6418030098a2ebb862d35d48f56118de886ae6ef88b09a782b29d2aac'
 post_ingress_sha = '98e3464ba86981b592c678d65b58eb10e747f9cb18a7b25cd6e697a2f27f6d89'
+h22_release_expected = '50bd429d58645cf8fde6f9a9757faac689cf864c'
+h22_intent_sha = '67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5e27'
+h22_completion_sha = '5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1'
+h22_guard_sha = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
+approved_bot_release = 'bcc479be0f2e807203df5612d380002fd6df2ee5'
+approved_bot_image = 'sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467c90fd73e3'
+reattested_production_sha = 'fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5'
+reattested_nine_sha = 'b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53'
+reattested_ingress_sha = '770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb'
 h18_helper_sha = '3adb799d17c3f51e2f6c49957d3a170e63151c30509962acdaf08c105dc65267'
 h18_finalizer_sha = '103b40c6ef76cca08e92bb5b475104f775b054b3981c5bb55057a085126745ea'
 h18_sudoers_sha = 'd33645e4767102a64463d27d90b63685dd71d1352fb175eb64a738a06b21f958'
@@ -637,8 +647,12 @@ try:
     if (
         len(h22_intent) != 24
         or len(h22_completion) != 25
+        or h22_release != h22_release_expected
+        or digest(h22_intent_data) != h22_intent_sha
+        or digest(h22_completion_data) != h22_completion_sha
         or sha_re.fullmatch(h22_successor_guard_sha) is None
         or h22_successor_guard_sha == h21_guard_sha
+        or h22_successor_guard_sha != h22_guard_sha
         or h22_intent != h22_expected
         or h22_completion[0] != h22_intent[0]
         or h22_completion[1] != 'state=terminal-receipt-order-guard-installed'
@@ -663,12 +677,83 @@ try:
     ):
         raise RuntimeError()
 
+    h23_children = os.listdir(h23_parent)
+    if len(h23_children) != 1 or release_re.fullmatch(h23_children[0]) is None:
+        raise RuntimeError()
+    h23_release = h23_children[0]
+    if h23_release in (
+        protected, h19_release, h20_release, h21_release, h22_release,
+        approved_bot_release,
+    ):
+        raise RuntimeError()
+    exact_dir(h23_parent, [h23_release])
+    h23_root = f'{h23_parent}/{h23_release}'
+    exact_dir(h23_root, [
+        'completed-v1', 'intent-v1', 'predecessor-ingress-guard',
+    ])
+    h23_intent_data = exact_file(f'{h23_root}/intent-v1', 0o600, 4096)
+    h23_completion_data = exact_file(f'{h23_root}/completed-v1', 0o600, 4096)
+    h23_archived_guard = exact_file(
+        f'{h23_root}/predecessor-ingress-guard', 0o400, 2 * 1024 * 1024
+    )
+    h23_intent = h23_intent_data.decode('ascii').splitlines()
+    h23_completion = h23_completion_data.decode('ascii').splitlines()
+    h23_successor_guard_sha = (
+        h23_intent[9].split('=', 1)[1] if len(h23_intent) > 9 else ''
+    )
+    h23_expected = [
+        'contract=fetanagent-h19-runtime-reattest-guard-bridge-v23',
+        'state=authorized',
+        f'bridge_release={h23_release}',
+        f'h22_bridge_release={h22_release_expected}',
+        f'h22_bridge_intent_sha256={h22_intent_sha}',
+        f'h22_bridge_completion_sha256={h22_completion_sha}',
+        f'h19_bridge_release={h19_release}',
+        f'candidate_gateway_release={h19_release}',
+        f'predecessor_ingress_guard_sha256={h22_guard_sha}',
+        f'successor_ingress_guard_sha256={h23_successor_guard_sha}',
+        f'approved_telegram_bot_release={approved_bot_release}',
+        f'approved_telegram_bot_image_id={approved_bot_image}',
+        f'reattested_production_boundary_sha256={reattested_production_sha}',
+        f'reattested_immutable_nine_sha256={reattested_nine_sha}',
+        f'reattested_shared_ingress_sha256={reattested_ingress_sha}',
+        f'reattested_tls_leaf_sha256={tls_sha}',
+        f'candidate_gateway_image_id={candidate_gateway_image}',
+        f'candidate_gateway_caddyfile_sha256={candidate_caddy}',
+        'staging_runtime_stopped=true',
+        'correction=approved-runtime-identity-reattest',
+        'h19_through_h22_evidence_preserved=true',
+        'production_runtime_mutation=false',
+        'database_mutation=false',
+        'financial_actions_mode=disabled',
+        'transfer_enabled=false',
+        'amount_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        len(h23_intent) != 27
+        or len(h23_completion) != 28
+        or sha_re.fullmatch(h23_successor_guard_sha) is None
+        or h23_successor_guard_sha == h22_guard_sha
+        or h23_intent != h23_expected
+        or h23_completion[0] != h23_intent[0]
+        or h23_completion[1] != 'state=runtime-reattest-guard-installed'
+        or h23_completion[2:27] != h23_intent[2:27]
+        or h23_completion[27] != f'bridge_intent_sha256={digest(h23_intent_data)}'
+        or h23_intent_data != ('\n'.join(h23_intent) + '\n').encode('ascii')
+        or h23_completion_data != ('\n'.join(h23_completion) + '\n').encode('ascii')
+        or digest(h23_archived_guard) != h22_guard_sha
+        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024))
+            != h23_successor_guard_sha
+    ):
+        raise RuntimeError()
+
     print(h19_release)
     print(h19_release)
     print(successor_helper_sha)
     print(successor_finalizer_sha)
     print(successor_sudoers_sha)
-    print(h22_successor_guard_sha)
+    print(h23_successor_guard_sha)
     print(h18_release)
     print(h18_intent_sha)
     print(h18_completion_sha)
@@ -683,16 +768,32 @@ try:
     print(canonical_nine_sha)
     print(h22_release)
     print(terminal_receipt_sha)
+    print(h23_release)
+    print(approved_bot_release)
+    print(approved_bot_image)
+    print(reattested_production_sha)
+    print(reattested_nine_sha)
+    print(reattested_ingress_sha)
+    print(tls_sha)
+    print(h22_successor_guard_sha)
+    print(h22_intent_sha)
+    print(h22_completion_sha)
 except Exception:
     raise SystemExit(1)
 PY
 )" || return 1
   mapfile -t H19_RECORD <<<"$output"
-  [[ "${#H19_RECORD[@]}" -eq 20 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
-    "${H19_RECORD[1]}" =~ ^[0-9a-f]{40}$ ]] || return 1
-  local value
-  for value in "${H19_RECORD[@]:2}"; do
-    [[ "$value" =~ ^[0-9a-f]{64}$ || "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "${#H19_RECORD[@]}" -eq 30 && "${H19_RECORD[0]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[1]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[6]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[14]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[18]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[20]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[21]}" =~ ^[0-9a-f]{40}$ &&
+    "${H19_RECORD[22]}" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  local index
+  for index in 2 3 4 5 7 8 9 10 11 12 13 15 16 17 19 23 24 25 26 27 28 29; do
+    [[ "${H19_RECORD[$index]}" =~ ^[0-9a-f]{64}$ ]] || return 1
   done
 }
 
@@ -714,8 +815,8 @@ require_production_contract() {
   [[ "$expected_gateway_release" == "$PROTECTED_RELEASE" ||
     "$expected_gateway_release" == "${H19_RECORD[1]}" ]] || return 1
   inspection="$(production_inspection)" || return 1
-  jq -e --arg candidate "${H19_RECORD[1]}" --arg expected "$expected_gateway_release" \
-    --arg protected "$PROTECTED_RELEASE" '
+  jq -e --arg bot "${H19_RECORD[21]}" --arg candidate "${H19_RECORD[1]}" \
+    --arg expected "$expected_gateway_release" --arg protected "$PROTECTED_RELEASE" '
       (map(.Config.Labels["com.docker.compose.service"]) | sort) == [
         "api", "beta-admission", "bot", "customer-web", "gateway", "owner-control",
         "production-companion-device-bridge", "telebirr-assignment-broker",
@@ -772,12 +873,14 @@ require_production_contract() {
           ] and all(.NetworkSettings.Networks[];
             (.Aliases | unique | sort) == ["fetanagent-production-gateway-1","gateway"])
         else
-          .Config.Labels["org.opencontainers.image.revision"] == $protected and
+          (if .Config.Labels["com.docker.compose.service"] == "bot"
+           then $bot else $protected end) as $release |
+          .Config.Labels["org.opencontainers.image.revision"] == $release and
           .Config.Image == ("fetanagent-" +
             (if .Config.Labels["com.docker.compose.service"] ==
               "production-companion-device-bridge" then "companion-device-bridge"
              else .Config.Labels["com.docker.compose.service"] end) +
-            ":" + ($protected[0:12])) and
+            ":" + ($release[0:12])) and
           ([.Config.Env[] | select(startswith("FINANCIAL_ACTIONS_MODE="))] ==
             ["FINANCIAL_ACTIONS_MODE=dry_run"]) and
           ([.Config.Env[] | select(startswith("KEMERBET_EXECUTOR_ENABLED="))] ==
@@ -804,6 +907,13 @@ gateway_image_id() {
     [.[] | select(.Config.Labels["com.docker.compose.service"] == "gateway") | .Image] |
     if length == 1 and (.[0] | test("^sha256:[0-9a-f]{64}$"))
     then .[0] else error("gateway") end'
+}
+
+bot_image_id() {
+  production_inspection | jq -er '
+    [.[] | select(.Config.Labels["com.docker.compose.service"] == "bot") | .Image] |
+    if length == 1 and (.[0] | test("^sha256:[0-9a-f]{64}$"))
+    then .[0] else error("bot") end'
 }
 
 require_shared_ingress() {
@@ -1168,7 +1278,8 @@ PY
 }
 
 require_current_state() {
-  local expected="$1" caddy gateway_id production_digest ingress_digest state transition_data tls_digest
+  local expected="$1" bot_id caddy gateway_id nine_digest production_digest ingress_digest
+  local state transition_data tls_digest
   protected_compose_source >/dev/null || return 1
   require_production_contract "$expected" || return 1
   require_shared_ingress || return 1
@@ -1193,11 +1304,23 @@ require_current_state() {
     "$PROTECTED_RELEASE:rolled-back"|"${H19_RECORD[1]}:completed")
       transition_data="$(require_transition_record "$state")" || return 1
       mapfile -t TRANSITION_RECORD <<<"$transition_data"
-      [[ "${#TRANSITION_RECORD[@]}" -eq 5 &&
-        "$production_digest" == "${TRANSITION_RECORD[1]}" &&
-        "$ingress_digest" == "${TRANSITION_RECORD[2]}" &&
-        "$tls_digest" == "${TRANSITION_RECORD[3]}" &&
-        "$gateway_id" == "${TRANSITION_RECORD[4]}" ]] || return 1
+      if [[ "$expected" == "${H19_RECORD[1]}" ]]; then
+        nine_digest="$(immutable_nine_digest)" || return 1
+        bot_id="$(bot_image_id)" || return 1
+        [[ "${#TRANSITION_RECORD[@]}" -eq 5 &&
+          "$production_digest" == "${H19_RECORD[23]}" &&
+          "$nine_digest" == "${H19_RECORD[24]}" &&
+          "$ingress_digest" == "${H19_RECORD[25]}" &&
+          "$tls_digest" == "${H19_RECORD[26]}" &&
+          "$gateway_id" == "${TRANSITION_RECORD[4]}" &&
+          "$bot_id" == "${H19_RECORD[22]}" ]] || return 1
+      else
+        [[ "${#TRANSITION_RECORD[@]}" -eq 5 &&
+          "$production_digest" == "${TRANSITION_RECORD[1]}" &&
+          "$ingress_digest" == "${TRANSITION_RECORD[2]}" &&
+          "$tls_digest" == "${TRANSITION_RECORD[3]}" &&
+          "$gateway_id" == "${TRANSITION_RECORD[4]}" ]] || return 1
+      fi
       ;;
     *) return 1 ;;
   esac

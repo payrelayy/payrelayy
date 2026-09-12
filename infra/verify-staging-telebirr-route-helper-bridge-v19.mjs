@@ -202,7 +202,7 @@ for (const invariant of [
   '"telebirr-assignment-broker"',
   '"telebirr-device-bridge"',
   '"telebirr-device-state-broker"',
-  '.Config.Labels["org.opencontainers.image.revision"] == $protected',
+  '.Config.Labels["org.opencontainers.image.revision"] == $release',
   '.Config.Labels["org.opencontainers.image.revision"] == $expected',
   'FINANCIAL_ACTIONS_MODE=dry_run',
   'KEMERBET_EXECUTOR_ENABLED=false',
@@ -224,6 +224,11 @@ for (const invariant of [
 ]) {
   assert.ok(productionContract.includes(invariant), `missing production invariant: ${invariant}`);
 }
+assert.match(
+  productionContract,
+  /service"\] == "bot"\s+then \$bot else \$protected end/u,
+  'H23 may vary only the explicitly approved bot release among non-gateway services',
+);
 assert.doesNotMatch(productionContract, /\.HostConfig\.CapAdd == \["NET_BIND_SERVICE"\]/u);
 assert.match(shellFunction(guard, 'production_inspection'), /"\$\{#PRODUCTION_IDS\[@\]\}" -eq 10/u);
 for (const name of [

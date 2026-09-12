@@ -116,6 +116,29 @@ atomically replaces only `/usr/local/sbin/fetanagent-telebirr-device-pilot-helpe
 Docker or PostgreSQL. If it reports an interrupted `.installing` or `.previous` file, preserve that
 file and inspect it; do not delete or rename it manually.
 
+### One-time helper-v4 installation
+
+Install helper v4 after its change is merged and before the next `stop` or `deploy-and-smoke`.
+Docker Engine can report an empty per-container `Gateway` for a live endpoint on this internal
+network even though the network's exact IPAM gateway remains configured. Helper v4 accepts that
+engine representation only when the immutable network ID, endpoint ID, IPv4 address and prefix,
+MAC address, aliases, full endpoint inventory, network IPAM, and production ingress checks all
+remain exact. Blank retained records and partially populated records remain rejected.
+
+In the authenticated DigitalOcean root console, create
+`/root/fetanagent-telebirr-device-pilot-helper-v4` as `root:root` mode `0700`. Stage the merged
+`fetanagent-telebirr-device-pilot-helper.sh` there as `root:root` mode `0600`, and stage
+`install-fetanagent-telebirr-device-pilot-helper-v4.sh` in that same directory as `root:root` mode
+`0700`. Leave no other directory entry. Verify both files against the reviewed GitHub blobs, then
+run the installer at that exact path directly as root. Do not invoke it through `sudo` or an SSH
+deployment identity.
+
+The installer accepts only the exact helper-v3 predecessor digest or an already-installed exact
+v4 successor, takes the shared deployment mutation lock, preserves the unchanged sudoers fragment,
+and atomically replaces only `/usr/local/sbin/fetanagent-telebirr-device-pilot-helper`. It does not
+call Docker or PostgreSQL. If it reports an interrupted `.installing` or `.previous` file, preserve
+that file and inspect it; do not delete or rename it manually.
+
 ## Operator-owned files
 
 Use one release-specific directory outside Git, for example

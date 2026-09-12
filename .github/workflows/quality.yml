@@ -67,6 +67,7 @@ jobs:
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh
           bash -n infra/operations/install-fetanagent-telebirr-device-pilot-helper-v2.sh
           bash -n infra/operations/install-fetanagent-telebirr-device-pilot-helper-v3.sh
+          bash -n infra/operations/install-fetanagent-telebirr-device-pilot-helper-v4.sh
           bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \

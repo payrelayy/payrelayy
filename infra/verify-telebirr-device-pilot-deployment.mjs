@@ -27,7 +27,7 @@ const deployHelper = await readFile(
   'utf8',
 );
 const helperInstaller = await readFile(
-  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v3.sh`,
+  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v4.sh`,
   'utf8',
 );
 const androidTransport = await readFile(
@@ -261,7 +261,7 @@ assert.match(
 );
 assert.match(
   qualityWorkflow,
-  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v3\.sh/u,
+  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v3\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v4\.sh/u,
 );
 assert.match(
   qualityWorkflow,
@@ -535,6 +535,15 @@ if (jqExecutable) {
     { [ingressNetwork]: attachedEndpoint },
     'attached',
   );
+  const attachedEndpointWithoutContainerGateway = structuredClone(attachedEndpoint);
+  attachedEndpointWithoutContainerGateway.Gateway = '';
+  runClassifier(
+    'Docker Engine empty-gateway ingress endpoint is attached',
+    legacyService,
+    legacyName,
+    { [ingressNetwork]: attachedEndpointWithoutContainerGateway },
+    'attached',
+  );
 
   for (const [label, mutate] of [
     ['partial endpoint id', (value) => (value.EndpointID = 'b'.repeat(64))],
@@ -565,9 +574,9 @@ if (jqExecutable) {
     );
   }
   const incompleteAttachedEndpoint = structuredClone(attachedEndpoint);
-  incompleteAttachedEndpoint.Gateway = '';
+  incompleteAttachedEndpoint.Gateway = '172.23.0.254';
   runClassifier(
-    'attached record rejects a missing gateway',
+    'attached record rejects an unexpected gateway',
     legacyService,
     legacyName,
     { [ingressNetwork]: incompleteAttachedEndpoint },
@@ -774,13 +783,13 @@ assert.match(
 );
 assert.match(
   helperInstaller,
-  /PREVIOUS_HELPER_SHA256='344462ff1cf9fd445440aca4808bb412dff8fef03bba38092ed05ea0e7db2985'/u,
+  /PREVIOUS_HELPER_SHA256='f8a83549ad36992c1921e42cc77ee86f1f5144ec51df9623077835d6ec11a11e'/u,
 );
 assert.match(helperInstaller, /run directly in the authenticated DigitalOcean root console/u);
 assert.match(helperInstaller, /"\$0" == "\$INSTALLER"/u);
 assert.match(
   helperInstaller,
-  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v3\.sh:f/u,
+  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v4\.sh:f/u,
 );
 assert.match(helperInstaller, /flock --exclusive --nonblock 9/u);
 assert.match(helperInstaller, /mv -f -- "\$TARGET_INSTALLING" "\$TARGET"/u);

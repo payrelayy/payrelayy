@@ -792,7 +792,7 @@ classify_pilot_bridge_ingress_record() {
             $endpoint.GwPriority == 0 and
             ($endpoint.EndpointID | type) == "string" and
             ($endpoint.EndpointID | test("^[0-9a-f]{64}$")) and
-            $endpoint.Gateway == $gateway and
+            ($endpoint.Gateway == "" or $endpoint.Gateway == $gateway) and
             ($endpoint.IPAddress | type) == "string" and
             ($endpoint.IPAddress | test("^172\\.23\\.[0-9]{1,3}\\.[0-9]{1,3}$")) and
             $endpoint.IPPrefixLen == 16 and

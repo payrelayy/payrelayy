@@ -14,6 +14,7 @@ readonly H20_PARENT='/var/lib/fetanagent/h19-canonical-cap-guard-bridge-v20'
 readonly H21_PARENT='/var/lib/fetanagent/h19-stable-nine-guard-bridge-v21'
 readonly H22_PARENT='/var/lib/fetanagent/h19-terminal-receipt-order-guard-bridge-v22'
 readonly H23_PARENT='/var/lib/fetanagent/h19-runtime-reattest-guard-bridge-v23'
+readonly H24_PARENT='/var/lib/fetanagent/h19-latest-guard-validation-bridge-v24'
 readonly TRANSITION_PARENT='/var/lib/fetanagent/production-gateway-staging-route-v1'
 readonly PRODUCTION_ROOT='/srv/fetanagent/production'
 readonly PRODUCTION_RELEASE_ROOT="$PRODUCTION_ROOT/releases"
@@ -241,7 +242,7 @@ PY
 read_h19_record() {
   local output
   output="$(env -i PATH="$SAFE_PATH" python3 -I - \
-    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$H22_PARENT" "$H23_PARENT" \
+    "$H19_PARENT" "$H20_PARENT" "$H21_PARENT" "$H22_PARENT" "$H23_PARENT" "$H24_PARENT" \
     "$TRANSITION_PARENT" "$STAGING_HELPER" "$CONTINUOUS_FINALIZER" \
     "$CONTINUOUS_SUDOERS" "$INSTALLED_PATH" <<'PY'
 import hashlib
@@ -250,7 +251,7 @@ import re
 import stat
 import sys
 
-h19_parent, h20_parent, h21_parent, h22_parent, h23_parent, transition_parent, helper, finalizer, \
+h19_parent, h20_parent, h21_parent, h22_parent, h23_parent, h24_parent, transition_parent, helper, finalizer, \
     sudoers, guard = sys.argv[1:]
 release_re = re.compile(r'[0-9a-f]{40}')
 sha_re = re.compile(r'[0-9a-f]{64}')
@@ -284,6 +285,10 @@ h22_completion_sha = '5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d4
 h22_guard_sha = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17'
 interrupted_h23_release = '837f3addad1e1acf9707099c0590824739e8c788'
 interrupted_h23_guard_sha = '16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23'
+h23_intent_sha = '0d842ba7013b9af71543e906d5db7fec6ecf509485f21c6b814b3c4486213489'
+h23_completion_sha = 'b51c3074d25daea13cd525c34de62a5a0efbf414cd16f5e0277cea76514f0d6a'
+h23_guard_sha = '351156b4d6d18d1f7920ebee7b8817ca937d126faabf9863f31d8811662dd759'
+h23_correction_release_expected = '930a76e11cd8f7ad77726a81981f2d25694d24da'
 approved_bot_release = 'bcc479be0f2e807203df5612d380002fd6df2ee5'
 approved_bot_image = 'sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467c90fd73e3'
 reattested_production_sha = 'fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5'
@@ -664,7 +669,6 @@ try:
         or h22_completion_data != ('\n'.join(h22_completion) + '\n').encode('ascii')
         or digest(h22_archived_guard) != h21_guard_sha
         or digest(h22_archived_receipt) != terminal_receipt_sha
-        or digest(exact_file(guard, 0o755, 2 * 1024 * 1024)) != h22_successor_guard_sha
     ):
         raise RuntimeError()
 
@@ -742,10 +746,14 @@ try:
         len(h23_intent) != 27
         or len(h23_completion) != 32
         or h23_release != interrupted_h23_release
+        or digest(h23_intent_data) != h23_intent_sha
+        or digest(h23_completion_data) != h23_completion_sha
         or h23_intended_guard_sha != interrupted_h23_guard_sha
         or sha_re.fullmatch(h23_successor_guard_sha) is None
         or h23_successor_guard_sha in (h22_guard_sha, h23_intended_guard_sha)
+        or h23_successor_guard_sha != h23_guard_sha
         or release_re.fullmatch(h23_correction_release) is None
+        or h23_correction_release != h23_correction_release_expected
         or h23_correction_release in (
             protected, h19_release, h20_release, h21_release, h22_release,
             h23_release, approved_bot_release,
@@ -764,8 +772,70 @@ try:
         or h23_intent_data != ('\n'.join(h23_intent) + '\n').encode('ascii')
         or h23_completion_data != ('\n'.join(h23_completion) + '\n').encode('ascii')
         or digest(h23_archived_guard) != h22_guard_sha
+    ):
+        raise RuntimeError()
+
+    h24_children = os.listdir(h24_parent)
+    if len(h24_children) != 1 or release_re.fullmatch(h24_children[0]) is None:
+        raise RuntimeError()
+    h24_release = h24_children[0]
+    if h24_release in (
+        protected, h19_release, h20_release, h21_release, h22_release,
+        h23_release, h23_correction_release, approved_bot_release,
+    ):
+        raise RuntimeError()
+    exact_dir(h24_parent, [h24_release])
+    h24_root = f'{h24_parent}/{h24_release}'
+    exact_dir(h24_root, [
+        'completed-v1', 'intent-v1', 'predecessor-ingress-guard',
+    ])
+    h24_intent_data = exact_file(f'{h24_root}/intent-v1', 0o600, 4096)
+    h24_completion_data = exact_file(f'{h24_root}/completed-v1', 0o600, 4096)
+    h24_archived_guard = exact_file(
+        f'{h24_root}/predecessor-ingress-guard', 0o400, 2 * 1024 * 1024
+    )
+    h24_intent = h24_intent_data.decode('ascii').splitlines()
+    h24_completion = h24_completion_data.decode('ascii').splitlines()
+    h24_successor_guard_sha = (
+        h24_intent[9].split('=', 1)[1] if len(h24_intent) > 9 else ''
+    )
+    h24_expected = [
+        'contract=fetanagent-h19-latest-guard-validation-bridge-v24',
+        'state=authorized',
+        f'bridge_release={h24_release}',
+        f'h23_bridge_release={interrupted_h23_release}',
+        f'h23_bridge_intent_sha256={h23_intent_sha}',
+        f'h23_bridge_completion_sha256={h23_completion_sha}',
+        f'h19_bridge_release={h19_release}',
+        f'candidate_gateway_release={h19_release}',
+        f'predecessor_ingress_guard_sha256={h23_guard_sha}',
+        f'successor_ingress_guard_sha256={h24_successor_guard_sha}',
+        'correction=validate-installed-guard-at-latest-terminal-bridge',
+        'h19_through_h23_evidence_preserved=true',
+        'production_runtime_mutation=false',
+        'database_mutation=false',
+        'financial_actions_mode=disabled',
+        'transfer_enabled=false',
+        'amount_enabled=false',
+        'money_moved=false',
+    ]
+    if (
+        len(h24_intent) != 18
+        or len(h24_completion) != 19
+        or sha_re.fullmatch(h24_successor_guard_sha) is None
+        or h24_successor_guard_sha in (
+            h22_guard_sha, interrupted_h23_guard_sha, h23_guard_sha,
+        )
+        or h24_intent != h24_expected
+        or h24_completion[0] != h24_intent[0]
+        or h24_completion[1] != 'state=latest-guard-validation-installed'
+        or h24_completion[2:18] != h24_intent[2:18]
+        or h24_completion[18] != f'bridge_intent_sha256={digest(h24_intent_data)}'
+        or h24_intent_data != ('\n'.join(h24_intent) + '\n').encode('ascii')
+        or h24_completion_data != ('\n'.join(h24_completion) + '\n').encode('ascii')
+        or digest(h24_archived_guard) != h23_guard_sha
         or digest(exact_file(guard, 0o755, 2 * 1024 * 1024))
-            != h23_successor_guard_sha
+            != h24_successor_guard_sha
     ):
         raise RuntimeError()
 
@@ -774,7 +844,7 @@ try:
     print(successor_helper_sha)
     print(successor_finalizer_sha)
     print(successor_sudoers_sha)
-    print(h23_successor_guard_sha)
+    print(h24_successor_guard_sha)
     print(h18_release)
     print(h18_intent_sha)
     print(h18_completion_sha)

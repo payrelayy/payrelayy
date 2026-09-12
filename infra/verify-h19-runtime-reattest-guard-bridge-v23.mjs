@@ -28,7 +28,7 @@ const installer = normalized(
 const guard = normalized('infra/operations/fetanagent-production-ingress-h19.sh');
 const runbook = normalized('infra/production-gateway-staging-telebirr-route-h19.md');
 const v22Verifier = normalized('infra/verify-h19-terminal-receipt-order-guard-bridge-v22.mjs');
-const guardDigest = sha256(guard);
+const currentGuardDigest = sha256(guard);
 
 const h19Release = '90b1f059577682b6bc458d239f6bdcb591077085';
 const h22Release = '50bd429d58645cf8fde6f9a9757faac689cf864c';
@@ -38,6 +38,7 @@ const h22Guard = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f
 const interruptedBridgeRelease = '837f3addad1e1acf9707099c0590824739e8c788';
 const interruptedSuccessorGuard =
   '16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23';
+const h23Guard = '351156b4d6d18d1f7920ebee7b8817ca937d126faabf9863f31d8811662dd759';
 const helper = '8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4';
 const finalizer = '1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f';
 const sudoers = '0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807';
@@ -55,7 +56,7 @@ for (const [name, value] of [
   ['H22_INTENT_SHA256', h22Intent],
   ['H22_COMPLETION_SHA256', h22Completion],
   ['H22_GUARD_SHA256', h22Guard],
-  ['REVIEWED_SUCCESSOR_GUARD_SHA256', guardDigest],
+  ['REVIEWED_SUCCESSOR_GUARD_SHA256', h23Guard],
   ['INTERRUPTED_BRIDGE_RELEASE', interruptedBridgeRelease],
   ['INTERRUPTED_SUCCESSOR_GUARD_SHA256', interruptedSuccessorGuard],
   ['H20_HELPER_SHA256', helper],
@@ -96,8 +97,7 @@ for (const invariant of [
   'correction=approved-runtime-identity-reattest',
   'h19_through_h22_evidence_preserved=true',
   'digest(h23_archived_guard) != h22_guard_sha',
-  '!= h23_successor_guard_sha',
-  'print(h23_successor_guard_sha)',
+  'h23_successor_guard_sha != h23_guard_sha',
   'print(approved_bot_release)',
   'print(approved_bot_image)',
   'resumed_after_archive_initializer_failure=true',
@@ -272,7 +272,7 @@ H22_INTENT_SHA256=${h22Intent}
 H22_COMPLETION_SHA256=${h22Completion}
 H19_RELEASE=${h19Release}
 H22_GUARD_SHA256=${h22Guard}
-SUCCESSOR_GUARD_SHA256=${guardDigest}
+SUCCESSOR_GUARD_SHA256=${h23Guard}
 INTERRUPTED_SUCCESSOR_GUARD_SHA256=${interruptedSuccessorGuard}
 APPROVED_BOT_RELEASE=${botRelease}
 APPROVED_BOT_IMAGE_ID=${botImage}
@@ -341,7 +341,7 @@ assert.equal(
 assert.deepEqual(producedCompletion.slice(28), [
   'resumed_after_archive_initializer_failure=true',
   `resume_correction_release=${correctionRelease}`,
-  `resume_successor_ingress_guard_sha256=${guardDigest}`,
+  `resume_successor_ingress_guard_sha256=${h23Guard}`,
   'resume_correction=split-dependent-local-initializers',
 ]);
 
@@ -388,5 +388,7 @@ assert.match(
 );
 
 console.log(
-  `FetanAgent H23 runtime re-attestation contracts verified; predecessor ${h22Guard}; successor ${guardDigest}; bot ${botRelease}.`,
+  `FetanAgent H23 runtime re-attestation contracts verified; predecessor ${h22Guard}; historical successor ${h23Guard}; current successor ${currentGuardDigest}; bot ${botRelease}.`,
 );
+
+await import('./verify-h19-latest-guard-validation-bridge-v24.mjs');

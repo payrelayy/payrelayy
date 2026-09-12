@@ -85,7 +85,7 @@ for (const invariant of [
 }
 assert.match(
   guard,
-  /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$H22_PARENT" "\$H23_PARENT"\s+\\\s+"\$TRANSITION_PARENT"/u,
+  /"\$H19_PARENT" "\$H20_PARENT" "\$H21_PARENT" "\$H22_PARENT" "\$H23_PARENT" "\$H24_PARENT"\s+\\\s+"\$TRANSITION_PARENT"/u,
 );
 assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 30/u);
 

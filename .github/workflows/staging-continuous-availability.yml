@@ -69,7 +69,7 @@ jobs:
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == 'refs/heads/codex/ingress-diagnostic' ]]
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
           [[ "$DEPLOYED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]

@@ -138,6 +138,15 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
                 revision: 1,
                 rotation_reason: null,
               }),
+              row({
+                account_reference_masked: '****4567',
+                protected_reference: false,
+                receiver_revision_id: '77777777-7777-4777-8777-777777777777',
+                receiver_status: 'inactive',
+                retired_at: new Date('2026-08-21T13:30:00.000Z'),
+                revision: 1,
+                rotation_reason: null,
+              }),
             ],
           };
         },
@@ -146,7 +155,7 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
     );
 
     const result = await control.list(authUserId);
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(4);
     expect(result[1]).toMatchObject({
       receiverStatus: 'inactive',
       retiredAt: '2026-08-22T13:30:00.000Z',
@@ -157,6 +166,11 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
       protectedReference: false,
       providerCode: 'cbe_birr',
       receiverStatus: 'active',
+    });
+    expect(result[3]).toMatchObject({
+      accountReferenceMasked: '****4567',
+      protectedReference: false,
+      receiverStatus: 'inactive',
     });
   });
 
@@ -205,5 +219,18 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
     await expect(duplicate.list(authUserId)).rejects.toBeInstanceOf(
       OwnerReceiverAccountUnavailableError,
     );
+
+    for (const invalid of [
+      row({ account_reference_masked: '****3456' }),
+      row({ account_reference_masked: '****3456', protected_reference: false }),
+    ]) {
+      const legacyMaskOutsideRetiredHistory = new PostgresOwnerReceiverAccounts(
+        { query: async () => ({ rows: [invalid] }) },
+        secrets,
+      );
+      await expect(legacyMaskOutsideRetiredHistory.list(authUserId)).rejects.toBeInstanceOf(
+        OwnerReceiverAccountUnavailableError,
+      );
+    }
   });
 });

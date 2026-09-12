@@ -147,19 +147,7 @@ root:root 0600 fetanagent-staging-continuous-availability.sudoers.next
 root:root 0600 fetanagent-production-ingress-h19.next
 ```
 
-First run its read-only preflight directly as root. This validates the complete live boundary and
-exits before acquiring the mutation lock or changing any state:
-
-```text
-fetanagent-h19-runtime-reattest-guard-bridge-v23.sh \
-  H23_MERGE_SHA \
-  SUCCESSOR_INGRESS_GUARD_SHA256 \
-  I-UNDERSTAND-THIS-REATTESTS-THE-EXACT-NO-MONEY-PRODUCTION-RUNTIME-WITHOUT-MUTATING-IT \
-  preflight
-```
-
-Only after that succeeds, run the identical staged installer without the `preflight` argument to
-apply the guard-only evidence transition:
+Run the staged installer directly as root:
 
 ```text
 fetanagent-h19-canonical-cap-guard-bridge-v20.sh \
@@ -300,25 +288,38 @@ root-only intent, atomically installs only the successor guard, publishes comple
 the grant only after the successor independently accepts the re-attested state. It does not restart
 or recreate a container, touch a database, activate a transfer, or move money.
 
-Stage these two files from the exact merged H23 commit in a root-owned mode-`0700` directory named
-`/root/fetanagent-h19-runtime-reattest-guard-bridge-v23-H23_MERGE_SHA/`:
+The first apply of H23 release `837f3addad1e1acf9707099c0590824739e8c788` stopped under
+`set -u` after publishing its exact intent and isolating the staging grant, but before archiving or
+replacing the H22 guard. Its dependent `local` initializers are now split into separate assignments.
+The resumed completion preserves that intent byte-for-byte and additionally records the distinct
+merged correction release and the exact initializer correction; neither the partial intent nor any
+H19-H22 evidence is rewritten or removed.
+
+Stage the two corrected files from the exact merged resume-correction commit in the existing
+root-owned mode-`0700` directory
+`/root/fetanagent-h19-runtime-reattest-guard-bridge-v23-837f3addad1e1acf9707099c0590824739e8c788/`:
 
 ```text
 root:root 0700 fetanagent-h19-runtime-reattest-guard-bridge-v23.sh
 root:root 0600 fetanagent-production-ingress-h19.next
 ```
 
-Run the staged installer directly as root:
+First run its read-only preflight directly as root. It requires the exact interrupted intent, old H22
+guard, isolated staging grant, and complete live boundary, then exits before acquiring the mutation
+lock or changing state:
 
 ```text
 fetanagent-h19-runtime-reattest-guard-bridge-v23.sh \
-  H23_MERGE_SHA \
+  837f3addad1e1acf9707099c0590824739e8c788 \
   SUCCESSOR_INGRESS_GUARD_SHA256 \
-  I-UNDERSTAND-THIS-REATTESTS-THE-EXACT-NO-MONEY-PRODUCTION-RUNTIME-WITHOUT-MUTATING-IT
+  I-UNDERSTAND-THIS-REATTESTS-THE-EXACT-NO-MONEY-PRODUCTION-RUNTIME-WITHOUT-MUTATING-IT \
+  H23_RESUME_CORRECTION_MERGE_SHA \
+  preflight
 ```
 
-If the process is interrupted, rerun the identical files and arguments. The staging grant remains
-disabled while a new guard lacks its completed provenance record; do not edit or remove the H23
+Only after that succeeds, run the same command without the final `preflight` argument. If the resume
+is interrupted, rerun the identical corrected files and arguments. The staging grant remains
+disabled while the new guard lacks its completed provenance record; do not edit or remove the H23
 namespace, any predecessor evidence, or the installed guard.
 
 ## Build and gateway-only transition
@@ -421,6 +422,7 @@ nine-service preflight, and confirms the installer contains no Compose, Supabase
 production-runtime, or money action.
 
 The H23 verifier binds the successor guard and exact approved bot/runtime fingerprints to repository
-bytes, proves that H19-H22 remain immutable, checks the 27-field resumable guard-only transaction,
-requires exact no-money and security flags for every service, and rejects Compose, Supabase,
-database, production-runtime, or money actions in the installer.
+bytes, proves that H19-H22 and the interrupted 27-field intent remain immutable, checks the 31-field
+resumed completion and executable predecessor-archive regression, requires exact no-money and
+security flags for every service, and rejects Compose, Supabase, database, production-runtime, or
+money actions in the installer.

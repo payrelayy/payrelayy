@@ -109,6 +109,8 @@ assert.match(workflow, /staging-telebirr-shadow-verifier-disable\.sql/gu);
 assert.match(workflow, /always\(\)[\s\S]*needs\.deploy\.result != 'success'/u);
 assert.match(workflow, /activeRuntimeSessions == 1/u);
 assert.doesNotMatch(workflow, /workflow_call|repository_dispatch|curl\s+.*(?:kemerbet|telebirr)/iu);
+assert.equal((workflow.match(/printf '%s' "\$SUPABASE_CA_CERTIFICATE_PEM"/gu) ?? []).length, 4);
+assert.doesNotMatch(workflow, /printf '%s\\n' "\$SUPABASE_CA_CERTIFICATE_PEM"/u);
 assert.match(qualityWorkflow, /^\s{2}pull_request:\r?$/mu);
 assert.match(
   qualityWorkflow,

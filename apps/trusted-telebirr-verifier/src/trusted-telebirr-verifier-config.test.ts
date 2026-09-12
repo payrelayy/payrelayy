@@ -22,6 +22,7 @@ const productionDatabaseUrl =
 const shadowDatabaseUrl =
   'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
+const paddedCaCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n${'A'.repeat(11)}=\n-----END CERTIFICATE-----\n`;
 
 function publicKeySpki(namedCurve: string): Buffer {
   return Buffer.from(
@@ -154,6 +155,44 @@ describe('trusted TeleBirr verifier configuration', () => {
       TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE,
       constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
     );
+  });
+
+  it.each([
+    ['standard Base64 padding', paddedCaCertificate],
+    ['no terminal newline', paddedCaCertificate.slice(0, -1)],
+    ['an exact certificate chain', `${caCertificate}${paddedCaCertificate}`],
+  ])('accepts canonical CA PEM with %s', (_name, ca) => {
+    const config = loadTrustedTelebirrVerifierConfig(
+      enabledEnvironment,
+      guardedDependencies({
+        [TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE]: databaseUrl,
+        [TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE]: manifest(),
+        [TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE]: ca,
+      }),
+    );
+    expect(config).toMatchObject({ enabled: true, connection: { ca } });
+  });
+
+  it.each([
+    ['noncanonical padding', paddedCaCertificate.replace(`${'A'.repeat(11)}=`, 'AQ=')],
+    [
+      'padding before the final payload line',
+      paddedCaCertificate.replace(`${'A'.repeat(64)}\n`, 'AQ==\n'),
+    ],
+    ['a carriage return', paddedCaCertificate.replaceAll('\n', '\r\n')],
+    ['a blank chain separator', `${caCertificate}\n${paddedCaCertificate}`],
+    ['trailing text', `${paddedCaCertificate}unexpected`],
+  ])('rejects CA PEM with %s', (_name, ca) => {
+    expect(() =>
+      loadTrustedTelebirrVerifierConfig(
+        enabledEnvironment,
+        guardedDependencies({
+          [TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE]: databaseUrl,
+          [TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE]: manifest(),
+          [TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE]: ca,
+        }),
+      ),
+    ).toThrow('The trusted TeleBirr verifier configuration is unavailable.');
   });
 
   it('accepts the exact production database target and rejects cross-target URLs', () => {
@@ -360,6 +399,20 @@ describe('TeleBirr shadow verifier configuration', () => {
         port: 5432,
         user: 'fetanagent_telebirr_shadow_verifier_runtime',
       },
+    });
+  });
+
+  it('accepts the canonical padded Supabase CA used by the shadow runtime', () => {
+    const config = loadTelebirrShadowVerifierConfig(
+      shadowEnvironment,
+      guardedDependencies({
+        ...shadowFiles,
+        [TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE]: paddedCaCertificate,
+      }),
+    );
+    expect(config).toMatchObject({
+      enabled: true,
+      connection: { ca: paddedCaCertificate },
     });
   });
 

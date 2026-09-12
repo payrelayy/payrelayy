@@ -6,10 +6,16 @@ import {
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
+import { buildTelegramTelebirrPaymentPrompt } from './telegram-guided-deposit.js';
 
 export type TelegramPlayerIdFlowPresentation =
   | { readonly kind: 'menu'; readonly menu: PrivateTelegramMenu }
-  | { readonly kind: 'message'; readonly text: string };
+  | { readonly kind: 'message'; readonly text: string }
+  | { readonly kind: 'force_reply'; readonly text: string; readonly placeholder: string };
+
+export interface TelegramPlayerIdFlowContext {
+  readonly selectedPlayerId?: string;
+}
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
   'I could not load that deposit status. Check the tracking reference in this private chat, or try again shortly.';
@@ -21,6 +27,7 @@ export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
  */
 export function presentTelegramPlayerIdFlowResult(
   result: TelegramPrivateActionResult,
+  context: TelegramPlayerIdFlowContext = {},
 ): TelegramPlayerIdFlowPresentation {
   switch (result.outcome) {
     case 'menu':
@@ -31,6 +38,31 @@ export function presentTelegramPlayerIdFlowResult(
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerIdPending') };
     case 'player_id_exists':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'playerIdExists') };
+    case 'telebirr_deposit_preview':
+      return {
+        kind: 'message',
+        text: [
+          '🔒 TeleBirr deposits are not live yet.',
+          '',
+          `Configured receiver: ${result.receiverAccountHolderName}`,
+          `Wallet: ${result.receiverAccountMasked}`,
+          '',
+          'Do not send money yet. The complete wallet number will appear here when automatic processing is ready.',
+          'Tap /menu to go back.',
+        ].join('\n'),
+      };
+    case 'telebirr_deposit_destination': {
+      if (!context.selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
+      return {
+        kind: 'force_reply',
+        text: buildTelegramTelebirrPaymentPrompt({
+          playerId: context.selectedPlayerId,
+          receiverAccountHolderName: result.receiverAccountHolderName,
+          receiverAccountReference: result.receiverAccountReference,
+        }),
+        placeholder: 'TeleBirr transaction number',
+      };
+    }
     case 'deposit_instructions':
       return {
         kind: 'message',
@@ -88,9 +120,10 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          '✅ Reference received.',
-          'FetanAgent is checking it.',
-          'Automatic credit and money movement are not enabled yet.',
+          '✅ Transaction number received',
+          'Status: Being checked',
+          '',
+          'Automatic credit is not live yet.',
         ].join('\n'),
       };
     case 'deposit_status':
@@ -118,22 +151,22 @@ export function presentTelegramPlayerIdFlowResult(
 
 export function telegramDepositHelpText(): string {
   return [
-    'TeleBirr deposit:',
-    '1. Send /menu.',
-    '2. Tap 💰 Deposit with TeleBirr.',
-    '3. Reply with your KemerBet Player ID on the first line and your TeleBirr transaction number on the second line.',
-    'You may paste a TeleBirr receipt link or the full SMS instead of the transaction number.',
-    'To check a previous request, send /deposit_status followed by its p1. tracking reference.',
-    'Use a reference from a transfer you already made. Do not make a new transfer for this step.',
-    'Automatic credit and money movement are not enabled yet.',
-    'Need account help? Use /support.',
+    '💰 How to deposit',
+    '',
+    '1. Tap /menu, then 💰 Make a deposit.',
+    '2. Send the KemerBet Player ID.',
+    '3. FetanAgent will show the receiver name and wallet number when payments are live.',
+    '4. After paying, reply with the TeleBirr transaction number, receipt link, or full SMS.',
+    '',
+    'Check an earlier request with /deposit_status and its tracking reference.',
+    'Need help? Tap /support.',
   ].join('\n');
 }
 
 export function telegramDepositReferenceSelectionText(): string {
   return [
     'I found more than one TeleBirr transaction number. Nothing was submitted.',
-    'Send /deposit, then reply with your KemerBet Player ID on the first line and only the transaction number you want to use on the second line.',
+    'Reply to the payment-details message with only the transaction number you want to use.',
   ].join('\n');
 }
 

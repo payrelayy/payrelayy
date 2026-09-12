@@ -24,6 +24,7 @@ export type TelegramActionSemanticConsumer =
   | 'capture_dry_run_deposit_reference'
   | 'capture_dry_run_deposit_proof'
   | 'capture_telegram_telebirr_shadow_proof'
+  | 'prepare_telegram_telebirr_destination'
   | 'open_live_deposit_intent'
   | 'capture_live_deposit_reference';
 
@@ -43,6 +44,13 @@ type PlayerIdSubmissionSemanticInput = {
    * database normalization/validation; it must never enter a generic log, audit record, or
    * callback payload.
    */
+  readonly playerId: string;
+  readonly semanticHmacSecret: string;
+};
+
+type TelebirrDestinationSemanticInput = {
+  readonly consumer: 'prepare_telegram_telebirr_destination';
+  readonly originInboundEventId: string;
   readonly playerId: string;
   readonly semanticHmacSecret: string;
 };
@@ -86,6 +94,7 @@ type DepositProofSemanticInput = {
 export type TelegramActionSemanticHmacInput =
   | CapabilityBoundSemanticInput
   | PlayerIdSubmissionSemanticInput
+  | TelebirrDestinationSemanticInput
   | PlayerIdExpirySemanticInput
   | DepositIntentSemanticInput
   | DepositReferenceSemanticInput
@@ -258,6 +267,14 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
       canonicalPayload = JSON.stringify({
         ...basePayload,
         platformCode: 'kemerbet',
+        normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
+      });
+      break;
+    case 'prepare_telegram_telebirr_destination':
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        platformCode: 'kemerbet',
+        providerCode: 'telebirr',
         normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
       });
       break;

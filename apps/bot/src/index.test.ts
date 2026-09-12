@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT } from './telegram-guided-deposit.js';
+import {
+  TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+  buildTelegramTelebirrPaymentPrompt,
+} from './telegram-guided-deposit.js';
 
 const runtime = vi.hoisted(() => ({
   actionDeliveries: [] as unknown[],
@@ -52,6 +55,10 @@ vi.mock('grammy', () => ({
 
     public text(text: string, callbackData: string): this {
       this.buttons.push({ text, callbackData });
+      return this;
+    }
+
+    public row(): this {
       return this;
     }
   },
@@ -277,7 +284,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('For app or account-access help, use /support.');
-    expect(context.replies[0]).toContain('Tap 💰 Deposit with TeleBirr');
+    expect(context.replies[0]).toContain('Tap /menu, then 💰 Make a deposit');
     expect(context.replies[0]).toContain('/deposit_status');
   });
 
@@ -383,11 +390,11 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     });
 
-    expect(context.replies[0]).toContain('tap 💰 Deposit with TeleBirr');
+    expect(context.replies[0]).toContain('Welcome to FetanAgent');
     expect(keyboard?.buttons).toEqual([
-      { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
+      { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
       {
-        text: 'Add KemerBet Player ID',
+        text: '🎮 Add Player ID',
         callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
       },
     ]);
@@ -470,7 +477,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
             reply_markup: {
               force_reply: true,
               selective: true,
-              input_field_placeholder: 'Player ID, then transaction number',
+              input_field_placeholder: 'KemerBet Player ID',
             },
           },
         },
@@ -480,7 +487,65 @@ describe('Telegram admission, private action, and ingress composition', () => {
     },
   );
 
-  it('submits a two-line prompt reply without provider or command syntax', async () => {
+  it('selects one Player ID and presents clear TeleBirr payment details', async () => {
+    await loadComposition(false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'telebirr_deposit_destination',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+      receiverAccountMasked: '***0042',
+      acceptsPayments: true,
+    };
+    const context = messageContext('PLAYER-DEMO-42');
+    const replies: { text: string; options?: unknown }[] = [];
+    await runtime.messageHandler!({
+      ...context,
+      message: {
+        text: 'PLAYER-DEMO-42',
+        reply_to_message: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      },
+      reply: async (text: string, options?: unknown) => {
+        replies.push({ text, options });
+      },
+    });
+
+    expect(runtime.actionDeliveries).toEqual([
+      {
+        version: 1,
+        kind: 'telebirr_deposit_destination_command',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+        playerId: 'PLAYER-DEMO-42',
+      },
+    ]);
+    expect(replies).toEqual([
+      {
+        text: buildTelegramTelebirrPaymentPrompt({
+          playerId: 'PLAYER-DEMO-42',
+          receiverAccountHolderName: 'Demo Receiver',
+          receiverAccountReference: '0000000042',
+        }),
+        options: {
+          reply_markup: {
+            force_reply: true,
+            selective: true,
+            input_field_placeholder: 'TeleBirr transaction number',
+          },
+        },
+      },
+    ]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('accepts only the transaction number after the displayed payment details', async () => {
     await loadComposition(false, true);
     runtime.actionResult = {
       version: 1,
@@ -490,44 +555,36 @@ describe('Telegram admission, private action, and ingress composition', () => {
       proofStatus: 'verification_queued',
       verificationMode: 'shadow_no_money',
     };
-    const context = messageContext('PLAYER-DEMO-42\nSYNTB00000001');
+    const paymentPrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    const context = messageContext('SYNTB00000001');
     await runtime.messageHandler!({
       ...context,
       message: {
-        text: 'PLAYER-DEMO-42\nSYNTB00000001',
-        reply_to_message: {
-          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
-          from: { is_bot: true },
-        },
+        text: 'SYNTB00000001',
+        reply_to_message: { text: paymentPrompt, from: { is_bot: true } },
       },
     });
 
     expect(runtime.actionDeliveries).toEqual([
-      {
-        version: 1,
+      expect.objectContaining({
         kind: 'deposit_proof_command',
-        updateId: '123456',
-        telegramUserId: '123456789',
-        privateChatId: '123456789',
-        preferredLocale: 'en',
         providerCode: 'telebirr',
         playerId: 'PLAYER-DEMO-42',
         transactionReference: 'SYNTB00000001',
-      },
+      }),
     ]);
-    expect(context.replies).toEqual([
-      [
-        '✅ Reference received.',
-        'FetanAgent is checking it.',
-        'Automatic credit and money movement are not enabled yet.',
-      ].join('\n'),
-    ]);
+    expect(context.replies[0]).toContain('Transaction number received');
+    expect(JSON.stringify(context.replies)).not.toMatch(/SYNTB|PLAYER-DEMO|0000000042/);
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
   it('keeps an invalid guided reply local and does not disclose it', async () => {
     await loadComposition(false, true);
-    const unsafeInput = 'PLAYER-DEMO-42\nPRIVATE-INVALID-REFERENCE';
+    const unsafeInput = 'PLAYER DEMO 42';
     const context = messageContext(unsafeInput);
     await runtime.messageHandler!({
       ...context,
@@ -543,7 +600,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
     expect(context.replies).toHaveLength(1);
-    expect(context.replies[0]).toContain("I couldn't read those two details");
+    expect(context.replies[0]).toContain("I couldn't read that Player ID");
     expect(context.replies[0]).not.toMatch(/PLAYER-DEMO|PRIVATE-INVALID/);
   });
 
@@ -615,7 +672,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(context.replies).toEqual([
       expect.stringContaining('more than one TeleBirr transaction number'),
     ]);
-    expect(context.replies[0]).toContain('Send /deposit');
+    expect(context.replies[0]).toContain('Reply to the payment-details message');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO|example\.invalid/);
   });
 
@@ -627,7 +684,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain('Do not make a new transfer for this step');
+    expect(context.replies[0]).toContain(
+      'FetanAgent will show the receiver name and wallet number',
+    );
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -753,8 +812,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('Tap 💰 Deposit with TeleBirr');
-    expect(context.replies[0]).toContain('Do not make a new transfer for this step');
+    expect(context.replies[0]).toContain('Tap /menu, then 💰 Make a deposit');
+    expect(context.replies[0]).toContain('reply with the TeleBirr transaction number');
     expect(context.replies[0]).toContain('/deposit_status');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

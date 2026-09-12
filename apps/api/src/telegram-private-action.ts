@@ -104,6 +104,7 @@ const ROOT_MENU_KEYS = new Set([
 ]);
 const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
+const TELEBIRR_DESTINATION_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const DEPOSIT_INTENT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId', 'amountEtb']);
 const DEPOSIT_REFERENCE_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken', 'transactionReference']);
 const DEPOSIT_PROOF_KEYS = new Set([
@@ -203,6 +204,10 @@ function validPlayerIdText(value: unknown): value is string {
   );
 }
 
+function validDestinationPlayerId(value: unknown): value is string {
+  return validPlayerIdText(value) && value === value.trim() && !/\s/u.test(value);
+}
+
 function validDepositReference(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -269,6 +274,17 @@ export function parseTelegramPrivateActionEnvelope(
       if (!identity || !validPlayerIdText(parsed.playerId)) return undefined;
 
       return { ...identity, kind: 'player_id_text', playerId: parsed.playerId };
+    }
+    case 'telebirr_deposit_destination_command': {
+      if (!hasOnlyKeys(parsed, TELEBIRR_DESTINATION_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (!identity || !validDestinationPlayerId(parsed.playerId)) return undefined;
+
+      return {
+        ...identity,
+        kind: 'telebirr_deposit_destination_command',
+        playerId: parsed.playerId,
+      };
     }
     case 'deposit_intent_command': {
       if (!hasOnlyKeys(parsed, DEPOSIT_INTENT_KEYS)) return undefined;

@@ -18,7 +18,10 @@ import {
 import {
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   isTelegramGuidedDepositPromptReply,
+  isTelegramGuidedDepositPlayerPromptReply,
   parseTelegramGuidedDepositInput,
+  parseTelegramGuidedDepositPlayerInput,
+  parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 
 export interface TelegramPrivateActionMetadata {
@@ -54,6 +57,16 @@ export interface TelegramGuidedDepositReplyMetadata extends TelegramPrivateActio
   readonly text: unknown;
   readonly replyToMessage: unknown;
 }
+
+export type TelegramGuidedDepositDestinationSubmission =
+  | {
+      readonly kind: 'action';
+      readonly action: Extract<
+        TelegramPrivateActionEnvelope,
+        { kind: 'telebirr_deposit_destination_command' }
+      >;
+    }
+  | { readonly kind: 'invalid_input' };
 
 const MAXIMUM_TELEGRAM_IDENTIFIER = 9_007_199_254_740_991;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
@@ -223,6 +236,29 @@ export function reduceTelegramPlayerIdTextAction(
   };
 }
 
+/**
+ * Convert the first wizard reply into a protected destination lookup. Ordinary Player-ID text and
+ * forged customer-authored prompts never enter this path.
+ */
+export function reduceTelegramGuidedDepositDestinationSubmission(
+  metadata: TelegramGuidedDepositReplyMetadata,
+): TelegramGuidedDepositDestinationSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || !isTelegramGuidedDepositPlayerPromptReply(metadata.replyToMessage)) {
+    return undefined;
+  }
+  const playerId = parseTelegramGuidedDepositPlayerInput(metadata.text);
+  if (!playerId) return { kind: 'invalid_input' };
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'telebirr_deposit_destination_command',
+      playerId,
+    },
+  };
+}
+
 /** Parse the explicit Player-ID + amount command without guessing which linked account to use. */
 export function reduceTelegramDepositIntentCommand(
   metadata: TelegramDepositCommandMetadata,
@@ -255,10 +291,17 @@ export function reduceTelegramGuidedDepositProofSubmission(
   metadata: TelegramGuidedDepositReplyMetadata,
 ): TelegramDepositProofSubmission | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
-  if (!identity || !isTelegramGuidedDepositPromptReply(metadata.replyToMessage)) return undefined;
-  const guidedInput = parseTelegramGuidedDepositInput(metadata.text);
-  if (!guidedInput) return { kind: 'invalid_input' };
-  const proofInput = reduceTelegramDepositProofInput('telebirr', guidedInput.proofText);
+  if (!identity) return undefined;
+
+  const paymentPlayerId = parseTelegramTelebirrPaymentPromptReply(metadata.replyToMessage);
+  const legacyReply = isTelegramGuidedDepositPromptReply(metadata.replyToMessage);
+  if (!paymentPlayerId && !legacyReply) return undefined;
+
+  const legacyInput = legacyReply ? parseTelegramGuidedDepositInput(metadata.text) : undefined;
+  const playerId = paymentPlayerId ?? legacyInput?.playerId;
+  const proofText = paymentPlayerId ? metadata.text : legacyInput?.proofText;
+  if (!playerId || typeof proofText !== 'string') return { kind: 'invalid_input' };
+  const proofInput = reduceTelegramDepositProofInput('telebirr', proofText);
   if (proofInput.kind !== 'candidate') return proofInput;
   return {
     kind: 'action',
@@ -266,7 +309,7 @@ export function reduceTelegramGuidedDepositProofSubmission(
       ...identity,
       kind: 'deposit_proof_command',
       providerCode: 'telebirr',
-      playerId: guidedInput.playerId,
+      playerId,
       transactionReference: proofInput.transactionReference,
     },
   };

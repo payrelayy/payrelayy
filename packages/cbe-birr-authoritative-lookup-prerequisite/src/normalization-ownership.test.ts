@@ -65,7 +65,7 @@ function exactSourceSlice(source: string, startMarker: string, endMarker: string
 
 function submittedReferenceCaptureSource(source: string): string {
   return [
-    exactSourceSlice(source, 'import { createCipheriv', 'import { types as nodeUtilTypes'),
+    exactSourceSlice(source, 'import { createCipheriv', 'import { createDecipheriv'),
     exactSourceSlice(source, 'const REFERENCE_PATTERN', 'const DIRECT_PROOF_REFERENCE_PATTERN'),
     exactSourceSlice(source, 'const SECRET_PATTERN', 'export const DEPOSIT_REFERENCE_KEY_VERSION'),
     exactSourceSlice(

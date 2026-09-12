@@ -81,6 +81,47 @@ describe('Telegram private-action bot client', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
   });
 
+  it('accepts only exact, internally consistent TeleBirr receiver projections', async () => {
+    const preview = {
+      version: 1,
+      outcome: 'telebirr_deposit_preview',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountMasked: '***0042',
+      acceptsPayments: false,
+    } as const;
+    const destination = {
+      ...preview,
+      outcome: 'telebirr_deposit_destination',
+      receiverAccountReference: '0000000042',
+      acceptsPayments: true,
+    } as const;
+
+    for (const result of [preview, destination]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => result }),
+        }),
+      ).resolves.toEqual(result);
+    }
+
+    for (const invalid of [
+      { ...preview, receiverAccountReference: '0000000042' },
+      { ...preview, acceptsPayments: true },
+      { ...destination, receiverAccountMasked: '***0000' },
+      { ...destination, receiverAccountReference: '09123 47494' },
+      { ...destination, acceptsPayments: false },
+      { ...destination, databaseReceiverId: 'private' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => invalid }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only the bounded customer projection on deposit instructions', async () => {
     const safeResult = {
       version: 1,

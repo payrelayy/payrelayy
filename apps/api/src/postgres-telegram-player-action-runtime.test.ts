@@ -2,6 +2,7 @@ import { createHash, createHmac } from 'node:crypto';
 
 import { loadApiConfig } from '@fetanagent/config/api';
 import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
+import { protectReceiverAccountReference } from '@fetanagent/deposit-reference-protection';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -272,6 +273,220 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         Buffer.from(JSON.stringify(action), 'utf8'),
       ),
     ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
+  });
+
+  it('returns only the receiver name and mask while the API financial gate is dry-run', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-12T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('prepare_telegram_telebirr_destination')) {
+          expect(values).toEqual([
+            inboundEventId,
+            'PLAYER-DEMO-42',
+            expect.stringMatching(/^hmac-sha256-v1:[0-9a-f]{64}$/u),
+          ]);
+          return {
+            rows: [
+              {
+                provider_code: 'telebirr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'Demo Receiver',
+                receiver_account_reference_ciphertext: 'must-not-be-opened',
+                receiver_account_reference_fingerprint: 'must-not-be-opened',
+                receiver_account_masked: '***0042',
+                payments_enabled: true,
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const destinationAction: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'telebirr_deposit_destination_command',
+      playerId: 'PLAYER-DEMO-42',
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        destinationAction,
+        Buffer.from(JSON.stringify(destinationAction), 'utf8'),
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_deposit_preview',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountMasked: '***0042',
+      acceptsPayments: false,
+    });
+    expect(JSON.stringify(calls)).not.toContain('must-not-be-opened');
+  });
+
+  it('opens the protected receiver only when both database and API gates are live', async () => {
+    const protectedReceiver = protectReceiverAccountReference(
+      {
+        provider: 'telebirr',
+        reference: '0000000042',
+        secrets: {
+          encryptionSecret: '1'.repeat(64),
+          fingerprintSecret: '2'.repeat(64),
+        },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-12T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('prepare_telegram_telebirr_destination')) {
+          return {
+            rows: [
+              {
+                provider_code: 'telebirr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'Demo Receiver',
+                receiver_account_reference_ciphertext: protectedReceiver.ciphertext,
+                receiver_account_reference_fingerprint: protectedReceiver.fingerprint,
+                receiver_account_masked: protectedReceiver.masked,
+                payments_enabled: true,
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const destinationAction: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'telebirr_deposit_destination_command',
+      playerId: 'PLAYER-DEMO-42',
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(
+      { ...actionConfig, financialActionsMode: 'live' },
+      database,
+    );
+
+    await expect(
+      runtime.handle(destinationAction, Buffer.from(JSON.stringify(destinationAction), 'utf8')),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_deposit_destination',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+      receiverAccountMasked: '***0042',
+      acceptsPayments: true,
+    });
+  });
+
+  it('fails closed without exposing receiver material when a live destination is tampered', async () => {
+    const receiverAccountReference = '0000000042';
+    const protectedReceiver = protectReceiverAccountReference(
+      {
+        provider: 'telebirr',
+        reference: receiverAccountReference,
+        secrets: {
+          encryptionSecret: '1'.repeat(64),
+          fingerprintSecret: '2'.repeat(64),
+        },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const ciphertextParts = protectedReceiver.ciphertext.split('.');
+    ciphertextParts[2] = `${ciphertextParts[2]?.slice(0, -1)}${
+      ciphertextParts[2]?.endsWith('A') ? 'B' : 'A'
+    }`;
+    const tamperedCiphertext = ciphertextParts.join('.');
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-08-12T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('prepare_telegram_telebirr_destination')) {
+          return {
+            rows: [
+              {
+                provider_code: 'telebirr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'Demo Receiver',
+                receiver_account_reference_ciphertext: tamperedCiphertext,
+                receiver_account_reference_fingerprint: protectedReceiver.fingerprint,
+                receiver_account_masked: protectedReceiver.masked,
+                payments_enabled: true,
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const destinationAction: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'telebirr_deposit_destination_command',
+      playerId: 'PLAYER-DEMO-42',
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(
+      { ...actionConfig, financialActionsMode: 'live' },
+      database,
+    );
+
+    let thrown: unknown;
+    try {
+      await runtime.handle(
+        destinationAction,
+        Buffer.from(JSON.stringify(destinationAction), 'utf8'),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({ name: 'TelegramPlayerActionRuntimeUnavailableError' });
+    const serializedError =
+      thrown instanceof Error
+        ? `${thrown.name}\n${thrown.message}\n${thrown.stack ?? ''}`
+        : String(thrown);
+    expect(serializedError).not.toContain(receiverAccountReference);
+    expect(serializedError).not.toContain(tamperedCiphertext);
+    expect(serializedError).not.toContain(protectedReceiver.fingerprint);
   });
 
   it('opens only a CBE Birr dry-run intake for an inclusive in-range amount', async () => {

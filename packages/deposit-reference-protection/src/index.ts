@@ -1,4 +1,5 @@
 import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
+import { createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { types as nodeUtilTypes } from 'node:util';
 
 const REFERENCE_PATTERN = /^[A-Za-z0-9._-]+$/u;
@@ -65,6 +66,14 @@ export interface ProtectedReceiverAccountReference {
   readonly masked: string;
   readonly profileVersion: typeof RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION;
   readonly provider: DepositProofReferenceProvider;
+}
+
+export interface ReceiverAccountReferenceUnprotectionInput {
+  readonly ciphertext: string;
+  readonly fingerprint: string;
+  readonly masked: string;
+  readonly provider: DepositProofReferenceProvider;
+  readonly secrets: DepositReferenceProtectionSecrets;
 }
 
 export class DepositReferenceProtectionError extends Error {
@@ -395,5 +404,135 @@ export function protectReceiverAccountReference(
     encryptionKey?.fill(0);
     fingerprintKey?.fill(0);
     nonce?.fill(0);
+  }
+}
+
+/**
+ * Opens one Owner-protected receiver wallet/account number for an authenticated customer-payment
+ * presentation. Callers must keep the returned digits in trusted memory, must never log them, and
+ * must disclose them only after their own payment-readiness and customer-authorization checks.
+ * The provider, authenticated ciphertext, keyed fingerprint, and stored mask must all agree.
+ */
+export function unprotectReceiverAccountReference(
+  input: ReceiverAccountReferenceUnprotectionInput,
+): string {
+  let encryptionMaster: Buffer | undefined;
+  let fingerprintMaster: Buffer | undefined;
+  let encryptionKey: Buffer | undefined;
+  let fingerprintKey: Buffer | undefined;
+  let nonce: Buffer | undefined;
+  let tag: Buffer | undefined;
+  let encrypted: Buffer | undefined;
+  let decrypted: Buffer | undefined;
+  let calculatedFingerprint: Buffer | undefined;
+  let suppliedFingerprint: Buffer | undefined;
+  try {
+    const inputProperties = exactDataProperties(input, [
+      'ciphertext',
+      'fingerprint',
+      'masked',
+      'provider',
+      'secrets',
+    ]);
+    if (inputProperties === undefined) throw new Error();
+    const secretsProperties = exactDataProperties(inputProperties.secrets, [
+      'encryptionSecret',
+      'fingerprintSecret',
+    ]);
+    if (
+      !exactProvider(inputProperties.provider) ||
+      typeof inputProperties.ciphertext !== 'string' ||
+      typeof inputProperties.fingerprint !== 'string' ||
+      !/^[0-9a-f]{64}$/u.test(inputProperties.fingerprint) ||
+      typeof inputProperties.masked !== 'string' ||
+      !/^\*{3}[0-9]{4}$/u.test(inputProperties.masked) ||
+      secretsProperties === undefined ||
+      !validSecret(secretsProperties.encryptionSecret) ||
+      !validSecret(secretsProperties.fingerprintSecret) ||
+      secretsProperties.encryptionSecret === secretsProperties.fingerprintSecret
+    ) {
+      throw new Error();
+    }
+
+    const provider = inputProperties.provider;
+    const envelopePattern = new RegExp(
+      `^receiver-v1\\.${provider}\\.([A-Za-z0-9_-]{16})\\.([A-Za-z0-9_-]{22})\\.([A-Za-z0-9_-]{12,32})$`,
+      'u',
+    );
+    const envelope = envelopePattern.exec(inputProperties.ciphertext);
+    if (!envelope?.[1] || !envelope[2] || !envelope[3]) throw new Error();
+
+    encryptionMaster = Buffer.from(secretsProperties.encryptionSecret, 'hex');
+    fingerprintMaster = Buffer.from(secretsProperties.fingerprintSecret, 'hex');
+    encryptionKey = createHmac('sha256', encryptionMaster)
+      .update(
+        `fetanagent:receiver-account-reference:encryption-key:v1\nprovider:${provider}`,
+        'utf8',
+      )
+      .digest();
+    fingerprintKey = createHmac('sha256', fingerprintMaster)
+      .update(
+        `fetanagent:receiver-account-reference:fingerprint-key:v1\nprovider:${provider}`,
+        'utf8',
+      )
+      .digest();
+    nonce = Buffer.from(envelope[1], 'base64url');
+    tag = Buffer.from(envelope[2], 'base64url');
+    encrypted = Buffer.from(envelope[3], 'base64url');
+    if (
+      nonce.byteLength !== 12 ||
+      tag.byteLength !== 16 ||
+      encrypted.byteLength < RECEIVER_ACCOUNT_REFERENCE_MIN_DIGITS ||
+      encrypted.byteLength > RECEIVER_ACCOUNT_REFERENCE_MAX_DIGITS
+    ) {
+      throw new Error();
+    }
+
+    const decipher = createDecipheriv('aes-256-gcm', encryptionKey, nonce);
+    decipher.setAAD(
+      Buffer.from(
+        `fetanagent:receiver-account-reference:encryption-aad:v1\nprovider:${provider}`,
+        'utf8',
+      ),
+    );
+    decipher.setAuthTag(tag);
+    decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    const reference = decrypted.toString('utf8');
+    if (
+      !validReceiverAccountReference(reference) ||
+      inputProperties.masked !== `***${reference.slice(-4)}`
+    ) {
+      throw new Error();
+    }
+
+    calculatedFingerprint = createHmac('sha256', fingerprintKey)
+      .update(
+        `fetanagent:receiver-account-reference:fingerprint-input:v1\nprovider:${provider}\n`,
+        'utf8',
+      )
+      .update(reference, 'utf8')
+      .digest();
+    suppliedFingerprint = Buffer.from(inputProperties.fingerprint, 'hex');
+    if (
+      suppliedFingerprint.byteLength !== calculatedFingerprint.byteLength ||
+      !timingSafeEqual(suppliedFingerprint, calculatedFingerprint)
+    ) {
+      throw new Error();
+    }
+
+    return reference;
+  } catch {
+    throw new DepositReferenceProtectionError();
+  } finally {
+    encryptionMaster?.fill(0);
+    fingerprintMaster?.fill(0);
+    encryptionKey?.fill(0);
+    fingerprintKey?.fill(0);
+    nonce?.fill(0);
+    tag?.fill(0);
+    encrypted?.fill(0);
+    decrypted?.fill(0);
+    calculatedFingerprint?.fill(0);
+    suppliedFingerprint?.fill(0);
   }
 }

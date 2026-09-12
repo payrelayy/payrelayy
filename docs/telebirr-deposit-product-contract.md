@@ -8,22 +8,23 @@ governed by its separate approved contract in
 
 ## Product decisions
 
-| Decision                      | Approved behavior                                                                                                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Payment participants          | The payer, submitting FetanAgent user, and KemerBet account holder may all be different people. No identity match among them is required.                                          |
-| Sender and claimant identity  | Do not match or require the TeleBirr payer, Telegram identity, web identity, or KemerBet identity.                                                                                 |
-| Destination                   | A customer may deposit to a saved eligible Player ID or choose **Deposit to another Player ID**.                                                                                   |
-| Amount entry                  | The customer does not enter an amount. The credited principal comes only from the freshly retrieved official receipt's **Settled Amount**.                                         |
-| Fees                          | Stamp duty, discount fields, service fee, service-fee VAT, and every other fee are never added to the KemerBet credit. **Total Paid Amount** is not the credited amount.           |
-| Per-deposit limits            | 25 ETB minimum and 25,000 ETB maximum, inclusive. An out-of-range receipt goes to manual review.                                                                                   |
-| Deposit count                 | There is no business limit on successful deposits. Abuse controls may still bound concurrent checks and invalid-reference probing.                                                 |
-| Transaction type              | Automatic verification initially accepts only TeleBirr wallet transfers whose official payment reason is **Send Money to Registered Customer**. Other reasons go to manual review. |
-| Age                           | A payment made before the FetanAgent flow may be verified automatically when submitted within one hour of the official payment time. Older receipts go to manual review.           |
-| Multiple references           | If submitted material contains multiple candidate transaction IDs, the customer must select one. FetanAgent must not guess.                                                        |
-| Customer confirmation         | No second confirmation is required after exact verification. The verified amount proceeds immediately to the selected Player ID through guarded settlement and execution.          |
-| Duplicate customer response   | Say only **This transaction was already used.** Never reveal the other user or Player ID.                                                                                          |
-| Internal duplicate visibility | The Owner and authorized payment-review admins may see the internal user, channel, Player ID, amount, timestamps, and audit history.                                               |
-| Receiver configuration        | The Owner configures exactly one official full receiver name per immutable TeleBirr receiver revision. Personal or merchant receiver accounts are supported.                       |
+| Decision                      | Approved behavior                                                                                                                                                                                                                       |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payment participants          | The payer, submitting FetanAgent user, and KemerBet account holder may all be different people. No identity match among them is required.                                                                                               |
+| Sender and claimant identity  | Do not match or require the TeleBirr payer, Telegram identity, web identity, or KemerBet identity.                                                                                                                                      |
+| Destination                   | A customer may deposit to a saved eligible Player ID or choose **Deposit to another Player ID**.                                                                                                                                        |
+| Amount entry                  | The customer does not enter an amount. The credited principal comes only from the freshly retrieved official receipt's **Settled Amount**.                                                                                              |
+| Fees                          | Stamp duty, discount fields, service fee, service-fee VAT, and every other fee are never added to the KemerBet credit. **Total Paid Amount** is not the credited amount.                                                                |
+| Per-deposit limits            | 25 ETB minimum and 25,000 ETB maximum, inclusive. An out-of-range receipt goes to manual review.                                                                                                                                        |
+| Deposit count                 | There is no business limit on successful deposits. Abuse controls may still bound concurrent checks and invalid-reference probing.                                                                                                      |
+| Transaction type              | Automatic verification initially accepts only TeleBirr wallet transfers whose official payment reason is **Send Money to Registered Customer**. Other reasons go to manual review.                                                      |
+| Age                           | A payment made before the FetanAgent flow may be verified automatically when submitted within one hour of the official payment time. Older receipts go to manual review.                                                                |
+| Multiple references           | If submitted material contains multiple candidate transaction IDs, the customer must select one. FetanAgent must not guess.                                                                                                             |
+| Customer confirmation         | No second confirmation is required after exact verification. The verified amount proceeds immediately to the selected Player ID through guarded settlement and execution.                                                               |
+| Duplicate customer response   | Say only **This transaction was already used.** Never reveal the other user or Player ID.                                                                                                                                               |
+| Internal duplicate visibility | The Owner and authorized payment-review admins may see the internal user, channel, Player ID, amount, timestamps, and audit history.                                                                                                    |
+| Receiver configuration        | The Owner configures exactly one official full receiver name per immutable TeleBirr receiver revision. Personal or merchant receiver accounts are supported.                                                                            |
+| Customer payment instructions | After one eligible Player ID is selected, show the active receiver's full name and number only when every payment-processing gate is live. Otherwise show the name and masked number with an explicit **Do not send money yet** notice. |
 
 ## Facts established by the official receipt
 
@@ -115,6 +116,20 @@ not an exact normalized match goes to manual review.
 If a configured masked-number suffix is available, it remains diagnostic. A conflict between that
 suffix and the official receipt goes to manual review; the suffix cannot override or substitute for
 the required full-name match.
+
+## Telegram customer experience
+
+The primary flow is a two-reply wizard: the customer taps **Make a deposit**, replies with one
+KemerBet Player ID, receives a compact TeleBirr payment card, and then replies to that card with only
+the transaction number, receipt link, or full SMS. The bot must not require provider codes, command
+syntax, amounts, or a two-line Player-ID/reference message.
+
+The payment card includes the selected Player ID, supported amount range, active receiver name, and
+active receiver number. The complete number is decrypted only in trusted API memory after the
+database and API independently confirm live payment readiness. It must not be stored in a Telegram
+action receipt, audit metadata, application log, analytics event, or error. If any readiness gate is
+not live, the bot shows only the receiver name and masked suffix and clearly tells the customer not
+to send money.
 
 ## Exact automatic-verification rule
 

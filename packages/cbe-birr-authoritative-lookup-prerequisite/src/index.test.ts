@@ -702,7 +702,7 @@ describe('read-only repository prerequisite regressions', () => {
     expect(legacyBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
     expect(providerAwareBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
     expect(apiSource).toContain(
-      "  protectCbeBirrDepositReference,\n  protectDepositProofReference,\n} from '@fetanagent/deposit-reference-protection';",
+      "  protectCbeBirrDepositReference,\n  protectDepositProofReference,\n  unprotectReceiverAccountReference,\n} from '@fetanagent/deposit-reference-protection';",
     );
     expect(apiSource).not.toContain('reference.toUpperCase()');
     expect(profileSource).toContain('timingSafeEqual(actualEncryption, expectedEncryption)');

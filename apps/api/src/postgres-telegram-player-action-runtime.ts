@@ -10,6 +10,7 @@ import {
 import {
   protectCbeBirrDepositReference,
   protectDepositProofReference,
+  unprotectReceiverAccountReference,
 } from '@fetanagent/deposit-reference-protection';
 import type { DepositStatus } from '@fetanagent/domain';
 import { Pool, type PoolConfig } from 'pg';
@@ -52,6 +53,12 @@ const SUBMIT_INPUT_SQL = `
          request_status, existing_request_reused, conversation_version,
          origin_inbound_event_already_consumed
   from app.submit_telegram_player_registration_input($1::uuid, $2::text, $3::text)
+`;
+const PREPARE_TELEBIRR_DESTINATION_SQL = `
+  select provider_code, receiver_revision_id, receiver_account_holder_name,
+         receiver_account_reference_ciphertext, receiver_account_reference_fingerprint,
+         receiver_account_masked, payments_enabled, request_replayed
+  from app.prepare_telegram_telebirr_destination($1::uuid, $2::text, $3::text)
 `;
 const EXPIRE_ACTION_SQL = `
   select player_registration_action_id, action_status, conversation_version,
@@ -350,6 +357,90 @@ async function handlePlayerId(
   }
   if (row.result_outcome === 'rejected') return { version: 1, outcome: 'restart_required' };
   throw new TelegramPlayerActionRuntimeUnavailableError();
+}
+
+async function handleTelebirrDestination(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'telebirr_deposit_destination_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  const semanticHmac = validateSemanticHmac(
+    createTelegramActionSemanticHmac({
+      consumer: 'prepare_telegram_telebirr_destination',
+      originInboundEventId,
+      playerId: action.playerId,
+      semanticHmacSecret: config.telegramActionCapability.semanticHmacSecret,
+    }),
+  );
+  const row = oneRow(
+    (
+      await database.query(PREPARE_TELEBIRR_DESTINATION_SQL, [
+        originInboundEventId,
+        action.playerId,
+        semanticHmac,
+      ])
+    ).rows,
+  );
+  if (
+    row.provider_code !== 'telebirr' ||
+    typeof row.receiver_revision_id !== 'string' ||
+    !UUID_PATTERN.test(row.receiver_revision_id) ||
+    typeof row.receiver_account_holder_name !== 'string' ||
+    row.receiver_account_holder_name !== row.receiver_account_holder_name.trim() ||
+    Array.from(row.receiver_account_holder_name).length < 2 ||
+    Array.from(row.receiver_account_holder_name).length > 160 ||
+    /[\u0000-\u001f\u007f]/u.test(row.receiver_account_holder_name) ||
+    typeof row.receiver_account_masked !== 'string' ||
+    !/^\*{3}[0-9]{4}$/u.test(row.receiver_account_masked) ||
+    typeof row.payments_enabled !== 'boolean' ||
+    typeof row.request_replayed !== 'boolean'
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+
+  const base = {
+    version: 1 as const,
+    providerCode: 'telebirr' as const,
+    providerName: 'TeleBirr' as const,
+    receiverAccountHolderName: row.receiver_account_holder_name,
+    receiverAccountMasked: row.receiver_account_masked,
+  };
+  if (!row.payments_enabled || config.financialActionsMode !== 'live') {
+    return {
+      ...base,
+      outcome: 'telebirr_deposit_preview',
+      acceptsPayments: false,
+    };
+  }
+
+  if (
+    typeof row.receiver_account_reference_ciphertext !== 'string' ||
+    typeof row.receiver_account_reference_fingerprint !== 'string'
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  const receiverAccountReference = unprotectReceiverAccountReference({
+    ciphertext: row.receiver_account_reference_ciphertext,
+    fingerprint: row.receiver_account_reference_fingerprint,
+    masked: row.receiver_account_masked,
+    provider: 'telebirr',
+    secrets: {
+      encryptionSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceEncryptionMasterSecret,
+      fingerprintSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
+    },
+  });
+  return {
+    ...base,
+    outcome: 'telebirr_deposit_destination',
+    receiverAccountReference,
+    acceptsPayments: true,
+  };
 }
 
 async function handleDepositIntent(
@@ -691,6 +782,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleCallback(pool, inboundEventId, action, config);
           case 'player_id_text':
             return await handlePlayerId(pool, inboundEventId, action, config);
+          case 'telebirr_deposit_destination_command':
+            return await handleTelebirrDestination(pool, inboundEventId, action, config);
           case 'deposit_intent_command':
             return await handleDepositIntent(pool, inboundEventId, action, config);
           case 'deposit_reference_command':

@@ -12,6 +12,7 @@ import {
   protectCbeBirrDepositReference,
   protectDepositProofReference,
   protectReceiverAccountReference,
+  unprotectReceiverAccountReference,
   type DepositProofReferenceProvider,
 } from './index.js';
 
@@ -596,6 +597,72 @@ describe('Owner receiver-account reference protection', () => {
     );
     expect(second.fingerprint).toBe(first.fingerprint);
     expect(second.ciphertext).not.toBe(first.ciphertext);
+  });
+
+  it('opens only an exact provider-bound envelope, fingerprint, and mask', () => {
+    const protectedReference = protectReceiverAccountReference(
+      { provider: 'telebirr', reference: '0000000042', secrets },
+      { nonce: () => Buffer.alloc(12, 13) },
+    );
+
+    expect(
+      unprotectReceiverAccountReference({
+        ciphertext: protectedReference.ciphertext,
+        fingerprint: protectedReference.fingerprint,
+        masked: protectedReference.masked,
+        provider: protectedReference.provider,
+        secrets,
+      }),
+    ).toBe('0000000042');
+
+    const ciphertextParts = protectedReference.ciphertext.split('.');
+    const encryptedReference = ciphertextParts[4]!;
+    ciphertextParts[4] = `${encryptedReference.startsWith('A') ? 'B' : 'A'}${encryptedReference.slice(1)}`;
+    const tamperedCiphertext = ciphertextParts.join('.');
+
+    for (const override of [
+      { provider: 'cbe_birr' as const },
+      { masked: '***0000' },
+      { fingerprint: '0'.repeat(64) },
+      { ciphertext: tamperedCiphertext },
+      { secrets: { ...secrets, encryptionSecret: 'c'.repeat(64) } },
+    ]) {
+      expect(() =>
+        unprotectReceiverAccountReference({
+          ciphertext: protectedReference.ciphertext,
+          fingerprint: protectedReference.fingerprint,
+          masked: protectedReference.masked,
+          provider: protectedReference.provider,
+          secrets,
+          ...override,
+        }),
+      ).toThrow(DepositReferenceProtectionError);
+    }
+  });
+
+  it('does not echo protected or decrypted receiver data in failures', () => {
+    const reference = '0000000042';
+    const protectedReference = protectReceiverAccountReference(
+      { provider: 'telebirr', reference, secrets },
+      { nonce: () => Buffer.alloc(12, 14) },
+    );
+    let thrown: unknown;
+    try {
+      unprotectReceiverAccountReference({
+        ciphertext: protectedReference.ciphertext,
+        fingerprint: 'f'.repeat(64),
+        masked: protectedReference.masked,
+        provider: 'telebirr',
+        secrets,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(String(thrown)).toBe(
+      'DepositReferenceProtectionError: The deposit reference could not be protected.',
+    );
+    expect(String(thrown)).not.toContain(reference);
+    expect(String(thrown)).not.toContain(protectedReference.ciphertext);
   });
 
   it.each([

@@ -90,7 +90,7 @@ assert.match(
 assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 30/u);
 
 const canonicalDigest = shellFunction(guard, 'immutable_nine_digest');
-assert.match(canonicalDigest, /del\(\.State\.Health\.Log\)/u);
+assert.match(canonicalDigest, /del\(\.ExecIDs,\.State\.Health\.Log\)/u);
 assert.match(canonicalDigest, /\.Mounts \|= sort_by\(\[/u);
 assert.match(
   canonicalDigest,

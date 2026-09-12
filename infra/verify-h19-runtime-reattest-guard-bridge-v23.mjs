@@ -43,7 +43,7 @@ const botImage = 'sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467
 const gatewayImage = 'sha256:443aac301bb8c26a51f7877a9cf016e8fd2101831c0cac6f59f7bd88a17189e8';
 const caddy = 'afce01127ba2f428ebca83b09460a27fd96c7a2ac319136eeefcbe5714860616';
 const production = 'fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5';
-const nine = 'b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53';
+const nine = '0b5c68c61794dadb0098470829ce581e6d8f9eec5ffc57429a5d438f72d846d6';
 const ingress = '770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb';
 const tls = '2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8';
 
@@ -105,6 +105,11 @@ assert.match(productionContract, /service"\] == "bot"\s+then \$bot else \$protec
 assert.match(productionContract, /FINANCIAL_ACTIONS_MODE=dry_run/u);
 assert.match(productionContract, /KEMERBET_EXECUTOR_ENABLED=false/u);
 assert.match(productionContract, /KEMERBET_FINAL_ACTION_ENABLED=false/u);
+assert.match(
+  shellFunction(guard, 'immutable_nine_digest'),
+  /del\(\.ExecIDs,\.State\.Health\.Log\)/u,
+  'the H23 guard fingerprint must exclude transient Docker exec sessions',
+);
 
 const installerProductionContract = shellFunction(installer, 'require_production_contract');
 for (const invariant of [
@@ -136,6 +141,11 @@ for (const invariant of [
     `H23 preflight must retain the shared-ingress invariant: ${invariant}`,
   );
 }
+assert.match(
+  shellFunction(installer, 'immutable_nine_digest'),
+  /del\(\.ExecIDs,\.State\.Health\.Log\)/u,
+  'the H23 preflight fingerprint must exclude transient Docker exec sessions',
+);
 
 const currentState = shellFunction(guard, 'require_current_state');
 for (const boundary of [23, 24, 25, 26, 22]) {

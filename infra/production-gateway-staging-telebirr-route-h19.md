@@ -324,6 +324,46 @@ is interrupted, rerun the identical corrected files and arguments. The staging g
 disabled while the new guard lacks its completed provenance record; do not edit or remove the H23
 namespace, any predecessor evidence, or the installed guard.
 
+## H24 latest-terminal guard validation correction
+
+The exact H23 transaction completed and preserved its predecessor evidence, but its successor guard
+failed closed before the staging grant was restored. The parser still compared the currently
+installed guard with the historical H22 and H23 successor fields before it reached the newest
+terminal bridge. A legitimate successor can never satisfy those historical installed-file checks.
+The ten production containers remained healthy and unchanged, and the staging deployment grant
+remained isolated at `/etc/sudoers.d/.fetanagent-staging-deploy-helper.h23-disabled`.
+
+H24 preserves H19-H23 byte-for-byte, archives the exact rejected H23 guard
+`351156b4d6d18d1f7920ebee7b8817ca937d126faabf9863f31d8811662dd759`, and moves the
+installed-file comparison to the newest terminal H24 record. Historical H22 and H23 records still
+validate their intent, completion, and archived predecessor guard; only H24 may bind the currently
+installed successor. The installer uses the exact H23 installer as a read-only re-attestation oracle,
+holds the existing mutation lock, does not invoke Compose, does not touch a database, and restores
+the staging grant only after the H24 guard independently accepts the no-money runtime.
+
+Stage only these two files from the merged H24 correction in a new root-owned mode-`0700` directory
+named `/root/fetanagent-h19-latest-guard-validation-bridge-v24-H24_MERGE_SHA/`:
+
+```text
+root:root 0700 fetanagent-h19-latest-guard-validation-bridge-v24.sh
+root:root 0600 fetanagent-production-ingress-h19.next
+```
+
+Run the read-only preflight directly as root first:
+
+```text
+fetanagent-h19-latest-guard-validation-bridge-v24.sh \
+  H24_MERGE_SHA \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  I-UNDERSTAND-THIS-CORRECTS-H23-GUARD-ORDERING-WITHOUT-MUTATING-THE-RUNTIME \
+  preflight
+```
+
+Only after preflight succeeds, run the same command without `preflight`. If interrupted, rerun the
+identical merged files and arguments. Never rewrite the H23 terminal evidence or manually restore
+the deployment grant; H24 restores it only after its terminal record, installed guard, and record
+output all agree.
+
 ## Build and gateway-only transition
 
 Build the production gateway image from the final H19 merged commit using the existing reviewed image

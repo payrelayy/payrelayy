@@ -57,6 +57,7 @@ const HOLDER_PATTERN =
   /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,158}[^\s\u0000-\u001f\u007f])?$/u;
 const CURRENT_MASK_PATTERN = /^\*\*\*[0-9]{4}$/u;
 const LEGACY_MASK_PATTERN = /^\*\*\*\*[0-9]{4}$/u;
+const LEGACY_SYNTHETIC_MASK = '****TEST';
 const REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
 const PROVIDERS = new Set<OwnerReceiverProvider>(['cbe_birr', 'telebirr']);
 const ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
@@ -136,7 +137,8 @@ function receiverFromRow(
     !HOLDER_PATTERN.test(row.account_holder_name) ||
     typeof row.account_reference_masked !== 'string' ||
     (!CURRENT_MASK_PATTERN.test(row.account_reference_masked) &&
-      !LEGACY_MASK_PATTERN.test(row.account_reference_masked)) ||
+      !LEGACY_MASK_PATTERN.test(row.account_reference_masked) &&
+      row.account_reference_masked !== LEGACY_SYNTHETIC_MASK) ||
     (row.receiver_status !== 'active' && row.receiver_status !== 'inactive') ||
     typeof row.protected_reference !== 'boolean'
   ) {

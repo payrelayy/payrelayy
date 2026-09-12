@@ -361,7 +361,7 @@ COPY --from=executor-build --chown=10001:10001 /deploy/workspace ./
 
 # playwright-core is exact-pinned in the executor manifest. Refuse an image whose externally
 # selected Debian Chromium package has a different major from Playwright's own Chromium contract.
-RUN node -e "const fs=require('node:fs');const cp=require('node:child_process');const spec=JSON.parse(fs.readFileSync('apps/executor/node_modules/playwright-core/browsers.json','utf8'));const expected=spec.browsers.find((entry)=>entry.name==='chromium')?.browserVersion?.split('.')[0];const actual=cp.execFileSync('/usr/bin/chromium',['--version'],{encoding:'utf8'}).trim();if(!expected||!actual.startsWith('Chromium '+expected+'.'))process.exit(1)"
+RUN node -e "const fs=require('node:fs');const cp=require('node:child_process');const spec=JSON.parse(fs.readFileSync('node_modules/playwright-core/browsers.json','utf8'));const expected=spec.browsers.find((entry)=>entry.name==='chromium')?.browserVersion?.split('.')[0];const actual=cp.execFileSync('/usr/bin/chromium',['--version'],{encoding:'utf8'}).trim();if(!expected||!actual.startsWith('Chromium '+expected+'.'))process.exit(1)"
 
 HEALTHCHECK --interval=60s --timeout=45s --start-period=120s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:8090/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 

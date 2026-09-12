@@ -661,7 +661,10 @@ assert.doesNotMatch(
 assert.match(executorImage, /HEALTHCHECK .*127\.0\.0\.1:8090\/readyz/);
 assert.match(executorImage, /HEALTHCHECK --interval=60s --timeout=45s --start-period=120s/);
 assert.match(executorImage, /CMD \["node", "apps\/executor\/dist\/index\.js"\]/);
-assert.match(executorImage, /playwright-core\/browsers\.json/);
+assert.match(
+  executorImage,
+  /fs\.readFileSync\('node_modules\/playwright-core\/browsers\.json','utf8'\)/,
+);
 assert.match(executorImage, /entry\.name==='chromium'/);
 assert.ok(executorImage.includes("actual.startsWith('Chromium '+expected+'.')"));
 assert.doesNotMatch(executorImage, /\bEXPOSE\b|docker\.sock|\/run\/secrets/);

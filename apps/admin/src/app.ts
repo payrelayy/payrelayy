@@ -212,6 +212,13 @@ const OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION = Object.freeze({
   signedIn: false,
   transferDisabled: true as const,
 });
+const OWNER_KEMERBET_COMPANION_IDLE_SESSION = Object.freeze({
+  active: false,
+  loginRequired: false,
+  phase: 'idle' as const,
+  signedIn: false,
+  transferDisabled: true as const,
+});
 
 function exactOwnerKemerbetSessionQuarantine(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -1396,11 +1403,17 @@ export function buildOwnerControlApp(
           return { session: OWNER_KEMERBET_SECURITY_RECOVERY_COHORT_REQUIRED_SESSION };
         }
         if (lifecycle === 'security_recovery_cohort_staged') {
+          if (runtimeConfig.companionDevicePairing.configured) {
+            return { session: OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION };
+          }
           const accountId = await interactiveKemerbetAgentProfileId(authUserId);
           return kemerbetSessionPayload(await kemerbetSessionControl.status(accountId), true);
         }
         if (lifecycle === 'imported' || lifecycle === 'retryable_failed') {
           return { session: OWNER_KEMERBET_SECURITY_RECOVERY_IN_PROGRESS_SESSION };
+        }
+        if (runtimeConfig.companionDevicePairing.configured) {
+          return { session: OWNER_KEMERBET_COMPANION_IDLE_SESSION };
         }
         const accountId = await interactiveKemerbetAgentProfileId(authUserId);
         return { session: await kemerbetSessionControl.status(accountId) };

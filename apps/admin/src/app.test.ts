@@ -3145,6 +3145,82 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('does not require the retired hosted-session socket for a configured companion recovery cohort', async () => {
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(false, true), {
+      fetch: verifiedAuthFetch(),
+      kemerbetReadinessCohortControl: {
+        completed: async () => false,
+        lifecycle: async () => 'security_recovery_cohort_staged',
+        prepare: async () => {
+          throw new Error('the existing recovery cohort must not be replaced');
+        },
+        rootReceipt: async () => undefined,
+      },
+      kemerbetSessionControl: {
+        frame: async () => undefined,
+        input: async () => {
+          throw new Error('the retired hosted session must not receive input');
+        },
+        start: async () => {
+          throw new Error('the retired hosted session must not start');
+        },
+        status: async () => {
+          calls.push('hosted-status');
+          throw new Error('the retired hosted-session socket is absent');
+        },
+        stop: async () => {
+          throw new Error('the retired hosted session must not stop');
+        },
+      },
+      runtime: runtime({
+        privateLivePilot: {
+          ...runtime().privateLivePilot,
+          prepare: async () => {
+            calls.push('pilot-prepare');
+            return pilotStatus();
+          },
+        },
+      }),
+    });
+
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/kemerbet-session',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.json()).toEqual({
+      session: {
+        active: false,
+        loginRequired: false,
+        phase: 'idle',
+        quarantine: {
+          reasonCode: 'security_recovery_in_progress',
+          recoveryRequired: true,
+        },
+        signedIn: false,
+        transferDisabled: true,
+      },
+    });
+
+    const prepared = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/private-live-deposit-pilots/prepare',
+      headers: pilotMutationHeaders(),
+      payload: {
+        activeFrom: '2026-09-05T18:00:00.000Z',
+        confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
+        expiresAt: '2026-09-05T20:00:00.000Z',
+        playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
+        requestId: pilotRequestId,
+      },
+    });
+    expect(prepared.statusCode).toBe(201);
+    expect(calls).toEqual(['pilot-prepare']);
+    await app.close();
+  });
+
   it.each(['imported', 'retryable_failed'] as const)(
     'keeps every mutation blocked while recovery remains %s',
     async (lifecycle) => {

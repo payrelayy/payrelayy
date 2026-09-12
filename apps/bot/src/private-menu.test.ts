@@ -17,8 +17,9 @@ describe('English-only private customer menu', () => {
       text: [
         'What would you like to do?',
         '',
-        'For a TeleBirr deposit, tap Deposit and follow the short prompt.',
-        'Staging test: do not send new money. Nothing will be credited or moved.',
+        'To deposit, tap 💰 Deposit with TeleBirr.',
+        'The bot will ask for your KemerBet Player ID and TeleBirr transaction number.',
+        'Automatic credit is not enabled yet.',
       ].join('\n'),
       buttons: [
         { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },

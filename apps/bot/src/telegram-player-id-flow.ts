@@ -70,11 +70,11 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'menu',
         menu: {
           text: [
-            '✅ Test reference received.',
+            '✅ Reference received.',
             `Payment method: ${result.providerName}.`,
             `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
             `To check it later, send /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            'Staging test: no payment was verified, credited, or moved.',
+            'Automatic credit and money movement are not enabled yet.',
           ].join('\n'),
           buttons: [
             {
@@ -89,8 +89,8 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'message',
         text: [
           '✅ Reference received.',
-          'FetanAgent is checking it in staging.',
-          'Nothing was credited or moved during this test.',
+          'FetanAgent is checking it.',
+          'Automatic credit and money movement are not enabled yet.',
         ].join('\n'),
       };
     case 'deposit_status':
@@ -124,7 +124,8 @@ export function telegramDepositHelpText(): string {
     '3. Reply with your KemerBet Player ID on the first line and your TeleBirr transaction number on the second line.',
     'You may paste a TeleBirr receipt link or the full SMS instead of the transaction number.',
     'To check a previous request, send /deposit_status followed by its p1. tracking reference.',
-    'Staging test: use a reference you already have. Do not send new money. Nothing will be credited or moved.',
+    'Use a reference from a transfer you already made. Do not make a new transfer for this step.',
+    'Automatic credit and money movement are not enabled yet.',
     'Need account help? Use /support.',
   ].join('\n');
 }

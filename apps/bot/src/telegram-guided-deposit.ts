@@ -13,23 +13,25 @@ export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Deposit with TeleBirr'
 export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = [
   'What would you like to do?',
   '',
-  'For a TeleBirr deposit, tap Deposit and follow the short prompt.',
-  'Staging test: do not send new money. Nothing will be credited or moved.',
+  'To deposit, tap 💰 Deposit with TeleBirr.',
+  'The bot will ask for your KemerBet Player ID and TeleBirr transaction number.',
+  'Automatic credit is not enabled yet.',
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = [
   '💰 TeleBirr deposit',
   '',
-  'Reply to this message with two lines:',
-  '1. Your KemerBet Player ID',
-  '2. Your TeleBirr transaction number',
+  'Reply to this message with:',
+  '1. Your KemerBet Player ID on the first line',
+  '2. Your TeleBirr transaction number on the second line',
   '',
   'Example:',
   'PLAYER-DEMO-42',
   'SYNTB00000001',
   '',
   'You may paste a TeleBirr receipt link or the full SMS instead of the transaction number.',
-  'Staging test: use a reference you already have. Do not send new money. Nothing will be credited or moved.',
+  'Use a reference from a transfer you already made. Do not make a new transfer for this step.',
+  'FetanAgent will submit the reference for verification. It will not credit or move money yet.',
   'Cancel anytime with /menu.',
 ].join('\n');
 

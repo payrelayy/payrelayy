@@ -22,8 +22,9 @@ describe('Telegram Player-ID flow presentation', () => {
         text: [
           'What would you like to do?',
           '',
-          'For a TeleBirr deposit, tap Deposit and follow the short prompt.',
-          'Staging test: do not send new money. Nothing will be credited or moved.',
+          'To deposit, tap 💰 Deposit with TeleBirr.',
+          'The bot will ask for your KemerBet Player ID and TeleBirr transaction number.',
+          'Automatic credit is not enabled yet.',
         ].join('\n'),
         buttons: [
           { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
@@ -145,11 +146,11 @@ describe('Telegram Player-ID flow presentation', () => {
         kind: 'menu',
         menu: {
           text: [
-            '✅ Test reference received.',
+            '✅ Reference received.',
             'Payment method: TeleBirr.',
             'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
             'To check it later, send /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
-            'Staging test: no payment was verified, credited, or moved.',
+            'Automatic credit and money movement are not enabled yet.',
           ].join('\n'),
           buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
         },
@@ -172,8 +173,8 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'message',
       text: [
         '✅ Reference received.',
-        'FetanAgent is checking it in staging.',
-        'Nothing was credited or moved during this test.',
+        'FetanAgent is checking it.',
+        'Automatic credit and money movement are not enabled yet.',
       ].join('\n'),
     });
     expect(JSON.stringify(presentation)).not.toMatch(/player|SYNTB|token|uuid|amount/iu);
@@ -185,7 +186,9 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(telegramDepositHelpText()).toContain('first line');
     expect(telegramDepositHelpText()).toContain('second line');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
-    expect(telegramDepositHelpText()).toContain('Nothing will be credited or moved');
+    expect(telegramDepositHelpText()).toContain(
+      'Automatic credit and money movement are not enabled yet',
+    );
     expect(telegramDepositHelpText()).toContain('receipt link or the full SMS');
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');
   });

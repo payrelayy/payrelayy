@@ -236,7 +236,7 @@ jobs:
           trap cleanup_unpublished_protected EXIT
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/telebirr-shadow-verifier-pins.v1.json"
           openssl rand -hex 32 >"$protected/runtime-password"
           runtime_password="$(<"$protected/runtime-password")"
@@ -576,7 +576,7 @@ jobs:
           umask 077
           ca_file="$RUNNER_TEMP/telebirr-shadow-verifier-failed-database-cleanup-ca.crt"
           trap 'rm -f -- "$ca_file"' EXIT
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
           chmod 0600 "$ca_file"
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$ca_file"
@@ -628,7 +628,7 @@ jobs:
           trap 'find -P "$protected" -mindepth 1 -maxdepth 1 -type f -delete; rmdir -- "$protected"' EXIT
           printf '%s\n' "$STAGING_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$STAGING_VM_KNOWN_HOSTS" >"$protected/known-hosts"
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected"/*
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
@@ -717,7 +717,7 @@ jobs:
           umask 077
           ca_file="$RUNNER_TEMP/telebirr-shadow-verifier-database-stop-ca.crt"
           trap 'rm -f -- "$ca_file"' EXIT
-          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
           chmod 0600 "$ca_file"
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$ca_file"

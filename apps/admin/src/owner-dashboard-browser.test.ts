@@ -1052,6 +1052,46 @@ describe('Owner dashboard browser authentication boundary', () => {
     },
   );
 
+  it('accepts only the two retired, unprotected legacy receiver masks in browser history', async () => {
+    const browser = ownerBrowserHarness(503);
+    const retiredLegacyReceiver = {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReferenceMasked: '****4567',
+      activeFrom: '2026-08-19T00:00:00.000Z',
+      protectedReference: false,
+      providerCode: 'cbe_birr',
+      providerDisplayName: 'CBE Birr',
+      receiverRevisionId: '33333333-3333-4333-8333-333333333333',
+      receiverStatus: 'inactive',
+      retiredAt: '2026-08-22T00:00:00.000Z',
+      revision: 1,
+    };
+
+    await expect(browser.call('validReceiver', retiredLegacyReceiver)).resolves.toMatchObject({
+      accountReferenceMasked: '****4567',
+      protectedReference: false,
+      receiverStatus: 'inactive',
+    });
+    await expect(
+      browser.call('validReceiver', {
+        ...retiredLegacyReceiver,
+        accountReferenceMasked: '****TEST',
+      }),
+    ).resolves.toMatchObject({ accountReferenceMasked: '****TEST' });
+
+    for (const invalid of [
+      { ...retiredLegacyReceiver, receiverStatus: 'active', retiredAt: undefined },
+      {
+        ...retiredLegacyReceiver,
+        protectedReference: true,
+        rotationReason: 'initial_configuration',
+      },
+      { ...retiredLegacyReceiver, accountReferenceMasked: '****DEMO' },
+    ]) {
+      await expect(browser.call('validReceiver', invalid)).resolves.toBeUndefined();
+    }
+  });
+
   it('shows one canonical Windows package while persisting only its idempotency key', async () => {
     const expiresAt = '2099-09-04T12:10:00.000Z';
     const receipt = companionPairingReceipt(expiresAt);

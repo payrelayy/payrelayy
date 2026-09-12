@@ -2137,13 +2137,19 @@ function validReceiver(value) {
   const providerCode = value.providerCode;
   const expectedDisplay = providerCode === 'cbe_birr' ? 'CBE Birr' :
     providerCode === 'telebirr' ? 'TeleBirr' : undefined;
+  const currentMask = typeof value.accountReferenceMasked === 'string' &&
+    /^\\*{3}[0-9]{4}$/.test(value.accountReferenceMasked);
+  const retiredLegacyMask = typeof value.accountReferenceMasked === 'string' &&
+    (/^\\*{4}[0-9]{4}$/.test(value.accountReferenceMasked) ||
+      value.accountReferenceMasked === '****TEST') &&
+    value.receiverStatus === 'inactive' && value.protectedReference === false;
   if (!expectedDisplay || value.providerDisplayName !== expectedDisplay ||
       typeof value.receiverRevisionId !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.receiverRevisionId) ||
       !Number.isSafeInteger(value.revision) || value.revision < 1 ||
       typeof value.accountHolderName !== 'string' ||
       !/^[^\\s\\u0000-\\u001f\\u007f](?:[^\\u0000-\\u001f\\u007f]{0,158}[^\\s\\u0000-\\u001f\\u007f])?$/.test(value.accountHolderName) ||
-      typeof value.accountReferenceMasked !== 'string' || !/^\\*{3}[0-9]{4}$/.test(value.accountReferenceMasked) ||
+      (!currentMask && !retiredLegacyMask) ||
       (value.receiverStatus !== 'active' && value.receiverStatus !== 'inactive') ||
       typeof value.activeFrom !== 'string' || !Number.isFinite(Date.parse(value.activeFrom)) ||
       typeof value.protectedReference !== 'boolean' ||

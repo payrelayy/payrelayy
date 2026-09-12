@@ -36,6 +36,7 @@ const h21Intent = 'e28e67e611ca8ece8cdddaa9c98634c0fb93324d547d50aa771920c89e59c
 const h21Completion = '15e1c3e5860aa6355f85be4114a5146f20e2683b1eb5da9b8351baf7a6b6d9ea';
 const h20Guard = '4481190534fb41f057f0f3c716d74ba1f6445da009d491936c1098bdaa756f5a';
 const h21Guard = 'a4e31a95bfb4826634069cdc31f745ed53cccb0db2cc01578851ac8330623813';
+const h22Guard = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17';
 const helper = '8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4';
 const finalizer = '1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f';
 const sudoers = '0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807';
@@ -61,7 +62,7 @@ for (const [name, value] of [
   ['H19_RELEASE', h19Release],
   ['TRANSITION_INTENT_SHA256', transitionIntent],
   ['REVIEWED_TERMINAL_RECEIPT_SHA256', terminalReceipt],
-  ['REVIEWED_SUCCESSOR_GUARD_SHA256', guardDigest],
+  ['REVIEWED_SUCCESSOR_GUARD_SHA256', h22Guard],
   ['POST_PRODUCTION_BOUNDARY_SHA256', postProduction],
   ['POST_SHARED_INGRESS_SHA256', postIngress],
   ['TLS_LEAF_SHA256', tls],
@@ -99,7 +100,7 @@ assert.match(
   guard,
   /readonly H22_PARENT='\/var\/lib\/fetanagent\/h19-terminal-receipt-order-guard-bridge-v22'/u,
 );
-assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 20/u);
+assert.match(guard, /"\$\{#H19_RECORD\[@\]\}" -eq 30/u);
 assert.match(
   recordReader,
   /print\(h22_release\)\s+print\(terminal_receipt_sha\)/u,
@@ -207,7 +208,7 @@ H21_INTENT_SHA256=${h21Intent}
 H21_COMPLETION_SHA256=${h21Completion}
 H19_RELEASE=${h19Release}
 H21_GUARD_SHA256=${h21Guard}
-SUCCESSOR_GUARD_SHA256=${guardDigest}
+SUCCESSOR_GUARD_SHA256=${h22Guard}
 TRANSITION_INTENT_SHA256=${transitionIntent}
 TERMINAL_RECEIPT_SHA256=${terminalReceipt}
 POST_PRODUCTION_BOUNDARY_SHA256=${postProduction}
@@ -233,7 +234,7 @@ assert.deepEqual(producedIntent, [
   `h19_bridge_release=${h19Release}`,
   `candidate_gateway_release=${h19Release}`,
   `predecessor_ingress_guard_sha256=${h21Guard}`,
-  `successor_ingress_guard_sha256=${guardDigest}`,
+  `successor_ingress_guard_sha256=${h22Guard}`,
   `transition_intent_sha256=${transitionIntent}`,
   `terminal_transition_receipt_sha256=${terminalReceipt}`,
   `post_production_boundary_sha256=${postProduction}`,
@@ -276,5 +277,7 @@ assert.match(
 );
 
 console.log(
-  `FetanAgent H22 terminal-receipt order guard bridge contracts verified; predecessor ${h21Guard}; successor ${guardDigest}; receipt ${terminalReceipt}.`,
+  `FetanAgent H22 terminal-receipt order guard bridge contracts verified; predecessor ${h21Guard}; successor ${h22Guard}; current guard ${guardDigest}; receipt ${terminalReceipt}.`,
 );
+
+await import('./verify-h19-runtime-reattest-guard-bridge-v23.mjs');

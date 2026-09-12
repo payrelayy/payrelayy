@@ -147,7 +147,19 @@ root:root 0600 fetanagent-staging-continuous-availability.sudoers.next
 root:root 0600 fetanagent-production-ingress-h19.next
 ```
 
-Run the staged installer directly as root:
+First run its read-only preflight directly as root. This validates the complete live boundary and
+exits before acquiring the mutation lock or changing any state:
+
+```text
+fetanagent-h19-runtime-reattest-guard-bridge-v23.sh \
+  H23_MERGE_SHA \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  I-UNDERSTAND-THIS-REATTESTS-THE-EXACT-NO-MONEY-PRODUCTION-RUNTIME-WITHOUT-MUTATING-IT \
+  preflight
+```
+
+Only after that succeeds, run the identical staged installer without the `preflight` argument to
+apply the guard-only evidence transition:
 
 ```text
 fetanagent-h19-canonical-cap-guard-bridge-v20.sh \
@@ -259,6 +271,55 @@ guard's `inspect 90b1f059577682b6bc458d239f6bdcb591077085` mode independently ac
 candidate and completed receipt. If interrupted, rerun the identical staged installer and arguments;
 do not rerun the terminal gateway transition and do not edit either receipt.
 
+## H23 exact no-money runtime re-attestation
+
+On 12 September 2026, the approved guided Telegram bot release
+`bcc479be0f2e807203df5612d380002fd6df2ee5` was installed independently and seven protected
+services were recreated without changing their protected `69be82ac3e49` images or financial
+configuration. The exact ten-service runtime remained healthy and no-money, but H22 correctly
+rejected the changed bot revision, container identities, timestamps, and shared-network endpoint
+fingerprint. Rewriting H19's terminal receipt or rolling the bot back cannot recover the original
+container identities and is forbidden.
+
+H23 preserves every H19-H22 file byte-for-byte and records one reviewed successor state instead. It
+admits only the existing H19 candidate gateway, the approved bot image
+`sha256:2f9e1af37575172eae8f31b302aca11bb1b807ac48d007fa14f8467c90fd73e3`, the other eight exact
+protected releases, the exact healthy/security configuration, and these observed fingerprints:
+
+- production boundary: `fc65828179bb1ff86b64a53b3aaca208f60e62e12bf9ccdb5f8f81606199bef5`;
+- immutable nine-service boundary: `b9c64968ed4945654f1f2b2075fff62502ad13dd4d182bf10c9d54360e58bc53`;
+- shared ingress: `770077ec0bea920eeb2bff9970df0dd30b566a21c2f9b6fb13b209be51b677eb`;
+- TLS leaf: `2c6bbb0eea676963398ea39a76ed974c2863da72236de67be761d19197dd7fd8`.
+
+The H23 installer cannot invoke Compose. It validates all ten containers, both shared-ingress
+members, the protected compose source, public negative probes, stopped staging projects, and the
+disabled financial/executor/final-action flags before and after acquiring the shared mutation lock.
+It then temporarily isolates the staging deployment grant, archives the H22 guard, publishes a
+root-only intent, atomically installs only the successor guard, publishes completion, and restores
+the grant only after the successor independently accepts the re-attested state. It does not restart
+or recreate a container, touch a database, activate a transfer, or move money.
+
+Stage these two files from the exact merged H23 commit in a root-owned mode-`0700` directory named
+`/root/fetanagent-h19-runtime-reattest-guard-bridge-v23-H23_MERGE_SHA/`:
+
+```text
+root:root 0700 fetanagent-h19-runtime-reattest-guard-bridge-v23.sh
+root:root 0600 fetanagent-production-ingress-h19.next
+```
+
+Run the staged installer directly as root:
+
+```text
+fetanagent-h19-runtime-reattest-guard-bridge-v23.sh \
+  H23_MERGE_SHA \
+  SUCCESSOR_INGRESS_GUARD_SHA256 \
+  I-UNDERSTAND-THIS-REATTESTS-THE-EXACT-NO-MONEY-PRODUCTION-RUNTIME-WITHOUT-MUTATING-IT
+```
+
+If the process is interrupted, rerun the identical files and arguments. The staging grant remains
+disabled while a new guard lacks its completed provenance record; do not edit or remove the H23
+namespace, any predecessor evidence, or the installed guard.
+
 ## Build and gateway-only transition
 
 Build the production gateway image from the final H19 merged commit using the existing reviewed image
@@ -331,6 +392,7 @@ node infra/verify-staging-telebirr-route-helper-bridge-v19.mjs
 node infra/verify-h19-canonical-cap-guard-bridge-v20.mjs
 node infra/verify-h19-stable-nine-guard-bridge-v21.mjs
 node infra/verify-h19-terminal-receipt-order-guard-bridge-v22.mjs
+node infra/verify-h19-runtime-reattest-guard-bridge-v23.mjs
 pnpm test:infra
 pnpm lint
 ```
@@ -356,3 +418,8 @@ receipt, checks the canonical terminal-entry comparison, validates the guard-onl
 ordering and exact 24-field intent, excludes transient health-check `ExecIDs` from its otherwise exact
 nine-service preflight, and confirms the installer contains no Compose, Supabase, database,
 production-runtime, or money action.
+
+The H23 verifier binds the successor guard and exact approved bot/runtime fingerprints to repository
+bytes, proves that H19-H22 remain immutable, checks the 27-field resumable guard-only transaction,
+requires exact no-money and security flags for every service, and rejects Compose, Supabase,
+database, production-runtime, or money actions in the installer.

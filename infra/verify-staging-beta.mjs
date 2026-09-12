@@ -6,6 +6,7 @@ const infraDirectory = fileURLToPath(new URL('.', import.meta.url));
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const compose = await readFile(`${infraDirectory}compose.staging-beta.yaml`, 'utf8');
 const dockerfile = await readFile(`${repositoryRoot}Dockerfile`, 'utf8');
+const workspace = await readFile(`${repositoryRoot}pnpm-workspace.yaml`, 'utf8');
 const caddyfile = await readFile(`${infraDirectory}gateway/Caddyfile`, 'utf8');
 const landingPage = await readFile(`${infraDirectory}gateway/site/index.html`, 'utf8');
 const retiredDepositReferenceProtection = new RegExp(
@@ -1223,6 +1224,51 @@ assert.match(dockerfile, /pnpm --filter @fetanagent\/bot\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/admin\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/customer-web\.\.\. run build/);
 assert.match(dockerfile, /pnpm --filter @fetanagent\/api\.\.\. run build/);
+for (const runtimePackage of [
+  'beta-admission',
+  'bot',
+  'admin',
+  'api',
+  'customer-web',
+  'executor',
+  'telebirr-assignment-broker',
+  'telebirr-device-state-broker',
+  'telebirr-device-bridge',
+  'companion-device-bridge',
+  'trusted-telebirr-verifier',
+]) {
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `pnpm --filter @fetanagent/${runtimePackage.replaceAll('-', '\\-')} deploy --prod /deploy/workspace/apps/${runtimePackage.replaceAll('-', '\\-')}`,
+    ),
+    `${runtimePackage} must be packaged with production dependencies only`,
+  );
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `mv /deploy/workspace/apps/${runtimePackage.replaceAll('-', '\\-')}/node_modules /deploy/workspace/node_modules`,
+    ),
+    `${runtimePackage} must preserve the established root node_modules runtime path`,
+  );
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `COPY --from=${runtimePackage.replaceAll('-', '\\-')}-build --chown=10001:10001 /deploy/workspace \\.\\/`,
+    ),
+    `${runtimePackage} must copy only its portable production workspace`,
+  );
+}
+assert.doesNotMatch(
+  dockerfile,
+  /COPY --from=[^\n]+-build[^\n]+\/workspace\/(?:node_modules|packages)/,
+  'runtime images must not copy the monorepo-wide dependency tree',
+);
+assert.match(
+  workspace,
+  /^injectWorkspacePackages: true$/m,
+  'portable runtime deployments must inject their workspace dependencies',
+);
 assert.match(dockerfile, /FROM build-base AS beta-admission-build/);
 assert.match(dockerfile, /FROM build-base AS bot-build/);
 assert.match(dockerfile, /FROM build-base AS admin-build/);

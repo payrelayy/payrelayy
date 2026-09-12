@@ -130,15 +130,11 @@ assert.match(
 assert.match(verifierImage, /org\.opencontainers\.image\.revision="\$\{VCS_REF\}"/);
 assert.match(
   verifierImage,
-  /COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 \/workspace\/node_modules/,
+  /COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 \/deploy\/workspace \.\//,
 );
-assert.match(
+assert.doesNotMatch(
   verifierImage,
-  /COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 \/workspace\/packages/,
-);
-assert.match(
-  verifierImage,
-  /COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 \/workspace\/apps\/trusted-telebirr-verifier/,
+  /COPY --from=trusted-telebirr-verifier-build[^\n]+\/workspace\/(?:node_modules|packages)/,
 );
 assert.match(verifierImage, /127\.0\.0\.1:8091\/readyz/);
 assert.match(

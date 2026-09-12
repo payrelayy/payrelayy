@@ -45,7 +45,7 @@ export const TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS = [
   'runtime_login_identity_allowed',
   'runtime_login_is_safe',
   'only_expected_direct_membership',
-  'runtime_has_no_members',
+  'runtime_only_trusted_members',
   'group_role_is_safe',
   'group_usage_allowed_set_denied',
   'group_only_expected_members',
@@ -100,12 +100,18 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
       join pg_catalog.pg_roles as member on member.oid = membership.member
       where member.rolname = current_user
     ) as only_expected_direct_membership,
-    not exists (
-      select 1
+    (
+      select count(*) <= 1 and coalesce(pg_catalog.bool_and(
+        member.rolname = 'postgres'
+        and not membership.inherit_option
+        and not membership.set_option
+        and membership.admin_option
+      ), true)
       from pg_catalog.pg_auth_members as membership
       join pg_catalog.pg_roles as granted on granted.oid = membership.roleid
+      join pg_catalog.pg_roles as member on member.oid = membership.member
       where granted.rolname = '${VERIFIER_RUNTIME_ROLE}'
-    ) as runtime_has_no_members,
+    ) as runtime_only_trusted_members,
     exists (
       select 1 from pg_catalog.pg_roles as role
       where role.rolname = '${VERIFIER_GROUP_ROLE}'
@@ -118,10 +124,27 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
       and not pg_catalog.pg_has_role(current_user, '${VERIFIER_GROUP_ROLE}', 'SET')
       as group_usage_allowed_set_denied,
     (
-      select count(*) = 1 and pg_catalog.bool_and(
-        member.rolname = '${VERIFIER_RUNTIME_ROLE}' and membership.inherit_option
-        and not membership.set_option and not membership.admin_option
-      )
+      select
+        count(*) filter (
+          where member.rolname = '${VERIFIER_RUNTIME_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+        ) = 1
+        and count(*) filter (where member.rolname = 'postgres') <= 1
+        and pg_catalog.bool_and(
+          (
+            member.rolname = '${VERIFIER_RUNTIME_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+          ) or (
+            member.rolname = 'postgres'
+            and not membership.inherit_option
+            and not membership.set_option
+            and membership.admin_option
+          )
+        )
       from pg_catalog.pg_auth_members as membership
       join pg_catalog.pg_roles as granted on granted.oid = membership.roleid
       join pg_catalog.pg_roles as member on member.oid = membership.member
@@ -145,7 +168,7 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
       as app_schema_boundary_allowed,
     (
       select coalesce(
-        pg_catalog.array_agg(namespace.nspname order by namespace.nspname),
+        pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname),
         '{}'::text[]
       ) = array['app', 'public']::text[]
       from pg_catalog.pg_namespace as namespace

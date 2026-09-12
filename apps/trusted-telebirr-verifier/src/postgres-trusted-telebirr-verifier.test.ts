@@ -66,8 +66,27 @@ describe('trusted TeleBirr PostgreSQL boundary', () => {
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as database_connect_temp_boundary_acknowledged',
     );
+    expect(TRUSTED_TELEBIRR_VERIFIER_PREFLIGHT_KEYS).toContain('runtime_only_trusted_members');
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      "member.rolname = 'postgres'",
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'and not membership.inherit_option',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'and membership.admin_option',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'as runtime_has_no_members',
+    );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as no_non_system_schema_create',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'pg_catalog.array_agg(namespace.nspname::text order by namespace.nspname)',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'pg_catalog.array_agg(namespace.nspname order by namespace.nspname)',
     );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as no_non_system_base_object_access',

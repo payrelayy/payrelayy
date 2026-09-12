@@ -146,6 +146,12 @@ jobs:
           else
             echo 'h19_status=rejected_or_not_permitted'
           fi
+          if sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability preflight \
+              "$DEPLOYED_RELEASE_SHA"; then
+            echo 'availability_preflight=accepted'
+          else
+            echo 'availability_preflight=rejected'
+          fi
           REMOTE
 
       - name: Inspect or enable continuous database lifetimes

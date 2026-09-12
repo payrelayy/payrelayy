@@ -383,7 +383,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     });
 
-    expect(context.replies[0]).toContain('tap Deposit');
+    expect(context.replies[0]).toContain('tap 💰 Deposit with TeleBirr');
     expect(keyboard?.buttons).toEqual([
       { text: '💰 Deposit with TeleBirr', callbackData: 'gd1.telebirr' },
       {
@@ -518,8 +518,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(context.replies).toEqual([
       [
         '✅ Reference received.',
-        'FetanAgent is checking it in staging.',
-        'Nothing was credited or moved during this test.',
+        'FetanAgent is checking it.',
+        'Automatic credit and money movement are not enabled yet.',
       ].join('\n'),
     ]);
     expect(runtime.ingressDeliveries).toHaveLength(0);
@@ -594,7 +594,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
       ]);
       expect(runtime.ingressDeliveries).toHaveLength(0);
       expect(context.replies[0]).toContain('p1.AAAAAAAAAAAAAAAAAAAAAA');
-      expect(context.replies[0]).toContain('no payment was verified, credited, or moved');
+      expect(context.replies[0]).toContain(
+        'Automatic credit and money movement are not enabled yet',
+      );
       expect(JSON.stringify(context.replies)).not.toMatch(
         /SYNTB|PLAYER-DEMO|900|5\.00|https:|Synthetic Receiver/,
       );
@@ -625,7 +627,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain('Do not send new money');
+    expect(context.replies[0]).toContain('Do not make a new transfer for this step');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -752,7 +754,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('Tap 💰 Deposit with TeleBirr');
-    expect(context.replies[0]).toContain('Do not send new money');
+    expect(context.replies[0]).toContain('Do not make a new transfer for this step');
     expect(context.replies[0]).toContain('/deposit_status');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

@@ -10,7 +10,10 @@ import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './tele
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
+  isTelegramGuidedDepositStartCallback,
+  isTelegramGuidedDepositStartCommand,
   isTelegramPrivateHelpCommand,
+  reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
@@ -18,6 +21,11 @@ import {
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
 } from './telegram-private-action.js';
+import {
+  TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+  TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+  TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
+} from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
 import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
@@ -149,6 +157,36 @@ bot.on('message', async (context) => {
       );
       return;
     }
+    if (isTelegramGuidedDepositStartCommand({ ...metadata, command: text })) {
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
+        reply_markup: {
+          force_reply: true,
+          selective: true,
+          input_field_placeholder: 'Player ID, then transaction number',
+        },
+      });
+      return;
+    }
+    const guidedSubmission = reduceTelegramGuidedDepositProofSubmission({
+      ...metadata,
+      text,
+      replyToMessage:
+        'reply_to_message' in context.message ? context.message.reply_to_message : undefined,
+    });
+    if (guidedSubmission) {
+      if (guidedSubmission.kind === 'action') {
+        await deliverPlayerAction(guidedSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        );
+      } else {
+        await context.reply(
+          guidedSubmission.kind === 'selection_required'
+            ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
+            : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+        );
+      }
+      return;
+    }
     const proofSubmission = reduceTelegramDepositProofSubmission({ ...metadata, command: text });
     if (proofSubmission) {
       if (proofSubmission.kind === 'action') {
@@ -237,10 +275,21 @@ if (playerActions.enabled) {
         : undefined,
       callbackData: context.callbackQuery.data,
     };
+    const guidedDepositStart = isTelegramGuidedDepositStartCallback(callbackMetadata);
     const action =
       reduceTelegramDepositProofStatusCallbackAction(callbackMetadata) ??
       reduceTelegramPlayerRegistrationCallbackAction(callbackMetadata);
     await context.answerCallbackQuery();
+    if (guidedDepositStart) {
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
+        reply_markup: {
+          force_reply: true,
+          selective: true,
+          input_field_placeholder: 'Player ID, then transaction number',
+        },
+      });
+      return;
+    }
     if (!action) {
       if (isRecognizedTelegramDepositProofStatusCallback(callbackMetadata)) {
         await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);

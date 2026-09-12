@@ -12,7 +12,7 @@ export type TelegramPlayerIdFlowPresentation =
   | { readonly kind: 'message'; readonly text: string };
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
-  'Deposit status is unavailable. Use the tracking reference from your proof receipt in this private chat, or try again shortly.';
+  'I could not load that deposit status. Check the tracking reference in this private chat, or try again shortly.';
 
 /**
  * Maps the API's deliberately small, non-sensitive result union to English-only Telegram copy.
@@ -70,11 +70,11 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'menu',
         menu: {
           text: [
-            'SIMULATION ONLY — proof received.',
-            `Provider: ${result.providerName}.`,
+            '✅ Test reference received.',
+            `Payment method: ${result.providerName}.`,
             `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            `Check progress with /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            'No payment was verified or credited. Do not send money for this simulation.',
+            `To check it later, send /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
+            'Staging test: no payment was verified, credited, or moved.',
           ].join('\n'),
           buttons: [
             {
@@ -88,9 +88,9 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          'NO-MONEY VERIFICATION ONLY — TeleBirr proof queued for a shadow check.',
-          'No payment has been marked verified or credited.',
-          'This check cannot create a deposit, execute a transfer, or move money.',
+          '✅ Reference received.',
+          'FetanAgent is checking it in staging.',
+          'Nothing was credited or moved during this test.',
         ].join('\n'),
       };
     case 'deposit_status':
@@ -118,21 +118,21 @@ export function presentTelegramPlayerIdFlowResult(
 
 export function telegramDepositHelpText(): string {
   return [
-    'SIMULATION ONLY — DO NOT SEND MONEY.',
-    'Use /deposit telebirr PLAYER_ID TRANSACTION_ID or /deposit cbe_birr PLAYER_ID TRANSACTION_ID.',
-    'Use the destination KemerBet Player ID and one test transaction ID of 8–32 letters or digits. Do not include an amount.',
-    'For TeleBirr, you can replace TRANSACTION_ID with a receipt URL or the full SMS text. Only one transaction ID can be submitted at a time.',
-    'URLs are not opened. Pasted amounts and payment details are not verification. Photos and PDF files are not supported yet.',
-    'After submission, choose Check status or send /deposit_status followed by the p1. tracking reference from your proof receipt.',
-    'Use /menu to add a Player ID. No payment is verified or credited in this simulation.',
+    'TeleBirr deposit:',
+    '1. Send /menu.',
+    '2. Tap 💰 Deposit with TeleBirr.',
+    '3. Reply with your KemerBet Player ID on the first line and your TeleBirr transaction number on the second line.',
+    'You may paste a TeleBirr receipt link or the full SMS instead of the transaction number.',
+    'To check a previous request, send /deposit_status followed by its p1. tracking reference.',
+    'Staging test: use a reference you already have. Do not send new money. Nothing will be credited or moved.',
+    'Need account help? Use /support.',
   ].join('\n');
 }
 
 export function telegramDepositReferenceSelectionText(): string {
   return [
-    'SIMULATION ONLY — DO NOT SEND MONEY.',
-    'More than one transaction ID was found. No proof was submitted.',
-    'Choose the transaction you intend to use, then send /deposit telebirr PLAYER_ID TRANSACTION_ID with only that one ID. Do not include an amount.',
+    'I found more than one TeleBirr transaction number. Nothing was submitted.',
+    'Send /deposit, then reply with your KemerBet Player ID on the first line and only the transaction number you want to use on the second line.',
   ].join('\n');
 }
 

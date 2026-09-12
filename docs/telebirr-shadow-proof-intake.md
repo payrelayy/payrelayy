@@ -13,6 +13,10 @@ The existing private Telegram command is:
 /deposit telebirr PLAYER_ID TRANSACTION_ID
 ```
 
+Customers do not need to type that compatibility command. They can send `/menu`, tap
+**💰 Deposit with TeleBirr**, and reply once with the Player ID on the first line and the
+transaction number on the second line. Sending `/deposit` opens the same prompt.
+
 The bot also accepts one unambiguous TeleBirr reference extracted from bounded receipt URL or SMS
 text. It never opens a submitted URL. Ambiguous text is rejected before the signed bot-to-API
 action is created. The private action envelope carries the raw Player ID and reference only through

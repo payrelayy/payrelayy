@@ -36,6 +36,8 @@ const h22Intent = '67e025161494c63fc7cab2560c4947218afb8f57e7e317c7a37bfeb8f96d5
 const h22Completion = '5d0e26765c30bc7a9e6ee828b130de2c09cbbb13bcbca52c67182de3d482aad1';
 const h22Guard = '0b4a9b31a893073e725bfc97fc6ef3f6589fd9b5d720da5003e987ad0dcc7f17';
 const interruptedBridgeRelease = '837f3addad1e1acf9707099c0590824739e8c788';
+const interruptedSuccessorGuard =
+  '16ff39bf812520d3ea271a27faa52630d69ff359597b35937e18f9e5e4dd8e23';
 const helper = '8c7230cea5101f182f05b11b094049822ddbe43884d7bda80a9a46b883eee4b4';
 const finalizer = '1ab7df7d5e530db75ba5f378169de0fda178c1a264df3a48fbb5acf76220f34f';
 const sudoers = '0978f4785d4661db46d8fe9bb8e29d81fa5ff2954aceb36aa6cc7d2ec4a71807';
@@ -55,6 +57,7 @@ for (const [name, value] of [
   ['H22_GUARD_SHA256', h22Guard],
   ['REVIEWED_SUCCESSOR_GUARD_SHA256', guardDigest],
   ['INTERRUPTED_BRIDGE_RELEASE', interruptedBridgeRelease],
+  ['INTERRUPTED_SUCCESSOR_GUARD_SHA256', interruptedSuccessorGuard],
   ['H20_HELPER_SHA256', helper],
   ['H20_FINALIZER_SHA256', finalizer],
   ['H20_SUDOERS_SHA256', sudoers],
@@ -83,6 +86,7 @@ for (const invariant of [
   `h22_completion_sha = '${h22Completion}'`,
   `h22_guard_sha = '${h22Guard}'`,
   `interrupted_h23_release = '${interruptedBridgeRelease}'`,
+  `interrupted_h23_guard_sha = '${interruptedSuccessorGuard}'`,
   `approved_bot_release = '${botRelease}'`,
   `approved_bot_image = '${botImage}'`,
   `reattested_production_sha = '${production}'`,
@@ -98,6 +102,7 @@ for (const invariant of [
   'print(approved_bot_image)',
   'resumed_after_archive_initializer_failure=true',
   'resume_correction_release=',
+  'resume_successor_ingress_guard_sha256=',
   'resume_correction=split-dependent-local-initializers',
 ]) {
   assert.ok(recordReader.includes(invariant), `missing H23 record invariant: ${invariant}`);
@@ -195,7 +200,7 @@ const intentFields = [
 assertInOrder(shellFunction(installer, 'expected_intent'), intentFields, 'H23 intent');
 assert.match(
   shellFunction(installer, 'expected_completion'),
-  /state=runtime-reattest-guard-installed[\s\S]*resumed_after_archive_initializer_failure=true[\s\S]*resume_correction_release=\$CORRECTION_RELEASE[\s\S]*resume_correction=split-dependent-local-initializers/u,
+  /state=runtime-reattest-guard-installed[\s\S]*resumed_after_archive_initializer_failure=true[\s\S]*resume_correction_release=\$CORRECTION_RELEASE[\s\S]*resume_successor_ingress_guard_sha256=\$SUCCESSOR_GUARD_SHA256[\s\S]*resume_correction=split-dependent-local-initializers/u,
 );
 assertInOrder(
   installer,
@@ -268,6 +273,7 @@ H22_COMPLETION_SHA256=${h22Completion}
 H19_RELEASE=${h19Release}
 H22_GUARD_SHA256=${h22Guard}
 SUCCESSOR_GUARD_SHA256=${guardDigest}
+INTERRUPTED_SUCCESSOR_GUARD_SHA256=${interruptedSuccessorGuard}
 APPROVED_BOT_RELEASE=${botRelease}
 APPROVED_BOT_IMAGE_ID=${botImage}
 REATTESTED_PRODUCTION_SHA256=${production}
@@ -295,7 +301,7 @@ assert.deepEqual(producedIntent, [
   `h19_bridge_release=${h19Release}`,
   `candidate_gateway_release=${h19Release}`,
   `predecessor_ingress_guard_sha256=${h22Guard}`,
-  `successor_ingress_guard_sha256=${guardDigest}`,
+  `successor_ingress_guard_sha256=${interruptedSuccessorGuard}`,
   `approved_telegram_bot_release=${botRelease}`,
   `approved_telegram_bot_image_id=${botImage}`,
   `reattested_production_boundary_sha256=${production}`,
@@ -325,7 +331,7 @@ expected_completion
 });
 assert.equal(completionResult.status, 0, completionResult.stderr);
 const producedCompletion = completionResult.stdout.trimEnd().split('\n');
-assert.equal(producedCompletion.length, 31);
+assert.equal(producedCompletion.length, 32);
 assert.equal(producedCompletion[1], 'state=runtime-reattest-guard-installed');
 assert.deepEqual(producedCompletion.slice(2, 27), producedIntent.slice(2, 27));
 assert.equal(
@@ -335,6 +341,7 @@ assert.equal(
 assert.deepEqual(producedCompletion.slice(28), [
   'resumed_after_archive_initializer_failure=true',
   `resume_correction_release=${correctionRelease}`,
+  `resume_successor_ingress_guard_sha256=${guardDigest}`,
   'resume_correction=split-dependent-local-initializers',
 ]);
 

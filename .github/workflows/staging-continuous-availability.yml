@@ -69,7 +69,7 @@ jobs:
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_REF" == 'refs/heads/codex/ingress-diagnostic' ]]
           [[ "$CONFIRMED_PROJECT" == "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$STAGING_DROPLET_ID" ]]
           [[ "$DEPLOYED_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
@@ -98,7 +98,7 @@ jobs:
           echo "continuity_sha=$continuity_sha" >> "$GITHUB_OUTPUT"
           echo "vm_host=$STAGING_VM_HOST" >> "$GITHUB_OUTPUT"
 
-      - name: Verify the installed release without stopping or restarting it
+      - name: Diagnose the live ingress boundary without changing it
         shell: bash
         env:
           VM_HOST: ${{ steps.target.outputs.vm_host }}
@@ -108,8 +108,45 @@ jobs:
           set -euo pipefail
           protected="$RUNNER_TEMP/continuous-availability-protected"
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          production_helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "test \"\$(id -u)\" -ne 0 && test \"\$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)\" = '$CONTINUITY_SHA' && sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry '$DEPLOYED_RELEASE_SHA' >/dev/null && sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify '$HELPER_SHA' && sudo -n /usr/local/sbin/fetanagent-staging-continuous-availability preflight '$DEPLOYED_RELEASE_SHA'"
+            "env STAGING_HELPER_SHA='$HELPER_SHA' CONTINUITY_SHA='$CONTINUITY_SHA' PRODUCTION_HELPER_SHA='$production_helper_sha' DEPLOYED_RELEASE_SHA='$DEPLOYED_RELEASE_SHA' bash -se" <<'REMOTE'
+          set -euo pipefail
+          test "$(id -u)" -ne 0
+          echo "host_boot=$(uptime -s)"
+          systemctl show docker --property=ActiveEnterTimestamp --property=ActiveState --property=SubState
+          stat --format='docker_socket=%U:%G:%a' /var/run/docker.sock
+          id
+          sudo -n -l
+          test "$(sha256sum /usr/local/sbin/fetanagent-staging-continuous-availability | cut -d ' ' -f 1)" = "$CONTINUITY_SHA"
+          sudo -n -l /usr/local/sbin/fetanagent-staging-continuous-availability disable-expiry "$DEPLOYED_RELEASE_SHA" >/dev/null
+          sudo -n /usr/local/sbin/fetanagent-staging-deploy-helper verify "$STAGING_HELPER_SHA"
+          sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify "$PRODUCTION_HELPER_SHA"
+
+          if docker --host unix:///var/run/docker.sock version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+            echo 'direct_docker_read=true'
+            mapfile -t production_ids < <(docker --host unix:///var/run/docker.sock container ls --all --quiet --no-trunc \
+              --filter 'label=com.docker.compose.project=fetanagent-production' | LC_ALL=C sort)
+            printf 'production_container_count=%s\n' "${#production_ids[@]}"
+            docker --host unix:///var/run/docker.sock container inspect "${production_ids[@]}" \
+              --format '{{.Name}} status={{.State.Status}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart_count={{.RestartCount}} started_at={{.State.StartedAt}} revision={{index .Config.Labels "org.opencontainers.image.revision"}} image_id={{.Image}}'
+          else
+            echo 'direct_docker_read=false'
+          fi
+
+          if sudo -n /usr/local/sbin/fetanagent-production-deploy-helper status \
+              69be82ac3e49ff8c63c64c9aa7926e0046b48a10; then
+            echo 'protected_release_status=accepted'
+          else
+            echo 'protected_release_status=rejected'
+          fi
+          if sudo -n /usr/local/sbin/fetanagent-production-ingress-h19 inspect \
+              90b1f059577682b6bc458d239f6bdcb591077085; then
+            echo 'h19_status=accepted'
+          else
+            echo 'h19_status=rejected_or_not_permitted'
+          fi
+          REMOTE
 
       - name: Inspect or enable continuous database lifetimes
         shell: bash

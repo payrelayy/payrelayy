@@ -379,6 +379,43 @@ assert.match(
   helper,
   /check-rollback\)\s+[\s\S]*?validate_rollback_transition "\$sha" "\$release"/u,
 );
+const disableStagingBotToken = helper
+  .split('\ndisable_staging_bot_token() {')[1]
+  ?.split('\n}\n')[0];
+assert.ok(disableStagingBotToken, 'the staging Telegram token disable boundary must exist');
+for (const contract of [
+  /container_for "\$STAGING_PROJECT" bot/u,
+  /the staging Telegram bot must be stopped before disabling its token/u,
+  /10001:10001:400:1/u,
+  /telegram-disabled-until-separate-smoke/u,
+  /sync -f "\$STAGING_BOT_TOKEN"/u,
+]) {
+  assert.match(disableStagingBotToken, contract);
+}
+assert.ok(
+  rollbackTransition.indexOf('stop_if_running "$(container_for "$STAGING_PROJECT" bot)"') <
+    rollbackTransition.indexOf('compose_release "$previous" up'),
+  'rollback must stop the staging poller before restoring a production predecessor',
+);
+assert.ok(
+  rollbackTransition.indexOf('mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"') <
+    rollbackTransition.indexOf('disable_staging_bot_token'),
+  'rollback must restore production before disabling the staging token',
+);
+const activateTransition = /\n  activate\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(activateTransition, 'production activation must exist');
+assert.ok(
+  activateTransition.indexOf('stop_if_running "$(container_for "$STAGING_PROJECT" bot)"') <
+    activateTransition.indexOf('up --detach --no-build --wait --wait-timeout 120 bot gateway'),
+  'every production activation must stop the staging poller before starting the production bot',
+);
+const finalizeTransition = /\n  finalize\)([\s\S]*?)\n    ;;/u.exec(helper)?.[1];
+assert.ok(finalizeTransition, 'production finalization must exist');
+assert.ok(
+  finalizeTransition.indexOf('stop_if_running "$(container_for "$STAGING_PROJECT" bot)"') <
+    finalizeTransition.indexOf('disable_staging_bot_token'),
+  'production finalization must stop the staging poller before disabling its token',
+);
 assert.match(helper, /chown 10001:10001 "\$incoming\/secrets"\/\*/u);
 assert.match(helper, /'10001:10001:400'/u);
 assert.match(helper, /'0:0:444'/u);

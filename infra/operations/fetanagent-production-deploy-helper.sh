@@ -15,6 +15,7 @@ readonly LEGACY_TELEBIRR_PROJECT='fetanagent-telebirr-device-pilot'
 readonly TELEBIRR_INGRESS_NETWORK='fetanagent-telebirr-device-ingress'
 readonly TELEBIRR_PUBLIC_ORIGIN='https://device.fetanagent.com'
 readonly HELPER_PATH='/usr/local/sbin/fetanagent-production-deploy-helper'
+readonly STAGING_BOT_TOKEN='/srv/fetanagent/secrets/staging/bot-token'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -151,6 +152,38 @@ stop_if_running() {
 start_if_stopped() {
   local id="$1"
   if [[ -n "$id" ]] && ! container_running "$id"; then docker container start "$id" >/dev/null; fi
+}
+
+disable_staging_bot_token() {
+  local id root temporary
+  root="${STAGING_BOT_TOKEN%/*}"
+  id="$(container_for "$STAGING_PROJECT" bot)"
+  ! container_running "$id" || die 'the staging Telegram bot must be stopped before disabling its token'
+  if [[ ! -e "$root" && ! -L "$root" ]]; then
+    [[ ! -e "$STAGING_BOT_TOKEN" && ! -L "$STAGING_BOT_TOKEN" ]] ||
+      die 'the staging Telegram token exists outside its expected root'
+    return
+  fi
+  [[ ! -L "$root" && -d "$root" && "$(realpath -- "$root")" == "$root" &&
+    "$(stat --format='%u:%g:%a' "$root")" == '0:0:755' ]] ||
+    die 'the staging secret root is unsafe'
+  if [[ -e "$STAGING_BOT_TOKEN" || -L "$STAGING_BOT_TOKEN" ]]; then
+    [[ ! -L "$STAGING_BOT_TOKEN" && -f "$STAGING_BOT_TOKEN" &&
+      "$(realpath -- "$STAGING_BOT_TOKEN")" == "$STAGING_BOT_TOKEN" &&
+      "$(stat --format='%u:%g:%a:%h' "$STAGING_BOT_TOKEN")" == '10001:10001:400:1' ]] ||
+      die 'the staging Telegram token file is unsafe'
+  fi
+  temporary="$(mktemp "$root/.bot-token-disabled.XXXXXX")" ||
+    die 'the disabled staging Telegram token temporary file could not be created'
+  printf '%s\n' 'telegram-disabled-until-separate-smoke' >"$temporary"
+  install -o 10001 -g 10001 -m 0400 "$temporary" "$STAGING_BOT_TOKEN"
+  rm -f -- "$temporary"
+  sync -f "$STAGING_BOT_TOKEN"
+  [[ ! -L "$STAGING_BOT_TOKEN" &&
+    "$(stat --format='%u:%g:%a:%h' "$STAGING_BOT_TOKEN")" == '10001:10001:400:1' ]] ||
+    die 'the disabled staging Telegram token metadata is unsafe'
+  grep -Fxq 'telegram-disabled-until-separate-smoke' "$STAGING_BOT_TOKEN" ||
+    die 'the staging Telegram token was not disabled exactly'
 }
 
 verify_images() {
@@ -301,10 +334,12 @@ rollback_transition() {
   validate_rollback_transition "$sha" "$release"
   previous="$ROLLBACK_PREVIOUS"
   compose_release "$release" down --remove-orphans --timeout 30 >/dev/null 2>&1 || true
+  stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
   if [[ -n "$previous" ]]; then
     compose_release "$previous" up --detach --no-build --wait --wait-timeout 120
     ln -sfn -- "$previous" "$CURRENT_LINK.next"
     mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
+    disable_staging_bot_token
   else
     start_if_stopped "$(container_for "$STAGING_PROJECT" bot)"
     start_if_stopped "$(container_for "$STAGING_PROJECT" gateway)"
@@ -479,8 +514,8 @@ case "${1:-}" in
     compose_release "$release" config --quiet
     compose_release "$release" up --detach --no-build --wait --wait-timeout 120 \
       owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker
+    stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
     if [[ -z "$previous" ]]; then
-      stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
       stop_if_running "$(container_for "$STAGING_PROJECT" gateway)"
     fi
     quiesce_legacy_telebirr_bridge "$sha"
@@ -549,6 +584,8 @@ case "${1:-}" in
     for service in owner-control customer-web api beta-admission; do
       stop_if_running "$(container_for "$STAGING_PROJECT" "$service")"
     done
+    stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
+    disable_staging_bot_token
     for service in telebirr-device-bridge telebirr-device-state-broker telebirr-assignment-broker; do
       stop_if_running "$(container_for "$LEGACY_TELEBIRR_PROJECT" "$service")"
     done

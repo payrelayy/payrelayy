@@ -469,6 +469,38 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
       ).toMatchObject({ rows: [{ allowed: true }] });
     });
 
+    it('accepts the continuous production login without weakening the exact role scaffold', async () => {
+      const client = getClient();
+      const guard = await client.query<{ readonly definition: string }>(
+        `select pg_get_functiondef(
+           'app.require_telebirr_device_state_session()'::regprocedure
+         ) as definition`,
+      );
+      const definition = guard.rows[0]?.definition ?? '';
+      expect(definition).toContain("role.rolvaliduntil = 'infinity'::timestamp with time zone");
+      expect(definition).toContain(
+        "role.rolvaliduntil > (pg_catalog.clock_timestamp() + '00:05:00'::interval)",
+      );
+      expect(definition).toContain(
+        "role.rolvaliduntil <= (pg_catalog.clock_timestamp() + '24:05:00'::interval)",
+      );
+
+      await withRollback(client, async () => {
+        await client.query(`alter role ${deviceStateRuntime} with login valid until 'infinity'`);
+        try {
+          await client.query(`set session authorization ${deviceStateRuntime}`);
+          const claimed = await client.query<{ readonly claim_state: string }>(
+            `select claim_state
+               from app.claim_private_telebirr_device_replay($1::text, $2::timestamptz)`,
+            [sha(`continuous:${randomUUID()}`), new Date(Date.now() + 60_000)],
+          );
+          expect(claimed.rows).toEqual([{ claim_state: 'claimed' }]);
+        } finally {
+          await client.query('reset session authorization');
+        }
+      });
+    });
+
     it('forces RLS, exposes no base storage, and stores no raw pairing nonce', async () => {
       const client = getClient();
       const rls = await client.query<{

@@ -56,7 +56,12 @@ installation requires terminal BrowserContext closure. Compromised-renderer cont
 after that close, in the disposable snapshot and three-service recheck below.
 
 The five application images use the immutable Linux/amd64 Node base in the repository `Dockerfile`;
-the gateway uses a separately pinned official Caddy image. Ordinary application services run as
+the gateway uses a separately pinned official Caddy image. Each Node runtime is assembled from a
+`pnpm deploy --prod` output for that one workspace package, with workspace dependency injection
+locked in `pnpm-workspace.yaml`. Runtime images therefore carry
+only the service's portable production dependency graph; they do not copy the monorepo-wide
+`node_modules` or `packages` trees. This keeps sealed release bundles and their on-host rollback
+reserve bounded when a small service changes. Ordinary application services run as
 numeric UID/GID 10001; the readiness controller and proxy use their separate identities above. Each
 Compose service uses a read-only root filesystem, prevents privilege escalation, and has PID, memory,
 and CPU limits. Application services drop every Linux capability; the gateway adds only

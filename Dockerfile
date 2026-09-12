@@ -17,47 +17,69 @@ RUN pnpm install --frozen-lockfile
 
 FROM build-base AS beta-admission-build
 
-RUN pnpm --filter @fetanagent/beta-admission... run build
+RUN pnpm --filter @fetanagent/beta-admission... run build \
+  && pnpm --filter @fetanagent/beta-admission deploy --prod /deploy/workspace/apps/beta-admission \
+  && mv /deploy/workspace/apps/beta-admission/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS bot-build
 
-RUN pnpm --filter @fetanagent/bot... run build
+RUN pnpm --filter @fetanagent/bot... run build \
+  && pnpm --filter @fetanagent/bot deploy --prod /deploy/workspace/apps/bot \
+  && mv /deploy/workspace/apps/bot/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS admin-build
 
-RUN pnpm --filter @fetanagent/admin... run build
+RUN pnpm --filter @fetanagent/admin... run build \
+  && pnpm --filter @fetanagent/admin deploy --prod /deploy/workspace/apps/admin \
+  && mv /deploy/workspace/apps/admin/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS api-build
 
-RUN pnpm --filter @fetanagent/api... run build
+RUN pnpm --filter @fetanagent/api... run build \
+  && pnpm --filter @fetanagent/api deploy --prod /deploy/workspace/apps/api \
+  && mv /deploy/workspace/apps/api/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS customer-web-build
 
-RUN pnpm --filter @fetanagent/customer-web... run build
+RUN pnpm --filter @fetanagent/customer-web... run build \
+  && pnpm --filter @fetanagent/customer-web deploy --prod /deploy/workspace/apps/customer-web \
+  && mv /deploy/workspace/apps/customer-web/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS executor-build
 
-RUN pnpm --filter @fetanagent/executor... run build
+RUN pnpm --filter @fetanagent/executor... run build \
+  && pnpm --filter @fetanagent/executor deploy --prod /deploy/workspace/apps/executor \
+  && mv /deploy/workspace/apps/executor/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS telebirr-assignment-broker-build
 
-RUN pnpm --filter @fetanagent/telebirr-assignment-broker... run build
+RUN pnpm --filter @fetanagent/telebirr-assignment-broker... run build \
+  && pnpm --filter @fetanagent/telebirr-assignment-broker deploy --prod /deploy/workspace/apps/telebirr-assignment-broker \
+  && mv /deploy/workspace/apps/telebirr-assignment-broker/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS telebirr-device-state-broker-build
 
-RUN pnpm --filter @fetanagent/telebirr-device-state-broker... run build
+RUN pnpm --filter @fetanagent/telebirr-device-state-broker... run build \
+  && pnpm --filter @fetanagent/telebirr-device-state-broker deploy --prod /deploy/workspace/apps/telebirr-device-state-broker \
+  && mv /deploy/workspace/apps/telebirr-device-state-broker/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS telebirr-device-bridge-build
 
-RUN pnpm --filter @fetanagent/telebirr-device-bridge... run build
+RUN pnpm --filter @fetanagent/telebirr-device-bridge... run build \
+  && pnpm --filter @fetanagent/telebirr-device-bridge deploy --prod /deploy/workspace/apps/telebirr-device-bridge \
+  && mv /deploy/workspace/apps/telebirr-device-bridge/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS companion-device-bridge-build
 
-RUN pnpm --filter @fetanagent/companion-device-bridge... run build
+RUN pnpm --filter @fetanagent/companion-device-bridge... run build \
+  && pnpm --filter @fetanagent/companion-device-bridge deploy --prod /deploy/workspace/apps/companion-device-bridge \
+  && mv /deploy/workspace/apps/companion-device-bridge/node_modules /deploy/workspace/node_modules
 
 FROM build-base AS trusted-telebirr-verifier-build
 
-RUN pnpm --filter @fetanagent/trusted-telebirr-verifier... run build
+RUN pnpm --filter @fetanagent/trusted-telebirr-verifier... run build \
+  && pnpm --filter @fetanagent/trusted-telebirr-verifier deploy --prod /deploy/workspace/apps/trusted-telebirr-verifier \
+  && mv /deploy/workspace/apps/trusted-telebirr-verifier/node_modules /deploy/workspace/node_modules
 
 FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
@@ -82,9 +104,7 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-beta-admission" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-COPY --from=beta-admission-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=beta-admission-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=beta-admission-build --chown=10001:10001 /workspace/apps/beta-admission ./apps/beta-admission
+COPY --from=beta-admission-build --chown=10001:10001 /deploy/workspace ./
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3001/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
@@ -96,9 +116,7 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-bot" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-COPY --from=bot-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=bot-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=bot-build --chown=10001:10001 /workspace/apps/bot ./apps/bot
+COPY --from=bot-build --chown=10001:10001 /deploy/workspace ./
 
 CMD ["node", "apps/bot/dist/index.js"]
 
@@ -115,9 +133,7 @@ RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-kemerbet-session-contro
 
 USER 10001:10001
 
-COPY --from=admin-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=admin-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=admin-build --chown=10001:10001 /workspace/apps/admin ./apps/admin
+COPY --from=admin-build --chown=10001:10001 /deploy/workspace ./
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3002/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
@@ -129,9 +145,7 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-api" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-COPY --from=api-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=api-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=api-build --chown=10001:10001 /workspace/apps/api ./apps/api
+COPY --from=api-build --chown=10001:10001 /deploy/workspace ./
 
 # Preserve the established inactive-image identity contract while the dedicated beta targets use
 # the equivalent numeric UID/GID form required by their Compose secret mounts.
@@ -147,9 +161,7 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-customer-web" \
       org.opencontainers.image.revision="${VCS_REF}"
 
-COPY --from=customer-web-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=customer-web-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=customer-web-build --chown=10001:10001 /workspace/apps/customer-web ./apps/customer-web
+COPY --from=customer-web-build --chown=10001:10001 /deploy/workspace ./
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:3003/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
@@ -168,9 +180,7 @@ RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-assignment-bro
 
 USER 10001:10001
 
-COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /workspace/apps/telebirr-assignment-broker ./apps/telebirr-assignment-broker
+COPY --from=telebirr-assignment-broker-build --chown=10001:10001 /deploy/workspace ./
 
 # The broker has no TCP health endpoint or exposed port. Runtime composition supplies the fixed
 # guarded files and a writable mode-0700 tmpfs at its one private Unix-socket directory.
@@ -189,9 +199,7 @@ RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-device-state \
 
 USER 10001:10001
 
-COPY --from=telebirr-device-state-broker-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=telebirr-device-state-broker-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=telebirr-device-state-broker-build --chown=10001:10001 /workspace/apps/telebirr-device-state-broker ./apps/telebirr-device-state-broker
+COPY --from=telebirr-device-state-broker-build --chown=10001:10001 /deploy/workspace ./
 
 # The device-state broker has no TCP health endpoint or exposed port. Runtime composition supplies
 # only its scoped database URL, the public Supabase CA, and a mode-0700 private socket directory.
@@ -222,9 +230,7 @@ RUN install -d -o 10001 -g 10001 -m 0700 /run/fetanagent-telebirr-assignment-bro
 
 USER 10001:10001
 
-COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=telebirr-device-bridge-build --chown=10001:10001 /workspace/apps/telebirr-device-bridge ./apps/telebirr-device-bridge
+COPY --from=telebirr-device-bridge-build --chown=10001:10001 /deploy/workspace ./
 
 # Do not declare or host-publish port 8084. A separately reviewed HTTPS gateway is the only
 # intended ingress and reaches this listener across a private Docker network.
@@ -253,9 +259,7 @@ RUN install -d -o root -g root -m 0755 /run/configs
 
 USER 10001:10001
 
-COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=companion-device-bridge-build --chown=10001:10001 /workspace/apps/companion-device-bridge ./apps/companion-device-bridge
+COPY --from=companion-device-bridge-build --chown=10001:10001 /deploy/workspace ./
 
 # Port 8085 is never published on the host. Caddy is the only intended caller.
 CMD ["node", "apps/companion-device-bridge/dist/main.js"]
@@ -280,9 +284,7 @@ ENV HOME=/tmp \
     ALL_PROXY= \
     all_proxy=
 
-COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 /workspace/apps/trusted-telebirr-verifier ./apps/trusted-telebirr-verifier
+COPY --from=trusted-telebirr-verifier-build --chown=10001:10001 /deploy/workspace ./
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:8091/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
@@ -355,9 +357,7 @@ LABEL org.opencontainers.image.title="fetanagent-deposit-executor" \
       org.opencontainers.image.chromium-package-version="${FETANAGENT_CHROMIUM_PACKAGE_VERSION}" \
       org.opencontainers.image.chromium-security-snapshot="${FETANAGENT_DEBIAN_SECURITY_SNAPSHOT}"
 
-COPY --from=executor-build --chown=10001:10001 /workspace/node_modules ./node_modules
-COPY --from=executor-build --chown=10001:10001 /workspace/packages ./packages
-COPY --from=executor-build --chown=10001:10001 /workspace/apps/executor ./apps/executor
+COPY --from=executor-build --chown=10001:10001 /deploy/workspace ./
 
 # playwright-core is exact-pinned in the executor manifest. Refuse an image whose externally
 # selected Debian Chromium package has a different major from Playwright's own Chromium contract.

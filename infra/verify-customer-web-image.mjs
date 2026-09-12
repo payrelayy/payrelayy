@@ -49,15 +49,11 @@ assert.match(customerWebImage, /org\.opencontainers\.image\.title="fetanagent-cu
 assert.match(customerWebImage, /org\.opencontainers\.image\.revision="\$\{VCS_REF\}"/);
 assert.match(
   customerWebImage,
-  /COPY --from=customer-web-build --chown=10001:10001 \/workspace\/node_modules/,
+  /COPY --from=customer-web-build --chown=10001:10001 \/deploy\/workspace \.\//,
 );
-assert.match(
+assert.doesNotMatch(
   customerWebImage,
-  /COPY --from=customer-web-build --chown=10001:10001 \/workspace\/packages/,
-);
-assert.match(
-  customerWebImage,
-  /COPY --from=customer-web-build --chown=10001:10001 \/workspace\/apps\/customer-web \.\/apps\/customer-web/,
+  /COPY --from=customer-web-build[^\n]+\/workspace\/(?:node_modules|packages)/,
 );
 assert.match(customerWebImage, /HEALTHCHECK .*127\.0\.0\.1:3003\/readyz/);
 assert.match(

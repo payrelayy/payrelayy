@@ -477,12 +477,12 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
          ) as definition`,
       );
       const definition = guard.rows[0]?.definition ?? '';
-      expect(definition).toContain("role.rolvaliduntil = 'infinity'::timestamp with time zone");
+      expect(definition).toContain("role.rolvaliduntil = 'infinity'::timestamptz");
       expect(definition).toContain(
-        "role.rolvaliduntil > (pg_catalog.clock_timestamp() + '00:05:00'::interval)",
+        "role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'",
       );
       expect(definition).toContain(
-        "role.rolvaliduntil <= (pg_catalog.clock_timestamp() + '24:05:00'::interval)",
+        "<= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'",
       );
 
       await withRollback(client, async () => {

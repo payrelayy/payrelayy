@@ -1,17 +1,25 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 IFS=$'\n\t'
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-export PATH
+LC_ALL=C
+LANG=C
+export PATH LC_ALL LANG
+unset BASH_ENV CDPATH ENV DOCKER_API_VERSION DOCKER_CERT_PATH DOCKER_CONFIG DOCKER_CONTEXT
+unset DOCKER_HOST DOCKER_TLS_VERIFY DOCKER_CLI_PLUGIN_EXTRA_DIRS COMPOSE_FILE COMPOSE_PROFILES
+unset COMPOSE_PROJECT_NAME COMPOSE_PATH_SEPARATOR COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 umask 077
 
 readonly PROJECT_NAME='fetanagent-production-trusted-telebirr-verifier'
 readonly ROOT='/srv/fetanagent/production-trusted-telebirr-verifier'
 readonly RELEASE_ROOT="$ROOT/releases"
 readonly STATE_ROOT='/var/lib/fetanagent/production-trusted-telebirr-verifier'
+readonly CREDENTIAL_ROOT="$STATE_ROOT/credentials"
+readonly ACTIVE_RECORD="$STATE_ROOT/active-record"
+readonly EMERGENCY_FENCE="$STATE_ROOT/emergency-fence"
 readonly PRODUCTION_STATE_ROOT='/var/lib/fetanagent/production'
 readonly HELPER_PATH='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
-readonly EXPECTED_COMPOSE_SHA256='8498713c25e93b929b110d2945b83f7b6dd4c26e9d59eb45073aa8fbe720740f'
+readonly EXPECTED_COMPOSE_SHA256='b1351eabbd0e735c302a01620f7a1959466ca5ec6e4af345bc5e926d116cf335'
 
 die() {
   printf 'fetanagent production trusted TeleBirr verifier helper: %s\n' "$*" >&2
@@ -32,6 +40,16 @@ require_pin_digest() {
   [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'an exact pin-manifest SHA-256 is required'
 }
 
+require_uuid() {
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+    die 'an exact lowercase UUID is required'
+}
+
+require_request_key() {
+  [[ "$1" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] ||
+    die 'an exact lowercase UUIDv4 request key is required'
+}
+
 release_dir() {
   require_sha "$1"
   printf '%s/%s\n' "$RELEASE_ROOT" "$1"
@@ -47,6 +65,12 @@ acquire_operation_locks() {
   if [[ ! -e "$STATE_ROOT" ]]; then install -d -m 0700 -o root -g root "$STATE_ROOT"; fi
   [[ -d "$STATE_ROOT" && "$(stat --format='%u:%g:%a' "$STATE_ROOT")" == '0:0:700' ]] ||
     die 'the verifier state directory is unsafe'
+  [[ ! -L "$CREDENTIAL_ROOT" ]] || die 'the verifier credential directory is unsafe'
+  if [[ ! -e "$CREDENTIAL_ROOT" ]]; then
+    install -d -m 0700 -o root -g root "$CREDENTIAL_ROOT"
+  fi
+  [[ -d "$CREDENTIAL_ROOT" && "$(stat --format='%u:%g:%a' "$CREDENTIAL_ROOT")" == '0:0:700' ]] ||
+    die 'the verifier credential directory is unsafe'
   shared_lock="$PRODUCTION_STATE_ROOT/helper.lock"
   verifier_lock="$STATE_ROOT/helper.lock"
   for lock in "$shared_lock" "$verifier_lock"; do
@@ -92,16 +116,118 @@ assert_verifier_container_absent() {
     die 'the production verifier container remains present'
 }
 
+prepared_credential_dir() {
+  require_request_key "$1"
+  printf '%s/%s\n' "$CREDENTIAL_ROOT" "$1"
+}
+
+verify_prepared_credential() {
+  local sha="$1" request_key="$2" pin_digest="$3" credential_dir database_pattern name
+  credential_dir="$(prepared_credential_dir "$request_key")"
+  require_sha "$sha"
+  require_pin_digest "$pin_digest"
+  [[ ! -L "$credential_dir" && -d "$credential_dir" &&
+    "$(realpath -- "$credential_dir")" == "$credential_dir" &&
+    "$(stat --format='%u:%g:%a' "$credential_dir")" == '0:0:700' ]] ||
+    die 'the prepared verifier credential directory is unsafe'
+  [[ "$(find -P "$credential_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 3 &&
+    -z "$(find -P "$credential_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+    die 'the prepared verifier credential shape is wrong'
+  for name in trusted-telebirr-verifier-database-url .release-sha .pin-manifest-sha256; do
+    [[ ! -L "$credential_dir/$name" && -f "$credential_dir/$name" && -s "$credential_dir/$name" ]] ||
+      die "the prepared verifier credential is missing $name"
+  done
+  [[ "$(stat --format='%u:%g:%a' "$credential_dir/trusted-telebirr-verifier-database-url")" == \
+    '10001:10001:400' ]] || die 'the prepared verifier credential metadata is wrong'
+  for name in .release-sha .pin-manifest-sha256; do
+    [[ "$(stat --format='%u:%g:%a' "$credential_dir/$name")" == '0:0:444' ]] ||
+      die "the prepared verifier marker metadata is wrong for $name"
+  done
+  [[ "$(<"$credential_dir/.release-sha")" == "$sha" ]] ||
+    die 'the prepared verifier release marker is wrong'
+  [[ "$(<"$credential_dir/.pin-manifest-sha256")" == "$pin_digest" ]] ||
+    die 'the prepared verifier pin marker is wrong'
+  database_pattern='^postgresql://fetanagent_trusted_telebirr_verifier_runtime:[0-9a-f]{64}@db\.xzztugbgtulptnbpoelr\.supabase\.co:5432/postgres\?sslmode=verify-full$'
+  [[ "$(<"$credential_dir/trusted-telebirr-verifier-database-url")" =~ $database_pattern ]] ||
+    die 'the prepared verifier runtime URL is not exact'
+  printf '%s\n' "$credential_dir"
+}
+
+remove_prepared_credential() {
+  local request_key="$1" credential_dir name
+  credential_dir="$(prepared_credential_dir "$request_key")"
+  if [[ ! -e "$credential_dir" && ! -L "$credential_dir" ]]; then return 0; fi
+  [[ ! -L "$credential_dir" && -d "$credential_dir" &&
+    "$(realpath -- "$credential_dir")" == "$credential_dir" &&
+    "$(stat --format='%u:%g:%a' "$credential_dir")" == '0:0:700' &&
+    -z "$(find -P "$credential_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+    die 'the prepared verifier credential cannot be removed safely'
+  for name in trusted-telebirr-verifier-database-url .release-sha .pin-manifest-sha256; do
+    if [[ -e "$credential_dir/$name" || -L "$credential_dir/$name" ]]; then
+      [[ ! -L "$credential_dir/$name" && -f "$credential_dir/$name" ]] ||
+        die 'the prepared verifier credential contains an unsafe entry'
+    fi
+  done
+  find -P "$credential_dir" -mindepth 1 -maxdepth 1 -type f -delete
+  rmdir -- "$credential_dir"
+}
+
+remove_all_runtime_material() {
+  local credential_dir request_key
+  [[ ! -L "$CREDENTIAL_ROOT" && -d "$CREDENTIAL_ROOT" &&
+    "$(stat --format='%u:%g:%a' "$CREDENTIAL_ROOT")" == '0:0:700' ]] || return 1
+  while IFS= read -r credential_dir; do
+    request_key="${credential_dir##*/}"
+    if [[ "$request_key" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+      remove_prepared_credential "$request_key"
+    elif [[ "$request_key" =~ ^\.incoming-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+      [[ ! -L "$credential_dir" && "$(realpath -- "$credential_dir")" == "$credential_dir" &&
+        "$(stat --format='%u:%g:%a' "$credential_dir")" == '0:0:700' &&
+        -z "$(find -P "$credential_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
+        return 1
+      find -P "$credential_dir" -mindepth 1 -maxdepth 1 -type f -delete
+      rmdir -- "$credential_dir"
+    else
+      return 1
+    fi
+  done < <(find -P "$CREDENTIAL_ROOT" -mindepth 1 -maxdepth 1 -type d -print)
+  [[ -z "$(find -P "$CREDENTIAL_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]] || return 1
+  if [[ -e "$ACTIVE_RECORD" || -L "$ACTIVE_RECORD" ]]; then
+    [[ ! -L "$ACTIVE_RECORD" && -f "$ACTIVE_RECORD" &&
+      "$(stat --format='%u:%g:%a' "$ACTIVE_RECORD")" == '0:0:600' ]] || return 1
+    rm -f -- "$ACTIVE_RECORD"
+  fi
+}
+
+arm_emergency_fence() {
+  local pending="$STATE_ROOT/.emergency-fence.$$"
+  [[ ! -L "$STATE_ROOT" ]] || return 1
+  if [[ ! -e "$STATE_ROOT" ]]; then install -d -m 0700 -o root -g root "$STATE_ROOT"; fi
+  [[ -d "$STATE_ROOT" && "$(stat --format='%u:%g:%a' "$STATE_ROOT")" == '0:0:700' ]] || return 1
+  [[ ! -L "$EMERGENCY_FENCE" ]] || return 1
+  if [[ -e "$EMERGENCY_FENCE" ]]; then
+    [[ -f "$EMERGENCY_FENCE" &&
+      "$(stat --format='%u:%g:%a' "$EMERGENCY_FENCE")" == '0:0:600' ]] || return 1
+  fi
+  rm -f -- "$pending"
+  printf '%s\n' 'emergency-stop' >"$pending"
+  chown root:root "$pending"
+  chmod 0600 "$pending"
+  mv -f -- "$pending" "$EMERGENCY_FENCE"
+  [[ ! -L "$EMERGENCY_FENCE" && -f "$EMERGENCY_FENCE" &&
+    "$(stat --format='%u:%g:%a' "$EMERGENCY_FENCE")" == '0:0:600' ]]
+}
+
 emergency_stop_verifier() {
-  local attempt output
+  local attempt output state_status=0
   local -a ids=()
   command -v docker >/dev/null || die 'Docker is required for emergency stop'
   command -v timeout >/dev/null || die 'timeout is required for bounded emergency stop'
 
   # There is deliberately no operation-lock, release, current-link, or Compose dependency here.
-  # The three exact-label scans close a concurrent observation/removal window. No command in this
-  # helper can create or start this service, so a successful final scan is stable within this
-  # lifecycle. Direct root Docker access remains outside the delegated helper boundary.
+  # Arm a persistent fence before scanning. A concurrent guarded start checks this fence before and
+  # after service creation, while repeated exact-label scans remove any already-created container.
+  arm_emergency_fence || state_status=1
   for attempt in 1 2 3; do
     output="$(verifier_container_ids)" || die 'the emergency container inventory failed'
     ids=()
@@ -116,6 +242,30 @@ emergency_stop_verifier() {
   done
   output="$(verifier_container_ids)" || die 'the final emergency container inventory failed'
   [[ -z "$output" ]] || die 'a production verifier container remains present'
+  if [[ ! -e "$CREDENTIAL_ROOT" ]]; then
+    install -d -m 0700 -o root -g root "$CREDENTIAL_ROOT" || state_status=1
+  fi
+  remove_all_runtime_material || state_status=1
+  [[ "$state_status" -eq 0 ]] || die 'the verifier stopped but protected runtime material needs administrator cleanup'
+}
+
+inspect_active_container() {
+  local expected_image_id="$1" container_id="$2" state
+  state="$(timeout --signal=TERM --kill-after=5s 20s docker container inspect \
+    --format '{{.Image}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}' \
+    "$container_id")" || die 'the production verifier container inspection failed'
+  [[ "$state" == "$expected_image_id|true|healthy|$PROJECT_NAME|trusted-telebirr-verifier" ]] ||
+    die 'the production verifier container is not exact and healthy'
+}
+
+verify_active_record() {
+  local sha="$1" request_key="$2" epoch="$3" pilot_revision_id="$4" expected
+  [[ ! -L "$ACTIVE_RECORD" && -f "$ACTIVE_RECORD" &&
+    "$(stat --format='%u:%g:%a' "$ACTIVE_RECORD")" == '0:0:600' ]] ||
+    die 'the production verifier active record is unsafe'
+  expected="$(printf '%s\n%s\n%s\n%s\n' "$sha" "$request_key" "$epoch" "$pilot_revision_id")"
+  [[ "$(<"$ACTIVE_RECORD")" == "$expected" ]] ||
+    die 'the production verifier active record does not match the activation'
 }
 
 verify_release() {
@@ -188,7 +338,7 @@ verify_release() {
 }
 
 case "${1:-}" in
-  preflight|prepare-incoming|cleanup-incoming|install)
+  preflight|prepare-incoming|cleanup-incoming|install|prepare-activation|discard-activation|start-activated|status-inert|status-active)
     acquire_operation_locks
     ;;
 esac
@@ -207,7 +357,7 @@ case "${1:-}" in
     command -v jq >/dev/null
     command -v openssl >/dev/null
     docker compose version >/dev/null
-    install -d -m 0700 -o root -g root "$ROOT" "$RELEASE_ROOT" "$STATE_ROOT"
+    install -d -m 0700 -o root -g root "$ROOT" "$RELEASE_ROOT" "$STATE_ROOT" "$CREDENTIAL_ROOT"
     available="$(df --output=avail --block-size=1 "$ROOT" | tail -n 1 | tr -d ' ')"
     [[ "$available" =~ ^[0-9]+$ && "$available" -gt $((2 * $2 + 536870912)) ]] ||
       die 'insufficient storage for the verifier release and staging margin'
@@ -347,19 +497,220 @@ case "${1:-}" in
     verify_release "$sha" "$release"
     ;;
 
+  prepare-activation)
+    [[ $# -eq 4 ]] || die 'prepare-activation requires commit SHA, request key, and pin digest'
+    sha="$2"
+    request_key="$3"
+    pin_digest="$4"
+    require_sha "$sha"
+    require_request_key "$request_key"
+    require_pin_digest "$pin_digest"
+    assert_verifier_container_absent
+    release="$(require_release "$sha")"
+    verify_release "$sha" "$release"
+    [[ "$(<"$release/.pin-manifest-sha256")" == "$pin_digest" ]] ||
+      die 'the release pin digest does not match the activation confirmation'
+    incoming="/tmp/fetanagent-production-trusted-telebirr-verifier-credential-$request_key"
+    [[ ! -L "$incoming" && -f "$incoming" &&
+      "$(stat --format='%U:%G:%a:%h' "$incoming")" == 'fetanagent-admin:fetanagent-admin:600:1' ]] ||
+      die 'the activation credential incoming file is unsafe'
+    incoming_identity="$(stat --format='%d:%i' "$incoming")"
+    chown --no-dereference root:root "$incoming"
+    [[ ! -L "$incoming" && -f "$incoming" &&
+      "$(stat --format='%d:%i:%U:%G:%a:%h' "$incoming")" == "$incoming_identity:root:root:600:1" ]] ||
+      die 'the activation credential changed while it was claimed'
+    database_pattern='^postgresql://fetanagent_trusted_telebirr_verifier_runtime:[0-9a-f]{64}@db\.xzztugbgtulptnbpoelr\.supabase\.co:5432/postgres\?sslmode=verify-full$'
+    [[ "$(<"$incoming")" =~ $database_pattern ]] || die 'the activation credential URL is not exact'
+    [[ -z "$(find -P "$CREDENTIAL_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
+      die 'another prepared verifier credential already exists'
+    sealed="$CREDENTIAL_ROOT/.incoming-$request_key"
+    credential_dir="$CREDENTIAL_ROOT/$request_key"
+    [[ ! -e "$sealed" && ! -L "$sealed" && ! -e "$credential_dir" && ! -L "$credential_dir" ]] ||
+      die 'the activation credential staging path already exists'
+
+    cleanup_prepare_activation() {
+      local command_status=$?
+      trap - EXIT
+      if [[ -f "$incoming" && ! -L "$incoming" ]]; then rm -f -- "$incoming"; fi
+      for cleanup_dir in "$sealed" "$credential_dir"; do
+        if [[ -d "$cleanup_dir" && ! -L "$cleanup_dir" &&
+          "$(realpath -- "$cleanup_dir")" == "$cleanup_dir" ]]; then
+          find -P "$cleanup_dir" -mindepth 1 -maxdepth 1 -type f -delete
+          rmdir -- "$cleanup_dir"
+        fi
+      done
+      exit "$command_status"
+    }
+    trap cleanup_prepare_activation EXIT
+    install -d -m 0700 -o root -g root "$sealed"
+    cp --no-dereference --reflink=never -- "$incoming" \
+      "$sealed/trusted-telebirr-verifier-database-url"
+    rm -f -- "$incoming"
+    printf '%s\n' "$sha" >"$sealed/.release-sha"
+    printf '%s\n' "$pin_digest" >"$sealed/.pin-manifest-sha256"
+    chown 10001:10001 "$sealed/trusted-telebirr-verifier-database-url"
+    chmod 0400 "$sealed/trusted-telebirr-verifier-database-url"
+    chmod 0444 "$sealed/.release-sha" "$sealed/.pin-manifest-sha256"
+    mv -- "$sealed" "$credential_dir"
+    verify_prepared_credential "$sha" "$request_key" "$pin_digest" >/dev/null
+    if [[ -e "$EMERGENCY_FENCE" || -L "$EMERGENCY_FENCE" ]]; then
+      [[ ! -L "$EMERGENCY_FENCE" && -f "$EMERGENCY_FENCE" &&
+        "$(stat --format='%u:%g:%a' "$EMERGENCY_FENCE")" == '0:0:600' ]] ||
+        die 'the previous emergency fence is unsafe'
+      rm -f -- "$EMERGENCY_FENCE"
+    fi
+    trap - EXIT
+    printf '%s\n' 'Production trusted TeleBirr verifier: one credential prepared; service remains absent.'
+    ;;
+
+  discard-activation)
+    [[ $# -eq 2 ]] || die 'discard-activation requires one request key'
+    request_key="$2"
+    require_request_key "$request_key"
+    assert_verifier_container_absent
+    incoming="/tmp/fetanagent-production-trusted-telebirr-verifier-credential-$request_key"
+    if [[ -e "$incoming" || -L "$incoming" ]]; then
+      [[ ! -L "$incoming" && -f "$incoming" &&
+        ( "$(stat --format='%U:%G:%a' "$incoming")" == 'fetanagent-admin:fetanagent-admin:600' ||
+          "$(stat --format='%U:%G:%a' "$incoming")" == 'root:root:600' ) ]] ||
+        die 'the activation credential incoming file cannot be removed safely'
+      rm -f -- "$incoming"
+    fi
+    remove_prepared_credential "$request_key"
+    if [[ -e "$ACTIVE_RECORD" || -L "$ACTIVE_RECORD" ]]; then
+      [[ ! -L "$ACTIVE_RECORD" && -f "$ACTIVE_RECORD" &&
+        "$(stat --format='%u:%g:%a' "$ACTIVE_RECORD")" == '0:0:600' ]] ||
+        die 'the inactive verifier record cannot be removed safely'
+      mapfile -t active_record_lines <"$ACTIVE_RECORD"
+      [[ "${#active_record_lines[@]}" -eq 4 && "${active_record_lines[1]}" == "$request_key" ]] ||
+        die 'the inactive verifier record belongs to a different activation'
+      rm -f -- "$ACTIVE_RECORD"
+    fi
+    printf '%s\n' 'Production trusted TeleBirr verifier: requested inactive credential absent.'
+    ;;
+
+  start-activated)
+    [[ $# -eq 6 ]] ||
+      die 'start-activated requires commit SHA, request key, epoch, pilot revision, and pin digest'
+    sha="$2"
+    request_key="$3"
+    epoch="$4"
+    pilot_revision_id="$5"
+    pin_digest="$6"
+    require_sha "$sha"
+    require_request_key "$request_key"
+    [[ "$epoch" =~ ^[1-9][0-9]*$ ]] || die 'a positive activation epoch is required'
+    require_uuid "$pilot_revision_id"
+    require_pin_digest "$pin_digest"
+    assert_verifier_container_absent
+    [[ ! -e "$ACTIVE_RECORD" && ! -L "$ACTIVE_RECORD" ]] ||
+      die 'an active verifier record already exists'
+    [[ ! -e "$EMERGENCY_FENCE" && ! -L "$EMERGENCY_FENCE" ]] ||
+      die 'an emergency fence blocks verifier start'
+    release="$(require_release "$sha")"
+    verify_release "$sha" "$release"
+    credential_dir="$(verify_prepared_credential "$sha" "$request_key" "$pin_digest")"
+    image_id="$(<"$release/.image-id")"
+
+    rollback_host_start() {
+      local command_status=$?
+      trap - EXIT INT TERM
+      if [[ -n "${pending_record:-}" && -f "$pending_record" && ! -L "$pending_record" ]]; then
+        rm -f -- "$pending_record"
+      fi
+      emergency_stop_verifier
+      exit "$command_status"
+    }
+    trap rollback_host_start EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_IMAGE_ID="$image_id" \
+    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_SECRET_FILE="$credential_dir/trusted-telebirr-verifier-database-url" \
+    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_CONFIG_FILE="$release/trusted-telebirr-verifier-pins.v1.json" \
+    FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_CONFIG_FILE="$release/supabase-ca.crt" \
+    FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE='live' \
+    FETANAGENT_PRODUCTION_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED='true' \
+    FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED='true' \
+      timeout --signal=TERM --kill-after=10s 90s docker compose \
+        --project-directory "$release" --env-file /dev/null \
+        --file "$release/compose.production-trusted-telebirr-verifier.yaml" \
+        --profile production-trusted-telebirr-verifier \
+        up --detach --no-build --no-deps trusted-telebirr-verifier
+
+    for attempt in {1..45}; do
+      [[ ! -e "$EMERGENCY_FENCE" && ! -L "$EMERGENCY_FENCE" ]] ||
+        die 'an emergency fence interrupted verifier start'
+      container_id="$(container_for_verifier)"
+      [[ -n "$container_id" ]] || die 'the production verifier container was not created'
+      health="$(timeout --signal=TERM --kill-after=5s 20s docker container inspect \
+        --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")" ||
+        die 'the verifier health inspection failed'
+      if [[ "$health" == 'healthy' ]]; then break; fi
+      [[ "$health" == 'starting' ]] || die 'the verifier became unhealthy during startup'
+      [[ "$attempt" != '45' ]] || die 'the verifier did not become healthy before the deadline'
+      sleep 2
+    done
+    inspect_active_container "$image_id" "$container_id"
+    [[ ! -e "$EMERGENCY_FENCE" && ! -L "$EMERGENCY_FENCE" ]] ||
+      die 'an emergency fence interrupted verifier finalization'
+    pending_record="$STATE_ROOT/.active-record.$$"
+    [[ ! -e "$pending_record" && ! -L "$pending_record" ]] ||
+      die 'the production verifier active-record staging path is unsafe'
+    printf '%s\n%s\n%s\n%s\n' "$sha" "$request_key" "$epoch" "$pilot_revision_id" >"$pending_record"
+    chown root:root "$pending_record"
+    chmod 0600 "$pending_record"
+    mv -- "$pending_record" "$ACTIVE_RECORD"
+    verify_active_record "$sha" "$request_key" "$epoch" "$pilot_revision_id"
+    [[ ! -e "$EMERGENCY_FENCE" && ! -L "$EMERGENCY_FENCE" ]] ||
+      die 'an emergency fence interrupted verifier completion'
+    inspect_active_container "$image_id" "$container_id"
+    trap - EXIT INT TERM
+    printf '%s\n' 'Production trusted TeleBirr verifier: exact service is healthy.'
+    ;;
+
   status-inert)
     [[ $# -eq 1 ]] || die 'status-inert accepts no arguments'
     assert_verifier_container_absent
-    printf '%s\n' 'Production trusted TeleBirr verifier: activation unavailable; no service container exists.'
+    [[ -z "$(find -P "$CREDENTIAL_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
+      die 'an inactive verifier credential remains prepared'
+    [[ ! -e "$ACTIVE_RECORD" && ! -L "$ACTIVE_RECORD" ]] ||
+      die 'an inactive verifier active record remains present'
+    printf '%s\n' 'Production trusted TeleBirr verifier: inert; no service or runtime credential exists.'
+    ;;
+
+  status-active)
+    [[ $# -eq 6 ]] ||
+      die 'status-active requires commit SHA, request key, epoch, pilot revision, and pin digest'
+    sha="$2"
+    request_key="$3"
+    epoch="$4"
+    pilot_revision_id="$5"
+    pin_digest="$6"
+    require_sha "$sha"
+    require_request_key "$request_key"
+    [[ "$epoch" =~ ^[1-9][0-9]*$ ]] || die 'a positive activation epoch is required'
+    require_uuid "$pilot_revision_id"
+    require_pin_digest "$pin_digest"
+    release="$(require_release "$sha")"
+    verify_release "$sha" "$release"
+    verify_prepared_credential "$sha" "$request_key" "$pin_digest" >/dev/null
+    verify_active_record "$sha" "$request_key" "$epoch" "$pilot_revision_id"
+    [[ ! -e "$EMERGENCY_FENCE" && ! -L "$EMERGENCY_FENCE" ]] ||
+      die 'an emergency fence is active'
+    container_id="$(container_for_verifier)"
+    [[ -n "$container_id" ]] || die 'the production verifier container is absent'
+    inspect_active_container "$(<"$release/.image-id")" "$container_id"
+    printf '%s\n' 'Production trusted TeleBirr verifier: exact active service is healthy.'
     ;;
 
   emergency-stop)
     [[ $# -eq 1 ]] || die 'emergency-stop accepts no arguments'
     emergency_stop_verifier
-    printf '%s\n' 'Production trusted TeleBirr verifier: exact labeled service container absent.'
+    printf '%s\n' 'Production trusted TeleBirr verifier: fenced, stopped, and runtime credential removed.'
     ;;
 
   *)
-    die 'expected verify, preflight, prepare-incoming, cleanup-incoming, install, status-inert, or emergency-stop'
+    die 'expected a verifier stage, guarded activation, status, or emergency-stop command'
     ;;
 esac

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => readFile(`${repositoryRoot}${path}`, 'utf8');
+const execute = promisify(execFile);
 const [
   dockerfile,
   compose,
@@ -38,6 +39,8 @@ const [
   activationScramMigration,
   activationEpochIndexesMigration,
   roleAdministrationMigration,
+  productionCredentialGenerator,
+  productionActivationRequestRenderer,
 ] = await Promise.all([
   read('Dockerfile'),
   read('infra/compose.trusted-telebirr-verifier.yaml'),
@@ -77,6 +80,8 @@ const [
   read(
     'supabase/migrations/20260913122142_normalize_trusted_telebirr_postgres_role_administration.sql',
   ),
+  read('infra/operations/create-production-trusted-telebirr-runtime-credential.mjs'),
+  read('infra/operations/render-production-trusted-telebirr-activation-requests.mjs'),
 ]);
 const manifest = JSON.parse(manifestText);
 
@@ -332,12 +337,22 @@ assert.match(productionCompose, /^\s{6}- ALL$/m);
 assert.match(productionCompose, /^\s{6}- no-new-privileges:true$/m);
 assert.match(productionCompose, /^\s{6}replicas: 1$/m);
 assert.match(productionCompose, /TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: production/);
-assert.match(productionCompose, /^\s{6}FINANCIAL_ACTIONS_MODE: dry_run$/m);
-assert.match(productionCompose, /^\s{6}INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: 'false'$/m);
-assert.match(productionCompose, /^\s{6}TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false'$/m);
+assert.match(
+  productionCompose,
+  /^\s{6}FINANCIAL_ACTIONS_MODE: \$\{FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE:\?[^\r\n]+\}$/m,
+);
+assert.match(
+  productionCompose,
+  /^\s{6}INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: \$\{FETANAGENT_PRODUCTION_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED:\?[^\r\n]+\}$/m,
+);
+assert.match(
+  productionCompose,
+  /^\s{6}TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: \$\{FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED:\?[^\r\n]+\}$/m,
+);
 assert.doesNotMatch(
   productionCompose,
-  /FETANAGENT_(?:TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE|INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED|TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED)/,
+  /FETANAGENT_PRODUCTION_(?:TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE|INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED|TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED):-/,
+  'no production verifier process gate may have a default',
 );
 assert.match(productionCompose, /127\.0\.0\.1:8091\/readyz/);
 assert.match(productionCompose, /mode: 0400/);
@@ -363,10 +378,11 @@ assert.match(
   /PRODUCTION_DATABASE_DIRECT_HOST: db\.xzztugbgtulptnbpoelr\.supabase\.co/,
 );
 assert.match(productionWorkflow, /STAGE DISABLED PRODUCTION VERIFIER/);
+assert.match(productionWorkflow, /ACTIVATE PRODUCTION TELEBIRR VERIFICATION/);
 assert.match(productionWorkflow, /EMERGENCY DISABLE PRODUCTION VERIFIER/);
 assert.match(
   productionWorkflow,
-  /case "\$REQUESTED_MODE:\$CONFIRMED_OPERATION" in\s+'plan:PLAN PRODUCTION VERIFIER'\|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'\|'status:STATUS PRODUCTION VERIFIER'\|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER'\) ;;/,
+  /case "\$REQUESTED_MODE:\$CONFIRMED_OPERATION" in\s+'plan:PLAN PRODUCTION VERIFIER'\|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'\|'activate-verification:ACTIVATE PRODUCTION TELEBIRR VERIFICATION'\|'status:STATUS PRODUCTION VERIFIER'\|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER'\) ;;/,
 );
 assert.doesNotMatch(
   productionWorkflow,
@@ -374,6 +390,9 @@ assert.doesNotMatch(
   'workflow case alternatives must not be split after a bare pipe',
 );
 assert.match(productionWorkflow, /confirm_pin_manifest_sha256/);
+assert.match(productionWorkflow, /confirm_owner_auth_user_id/);
+assert.match(productionWorkflow, /confirm_pilot_revision_id/);
+assert.match(productionWorkflow, /confirm_activation_request_key/);
 assert.match(productionWorkflow, /require-production-ci\.mjs/g);
 assert.match(productionWorkflow, /docker build --pull=false --target trusted-telebirr-verifier/);
 assert.match(productionWorkflow, /fetanagent-trusted-telebirr-verifier-image\.tar/);
@@ -455,9 +474,33 @@ assert.match(
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-inspect\.sql/);
 assert.match(productionWorkflow, /\.financialSwitchesChanged == false/g);
 assert.match(productionWorkflow, /\.executorLogin == "disabled"/g);
+const activationJob = productionWorkflow
+  .split('\n  activate-verification:')[1]
+  ?.split('\n  status:')[0];
+assert.ok(activationJob, 'missing guarded production verification activation job');
+assert.match(activationJob, /environment: production/);
+assert.match(activationJob, /create-production-trusted-telebirr-runtime-credential\.mjs/);
+assert.match(activationJob, /render-production-trusted-telebirr-activation-requests\.mjs/);
+assert.match(activationJob, /activation_attempted=0/);
+assert.match(activationJob, /trap rollback_operation EXIT/);
+assert.match(
+  activationJob,
+  /production-trusted-telebirr-verifier-independent-emergency-disable\.sql/,
+);
+assert.match(activationJob, /prepare-activation '\$GITHUB_SHA'/);
+assert.match(activationJob, /start-activated '\$GITHUB_SHA'/);
+assert.match(activationJob, /status-active '\$GITHUB_SHA'/);
+assert.match(activationJob, /\.activeVerifierSessions == 1/);
+assert.match(activationJob, /\.unexpectedVerifierSessions == 0/);
+assert.match(activationJob, /\.executorLogin == "disabled"/);
+assert.match(activationJob, /\.switchBoundary == "live_verification"/);
+assert.match(
+  activationJob,
+  /https:\/\/api\.supabase\.com\/v1\/projects\/\$PRODUCTION_PROJECT_REF\/database\/query/g,
+);
 assert.doesNotMatch(
-  productionWorkflow,
-  /activate-verifier|ACTIVATE PRODUCTION|activation-preflight|bounded_verifier_login_provision|production-trusted-telebirr-verifier-provision|helper' (?:activate|finalize|rollback)|helper (?:activate|finalize|rollback)/i,
+  activationJob,
+  /SUPABASE_DB_PASSWORD|PGPASSWORD|fetanagent-production-direct-database-tunnel|deposit-executor/iu,
 );
 assert.doesNotMatch(productionWorkflow, /TRUSTED_TELEBIRR_VERIFIER_RUNTIME_PASSWORD/);
 assert.doesNotMatch(productionWorkflow, /pull_request:|push:|schedule:|workflow_call:/);
@@ -466,16 +509,24 @@ assert.doesNotMatch(
   productionWorkflow,
   /docker\s+(?:push|login)|kubectl|helm|doctl|service_role/iu,
 );
+const workflowBeforeActivation = productionWorkflow.split('\n  activate-verification:')[0];
+const workflowBetweenActivationAndIndependentEmergency = productionWorkflow
+  .split('\n  status:')[1]
+  ?.split('\n  emergency-database-independent-revoke:')[0];
+assert.doesNotMatch(workflowBeforeActivation, /SUPABASE_ACCESS_TOKEN/);
 assert.doesNotMatch(
-  productionWorkflow.split('\n  emergency-database-independent-revoke:')[0],
+  workflowBetweenActivationAndIndependentEmergency ?? '',
   /SUPABASE_ACCESS_TOKEN/,
-  'the protected token must be confined to the independent emergency job',
+  'the protected Management API token must be confined to activation and the independent emergency job',
 );
 
 assert.match(
   productionHelper,
   /readonly PROJECT_NAME='fetanagent-production-trusted-telebirr-verifier'/,
 );
+assert.match(productionHelper, /^#!\/bin\/bash$/m);
+assert.match(productionHelper, /unset BASH_ENV CDPATH ENV DOCKER_API_VERSION/);
+assert.match(productionHelper, /unset COMPOSE_PROJECT_NAME COMPOSE_PATH_SEPARATOR/);
 assert.match(productionHelper, /PRODUCTION_STATE_ROOT='\/var\/lib\/fetanagent\/production'/);
 assert.match(productionHelper, /stat --format='%u:%g:%a'.*PRODUCTION_STATE_ROOT/);
 assert.match(productionHelper, /a production operation lock is unsafe/g);
@@ -488,6 +539,9 @@ assert.match(productionHelper, new RegExp(`EXPECTED_COMPOSE_SHA256='${production
 assert.match(productionHelper, /sha256sum .*compose\.production-trusted-telebirr-verifier\.yaml/);
 assert.match(productionHelper, /docker image inspect .*\.Id/);
 assert.match(productionHelper, /assert_verifier_container_absent/);
+assert.match(productionHelper, /^\s{2}prepare-activation\)$/m);
+assert.match(productionHelper, /^\s{2}start-activated\)$/m);
+assert.match(productionHelper, /^\s{2}status-active\)$/m);
 assert.match(productionHelper, /^\s{2}status-inert\)$/m);
 assert.match(productionHelper, /^\s{2}emergency-stop\)$/m);
 assert.match(productionHelper, /docker container rm --force -- "\$\{ids\[@\]\}"/);
@@ -508,7 +562,7 @@ assert.match(
 );
 assert.match(
   productionHelper,
-  /case "\$\{1:-\}" in\s+preflight\|prepare-incoming\|cleanup-incoming\|install\)\s+acquire_operation_locks/s,
+  /case "\$\{1:-\}" in\s+preflight\|prepare-incoming\|cleanup-incoming\|install\|prepare-activation\|discard-activation\|start-activated\|status-inert\|status-active\)\s+acquire_operation_locks/s,
 );
 const verifierInstallCase = productionHelper
   .split('\n  install)')[1]
@@ -553,13 +607,34 @@ assert.match(emergencyStopCommands, /output="\$\(verifier_container_ids\)"/g);
 assert.match(emergencyStopCommands, /mapfile -t ids <<<"\$output"/);
 assert.match(emergencyStopCommands, /"\$\{ids\[@\]\}"/);
 assert.doesNotMatch(emergencyStopCommands, /container_for_verifier|multiple .* containers/i);
-assert.doesNotMatch(
-  emergencyStopCommands,
-  /CURRENT|RELEASE_ROOT|STATE_ROOT|flock|compose|database|secret/i,
+assert.doesNotMatch(emergencyStopCommands, /CURRENT|RELEASE_ROOT|flock|compose|database|secret/i);
+assert.match(
+  productionHelper,
+  /arm_emergency_fence[\s\S]*?for attempt in 1 2 3[\s\S]*?remove_all_runtime_material/,
 );
+assert.match(
+  productionHelper,
+  /FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE='live'/,
+);
+assert.match(
+  productionHelper,
+  /FETANAGENT_PRODUCTION_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED='true'/,
+);
+assert.match(
+  productionHelper,
+  /FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED='true'/,
+);
+assert.match(
+  productionHelper,
+  /--project-directory "\$release" --env-file \/dev\/null[\s\S]*?up --detach --no-build --no-deps trusted-telebirr-verifier/,
+);
+assert.match(productionHelper, /trap rollback_host_start EXIT/);
+assert.match(productionHelper, /trap 'exit 130' INT/);
+assert.match(productionHelper, /trap 'exit 143' TERM/);
+assert.match(productionHelper, /inspect_active_container "\$image_id"/g);
 assert.doesNotMatch(
   productionHelper,
-  /^\s{2}(?:activation-preflight|activate|finalize|rollback|status)\)|CURRENT_LINK|pending-.*\.previous|compose_release|\bup --detach\b|docker container start/im,
+  /CURRENT_LINK|pending-.*\.previous|compose_release|docker container start/im,
 );
 assert.doesNotMatch(productionHelper, /docker\s+(?:push|login)|curl\s+http|KEMERBET/iu);
 
@@ -570,7 +645,11 @@ for (const command of [
   'prepare-incoming *',
   'cleanup-incoming *',
   'install *',
+  'prepare-activation *',
+  'discard-activation *',
+  'start-activated *',
   'status-inert',
+  'status-active *',
   'emergency-stop',
 ]) {
   assert.match(
@@ -583,19 +662,129 @@ for (const command of [
 }
 assert.doesNotMatch(
   productionSudoers,
-  /helper \*$|\b(?:activate|activation-preflight|finalize|rollback|status-current)\b/m,
+  /helper \*$|\b(?:activation-preflight|finalize|rollback|status-current)\b/m,
 );
 assert.doesNotMatch(productionSudoers, /REPLACE_WITH/);
 
+const credentialFixtureRoot = await mkdtemp(join(tmpdir(), 'fetanagent-verifier-credential-'));
+try {
+  const databaseUrlPath = join(credentialFixtureRoot, 'database-url');
+  const scramPath = join(credentialFixtureRoot, 'verifier.scram');
+  const generated = await execute(
+    process.execPath,
+    [
+      join(
+        repositoryRoot,
+        'infra/operations/create-production-trusted-telebirr-runtime-credential.mjs',
+      ),
+      '--database-url-output',
+      databaseUrlPath,
+      '--scram-output',
+      scramPath,
+    ],
+    { timeout: 10_000 },
+  );
+  assert.equal(generated.stdout, '');
+  assert.equal(generated.stderr, '');
+  const databaseUrl = await readFile(databaseUrlPath, 'utf8');
+  const scram = await readFile(scramPath, 'utf8');
+  const databaseMatch =
+    /^postgresql:\/\/fetanagent_trusted_telebirr_verifier_runtime:([0-9a-f]{64})@db\.xzztugbgtulptnbpoelr\.supabase\.co:5432\/postgres\?sslmode=verify-full$/u.exec(
+      databaseUrl,
+    );
+  assert.ok(databaseMatch, 'the generated production verifier URL is not exact');
+  const scramMatch =
+    /^SCRAM-SHA-256\$4096:([A-Za-z0-9+/]{22}==)\$([A-Za-z0-9+/]{43}=):([A-Za-z0-9+/]{43}=)$/u.exec(
+      scram,
+    );
+  assert.ok(scramMatch, 'the generated PostgreSQL SCRAM verifier is malformed');
+  const salt = Buffer.from(scramMatch[1], 'base64');
+  const salted = pbkdf2Sync(databaseMatch[1], salt, 4_096, 32, 'sha256');
+  const clientKey = createHmac('sha256', salted).update('Client Key').digest();
+  const expectedStoredKey = createHash('sha256').update(clientKey).digest('base64');
+  const expectedServerKey = createHmac('sha256', salted).update('Server Key').digest('base64');
+  assert.equal(scramMatch[2], expectedStoredKey);
+  assert.equal(scramMatch[3], expectedServerKey);
+  salt.fill(0);
+  salted.fill(0);
+  clientKey.fill(0);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(databaseUrlPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(scramPath)).mode & 0o777, 0o600);
+  }
+
+  const owner = '11111111-1111-4111-8111-111111111111';
+  const pilot = '22222222-2222-4222-8222-222222222222';
+  const requestKey = '33333333-3333-4333-8333-333333333333';
+  const rendered = await execute(
+    process.execPath,
+    [
+      join(
+        repositoryRoot,
+        'infra/operations/render-production-trusted-telebirr-activation-requests.mjs',
+      ),
+      '--owner-auth-user-id',
+      owner,
+      '--pilot-revision-id',
+      pilot,
+      '--request-key',
+      requestKey,
+      '--scram-file',
+      scramPath,
+      '--output-directory',
+      credentialFixtureRoot,
+    ],
+    { timeout: 10_000 },
+  );
+  assert.equal(rendered.stdout, '');
+  assert.equal(rendered.stderr, '');
+  const activationRequest = JSON.parse(
+    await readFile(join(credentialFixtureRoot, 'activation-request.json'), 'utf8'),
+  );
+  const inspectionRequest = JSON.parse(
+    await readFile(join(credentialFixtureRoot, 'active-inspection-request.json'), 'utf8'),
+  );
+  assert.deepEqual(Object.keys(activationRequest), ['query']);
+  assert.deepEqual(Object.keys(inspectionRequest), ['query']);
+  assert.match(activationRequest.query, /app\.activate_private_trusted_telebirr_verification\(/);
+  assert.match(activationRequest.query, new RegExp(owner, 'u'));
+  assert.match(activationRequest.query, new RegExp(pilot, 'u'));
+  assert.match(activationRequest.query, new RegExp(requestKey, 'u'));
+  assert.ok(activationRequest.query.includes(scram));
+  assert.ok(!activationRequest.query.includes(databaseMatch[1]));
+  assert.ok(!inspectionRequest.query.includes(scram));
+  assert.ok(!inspectionRequest.query.includes(databaseMatch[1]));
+  assert.match(inspectionRequest.query, /activeVerifierSessions/);
+  assert.match(inspectionRequest.query, /fetanagent_deposit_executor_runtime/);
+} finally {
+  await rm(credentialFixtureRoot, { recursive: true, force: true });
+}
+
+assert.match(productionCredentialGenerator, /randomBytes\(32\)/);
+assert.match(
+  productionCredentialGenerator,
+  /pbkdf2Sync\(password, salt, ITERATIONS, 32, 'sha256'\)/,
+);
+assert.match(productionCredentialGenerator, /open\(databaseUrlOutput, 'wx', 0o600\)/);
+assert.doesNotMatch(productionCredentialGenerator, /console\.|process\.stdout|process\.stderr/);
+assert.match(
+  productionActivationRequestRenderer,
+  /SCRAM-SHA-256|activate_private_trusted_telebirr_verification/,
+);
+assert.doesNotMatch(productionActivationRequestRenderer, /p_verifier_password|console\./);
+
 if (process.platform === 'linux') {
-  const execute = promisify(execFile);
   const fixtureRoot = await mkdtemp(join(tmpdir(), 'fetanagent-verifier-emergency-'));
   try {
     const fixtureBin = join(fixtureRoot, 'bin');
+    const fixtureStateRoot = join(fixtureRoot, 'state');
+    const fixtureCredentialRoot = join(fixtureStateRoot, 'credentials');
     const containerState = join(fixtureRoot, 'containers');
     const dockerLog = join(fixtureRoot, 'docker.log');
     const containerId = 'a'.repeat(64);
     await mkdir(fixtureBin, { mode: 0o700 });
+    await mkdir(fixtureStateRoot, { mode: 0o700 });
+    await mkdir(fixtureCredentialRoot, { mode: 0o700 });
     await writeFile(containerState, `${containerId}\n`, { mode: 0o600 });
     await writeFile(dockerLog, '', { mode: 0o600 });
     await writeFile(
@@ -604,6 +793,7 @@ if (process.platform === 'linux') {
       { mode: 0o700 },
     );
     await writeFile(join(fixtureBin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o700 });
+    await writeFile(join(fixtureBin, 'chown'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o700 });
     await writeFile(
       join(fixtureBin, 'docker'),
       `#!/usr/bin/env bash
@@ -622,12 +812,20 @@ fi
       { mode: 0o700 },
     );
     const fixtureHelper = join(fixtureRoot, 'helper.sh');
+    const fixtureIdentity = `${process.getuid()}:${process.getgid()}`;
     await writeFile(
       fixtureHelper,
-      productionHelper.replace(
-        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
-        `PATH=${fixtureBin}:/usr/bin:/bin`,
-      ),
+      productionHelper
+        .replace(
+          'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+          `PATH=${fixtureBin}:/usr/bin:/bin`,
+        )
+        .replace(
+          "readonly STATE_ROOT='/var/lib/fetanagent/production-trusted-telebirr-verifier'",
+          `readonly STATE_ROOT='${fixtureStateRoot}'`,
+        )
+        .replaceAll('0:0:700', `${fixtureIdentity}:700`)
+        .replaceAll('0:0:600', `${fixtureIdentity}:600`),
       { mode: 0o700 },
     );
     await chmod(fixtureHelper, 0o700);
@@ -641,9 +839,13 @@ fi
     });
     assert.equal(
       result.stdout,
-      'Production trusted TeleBirr verifier: exact labeled service container absent.\n',
+      'Production trusted TeleBirr verifier: fenced, stopped, and runtime credential removed.\n',
     );
     assert.equal(await readFile(containerState, 'utf8'), '');
+    assert.equal(
+      await readFile(join(fixtureStateRoot, 'emergency-fence'), 'utf8'),
+      'emergency-stop\n',
+    );
     const dockerCalls = (await readFile(dockerLog, 'utf8')).trim().split('\n');
     assert.equal(dockerCalls.length, 5);
     assert.equal(dockerCalls[1], `container rm --force -- ${containerId}`);
@@ -661,14 +863,17 @@ assert.match(productionTunnel, /ConnectTimeout=5/);
 assert.match(productionTunnel, /ConnectionAttempts=1/);
 assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 
-assert.match(productionRunbook, /Production runtime activation is deliberately unavailable/);
+assert.match(
+  productionRunbook,
+  /Production runtime activation is available only through `activate-verification`/,
+);
 assert.match(productionRunbook, /shared\s+database state machine or epoch/);
 assert.match(
   productionRunbook,
   /TeleBirr execution\s+lease records\s+an immutable\s+attempt-to-epoch binding/,
 );
 assert.match(productionRunbook, /Cancellation and\s+reconciliation deliberately remain usable/);
-assert.match(productionRunbook, /There is no same-release renewal or host-start path/);
+assert.match(productionRunbook, /There is no same-release renewal/);
 assert.match(productionRunbook, /three DAG-independent protected jobs/);
 assert.doesNotMatch(productionRunbook, /share a VM\/SSH failure domain/);
 assert.match(productionRunbook, /does not depend on the production VM/);
@@ -676,8 +881,10 @@ assert.match(
   productionRunbook,
   /lock activation control, epoch, the\s+readiness serialization gate, feature switches, then pilot/,
 );
+assert.match(productionRunbook, /ACTIVATE PRODUCTION TELEBIRR VERIFICATION/);
+assert.match(productionRunbook, /automatic rollback/);
+assert.match(productionRunbook, /another separate financial confirmation/);
 assert.doesNotMatch(productionRunbook, /ACTIVATE PRODUCTION PAYMENT VERIFIER ONLY/);
-assert.doesNotMatch(productionRunbook, /Renewal is .*activate-verifier/);
 
 assert.match(activationEpochMigration, /values \(0\)/);
 assert.match(
@@ -1293,5 +1500,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, epoch-bound verifier and execution authority, postgres-only uninvoked activation writer, fixed-off process gates with no host activation or renewal route, strict inert status, and bounded DAG-independent VM plus Management API emergency jobs',
+  'trusted TeleBirr verifier deployment artifacts verified: immutable staging, locally derived SCRAM credential, separately confirmed bounded activation, exact healthy host start, strict active/inert status, and automatic plus DAG-independent emergency rollback',
 );

@@ -1,20 +1,19 @@
 # Production trusted TeleBirr verifier
 
-This runbook covers a disabled production staging and emergency-control boundary for the isolated
-database-ingress verifier. Merely merging or applying the checked-in artifacts does not install a
-host helper, create a GitHub secret or variable, stage an image, invoke activation, enable a
-database login, start a container, change a feature switch, complete a payment, enqueue an
-execution, or move money.
+This runbook covers disabled staging, one manually confirmed verification-only activation, status,
+and emergency control for the isolated database-ingress verifier. Merely merging or applying the
+checked-in artifacts does not install a host helper, create a GitHub secret or variable, stage an
+image, invoke activation, enable a database login, start a container, change a feature switch,
+complete a payment, enqueue an execution, or move money.
 
-Production runtime activation is deliberately unavailable in this lifecycle. The workflow has no
-activation, provisioning, renewal, finalization, or rollback mode; the root helper has no command
-that can create or start a container; and the production Compose file fixes
-`FINANCIAL_ACTIONS_MODE=dry_run` and both verifier process gates to `false`. A database migration
-now defines one postgres-only activation transaction for the next host-orchestration phase. No
-application role can execute it, it is not invoked by migration, and this workflow has no route to
-supply its precomputed SCRAM verifier or call it. The runtime role therefore remains the migration-created
-`NOLOGIN`, passwordless scaffold unless an independent administrator operation outside this
-lifecycle has made the database unsafe.
+Production runtime activation is available only through `activate-verification`. That manual mode
+requires the exact reviewed `main` commit, production project and droplet, pin-manifest digest,
+active Owner UUID, fresh companion-verified pilot UUID, new UUIDv4 idempotency key, and the exact
+action-time phrase. The workflow creates a one-use random password locally, sends only the derived
+4096-iteration SCRAM verifier to the postgres-only atomic database function, then asks the
+digest-pinned root helper to start the exact staged release. Any failed, unhealthy, or ambiguous
+result invokes both the independent database emergency transaction and the host emergency stop.
+There is no renewal route, no executor start, and no final-action route.
 
 This conservative boundary is required because checking financial switches and then starting a
 poller are separate cross-system operations. The database foundation now defines one shared
@@ -36,7 +35,7 @@ transaction. A forward-only adapter accepts only the exact precomputed 4096-iter
 SQL and PostgreSQL activity text. It leaves executor login and both withdrawal switches disabled.
 An additional read before process start is not an atomic interlock and is not accepted here.
 
-Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
+The activation transaction inserts one bounded epoch tied to the exact armed pilot, advances
 the singleton pointer, and change the complete TeleBirr switch set in the same database
 transaction. The deferred complete-set constraint rejects a transaction that leaves TeleBirr live
 with a partial or mismatched switch set. Mutating control paths lock activation control, epoch, the
@@ -52,11 +51,12 @@ executor lease entrypoint also retains one recovery-only path after stop/expiry:
 expired `prepared` attempt and cancel it into review, but cannot issue a new lease, epoch binding, or
 action fence. Natural activation-epoch expiry has the same convergence path.
 
-The production verifier remains separate from `compose.production.yaml`. Its staged service has no
+The production verifier remains separate from `compose.production.yaml`. Its service has no
 host port, contains no KemerBet/executor/final-action authority, uses the exact production direct
 database host with `sslmode=verify-full`, and carries only public signer/device pins. Even a direct
-attempt to start the checked-in production Compose service fails closed because its required
-process gates are fixed off.
+attempt to render or start the checked-in production Compose service outside the root helper fails
+closed because all three process gates are required substitutions with no defaults. The helper
+supplies fixed `live`/`true`/`true` values only in its guarded `start-activated` command.
 
 ## Required reviewed inputs
 
@@ -67,7 +67,7 @@ physically enrolled and its public key has been independently checked:
 | ---------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
 | `TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64`                                 | variable             | Base64 of the exact canonical JSON pin manifest; public keys only          |
 | `SUPABASE_DB_PASSWORD`                                                             | secret               | Existing production administrator credential, used only for status/disable |
-| `SUPABASE_ACCESS_TOKEN`                                                            | secret               | Protected Management API token for the VM-independent emergency route      |
+| `SUPABASE_ACCESS_TOKEN`                                                            | secret               | Protected Management API token for activation and independent emergency    |
 | `SUPABASE_CA_CERTIFICATE_PEM`                                                      | secret               | Existing reviewed Supabase CA                                              |
 | `PRODUCTION_VM_HOST`, `PRODUCTION_VM_KNOWN_HOSTS`, `PRODUCTION_VM_SSH_PRIVATE_KEY` | protected connection | Existing production host boundary                                          |
 
@@ -91,16 +91,18 @@ runtime digest check both pin the installed helper. This bootstrap is intentiona
 Run `Production trusted TeleBirr verifier` only from the exact reviewed commit on `main`, with the
 exact production project reference and droplet ID. The workflow is manual-only.
 
-| Mode                | Exact confirmation phrase               | Effect                                                                           |
-| ------------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
-| `plan`              | `PLAN PRODUCTION VERIFIER`              | Static verification and an ingress-free image build; no protected inputs         |
-| `stage-disabled`    | `STAGE DISABLED PRODUCTION VERIFIER`    | Stages an immutable stopped release with a deliberately unprovisioned credential |
-| `status`            | `STATUS PRODUCTION VERIFIER`            | Requires no labeled container, a `NOLOGIN` verifier, and zero verifier sessions  |
-| `emergency-disable` | `EMERGENCY DISABLE PRODUCTION VERIFIER` | Independently removes labeled containers and revokes login/password/sessions     |
+| Mode                    | Exact confirmation phrase                   | Effect                                                                                        |
+| ----------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `plan`                  | `PLAN PRODUCTION VERIFIER`                  | Static verification and an ingress-free image build; no protected inputs                      |
+| `stage-disabled`        | `STAGE DISABLED PRODUCTION VERIFIER`        | Stages an immutable stopped release with a deliberately unprovisioned placeholder             |
+| `activate-verification` | `ACTIVATE PRODUCTION TELEBIRR VERIFICATION` | Atomically enables one fresh bounded verification pilot and starts only its sealed verifier   |
+| `status`                | `STATUS PRODUCTION VERIFIER`                | Requires no labeled container, runtime credential, login, or verifier session                 |
+| `emergency-disable`     | `EMERGENCY DISABLE PRODUCTION VERIFIER`     | Independently fences/stops the host and revokes login, password, sessions, and live authority |
 
-There is intentionally no activation confirmation phrase. For `stage-disabled`, also supply the
-independently reviewed pin-manifest digest. For every other mode the digest input must be
-`not-applicable` so an inspection or emergency action cannot be confused with an install.
+For `stage-disabled` and `activate-verification`, supply the independently reviewed pin-manifest
+digest. Activation additionally requires the three UUID inputs described above. For other modes,
+the digest and all activation UUID inputs must be `not-applicable`, preventing an inspection or
+emergency action from being confused with activation.
 
 ## Immutable disabled release
 
@@ -116,11 +118,41 @@ the next staging attempt first removes the same exact safe incoming path before 
 runner cancellation or command timeout therefore cannot leave a login or process enabled, and any
 inert incoming residue is neither ignored nor reusable as a release.
 
-There is no same-release renewal or host-start path. A bounded login found by `status` is unsafe and
-causes status to fail. Use `emergency-disable` to force `NOLOGIN`, clear the password, terminate
-sessions, and revoke any current epoch. Any future host activation or renewal must arrive in a
-separate reviewed change that invokes the shared database interlock; disable/reactivate semantics
-alone are not implemented by this lifecycle.
+There is no same-release renewal. A bounded login found by the ordinary `status` mode is unsafe and
+causes status to fail; the activation job uses the helper's exact `status-active` proof instead.
+Use `emergency-disable` to force `NOLOGIN`, clear the password, terminate sessions, revoke the
+current epoch, stop its pilot, disable its switches, remove every exact labeled container, and
+remove the host credential. Reactivation requires a newly staged reviewed commit, fresh pilot, new
+credential and request key, and another explicit confirmation.
+
+## Guarded activation and automatic rollback
+
+The activation job first requires the installed helper digest, exact immutable release and pin
+digest, an empty host runtime boundary, and no labeled container. It copies one root-claimed
+credential file to a request-keyed `0400` runtime directory, while the clear password remains
+absent from command lines, logs, GitHub outputs, SQL text, and database receipts. Only the SCRAM
+verifier appears in the protected Management API request.
+
+The database transaction validates the one exact active Owner, fresh armed two-hour pilot,
+companion assignment, receiver lineage, complete readiness cohort, role graph, current authority,
+and switch state. It then creates the append-only receipt, bounded runtime login, epoch, pointer,
+and complete verification switch set atomically. The executor roles and processes and both
+withdrawal switches remain disabled.
+
+Only after that commit does `start-activated` render Compose with its three fixed helper-only gates.
+It checks the exact image ID and revision, secret/config metadata, label inventory, one-container
+invariant, loopback readiness, and Docker health under bounded timeouts. A root-owned record binds
+the container to the exact commit, request, epoch, and pilot. A final independent database query
+requires exactly one verifier session, no unexpected verifier or executor session, the same current
+authority, and the exact verification-only switch set.
+
+The workflow arms its rollback handler before activation. Any later nonzero exit, signal, HTTP
+ambiguity, malformed response, SSH failure, container failure, unhealthy readiness, or final-state
+drift submits the VM-independent emergency SQL and calls the host emergency stop. The helper also
+rolls back a failed local start. Emergency stop persists a fence before repeated label scans, so a
+concurrent guarded start detects the fence before or after container creation and removes itself.
+Credential and active-record cleanup follows container removal. If either independent rollback path
+cannot be proven, the job fails loudly and requires immediate operator follow-up.
 
 ## Status and emergency disable
 
@@ -152,10 +184,12 @@ key, database password, or VM network path:
   switches. Committing credential revocation first means later financial-drift detection cannot
   roll the login kill switch back.
 
-The new helper contains no service-creation primitive, and the production Compose gates are fixed
-off. Thus an operation racing with emergency intent cannot use this lifecycle to recreate a healthy
-verifier. Direct root Docker access is outside the delegated workflow/helper authority and remains
-an administrator incident boundary.
+The helper's only service-creation primitive is `start-activated`, which requires an exact prepared
+credential, release, pin digest, request, epoch and pilot under both production locks. Emergency
+stop does not wait for those locks: it first persists the fence and repeatedly removes every exact
+labeled container. The start path checks that fence before and after service creation, so an
+operation racing with emergency intent cannot remain healthy. Direct root Docker access is outside
+the delegated workflow/helper authority and remains an administrator incident boundary.
 
 The host and tunnel jobs deliberately do not rewrite global financial switches. The independent
 database job invokes the separate Owner emergency boundary only for the exact current live epoch;
@@ -167,30 +201,27 @@ Never use direct Docker or PostgreSQL administration to bypass these controls, r
 credential/key, add a public route, mount the Docker socket, add executor material, or reintroduce a
 start/provision command without the shared atomic database interlock.
 
-## Remaining activation blockers
+## Preconditions before invoking activation
 
-Before a future production activation can even be proposed, all of these remain required:
+The device pairing, epoch/execution foundation, production activation migrations, postgres-only
+activation writer, bounded-login transaction, guarded host start, automatic rollback, and
+VM-independent emergency SQL exist. Code readiness still is not authority to activate. Before an
+operator selects `activate-verification`, all of these are required:
 
-The disabled release, device pairing, epoch/execution foundation, postgres-only activation writer,
-bounded-login transaction, and VM-independent emergency SQL now exist. Before production runtime
-activation can be proposed, these still remain:
-
-1. Merge this change only after the disposable SQL, Linux quality, and verifier image-smoke checks
-   pass on the exact commit.
-2. Apply the activation migrations to production while epoch zero, all financial switches, verifier
-   login, executor login, and verifier/executor sessions remain inert; then run both advisors and a
-   read-only catalog/state audit.
-3. Add and adversarially test the root-helper and workflow activation/start/automatic-rollback
-   route. It must generate and stage the one-use clear credential locally, send only its SCRAM
-   verifier to the atomic database call, start only the exact sealed release, and invoke independent
-   emergency disable on any ambiguous or unhealthy result.
+1. Merge this change only after the disposable SQL, Linux quality, static verifier, and verifier
+   image-smoke checks pass on the exact commit.
+2. Separately review and install that commit's root helper and matching digest-pinned sudoers file,
+   then stage the exact stopped release with the independently reviewed pin-manifest digest.
+3. Reconfirm production remains at an inert authority/login/session boundary before preparing the
+   pilot.
 4. Prepare and companion-verify a fresh exact-five, exact-receiver, two-hour pilot for that action;
    expired or previously stopped pilots cannot be reused.
-5. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.
-6. Obtain another separate financial confirmation before invoking the live feature-switch
-   transaction, and a later distinct confirmation before enabling execution or attempting any
-   actual deposit. Code readiness, migration deployment, and verifier staging are not authority to
-   execute or move money.
+5. Keep the deposit executor process and roles, both withdrawals, and every KemerBet final-action
+   gate disabled throughout verification.
+6. Obtain another separate financial confirmation immediately before invoking the live
+   verification transaction, and a later distinct confirmation before enabling execution or
+   attempting any actual deposit. Merging, migration deployment, helper installation, verifier
+   staging, and pilot preparation do not authorize either action.
 
 Local/static verification is non-mutating:
 

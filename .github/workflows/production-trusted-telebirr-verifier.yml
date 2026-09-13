@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan, stage a disabled release, inspect the inert boundary, or emergency-disable
+        description: Plan, stage, activate verification, inspect, or emergency-disable
         required: true
         default: plan
         type: choice
         options:
           - plan
           - stage-disabled
+          - activate-verification
           - status
           - emergency-disable
       confirm_production_project_ref:
@@ -31,6 +32,18 @@ on:
         type: string
       confirm_operation:
         description: Type the exact operation phrase documented in the verifier runbook
+        required: true
+        type: string
+      confirm_owner_auth_user_id:
+        description: For activation type the exact active Owner auth-user UUID; otherwise not-applicable
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: For activation type the exact fresh companion-verified pilot UUID; otherwise not-applicable
+        required: true
+        type: string
+      confirm_activation_request_key:
+        description: For activation type one new lowercase UUIDv4 idempotency key; otherwise not-applicable
         required: true
         type: string
 
@@ -66,6 +79,9 @@ jobs:
           CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
           CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
           CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+          CONFIRMED_OWNER: ${{ inputs.confirm_owner_auth_user_id }}
+          CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+          CONFIRMED_REQUEST_KEY: ${{ inputs.confirm_activation_request_key }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
@@ -74,21 +90,30 @@ jobs:
           [[ "$CONFIRMED_PROJECT" != "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
-            'plan:PLAN PRODUCTION VERIFIER'|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'|'status:STATUS PRODUCTION VERIFIER'|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER') ;;
+            'plan:PLAN PRODUCTION VERIFIER'|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'|'activate-verification:ACTIVATE PRODUCTION TELEBIRR VERIFICATION'|'status:STATUS PRODUCTION VERIFIER'|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER') ;;
             *)
               echo '::error::The verifier operation confirmation does not match the selected mode.'
               exit 1
               ;;
           esac
-          if [[ "$REQUESTED_MODE" == 'stage-disabled' ]]; then
+          if [[ "$REQUESTED_MODE" == 'stage-disabled' || "$REQUESTED_MODE" == 'activate-verification' ]]; then
             [[ "$CONFIRMED_PIN_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           else
             [[ "$CONFIRMED_PIN_DIGEST" == 'not-applicable' ]]
           fi
+          if [[ "$REQUESTED_MODE" == 'activate-verification' ]]; then
+            [[ "$CONFIRMED_OWNER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+            [[ "$CONFIRMED_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+            [[ "$CONFIRMED_REQUEST_KEY" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          else
+            [[ "$CONFIRMED_OWNER" == 'not-applicable' ]]
+            [[ "$CONFIRMED_PILOT" == 'not-applicable' ]]
+            [[ "$CONFIRMED_REQUEST_KEY" == 'not-applicable' ]]
+          fi
 
   validate-ci:
     name: Require exact production commit CI
-    if: inputs.mode == 'stage-disabled'
+    if: inputs.mode == 'stage-disabled' || inputs.mode == 'activate-verification'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -311,6 +336,230 @@ jobs:
             rmdir -- "$protected"
           fi
 
+  activate-verification:
+    name: Activate only the bounded production verification lane
+    if: inputs.mode == 'activate-verification'
+    needs: [validate-target, validate-ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Check out exact activation contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Recheck latest main push CI before activation inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+      - name: Create one-use credential and protected requests
+        id: protected
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          OWNER_AUTH_USER_ID: ${{ inputs.confirm_owner_auth_user_id }}
+          PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          ACTIVATION_REQUEST_KEY: ${{ inputs.confirm_activation_request_key }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$SUPABASE_ACCESS_TOKEN" =~ ^[A-Za-z0-9._-]{20,512}$ ]]
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          protected="$RUNNER_TEMP/production-verifier-activation"
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          node infra/operations/create-production-trusted-telebirr-runtime-credential.mjs \
+            --database-url-output "$protected/trusted-telebirr-verifier-database-url" \
+            --scram-output "$protected/trusted-telebirr-verifier.scram"
+          node infra/operations/render-production-trusted-telebirr-activation-requests.mjs \
+            --owner-auth-user-id "$OWNER_AUTH_USER_ID" \
+            --pilot-revision-id "$PILOT_REVISION_ID" \
+            --request-key "$ACTIVATION_REQUEST_KEY" \
+            --scram-file "$protected/trusted-telebirr-verifier.scram" \
+            --output-directory "$protected"
+          jq -Rs '{query: .}' \
+            infra/sql/production-trusted-telebirr-verifier-independent-emergency-disable.sql \
+            >"$protected/emergency-request.json"
+          printf 'header = "Authorization: Bearer %s"\n' "$SUPABASE_ACCESS_TOKEN" \
+            >"$protected/curl.conf"
+          printf '%s\n' 'header = "Content-Type: application/json"' >>"$protected/curl.conf"
+          chmod 0600 "$protected"/*
+          unset SUPABASE_ACCESS_TOKEN
+          jq -e '.query | type == "string" and length > 0' \
+            "$protected/activation-request.json" \
+            "$protected/active-inspection-request.json" \
+            "$protected/emergency-request.json" >/dev/null
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+          echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+      - name: Activate, start, prove health, or automatically revoke
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.protected.outputs.protected }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          HELPER_SHA: ${{ steps.protected.outputs.helper_sha }}
+          PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+          PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          ACTIVATION_REQUEST_KEY: ${{ inputs.confirm_activation_request_key }}
+        run: |
+          set -euo pipefail
+          umask 077
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
+          remote="fetanagent-admin@$VM_HOST"
+          remote_credential="/tmp/fetanagent-production-trusted-telebirr-verifier-credential-$ACTIVATION_REQUEST_KEY"
+          ssh_opts=(-F /dev/null -i "$PROTECTED/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$PROTECTED/known-hosts" \
+            -o ConnectTimeout=8 -o ConnectionAttempts=1 -o ServerAliveInterval=5 \
+            -o ServerAliveCountMax=1)
+          activation_attempted=0
+          operation_complete=0
+
+          rollback_operation() {
+            local command_status=$? database_status=0 host_status=0 cleanup_status=0 status
+            trap - EXIT INT TERM
+            set +e
+            if [[ "$operation_complete" != '1' ]]; then
+              if [[ "$activation_attempted" == '1' ]]; then
+                status="$(curl --silent --show-error \
+                  --retry 2 --retry-all-errors --connect-timeout 8 --max-time 45 \
+                  --request POST --config "$PROTECTED/curl.conf" \
+                  --data-binary @"$PROTECTED/emergency-request.json" \
+                  --output "$PROTECTED/emergency-response.json" --write-out '%{http_code}' \
+                  "https://api.supabase.com/v1/projects/$PRODUCTION_PROJECT_REF/database/query")"
+                [[ "$status" == '201' ]] || database_status=1
+                if [[ "$database_status" -eq 0 ]]; then
+                  jq -e '
+                    (if type == "array" and length == 1 then
+                       (.[0].result // .[0].jsonb_build_object // .[0])
+                     elif (.data | type?) == "array" and (.data | length) == 1 then
+                       (.data[0].result // .data[0].jsonb_build_object // .data[0])
+                     else empty end) as $result |
+                    $result.operation == "verifier_independent_emergency_disable" and
+                    $result.deploymentTarget == "production" and
+                    $result.verifierLogin == "disabled" and
+                    $result.activeVerifierSessions == 0 and
+                    $result.currentFinancialAuthority == null and
+                    $result.liveMoneySwitchCount == 0
+                  ' "$PROTECTED/emergency-response.json" >/dev/null || database_status=1
+                fi
+              fi
+              timeout --signal=TERM --kill-after=10s 110s \
+                ssh "${ssh_opts[@]}" "$remote" \
+                  "sudo -n '$helper' emergency-stop" || host_status=1
+              timeout --signal=TERM --kill-after=10s 60s \
+                ssh "${ssh_opts[@]}" "$remote" \
+                  "sudo -n '$helper' discard-activation '$ACTIVATION_REQUEST_KEY'" || cleanup_status=1
+            fi
+            if [[ "$command_status" -eq 0 ]]; then command_status=1; fi
+            if [[ "$database_status" -ne 0 || "$host_status" -ne 0 || "$cleanup_status" -ne 0 ]]; then
+              echo '::error::Automatic rollback was attempted through every independent route; at least one route needs immediate operator follow-up.' >&2
+              command_status=1
+            fi
+            exit "$command_status"
+          }
+          trap rollback_operation EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          timeout --signal=TERM --kill-after=10s 90s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' verify '$HELPER_SHA' && sudo -n '$helper' discard-activation '$ACTIVATION_REQUEST_KEY' && sudo -n '$helper' status-inert"
+          timeout --signal=TERM --kill-after=10s 60s \
+            scp "${ssh_opts[@]}" \
+              "$PROTECTED/trusted-telebirr-verifier-database-url" \
+              "$remote:$remote_credential"
+          timeout --signal=TERM --kill-after=10s 90s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "chmod 0600 '$remote_credential' && sudo -n '$helper' prepare-activation '$GITHUB_SHA' '$ACTIVATION_REQUEST_KEY' '$PIN_DIGEST'"
+
+          activation_attempted=1
+          activation_status="$(curl --silent --show-error \
+            --retry 2 --retry-all-errors --connect-timeout 8 --max-time 45 \
+            --request POST --config "$PROTECTED/curl.conf" \
+            --data-binary @"$PROTECTED/activation-request.json" \
+            --output "$PROTECTED/activation-response.json" --write-out '%{http_code}' \
+            "https://api.supabase.com/v1/projects/$PRODUCTION_PROJECT_REF/database/query")"
+          [[ "$activation_status" == '201' ]]
+          activation_epoch="$(jq -er '
+            (if type == "array" and length == 1 then
+               (.[0].result // .[0].jsonb_build_object // .[0])
+             elif (.data | type?) == "array" and (.data | length) == 1 then
+               (.data[0].result // .data[0].jsonb_build_object // .data[0])
+             else empty end) as $result |
+            select(
+              $result.schemaVersion == 1 and
+              $result.operation == "trusted_telebirr_verification_activation" and
+              $result.deploymentTarget == "production" and
+              $result.requestKey == $request and
+              $result.pilotRevisionId == $pilot and
+              $result.currentActivationEpoch == $result.activationEpoch and
+              $result.executorLogin == "disabled" and
+              $result.withdrawals == "disabled"
+            ) |
+            $result.activationEpoch | select(type == "number" and . >= 1) | tostring
+          ' --arg request "$ACTIVATION_REQUEST_KEY" --arg pilot "$PILOT_REVISION_ID" \
+            "$PROTECTED/activation-response.json")"
+          [[ "$activation_epoch" =~ ^[1-9][0-9]*$ ]]
+
+          timeout --signal=TERM --kill-after=15s 150s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' start-activated '$GITHUB_SHA' '$ACTIVATION_REQUEST_KEY' '$activation_epoch' '$PILOT_REVISION_ID' '$PIN_DIGEST' && sudo -n '$helper' status-active '$GITHUB_SHA' '$ACTIVATION_REQUEST_KEY' '$activation_epoch' '$PILOT_REVISION_ID' '$PIN_DIGEST'"
+
+          inspection_status="$(curl --silent --show-error \
+            --retry 2 --retry-all-errors --connect-timeout 8 --max-time 45 \
+            --request POST --config "$PROTECTED/curl.conf" \
+            --data-binary @"$PROTECTED/active-inspection-request.json" \
+            --output "$PROTECTED/active-inspection-response.json" --write-out '%{http_code}' \
+            "https://api.supabase.com/v1/projects/$PRODUCTION_PROJECT_REF/database/query")"
+          [[ "$inspection_status" == '201' ]]
+          jq -e '
+            (if type == "array" and length == 1 then
+               (.[0].result // .[0].jsonb_build_object // .[0])
+             elif (.data | type?) == "array" and (.data | length) == 1 then
+               (.data[0].result // .data[0].jsonb_build_object // .data[0])
+             else empty end) as $result |
+            $result.schemaVersion == 1 and
+            $result.operation == "trusted_telebirr_verification_active_inspect" and
+            $result.deploymentTarget == "production" and
+            $result.requestKey == $request and
+            $result.pilotRevisionId == $pilot and
+            ($result.activationEpoch | tostring) == $epoch and
+            $result.authority == "active" and
+            $result.verifierLogin == "bounded" and
+            $result.activeVerifierSessions == 1 and
+            $result.unexpectedVerifierSessions == 0 and
+            $result.executorLogin == "disabled" and
+            $result.switchBoundary == "live_verification"
+          ' --arg request "$ACTIVATION_REQUEST_KEY" --arg pilot "$PILOT_REVISION_ID" \
+            --arg epoch "$activation_epoch" "$PROTECTED/active-inspection-response.json" >/dev/null
+
+          operation_complete=1
+          trap - EXIT INT TERM
+          echo 'The exact sealed verifier is healthy with one bounded production verification session. The executor and withdrawals remain disabled.' >>"$GITHUB_STEP_SUMMARY"
+      - name: Remove every runner-local activation secret
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/production-verifier-activation"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]
+            find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$protected"
+          fi
+
   status:
     name: Prove the production verifier remains inert
     if: always() && needs.validate-target.result == 'success' && inputs.mode == 'status'
@@ -388,8 +637,7 @@ jobs:
             .schemaVersion == 1 and .operation == "verifier_status_inspect" and
             .deploymentTarget == "production" and .verifierLogin == "disabled" and
             .activeVerifierSessions == 0 and .executorLogin == "disabled" and
-            (.financialBoundary == "disabled" or .financialBoundary == "dry_run" or
-             .financialBoundary == "live_verification")
+            .financialBoundary == "disabled"
           ' <<<"$result" >/dev/null
       - name: Remove runner-local inspection material
         if: always()

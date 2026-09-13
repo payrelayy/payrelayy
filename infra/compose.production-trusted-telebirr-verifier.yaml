@@ -1,8 +1,8 @@
 name: fetanagent-production-trusted-telebirr-verifier
 
-# This production verifier is a separate, explicit-profile-only, disabled stack. The checked-in
-# lifecycle can stage and inspect it but has no activation route. All process gates remain fixed
-# off until a future atomic database/host activation design is separately reviewed.
+# This production verifier is a separate, explicit-profile-only stack. The three live-verification
+# process gates have no defaults and can be supplied only by the digest-pinned root helper. Staging
+# never renders or starts this service; the guarded activation route supplies the exact fixed values.
 services:
   trusted-telebirr-verifier:
     profiles: [production-trusted-telebirr-verifier]
@@ -33,9 +33,9 @@ services:
         max-file: '3'
     environment:
       NODE_ENV: production
-      FINANCIAL_ACTIONS_MODE: dry_run
-      INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: 'false'
-      TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: 'false'
+      FINANCIAL_ACTIONS_MODE: ${FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_FINANCIAL_ACTIONS_MODE:?root-helper-only gate is required}
+      INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED: ${FETANAGENT_PRODUCTION_INTERNAL_TRUSTED_TELEBIRR_VERIFIER_ENABLED:?root-helper-only gate is required}
+      TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED: ${FETANAGENT_PRODUCTION_TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED:?root-helper-only gate is required}
       TRUSTED_TELEBIRR_VERIFIER_DEPLOYMENT_TARGET: production
       TRUSTED_TELEBIRR_VERIFIER_DATABASE_URL_FILE: /run/secrets/trusted_telebirr_verifier_database_url
       TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_FILE: /run/configs/trusted_telebirr_verifier_pins.v1.json

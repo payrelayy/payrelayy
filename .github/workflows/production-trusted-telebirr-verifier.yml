@@ -538,3 +538,82 @@ jobs:
             find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
             rmdir -- "$protected"
           fi
+
+  emergency-database-independent-revoke:
+    name: Emergency-disable through the independent Supabase route
+    if: >-
+      always() && needs.validate-target.result == 'success' &&
+      inputs.mode == 'emergency-disable'
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Check out exact independent database kill-switch contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare a protected Management API request
+        id: independent
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$SUPABASE_ACCESS_TOKEN" =~ ^[A-Za-z0-9._-]{20,512}$ ]]
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          protected="$RUNNER_TEMP/production-verifier-independent-emergency"
+          install -d -m 0700 "$protected"
+          jq -Rs '{query: .}' \
+            infra/sql/production-trusted-telebirr-verifier-independent-emergency-disable.sql \
+            >"$protected/request.json"
+          printf 'header = "Authorization: Bearer %s"\n' "$SUPABASE_ACCESS_TOKEN" \
+            >"$protected/curl.conf"
+          printf '%s\n' 'header = "Content-Type: application/json"' \
+            >>"$protected/curl.conf"
+          chmod 0600 "$protected"/*
+          unset SUPABASE_ACCESS_TOKEN
+          jq -e '.query | type == "string" and length > 0' "$protected/request.json" >/dev/null
+          echo "protected=$protected" >>"$GITHUB_OUTPUT"
+      - name: Always call the VM-independent database kill switch
+        if: always()
+        shell: bash
+        env:
+          PROTECTED: ${{ steps.independent.outputs.protected }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PROTECTED" && -d "$PROTECTED" && ! -L "$PROTECTED" ]]
+          response="$PROTECTED/response.json"
+          status="$(curl --silent --show-error \
+            --retry 2 --retry-all-errors --connect-timeout 8 --max-time 45 \
+            --request POST --config "$PROTECTED/curl.conf" \
+            --data-binary @"$PROTECTED/request.json" \
+            --output "$response" --write-out '%{http_code}' \
+            "https://api.supabase.com/v1/projects/$PRODUCTION_PROJECT_REF/database/query")"
+          [[ "$status" == '201' ]]
+          jq -e '
+            (if type == "array" and length == 1 then
+               (.[0].result // .[0].jsonb_build_object // .[0])
+             elif (.data | type?) == "array" and (.data | length) == 1 then
+               (.data[0].result // .data[0].jsonb_build_object // .data[0])
+             else empty end) as $result |
+            $result.schemaVersion == 1 and
+            $result.operation == "verifier_independent_emergency_disable" and
+            $result.deploymentTarget == "production" and
+            $result.verifierLogin == "disabled" and
+            $result.activeVerifierSessions == 0 and
+            $result.currentFinancialAuthority == null and
+            $result.liveMoneySwitchCount == 0
+          ' "$response" >/dev/null
+      - name: Remove runner-local independent emergency material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          protected="$RUNNER_TEMP/production-verifier-independent-emergency"
+          if [[ -e "$protected" || -L "$protected" ]]; then
+            [[ -d "$protected" && ! -L "$protected" && "$(realpath -- "$protected")" == "$protected" ]]
+            find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+            rmdir -- "$protected"
+          fi

@@ -46,7 +46,8 @@ commit;
 
 -- Deliberately use a second transaction. The verifier credential revocation above remains
 -- committed even if the financial emergency boundary detects drift and fails closed below.
-begin transaction isolation level serializable;
+-- The frozen financial readiness gate requires READ COMMITTED for this state transition.
+begin transaction isolation level read committed;
 set local search_path = pg_catalog;
 set local statement_timeout = '15s';
 set local lock_timeout = '2s';

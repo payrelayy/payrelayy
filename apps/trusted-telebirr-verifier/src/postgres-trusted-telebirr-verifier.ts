@@ -237,7 +237,19 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
     (
       select count(*) = 4 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
-        and routine.proconfig = array['search_path=pg_catalog']::text[]
+        and (
+          (
+            routine.oid in (
+              ${AUTHORITY_FUNCTION_SQL},
+              ${COMPLETION_FUNCTION_SQL},
+              ${STAGED_EVIDENCE_FUNCTION_SQL}
+            )
+            and routine.proconfig = array['search_path=""']::text[]
+          ) or (
+            routine.oid = ${QUARANTINE_FUNCTION_SQL}
+            and routine.proconfig = array['search_path=pg_catalog']::text[]
+          )
+        )
         and owner.rolname = 'postgres'
       )
       from pg_catalog.pg_proc as routine

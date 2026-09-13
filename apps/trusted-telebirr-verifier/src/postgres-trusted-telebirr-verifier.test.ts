@@ -98,7 +98,16 @@ describe('trusted TeleBirr PostgreSQL boundary', () => {
       'as no_reachable_unallowlisted_security_definer',
     );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
+      'routine.proconfig = array[\'search_path=""\']::text[]',
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       "routine.proconfig = array['search_path=pg_catalog']::text[]",
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toMatch(
+      /routine\.oid in \([\s\S]*load_private_live_telebirr_verification_authority[\s\S]*complete_private_live_telebirr_verification[\s\S]*load_next_private_live_telebirr_staged_evidence[\s\S]*routine\.proconfig = array\['search_path=""'\]::text\[\]/,
+    );
+    expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toMatch(
+      /routine\.oid = [^\n]*quarantine_private_live_telebirr_staged_evidence[^\n]*[\s\S]*routine\.proconfig = array\['search_path=pg_catalog'\]::text\[\]/,
     );
     expect(TRUSTED_TELEBIRR_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
       'as allowed_functions_execution_private',

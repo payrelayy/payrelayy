@@ -1470,8 +1470,17 @@ assert.equal(
     productionIndependentDisableSql.match(/^begin transaction isolation level serializable;$/gmu) ??
     []
   ).length,
-  2,
-  'independent emergency SQL must isolate credential and financial revocation transactions',
+  1,
+  'independent emergency SQL must isolate credential revocation from the financial transaction',
+);
+assert.equal(
+  (
+    productionIndependentDisableSql.match(
+      /^begin transaction isolation level read committed;$/gmu,
+    ) ?? []
+  ).length,
+  1,
+  'the independent financial emergency transaction must use the readiness gate isolation level',
 );
 assert.equal(
   (productionIndependentDisableSql.match(/^commit;$/gmu) ?? []).length,
@@ -1482,13 +1491,17 @@ const independentLoginIndex = productionIndependentDisableSql.indexOf(
   'alter role fetanagent_trusted_telebirr_verifier_runtime with',
 );
 const independentFirstCommitIndex = productionIndependentDisableSql.indexOf('commit;');
+const independentFinancialTransactionIndex = productionIndependentDisableSql.indexOf(
+  'begin transaction isolation level read committed;',
+);
 const independentFinancialIndex = productionIndependentDisableSql.indexOf(
   'request_private_trusted_telebirr_emergency_disable',
 );
 assert.ok(
   independentLoginIndex >= 0 &&
     independentLoginIndex < independentFirstCommitIndex &&
-    independentFirstCommitIndex < independentFinancialIndex,
+    independentFirstCommitIndex < independentFinancialTransactionIndex &&
+    independentFinancialTransactionIndex < independentFinancialIndex,
   'independent emergency SQL must commit the login kill switch before financial disable',
 );
 assert.match(productionIndependentDisableSql, /current_user <> 'postgres'/g);

@@ -420,6 +420,13 @@ assert.match(
   productionWorkflow,
   /\.verifierLogin == "disabled"[\s\S]*?\.activeVerifierSessions == 0/,
 );
+const statusJob = productionWorkflow.split('\n  status:')[1]?.split('\n  emergency-host-stop:')[0];
+assert.ok(statusJob, 'missing production verifier status job');
+assert.match(
+  statusJob,
+  /\(\.financialBoundary == "disabled" or \.financialBoundary == "dry_run"\)/,
+  'inert status must accept the exact non-live dry-run pilot boundary',
+);
 const emergencyHostJob = productionWorkflow
   .split('\n  emergency-host-stop:')[1]
   ?.split('\n  emergency-database-revoke:')[0];

@@ -324,6 +324,15 @@ assert.match(
 );
 assert.match(productionWorkflow, /STAGE DISABLED PRODUCTION VERIFIER/);
 assert.match(productionWorkflow, /EMERGENCY DISABLE PRODUCTION VERIFIER/);
+assert.match(
+  productionWorkflow,
+  /case "\$REQUESTED_MODE:\$CONFIRMED_OPERATION" in\s+'plan:PLAN PRODUCTION VERIFIER'\|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'\|'status:STATUS PRODUCTION VERIFIER'\|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER'\) ;;/,
+);
+assert.doesNotMatch(
+  productionWorkflow,
+  /'(?:plan|stage-disabled|status):[^'\r\n]+'\|\r?\n/,
+  'workflow case alternatives must not be split after a bare pipe',
+);
 assert.match(productionWorkflow, /confirm_pin_manifest_sha256/);
 assert.match(productionWorkflow, /require-production-ci\.mjs/g);
 assert.match(productionWorkflow, /docker build --pull=false --target trusted-telebirr-verifier/);

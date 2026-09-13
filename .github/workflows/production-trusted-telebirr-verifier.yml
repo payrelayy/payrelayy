@@ -74,10 +74,7 @@ jobs:
           [[ "$CONFIRMED_PROJECT" != "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
-            'plan:PLAN PRODUCTION VERIFIER'|
-            'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'|
-            'status:STATUS PRODUCTION VERIFIER'|
-            'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER') ;;
+            'plan:PLAN PRODUCTION VERIFIER'|'stage-disabled:STAGE DISABLED PRODUCTION VERIFIER'|'status:STATUS PRODUCTION VERIFIER'|'emergency-disable:EMERGENCY DISABLE PRODUCTION VERIFIER') ;;
             *)
               echo '::error::The verifier operation confirmation does not match the selected mode.'
               exit 1

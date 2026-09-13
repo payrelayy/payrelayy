@@ -48,7 +48,7 @@ if (activationOutput === scramFile || inspectionOutput === scramFile) {
 const scramVerifier = await readFile(scramFile, 'utf8');
 if (!SCRAM_PATTERN.test(scramVerifier)) fail('the SCRAM verifier is malformed');
 
-const activationSql = `begin transaction isolation level serializable;
+const activationSql = `begin transaction isolation level read committed;
 set local search_path = pg_catalog;
 set local statement_timeout = '15s';
 set local lock_timeout = '2s';

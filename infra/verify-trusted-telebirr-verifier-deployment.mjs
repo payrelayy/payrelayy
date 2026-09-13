@@ -778,6 +778,15 @@ assert.match(
   productionActivationRequestRenderer,
   /SCRAM-SHA-256|activate_private_trusted_telebirr_verification/,
 );
+assert.match(
+  productionActivationRequestRenderer,
+  /begin transaction isolation level read committed;/,
+  'activation must use the isolation level required by the frozen readiness gate',
+);
+assert.doesNotMatch(
+  productionActivationRequestRenderer,
+  /begin transaction isolation level serializable;/,
+);
 assert.doesNotMatch(productionActivationRequestRenderer, /p_verifier_password|console\./);
 
 if (process.platform === 'linux') {

@@ -37,6 +37,7 @@ const [
   activationRequestIndexesMigration,
   activationScramMigration,
   activationEpochIndexesMigration,
+  roleAdministrationMigration,
 ] = await Promise.all([
   read('Dockerfile'),
   read('infra/compose.trusted-telebirr-verifier.yaml'),
@@ -72,6 +73,9 @@ const [
   ),
   read(
     'supabase/migrations/20260913120130_production_trusted_telebirr_activation_epoch_indexes.sql',
+  ),
+  read(
+    'supabase/migrations/20260913122142_normalize_trusted_telebirr_postgres_role_administration.sql',
   ),
 ]);
 const manifest = JSON.parse(manifestText);
@@ -855,6 +859,23 @@ assert.ok(
     scramLegacyBoundaryIndex < scramFinalCredentialIndex &&
     scramFinalCredentialIndex < scramExactCredentialIndex,
   'the SCRAM adapter must lock before activation and install then verify the final precomputed verifier',
+);
+
+assert.match(roleAdministrationMigration, /current_user <> 'postgres'/);
+assert.match(roleAdministrationMigration, /session_user <> 'postgres'/);
+assert.match(roleAdministrationMigration, /activation_control\.current_epoch = 0/);
+assert.match(
+  roleAdministrationMigration,
+  /grant fetanagent_trusted_telebirr_verifier to postgres [\s\S]*?with inherit false, set false, admin true/,
+);
+assert.match(
+  roleAdministrationMigration,
+  /grant fetanagent_trusted_telebirr_verifier_runtime to postgres [\s\S]*?with inherit false, set false, admin true/,
+);
+assert.doesNotMatch(
+  roleAdministrationMigration,
+  /\b(?:insert|update|delete|truncate)\b|alter role[^;]*login|password %L|password_encryption/i,
+  'portable role administration must not change application data, login state, or credentials',
 );
 
 const writerAuthorityIndex = activationWriterBody.indexOf('select activation_epoch.*');

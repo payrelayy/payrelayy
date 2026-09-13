@@ -344,14 +344,39 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
         'stop_reason_code',
       ]);
 
-      const activationWriters = await client.query(`
-        select routine.oid::regprocedure::text
+      const activationWriters = await client.query<{
+        readonly hardened: boolean;
+        readonly oid: string;
+        readonly public_execute: boolean;
+      }>(`
+        select routine.oid::regprocedure::text as oid,
+               routine.prosecdef and routine.proowner = 'postgres'::regrole as hardened,
+               exists (
+                 select 1
+                   from aclexplode(coalesce(
+                     routine.proacl, acldefault('f', routine.proowner)
+                   )) privilege
+                  where privilege.grantee = 0
+                    and privilege.privilege_type = 'EXECUTE'
+               ) as public_execute
           from pg_proc routine
           join pg_namespace namespace on namespace.oid = routine.pronamespace
          where namespace.nspname = 'app'
            and routine.proname like 'activate_private_trusted_telebirr%'
+         order by oid
       `);
-      expect(activationWriters.rows).toEqual([]);
+      expect(activationWriters.rows).toEqual([
+        {
+          oid: 'app.activate_private_trusted_telebirr_verification(uuid,uuid,uuid,text)',
+          hardened: true,
+          public_execute: false,
+        },
+        {
+          oid: 'app.activate_private_trusted_telebirr_verification_v1_surrogate(uuid,uuid,uuid,text)',
+          hardened: true,
+          public_execute: false,
+        },
+      ]);
     });
 
     it('binds one lease, rejects stale authority, and preserves the exact fence contract', async () => {

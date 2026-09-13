@@ -1,16 +1,16 @@
 # This digest pins the exact stage, request-bound activation/start, status, and emergency helper.
 # Wildcards remain command-scoped; the helper validates every argument and fixed production value.
 Cmnd_Alias FETANAGENT_PRODUCTION_VERIFIER_GUARDED = \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper preflight *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper prepare-incoming *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper cleanup-incoming *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper install *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper prepare-activation *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper discard-activation *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper start-activated *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-inert, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-active *, \
-  sha256:cbbc0af41a475beca3c30ea69951a331b5ffd4828f6aa691d990492af713d324 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper emergency-stop
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper verify *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper preflight *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper prepare-incoming *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper cleanup-incoming *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper install *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper prepare-activation *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper discard-activation *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper start-activated *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-inert, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper status-active *, \
+  sha256:367e5c6897e490550fc5357163b3fbc6a27c1c962b0a63af14f3b9f9d9a666c8 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper emergency-stop
 
 fetanagent-admin ALL=(root) NOPASSWD: FETANAGENT_PRODUCTION_VERIFIER_GUARDED

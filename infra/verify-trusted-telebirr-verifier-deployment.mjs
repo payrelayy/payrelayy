@@ -544,6 +544,28 @@ assert.match(productionHelper, /sha256sum .*trusted-telebirr-verifier-pins\.v1\.
 const productionComposeDigest = createHash('sha256').update(productionCompose).digest('hex');
 assert.match(productionHelper, new RegExp(`EXPECTED_COMPOSE_SHA256='${productionComposeDigest}'`));
 assert.match(productionHelper, /sha256sum .*compose\.production-trusted-telebirr-verifier\.yaml/);
+assert.match(productionCompose, /^  trusted_telebirr_verifier_database_egress:\s*$/m);
+assert.equal((productionCompose.match(/^    enable_ipv6: true$/gmu) ?? []).length, 1);
+assert.match(
+  productionHelper,
+  /readonly VERIFIER_NETWORK_KEY='trusted_telebirr_verifier_database_egress'/,
+);
+assert.match(
+  productionHelper,
+  /readonly VERIFIER_NETWORK_NAME="\$\{PROJECT_NAME\}_\$\{VERIFIER_NETWORK_KEY\}"/,
+);
+assert.match(
+  productionHelper,
+  /remove_inactive_verifier_network[\s\S]*?docker network rm "\$VERIFIER_NETWORK_NAME"/,
+);
+assert.match(
+  productionHelper,
+  /\.EnableIPv6[\s\S]*?\.IPv6Address[\s\S]*?the production verifier network is not exact and IPv6-enabled/,
+);
+assert.match(
+  productionHelper,
+  /remove_inactive_verifier_network[\s\S]*?FETANAGENT_TRUSTED_TELEBIRR_VERIFIER_IMAGE_ID=/,
+);
 assert.match(productionHelper, /docker image inspect .*\.Id/);
 assert.match(productionHelper, /assert_verifier_container_absent/);
 assert.match(productionHelper, /^\s{2}prepare-activation\)$/m);

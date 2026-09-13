@@ -11,6 +11,8 @@ unset COMPOSE_PROJECT_NAME COMPOSE_PATH_SEPARATOR COMPOSE_ENV_FILES COMPOSE_DISA
 umask 077
 
 readonly PROJECT_NAME='fetanagent-production-trusted-telebirr-verifier'
+readonly VERIFIER_NETWORK_KEY='trusted_telebirr_verifier_database_egress'
+readonly VERIFIER_NETWORK_NAME="${PROJECT_NAME}_${VERIFIER_NETWORK_KEY}"
 readonly ROOT='/srv/fetanagent/production-trusted-telebirr-verifier'
 readonly RELEASE_ROOT="$ROOT/releases"
 readonly STATE_ROOT='/var/lib/fetanagent/production-trusted-telebirr-verifier'
@@ -19,7 +21,7 @@ readonly ACTIVE_RECORD="$STATE_ROOT/active-record"
 readonly EMERGENCY_FENCE="$STATE_ROOT/emergency-fence"
 readonly PRODUCTION_STATE_ROOT='/var/lib/fetanagent/production'
 readonly HELPER_PATH='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
-readonly EXPECTED_COMPOSE_SHA256='b1351eabbd0e735c302a01620f7a1959466ca5ec6e4af345bc5e926d116cf335'
+readonly EXPECTED_COMPOSE_SHA256='fc46313c95b1c71afd9f3d33c4304110a31f7da1342e22b17ace4a16b6c1901b'
 
 die() {
   printf 'fetanagent production trusted TeleBirr verifier helper: %s\n' "$*" >&2
@@ -114,6 +116,26 @@ container_for_verifier() {
 assert_verifier_container_absent() {
   [[ -z "$(container_for_verifier)" ]] ||
     die 'the production verifier container remains present'
+}
+
+remove_inactive_verifier_network() {
+  local state
+  if ! timeout --signal=TERM --kill-after=5s 20s \
+    docker network inspect "$VERIFIER_NETWORK_NAME" >/dev/null 2>&1; then
+    return 0
+  fi
+  state="$(timeout --signal=TERM --kill-after=5s 20s docker network inspect \
+    --format '{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.network"}}|{{len .Containers}}' \
+    "$VERIFIER_NETWORK_NAME")" || die 'the inactive verifier network inspection failed'
+  [[ "$state" == "$VERIFIER_NETWORK_NAME|$PROJECT_NAME|$VERIFIER_NETWORK_KEY|0" ]] ||
+    die 'the inactive verifier network is not exact and empty'
+  timeout --signal=TERM --kill-after=5s 20s \
+    docker network rm "$VERIFIER_NETWORK_NAME" >/dev/null ||
+    die 'the inactive verifier network could not be removed'
+  if timeout --signal=TERM --kill-after=5s 20s \
+    docker network inspect "$VERIFIER_NETWORK_NAME" >/dev/null 2>&1; then
+    die 'the inactive verifier network remains present'
+  fi
 }
 
 prepared_credential_dir() {
@@ -250,12 +272,22 @@ emergency_stop_verifier() {
 }
 
 inspect_active_container() {
-  local expected_image_id="$1" container_id="$2" state
+  local expected_image_id="$1" container_id="$2" state network_state
+  local network_ipv6 network_internal network_project network_key network_count network_address
   state="$(timeout --signal=TERM --kill-after=5s 20s docker container inspect \
     --format '{{.Image}}|{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}' \
     "$container_id")" || die 'the production verifier container inspection failed'
   [[ "$state" == "$expected_image_id|true|healthy|$PROJECT_NAME|trusted-telebirr-verifier" ]] ||
     die 'the production verifier container is not exact and healthy'
+  network_state="$(timeout --signal=TERM --kill-after=5s 20s docker network inspect \
+    --format '{{.EnableIPv6}}|{{.Internal}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.network"}}|{{len .Containers}}|{{range .Containers}}{{.IPv6Address}}{{end}}' \
+    "$VERIFIER_NETWORK_NAME")" || die 'the production verifier network inspection failed'
+  IFS='|' read -r network_ipv6 network_internal network_project network_key \
+    network_count network_address <<<"$network_state"
+  [[ "$network_ipv6" == 'true' && "$network_internal" == 'false' &&
+    "$network_project" == "$PROJECT_NAME" && "$network_key" == "$VERIFIER_NETWORK_KEY" &&
+    "$network_count" == '1' && "$network_address" =~ ^[0-9a-f:]+/[0-9]+$ ]] ||
+    die 'the production verifier network is not exact and IPv6-enabled'
 }
 
 verify_active_record() {
@@ -611,6 +643,9 @@ case "${1:-}" in
     verify_release "$sha" "$release"
     credential_dir="$(verify_prepared_credential "$sha" "$request_key" "$pin_digest")"
     image_id="$(<"$release/.image-id")"
+    # Compose does not mutate an already-created bridge from IPv4-only to dual-stack. Replace only
+    # the exact empty project network before start so the sealed enable_ipv6 contract takes effect.
+    remove_inactive_verifier_network
 
     rollback_host_start() {
       local command_status=$?

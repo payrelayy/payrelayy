@@ -93,3 +93,7 @@ configs:
 networks:
   trusted_telebirr_verifier_database_egress:
     driver: bridge
+    # Supabase direct database endpoints are IPv6-only unless the optional IPv4 add-on is used.
+    # The production Droplet has native IPv6, so this isolated bridge must explicitly assign an
+    # IPv6 address to the verifier container instead of silently creating an IPv4-only network.
+    enable_ipv6: true

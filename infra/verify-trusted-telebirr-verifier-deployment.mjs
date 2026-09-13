@@ -420,6 +420,13 @@ assert.match(
   productionWorkflow,
   /\.verifierLogin == "disabled"[\s\S]*?\.activeVerifierSessions == 0/,
 );
+const statusJob = productionWorkflow.split('\n  status:')[1]?.split('\n  emergency-host-stop:')[0];
+assert.ok(statusJob, 'missing production verifier status job');
+assert.match(
+  statusJob,
+  /\(\.financialBoundary == "disabled" or \.financialBoundary == "dry_run"\)/,
+  'inert status must accept the exact non-live dry-run pilot boundary',
+);
 const emergencyHostJob = productionWorkflow
   .split('\n  emergency-host-stop:')[1]
   ?.split('\n  emergency-database-revoke:')[0];
@@ -770,6 +777,15 @@ assert.doesNotMatch(productionCredentialGenerator, /console\.|process\.stdout|pr
 assert.match(
   productionActivationRequestRenderer,
   /SCRAM-SHA-256|activate_private_trusted_telebirr_verification/,
+);
+assert.match(
+  productionActivationRequestRenderer,
+  /begin transaction isolation level read committed;/,
+  'activation must use the isolation level required by the frozen readiness gate',
+);
+assert.doesNotMatch(
+  productionActivationRequestRenderer,
+  /begin transaction isolation level serializable;/,
 );
 assert.doesNotMatch(productionActivationRequestRenderer, /p_verifier_password|console\./);
 

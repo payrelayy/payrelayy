@@ -637,7 +637,7 @@ jobs:
             .schemaVersion == 1 and .operation == "verifier_status_inspect" and
             .deploymentTarget == "production" and .verifierLogin == "disabled" and
             .activeVerifierSessions == 0 and .executorLogin == "disabled" and
-            .financialBoundary == "disabled"
+            (.financialBoundary == "disabled" or .financialBoundary == "dry_run")
           ' <<<"$result" >/dev/null
       - name: Remove runner-local inspection material
         if: always()

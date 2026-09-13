@@ -91,7 +91,7 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
   createSession: () => Client,
 ): void {
   describe('trusted TeleBirr activation epoch foundation', () => {
-    it('starts at immutable epoch zero with private tables and no activation routine', async () => {
+    it('starts at immutable epoch zero with private tables and postgres-only activation', async () => {
       const client = getClient();
       const state = await client.query<{
         readonly authority_state: string;
@@ -126,16 +126,51 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
            and relation.relname in (
              'private_trusted_telebirr_activation_control',
              'private_trusted_telebirr_activation_epochs',
+             'private_trusted_telebirr_activation_requests',
              'private_trusted_telebirr_emergency_disable_intents'
            )
          order by relation.relname
       `);
-      expect(rls.rows).toHaveLength(3);
+      expect(rls.rows).toHaveLength(4);
       expect(
         rls.rows.every(
           (row) => row.relrowsecurity && row.relforcerowsecurity && row.owner_only_acl,
         ),
       ).toBe(true);
+
+      const receiptIndexes = await client.query<{ readonly indexname: string }>(`
+        select indexname
+          from pg_indexes
+         where schemaname = 'app'
+           and tablename = 'private_trusted_telebirr_activation_requests'
+           and indexname in (
+             'private_tt_activation_requests_admin_idx',
+             'private_tt_activation_requests_companion_assignment_idx',
+             'private_tt_activation_requests_receiver_profile_idx'
+           )
+         order by indexname
+      `);
+      expect(receiptIndexes.rows).toEqual([
+        { indexname: 'private_tt_activation_requests_admin_idx' },
+        { indexname: 'private_tt_activation_requests_companion_assignment_idx' },
+        { indexname: 'private_tt_activation_requests_receiver_profile_idx' },
+      ]);
+
+      const epochIndexes = await client.query<{ readonly indexname: string }>(`
+        select indexname
+          from pg_indexes
+         where schemaname = 'app'
+           and tablename = 'private_trusted_telebirr_activation_epochs'
+           and indexname in (
+             'private_tt_activation_epochs_activated_by_idx',
+             'private_tt_activation_epochs_pilot_idx'
+           )
+         order by indexname
+      `);
+      expect(epochIndexes.rows).toEqual([
+        { indexname: 'private_tt_activation_epochs_activated_by_idx' },
+        { indexname: 'private_tt_activation_epochs_pilot_idx' },
+      ]);
 
       const policies = await client.query<{ readonly policyname: string }>(`
         select policyname
@@ -144,6 +179,7 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
            and tablename in (
              'private_trusted_telebirr_activation_control',
              'private_trusted_telebirr_activation_epochs',
+             'private_trusted_telebirr_activation_requests',
              'private_trusted_telebirr_emergency_disable_intents'
            )
       `);
@@ -198,14 +234,117 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
         },
       ]);
 
-      const activationSurface = await client.query<{ readonly routine: string }>(`
-        select routine.oid::regprocedure::text as routine
+      const activationSurface = await client.query<{
+        readonly anon_execute: boolean;
+        readonly configuration: readonly string[] | null;
+        readonly hardened: boolean;
+        readonly owner_control_execute: boolean;
+        readonly owner_runtime_execute: boolean;
+        readonly public_execute: boolean;
+        readonly routine: string;
+        readonly service_execute: boolean;
+        readonly verifier_execute: boolean;
+      }>(`
+        select routine.oid::regprocedure::text as routine,
+               routine.prosecdef and routine.proowner = 'postgres'::regrole as hardened,
+               routine.proconfig as configuration,
+               exists (
+                 select 1
+                   from aclexplode(coalesce(
+                     routine.proacl, acldefault('f', routine.proowner)
+                   )) privilege
+                  where privilege.grantee = 0
+                    and privilege.privilege_type = 'EXECUTE'
+               ) as public_execute,
+               has_function_privilege('anon', routine.oid, 'EXECUTE') as anon_execute,
+               has_function_privilege('service_role', routine.oid, 'EXECUTE') as service_execute,
+               has_function_privilege(
+                 'fetanagent_trusted_telebirr_verifier', routine.oid, 'EXECUTE'
+               ) as verifier_execute,
+               has_function_privilege(
+                 'fetanagent_owner_control', routine.oid, 'EXECUTE'
+               ) as owner_control_execute,
+               has_function_privilege(
+                 'fetanagent_owner_control_runtime', routine.oid, 'EXECUTE'
+               ) as owner_runtime_execute
           from pg_proc routine
           join pg_namespace namespace on namespace.oid = routine.pronamespace
          where namespace.nspname = 'app'
-           and routine.proname like 'activate_private_trusted_telebirr%'
+           and routine.proname in (
+             'activate_private_trusted_telebirr_verification',
+             'activate_private_trusted_telebirr_verification_v1_surrogate',
+             'disable_private_trusted_telebirr_verifier_login'
+           )
+         order by routine
       `);
-      expect(activationSurface.rows).toEqual([]);
+      expect(activationSurface.rows).toEqual([
+        {
+          routine: 'app.activate_private_trusted_telebirr_verification(uuid,uuid,uuid,text)',
+          hardened: true,
+          configuration: ['search_path=""'],
+          public_execute: false,
+          anon_execute: false,
+          service_execute: false,
+          verifier_execute: false,
+          owner_control_execute: false,
+          owner_runtime_execute: false,
+        },
+        {
+          routine:
+            'app.activate_private_trusted_telebirr_verification_v1_surrogate(uuid,uuid,uuid,text)',
+          hardened: true,
+          configuration: ['search_path=""'],
+          public_execute: false,
+          anon_execute: false,
+          service_execute: false,
+          verifier_execute: false,
+          owner_control_execute: false,
+          owner_runtime_execute: false,
+        },
+        {
+          routine: 'app.disable_private_trusted_telebirr_verifier_login()',
+          hardened: true,
+          configuration: ['search_path=""'],
+          public_execute: false,
+          anon_execute: false,
+          service_execute: false,
+          verifier_execute: false,
+          owner_control_execute: false,
+          owner_runtime_execute: false,
+        },
+      ]);
+
+      const scramContract = await client.query<{
+        readonly arguments: string;
+        readonly clear_password_parameter_absent: boolean;
+        readonly exact_scram_verifier_check: boolean;
+        readonly final_verifier_checked: boolean;
+      }>(`
+        select pg_get_function_arguments(routine.oid) as arguments,
+               position(
+                 'SCRAM-SHA-256[$]4096:' in pg_get_functiondef(routine.oid)
+               ) > 0 as exact_scram_verifier_check,
+               position(
+                 'role.rolpassword is not distinct from p_verifier_scram_secret'
+                 in pg_get_functiondef(routine.oid)
+               ) > 0 as final_verifier_checked,
+               position(
+                 'p_verifier_password' in pg_get_functiondef(routine.oid)
+               ) = 0 as clear_password_parameter_absent
+          from pg_proc routine
+         where routine.oid =
+           'app.activate_private_trusted_telebirr_verification(uuid,uuid,uuid,text)'
+             ::regprocedure
+      `);
+      expect(scramContract.rows).toEqual([
+        {
+          arguments:
+            'p_actor_auth_user_id uuid, p_pilot_revision_id uuid, p_request_key uuid, p_verifier_scram_secret text',
+          exact_scram_verifier_check: true,
+          final_verifier_checked: true,
+          clear_password_parameter_absent: true,
+        },
+      ]);
 
       const ownerLockOrder = await client.query<{
         readonly authority_first: boolean;
@@ -307,6 +446,103 @@ export function registerTrustedTelebirrActivationEpochSqlTests(
         'select * from app.load_next_private_live_telebirr_staged_evidence()',
       );
       expect(loader.rows).toEqual([]);
+    });
+
+    it('accepts only a SCRAM verifier and rolls rejected activation back to inert state', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const nonexistentPilotId = randomUUID();
+        const rawPasswordFailure = await failureAtSavepoint(client, () =>
+          client.query(
+            `select *
+               from app.activate_private_trusted_telebirr_verification(
+                 $1::uuid, $2::uuid, $3::uuid, $4::text
+               )`,
+            [getOwnerAdminId(), nonexistentPilotId, randomUUID(), 'a'.repeat(64)],
+          ),
+        );
+        expect(rawPasswordFailure.message).toContain(
+          'The trusted TeleBirr activation request is invalid.',
+        );
+
+        const fakeScramVerifier = [
+          'SCRAM-SHA-256',
+          `4096:${'A'.repeat(22)}==`,
+          `${'B'.repeat(43)}=:${'C'.repeat(43)}=`,
+        ].join('$');
+        const guardedPilotFailure = await failureAtSavepoint(client, () =>
+          client.query(
+            `select *
+               from app.activate_private_trusted_telebirr_verification(
+                 $1::uuid, $2::uuid, $3::uuid, $4::text
+               )`,
+            [getOwnerAdminId(), nonexistentPilotId, randomUUID(), fakeScramVerifier],
+          ),
+        );
+        expect(guardedPilotFailure.message).toContain(
+          'The fixed companion-verified TeleBirr pilot is not activation-ready.',
+        );
+
+        const inert = await client.query<{
+          readonly activation_requests: string;
+          readonly current_epoch: string;
+          readonly live_switches: string;
+          readonly verifier_roles_inert: string;
+          readonly verifier_sessions: string;
+        }>(`
+          select (
+                   select count(*)
+                     from app.private_trusted_telebirr_activation_requests
+                 ) as activation_requests,
+                 (
+                   select current_epoch
+                     from app.private_trusted_telebirr_activation_control
+                    where control_key = 'trusted_telebirr_financial_authority'
+                 ) as current_epoch,
+                 (
+                   select count(*)
+                     from app.feature_switches
+                    where feature_key in (
+                      'cbe_birr_authoritative_verification',
+                      'deposit_execution',
+                      'payment_verification',
+                      'private_live_deposit_pilot',
+                      'telebirr_authoritative_verification',
+                      'withdrawal_collection',
+                      'withdrawal_validation'
+                    )
+                      and mode = 'live'
+                 ) as live_switches,
+                 (
+                   select count(*)
+                     from pg_authid
+                    where rolname in (
+                      'fetanagent_trusted_telebirr_verifier',
+                      'fetanagent_trusted_telebirr_verifier_runtime'
+                    )
+                      and not rolcanlogin
+                      and rolpassword is null
+                 ) as verifier_roles_inert,
+                 (
+                   select count(*)
+                     from pg_stat_activity
+                    where usename in (
+                      'fetanagent_trusted_telebirr_verifier',
+                      'fetanagent_trusted_telebirr_verifier_runtime'
+                    )
+                      and pid <> pg_backend_pid()
+                 ) as verifier_sessions
+        `);
+        expect(inert.rows).toEqual([
+          {
+            activation_requests: '0',
+            current_epoch: '0',
+            live_switches: '0',
+            verifier_roles_inert: '2',
+            verifier_sessions: '0',
+          },
+        ]);
+      });
     });
 
     it('rejects live TeleBirr without an epoch and rejects a partial live set at commit', async () => {

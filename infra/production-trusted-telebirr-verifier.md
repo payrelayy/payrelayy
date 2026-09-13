@@ -1,16 +1,20 @@
 # Production trusted TeleBirr verifier
 
 This runbook covers a disabled production staging and emergency-control boundary for the isolated
-database-ingress verifier. The checked-in artifacts do not install a host helper, create a GitHub
-secret or variable, stage an image, enable a database login, start a container, change a feature
-switch, complete a payment, enqueue an execution, or move money.
+database-ingress verifier. Merely merging or applying the checked-in artifacts does not install a
+host helper, create a GitHub secret or variable, stage an image, invoke activation, enable a
+database login, start a container, change a feature switch, complete a payment, enqueue an
+execution, or move money.
 
-Production activation is deliberately unavailable. The workflow has no activation, provisioning,
-renewal, finalization, or rollback mode; the root helper has no command that can create or start a
-container; the former production login-provisioning SQL is absent; and the production Compose file
-fixes `FINANCIAL_ACTIONS_MODE=dry_run` and both verifier process gates to `false`. The runtime role
-therefore remains the migration-created `NOLOGIN`, passwordless scaffold unless an independent
-administrator operation outside this lifecycle has made the database unsafe.
+Production runtime activation is deliberately unavailable in this lifecycle. The workflow has no
+activation, provisioning, renewal, finalization, or rollback mode; the root helper has no command
+that can create or start a container; and the production Compose file fixes
+`FINANCIAL_ACTIONS_MODE=dry_run` and both verifier process gates to `false`. A database migration
+now defines one postgres-only activation transaction for the next host-orchestration phase. No
+application role can execute it, it is not invoked by migration, and this workflow has no route to
+supply its precomputed SCRAM verifier or call it. The runtime role therefore remains the migration-created
+`NOLOGIN`, passwordless scaffold unless an independent administrator operation outside this
+lifecycle has made the database unsafe.
 
 This conservative boundary is required because checking financial switches and then starting a
 poller are separate cross-system operations. The database foundation now defines one shared
@@ -24,8 +28,13 @@ cannot starve an independently live CBE lane. Each TeleBirr execution lease reco
 attempt-to-epoch binding, its complete lease window must fit inside that epoch, and the same epoch
 must still be current with ten seconds remaining when final action is fenced. Owner aggregate status
 uses the same any-configured-live-lane rule and never counts an unconfigured live switch. It seeds
-only immutable epoch zero in `disabled` state and provides no live-activation writer. An additional
-read before process start is not an atomic interlock and is not accepted here.
+only immutable epoch zero in `disabled` state. The later postgres-only writer can create exactly
+one append-only activation receipt per already armed pilot, provisions a SCRAM verifier login only
+until that pilot expires, and changes the epoch, pointer, and complete TeleBirr switch set in one
+transaction. A forward-only adapter accepts only the exact precomputed 4096-iteration
+`SCRAM-SHA-256` verifier; the clear random runtime password therefore stays outside Management API
+SQL and PostgreSQL activity text. It leaves executor login and both withdrawal switches disabled.
+An additional read before process start is not an atomic interlock and is not accepted here.
 
 Any later activation proposal must insert one bounded epoch tied to the exact armed pilot, advance
 the singleton pointer, and change the complete TeleBirr switch set in the same database
@@ -58,6 +67,7 @@ physically enrolled and its public key has been independently checked:
 | ---------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
 | `TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64`                                 | variable             | Base64 of the exact canonical JSON pin manifest; public keys only          |
 | `SUPABASE_DB_PASSWORD`                                                             | secret               | Existing production administrator credential, used only for status/disable |
+| `SUPABASE_ACCESS_TOKEN`                                                            | secret               | Protected Management API token for the VM-independent emergency route      |
 | `SUPABASE_CA_CERTIFICATE_PEM`                                                      | secret               | Existing reviewed Supabase CA                                              |
 | `PRODUCTION_VM_HOST`, `PRODUCTION_VM_KNOWN_HOSTS`, `PRODUCTION_VM_SSH_PRIVATE_KEY` | protected connection | Existing production host boundary                                          |
 
@@ -106,10 +116,11 @@ the next staging attempt first removes the same exact safe incoming path before 
 runner cancellation or command timeout therefore cannot leave a login or process enabled, and any
 inert incoming residue is neither ignored nor reusable as a release.
 
-There is no same-release renewal path. A bounded login found by `status` is unsafe and causes status
-to fail. Use `emergency-disable` to force `NOLOGIN`, clear the password, and terminate sessions. Any
-future activation or renewal must arrive in a separate reviewed change with the shared database
-interlock described above; disable/reactivate semantics alone are not implemented by this PR.
+There is no same-release renewal or host-start path. A bounded login found by `status` is unsafe and
+causes status to fail. Use `emergency-disable` to force `NOLOGIN`, clear the password, terminate
+sessions, and revoke any current epoch. Any future host activation or renewal must arrive in a
+separate reviewed change that invokes the shared database interlock; disable/reactivate semantics
+alone are not implemented by this lifecycle.
 
 ## Status and emergency disable
 
@@ -119,10 +130,10 @@ be absent, while the serializable read-only database inspection requires the run
 executor and recognized financial-boundary state without changing either.
 
 `emergency-disable` overrides this workflow's ordinary serialization by canceling an older run in
-the same concurrency group. It then launches two DAG-independent protected jobs. They execute even
-when the other job fails, but the current database route still tunnels through the production VM,
-so both jobs share a VM/SSH failure domain until the database kill switch has a separately reachable
-administrative route:
+the same concurrency group. It then launches three DAG-independent protected jobs. They execute
+even when either of the other jobs fails. Two retain the existing host/tunnel path, while the third
+uses the Supabase Management API and therefore does not depend on the production VM, SSH key, host
+key, database password, or VM network path:
 
 - The host job needs only the SSH host/key/known-hosts inputs. It calls the installed
   sudoers-digest-pinned `emergency-stop` command directly with bounded SSH. That command takes no
@@ -130,21 +141,27 @@ administrative route:
   secret, enumerates every container with the exact Compose project and service labels, attempts to
   force-remove all of them together under an internal timeout, and performs repeated exact-label
   absence checks. Ordinary status and staging still reject a broken multiple-container invariant.
-- In parallel, the database job always attempts the `NOLOGIN` kill switch through the exact
+- In parallel, the tunnel database job always attempts the `NOLOGIN` kill switch through the exact
   verify-full direct tunnel. It clears both verifier-role passwords and terminates all verifier
-  sessions. A failure result from one job cannot skip the other job, but loss of the shared VM/SSH
-  route can prevent both operations and must be treated as an administrator incident.
+  sessions. It is retained as a defense-in-depth fallback.
+- The independent database job submits the reviewed SQL file to
+  `POST /v1/projects/{ref}/database/query` with the protected Supabase token. Its first transaction
+  revokes both verifier credentials and sessions. A second transaction discovers the exact current
+  epoch and, when it is active and unrevoked, calls the existing Owner emergency boundary to append
+  intent, revoke authority, stop the pilot, and disable payment, execution, provider, and pilot
+  switches. Committing credential revocation first means later financial-drift detection cannot
+  roll the login kill switch back.
 
 The new helper contains no service-creation primitive, and the production Compose gates are fixed
 off. Thus an operation racing with emergency intent cannot use this lifecycle to recreate a healthy
 verifier. Direct root Docker access is outside the delegated workflow/helper authority and remains
 an administrator incident boundary.
 
-The host `emergency-disable` workflow deliberately does not rewrite global financial switches. The
-database Owner emergency boundary is separate: once a future live epoch exists, it atomically
-records append-only intent, revokes that exact expected epoch, stops its pilot, and disables all
-five provider/pilot/payment/execution switches. Neither route can activate an epoch, enable a
-runtime login, start a verifier, or authorize a final action.
+The host and tunnel jobs deliberately do not rewrite global financial switches. The independent
+database job invokes the separate Owner emergency boundary only for the exact current live epoch;
+that boundary atomically records append-only intent, revokes the epoch, stops its pilot, and
+disables all five provider/pilot/payment/execution switches. None of the emergency routes can
+activate an epoch, enable a runtime login, start a verifier, or authorize a final action.
 
 Never use direct Docker or PostgreSQL administration to bypass these controls, reuse a staging
 credential/key, add a public route, mount the Docker socket, add executor material, or reintroduce a
@@ -154,20 +171,26 @@ start/provision command without the shared atomic database interlock.
 
 Before a future production activation can even be proposed, all of these remain required:
 
-1. Merge this disabled lifecycle and run its Linux quality/image-smoke checks on exact `main`.
-2. Install and attest the exact stage/status/emergency-only helper and command-scoped sudoers digest.
-3. Complete Android device pairing and independently review the public-key pin manifest.
-4. Stage the exact disabled release and prove the container, login, password, and sessions absent.
-5. Review and apply the disabled-only database epoch foundation, including its switch interlock,
-   verifier lease-to-authority and authority-to-completion tests, execution lease-to-epoch and
-   epoch-to-fence tests, immutable binding ACL/RLS checks, and independent emergency route.
-6. Add any live-epoch creation and bounded-login provisioning only in a later separately confirmed
-   change; the foundation intentionally contains neither.
-7. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.
-8. Obtain another separate financial confirmation before any live feature-switch operation or
-   actual deposit. Verifier staging is not authorization to execute or move money.
-9. Provide and test a database emergency-revocation route that does not depend on the production VM,
-   its SSH key, its host key, or its network path.
+The disabled release, device pairing, epoch/execution foundation, postgres-only activation writer,
+bounded-login transaction, and VM-independent emergency SQL now exist. Before production runtime
+activation can be proposed, these still remain:
+
+1. Merge this change only after the disposable SQL, Linux quality, and verifier image-smoke checks
+   pass on the exact commit.
+2. Apply the activation migrations to production while epoch zero, all financial switches, verifier
+   login, executor login, and verifier/executor sessions remain inert; then run both advisors and a
+   read-only catalog/state audit.
+3. Add and adversarially test the root-helper and workflow activation/start/automatic-rollback
+   route. It must generate and stage the one-use clear credential locally, send only its SCRAM
+   verifier to the atomic database call, start only the exact sealed release, and invoke independent
+   emergency disable on any ambiguous or unhealthy result.
+4. Prepare and companion-verify a fresh exact-five, exact-receiver, two-hour pilot for that action;
+   expired or previously stopped pilots cannot be reused.
+5. Keep the deposit executor and every KemerBet final-action gate disabled throughout verification.
+6. Obtain another separate financial confirmation before invoking the live feature-switch
+   transaction, and a later distinct confirmation before enabling execution or attempting any
+   actual deposit. Code readiness, migration deployment, and verifier staging are not authority to
+   execute or move money.
 
 Local/static verification is non-mutating:
 

@@ -146,7 +146,7 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('dedicated trusted TeleBirr verifier runtime boundary', () => {
-    it('creates a dormant NOLOGIN pair with one non-settable inheritance edge', async () => {
+    it('creates a dormant NOLOGIN pair with one runtime edge and admin-only postgres control', async () => {
       const client = getClient();
       const roles = await client.query<{
         readonly rolbypassrls: boolean;
@@ -216,6 +216,20 @@ export function registerTrustedTelebirrVerifierRuntimeSqlTests(
           inherit_option: true,
           set_option: false,
           admin_option: false,
+        },
+        {
+          group_role: verifierGroup,
+          member_role: 'postgres',
+          inherit_option: false,
+          set_option: false,
+          admin_option: true,
+        },
+        {
+          group_role: verifierRuntime,
+          member_role: 'postgres',
+          inherit_option: false,
+          set_option: false,
+          admin_option: true,
         },
       ]);
       const roleUsage = await client.query<{

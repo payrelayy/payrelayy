@@ -28,10 +28,16 @@ const [
   productionTunnel,
   productionRunbook,
   productionDisableSql,
+  productionIndependentDisableSql,
   productionInspectSql,
   readinessCohortMigration,
   activationEpochMigration,
   executionEpochMigration,
+  activationWriterMigration,
+  activationRequestIndexesMigration,
+  activationScramMigration,
+  activationEpochIndexesMigration,
+  roleAdministrationMigration,
 ] = await Promise.all([
   read('Dockerfile'),
   read('infra/compose.trusted-telebirr-verifier.yaml'),
@@ -51,10 +57,26 @@ const [
   read('infra/operations/fetanagent-production-direct-database-tunnel.sh'),
   read('infra/production-trusted-telebirr-verifier.md'),
   read('infra/sql/production-trusted-telebirr-verifier-disable.sql'),
+  read('infra/sql/production-trusted-telebirr-verifier-independent-emergency-disable.sql'),
   read('infra/sql/production-trusted-telebirr-verifier-inspect.sql'),
   read('supabase/migrations/20260825103000_private_owner_kemerbet_readiness_cohort_claim.sql'),
   read('supabase/migrations/20260910154104_trusted_telebirr_activation_epoch_foundation.sql'),
   read('supabase/migrations/20260910170000_private_live_execution_activation_epoch.sql'),
+  read(
+    'supabase/migrations/20260913112000_production_trusted_telebirr_verification_activation.sql',
+  ),
+  read(
+    'supabase/migrations/20260913114551_production_trusted_telebirr_activation_request_indexes.sql',
+  ),
+  read(
+    'supabase/migrations/20260913115251_harden_production_trusted_telebirr_activation_credential.sql',
+  ),
+  read(
+    'supabase/migrations/20260913120130_production_trusted_telebirr_activation_epoch_indexes.sql',
+  ),
+  read(
+    'supabase/migrations/20260913122142_normalize_trusted_telebirr_postgres_role_administration.sql',
+  ),
 ]);
 const manifest = JSON.parse(manifestText);
 
@@ -108,6 +130,24 @@ function executionEpochFunctionBody(name) {
     'u',
   ).exec(executionEpochMigration);
   assert.ok(match, `missing execution-epoch function ${name}`);
+  return match[1];
+}
+
+function activationWriterFunctionBody(name) {
+  const match = new RegExp(
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    'u',
+  ).exec(activationWriterMigration);
+  assert.ok(match, `missing production activation-writer function ${name}`);
+  return match[1];
+}
+
+function activationScramFunctionBody(name) {
+  const match = new RegExp(
+    `create(?: or replace)? function app\\.${escapeRegExp(name)}\\([^]*?as \\$\\$([^]*?)\\$\\$;`,
+    'u',
+  ).exec(activationScramMigration);
+  assert.ok(match, `missing SCRAM activation function ${name}`);
   return match[1];
 }
 
@@ -364,14 +404,26 @@ assert.match(
 const emergencyHostJob = productionWorkflow
   .split('\n  emergency-host-stop:')[1]
   ?.split('\n  emergency-database-revoke:')[0];
-const emergencyDatabaseJob = productionWorkflow.split('\n  emergency-database-revoke:')[1];
+const emergencyDatabaseJob = productionWorkflow
+  .split('\n  emergency-database-revoke:')[1]
+  ?.split('\n  emergency-database-independent-revoke:')[0];
+const emergencyIndependentDatabaseJob = productionWorkflow.split(
+  '\n  emergency-database-independent-revoke:',
+)[1];
 assert.ok(emergencyHostJob, 'missing DAG-independent emergency host-stop job');
 assert.ok(emergencyDatabaseJob, 'missing DAG-independent emergency database-revoke job');
+assert.ok(emergencyIndependentDatabaseJob, 'missing VM-independent emergency database-revoke job');
 assert.match(emergencyHostJob, /always\(\).*inputs\.mode == 'emergency-disable'/s);
 assert.match(emergencyDatabaseJob, /always\(\).*inputs\.mode == 'emergency-disable'/s);
+assert.match(emergencyIndependentDatabaseJob, /always\(\).*inputs\.mode == 'emergency-disable'/s);
 assert.match(emergencyHostJob, /needs: validate-target/);
 assert.match(emergencyDatabaseJob, /needs: validate-target/);
+assert.match(emergencyIndependentDatabaseJob, /needs: validate-target/);
 assert.doesNotMatch(emergencyDatabaseJob, /needs:.*emergency-host-stop/);
+assert.doesNotMatch(
+  emergencyIndependentDatabaseJob,
+  /needs:.*(?:emergency-host-stop|emergency-database-revoke)/,
+);
 assert.match(
   emergencyHostJob,
   /timeout --signal=TERM --kill-after=10s 110s[\s\S]*?ConnectTimeout=8[\s\S]*?helper emergency-stop/,
@@ -379,7 +431,27 @@ assert.match(
 assert.doesNotMatch(emergencyHostJob, /SUPABASE_(?:DB_PASSWORD|CA_CERTIFICATE)|PGPASSWORD|PGHOST/);
 assert.match(emergencyDatabaseJob, /Always attempt the database kill switch/);
 assert.match(emergencyDatabaseJob, /if: always\(\)/g);
+assert.match(
+  emergencyIndependentDatabaseJob,
+  /Always call the VM-independent database kill switch/,
+);
+assert.match(emergencyIndependentDatabaseJob, /if: always\(\)/g);
+assert.match(emergencyIndependentDatabaseJob, /SUPABASE_ACCESS_TOKEN/);
+assert.match(
+  emergencyIndependentDatabaseJob,
+  /https:\/\/api\.supabase\.com\/v1\/projects\/\$PRODUCTION_PROJECT_REF\/database\/query/,
+);
+assert.match(emergencyIndependentDatabaseJob, /--data-binary @"\$PROTECTED\/request\.json"/);
+assert.match(emergencyIndependentDatabaseJob, /"\$status" == '201'/);
+assert.doesNotMatch(
+  emergencyIndependentDatabaseJob,
+  /PRODUCTION_VM|SSH|PGPASSWORD|SUPABASE_DB_PASSWORD|SUPABASE_CA_CERTIFICATE|direct-database-tunnel/i,
+);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-disable\.sql/);
+assert.match(
+  productionWorkflow,
+  /production-trusted-telebirr-verifier-independent-emergency-disable\.sql/,
+);
 assert.match(productionWorkflow, /production-trusted-telebirr-verifier-inspect\.sql/);
 assert.match(productionWorkflow, /\.financialSwitchesChanged == false/g);
 assert.match(productionWorkflow, /\.executorLogin == "disabled"/g);
@@ -392,7 +464,12 @@ assert.doesNotMatch(productionWorkflow, /pull_request:|push:|schedule:|workflow_
 assert.doesNotMatch(productionWorkflow, /KEMERBET_(?:EXECUTOR|FINAL_ACTION)|deposit-executor/iu);
 assert.doesNotMatch(
   productionWorkflow,
-  /docker\s+(?:push|login)|kubectl|helm|doctl|SUPABASE_ACCESS_TOKEN|service_role/iu,
+  /docker\s+(?:push|login)|kubectl|helm|doctl|service_role/iu,
+);
+assert.doesNotMatch(
+  productionWorkflow.split('\n  emergency-database-independent-revoke:')[0],
+  /SUPABASE_ACCESS_TOKEN/,
+  'the protected token must be confined to the independent emergency job',
 );
 
 assert.match(
@@ -584,17 +661,17 @@ assert.match(productionTunnel, /ConnectTimeout=5/);
 assert.match(productionTunnel, /ConnectionAttempts=1/);
 assert.doesNotMatch(productionTunnel, /spzpiyxheappsfyswewl/);
 
-assert.match(productionRunbook, /Production activation is deliberately unavailable/);
+assert.match(productionRunbook, /Production runtime activation is deliberately unavailable/);
 assert.match(productionRunbook, /shared\s+database state machine or epoch/);
 assert.match(
   productionRunbook,
   /TeleBirr execution\s+lease records\s+an immutable\s+attempt-to-epoch binding/,
 );
 assert.match(productionRunbook, /Cancellation and\s+reconciliation deliberately remain usable/);
-assert.match(productionRunbook, /There is no same-release renewal path/);
-assert.match(productionRunbook, /two DAG-independent protected jobs/);
-assert.match(productionRunbook, /share a VM\/SSH failure domain/);
-assert.match(productionRunbook, /database emergency-revocation route that does not depend/);
+assert.match(productionRunbook, /There is no same-release renewal or host-start path/);
+assert.match(productionRunbook, /three DAG-independent protected jobs/);
+assert.doesNotMatch(productionRunbook, /share a VM\/SSH failure domain/);
+assert.match(productionRunbook, /does not depend on the production VM/);
 assert.match(
   productionRunbook,
   /lock activation control, epoch, the\s+readiness serialization gate, feature switches, then pilot/,
@@ -646,6 +723,198 @@ assert.doesNotMatch(
   executionEpochMigration,
   /create(?: or replace)? function app\.activate_private_trusted_telebirr|insert into app\.private_trusted_telebirr_activation_epochs|update app\.private_trusted_telebirr_activation_control/,
 );
+
+assert.match(
+  activationWriterMigration,
+  /create table app\.private_trusted_telebirr_activation_requests/,
+);
+assert.match(
+  activationWriterMigration,
+  /create function app\.activate_private_trusted_telebirr_verification\(/,
+);
+assert.match(
+  activationWriterMigration,
+  /create function app\.disable_private_trusted_telebirr_verifier_login\(\)/,
+);
+assert.match(
+  activationWriterMigration,
+  /alter table app\.private_trusted_telebirr_activation_requests enable row level security/,
+);
+assert.match(
+  activationWriterMigration,
+  /alter table app\.private_trusted_telebirr_activation_requests force row level security/,
+);
+assert.match(activationWriterMigration, /verifier_credential_digest text not null/);
+assert.doesNotMatch(
+  activationWriterMigration,
+  /verifier_password\s+text\s+not null/,
+  'the activation receipt must never retain the runtime password',
+);
+assert.match(
+  activationWriterMigration,
+  /revoke all on function[\s\S]*?activate_private_trusted_telebirr_verification\(uuid, uuid, uuid, text\)[\s\S]*?from public, anon, authenticated, service_role/,
+);
+assert.doesNotMatch(
+  activationWriterMigration,
+  /grant execute on function app\.activate_private_trusted_telebirr_verification/,
+);
+for (const column of ['companion_assignment_id', 'receiver_profile_id', 'requested_by_admin_id']) {
+  assert.match(
+    activationRequestIndexesMigration,
+    new RegExp(
+      `create index [a-z0-9_]+\\s+on app\\.private_trusted_telebirr_activation_requests \\(${column}\\)`,
+      'u',
+    ),
+    `the activation receipt ${column} foreign key must have a covering index`,
+  );
+}
+assert.doesNotMatch(
+  activationRequestIndexesMigration,
+  /^\s*(?:insert|update|delete|truncate|alter|drop|grant|revoke)\b/im,
+  'the advisor follow-up must remain index-only metadata',
+);
+
+for (const column of ['pilot_revision_id', 'activated_by_admin_id']) {
+  assert.match(
+    activationEpochIndexesMigration,
+    new RegExp(
+      `create index [a-z0-9_]+\\s+on app\\.private_trusted_telebirr_activation_epochs \\(${column}\\)`,
+      'u',
+    ),
+    `the activation epoch ${column} foreign key must have a covering index`,
+  );
+}
+assert.doesNotMatch(
+  activationEpochIndexesMigration,
+  /^\s*(?:insert|update|delete|truncate|alter|drop|grant|revoke)\b/im,
+  'the epoch advisor follow-up must remain index-only metadata',
+);
+
+const activationWriterBody = activationWriterFunctionBody(
+  'activate_private_trusted_telebirr_verification',
+);
+assert.match(activationWriterBody, /session_user <> 'postgres'/);
+assert.match(activationWriterBody, /p_verifier_password !~ '\^\[0-9a-f\]\{64\}\$'/);
+assert.match(activationWriterBody, /password_encryption', 'scram-sha-256'/);
+assert.match(activationWriterBody, /alter role fetanagent_trusted_telebirr_verifier_runtime with/);
+assert.match(activationWriterBody, /password %L valid until %L/);
+assert.match(activationWriterBody, /role\.rolpassword like 'SCRAM-SHA-256\$%'/);
+assert.match(activationWriterBody, /fetanagent_deposit_executor_runtime'[\s\S]*?role\.rolcanlogin/);
+assert.doesNotMatch(activationWriterBody, /alter role fetanagent_deposit_executor[^;]*login/i);
+
+assert.match(
+  activationScramMigration,
+  /rename to activate_private_trusted_telebirr_verification_v1_surrogate/,
+);
+assert.match(
+  activationScramMigration,
+  /exists \(\s*select 1\s*from app\.private_trusted_telebirr_activation_requests\s*\)/,
+  'the adapter migration must refuse installation after any activation receipt exists',
+);
+assert.match(
+  activationScramMigration,
+  /activation_control\.current_epoch = 0/,
+  'the adapter migration must install only at epoch zero',
+);
+assert.match(
+  activationScramMigration,
+  /revoke all on function[\s\S]*?activate_private_trusted_telebirr_verification_v1_surrogate\(uuid, uuid, uuid, text\)[\s\S]*?activate_private_trusted_telebirr_verification\(uuid, uuid, uuid, text\)[\s\S]*?from public, anon, authenticated, service_role/,
+);
+
+const activationScramBody = activationScramFunctionBody(
+  'activate_private_trusted_telebirr_verification',
+);
+assert.match(activationScramBody, /session_user <> 'postgres'/);
+assert.match(activationScramBody, /p_verifier_scram_secret[\s\S]*?SCRAM-SHA-256\[\$\]4096/);
+assert.doesNotMatch(activationScramBody, /p_verifier_password/);
+assert.match(
+  activationScramBody,
+  /trusted-telebirr-verifier-scram-surrogate:v2:[\s\S]*?p_verifier_scram_secret/,
+);
+assert.match(activationScramBody, /lock table app\.admin_users in share mode/);
+assert.match(activationScramBody, /membership\.inherit_option/);
+assert.match(activationScramBody, /membership\.set_option/);
+assert.match(activationScramBody, /membership\.admin_option/);
+assert.match(
+  activationScramBody,
+  /from app\.activate_private_trusted_telebirr_verification_v1_surrogate/,
+);
+assert.match(activationScramBody, /role\.rolpassword is not distinct from p_verifier_scram_secret/);
+assert.doesNotMatch(activationScramBody, /alter role fetanagent_deposit_executor[^;]*login/i);
+const scramAdapterLockIndex = activationScramBody.indexOf('pg_advisory_xact_lock');
+const scramIdentityLockIndex = activationScramBody.indexOf('lock table app.admin_users');
+const scramLegacyBoundaryIndex = activationScramBody.indexOf(
+  'from app.activate_private_trusted_telebirr_verification_v1_surrogate',
+);
+const scramFinalCredentialIndex = activationScramBody.lastIndexOf(
+  'alter role fetanagent_trusted_telebirr_verifier_runtime with',
+);
+const scramExactCredentialIndex = activationScramBody.indexOf(
+  'role.rolpassword is not distinct from p_verifier_scram_secret',
+);
+assert.ok(
+  scramAdapterLockIndex >= 0 &&
+    scramAdapterLockIndex < scramIdentityLockIndex &&
+    scramIdentityLockIndex < scramLegacyBoundaryIndex &&
+    scramLegacyBoundaryIndex < scramFinalCredentialIndex &&
+    scramFinalCredentialIndex < scramExactCredentialIndex,
+  'the SCRAM adapter must lock before activation and install then verify the final precomputed verifier',
+);
+
+assert.match(roleAdministrationMigration, /current_user <> 'postgres'/);
+assert.match(roleAdministrationMigration, /session_user <> 'postgres'/);
+assert.match(roleAdministrationMigration, /activation_control\.current_epoch = 0/);
+assert.match(
+  roleAdministrationMigration,
+  /grant fetanagent_trusted_telebirr_verifier to postgres [\s\S]*?with inherit false, set false, admin true/,
+);
+assert.match(
+  roleAdministrationMigration,
+  /grant fetanagent_trusted_telebirr_verifier_runtime to postgres [\s\S]*?with inherit false, set false, admin true/,
+);
+assert.doesNotMatch(
+  roleAdministrationMigration,
+  /\b(?:insert|update|delete|truncate)\b|alter role[^;]*login|password %L|password_encryption/i,
+  'portable role administration must not change application data, login state, or credentials',
+);
+
+const writerAuthorityIndex = activationWriterBody.indexOf('select activation_epoch.*');
+const writerReadinessIndex = activationWriterBody.indexOf('perform gate.singleton');
+const writerSwitchLockIndex = activationWriterBody.indexOf('perform feature_switch.feature_key');
+const writerPilotLockIndex = activationWriterBody.indexOf('select pilot_revision.*');
+const writerTimeIndex = activationWriterBody.indexOf(
+  'activated_at := pg_catalog.clock_timestamp()',
+);
+const writerEpochInsertIndex = activationWriterBody.indexOf(
+  'insert into app.private_trusted_telebirr_activation_epochs',
+);
+const writerControlAdvanceIndex = activationWriterBody.indexOf(
+  'update app.private_trusted_telebirr_activation_control',
+);
+const writerLoginIndex = activationWriterBody.indexOf(
+  'alter role fetanagent_trusted_telebirr_verifier_runtime with',
+);
+const writerSwitchWriteIndex = activationWriterBody.indexOf('update app.feature_switches');
+assert.ok(
+  writerAuthorityIndex >= 0 &&
+    writerAuthorityIndex < writerReadinessIndex &&
+    writerReadinessIndex < writerSwitchLockIndex &&
+    writerSwitchLockIndex < writerPilotLockIndex &&
+    writerPilotLockIndex < writerTimeIndex &&
+    writerTimeIndex < writerEpochInsertIndex &&
+    writerEpochInsertIndex < writerControlAdvanceIndex &&
+    writerControlAdvanceIndex < writerLoginIndex &&
+    writerLoginIndex < writerSwitchWriteIndex,
+  'activation must preserve authority/readiness/switch/pilot order and commit every authority component together',
+);
+
+const loginDisableBody = activationWriterFunctionBody(
+  'disable_private_trusted_telebirr_verifier_login',
+);
+assert.match(loginDisableBody, /session_user <> 'postgres'/);
+assert.match(loginDisableBody, /nologin noinherit nocreatedb nocreaterole/);
+assert.match(loginDisableBody, /password null valid until ''infinity''/g);
+assert.match(loginDisableBody, /pg_catalog\.pg_terminate_backend/);
 const executionMigrationControlIndex = executionEpochMigration.indexOf(
   'select activation_control.current_epoch',
 );
@@ -973,6 +1242,46 @@ assert.doesNotMatch(
   /^\s*(?:insert|update|delete|truncate|create|drop|grant|revoke)\b/im,
 );
 
+assert.equal(
+  (
+    productionIndependentDisableSql.match(/^begin transaction isolation level serializable;$/gmu) ??
+    []
+  ).length,
+  2,
+  'independent emergency SQL must isolate credential and financial revocation transactions',
+);
+assert.equal(
+  (productionIndependentDisableSql.match(/^commit;$/gmu) ?? []).length,
+  2,
+  'independent emergency SQL must commit credential revocation before financial revocation',
+);
+const independentLoginIndex = productionIndependentDisableSql.indexOf(
+  'alter role fetanagent_trusted_telebirr_verifier_runtime with',
+);
+const independentFirstCommitIndex = productionIndependentDisableSql.indexOf('commit;');
+const independentFinancialIndex = productionIndependentDisableSql.indexOf(
+  'request_private_trusted_telebirr_emergency_disable',
+);
+assert.ok(
+  independentLoginIndex >= 0 &&
+    independentLoginIndex < independentFirstCommitIndex &&
+    independentFirstCommitIndex < independentFinancialIndex,
+  'independent emergency SQL must commit the login kill switch before financial disable',
+);
+assert.match(productionIndependentDisableSql, /current_user <> 'postgres'/g);
+assert.match(productionIndependentDisableSql, /session_user <> 'postgres'/g);
+assert.match(productionIndependentDisableSql, /password null valid until 'infinity'/g);
+assert.match(productionIndependentDisableSql, /pg_catalog\.pg_terminate_backend/);
+assert.match(
+  productionIndependentDisableSql,
+  /app\.current_private_trusted_telebirr_activation_epoch\(\)/,
+);
+assert.match(productionIndependentDisableSql, /'liveMoneySwitchCount'/);
+assert.doesNotMatch(
+  productionIndependentDisableSql,
+  /activate_private_trusted_telebirr|\blogin\s+noinherit|docker|ssh|curl|http/i,
+);
+
 assert.match(productionInspectSql, /serializable read only/);
 assert.match(productionInspectSql, /'activeVerifierSessions'/);
 assert.match(productionInspectSql, /'executorLogin'/);
@@ -984,5 +1293,5 @@ assert.doesNotMatch(
 );
 
 console.log(
-  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, epoch-bound verifier and execution authority, fixed-off process gates, no activation/provision/renewal route, strict inert status, bounded DAG-independent emergency jobs, and the documented shared-route blocker',
+  'trusted TeleBirr verifier deployment artifacts verified: immutable disabled staging, epoch-bound verifier and execution authority, postgres-only uninvoked activation writer, fixed-off process gates with no host activation or renewal route, strict inert status, and bounded DAG-independent VM plus Management API emergency jobs',
 );

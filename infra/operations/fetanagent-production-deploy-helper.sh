@@ -180,6 +180,25 @@ compose_release() {
       "${compose_files[@]}" --profile production "$@"
 }
 
+# Supabase session-pooler backends can remain accounted for briefly after Docker has stopped the
+# previous client. Keep each runtime's application pool and PostgreSQL role single-connection,
+# but give the replacement container a bounded opportunity to reconnect after that handoff.
+# Every attempt still uses Compose's health gate; exhausting the attempts fails closed and lets
+# the activation ERR trap restore the previous release.
+start_release_services_with_session_handoff_retry() {
+  local release="$1"
+  shift
+  local attempt
+  for attempt in 1 2 3; do
+    if compose_release "$release" up --detach --no-build --wait --wait-timeout 120 "$@"; then
+      return 0
+    fi
+    [[ "$attempt" -lt 3 ]] ||
+      die 'production services did not become healthy after bounded database-session handoff retries'
+    sleep "$((attempt * 5))"
+  done
+}
+
 container_for() {
   local project="$1" service="$2"
   mapfile -t matches < <(
@@ -575,7 +594,7 @@ case "${1:-}" in
     printf '%s\n' "$previous" >"$previous_file"
     trap 'rollback_transition "$sha" "$release"' ERR
     compose_release "$release" config --quiet
-    compose_release "$release" up --detach --no-build --wait --wait-timeout 120 \
+    start_release_services_with_session_handoff_retry "$release" \
       owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker
     stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
     if [[ -z "$previous" ]]; then
@@ -585,7 +604,7 @@ case "${1:-}" in
     compose_release "$release" up --detach --no-build --wait --wait-timeout 120 \
       telebirr-device-bridge
     if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
-      compose_release "$release" up --detach --no-build --wait --wait-timeout 120 production-companion-device-bridge
+      start_release_services_with_session_handoff_retry "$release" production-companion-device-bridge
     fi
     compose_release "$release" up --detach --no-build --wait --wait-timeout 120 bot gateway
     owner_body="$(curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 15 https://owner.fetanagent.com/owner)"

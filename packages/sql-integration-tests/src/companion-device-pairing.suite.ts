@@ -98,18 +98,6 @@ export function registerCompanionDevicePairingSqlTests(
       `);
       expect(roles.rows).toEqual([
         {
-          rolname: executionGroupRole,
-          rolcanlogin: false,
-          rolinherit: false,
-          rolsuper: false,
-          rolcreatedb: false,
-          rolcreaterole: false,
-          rolreplication: false,
-          rolbypassrls: false,
-          rolconnlimit: 1,
-          continuous_lifetime: true,
-        },
-        {
           rolname: groupRole,
           rolcanlogin: false,
           rolinherit: false,
@@ -123,6 +111,18 @@ export function registerCompanionDevicePairingSqlTests(
         },
         {
           rolname: runtimeRole,
+          rolcanlogin: false,
+          rolinherit: false,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolbypassrls: false,
+          rolconnlimit: 1,
+          continuous_lifetime: true,
+        },
+        {
+          rolname: executionGroupRole,
           rolcanlogin: false,
           rolinherit: false,
           rolsuper: false,

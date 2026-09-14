@@ -240,6 +240,7 @@ async function createInboundEvent(
   identityId: string,
   purpose: string,
 ): Promise<string> {
+  const updateId = BigInt(`0x${randomUUID().replaceAll('-', '').slice(0, 15)}`).toString();
   const inbound = await client.query<{ readonly id: string }>(
     `insert into app.inbound_events (
        channel,
@@ -248,7 +249,7 @@ async function createInboundEvent(
        payload_digest
      ) values ('telegram', $1::text, $2::uuid, $3::text)
      returning id`,
-    [`${purpose}:${randomUUID()}`, identityId, semanticHmac()],
+    [`update:${updateId}`, identityId, semanticHmac(`${purpose}:${updateId}`)],
   );
   return inbound.rows[0]!.id;
 }

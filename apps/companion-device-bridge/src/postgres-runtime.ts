@@ -3,6 +3,7 @@ import { types as nodeUtilTypes } from 'node:util';
 
 import {
   COMPANION_DEVICE_BRIDGE_DATABASE_ROLE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE,
   COMPANION_DEVICE_BRIDGE_GROUP_ROLE,
   type CompanionDeviceBridgeConnectionConfig,
 } from './config.js';
@@ -69,9 +70,12 @@ export const COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS = [
   'only_expected_direct_membership',
   'runtime_only_trusted_members',
   'group_role_is_safe',
+  'execution_group_role_is_safe',
   'group_usage_allowed_set_denied',
   'group_only_expected_members',
+  'execution_group_membership_is_dormant_or_exact',
   'group_has_no_upstream_membership',
+  'execution_group_has_no_upstream_membership',
   'database_connect_temp_boundary_acknowledged',
   'app_schema_boundary_allowed',
   'non_system_schema_usage_exact',
@@ -99,10 +103,28 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and role.rolvaliduntil = 'infinity'::timestamptz
     ) as runtime_login_is_safe,
     (
-      select count(*) = 1 and pg_catalog.bool_and(
-        granted.rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}' and membership.inherit_option
-        and not membership.set_option and not membership.admin_option
-      )
+      select count(*) between 1 and 2
+        and count(*) filter (
+          where granted.rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+        ) = 1
+        and count(*) filter (
+          where granted.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+        ) <= 1
+        and pg_catalog.bool_and(
+          granted.rolname in (
+            '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}',
+            '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+          )
+          and membership.inherit_option
+          and not membership.set_option
+          and not membership.admin_option
+        )
       from pg_catalog.pg_auth_members membership
       join pg_catalog.pg_roles granted on granted.oid = membership.roleid
       join pg_catalog.pg_roles member on member.oid = membership.member
@@ -128,6 +150,15 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and not role.rolreplication and not role.rolbypassrls
         and role.rolconnlimit = 2
     ) as group_role_is_safe,
+    exists (
+      select 1 from pg_catalog.pg_roles role
+      where role.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+        and not role.rolcanlogin and not role.rolinherit and not role.rolsuper
+        and not role.rolcreatedb and not role.rolcreaterole
+        and not role.rolreplication and not role.rolbypassrls
+        and role.rolconnlimit = 1
+        and role.rolvaliduntil = 'infinity'::timestamptz
+    ) as execution_group_role_is_safe,
     pg_catalog.pg_has_role(current_user, '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}', 'USAGE')
       and not pg_catalog.pg_has_role(current_user, '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}', 'SET')
       as group_usage_allowed_set_denied,
@@ -158,11 +189,43 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       join pg_catalog.pg_roles member on member.oid = membership.member
       where granted.rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}'
     ) as group_only_expected_members,
+    (
+      select count(*) <= 2
+        and count(*) filter (
+          where member.rolname = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+        ) <= 1
+        and count(*) filter (where member.rolname = 'postgres') <= 1
+        and coalesce(pg_catalog.bool_and(
+          (
+            member.rolname = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}'
+            and membership.inherit_option
+            and not membership.set_option
+            and not membership.admin_option
+          ) or (
+            member.rolname = 'postgres'
+            and not membership.inherit_option
+            and not membership.set_option
+            and membership.admin_option
+          )
+        ), true)
+      from pg_catalog.pg_auth_members membership
+      join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+      join pg_catalog.pg_roles member on member.oid = membership.member
+      where granted.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+    ) as execution_group_membership_is_dormant_or_exact,
     not exists (
       select 1 from pg_catalog.pg_auth_members membership
       join pg_catalog.pg_roles member on member.oid = membership.member
       where member.rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}'
     ) as group_has_no_upstream_membership,
+    not exists (
+      select 1 from pg_catalog.pg_auth_members membership
+      join pg_catalog.pg_roles member on member.oid = membership.member
+      where member.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+    ) as execution_group_has_no_upstream_membership,
     pg_catalog.has_database_privilege(
       current_user, pg_catalog.current_database(), 'CONNECT'
     ) and pg_catalog.has_database_privilege(
@@ -281,10 +344,13 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       ) privilege
       where routine.oid in (${ALLOWED_FUNCTIONS_SQL})
         and privilege.privilege_type = 'EXECUTE'
+        and privilege.grantee <> routine.proowner
         and privilege.grantee not in (
-          routine.proowner,
-          (select oid from pg_catalog.pg_roles
-            where rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}')
+          select oid from pg_catalog.pg_roles
+          where rolname in (
+            '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}',
+            '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
+          )
         )
     ) as allowed_functions_execution_private,
     exists (

@@ -17,6 +17,8 @@ import { createP256CompanionBridgeSigner } from './pairing-handler.js';
 export const COMPANION_DEVICE_BRIDGE_DATABASE_ROLE =
   'fetanagent_companion_device_bridge_runtime' as const;
 export const COMPANION_DEVICE_BRIDGE_GROUP_ROLE = 'fetanagent_companion_device_bridge' as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE =
+  'fetanagent_companion_execution_bridge' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;

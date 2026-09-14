@@ -114,6 +114,15 @@ describe('companion device bridge PostgreSQL runtime', () => {
   });
 
   it('requires the expanded exact catalog only when the separate execution signer is enabled', async () => {
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      'fetanagent_companion_execution_bridge',
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      'execution_group_membership_is_dormant_or_exact',
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      'execution_group_has_no_upstream_membership',
+    );
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 14');
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.claim_agent_platform_companion_execution_assignment',

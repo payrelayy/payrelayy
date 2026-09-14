@@ -4,10 +4,11 @@ import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 const groupRole = 'fetanagent_companion_device_bridge';
+const executionGroupRole = 'fetanagent_companion_execution_bridge';
 const runtimeRole = 'fetanagent_companion_device_bridge_runtime';
 const ownerIssueFunction = 'app.issue_agent_platform_companion_pairing(uuid,uuid,text,text)';
 const ownerRevokeFunction = 'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)';
-const bridgeFunctions = [
+const baselineBridgeFunctions = [
   'app.claim_agent_platform_companion_pairing(uuid,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text)',
   'app.complete_agent_platform_companion_pairing(text,text,text,text,jsonb)',
   'app.release_agent_platform_companion_pairing(text)',
@@ -15,6 +16,8 @@ const bridgeFunctions = [
   'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)',
   'app.release_agent_platform_companion_lookup_assignment(text)',
   'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb)',
+] as const;
+const executionBridgeFunctions = [
   'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,text)',
   'app.complete_agent_platform_companion_execution_assignment(text,jsonb,text,jsonb)',
   'app.claim_agent_platform_companion_execution_authority(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,jsonb,jsonb)',
@@ -90,7 +93,7 @@ export function registerCompanionDevicePairingSqlTests(
                rolreplication, rolbypassrls, rolconnlimit,
                rolvaliduntil = 'infinity'::timestamptz as continuous_lifetime
           from pg_roles
-         where rolname in ('${groupRole}', '${runtimeRole}')
+         where rolname in ('${groupRole}', '${executionGroupRole}', '${runtimeRole}')
          order by rolname
       `);
       expect(roles.rows).toEqual([
@@ -118,6 +121,18 @@ export function registerCompanionDevicePairingSqlTests(
           rolconnlimit: 1,
           continuous_lifetime: true,
         },
+        {
+          rolname: executionGroupRole,
+          rolcanlogin: false,
+          rolinherit: false,
+          rolsuper: false,
+          rolcreatedb: false,
+          rolcreaterole: false,
+          rolreplication: false,
+          rolbypassrls: false,
+          rolconnlimit: 1,
+          continuous_lifetime: true,
+        },
       ]);
 
       const memberships = await client.query(`
@@ -126,8 +141,8 @@ export function registerCompanionDevicePairingSqlTests(
           from pg_auth_members membership
           join pg_roles granted on granted.oid = membership.roleid
           join pg_roles member on member.oid = membership.member
-         where granted.rolname in ('${groupRole}', '${runtimeRole}')
-            or member.rolname in ('${groupRole}', '${runtimeRole}')
+         where granted.rolname in ('${groupRole}', '${executionGroupRole}', '${runtimeRole}')
+            or member.rolname in ('${groupRole}', '${executionGroupRole}', '${runtimeRole}')
       `);
       expect(memberships.rows).toEqual([
         {
@@ -151,7 +166,27 @@ export function registerCompanionDevicePairingSqlTests(
          order by signature
       `);
       expect(routines.rows).toEqual(
-        [...bridgeFunctions].sort().map((signature) => ({ signature, hardened: true })),
+        [...baselineBridgeFunctions].sort().map((signature) => ({ signature, hardened: true })),
+      );
+      const executionRoutines = await client.query(`
+        select routine.oid::regprocedure::text as signature,
+               routine.prosecdef
+                 and routine.proowner = 'postgres'::regrole
+                 and routine.proconfig = array['search_path=pg_catalog']::text[] as hardened,
+               has_function_privilege('${runtimeRole}', routine.oid, 'EXECUTE')
+                 as reachable_by_base_runtime
+          from pg_proc routine
+          join pg_namespace namespace on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'app'
+           and has_function_privilege('${executionGroupRole}', routine.oid, 'EXECUTE')
+         order by signature
+      `);
+      expect(executionRoutines.rows).toEqual(
+        [...executionBridgeFunctions].sort().map((signature) => ({
+          signature,
+          hardened: true,
+          reachable_by_base_runtime: false,
+        })),
       );
       expect(
         await client.query(`select

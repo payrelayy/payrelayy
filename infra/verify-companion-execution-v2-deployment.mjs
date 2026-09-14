@@ -17,6 +17,7 @@ const [
   deployHelper,
   productionWorkflow,
   migration,
+  privilegeGateMigration,
   packageBuilder,
 ] = await Promise.all([
   read('apps/windows-companion/src/config.ts'),
@@ -32,6 +33,7 @@ const [
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('.github/workflows/production-runtime.yml'),
   read('supabase/migrations/20260914030000_agent_platform_companion_execution_bridge.sql'),
+  read('supabase/migrations/20260914123000_companion_execution_privilege_gate.sql'),
   read('scripts/build-windows-companion-package.ps1'),
 ]);
 
@@ -124,6 +126,19 @@ assert.doesNotMatch(
 );
 assert.match(migration, /control_state text not null default 'disabled'/u);
 assert.match(migration, /this migration exposes no procedure that can arm it/iu);
+assert.match(
+  privilegeGateMigration,
+  /create role fetanagent_companion_execution_bridge[\s\S]*?nologin/iu,
+);
+assert.match(
+  privilegeGateMigration,
+  /from[\s\S]*?fetanagent_companion_device_bridge[\s\S]*?fetanagent_companion_device_bridge_runtime[\s\S]*?fetanagent_companion_execution_bridge/iu,
+);
+assert.match(privilegeGateMigration, /to fetanagent_companion_execution_bridge/iu);
+assert.doesNotMatch(
+  privilegeGateMigration,
+  /grant fetanagent_companion_execution_bridge\s+to\s+fetanagent_companion_device_bridge_runtime/iu,
+);
 assert.match(packageBuilder, /packages\/agent-platform-companion-execution-contracts/u);
 
 console.log(

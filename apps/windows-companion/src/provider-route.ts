@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
+
+import { KEMERBET_AGENT_API_ORIGIN } from '@fetanagent/agent-platform-kemerbet';
 import type { APIResponse, BrowserContext, Route } from 'playwright-core';
 
 import {
   decideLocalKemerBetRequest,
   isLocalKemerBetProviderUrl,
+  KEMERBET_DEPOSIT_PATH,
   type LocalKemerBetGuardPhase,
 } from './request-guard.js';
 
@@ -11,6 +15,120 @@ type BlockReason = 'mutation_attempt_blocked' | 'provider_request_failed';
 export interface LocalKemerBetLookupAuthorization {
   currentPlayerId(): string | undefined;
   consume(playerId: string): boolean;
+}
+
+export type LocalKemerBetDepositDispatchOutcome =
+  | {
+      readonly outcome: 'submission_attempted';
+      readonly providerResponseDigest: string;
+    }
+  | {
+      readonly outcome: 'local_uncertain';
+      readonly providerResponseDigest: string | null;
+    };
+
+export interface ConsumedLocalKemerBetDepositAuthorization {
+  isFresh(): boolean;
+  settle(outcome: LocalKemerBetDepositDispatchOutcome): void;
+}
+
+export interface LocalKemerBetDepositAuthorization {
+  /** This method must atomically consume any pending allowance before it returns. */
+  consumeExactRequest(
+    method: string,
+    rawUrl: string,
+    postData: unknown,
+  ): ConsumedLocalKemerBetDepositAuthorization | undefined;
+}
+
+function exactDepositUrl(url: URL): boolean {
+  return (
+    url.origin === KEMERBET_AGENT_API_ORIGIN &&
+    url.pathname === KEMERBET_DEPOSIT_PATH &&
+    url.search === '' &&
+    url.hash === '' &&
+    url.username === '' &&
+    url.password === '' &&
+    url.port === ''
+  );
+}
+
+function providerResponseDigest(response: APIResponse, body: Buffer): string {
+  const headers = Object.entries(response.headers()).sort(([left], [right]) =>
+    left.localeCompare(right, 'en-US'),
+  );
+  return `sha256:${createHash('sha256')
+    .update('fetanagent\0windows-companion\0kemerbet-provider-response\0v2\0', 'utf8')
+    .update(String(response.status()), 'utf8')
+    .update('\0', 'utf8')
+    .update(response.url(), 'utf8')
+    .update('\0', 'utf8')
+    .update(JSON.stringify(headers), 'utf8')
+    .update('\0', 'utf8')
+    .update(body)
+    .digest('hex')}`;
+}
+
+async function forwardExactDepositRequest(
+  route: Route,
+  allowance: ConsumedLocalKemerBetDepositAuthorization,
+  reportBlocked: (reason: BlockReason) => void,
+): Promise<void> {
+  const request = route.request();
+  let response: APIResponse | undefined;
+  let body: Buffer | undefined;
+  let settled = false;
+  let dispatchStarted = false;
+  let observedResponseDigest: string | null = null;
+  const settle = (outcome: LocalKemerBetDepositDispatchOutcome): void => {
+    if (settled) return;
+    settled = true;
+    try {
+      allowance.settle(outcome);
+    } catch {
+      // The local action is already one-use. Reporting failures are handled as uncertainty.
+    }
+  };
+  try {
+    for (const name of ['x-http-method-override', 'x-http-method', 'x-method-override']) {
+      if ((await request.headerValue(name)) !== null) {
+        await route.abort('blockedbyclient').catch(() => undefined);
+        reportBlocked('mutation_attempt_blocked');
+        settle({ outcome: 'local_uncertain', providerResponseDigest: null });
+        return;
+      }
+    }
+    if (!allowance.isFresh()) {
+      await route.abort('blockedbyclient').catch(() => undefined);
+      reportBlocked('mutation_attempt_blocked');
+      settle({ outcome: 'local_uncertain', providerResponseDigest: null });
+      return;
+    }
+    dispatchStarted = true;
+    response = await route.fetch({ maxRedirects: 0, maxRetries: 0, timeout: 15_000 });
+    body = await response.body();
+    observedResponseDigest = providerResponseDigest(response, body);
+    const status = response.status();
+    if (status >= 300 && status < 400 && status !== 304) {
+      await route.abort('blockedbyclient').catch(() => undefined);
+      reportBlocked('mutation_attempt_blocked');
+      settle({ outcome: 'local_uncertain', providerResponseDigest: observedResponseDigest });
+      return;
+    }
+    await route.fulfill({ response });
+    settle({
+      outcome: 'submission_attempted',
+      providerResponseDigest: observedResponseDigest,
+    });
+  } catch {
+    await route.abort('blockedbyclient').catch(() => undefined);
+    reportBlocked(dispatchStarted ? 'provider_request_failed' : 'mutation_attempt_blocked');
+    settle({ outcome: 'local_uncertain', providerResponseDigest: observedResponseDigest });
+  } finally {
+    body?.fill(0);
+    await response?.dispose().catch(() => undefined);
+    if (!settled) settle({ outcome: 'local_uncertain', providerResponseDigest: null });
+  }
 }
 
 function escapeHtmlAttribute(value: string): string {
@@ -34,10 +152,40 @@ async function forwardProviderRequest(
   allowNavigationRedirect: () => boolean,
   resetNavigationRedirects: () => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
+  depositAuthorization?: LocalKemerBetDepositAuthorization,
 ): Promise<void> {
   const request = route.request();
   const method = request.method();
-  const originalUrl = new URL(request.url());
+  let originalUrl: URL;
+  try {
+    originalUrl = new URL(request.url());
+  } catch {
+    await route.abort('blockedbyclient').catch(() => undefined);
+    reportBlocked('mutation_attempt_blocked');
+    return;
+  }
+  // The exact financial allowance is consumed synchronously before the first await in this
+  // handler. Malformed, duplicate, late, redirected, or override-bearing requests can only burn
+  // that allowance; they can never borrow a later one.
+  if (exactDepositUrl(originalUrl)) {
+    let consumed: ConsumedLocalKemerBetDepositAuthorization | undefined;
+    try {
+      consumed = depositAuthorization?.consumeExactRequest(
+        method,
+        originalUrl.href,
+        request.postDataJSON(),
+      );
+    } catch {
+      consumed = undefined;
+    }
+    if (!consumed) {
+      await route.abort('blockedbyclient').catch(() => undefined);
+      reportBlocked('mutation_attempt_blocked');
+      return;
+    }
+    await forwardExactDepositRequest(route, consumed, reportBlocked);
+    return;
+  }
   let targetUrl = originalUrl;
   let response: APIResponse | undefined;
   const deadline = Date.now() + 30_000;
@@ -148,6 +296,7 @@ export async function installProviderMutationBoundary(
   phase: () => LocalKemerBetGuardPhase,
   reportBlocked: (reason: BlockReason) => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
+  depositAuthorization?: LocalKemerBetDepositAuthorization,
 ): Promise<void> {
   // Chrome starts offline; context-wide routing covers initial popup, iframe, and worker
   // requests, with service workers disabled. Unrelated CAPTCHA traffic stays in Chrome.
@@ -162,6 +311,7 @@ export async function installProviderMutationBoundary(
         navigationRedirects = 0;
       },
       lookupAuthorization,
+      depositAuthorization,
     ),
   );
 }

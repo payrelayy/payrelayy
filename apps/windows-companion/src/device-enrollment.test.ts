@@ -24,6 +24,27 @@ import {
   type SignedCompanionPairingRequest,
   type SignedKemerBetExactFiveLookupAssignment,
 } from '@fetanagent/agent-platform-companion-contracts';
+import {
+  COMPANION_EXECUTION_ACTION_KIND,
+  COMPANION_EXECUTION_AMOUNT_MINOR_UNITS,
+  COMPANION_EXECUTION_CAPABILITY,
+  COMPANION_EXECUTION_CONTRACT_VERSION,
+  COMPANION_EXECUTION_CURRENCY_CODE,
+  COMPANION_EXECUTION_PLATFORM_CODE,
+  COMPANION_EXECUTION_POLL_PATH,
+  COMPANION_EXECUTION_PROTOCOL_MODE,
+  digestCompanionExecutionNonce,
+  digestCompanionExecutionPlayerId,
+  signAuthoritativeExecutionStatus,
+  signExecutionAssignment,
+  signExecutionEnrollment,
+  signOneUseActionAuthority,
+  type AuthoritativeExecutionStatusBody,
+  type ExecutionAssignmentBody,
+  type ExecutionEnrollmentBody,
+  type ExecutionResultBody,
+  type OneUseActionAuthorityBody,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -538,5 +559,310 @@ describe('Windows companion device enrollment', () => {
     );
     expect(runtime.verifyLookupExchange(assignment, result, assessedAt)).toBe(true);
     expect(runtime.verifyLookupExchange(otherAssignment, result, assessedAt)).toBe(false);
+  });
+
+  it('verifies the independently pinned execution chain and signs only a bound result', async () => {
+    const dataRoot = await root();
+    const noMoneyServer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const noMoneySpki = Buffer.from(
+      noMoneyServer.publicKey.export({ format: 'der', type: 'spki' }),
+    );
+    const executionSigner = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const executionSpki = Buffer.from(
+      executionSigner.publicKey.export({ format: 'der', type: 'spki' }),
+    );
+    const selectedProtector = protector();
+    await ensureCompanionDeviceEnrollment({
+      dataRoot,
+      pairingPackage: pairingPackage(noMoneySpki),
+      releaseSha,
+      fetch: successfulFetch(noMoneyServer.privateKey) as unknown as typeof fetch,
+      now: () => now,
+      protector: selectedProtector,
+    });
+    const platformAgentAccountId = 'platform-agent-account-0001';
+    const executionSignerKeyId = 'execution-signer-production-0001';
+    const runtime = await loadCompanionDeviceSigningRuntime({
+      dataRoot,
+      now: () => new Date(now.getTime() + 40_000),
+      protector: selectedProtector,
+      execution: {
+        expectedPlatformAgentAccountId: platformAgentAccountId,
+        trustedExecutionSignerKeyId: executionSignerKeyId,
+        trustedExecutionSignerPublicKeySpki: executionSpki.toString('base64url'),
+        trustedExecutionSignerPublicKeySpkiSha256: sha(executionSpki),
+      },
+    });
+    const execution = runtime.execution!;
+    expect(execution.pollEndpoint).toBe(
+      `https://device.fetanagent.com${COMPANION_EXECUTION_POLL_PATH}`,
+    );
+    expect(
+      runtime.createSignedHttpRequest(
+        COMPANION_EXECUTION_POLL_PATH,
+        `sha256:${'f'.repeat(64)}`,
+        new Date(now.getTime() + 40_000),
+      ).body.canonicalPath,
+    ).toBe(COMPANION_EXECUTION_POLL_PATH);
+
+    const enrollmentBody: ExecutionEnrollmentBody = Object.freeze({
+      contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+      protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+      capability: COMPANION_EXECUTION_CAPABILITY,
+      enrollmentId: 'execution-enrollment-0001',
+      noMoneyCertificateId: runtime.certificate.body.certificateId,
+      noMoneyCertificateBodyDigest: runtime.certificate.bodyDigest,
+      deviceId: runtime.certificate.body.deviceId,
+      deviceKeyId: runtime.certificate.body.deviceKeyId,
+      devicePublicKeySpkiSha256: runtime.certificate.body.devicePublicKeySpkiSha256,
+      platformAgentAccountId,
+      accountBindingCount: 1,
+      platformCode: COMPANION_EXECUTION_PLATFORM_CODE,
+      pilotId: 'private-pilot-0001',
+      pilotRevision: '7',
+      pilotConfigDigest: `sha256:${'3'.repeat(64)}`,
+      amountMinorUnits: COMPANION_EXECUTION_AMOUNT_MINOR_UNITS,
+      currencyCode: COMPANION_EXECUTION_CURRENCY_CODE,
+      maxActionsPerAssignment: 1,
+      maxAssignmentLifetimeMs: 60_000,
+      maxAuthorityLifetimeMs: 10_000,
+      maxStatusLifetimeMs: 8_000,
+      maxRoundTripTimeMs: 5_000,
+      executionSignerKeyId,
+      executionSignerPublicKeySpki: executionSpki.toString('base64url'),
+      executionSignerPublicKeySpkiSha256: sha(executionSpki),
+      capabilityState: 'active',
+      issuedAt: new Date(now.getTime() + 1_000).toISOString(),
+      validFrom: new Date(now.getTime() + 1_000).toISOString(),
+      validUntil: new Date(now.getTime() + 3_600_000).toISOString(),
+    });
+    const enrollment = signExecutionEnrollment(enrollmentBody, executionSigner.privateKey)!;
+    expect(Buffer.byteLength(JSON.stringify(enrollment), 'utf8')).toBeLessThan(3_500);
+    const playerId = '28379330';
+    const assignmentBody: ExecutionAssignmentBody = Object.freeze({
+      contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+      protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+      capability: COMPANION_EXECUTION_CAPABILITY,
+      actionKind: COMPANION_EXECUTION_ACTION_KIND,
+      assignmentId: 'execution-assignment-0001',
+      assignmentNonceDigest: `sha256:${'4'.repeat(64)}`,
+      activationEpoch: '11',
+      intentId: 'deposit-intent-0001',
+      jobId: 'deposit-job-0001',
+      attemptId: 'deposit-attempt-0001',
+      platformAgentAccountId,
+      enrollmentId: enrollment.body.enrollmentId,
+      enrollmentBodyDigest: enrollment.bodyDigest,
+      noMoneyCertificateId: enrollment.body.noMoneyCertificateId,
+      noMoneyCertificateBodyDigest: enrollment.body.noMoneyCertificateBodyDigest,
+      deviceId: enrollment.body.deviceId,
+      deviceKeyId: enrollment.body.deviceKeyId,
+      executionSignerKeyId,
+      platformCode: COMPANION_EXECUTION_PLATFORM_CODE,
+      pilotId: enrollment.body.pilotId,
+      pilotRevision: enrollment.body.pilotRevision,
+      pilotConfigDigest: enrollment.body.pilotConfigDigest,
+      pilotReservationId: 'pilot-reservation-0001',
+      pilotReservationDigest: `sha256:${'5'.repeat(64)}`,
+      amountMinorUnits: COMPANION_EXECUTION_AMOUNT_MINOR_UNITS,
+      currencyCode: COMPANION_EXECUTION_CURRENCY_CODE,
+      playerIdDigest: digestCompanionExecutionPlayerId(playerId)!,
+      oneUse: true,
+      serverIssuedAt: new Date(now.getTime() + 30_000).toISOString(),
+      serverNotBefore: new Date(now.getTime() + 30_000).toISOString(),
+      serverValidUntil: new Date(now.getTime() + 90_000).toISOString(),
+    });
+    const assignment = signExecutionAssignment(assignmentBody, executionSigner.privateKey)!;
+    expect(Buffer.byteLength(JSON.stringify(assignment), 'utf8')).toBeLessThan(3_500);
+    const roundTrip = { monotonicRequestStartedMs: 1_000, monotonicResponseReceivedMs: 1_100 };
+    const chain = execution.verifyAssignment(
+      enrollment,
+      assignment,
+      playerId,
+      new Date(now.getTime() + 40_000),
+      roundTrip,
+    )!;
+    expect(chain.assignment).toEqual(assignment);
+    expect(
+      execution.verifyAssignment(
+        enrollment,
+        assignment,
+        'wrong-player',
+        new Date(now.getTime() + 40_000),
+        roundTrip,
+      ),
+    ).toBeUndefined();
+
+    const requestNonceDigest = digestCompanionExecutionNonce(Buffer.alloc(32, 7))!;
+    const authorityBody: OneUseActionAuthorityBody = Object.freeze({
+      contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+      protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+      capability: COMPANION_EXECUTION_CAPABILITY,
+      actionKind: COMPANION_EXECUTION_ACTION_KIND,
+      authorityId: 'one-use-authority-0001',
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+      activationEpoch: assignment.body.activationEpoch,
+      intentId: assignment.body.intentId,
+      jobId: assignment.body.jobId,
+      attemptId: assignment.body.attemptId,
+      platformAgentAccountId,
+      enrollmentId: assignment.body.enrollmentId,
+      enrollmentBodyDigest: assignment.body.enrollmentBodyDigest,
+      noMoneyCertificateId: assignment.body.noMoneyCertificateId,
+      noMoneyCertificateBodyDigest: assignment.body.noMoneyCertificateBodyDigest,
+      deviceId: assignment.body.deviceId,
+      deviceKeyId: assignment.body.deviceKeyId,
+      executionSignerKeyId,
+      platformCode: assignment.body.platformCode,
+      pilotId: assignment.body.pilotId,
+      pilotRevision: assignment.body.pilotRevision,
+      pilotConfigDigest: assignment.body.pilotConfigDigest,
+      pilotReservationId: assignment.body.pilotReservationId,
+      pilotReservationDigest: assignment.body.pilotReservationDigest,
+      amountMinorUnits: assignment.body.amountMinorUnits,
+      currencyCode: assignment.body.currencyCode,
+      playerIdDigest: assignment.body.playerIdDigest,
+      fenceId: 'database-fence-0001',
+      fenceNonceDigest: `sha256:${'6'.repeat(64)}`,
+      databaseFenceState: 'first_fence_acquired',
+      firstFenceAcquired: true,
+      requestNonceDigest,
+      oneUse: true,
+      databaseFencedAt: new Date(now.getTime() + 41_000).toISOString(),
+      databaseAuthorityIssuedAt: new Date(now.getTime() + 42_000).toISOString(),
+      serverValidUntil: new Date(now.getTime() + 49_000).toISOString(),
+    });
+    const authority = signOneUseActionAuthority(authorityBody, executionSigner.privateKey)!;
+    expect(Buffer.byteLength(JSON.stringify(authority), 'utf8')).toBeLessThan(3_500);
+    const verifiedAuthority = execution.verifyAuthority(
+      authority,
+      chain,
+      requestNonceDigest,
+      new Date(now.getTime() + 42_000),
+      roundTrip,
+    )!;
+    expect(verifiedAuthority.authority).toEqual(authority);
+    expect(
+      execution.verifyAuthority(
+        authority,
+        chain,
+        `sha256:${'9'.repeat(64)}`,
+        new Date(now.getTime() + 42_000),
+        roundTrip,
+      ),
+    ).toBeUndefined();
+
+    const resultBody: ExecutionResultBody = Object.freeze({
+      contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+      protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+      capability: COMPANION_EXECUTION_CAPABILITY,
+      actionKind: COMPANION_EXECUTION_ACTION_KIND,
+      resultId: 'execution-result-0001',
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+      authorityId: authority.body.authorityId,
+      authorityBodyDigest: authority.bodyDigest,
+      activationEpoch: assignment.body.activationEpoch,
+      intentId: assignment.body.intentId,
+      jobId: assignment.body.jobId,
+      attemptId: assignment.body.attemptId,
+      platformAgentAccountId,
+      enrollmentId: assignment.body.enrollmentId,
+      enrollmentBodyDigest: assignment.body.enrollmentBodyDigest,
+      noMoneyCertificateId: assignment.body.noMoneyCertificateId,
+      noMoneyCertificateBodyDigest: assignment.body.noMoneyCertificateBodyDigest,
+      deviceId: assignment.body.deviceId,
+      deviceKeyId: assignment.body.deviceKeyId,
+      executionSignerKeyId,
+      platformCode: assignment.body.platformCode,
+      pilotId: assignment.body.pilotId,
+      pilotRevision: assignment.body.pilotRevision,
+      pilotConfigDigest: assignment.body.pilotConfigDigest,
+      pilotReservationId: assignment.body.pilotReservationId,
+      pilotReservationDigest: assignment.body.pilotReservationDigest,
+      amountMinorUnits: assignment.body.amountMinorUnits,
+      currencyCode: assignment.body.currencyCode,
+      playerIdDigest: assignment.body.playerIdDigest,
+      fenceId: authority.body.fenceId,
+      fenceNonceDigest: authority.body.fenceNonceDigest,
+      requestNonceDigest: authority.body.requestNonceDigest,
+      outcome: 'submission_attempted',
+      finalActionStarted: true,
+      finalActionStartedAt: new Date(now.getTime() + 43_000).toISOString(),
+      providerResponseDigest: `sha256:${'8'.repeat(64)}`,
+      evidenceDigest: `sha256:${'9'.repeat(64)}`,
+      reportedAt: new Date(now.getTime() + 44_000).toISOString(),
+    });
+    const result = execution.createSignedResult(
+      resultBody,
+      chain,
+      authority,
+      new Date(now.getTime() + 44_000),
+    );
+    expect(Buffer.byteLength(JSON.stringify(result), 'utf8')).toBeLessThan(3_500);
+    const queryNonceDigest = digestCompanionExecutionNonce(Buffer.alloc(32, 8))!;
+    const statusBody: AuthoritativeExecutionStatusBody = Object.freeze({
+      contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+      protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+      statusKind: 'authoritative_execution_status',
+      grantsActionAuthority: false,
+      oneUseActionAuthority: false,
+      capability: COMPANION_EXECUTION_CAPABILITY,
+      actionKind: COMPANION_EXECUTION_ACTION_KIND,
+      statusId: 'authoritative-status-0001',
+      statusSequence: '7',
+      queryNonceDigest,
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+      authorityId: authority.body.authorityId,
+      authorityBodyDigest: authority.bodyDigest,
+      activationEpoch: assignment.body.activationEpoch,
+      intentId: assignment.body.intentId,
+      jobId: assignment.body.jobId,
+      attemptId: assignment.body.attemptId,
+      platformAgentAccountId,
+      enrollmentId: assignment.body.enrollmentId,
+      enrollmentBodyDigest: assignment.body.enrollmentBodyDigest,
+      noMoneyCertificateId: assignment.body.noMoneyCertificateId,
+      noMoneyCertificateBodyDigest: assignment.body.noMoneyCertificateBodyDigest,
+      deviceId: assignment.body.deviceId,
+      deviceKeyId: assignment.body.deviceKeyId,
+      executionSignerKeyId,
+      platformCode: assignment.body.platformCode,
+      pilotId: assignment.body.pilotId,
+      pilotRevision: assignment.body.pilotRevision,
+      pilotConfigDigest: assignment.body.pilotConfigDigest,
+      pilotReservationId: assignment.body.pilotReservationId,
+      pilotReservationDigest: assignment.body.pilotReservationDigest,
+      amountMinorUnits: assignment.body.amountMinorUnits,
+      currencyCode: assignment.body.currencyCode,
+      playerIdDigest: assignment.body.playerIdDigest,
+      fenceId: authority.body.fenceId,
+      databaseFenceState: 'consumed',
+      databaseAttemptState: 'submission_attempted',
+      databaseReconciliationState: 'succeeded',
+      terminalState: 'succeeded',
+      executionResultBodyDigest: result.bodyDigest,
+      providerResponseDigest: result.body.providerResponseDigest,
+      evidenceDigest: result.body.evidenceDigest,
+      databaseObservedAt: new Date(now.getTime() + 45_000).toISOString(),
+      serverIssuedAt: new Date(now.getTime() + 45_000).toISOString(),
+      serverValidUntil: new Date(now.getTime() + 50_000).toISOString(),
+    });
+    const status = signAuthoritativeExecutionStatus(statusBody, executionSigner.privateKey)!;
+    expect(
+      execution.verifyStatus(
+        status,
+        chain,
+        authority,
+        result,
+        queryNonceDigest,
+        '1',
+        new Date(now.getTime() + 45_000),
+        roundTrip,
+      ),
+    ).toEqual(status);
+    executionSpki.fill(0);
   });
 });

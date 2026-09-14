@@ -50,6 +50,8 @@ export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
   '/run/secrets/companion_device_bridge_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
   '/run/secrets/companion_device_bridge_server_signer.pkcs8.der' as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE =
+  '/run/secrets/companion_execution_signer.pkcs8.der' as const;
 export const COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE =
   '/run/configs/companion_device_bridge_runtime_manifest.v2.json' as const;
 export const COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE =
@@ -87,6 +89,12 @@ export type CompanionDeviceBridgeConfig =
       readonly connection: CompanionDeviceBridgeConnectionConfig;
       readonly serverSignerId: string;
       readonly signer: CompanionBridgeSigner;
+      readonly execution:
+        | { readonly enabled: false }
+        | {
+            readonly enabled: true;
+            readonly signer: CompanionBridgeSigner;
+          };
     };
 
 export interface CompanionDeviceBridgeGuardedFileStat {
@@ -303,17 +311,64 @@ function plainCanonicalRecord(value: string, keys: readonly string[]): Record<st
   return parsed as Record<string, unknown>;
 }
 
-interface CompanionDeviceBridgeRuntimeManifest {
+function canonicalP256PublicKey(value: unknown): Buffer {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.includes('=') ||
+    !/^[A-Za-z0-9_-]+$/u.test(value)
+  ) {
+    return unavailable();
+  }
+  let bytes: Buffer | undefined;
+  let canonical: Buffer | undefined;
+  try {
+    bytes = Buffer.from(value, 'base64url');
+    if (bytes.byteLength !== 91 || bytes.toString('base64url') !== value) return unavailable();
+    const publicKey = createPublicKey({ key: bytes, format: 'der', type: 'spki' });
+    canonical = Buffer.from(publicKey.export({ format: 'der', type: 'spki' }));
+    if (
+      publicKey.asymmetricKeyType !== 'ec' ||
+      publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1' ||
+      !canonical.equals(bytes)
+    ) {
+      return unavailable();
+    }
+    return Buffer.from(canonical);
+  } catch {
+    return unavailable();
+  } finally {
+    bytes?.fill(0);
+    canonical?.fill(0);
+  }
+}
+
+interface CompanionDeviceBridgeRuntimeManifestV2 {
+  readonly contractVersion: 2;
   readonly serverSignerId: string;
   readonly serverSignerKeyId: string;
   readonly serverSignerPublicKeySpkiSha256: string;
 }
 
+interface CompanionDeviceBridgeRuntimeManifestV3 {
+  readonly contractVersion: 3;
+  readonly serverSignerId: string;
+  readonly serverSignerKeyId: string;
+  readonly serverSignerPublicKeySpkiSha256: string;
+  readonly executionSignerKeyId: string;
+  readonly executionSignerPublicKeySpki: string;
+  readonly executionSignerPublicKeySpkiSha256: string;
+}
+
+type CompanionDeviceBridgeRuntimeManifest =
+  CompanionDeviceBridgeRuntimeManifestV2 | CompanionDeviceBridgeRuntimeManifestV3;
+
 function runtimeManifestFrom(
   value: string,
   deploymentTarget: DeploymentTarget,
+  executionEnabled: boolean,
 ): CompanionDeviceBridgeRuntimeManifest {
-  const record = plainCanonicalRecord(value, [
+  const v2Keys = [
     'contractVersion',
     'deploymentTarget',
     'pairingAllowed',
@@ -323,14 +378,28 @@ function runtimeManifestFrom(
     'serverSignerId',
     'serverSignerKeyId',
     'serverSignerPublicKeySpkiSha256',
-  ]);
+  ] as const;
+  const v3Keys = [
+    'contractVersion',
+    'deploymentTarget',
+    'pairingAllowed',
+    'exactFiveReadOnlyLookupAllowed',
+    'executionTransportAllowed',
+    'serverProviderActionAllowed',
+    'serverMoneyMovementAllowed',
+    'serverSignerId',
+    'serverSignerKeyId',
+    'serverSignerPublicKeySpkiSha256',
+    'executionSignerKeyId',
+    'executionSignerPublicKeySpki',
+    'executionSignerPublicKeySpkiSha256',
+  ] as const;
+  const record = plainCanonicalRecord(value, executionEnabled ? v3Keys : v2Keys);
   if (
-    record.contractVersion !== 2 ||
+    record.contractVersion !== (executionEnabled ? 3 : 2) ||
     record.deploymentTarget !== deploymentTarget ||
     record.pairingAllowed !== true ||
     record.exactFiveReadOnlyLookupAllowed !== true ||
-    record.financialActionAllowed !== false ||
-    record.moneyMovementAllowed !== false ||
     typeof record.serverSignerId !== 'string' ||
     !UUID_V4_PATTERN.test(record.serverSignerId) ||
     typeof record.serverSignerKeyId !== 'string' ||
@@ -342,10 +411,45 @@ function runtimeManifestFrom(
   ) {
     return unavailable();
   }
+  if (!executionEnabled) {
+    if (record.financialActionAllowed !== false || record.moneyMovementAllowed !== false) {
+      return unavailable();
+    }
+    return Object.freeze({
+      contractVersion: 2,
+      serverSignerId: record.serverSignerId,
+      serverSignerKeyId: record.serverSignerKeyId,
+      serverSignerPublicKeySpkiSha256: record.serverSignerPublicKeySpkiSha256,
+    });
+  }
+  const executionSignerPublicKeySpki = canonicalP256PublicKey(record.executionSignerPublicKeySpki);
+  if (
+    record.executionTransportAllowed !== true ||
+    record.serverProviderActionAllowed !== false ||
+    record.serverMoneyMovementAllowed !== false ||
+    typeof record.executionSignerKeyId !== 'string' ||
+    !KEY_ID_PATTERN.test(record.executionSignerKeyId) ||
+    record.executionSignerKeyId === record.serverSignerKeyId ||
+    (deploymentTarget === 'production' &&
+      record.executionSignerKeyId !== 'companion-execution-production-v1') ||
+    typeof record.executionSignerPublicKeySpkiSha256 !== 'string' ||
+    !SHA256_PATTERN.test(record.executionSignerPublicKeySpkiSha256) ||
+    `sha256:${createHash('sha256').update(executionSignerPublicKeySpki).digest('hex')}` !==
+      record.executionSignerPublicKeySpkiSha256
+  ) {
+    executionSignerPublicKeySpki.fill(0);
+    return unavailable();
+  }
+  const encodedExecutionPublicKey = executionSignerPublicKeySpki.toString('base64url');
+  executionSignerPublicKeySpki.fill(0);
   return Object.freeze({
+    contractVersion: 3,
     serverSignerId: record.serverSignerId,
     serverSignerKeyId: record.serverSignerKeyId,
     serverSignerPublicKeySpkiSha256: record.serverSignerPublicKeySpkiSha256,
+    executionSignerKeyId: record.executionSignerKeyId,
+    executionSignerPublicKeySpki: encodedExecutionPublicKey,
+    executionSignerPublicKeySpkiSha256: record.executionSignerPublicKeySpkiSha256,
   });
 }
 
@@ -453,7 +557,8 @@ function guardedCa(value: unknown): string {
 
 function signerFromPkcs8(
   privateKeyBytes: Buffer,
-  manifest: CompanionDeviceBridgeRuntimeManifest,
+  keyId: string,
+  publicKeySpkiSha256: string,
 ): CompanionBridgeSigner {
   let privateKey: KeyObject;
   let canonicalPrivateKey: Buffer | undefined;
@@ -474,16 +579,11 @@ function signerFromPkcs8(
     );
     if (
       publicKeySpki.byteLength !== 91 ||
-      `sha256:${createHash('sha256').update(publicKeySpki).digest('hex')}` !==
-        manifest.serverSignerPublicKeySpkiSha256
+      `sha256:${createHash('sha256').update(publicKeySpki).digest('hex')}` !== publicKeySpkiSha256
     ) {
       return unavailable();
     }
-    return createP256CompanionBridgeSigner(
-      manifest.serverSignerKeyId,
-      privateKey,
-      Uint8Array.from(publicKeySpki),
-    );
+    return createP256CompanionBridgeSigner(keyId, privateKey, Uint8Array.from(publicKeySpki));
   } catch {
     return unavailable();
   } finally {
@@ -492,14 +592,21 @@ function signerFromPkcs8(
   }
 }
 
-function requireFixedFiles(environment: NodeJS.ProcessEnv): void {
+function requireFixedFiles(environment: NodeJS.ProcessEnv, executionEnabled: boolean): void {
   const expected = {
     COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
     COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
+    ...(executionEnabled ? { COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE } : {}),
   } as const;
   for (const [name, value] of Object.entries(expected)) {
     if (environment[name] !== value) unavailable();
+  }
+  if (
+    !executionEnabled &&
+    environment.COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE !== undefined
+  ) {
+    unavailable();
   }
 }
 
@@ -511,6 +618,7 @@ function rejectInlineOrBroaderSecrets(environment: NodeJS.ProcessEnv): void {
     'SUPABASE_SECRET_KEY',
     'COMPANION_DEVICE_BRIDGE_DATABASE_URL',
     'COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY',
+    'COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY',
     'OWNER_CONTROL_DATABASE_URL',
     'OWNER_CONTROL_DATABASE_URL_FILE',
     'KEMERBET_EXECUTOR_DATABASE_URL',
@@ -527,6 +635,7 @@ export function loadCompanionDeviceBridgeConfig(
 ): CompanionDeviceBridgeConfig {
   const enabled = exactBoolean(environment.INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
+  const executionEnabled = exactBoolean(environment.INTERNAL_COMPANION_EXECUTION_V2_ENABLED);
   const deploymentTarget = environment.COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET;
   if (deploymentTarget !== 'staging' && deploymentTarget !== 'production') return unavailable();
   if (
@@ -538,13 +647,14 @@ export function loadCompanionDeviceBridgeConfig(
     return unavailable();
   }
   rejectInlineOrBroaderSecrets(environment);
-  requireFixedFiles(environment);
+  requireFixedFiles(environment, executionEnabled);
 
   const manifest = runtimeManifestFrom(
     guardedCanonicalJson(
       readGuardedText(COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE, dependencies, 'public_config'),
     ),
     deploymentTarget,
+    executionEnabled,
   );
   const privateKeyBytes = readGuardedBytes(
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
@@ -553,9 +663,42 @@ export function loadCompanionDeviceBridgeConfig(
   );
   let signer: CompanionBridgeSigner;
   try {
-    signer = signerFromPkcs8(privateKeyBytes, manifest);
+    signer = signerFromPkcs8(
+      privateKeyBytes,
+      manifest.serverSignerKeyId,
+      manifest.serverSignerPublicKeySpkiSha256,
+    );
   } finally {
     privateKeyBytes.fill(0);
+  }
+  let execution: Extract<CompanionDeviceBridgeConfig, { readonly enabled: true }>['execution'];
+  if (manifest.contractVersion === 3) {
+    const executionPrivateKeyBytes = readGuardedBytes(
+      COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+      dependencies,
+      'secret',
+    );
+    let executionSigner: CompanionBridgeSigner;
+    try {
+      executionSigner = signerFromPkcs8(
+        executionPrivateKeyBytes,
+        manifest.executionSignerKeyId,
+        manifest.executionSignerPublicKeySpkiSha256,
+      );
+    } finally {
+      executionPrivateKeyBytes.fill(0);
+    }
+    if (
+      signer.keyId === executionSigner.keyId ||
+      Buffer.from(signer.publicKeySpkiDer).equals(Buffer.from(executionSigner.publicKeySpkiDer)) ||
+      Buffer.from(executionSigner.publicKeySpkiDer).toString('base64url') !==
+        manifest.executionSignerPublicKeySpki
+    ) {
+      return unavailable();
+    }
+    execution = Object.freeze({ enabled: true, signer: executionSigner });
+  } else {
+    execution = Object.freeze({ enabled: false });
   }
   const connectionWithoutCa = connectionFromUrl(
     guardedSingleLine(
@@ -573,6 +716,7 @@ export function loadCompanionDeviceBridgeConfig(
     connection: Object.freeze({ ...connectionWithoutCa, ca }),
     serverSignerId: manifest.serverSignerId,
     signer,
+    execution,
   });
 }
 
@@ -584,6 +728,8 @@ export function redactedCompanionDeviceBridgeConfigForLog(
   deploymentTarget: DeploymentTarget | undefined;
   connectionConfigured: boolean;
   signerConfigured: boolean;
+  executionTransportConfigured: boolean;
+  executionSignerConfigured: boolean;
   pairingAllowed: true;
   exactFiveReadOnlyLookupAllowed: true;
   financialActionAllowed: false;
@@ -594,6 +740,8 @@ export function redactedCompanionDeviceBridgeConfigForLog(
     deploymentTarget: config.enabled ? config.deploymentTarget : undefined,
     connectionConfigured: config.enabled,
     signerConfigured: config.enabled,
+    executionTransportConfigured: config.enabled && config.execution.enabled,
+    executionSignerConfigured: config.enabled && config.execution.enabled,
     pairingAllowed: true,
     exactFiveReadOnlyLookupAllowed: true,
     financialActionAllowed: false,

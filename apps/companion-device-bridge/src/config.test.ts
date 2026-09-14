@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
   COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
   COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
   COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE,
@@ -31,6 +32,14 @@ const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const privateKey = Buffer.from(keyPair.privateKey.export({ format: 'der', type: 'pkcs8' }));
 const publicKey = Buffer.from(keyPair.publicKey.export({ format: 'der', type: 'spki' }));
 const publicKeyDigest = `sha256:${createHash('sha256').update(publicKey).digest('hex')}`;
+const executionKeyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const executionPrivateKey = Buffer.from(
+  executionKeyPair.privateKey.export({ format: 'der', type: 'pkcs8' }),
+);
+const executionPublicKey = Buffer.from(
+  executionKeyPair.publicKey.export({ format: 'der', type: 'spki' }),
+);
+const executionPublicKeyDigest = `sha256:${createHash('sha256').update(executionPublicKey).digest('hex')}`;
 const manifest = JSON.stringify({
   contractVersion: 2,
   deploymentTarget: 'staging',
@@ -62,6 +71,36 @@ const productionEnvironment = {
 const productionManifest = manifest
   .replace('staging', 'production')
   .replace('companion_server_signer_2026_01', 'companion-server-production-v1');
+const executionManifest = JSON.stringify({
+  contractVersion: 3,
+  deploymentTarget: 'staging',
+  pairingAllowed: true,
+  exactFiveReadOnlyLookupAllowed: true,
+  executionTransportAllowed: true,
+  serverProviderActionAllowed: false,
+  serverMoneyMovementAllowed: false,
+  serverSignerId: '11111111-1111-4111-8111-111111111111',
+  serverSignerKeyId: 'companion_server_signer_2026_01',
+  serverSignerPublicKeySpkiSha256: publicKeyDigest,
+  executionSignerKeyId: 'companion_execution_staging_v1',
+  executionSignerPublicKeySpki: executionPublicKey.toString('base64url'),
+  executionSignerPublicKeySpkiSha256: executionPublicKeyDigest,
+});
+const executionEnvironment: NodeJS.ProcessEnv = {
+  ...enabledEnvironment,
+  INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
+  COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+};
+
+function executionFiles(runtimeManifest = executionManifest, key = executionPrivateKey) {
+  return {
+    [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: databaseUrl,
+    [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: runtimeManifest,
+    [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+    [COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE]: key,
+    [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
+  };
+}
 
 function productionFiles(url = productionDatabaseUrl, runtimeManifest = productionManifest) {
   return {
@@ -218,6 +257,59 @@ describe('companion device bridge configuration', () => {
         user: 'fetanagent_companion_device_bridge_runtime',
       },
     });
+  });
+
+  it('loads a separately pinned execution signer only behind the v3 transport gate', async () => {
+    const dependencies = guardedDependencies(executionFiles());
+    const config = loadCompanionDeviceBridgeConfig(executionEnvironment, dependencies);
+    expect(config.enabled).toBe(true);
+    if (!config.enabled || !config.execution.enabled) throw new Error('expected execution config');
+    expect(config.signer.keyId).toBe('companion_server_signer_2026_01');
+    expect(config.execution.signer.keyId).toBe('companion_execution_staging_v1');
+    expect(Buffer.from(config.execution.signer.publicKeySpkiDer)).toEqual(executionPublicKey);
+    expect(Buffer.from(config.execution.signer.publicKeySpkiDer)).not.toEqual(publicKey);
+    const transcript = Buffer.from('execution-trust-root-check', 'utf8');
+    const signature = await config.execution.signer.signP1363(transcript);
+    expect(
+      verify(
+        'sha256',
+        transcript,
+        { key: executionKeyPair.publicKey, dsaEncoding: 'ieee-p1363' },
+        Buffer.from(signature, 'base64url'),
+      ),
+    ).toBe(true);
+    expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(5);
+    expect(redactedCompanionDeviceBridgeConfigForLog(config)).toMatchObject({
+      executionTransportConfigured: true,
+      executionSignerConfigured: true,
+      financialActionAllowed: false,
+      moneyMovementAllowed: false,
+    });
+  });
+
+  it.each([
+    ['v2 manifest behind the execution gate', manifest, executionPrivateKey],
+    ['v3 manifest without the execution gate', executionManifest, executionPrivateKey],
+    [
+      'reused no-money private key',
+      executionManifest
+        .replace('companion_execution_staging_v1', 'companion_server_signer_2026_01')
+        .replace(executionPublicKey.toString('base64url'), publicKey.toString('base64url'))
+        .replace(executionPublicKeyDigest, publicKeyDigest),
+      privateKey,
+    ],
+    ['execution manifest/key mismatch', executionManifest, privateKey],
+  ])('rejects %s', (_name, runtimeManifest, key) => {
+    const environment =
+      runtimeManifest === executionManifest && _name === 'v3 manifest without the execution gate'
+        ? enabledEnvironment
+        : executionEnvironment;
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        environment,
+        guardedDependencies(executionFiles(runtimeManifest, key)),
+      ),
+    ).toThrow('configuration is unavailable');
   });
 
   it.each([
@@ -443,6 +535,8 @@ describe('companion device bridge configuration', () => {
       deploymentTarget: 'staging',
       connectionConfigured: true,
       signerConfigured: true,
+      executionTransportConfigured: false,
+      executionSignerConfigured: false,
       pairingAllowed: true,
       exactFiveReadOnlyLookupAllowed: true,
       financialActionAllowed: false,

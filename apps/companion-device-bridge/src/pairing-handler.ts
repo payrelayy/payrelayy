@@ -289,12 +289,26 @@ export function createP256CompanionBridgeSigner(
   privateKey: KeyObject,
   publicKeySpkiDer: Uint8Array,
 ): CompanionBridgeSigner {
+  const p256Order = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+  const p256HalfOrder = p256Order / 2n;
   return Object.freeze({
     keyId,
     publicKeySpkiDer: Uint8Array.from(publicKeySpkiDer),
-    signP1363: async (transcript: Uint8Array) =>
-      sign('sha256', transcript, { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString(
-        'base64url',
-      ),
+    signP1363: async (transcript: Uint8Array) => {
+      const signature = sign('sha256', transcript, {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+      });
+      try {
+        if (signature.byteLength !== 64) throw new Error();
+        const s = BigInt(`0x${signature.subarray(32).toString('hex')}`);
+        if (s > p256HalfOrder) {
+          Buffer.from((p256Order - s).toString(16).padStart(64, '0'), 'hex').copy(signature, 32);
+        }
+        return signature.toString('base64url');
+      } finally {
+        signature.fill(0);
+      }
+    },
   });
 }

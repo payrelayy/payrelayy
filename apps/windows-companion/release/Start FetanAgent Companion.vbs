@@ -2,7 +2,7 @@ Option Explicit
 
 Dim shell, fileSystem, packageRoot, nodePath, entryPath, releasePath, pairingDialogPath
 Dim dataRoot, releaseSha, identityBindingPath, enrollmentPath, expectedIdentity
-Dim pairingPackage, pairingCommand, pairingProcess, command, stream, exitCode
+Dim pairingPackage, pairingCommand, pairingProcess, command, stream, exitCode, executionMode
 
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
@@ -60,6 +60,7 @@ End If
 
 shell.Environment("Process")("FETANAGENT_COMPANION_DATA_ROOT") = dataRoot
 shell.Environment("Process")("FETANAGENT_COMPANION_RELEASE_SHA") = releaseSha
+executionMode = (LCase(Trim(shell.Environment("Process")("INTERNAL_COMPANION_EXECUTION_V2_ENABLED"))) = "true")
 
 identityBindingPath = fileSystem.BuildPath(fileSystem.BuildPath(dataRoot, "identity"), "kemerbet-primary.binding.json")
 If Not fileSystem.FileExists(identityBindingPath) Then
@@ -75,12 +76,20 @@ If Not fileSystem.FileExists(identityBindingPath) Then
   shell.Environment("Process")("FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY") = expectedIdentity
 End If
 
-MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
-  "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
-  "The companion will locally verify the exact bound agent header." & vbCrLf & _
-  "Any supplied pairing package will be consumed only after that verification." & vbCrLf & _
-  "Only a separate expiring server-signed command can run exactly five Find-only Player-ID lookups." & vbCrLf & _
-  "Amount, Notes, Transfer, settlement, and money movement remain disabled.", 64, "FetanAgent Companion"
+If executionMode Then
+  MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
+    "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
+    "Automatic Deposit pilot mode is enabled for this exact paired account." & vbCrLf & _
+    "Each approved assignment is fixed at 25.00 ETB, requires a freshly verified receiver, keeps Notes empty, and permits only one Transfer request." & vbCrLf & _
+    "A timeout, duplicate, changed page, or uncertain response stops the action and requires server reconciliation; it is never retried blindly.", 64, "FetanAgent Companion"
+Else
+  MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
+    "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
+    "The companion will locally verify the exact bound agent header." & vbCrLf & _
+    "Any supplied pairing package will be consumed only after that verification." & vbCrLf & _
+    "Only a separate expiring server-signed command can run exactly five Find-only Player-ID lookups." & vbCrLf & _
+    "Amount, Notes, Transfer, settlement, and money movement remain disabled.", 64, "FetanAgent Companion"
+End If
 
 command = Chr(34) & nodePath & Chr(34) & " " & Chr(34) & entryPath & Chr(34)
 On Error Resume Next
@@ -92,7 +101,13 @@ End If
 On Error GoTo 0
 
 If exitCode <> 0 Then
-  MsgBox "The protected KemerBet browser stopped without completing local identity verification." & vbCrLf & vbCrLf & _
-    "If another Companion window is already open, use that window. Otherwise confirm Chrome is installed and your internet connection works, then reopen the Companion." & vbCrLf & _
-    "Do not enter your password anywhere except the KemerBet Chrome window. No payment was enabled.", 48, "FetanAgent Companion"
+  If executionMode Then
+    MsgBox "The protected KemerBet browser stopped." & vbCrLf & vbCrLf & _
+      "Do not repeatedly restart it if an Automatic Deposit was in progress. FetanAgent will reconcile any protected attempt before accepting another assignment." & vbCrLf & _
+      "Do not enter your password anywhere except the KemerBet Chrome window.", 48, "FetanAgent Companion"
+  Else
+    MsgBox "The protected KemerBet browser stopped without completing local identity verification." & vbCrLf & vbCrLf & _
+      "If another Companion window is already open, use that window. Otherwise confirm Chrome is installed and your internet connection works, then reopen the Companion." & vbCrLf & _
+      "Do not enter your password anywhere except the KemerBet Chrome window. No payment was enabled.", 48, "FetanAgent Companion"
+  End If
 End If

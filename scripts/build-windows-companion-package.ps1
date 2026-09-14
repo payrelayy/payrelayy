@@ -31,7 +31,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or $checkedOutSha -ne $ReleaseSha) {
     throw 'The release SHA does not match the checked-out source.'
   }
-  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1 scripts/test-windows-companion-pairing-dialog.ps1
+  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-companion-execution-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1 scripts/test-windows-companion-pairing-dialog.ps1
   if ($LASTEXITCODE -ne 0) { throw 'Release inputs contain uncommitted changes.' }
 
   pnpm --filter '@fetanagent/windows-companion...' run build

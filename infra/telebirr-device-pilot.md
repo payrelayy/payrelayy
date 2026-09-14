@@ -139,6 +139,26 @@ and atomically replaces only `/usr/local/sbin/fetanagent-telebirr-device-pilot-h
 call Docker or PostgreSQL. If it reports an interrupted `.installing` or `.previous` file, preserve
 that file and inspect it; do not delete or rename it manually.
 
+### One-time helper-v5 installation
+
+Install helper v5 after this change is merged and before the next TeleBirr pilot mutation. It
+updates only the gateway-byte attestation so the existing staging pilot recognizes the reviewed
+companion execution-v2 routes. It does not enable companion execution, change a database role, call
+the provider, or move money.
+
+In the authenticated DigitalOcean root console, create
+`/root/fetanagent-telebirr-device-pilot-helper-v5` as `root:root` mode `0700`. Stage the merged
+`fetanagent-telebirr-device-pilot-helper.sh` there as `root:root` mode `0600`, and stage
+`install-fetanagent-telebirr-device-pilot-helper-v5.sh` in that same directory as `root:root` mode
+`0700`. Leave no other directory entry. Verify both files against the reviewed GitHub blobs, then
+run the installer at that exact path directly as root. Do not invoke it through `sudo` or an SSH
+deployment identity.
+
+The installer accepts only the exact helper-v4 predecessor digest or an already-installed exact
+v5 successor. It takes the shared deployment mutation lock, preserves the unchanged sudoers
+fragment, and atomically replaces only `/usr/local/sbin/fetanagent-telebirr-device-pilot-helper`.
+If it reports an interrupted `.installing` or `.previous` file, preserve that file for review.
+
 ## Operator-owned files
 
 Use one release-specific directory outside Git, for example

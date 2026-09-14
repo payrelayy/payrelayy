@@ -10,6 +10,8 @@ const DPAPI_ENTROPY = Object.freeze({
   'lookup-ledger': 'FetanAgent Windows Companion\0Exact-five lookup ledger\0v1',
   'execution-v2-crash-evidence':
     'FetanAgent Windows Companion\0Execution v2 local crash evidence\0v2',
+  'execution-v2-attempt-chain':
+    'FetanAgent Windows Companion\0Execution v2 protected attempt chain\0v2',
 } as const);
 
 export type WindowsDataProtectionPurpose = keyof typeof DPAPI_ENTROPY;

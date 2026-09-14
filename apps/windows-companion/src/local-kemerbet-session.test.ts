@@ -41,6 +41,7 @@ const TEN_MINUTES = 10 * 60 * 1_000;
 const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
 const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
+  executionV2Enabled: false,
   expectedAgentIdentityProvided: false,
   pairingPackageProvided: false,
   profileRoot: resolve('test-fixtures', 'local-companion', 'profile'),

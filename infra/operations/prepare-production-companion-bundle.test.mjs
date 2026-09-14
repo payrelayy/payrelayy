@@ -41,12 +41,12 @@ function fixture() {
   };
 }
 
-test('prepares only three production-bound protected files without a database-URL newline', (t) => {
+test('prepares the base and execution-v2 production-bound files without a database-URL newline', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'fetanagent-companion-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const { environment, privateBytes, manifest } = fixture();
   prepareProductionCompanionBundle(environment, directory);
-  assert.equal(readdirSync(directory).length, 3);
+  assert.equal(readdirSync(directory).length, 4);
   assert.deepEqual(
     readFileSync(join(directory, 'companion-bridge-server-signer.pkcs8.der')),
     privateBytes,
@@ -54,6 +54,26 @@ test('prepares only three production-bound protected files without a database-UR
   assert.equal(
     readFileSync(join(directory, 'companion-bridge-runtime-manifest.v2.json'), 'utf8'),
     JSON.stringify(manifest),
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(directory, 'companion-bridge-runtime-manifest.v3.json'), 'utf8')),
+    {
+      contractVersion: 3,
+      deploymentTarget: 'production',
+      pairingAllowed: true,
+      exactFiveReadOnlyLookupAllowed: true,
+      executionTransportAllowed: true,
+      serverProviderActionAllowed: false,
+      serverMoneyMovementAllowed: false,
+      serverSignerId: manifest.serverSignerId,
+      serverSignerKeyId: manifest.serverSignerKeyId,
+      serverSignerPublicKeySpkiSha256: manifest.serverSignerPublicKeySpkiSha256,
+      executionSignerKeyId: 'companion-execution-production-v1',
+      executionSignerPublicKeySpki:
+        'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7NAIqUp1BqgN1d5qzvSGT_WbZ1Z_LmUSAvI_eUs_OzIeaVtLMKfEzCjg9iqiLy_RQiU-4-WaY8XMtHbEkd6z0g',
+      executionSignerPublicKeySpkiSha256:
+        'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2',
+    },
   );
   const url = readFileSync(join(directory, 'companion-device-database-url'), 'utf8');
   assert.equal(new URL(url).hostname, 'db.xzztugbgtulptnbpoelr.supabase.co');

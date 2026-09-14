@@ -1,4 +1,4 @@
-FetanAgent Windows Companion — signed exact-five read-only / no-transfer release
+FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable release
 =================================================================================
 
 1. Extract the complete ZIP file.
@@ -17,17 +17,22 @@ FetanAgent Windows Companion — signed exact-five read-only / no-transfer relea
    within ten minutes. Closing Chrome stops the companion.
 8. After local identity verification, the companion generates a P-256 key on this computer,
    protects the private key with Windows DPAPI, and sends only the signed public pairing request.
-9. On the authenticated FetanAgent Owner page, approve one exact-five read-only lookup. The
+9. By default, an authenticated Owner approval can authorize one exact-five read-only lookup. The
    companion performs exactly five sequential KemerBet Find requests and returns only signed,
-   redacted outcomes and aggregate counts. It never enters Amount or Notes and never clicks
-   Transfer.
+   redacted outcomes and aggregate counts.
 10. Close the companion Chrome window to stop it.
 
-This release adds server-signed public-key device enrollment and one-use, expiring, signed
-exact-five Player-ID lookup assignments after local exact-identity verification. Player lookup is
-Find-only and sequential; it has no payment execution capability.
-KemerBet wallet and transaction requests are blocked even if the provider page displays a
-Transfer button. Amount, Notes, Transfer, settlement, and all money movement remain blocked.
+Automatic Deposit remains off unless FetanAgent has installed an exact production account binding
+and enabled the execution-v2 pilot for this Windows account. Do not set that internal switch or
+account ID yourself. When the pilot is enabled, one fresh server-signed assignment may prepare one
+specific Player, verify the receiver name/number and ETB currency, enter exactly 25.00 ETB with an
+empty Notes field, obtain a one-use database fence, and issue exactly one Transfer request. A
+duplicate, expired authority, changed page, redirect, malformed request, timeout, crash, or
+uncertain provider response blocks any blind retry and requires signed server reconciliation.
+
+When Automatic Deposit is off, KemerBet wallet and transaction requests remain blocked even if the
+provider page displays a Transfer button. The read-only exact-five flow never enters Amount or Notes
+and never clicks Transfer.
 Detecting the agent page is only a candidate until the exact locally bound header is
 observed twice, visible signed-out/CAPTCHA markers are absent, and the protected fingerprint
 matches. Repeated page events do not extend the twelve-hour deadline. Each guarded session has an

@@ -129,6 +129,10 @@ assert.match(companionMatcher, /method POST/u);
 assert.match(companionMatcher, /path \/v1\/companion\/device\/enrollments:pair/u);
 assert.match(companionMatcher, /\/v1\/companion\/device\/lookup-assignments:poll/u);
 assert.match(companionMatcher, /\/v1\/companion\/device\/lookup-results:submit/u);
+assert.match(companionMatcher, /\/v2\/companion\/device\/execution-assignments:poll/u);
+assert.match(companionMatcher, /\/v2\/companion\/device\/execution-authorities:consume/u);
+assert.match(companionMatcher, /\/v2\/companion\/device\/execution-results:submit/u);
+assert.match(companionMatcher, /\/v2\/companion\/device\/execution-status:query/u);
 assert.match(
   companionMatcher,
   /header Content-Type application\/vnd\.fetanagent\.companion-device-bridge\+json/u,
@@ -137,7 +141,7 @@ assert.match(
   companionMatcher,
   /header Accept application\/vnd\.fetanagent\.companion-device-bridge\+json/u,
 );
-assert.doesNotMatch(companionMatcher, /amount|transfer|settlement|execute/iu);
+assert.doesNotMatch(companionMatcher, /amount|transfer|settlement/iu);
 assert.match(caddyfile, /max_size 64KiB/u);
 assert.match(
   caddyfile,

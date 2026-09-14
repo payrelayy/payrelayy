@@ -6,7 +6,7 @@ import {
 
 const KEMERBET_LOGIN_PATH = '/Account/Login';
 const KEMERBET_REFRESH_PATH = '/Account/RefreshToken';
-const KEMERBET_DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit';
+export const KEMERBET_DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit' as const;
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const REVIEWED_API_READ_PATHS = new Set([

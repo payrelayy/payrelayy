@@ -44,6 +44,19 @@ export const COMPANION_EXECUTION_RESULT_TRANSCRIPT =
   'agent-platform-companion-execution-result-transcript-v2' as const;
 export const COMPANION_AUTHORITATIVE_EXECUTION_STATUS_TRANSCRIPT =
   'agent-platform-companion-authoritative-execution-status-transcript-v2' as const;
+export const COMPANION_EXECUTION_POLL_PATH =
+  '/v2/companion/device/execution-assignments:poll' as const;
+export const COMPANION_EXECUTION_AUTHORITY_PATH =
+  '/v2/companion/device/execution-authorities:consume' as const;
+export const COMPANION_EXECUTION_RESULT_PATH =
+  '/v2/companion/device/execution-results:submit' as const;
+export const COMPANION_EXECUTION_STATUS_PATH =
+  '/v2/companion/device/execution-status:query' as const;
+export type CompanionExecutionRequestPath =
+  | typeof COMPANION_EXECUTION_POLL_PATH
+  | typeof COMPANION_EXECUTION_AUTHORITY_PATH
+  | typeof COMPANION_EXECUTION_RESULT_PATH
+  | typeof COMPANION_EXECUTION_STATUS_PATH;
 export const COMPANION_EXECUTION_MAX_ENROLLMENT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const COMPANION_EXECUTION_MAX_ASSIGNMENT_LIFETIME_MS = 2 * 60 * 1_000;
 export const COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS = 10_000;
@@ -2211,6 +2224,83 @@ export function digestCompanionExecutionNonce(nonceCandidate: unknown): string |
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Bind a paired-device HTTP poll to its public certificate without turning the poll itself into
+ * action authority. The returned digest is suitable only for the no-money signed HTTP envelope.
+ */
+export function digestCompanionExecutionPollContent(
+  certificateBodyDigestCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  return certificateBodyDigest
+    ? sha256(
+        encodeFields('fetanagent:agent-platform-companion:execution-poll-content:v2', [
+          ['certificateBodyDigest', certificateBodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+/** Bind one fresh authority request to the exact enrollment, assignment, and request nonce. */
+export function digestCompanionExecutionAuthorityRequestContent(
+  signedEnrollmentCandidate: unknown,
+  signedAssignmentCandidate: unknown,
+  requestNonceDigestCandidate: unknown,
+): string | undefined {
+  const enrollment = decodeSignedExecutionEnrollment(signedEnrollmentCandidate);
+  const assignment = decodeSignedExecutionAssignment(signedAssignmentCandidate);
+  const requestNonceDigest = digest(requestNonceDigestCandidate);
+  if (!enrollment || !assignment || !requestNonceDigest) return undefined;
+  return sha256(
+    encodeFields('fetanagent:agent-platform-companion:execution-authority-request-content:v2', [
+      ['enrollmentBodyDigest', enrollment.bodyDigest],
+      ['assignmentBodyDigest', assignment.bodyDigest],
+      ['requestNonceDigest', requestNonceDigest],
+    ]),
+  );
+}
+
+/** Bind a result handoff to the complete signed execution chain. */
+export function digestCompanionExecutionResultContent(
+  signedEnrollmentCandidate: unknown,
+  signedAssignmentCandidate: unknown,
+  signedAuthorityCandidate: unknown,
+  signedResultCandidate: unknown,
+): string | undefined {
+  const enrollment = decodeSignedExecutionEnrollment(signedEnrollmentCandidate);
+  const assignment = decodeSignedExecutionAssignment(signedAssignmentCandidate);
+  const authority = decodeSignedOneUseActionAuthority(signedAuthorityCandidate);
+  const result = decodeSignedExecutionResult(signedResultCandidate);
+  if (!enrollment || !assignment || !authority || !result) return undefined;
+  return sha256(
+    encodeFields('fetanagent:agent-platform-companion:execution-result-content:v2', [
+      ['enrollmentBodyDigest', enrollment.bodyDigest],
+      ['assignmentBodyDigest', assignment.bodyDigest],
+      ['authorityBodyDigest', authority.bodyDigest],
+      ['resultBodyDigest', result.bodyDigest],
+    ]),
+  );
+}
+
+/** Bind a read-only recovery/status query to the exact assignment and a fresh query nonce. */
+export function digestCompanionExecutionStatusQueryContent(
+  signedEnrollmentCandidate: unknown,
+  signedAssignmentCandidate: unknown,
+  queryNonceDigestCandidate: unknown,
+): string | undefined {
+  const enrollment = decodeSignedExecutionEnrollment(signedEnrollmentCandidate);
+  const assignment = decodeSignedExecutionAssignment(signedAssignmentCandidate);
+  const queryNonceDigest = digest(queryNonceDigestCandidate);
+  if (!enrollment || !assignment || !queryNonceDigest) return undefined;
+  return sha256(
+    encodeFields('fetanagent:agent-platform-companion:execution-status-query-content:v2', [
+      ['enrollmentBodyDigest', enrollment.bodyDigest],
+      ['assignmentBodyDigest', assignment.bodyDigest],
+      ['queryNonceDigest', queryNonceDigest],
+    ]),
+  );
 }
 
 function replayIdentity<T extends object>(

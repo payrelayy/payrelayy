@@ -24,7 +24,7 @@ sudoers entry, then dispatch the normal production runtime deployment against th
 
 The deployment verifies generated material before provisioning, adds immutable public signing
 trust in Supabase, enables only the existing constrained companion login, installs the sealed
-images and protected files, and checks that all three public companion routes reject unsigned
+images and protected files, and checks that all seven public companion routes reject unsigned
 requests. A failed first activation disables the newly enabled companion login and restores the
 previous application release. Earlier nine-service releases remain valid rollback targets.
 

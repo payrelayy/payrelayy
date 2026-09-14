@@ -23,6 +23,7 @@ const enabledConfig: CompanionDeviceBridgeConfig = {
     publicKeySpkiDer: Uint8Array.of(1),
     signP1363: async () => 'synthetic-signature',
   },
+  execution: { enabled: false },
 };
 
 function postgresRuntime(initiallyReady = true) {
@@ -80,6 +81,7 @@ describe('companion device bridge application lifecycle', () => {
     expect(createPostgresRuntime).toHaveBeenCalledWith(
       enabledConfig.connection,
       enabledConfig.signer.keyId,
+      undefined,
     );
     expect(createServer).toHaveBeenCalledTimes(1);
     await expect(application.ready()).resolves.toBe(true);

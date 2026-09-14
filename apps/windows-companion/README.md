@@ -3,7 +3,8 @@
 This is the local, headed-browser replacement for the unreliable DigitalOcean KemerBet sign-in
 preview. It runs in the signed-in Windows desktop session and opens the installed stable Chrome.
 
-The current slice is deliberately paired, signed-command-only, and read-only:
+The companion is paired and signed-command-only. Automatic Deposit execution is compiled in but
+off by default; without the exact opt-in configuration it retains the original read-only behavior:
 
 - the owner types KemerBet credentials and CAPTCHA directly into the local Chrome window;
 - the dedicated Chrome profile stays on this Windows account;
@@ -19,8 +20,9 @@ The current slice is deliberately paired, signed-command-only, and read-only:
   enrollment starts without another package;
 - after pairing, only one unexpired server-signed assignment can authorize exactly five sequential
   Player-ID Find requests; the companion returns signed redacted outcomes and aggregate counts;
-- only the exact KemerBet login POST and non-financial session-refresh POST are permitted;
-- the KemerBet transfer endpoint and every other provider mutation are blocked;
+- only the exact KemerBet login POST and non-financial session-refresh POST are normally permitted;
+- the KemerBet transfer endpoint and every other provider mutation are blocked unless a single
+  execution-v2 allowance is synchronously installed for the exact prepared request;
 - the exact non-financial KemerBet session-refresh request remains available so the signed-in
   session can stay healthy;
 - no screenshot, keystroke, credential, cookie, browser-storage value, Player ID, or provider
@@ -40,7 +42,16 @@ twice, and matches it to the DPAPI-protected local binding before reporting `sig
 Window retention does not depend on a particular background `Account/Info` response or locale.
 Returning to the actual login page resets the state and starts a new non-sliding ten-minute login
 window within the overall session cap. A separately signed exact-five Player-ID lookup can run
-after pairing; it is read-only and cannot enter an amount, note, transfer, or settlement action.
+after pairing; it remains read-only.
+
+The opt-in execution-v2 worker requires the literal `INTERNAL_COMPANION_EXECUTION_V2_ENABLED=true`
+and one exact UUID account binding. It independently pins the production execution signer, verifies
+the signed enrollment/assignment/Player chain, prepares and rechecks the receiver identity and ETB
+currency, keeps Notes empty, fixes Amount at 25.00 ETB, consumes a durable one-use replay barrier,
+and persists crash evidence before the one allowed Transfer request. Provider redirects are never
+followed. Any ambiguous authority request, timeout, crash, duplicate, malformed payload, or
+uncertain provider response stops the lane and requires signed database reconciliation; it never
+causes an automatic provider retry.
 
 Sensitive request data may pass through the companion's local Node process memory during forwarding;
 it remains on this device and is not retained in logs or sent to remote FetanAgent services. Browser
@@ -58,5 +69,6 @@ For a first local-development run, set
 `FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY` to the exact visible agent-header value before
 starting. To enroll a verified device, set `FETANAGENT_COMPANION_PAIRING_PACKAGE` to a fresh package
 created on the Owner page; the process consumes and deletes that environment value during startup.
-Use `Ctrl+C` in the launching terminal to close the guarded browser. No assignment can authorize an
-Amount, Notes, Transfer, settlement, account mutation, balance mutation, or money movement action.
+Use `Ctrl+C` in the launching terminal to close the guarded browser. Do not manually enable the
+execution-v2 variables: they are installed only for an exact production account after the server
+transport, database migration, signer, pilot, and reconciliation gates have been verified.

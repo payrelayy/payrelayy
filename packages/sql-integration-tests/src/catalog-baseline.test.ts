@@ -8597,10 +8597,83 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(callableExecutionRoutines.rows).toEqual([
       {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.accept_agent_platform_companion_execution_result(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb,jsonb,jsonb)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.agent_platform_companion_execution_certificate_is_active(uuid,text,text,text,timestamp with time zone)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.agent_platform_companion_execution_encode_texts(text[])',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.agent_platform_companion_execution_player_digest(text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.agent_platform_companion_execution_valid_http_request(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
+      },
+      {
         deposit_executor_runtime: true,
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.cancel_deposit_execution_before_action(uuid,uuid,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.claim_agent_platform_companion_execution_authority(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,jsonb,jsonb)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.claim_agent_platform_companion_execution_status(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,jsonb,jsonb,jsonb,jsonb)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.complete_agent_platform_companion_execution_assignment(text,jsonb,text,jsonb)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.complete_agent_platform_companion_execution_authority(text,jsonb)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.complete_agent_platform_companion_execution_status(text,jsonb)',
       },
       {
         deposit_executor_runtime: false,

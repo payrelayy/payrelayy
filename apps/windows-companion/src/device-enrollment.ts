@@ -63,6 +63,33 @@ import {
 } from '@fetanagent/agent-platform-companion-contracts';
 
 import {
+  COMPANION_EXECUTION_AUTHORITY_PATH,
+  COMPANION_EXECUTION_POLL_PATH,
+  COMPANION_EXECUTION_RESULT_PATH,
+  COMPANION_EXECUTION_STATUS_PATH,
+  decodeSignedAuthoritativeExecutionStatus,
+  decodeSignedExecutionAssignment,
+  decodeSignedExecutionEnrollment,
+  decodeSignedOneUseActionAuthority,
+  digestCompanionExecutionPlayerId,
+  signExecutionResult,
+  verifySignedAuthoritativeExecutionStatus,
+  verifySignedExecutionAssignment,
+  verifySignedExecutionEnrollment,
+  verifySignedExecutionResult,
+  verifySignedOneUseActionAuthorityCryptographically,
+  type CompanionExecutionRequestPath,
+  type CryptographicallyVerifiedOneUseActionAuthority,
+  type ExecutionResultBody,
+  type SignedAuthoritativeExecutionStatus,
+  type SignedExecutionAssignment,
+  type SignedExecutionEnrollment,
+  type SignedExecutionResult,
+  type SignedOneUseActionAuthority,
+  type TrustedRoundTripContext,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
+
+import {
   createWindowsCurrentUserDataProtector,
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
@@ -897,6 +924,8 @@ export type CompanionLookupRequestPath =
   | typeof AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH
   | typeof AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH;
 
+export type CompanionDeviceRequestPath = CompanionLookupRequestPath | CompanionExecutionRequestPath;
+
 export type ExactFiveCompanionLookupOutcomes = readonly [
   CompanionPlayerLookupOutcome,
   CompanionPlayerLookupOutcome,
@@ -909,8 +938,9 @@ export interface CompanionDeviceSigningRuntime {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   readonly pollEndpoint: string;
   readonly resultEndpoint: string;
+  readonly execution?: CompanionExecutionSigningRuntime;
   createSignedHttpRequest(
-    path: CompanionLookupRequestPath,
+    path: CompanionDeviceRequestPath,
     contentDigest: string,
     issuedAt?: Date,
   ): SignedCompanionHttpRequest;
@@ -930,10 +960,69 @@ export interface CompanionDeviceSigningRuntime {
   ): SignedKemerBetExactFiveLookupResult;
 }
 
+export interface CompanionExecutionRuntimeConfiguration {
+  readonly expectedPlatformAgentAccountId: string;
+  readonly trustedExecutionSignerKeyId: string;
+  readonly trustedExecutionSignerPublicKeySpki: string;
+  readonly trustedExecutionSignerPublicKeySpkiSha256: string;
+}
+
+export interface CompanionExecutionSignedChain {
+  readonly enrollment: SignedExecutionEnrollment;
+  readonly assignment: SignedExecutionAssignment;
+}
+
+export interface VerifiedCompanionExecutionAssignment extends CompanionExecutionSignedChain {
+  readonly playerId: string;
+}
+
+export interface VerifiedCompanionExecutionAuthority {
+  readonly authority: SignedOneUseActionAuthority;
+  readonly verification: CryptographicallyVerifiedOneUseActionAuthority;
+}
+
+export interface CompanionExecutionSigningRuntime {
+  readonly pollEndpoint: string;
+  readonly authorityEndpoint: string;
+  readonly resultEndpoint: string;
+  readonly statusEndpoint: string;
+  verifyAssignment(
+    enrollmentCandidate: unknown,
+    assignmentCandidate: unknown,
+    playerIdCandidate: unknown,
+    trustedNow: Date,
+    roundTrip: TrustedRoundTripContext,
+  ): VerifiedCompanionExecutionAssignment | undefined;
+  verifyAuthority(
+    candidate: unknown,
+    chain: CompanionExecutionSignedChain,
+    expectedRequestNonceDigest: string,
+    trustedNow: Date,
+    roundTrip: TrustedRoundTripContext,
+  ): VerifiedCompanionExecutionAuthority | undefined;
+  createSignedResult(
+    bodyCandidate: ExecutionResultBody,
+    chain: CompanionExecutionSignedChain,
+    authority: SignedOneUseActionAuthority,
+    trustedNow: Date,
+  ): SignedExecutionResult;
+  verifyStatus(
+    candidate: unknown,
+    chain: CompanionExecutionSignedChain,
+    authority: SignedOneUseActionAuthority | null,
+    result: SignedExecutionResult | null,
+    expectedQueryNonceDigest: string,
+    minimumStatusSequence: string,
+    trustedNow: Date,
+    roundTrip: TrustedRoundTripContext,
+  ): SignedAuthoritativeExecutionStatus | undefined;
+}
+
 export interface LoadCompanionDeviceSigningRuntimeOptions {
   readonly dataRoot: string;
   readonly now?: () => Date;
   readonly protector?: WindowsCurrentUserDataProtector;
+  readonly execution?: CompanionExecutionRuntimeConfiguration;
 }
 
 function validRuntimeDate(candidate: Date): string {
@@ -943,7 +1032,7 @@ function validRuntimeDate(candidate: Date): string {
   return candidate.toISOString();
 }
 
-function endpointFor(enrollmentEndpoint: string, path: CompanionLookupRequestPath): string {
+function endpointFor(enrollmentEndpoint: string, path: CompanionDeviceRequestPath): string {
   const endpoint = new URL(enrollmentEndpoint);
   endpoint.pathname = path;
   endpoint.search = '';
@@ -1012,13 +1101,17 @@ export async function loadCompanionDeviceSigningRuntime(
 
   const certificate = enrollment.certificate;
   const createSignedHttpRequest = (
-    path: CompanionLookupRequestPath,
+    path: CompanionDeviceRequestPath,
     contentDigest: string,
     issuedAt = nowProvider(),
   ): SignedCompanionHttpRequest => {
     if (
       (path !== AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH &&
-        path !== AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH) ||
+        path !== AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH &&
+        path !== COMPANION_EXECUTION_POLL_PATH &&
+        path !== COMPANION_EXECUTION_AUTHORITY_PATH &&
+        path !== COMPANION_EXECUTION_RESULT_PATH &&
+        path !== COMPANION_EXECUTION_STATUS_PATH) ||
       !DIGEST_PATTERN.test(contentDigest)
     ) {
       fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
@@ -1190,10 +1283,135 @@ export async function loadCompanionDeviceSigningRuntime(
     return result;
   };
 
+  let execution: CompanionExecutionSigningRuntime | undefined;
+  if (options.execution !== undefined) {
+    const executionSignerKey = p256PublicKey(options.execution.trustedExecutionSignerPublicKeySpki);
+    if (
+      !OPAQUE_ID_PATTERN.test(options.execution.expectedPlatformAgentAccountId) ||
+      !OPAQUE_ID_PATTERN.test(options.execution.trustedExecutionSignerKeyId) ||
+      options.execution.trustedExecutionSignerPublicKeySpkiSha256 !== executionSignerKey.digest ||
+      options.execution.trustedExecutionSignerKeyId === certificate.signerKeyId ||
+      executionSignerKey.digest === sha256(serverPublicKey) ||
+      executionSignerKey.digest === certificate.body.devicePublicKeySpkiSha256
+    ) {
+      executionSignerKey.bytes.fill(0);
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    const executionIdentity = (trustedNow: Date) => ({
+      signedNoMoneyCertificate: certificate,
+      trustedNoMoneyServerPublicKeySpkiDer: serverPublicKey,
+      trustedExecutionSignerKeyId: options.execution!.trustedExecutionSignerKeyId,
+      trustedExecutionSignerPublicKeySpkiDer: executionSignerKey.bytes,
+      expectedDeviceId: certificate.body.deviceId,
+      expectedDeviceKeyId: certificate.body.deviceKeyId,
+      expectedPlatformAgentAccountId: options.execution!.expectedPlatformAgentAccountId,
+      trustedNow: validRuntimeDate(trustedNow),
+    });
+    const executionRuntime: CompanionExecutionSigningRuntime = {
+      pollEndpoint: endpointFor(enrollment.endpoint, COMPANION_EXECUTION_POLL_PATH),
+      authorityEndpoint: endpointFor(enrollment.endpoint, COMPANION_EXECUTION_AUTHORITY_PATH),
+      resultEndpoint: endpointFor(enrollment.endpoint, COMPANION_EXECUTION_RESULT_PATH),
+      statusEndpoint: endpointFor(enrollment.endpoint, COMPANION_EXECUTION_STATUS_PATH),
+      verifyAssignment(
+        enrollmentCandidate,
+        assignmentCandidate,
+        playerIdCandidate,
+        trustedNow,
+        roundTrip,
+      ) {
+        const signedEnrollment = decodeSignedExecutionEnrollment(enrollmentCandidate);
+        const signedAssignment = decodeSignedExecutionAssignment(assignmentCandidate);
+        if (
+          !signedEnrollment ||
+          !signedAssignment ||
+          typeof playerIdCandidate !== 'string' ||
+          digestCompanionExecutionPlayerId(playerIdCandidate) !==
+            signedAssignment.body.playerIdDigest
+        ) {
+          return undefined;
+        }
+        const identity = executionIdentity(trustedNow);
+        if (
+          !verifySignedExecutionEnrollment(signedEnrollment, identity) ||
+          !verifySignedExecutionAssignment(signedAssignment, {
+            ...identity,
+            signedExecutionEnrollment: signedEnrollment,
+            roundTrip,
+            consumedReplayIdentities: [],
+          })
+        ) {
+          return undefined;
+        }
+        return Object.freeze({
+          enrollment: signedEnrollment,
+          assignment: signedAssignment,
+          playerId: playerIdCandidate,
+        });
+      },
+      verifyAuthority(candidate, chain, expectedRequestNonceDigest, trustedNow, roundTrip) {
+        const authority = decodeSignedOneUseActionAuthority(candidate);
+        if (!authority) return undefined;
+        const verification = verifySignedOneUseActionAuthorityCryptographically(authority, {
+          ...executionIdentity(trustedNow),
+          signedExecutionEnrollment: chain.enrollment,
+          signedExecutionAssignment: chain.assignment,
+          expectedRequestNonceDigest,
+          roundTrip,
+          consumedReplayIdentities: [],
+        });
+        return verification ? Object.freeze({ authority, verification }) : undefined;
+      },
+      createSignedResult(bodyCandidate, chain, authority, trustedNow) {
+        const result = signExecutionResult(bodyCandidate, privateKey);
+        if (
+          !result ||
+          !verifySignedExecutionResult(result, {
+            ...executionIdentity(trustedNow),
+            signedExecutionEnrollment: chain.enrollment,
+            signedExecutionAssignment: chain.assignment,
+            signedOneUseActionAuthority: authority,
+            consumedReplayIdentities: [],
+          })
+        ) {
+          fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+        }
+        return result;
+      },
+      verifyStatus(
+        candidate,
+        chain,
+        authority,
+        result,
+        expectedQueryNonceDigest,
+        minimumStatusSequence,
+        trustedNow,
+        roundTrip,
+      ) {
+        const status = decodeSignedAuthoritativeExecutionStatus(candidate);
+        return status &&
+          verifySignedAuthoritativeExecutionStatus(status, {
+            ...executionIdentity(trustedNow),
+            signedExecutionEnrollment: chain.enrollment,
+            signedExecutionAssignment: chain.assignment,
+            signedOneUseActionAuthority: authority,
+            signedExecutionResult: result,
+            expectedQueryNonceDigest,
+            minimumStatusSequence,
+            roundTrip,
+            consumedReplayIdentities: [],
+          })
+          ? status
+          : undefined;
+      },
+    };
+    execution = Object.freeze(executionRuntime);
+  }
+
   return Object.freeze({
     certificate,
     pollEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH),
     resultEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH),
+    ...(execution === undefined ? {} : { execution }),
     createSignedHttpRequest,
     decodeAndVerifyAssignment,
     verifyLookupExchange,

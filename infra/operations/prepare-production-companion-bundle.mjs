@@ -7,6 +7,11 @@ const unavailable = () => {
   throw new Error('Production companion material is missing, mismatched, or unsafe.');
 };
 const digest = (bytes) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+const executionSignerKeyId = 'companion-execution-production-v1';
+const executionSignerPublicKeySpki =
+  'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7NAIqUp1BqgN1d5qzvSGT_WbZ1Z_LmUSAvI_eUs_OzIeaVtLMKfEzCjg9iqiLy_RQiU-4-WaY8XMtHbEkd6z0g';
+const executionSignerPublicKeySpkiSha256 =
+  'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2';
 const fields = [
   'contractVersion',
   'deploymentTarget',
@@ -17,6 +22,21 @@ const fields = [
   'serverSignerId',
   'serverSignerKeyId',
   'serverSignerPublicKeySpkiSha256',
+];
+const executionFields = [
+  'contractVersion',
+  'deploymentTarget',
+  'pairingAllowed',
+  'exactFiveReadOnlyLookupAllowed',
+  'executionTransportAllowed',
+  'serverProviderActionAllowed',
+  'serverMoneyMovementAllowed',
+  'serverSignerId',
+  'serverSignerKeyId',
+  'serverSignerPublicKeySpkiSha256',
+  'executionSignerKeyId',
+  'executionSignerPublicKeySpki',
+  'executionSignerPublicKeySpkiSha256',
 ];
 
 function decode(value) {
@@ -92,6 +112,44 @@ export function prepareProductionCompanionBundle(environment, directory) {
       manifest.serverSignerPublicKeySpkiSha256 !== publicDigest
     )
       unavailable();
+    const executionPublicBytes = Buffer.from(executionSignerPublicKeySpki, 'base64url');
+    buffers.push(executionPublicBytes);
+    const canonicalExecutionPublicBytes = Buffer.from(
+      createPublicKey({ key: executionPublicBytes, format: 'der', type: 'spki' }).export({
+        format: 'der',
+        type: 'spki',
+      }),
+    );
+    buffers.push(canonicalExecutionPublicBytes);
+    if (
+      executionPublicBytes.length !== 91 ||
+      !executionPublicBytes.equals(canonicalExecutionPublicBytes) ||
+      digest(executionPublicBytes) !== executionSignerPublicKeySpkiSha256 ||
+      [
+        publicDigest,
+        environment.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256,
+        environment.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256,
+      ].includes(executionSignerPublicKeySpkiSha256)
+    )
+      unavailable();
+    const executionManifest = {
+      contractVersion: 3,
+      deploymentTarget: 'production',
+      pairingAllowed: true,
+      exactFiveReadOnlyLookupAllowed: true,
+      executionTransportAllowed: true,
+      serverProviderActionAllowed: false,
+      serverMoneyMovementAllowed: false,
+      serverSignerId: signerId,
+      serverSignerKeyId: keyId,
+      serverSignerPublicKeySpkiSha256: publicDigest,
+      executionSignerKeyId,
+      executionSignerPublicKeySpki,
+      executionSignerPublicKeySpkiSha256,
+    };
+    if (Object.keys(executionManifest).join(',') !== executionFields.join(',')) unavailable();
+    const executionManifestBytes = Buffer.from(JSON.stringify(executionManifest), 'utf8');
+    buffers.push(executionManifestBytes);
     const values = [
       [
         'companion-device-database-url',
@@ -99,6 +157,7 @@ export function prepareProductionCompanionBundle(environment, directory) {
       ],
       ['companion-bridge-server-signer.pkcs8.der', privateBytes],
       ['companion-bridge-runtime-manifest.v2.json', manifestBytes],
+      ['companion-bridge-runtime-manifest.v3.json', executionManifestBytes],
     ];
     for (const [name, value] of values) {
       writeFileSync(join(directory, name), value, { flag: 'wx', mode: 0o600 });

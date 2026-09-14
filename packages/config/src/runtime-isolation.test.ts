@@ -148,6 +148,35 @@ describe('runtime configuration isolation', () => {
     });
   });
 
+  it('accepts only the exact target-bound Player-ID action session-pooler login', () => {
+    const staging = loadApiConfig({
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+    });
+    expect(staging.telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'staging',
+      connection: {
+        host: 'aws-1-eu-west-1.pooler.supabase.com',
+        user: 'fetanagent_player_actions_runtime.spzpiyxheappsfyswewl',
+      },
+    });
+
+    const production = loadApiConfig({
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DEPLOYMENT_TARGET: 'production',
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime.xzztugbgtulptnbpoelr:password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+    });
+    expect(production.telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'production',
+      connection: {
+        host: 'aws-0-eu-west-1.pooler.supabase.com',
+        user: 'fetanagent_player_actions_runtime.xzztugbgtulptnbpoelr',
+      },
+    });
+  });
+
   it('enables receiver review only on the production Player-action target', () => {
     const production = loadApiConfig({
       ...playerActionEnvironment,
@@ -209,9 +238,23 @@ describe('runtime configuration isolation', () => {
       loadApiConfig({
         ...playerActionEnvironment,
         PLAYER_ACTION_DATABASE_URL:
-          'postgres://fetanagent_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+          'postgres://fetanagent_player_actions_runtime:password@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
       }),
-    ).toThrow('exact IPv6 direct database endpoint');
+    ).toThrow('exact direct or session-pooler database endpoint');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('match the explicit deployment target');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime.spzpiyxheappsfyswewl:password@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('complete port-5432 PostgreSQL URL');
     expect(() =>
       loadApiConfig({
         ...playerActionEnvironment,

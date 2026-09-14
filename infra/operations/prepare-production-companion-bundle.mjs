@@ -153,7 +153,7 @@ export function prepareProductionCompanionBundle(environment, directory) {
     const values = [
       [
         'companion-device-database-url',
-        `postgresql://fetanagent_companion_device_bridge_runtime:${password}@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full`,
+        `postgresql://fetanagent_companion_device_bridge_runtime.xzztugbgtulptnbpoelr:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
       ],
       ['companion-bridge-server-signer.pkcs8.der', privateBytes],
       ['companion-bridge-runtime-manifest.v2.json', manifestBytes],

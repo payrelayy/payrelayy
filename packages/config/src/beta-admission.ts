@@ -14,13 +14,20 @@ export const BETA_ADMISSION_DATABASE_RUNTIME_ROLE = 'fetanagent_beta_admission_r
 
 export const BETA_ADMISSION_DATABASE_DIRECT_HOST = `db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
 export const BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST = `db.${FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE}.supabase.co`;
+export const BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST = 'aws-1-eu-west-1.pooler.supabase.com';
+export const BETA_ADMISSION_PRODUCTION_DATABASE_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com';
 export const BETA_ADMISSION_DEPLOYMENT_TARGETS = {
   staging: {
     databaseDirectHost: BETA_ADMISSION_DATABASE_DIRECT_HOST,
+    databaseSessionPoolerHost: BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST,
+    databaseSessionPoolerRuntimeRole: `${BETA_ADMISSION_DATABASE_RUNTIME_ROLE}.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}`,
     projectReference: FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
   },
   production: {
     databaseDirectHost: BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST,
+    databaseSessionPoolerHost: BETA_ADMISSION_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
+    databaseSessionPoolerRuntimeRole: `${BETA_ADMISSION_DATABASE_RUNTIME_ROLE}.${FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE}`,
     projectReference: FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
   },
 } as const;
@@ -143,9 +150,15 @@ function resolveRuntimeUser(
   ) {
     return user;
   }
+  if (
+    connectionUrl.hostname === target.databaseSessionPoolerHost &&
+    user === target.databaseSessionPoolerRuntimeRole
+  ) {
+    return user;
+  }
 
   throw new Error(
-    'BETA_ADMISSION_DATABASE_URL must use the dedicated beta-admission runtime login through the exact deployment-target database endpoint.',
+    'BETA_ADMISSION_DATABASE_URL must use the dedicated beta-admission runtime login through the exact deployment-target direct or session-pooler database endpoint.',
   );
 }
 
@@ -173,7 +186,7 @@ function parseDatabaseConnection(
     );
   }
   if (connectionUrl.port !== '' && connectionUrl.port !== '5432') {
-    throw new Error('BETA_ADMISSION_DATABASE_URL must use direct database port 5432.');
+    throw new Error('BETA_ADMISSION_DATABASE_URL must use database port 5432.');
   }
 
   const queryKeys = Array.from(connectionUrl.searchParams.keys());

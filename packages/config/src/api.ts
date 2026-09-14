@@ -174,12 +174,16 @@ const PLAYER_ACTION_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
 const PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE = FETANAGENT_SUPABASE_PROJECT_REFERENCE;
 const PLAYER_ACTION_DATABASE_TARGETS = {
   staging: {
+    directHost: `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`,
     projectReference: PLAYER_ACTION_STAGING_PROJECT_REFERENCE,
-    host: `db.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}.supabase.co`,
+    sessionPoolerHost: 'aws-1-eu-west-1.pooler.supabase.com',
+    sessionPoolerUser: `${PLAYER_ACTION_DATABASE_RUNTIME_ROLE}.${PLAYER_ACTION_STAGING_PROJECT_REFERENCE}`,
   },
   production: {
+    directHost: `db.${PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
     projectReference: PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE,
-    host: `db.${PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE}.supabase.co`,
+    sessionPoolerHost: 'aws-0-eu-west-1.pooler.supabase.com',
+    sessionPoolerUser: `${PLAYER_ACTION_DATABASE_RUNTIME_ROLE}.${PLAYER_ACTION_PRODUCTION_PROJECT_REFERENCE}`,
   },
 } as const;
 type PlayerActionDeploymentTarget = keyof typeof PLAYER_ACTION_DATABASE_TARGETS;
@@ -466,13 +470,19 @@ function resolvePlayerActionDatabaseRuntimeUser(
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
   const expectedTarget = PLAYER_ACTION_DATABASE_TARGETS[deploymentTarget];
   if (
-    connectionUrl.hostname === expectedTarget.host &&
+    connectionUrl.hostname === expectedTarget.directHost &&
     user === PLAYER_ACTION_DATABASE_RUNTIME_ROLE
   ) {
     return user;
   }
+  if (
+    connectionUrl.hostname === expectedTarget.sessionPoolerHost &&
+    user === expectedTarget.sessionPoolerUser
+  ) {
+    return user;
+  }
   throw new Error(
-    'PLAYER_ACTION_DATABASE_URL must match the explicit deployment target and use the dedicated Player-ID action runtime login through its exact IPv6 direct database endpoint.',
+    'PLAYER_ACTION_DATABASE_URL must match the explicit deployment target and use the dedicated Player-ID action runtime login through its exact direct or session-pooler database endpoint.',
   );
 }
 

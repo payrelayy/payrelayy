@@ -17,12 +17,14 @@ import {
   CUSTOMER_WEB_DEPLOYMENT_TARGETS,
   CUSTOMER_WEB_DATABASE_DIRECT_HOST,
   CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
+  CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
   CUSTOMER_WEB_PASSWORD_RECOVERY_REDIRECT_URL,
   CUSTOMER_WEB_PRODUCTION_DATABASE_URL_SECRET_FILE,
   CUSTOMER_WEB_PRODUCTION_RATE_LIMIT_HMAC_SECRET_FILE,
   CUSTOMER_WEB_PRODUCTION_SUPABASE_PUBLISHABLE_KEY_SECRET_FILE,
   CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
+  CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST,
   loadCustomerWebAuthConfig,
   loadCustomerWebDepositConfig,
   loadCustomerWebDryRunDepositProofConfig,
@@ -769,6 +771,39 @@ describe('customer web workspace configuration', () => {
     expect(JSON.stringify(redacted)).not.toContain(CUSTOMER_WEB_DATABASE_RUNTIME_ROLE);
   });
 
+  it('loads the exact target-bound session-pooler host and suffixed runtime role', () => {
+    const stagingPoolerDatabaseUrl = `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@${CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`;
+    expect(
+      loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'staging',
+        CUSTOMER_WEB_DATABASE_URL: stagingPoolerDatabaseUrl,
+        INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+      }),
+    ).toMatchObject({
+      connection: {
+        host: CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST,
+        user: `${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}`,
+      },
+      deploymentTarget: 'staging',
+    });
+
+    const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
+    const productionPoolerDatabaseUrl = `postgresql://${production.databaseSessionPoolerRuntimeRole}:db-password@${CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`;
+    expect(
+      loadCustomerWebWorkspaceConfig({
+        CUSTOMER_WEB_DEPLOYMENT_TARGET: 'production',
+        CUSTOMER_WEB_DATABASE_URL: productionPoolerDatabaseUrl,
+        INTERNAL_CUSTOMER_WEB_WORKSPACE_RUNTIME_ENABLED: 'true',
+      }),
+    ).toMatchObject({
+      connection: {
+        host: CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
+        user: production.databaseSessionPoolerRuntimeRole,
+      },
+      deploymentTarget: 'production',
+    });
+  });
+
   it('binds the workspace to production only when the production target and host agree', () => {
     const production = CUSTOMER_WEB_DEPLOYMENT_TARGETS.production;
     const productionDatabaseUrl = `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}:db-password@${production.databaseDirectHost}:5432/postgres?sslmode=verify-full`;
@@ -936,6 +971,9 @@ describe('customer web workspace configuration', () => {
   it.each([
     databaseUrl.replace(CUSTOMER_WEB_DATABASE_DIRECT_HOST, 'db.example.test'),
     databaseUrl.replace(CUSTOMER_WEB_DATABASE_RUNTIME_ROLE, 'postgres'),
+    `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}:db-password@${CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+    `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@${CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+    `postgresql://${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@${CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST}:6543/postgres?sslmode=verify-full`,
     databaseUrl.replace(':5432/', ':6543/'),
     databaseUrl.replace('/postgres?', '/template1?'),
     databaseUrl.replace('sslmode=verify-full', 'sslmode=require'),

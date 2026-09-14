@@ -304,6 +304,25 @@ assert.match(workflow, /cleanup-incoming/u);
 assert.match(workflow, /production-nonfinancial-runtimes-disable\.sql/u);
 assert.doesNotMatch(workflow, /^  schedule:|2026-09-0|systemctl|service[_-]?role/imu);
 assert.doesNotMatch(workflow, /echo[^\r\n]*(?:PASSWORD|TOKEN|PRIVATE_KEY)/u);
+assert.doesNotMatch(
+  deployJob,
+  /\$PRODUCTION_DATABASE_DIRECT_HOST/u,
+  'deployed runtime DSNs must not use the unreachable direct IPv6 endpoint',
+);
+for (const roleVariable of [
+  'OWNER_RUNTIME_ROLE',
+  'CUSTOMER_WEB_RUNTIME_ROLE',
+  'BETA_RUNTIME_ROLE',
+  'PLAYER_ACTION_RUNTIME_ROLE',
+]) {
+  assert.match(
+    workflow,
+    new RegExp(
+      `"\\$${roleVariable}\\.\\$PRODUCTION_PROJECT_REF"[\\s\\S]*?"\\$PRODUCTION_DATABASE_POOLER_HOST" >"\\$secret_dir/`,
+      'u',
+    ),
+  );
+}
 for (const target of [
   'companion-device-bridge',
   'telebirr-assignment-broker',
@@ -323,11 +342,11 @@ for (const protectedName of [
 }
 assert.match(
   workflow,
-  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*'fetanagent_telebirr_device_state_runtime'/u,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"[\s\S]*?"\$PRODUCTION_DATABASE_POOLER_HOST"/u,
 );
 assert.doesNotMatch(
   workflow,
-  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*'fetanagent_telebirr_device_state_runtime'/u,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"/u,
 );
 assert.doesNotMatch(
   workflow,

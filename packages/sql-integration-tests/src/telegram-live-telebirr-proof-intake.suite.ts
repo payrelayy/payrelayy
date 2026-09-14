@@ -196,41 +196,36 @@ async function createTelegramActor(
   );
 
   const admissionEvent = await createInboundEvent(client, identityId, 'admission');
+  const tokenDigest = `sha256-v1:${referenceFingerprint()}`;
   await client.query(
     `insert into app.telegram_beta_invites (
        token_digest,
-       status,
        expires_at,
        issued_by_admin_id,
-       created_at,
-       redeemed_telegram_user_id,
-       redeemed_private_chat_id,
-       redeemed_customer_id,
-       redeemed_customer_identity_id,
-       redeemed_inbound_event_id,
-       redeemed_at
+       created_at
      ) values (
        $1::text,
-       'redeemed',
        clock_timestamp() + interval '1 hour',
        $2::uuid,
-       clock_timestamp() - interval '10 minutes',
-       $3::bigint,
-       $3::bigint,
-       $4::uuid,
-       $5::uuid,
-       $6::uuid,
-       clock_timestamp() - interval '5 minutes'
+       clock_timestamp() - interval '10 minutes'
      )`,
-    [
-      `sha256-v1:${referenceFingerprint()}`,
-      ownerAdminId,
-      telegramUserId,
-      resolvedCustomerId,
-      identityId,
-      admissionEvent,
-    ],
+    [tokenDigest, ownerAdminId],
   );
+  const redeemedInvite = await client.query<{ readonly token_digest: string }>(
+    `update app.telegram_beta_invites
+        set status = 'redeemed',
+            redeemed_telegram_user_id = $2::bigint,
+            redeemed_private_chat_id = $2::bigint,
+            redeemed_customer_id = $3::uuid,
+            redeemed_customer_identity_id = $4::uuid,
+            redeemed_inbound_event_id = $5::uuid,
+            redeemed_at = clock_timestamp() - interval '5 minutes'
+      where token_digest = $1::text
+        and status = 'active'
+      returning token_digest`,
+    [tokenDigest, telegramUserId, resolvedCustomerId, identityId, admissionEvent],
+  );
+  expect(redeemedInvite.rows).toHaveLength(1);
 
   return { customerId: resolvedCustomerId, identityId, telegramUserId };
 }

@@ -179,7 +179,7 @@ function databaseWithOperations(
   );
 }
 
-describe('dedicated customer workspace direct-Postgres runtime', () => {
+describe('dedicated customer workspace Postgres runtime', () => {
   it('builds an exact verify-full, max-one pool with bounded client and server timeouts', () => {
     expect(createCustomerWorkspacePoolConfig(config)).toEqual({
       application_name: 'fetanagent-customer-web',
@@ -226,11 +226,42 @@ describe('dedicated customer workspace direct-Postgres runtime', () => {
       host: production.databaseDirectHost,
       user: 'fetanagent_customer_web_runtime',
     });
+    const productionPoolerConfig: Extract<CustomerWebWorkspaceConfig, { readonly enabled: true }> =
+      {
+        ...productionConfig,
+        connection: {
+          ...productionConfig.connection,
+          host: production.databaseSessionPoolerHost,
+          user: production.databaseSessionPoolerRuntimeRole,
+        },
+      };
+    expect(createCustomerWorkspacePoolConfig(productionPoolerConfig)).toMatchObject({
+      host: production.databaseSessionPoolerHost,
+      user: production.databaseSessionPoolerRuntimeRole,
+    });
     expect(() =>
       createCustomerWorkspacePoolConfig({
         ...productionConfig,
         connection: { ...productionConfig.connection, host: config.connection.host },
       } as CustomerWebWorkspaceConfig & { readonly enabled: true }),
+    ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
+    expect(() =>
+      createCustomerWorkspacePoolConfig({
+        ...productionPoolerConfig,
+        connection: {
+          ...productionPoolerConfig.connection,
+          user: 'fetanagent_customer_web_runtime',
+        },
+      }),
+    ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
+    expect(() =>
+      createCustomerWorkspacePoolConfig({
+        ...productionConfig,
+        connection: {
+          ...productionConfig.connection,
+          user: production.databaseSessionPoolerRuntimeRole,
+        },
+      }),
     ).toThrow(CustomerWorkspaceRuntimeUnavailableError);
     expect(() =>
       createCustomerWorkspacePoolConfig({

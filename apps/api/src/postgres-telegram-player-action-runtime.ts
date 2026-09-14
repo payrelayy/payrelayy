@@ -409,7 +409,10 @@ async function handleTelebirrDestination(
     receiverAccountHolderName: row.receiver_account_holder_name,
     receiverAccountMasked: row.receiver_account_masked,
   };
-  if (!row.payments_enabled || config.financialActionsMode !== 'live') {
+  const receiverReviewEnabled =
+    config.financialActionsMode === 'dry_run' &&
+    config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
+  if (!row.payments_enabled || (!receiverReviewEnabled && config.financialActionsMode !== 'live')) {
     return {
       ...base,
       outcome: 'telebirr_deposit_preview',
@@ -435,6 +438,16 @@ async function handleTelebirrDestination(
         config.telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
     },
   });
+  if (receiverReviewEnabled) {
+    return {
+      ...base,
+      outcome: 'telebirr_deposit_destination_review',
+      receiverAccountReference,
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      acceptsPayments: false,
+    };
+  }
   return {
     ...base,
     outcome: 'telebirr_deposit_destination',
@@ -565,7 +578,10 @@ async function handleDepositProof(
   action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_proof_command' }>,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
-  if (config.financialActionsMode !== 'dry_run') {
+  if (
+    config.financialActionsMode !== 'dry_run' ||
+    config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled
+  ) {
     return { version: 1, outcome: 'deposit_unavailable' };
   }
 

@@ -119,6 +119,7 @@ describe('runtime configuration isolation', () => {
         host: 'db.spzpiyxheappsfyswewl.supabase.co',
         user: 'fetanagent_player_actions_runtime',
       },
+      telebirrReceiverReviewEnabled: false,
     });
     const redacted = JSON.stringify(redactedApiConfigForLog(config));
     expect(redacted).not.toContain('password');
@@ -143,7 +144,34 @@ describe('runtime configuration isolation', () => {
         host: 'db.xzztugbgtulptnbpoelr.supabase.co',
         user: 'fetanagent_player_actions_runtime',
       },
+      telebirrReceiverReviewEnabled: false,
     });
+  });
+
+  it('enables receiver review only on the production Player-action target', () => {
+    const production = loadApiConfig({
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DEPLOYMENT_TARGET: 'production',
+      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true',
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+    });
+    expect(production.telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'production',
+      telebirrReceiverReviewEnabled: true,
+    });
+    expect(
+      redactedApiConfigForLog(production).telegramPlayerActionRuntime.telebirrReceiverReviewEnabled,
+    ).toBe(true);
+
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true',
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('restricted to the production Player-action target');
   });
 
   it('rejects target drift, a generic role, and shared Player-ID action HMACs', () => {

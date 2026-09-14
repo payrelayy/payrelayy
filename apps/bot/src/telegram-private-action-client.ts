@@ -109,6 +109,19 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'telebirr_deposit_destination_review' &&
+    keys.length === 10 &&
+    validReceiverPresentation(value) &&
+    typeof value.receiverAccountReference === 'string' &&
+    /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
+    value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
+    value.amountMinor === '2500' &&
+    value.currencyCode === 'ETB' &&
+    value.acceptsPayments === false
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     (value.outcome === 'deposit_proof_received' || value.outcome === 'deposit_proof_status') &&
     keys.length === 7 &&
     isTelegramDepositProofToken(value.proofToken) &&

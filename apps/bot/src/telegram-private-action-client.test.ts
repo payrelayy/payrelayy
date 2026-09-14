@@ -97,8 +97,15 @@ describe('Telegram private-action bot client', () => {
       receiverAccountReference: '0000000042',
       acceptsPayments: true,
     } as const;
+    const review = {
+      ...preview,
+      outcome: 'telebirr_deposit_destination_review',
+      receiverAccountReference: '0000000042',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+    } as const;
 
-    for (const result of [preview, destination]) {
+    for (const result of [preview, destination, review]) {
       await expect(
         deliverTelegramPrivateAction(action, config, {
           fetch: async () => ({ status: 200, json: async () => result }),
@@ -113,6 +120,10 @@ describe('Telegram private-action bot client', () => {
       { ...destination, receiverAccountReference: '09123 47494' },
       { ...destination, acceptsPayments: false },
       { ...destination, databaseReceiverId: 'private' },
+      { ...review, receiverAccountMasked: '***0000' },
+      { ...review, amountMinor: '5000' },
+      { ...review, currencyCode: 'USD' },
+      { ...review, acceptsPayments: true },
     ]) {
       await expect(
         deliverTelegramPrivateAction(action, config, {

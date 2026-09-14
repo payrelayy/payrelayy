@@ -91,6 +91,19 @@ async function queryAsBetaAdmission<T extends QueryResultRow>(
   });
 }
 
+async function queryAsOwnerControl<T extends QueryResultRow>(
+  client: Client,
+  query: string,
+  values: readonly (number | string | null)[] = [],
+): Promise<readonly T[]> {
+  return withSavepoint(client, async () => {
+    await client.query('set local role fetanagent_owner_control');
+    const result = await client.query<T>(query, [...values]);
+    await client.query('reset role');
+    return result.rows;
+  });
+}
+
 async function recordPublicAction(
   client: Client,
   input: {
@@ -406,6 +419,175 @@ export function registerPublicTelegramActionOnboardingSqlTests(getClient: () => 
           [secondDigest, `update:${inviteUpdateId + 1}`],
         );
         expect(rejectedSecondInvite.rows).toEqual([{ events: '0', status: 'active' }]);
+      });
+    });
+
+    it('redeems a genuine invite into the same audited public identity after complete Owner-reviewed Player progression', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const userId = 8_810_000_015;
+        const tokenDigest = inviteDigest('8');
+        await recordPublicAction(client, {
+          chatId: userId,
+          payload: payloadHmac('8'),
+          updateId: 8_820_000_015,
+          userId,
+        });
+
+        const before = await client.query<PublicIdentityGraphRow>(
+          `select customer.id as customer_id,
+                  customer_identity.id as customer_identity_id,
+                  telegram_identity.telegram_user_id::text as telegram_user_id,
+                  telegram_identity.private_chat_id::text as private_chat_id,
+                  conversation.id as conversation_id,
+                  conversation.state as conversation_state,
+                  conversation.version::text as conversation_version
+             from app.customer_identities customer_identity
+             join app.customers customer
+               on customer.id = customer_identity.customer_id
+             join app.telegram_identities telegram_identity
+               on telegram_identity.customer_identity_id = customer_identity.id
+             join app.bot_conversations conversation
+               on conversation.telegram_identity_id = customer_identity.id
+            where customer_identity.identity_kind = 'telegram'
+              and customer_identity.external_subject = $1::text`,
+          [userId.toString()],
+        );
+        expect(before.rows).toHaveLength(1);
+
+        const owner = await client.query<{
+          readonly auth_user_id: string;
+          readonly id: string;
+        }>(
+          `select admin_user.id::text, admin_user.auth_user_id::text
+             from app.admin_users admin_user
+            where admin_user.role = 'owner'
+              and admin_user.status = 'active'`,
+        );
+        expect(owner.rows).toHaveLength(1);
+
+        const registration = await client.query<{ readonly id: string }>(
+          `insert into app.player_registration_requests (customer_id, platform_id, player_id)
+           select $1::uuid, platform.id, 'MATURE-PUBLIC-PLAYER-1'
+             from app.platforms platform
+            where platform.code = 'kemerbet'
+              and platform.status = 'active'
+           returning id::text`,
+          [before.rows[0]!.customer_id],
+        );
+        expect(registration.rows).toHaveLength(1);
+        await queryAsOwnerControl(
+          client,
+          `select * from app.review_owner_player_registration_request(
+             $1::uuid, $2::uuid, 'exists', 'owner_platform_lookup'
+           )`,
+          [owner.rows[0]!.auth_user_id, registration.rows[0]!.id],
+        );
+        const association = await queryAsOwnerControl<{
+          readonly associated_player_account_id: string;
+        }>(
+          client,
+          `select associated_player_account_id::text
+             from app.associate_owner_validated_player_registration_request(
+               $1::uuid, $2::uuid, 'owner_verified_platform_ownership'
+             )`,
+          [owner.rows[0]!.auth_user_id, registration.rows[0]!.id],
+        );
+        expect(association).toHaveLength(1);
+
+        await client.query(
+          `insert into app.telegram_beta_invites (
+             token_digest, expires_at, issued_by_admin_id
+           ) values ($1::text, clock_timestamp() + interval '1 hour', $2::uuid)`,
+          [tokenDigest, owner.rows[0]!.id],
+        );
+
+        const redeemed = await redeemBetaInvite(client, {
+          chatId: userId,
+          invite: tokenDigest,
+          payload: payloadHmac('9'),
+          updateId: 8_820_000_016,
+          userId,
+        });
+        expect(redeemed).toHaveLength(1);
+        expect(redeemed[0]).toMatchObject({ inbound_event_already_recorded: false });
+
+        const after = await client.query<
+          PublicIdentityGraphRow & {
+            readonly associations: string;
+            readonly beta_audits: string;
+            readonly deposit_intents: string;
+            readonly deposit_proofs: string;
+            readonly destination_receipts: string;
+            readonly identity_adoption: string;
+            readonly pilot_reservations: string;
+            readonly player_accounts: string;
+            readonly player_requests: string;
+            readonly redeemed_invites: string;
+          }
+        >(
+          `select customer.id as customer_id,
+                  customer_identity.id as customer_identity_id,
+                  telegram_identity.telegram_user_id::text as telegram_user_id,
+                  telegram_identity.private_chat_id::text as private_chat_id,
+                  conversation.id as conversation_id,
+                  conversation.state as conversation_state,
+                  conversation.version::text as conversation_version,
+                  (select count(*)::text from app.player_registration_requests request
+                    where request.customer_id = customer.id) as player_requests,
+                  (select count(*)::text from app.customer_platform_players player
+                    where player.customer_id = customer.id) as player_accounts,
+                  (select count(*)::text
+                     from app.player_registration_request_associations association_row
+                     join app.customer_platform_players player
+                       on player.id = association_row.player_account_id
+                    where player.customer_id = customer.id) as associations,
+                  (select count(*)::text from app.deposit_intents intent
+                    where intent.customer_id = customer.id) as deposit_intents,
+                  (select count(*)::text from app.deposit_proof_requests proof
+                    where proof.submitting_customer_id = customer.id) as deposit_proofs,
+                  (select count(*)::text from app.telegram_telebirr_destination_receipts receipt
+                    where receipt.customer_id = customer.id) as destination_receipts,
+                  (select count(*)::text from app.private_live_deposit_pilot_reservations reservation
+                    where reservation.submitting_customer_id = customer.id
+                       or reservation.player_owner_customer_id_snapshot = customer.id)
+                    as pilot_reservations,
+                  (select count(*)::text from app.telegram_beta_invites invite
+                    where invite.status = 'redeemed'
+                      and invite.redeemed_customer_identity_id = customer_identity.id)
+                    as redeemed_invites,
+                  audit_event.metadata->>'identity_adoption' as identity_adoption,
+                  (select count(*)::text from app.audit_events scoped_audit
+                    where scoped_audit.action = 'customer.telegram_beta_invite_redeemed'
+                      and scoped_audit.resource_id = customer_identity.id) as beta_audits
+             from app.customer_identities customer_identity
+             join app.customers customer
+               on customer.id = customer_identity.customer_id
+             join app.telegram_identities telegram_identity
+               on telegram_identity.customer_identity_id = customer_identity.id
+             join app.bot_conversations conversation
+               on conversation.telegram_identity_id = customer_identity.id
+             join app.audit_events audit_event
+               on audit_event.action = 'customer.telegram_beta_invite_redeemed'
+              and audit_event.resource_id = customer_identity.id
+            where customer_identity.id = $1::uuid`,
+          [before.rows[0]!.customer_identity_id],
+        );
+        expect(after.rows).toEqual([
+          {
+            ...before.rows[0]!,
+            associations: '1',
+            beta_audits: '1',
+            deposit_intents: '0',
+            deposit_proofs: '0',
+            destination_receipts: '0',
+            identity_adoption: 'mature_public_action',
+            pilot_reservations: '0',
+            player_accounts: '1',
+            player_requests: '1',
+            redeemed_invites: '1',
+          },
+        ]);
       });
     });
 

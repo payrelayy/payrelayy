@@ -111,6 +111,12 @@ assert.match(api, /PLAYER_ACTION_DEPLOYMENT_TARGET: production/u);
 assert.match(api, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/u);
+assert.match(api, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
+assert.equal(
+  count(compose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/gu),
+  1,
+  'the non-submittable receiver review gate must exist only in the production API service',
+);
 
 const beta = childBlock(services, 'beta-admission');
 assert.match(beta, /BETA_ADMISSION_DEPLOYMENT_TARGET: production/u);

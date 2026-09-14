@@ -184,6 +184,7 @@ services:
       NODE_ENV: production
       LOG_LEVEL: info
       FINANCIAL_ACTIONS_MODE: dry_run
+      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'
       API_HOST: 0.0.0.0
       API_PORT: '3000'
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate

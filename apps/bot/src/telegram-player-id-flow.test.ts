@@ -150,6 +150,37 @@ describe('Telegram Player-ID flow presentation', () => {
     }
   });
 
+  it('renders the live 25 ETB receiver review as a plain non-submittable message', () => {
+    const presentation = presentTelegramPlayerIdFlowResult(
+      {
+        version: 1,
+        outcome: 'telebirr_deposit_destination_review',
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        receiverAccountHolderName: 'Demo Receiver',
+        receiverAccountReference: '0000000042',
+        receiverAccountMasked: '***0042',
+        amountMinor: '2500',
+        currencyCode: 'ETB',
+        acceptsPayments: false,
+      },
+      { selectedPlayerId: 'PLAYER-DEMO-42' },
+    );
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: expect.stringContaining('🔎 Live 25 ETB TeleBirr pilot — review only'),
+    });
+    if (presentation.kind === 'message') {
+      expect(presentation.text).toContain('👤 Name: Demo Receiver');
+      expect(presentation.text).toContain('📱 Number: 0000000042');
+      expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
+      expect(presentation.text).toContain('💵 Amount: 25 ETB');
+      expect(presentation.text).toContain('NO PAYMENT YET');
+      expect(presentation.text).not.toMatch(/transaction number|receipt|full SMS/iu);
+    }
+  });
+
   it('renders a concise force-reply payment card with the receiver name and full number', () => {
     const presentation = presentTelegramPlayerIdFlowResult(
       {

@@ -239,6 +239,21 @@ assert.match(
   /concurrency:\s*\r?\n  group: fetanagent-production-runtime\s*\r?\n  cancel-in-progress: false/u,
 );
 assert.match(workflow, /environment: production/u);
+assert.match(
+  workflow,
+  /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u,
+  'short-lived GitHub Actions administration must use the production transaction pooler',
+);
+assert.equal(
+  count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
+  3,
+  'provision, rollback, and stop must share the reviewed administrative pooler route',
+);
+assert.doesNotMatch(
+  workflow,
+  /PGPORT: '5432'/u,
+  'GitHub-hosted administrative psql must not consume a long-lived session-pooler slot',
+);
 const runtimeJobs = topLevelSection(workflow, 'jobs');
 const ciGate = childBlock(runtimeJobs, 'validate-ci');
 const buildJob = childBlock(runtimeJobs, 'build');
@@ -313,6 +328,11 @@ assert.doesNotMatch(
   deployJob,
   /\$PRODUCTION_DATABASE_DIRECT_HOST/u,
   'deployed runtime DSNs must not use the unreachable direct IPv6 endpoint',
+);
+assert.doesNotMatch(
+  deployJob,
+  /postgresql:\/\/[^\r\n]*\$PRODUCTION_DATABASE_ADMIN_POOLER_PORT/u,
+  'deployed runtime DSNs must remain on their dedicated session-pooler route',
 );
 for (const roleVariable of [
   'OWNER_RUNTIME_ROLE',

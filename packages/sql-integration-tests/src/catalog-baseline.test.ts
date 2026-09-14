@@ -29,6 +29,7 @@ import { registerStagingTelebirrShadowVerifierLifecycleSqlTests } from './stagin
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
 import { registerTelebirrShadowVerificationSqlTests } from './telebirr-shadow-verification.suite.js';
+import { registerTelegramLiveTelebirrProofIntakeSqlTests } from './telegram-live-telebirr-proof-intake.suite.js';
 import { registerTrustedTelebirrActivationEpochSqlTests } from './trusted-telebirr-activation-epoch.suite.js';
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
@@ -1095,7 +1096,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly thirteen non-executing procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly sixteen non-executing procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1136,12 +1137,15 @@ describe('disposable SQL migration baseline', () => {
     expect(functions.rows.map((row) => row.signature)).toEqual([
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
+      'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
+      'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+      'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
@@ -6817,6 +6821,10 @@ describe('disposable SQL migration baseline', () => {
       { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
       {
         signature:
+          'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+      },
+      {
+        signature:
           'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       },
       {
@@ -9703,6 +9711,10 @@ registerPrivateLivePilotOwnerControlSqlTests(
   () => ownerAdminId,
 );
 registerPrivateLiveTelebirrProofLineageSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerTelegramLiveTelebirrProofIntakeSqlTests(
   () => client,
   () => ownerAdminId,
 );

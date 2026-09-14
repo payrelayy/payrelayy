@@ -52,7 +52,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires public onboarding and the guarded destination procedure in the exact 13-function surface', () => {
+  it('requires public onboarding and the guarded proof-first procedures in the exact 16-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -75,6 +75,18 @@ describe('Player-ID action catalog preflight', () => {
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toMatch(
+      /when routine\.oid in \([\s\S]*?app\.prepare_telegram_live_telebirr_destination\(uuid,text,text\)[\s\S]*?then array\['search_path=pg_catalog'\]/u,
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       "then array['search_path=pg_catalog']::text[]",
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
@@ -92,6 +104,6 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 13');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 16');
   });
 });

@@ -209,7 +209,13 @@ async function resolveTelebirrBoundary(
         account_reference_ciphertext,
         verification_reference_ciphertext,
         account_reference_masked,
-        instructions
+        instructions,
+        rotation_request_id,
+        rotation_reason,
+        account_reference_fingerprint,
+        protection_profile_version,
+        encryption_key_version,
+        fingerprint_key_version
       )
       select provider.id,
              coalesce((
@@ -218,10 +224,16 @@ async function resolveTelebirrBoundary(
                 where receiver.provider_id = provider.id
              ), 1),
              'Synthetic TeleBirr Private Pilot Receiver',
-             'synthetic-telebirr-private-pilot-account-ciphertext',
+             'receiver-v1.telebirr.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCC',
              'synthetic-telebirr-private-pilot-verification-ciphertext',
-             '****7001',
-             jsonb_build_object('customer_message', 'Synthetic SQL fixture only')
+             '***7001',
+             jsonb_build_object('customer_message', 'Synthetic SQL fixture only'),
+             gen_random_uuid(),
+             'initial_configuration',
+             repeat('a', 64),
+             1,
+             1,
+             1
         from app.payment_providers provider
        where provider.code = 'telebirr'
          and provider.status = 'active'
@@ -297,6 +309,7 @@ export async function prepareTelebirrPilot(
   client: Client,
   ownerAdminId: string,
   options: {
+    readonly includePlayerOwnerAsSubmittingCustomer?: boolean;
     readonly maximumPerDepositMinor?: number;
     readonly maximumPerPlayerMinor?: number;
     readonly maximumAggregateMinor?: number;
@@ -320,7 +333,7 @@ export async function prepareTelebirrPilot(
        $2::uuid,
        array['telebirr']::text[],
        $3::text[],
-       array[$4::uuid]::uuid[],
+       $4::uuid[],
        2500::bigint,
        $5::bigint,
        $6::bigint,
@@ -333,7 +346,9 @@ export async function prepareTelebirrPilot(
       ownerAdminId,
       requestKey,
       prerequisites.playerIds,
-      prerequisites.submittingCustomerId,
+      options.includePlayerOwnerAsSubmittingCustomer
+        ? [prerequisites.ownerCustomerId, prerequisites.submittingCustomerId]
+        : [prerequisites.submittingCustomerId],
       maximumPerDepositMinor,
       maximumPerPlayerMinor,
       maximumAggregateMinor,

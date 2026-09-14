@@ -144,6 +144,32 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'telebirr_live_verification_queued' &&
+    keys.length === 7 &&
+    isTelegramDepositProofToken(value.proofToken) &&
+    value.providerCode === 'telebirr' &&
+    value.providerName === 'TeleBirr' &&
+    isCustomerDepositStatusProjection(value.depositStatus) &&
+    value.financialMode === 'live'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'telebirr_live_deposit_status' &&
+    keys.length === 9 &&
+    isTelegramDepositProofToken(value.proofToken) &&
+    value.providerCode === 'telebirr' &&
+    value.providerName === 'TeleBirr' &&
+    ((value.amountMinor === null && value.currencyCode === null) ||
+      (typeof value.amountMinor === 'string' &&
+        /^[1-9][0-9]*$/u.test(value.amountMinor) &&
+        value.currencyCode === 'ETB')) &&
+    isCustomerDepositStatusProjection(value.depositStatus) &&
+    value.financialMode === 'live'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'deposit_status' &&
     keys.length === 5 &&
     typeof value.amountMinor === 'string' &&

@@ -299,6 +299,54 @@ describe('Telegram private-action bot client', () => {
     }
   });
 
+  it('accepts only exact live TeleBirr queue and status projections', async () => {
+    const proofToken = `${'B'.repeat(21)}A`;
+    const queued = {
+      version: 1,
+      outcome: 'telebirr_live_verification_queued',
+      proofToken,
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    } as const;
+    const status = {
+      version: 1,
+      outcome: 'telebirr_live_deposit_status',
+      proofToken,
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      amountMinor: null,
+      currencyCode: null,
+      depositStatus: { label: 'Being checked', tone: 'working' },
+      financialMode: 'live',
+    } as const;
+    for (const result of [queued, status]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => result }),
+        }),
+      ).resolves.toEqual(result);
+    }
+
+    for (const unsafeResult of [
+      { ...queued, proofToken: 'B'.repeat(22) },
+      { ...queued, financialMode: 'dry_run' },
+      { ...queued, transactionReference: 'SYNTHETICREF7890' },
+      { ...status, amountMinor: '2500' },
+      { ...status, currencyCode: 'ETB' },
+      { ...status, amountMinor: '2500', currencyCode: null },
+      { ...status, providerCode: 'cbe_birr' },
+      { ...status, liveProofId: 'private' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only a generic two-key status-unavailable response', async () => {
     await expect(
       deliverTelegramPrivateAction(action, config, {

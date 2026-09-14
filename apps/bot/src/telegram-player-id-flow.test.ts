@@ -265,6 +265,60 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
   });
 
+  it('renders a live verifier acknowledgement with one opaque tracking button', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_live_verification_queued',
+      proofToken: 'A'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    });
+    expect(presentation).toEqual({
+      kind: 'menu',
+      menu: {
+        text: [
+          '✅ Transaction number received',
+          'Status: Checking payment',
+          '',
+          'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
+          'FetanAgent will verify the payment and prepare the KemerBet deposit automatically.',
+        ].join('\n'),
+        buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
+      },
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|SYNTB|uuid/iu);
+    expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
+  });
+
+  it('shows an authoritative live amount only after it is available', () => {
+    const pending = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_live_deposit_status',
+      proofToken: 'A'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      amountMinor: null,
+      currencyCode: null,
+      depositStatus: { label: 'Being checked', tone: 'working' },
+      financialMode: 'live',
+    });
+    const settled = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_live_deposit_status',
+      proofToken: 'A'.repeat(22),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      amountMinor: '2500',
+      currencyCode: 'ETB',
+      depositStatus: { label: 'Preparing deposit', tone: 'working' },
+      financialMode: 'live',
+    });
+    expect(JSON.stringify(pending)).not.toContain('Amount:');
+    expect(JSON.stringify(settled)).toContain('Amount: 25.00 ETB');
+  });
+
   it('explains the button-first flow and tracking without requiring command syntax', () => {
     expect(telegramDepositHelpText()).toContain('Tap /menu, then 💰 Make a deposit');
     expect(telegramDepositHelpText()).toContain('Send the KemerBet Player ID');

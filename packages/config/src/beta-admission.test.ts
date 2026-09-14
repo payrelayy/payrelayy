@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BETA_ADMISSION_DATABASE_DIRECT_HOST,
+  BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST,
   BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST,
+  BETA_ADMISSION_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
   loadBetaAdmissionConfig,
   FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
   FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE,
@@ -45,7 +47,7 @@ describe('beta-admission runtime configuration', () => {
     });
   });
 
-  it('accepts only the exact staging IPv6 direct database login', () => {
+  it('accepts the exact staging direct database login', () => {
     expect(loadBetaAdmissionConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
       stage: 'staging',
@@ -56,6 +58,18 @@ describe('beta-admission runtime configuration', () => {
         port: 5432,
       },
       tlsMode: 'verify-full',
+    });
+  });
+
+  it('accepts the exact staging session-pooler login', () => {
+    const poolerDatabaseUrl = `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:db-password@${BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`;
+    expect(loadBetaAdmissionConfig(enabledEnvironment(poolerDatabaseUrl)).runtime).toMatchObject({
+      enabled: true,
+      stage: 'staging',
+      connection: {
+        host: BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST,
+        user: `fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}`,
+      },
     });
   });
 
@@ -72,18 +86,33 @@ describe('beta-admission runtime configuration', () => {
       projectReference: FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
       connection: { host: BETA_ADMISSION_PRODUCTION_DATABASE_DIRECT_HOST },
     });
+    const productionPoolerDatabaseUrl = `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE}:db-password@${BETA_ADMISSION_PRODUCTION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`;
+    expect(
+      loadBetaAdmissionConfig({
+        ...enabledEnvironment(productionPoolerDatabaseUrl),
+        BETA_ADMISSION_DEPLOYMENT_TARGET: 'production',
+      }).runtime,
+    ).toMatchObject({
+      enabled: true,
+      stage: 'production',
+      connection: {
+        host: BETA_ADMISSION_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
+        user: `fetanagent_beta_admission_runtime.${FETANAGENT_PRODUCTION_SUPABASE_PROJECT_REFERENCE}`,
+      },
+    });
     expect(() =>
       loadBetaAdmissionConfig({
         ...enabledEnvironment(),
         BETA_ADMISSION_DEPLOYMENT_TARGET: 'production',
       }),
-    ).toThrow('exact deployment-target database endpoint');
+    ).toThrow('exact deployment-target direct or session-pooler database endpoint');
   });
 
   it('rejects broad roles, transaction pooling, and weak or ambiguous TLS URLs', () => {
     const invalidUrls = [
       `postgresql://postgres:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=verify-full`,
-      `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime:pw@${BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
+      `postgresql://fetanagent_beta_admission_runtime.wrong-project:pw@${BETA_ADMISSION_DATABASE_SESSION_POOLER_HOST}:5432/postgres?sslmode=verify-full`,
       `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
       `postgresql://fetanagent_beta_admission_runtime.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full`,
       `postgresql://fetanagent_beta_admission_runtime:pw@db.${FETANAGENT_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co:5432/postgres?sslmode=require`,

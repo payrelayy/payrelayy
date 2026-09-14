@@ -76,7 +76,11 @@ test('prepares the base and execution-v2 production-bound files without a databa
     },
   );
   const url = readFileSync(join(directory, 'companion-device-database-url'), 'utf8');
-  assert.equal(new URL(url).hostname, 'db.xzztugbgtulptnbpoelr.supabase.co');
+  assert.equal(new URL(url).hostname, 'aws-0-eu-west-1.pooler.supabase.com');
+  assert.equal(
+    new URL(url).username,
+    'fetanagent_companion_device_bridge_runtime.xzztugbgtulptnbpoelr',
+  );
   assert.equal(url.includes('\n'), false);
   assert.throws(() => prepareProductionCompanionBundle(environment, directory), /unsafe/u);
 });

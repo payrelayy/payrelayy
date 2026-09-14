@@ -26,14 +26,22 @@ export const CUSTOMER_WEB_STAGING_DATABASE_DIRECT_HOST =
   `db.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
 export const CUSTOMER_WEB_PRODUCTION_DATABASE_DIRECT_HOST =
   `db.${CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE}.supabase.co` as const;
+export const CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST =
+  'aws-1-eu-west-1.pooler.supabase.com' as const;
+export const CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
 export const CUSTOMER_WEB_DEPLOYMENT_TARGETS = {
   staging: {
     databaseDirectHost: CUSTOMER_WEB_STAGING_DATABASE_DIRECT_HOST,
+    databaseSessionPoolerHost: CUSTOMER_WEB_STAGING_DATABASE_SESSION_POOLER_HOST,
+    databaseSessionPoolerRuntimeRole: `${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE}`,
     projectReference: CUSTOMER_WEB_STAGING_SUPABASE_PROJECT_REFERENCE,
     supabaseOrigin: CUSTOMER_WEB_STAGING_SUPABASE_ORIGIN,
   },
   production: {
     databaseDirectHost: CUSTOMER_WEB_PRODUCTION_DATABASE_DIRECT_HOST,
+    databaseSessionPoolerHost: CUSTOMER_WEB_PRODUCTION_DATABASE_SESSION_POOLER_HOST,
+    databaseSessionPoolerRuntimeRole: `${CUSTOMER_WEB_DATABASE_RUNTIME_ROLE}.${CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE}`,
     projectReference: CUSTOMER_WEB_PRODUCTION_SUPABASE_PROJECT_REFERENCE,
     supabaseOrigin: CUSTOMER_WEB_PRODUCTION_SUPABASE_ORIGIN,
   },
@@ -80,10 +88,10 @@ export type RedactedCustomerWebAuthConfig = {
 
 export interface CustomerWebDatabaseConnection {
   readonly database: 'postgres';
-  readonly host: (typeof CUSTOMER_WEB_DEPLOYMENT_TARGETS)[CustomerWebDeploymentTarget]['databaseDirectHost'];
+  readonly host: string;
   readonly password: string;
   readonly port: 5432;
-  readonly user: typeof CUSTOMER_WEB_DATABASE_RUNTIME_ROLE;
+  readonly user: string;
 }
 
 export type CustomerWebWorkspaceConfig =
@@ -422,17 +430,13 @@ function parseCustomerWebDatabaseConnection(
     throw new Error('CUSTOMER_WEB_DATABASE_URL must use the postgres or postgresql protocol.');
   }
   const expectedTarget = CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget];
-  if (
-    connectionUrl.hostname !== expectedTarget.databaseDirectHost ||
-    connectionUrl.username === '' ||
-    connectionUrl.password === ''
-  ) {
+  if (connectionUrl.username === '' || connectionUrl.password === '') {
     throw new Error(
-      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct database endpoint and dedicated runtime login.',
+      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct or session-pooler database endpoint and dedicated runtime login.',
     );
   }
   if (connectionUrl.port !== '' && connectionUrl.port !== '5432') {
-    throw new Error('CUSTOMER_WEB_DATABASE_URL must use direct database port 5432.');
+    throw new Error('CUSTOMER_WEB_DATABASE_URL must use database port 5432.');
   }
 
   const queryKeys = Array.from(connectionUrl.searchParams.keys());
@@ -445,9 +449,15 @@ function parseCustomerWebDatabaseConnection(
     throw new Error('CUSTOMER_WEB_DATABASE_URL must contain only sslmode=verify-full.');
   }
   const user = decodeDatabaseUrlComponent(connectionUrl.username);
-  if (user !== CUSTOMER_WEB_DATABASE_RUNTIME_ROLE) {
+  const directConnection =
+    connectionUrl.hostname === expectedTarget.databaseDirectHost &&
+    user === CUSTOMER_WEB_DATABASE_RUNTIME_ROLE;
+  const sessionPoolerConnection =
+    connectionUrl.hostname === expectedTarget.databaseSessionPoolerHost &&
+    user === expectedTarget.databaseSessionPoolerRuntimeRole;
+  if (!directConnection && !sessionPoolerConnection) {
     throw new Error(
-      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct database endpoint and dedicated runtime login.',
+      'CUSTOMER_WEB_DATABASE_URL must match the explicit deployment target and use its exact direct or session-pooler database endpoint and dedicated runtime login.',
     );
   }
   const database = decodeDatabaseUrlComponent(connectionUrl.pathname.slice(1));
@@ -457,10 +467,10 @@ function parseCustomerWebDatabaseConnection(
 
   return {
     database: 'postgres',
-    host: expectedTarget.databaseDirectHost,
+    host: connectionUrl.hostname,
     password: decodeDatabaseUrlComponent(connectionUrl.password),
     port: 5432,
-    user: CUSTOMER_WEB_DATABASE_RUNTIME_ROLE,
+    user,
   };
 }
 

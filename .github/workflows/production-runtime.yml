@@ -42,7 +42,6 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DROPLET_ID: '593344964'
   PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
-  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
   BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
   CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
@@ -322,15 +321,15 @@ jobs:
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge.spki.der"
           printf '%s' "$TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-runtime-manifest.v1.json"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$OWNER_RUNTIME_ROLE" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/owner-database-url"
+            "$OWNER_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/owner-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$CUSTOMER_WEB_RUNTIME_ROLE" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/customer-web-database-url"
+            "$CUSTOMER_WEB_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/customer-web-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$BETA_RUNTIME_ROLE" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/beta-database-url"
+            "$BETA_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/beta-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$PLAYER_ACTION_RUNTIME_ROLE" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/player-action-database-url"
+            "$PLAYER_ACTION_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/player-action-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            'fetanagent_telebirr_device_state_runtime' "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_DIRECT_HOST" >"$secret_dir/telebirr-device-state-database-url"
+            "fetanagent_telebirr_device_state_runtime.$PRODUCTION_PROJECT_REF" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
           printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
           printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/beta-transport-hmac"

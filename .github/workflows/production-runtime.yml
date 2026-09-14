@@ -436,12 +436,27 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
+          psql_with_connection_retry() {
+            local attempt status=2
+            for attempt in 1 2 3 4; do
+              if psql "$@"; then
+                return 0
+              else
+                status=$?
+              fi
+              # psql exit 2 is a connection failure. SQL or catalog failures keep their distinct
+              # non-2 status and fail immediately rather than replaying a rejected operation.
+              [[ "$status" -eq 2 && "$attempt" -lt 4 ]] || return "$status"
+              sleep "$((attempt * 2))"
+            done
+            return "$status"
+          }
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
-          companion_previous_login="$(psql -X -Atc "select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_companion_device_bridge_runtime'")"
+          companion_previous_login="$(psql_with_connection_retry -X -Atc "select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_companion_device_bridge_runtime'")"
           [[ "$companion_previous_login" == 't' || "$companion_previous_login" == 'f' ]]
           echo "companion_previous_login=$companion_previous_login" >>"$GITHUB_OUTPUT"
-          psql -X --file=infra/sql/production-nonfinancial-runtimes-provision.sql
-          psql -X \
+          psql_with_connection_retry -X --file=infra/sql/production-nonfinancial-runtimes-provision.sql
+          psql_with_connection_retry -X \
             --set=companion_signer_id="$COMPANION_SERVER_SIGNER_ID" \
             --set=companion_signer_key_id="$COMPANION_SERVER_SIGNER_KEY_ID" \
             --set=companion_signer_public_spki="$COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL" \
@@ -449,7 +464,7 @@ jobs:
             --set=companion_signer_valid_from="$COMPANION_SERVER_SIGNER_VALID_FROM" \
             --set=companion_signer_valid_until="$COMPANION_SERVER_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-companion-server-signer-provision.sql
-          psql -X --file=infra/sql/production-companion-bridge-runtime-enable-continuous.sql
+          psql_with_connection_retry -X --file=infra/sql/production-companion-bridge-runtime-enable-continuous.sql
 
       - name: Transfer and install the sealed release
         shell: bash

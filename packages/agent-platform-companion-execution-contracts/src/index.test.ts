@@ -27,9 +27,13 @@ import {
   COMPANION_EXECUTION_DATABASE_FINAL_ACTION_WINDOW_MS,
   COMPANION_EXECUTION_DIGEST_ALGORITHM,
   COMPANION_EXECUTION_ENROLLMENT_TRANSCRIPT,
+  COMPANION_EXECUTION_AUTHORITY_PATH,
+  COMPANION_EXECUTION_POLL_PATH,
   COMPANION_EXECUTION_PLATFORM_CODE,
   COMPANION_EXECUTION_PROTOCOL_MODE,
+  COMPANION_EXECUTION_RESULT_PATH,
   COMPANION_EXECUTION_RESULT_TRANSCRIPT,
+  COMPANION_EXECUTION_STATUS_PATH,
   COMPANION_EXECUTION_SIGNATURE_ALGORITHM,
   COMPANION_EXECUTION_SIGNATURE_ENCODING,
   COMPANION_EXECUTION_POSTGRES_BIGINT_MAX,
@@ -55,8 +59,12 @@ import {
   deriveExecutionResultReplayIdentity,
   deriveOneUseActionAuthorityReplayIdentity,
   digestAuthoritativeExecutionStatusBody,
+  digestCompanionExecutionAuthorityRequestContent,
   digestCompanionExecutionNonce,
+  digestCompanionExecutionPollContent,
   digestCompanionExecutionPlayerId,
+  digestCompanionExecutionResultContent,
+  digestCompanionExecutionStatusQueryContent,
   digestExecutionAssignmentBody,
   digestExecutionEnrollmentBody,
   digestExecutionResultBody,
@@ -1835,6 +1843,67 @@ describe('dormant companion execution v2 contracts', () => {
     ];
     expect(replayIdentities.every(Boolean)).toBe(true);
     expect(new Set(replayIdentities).size).toBe(replayIdentities.length);
+  });
+
+  it('binds every fixed execution HTTP operation to its exact signed artifact chain', () => {
+    const value = fixture();
+    const requestNonceDigest = digestCompanionExecutionNonce(Buffer.alloc(32, 7))!;
+    const queryNonceDigest = digestCompanionExecutionNonce(Buffer.alloc(32, 8))!;
+
+    expect([
+      COMPANION_EXECUTION_POLL_PATH,
+      COMPANION_EXECUTION_AUTHORITY_PATH,
+      COMPANION_EXECUTION_RESULT_PATH,
+      COMPANION_EXECUTION_STATUS_PATH,
+    ]).toEqual([
+      '/v2/companion/device/execution-assignments:poll',
+      '/v2/companion/device/execution-authorities:consume',
+      '/v2/companion/device/execution-results:submit',
+      '/v2/companion/device/execution-status:query',
+    ]);
+    expect(digestCompanionExecutionPollContent(value.certificate.bodyDigest)).toMatch(
+      /^sha256:[a-f0-9]{64}$/u,
+    );
+    expect(
+      digestCompanionExecutionAuthorityRequestContent(
+        value.enrollment,
+        value.assignment,
+        requestNonceDigest,
+      ),
+    ).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(
+      digestCompanionExecutionResultContent(
+        value.enrollment,
+        value.assignment,
+        value.authority,
+        value.result,
+      ),
+    ).toMatch(/^sha256:[a-f0-9]{64}$/u);
+    expect(
+      digestCompanionExecutionStatusQueryContent(
+        value.enrollment,
+        value.assignment,
+        queryNonceDigest,
+      ),
+    ).toMatch(/^sha256:[a-f0-9]{64}$/u);
+
+    expect(digestCompanionExecutionPollContent('sha256:ABC')).toBeUndefined();
+    expect(
+      digestCompanionExecutionAuthorityRequestContent(
+        value.enrollment,
+        { ...value.assignment, extra: true },
+        requestNonceDigest,
+      ),
+    ).toBeUndefined();
+    expect(
+      digestCompanionExecutionResultContent(value.enrollment, value.assignment, value.authority, {
+        ...value.result,
+        extra: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      digestCompanionExecutionStatusQueryContent(value.enrollment, value.assignment, 'bad'),
+    ).toBeUndefined();
   });
 
   it('bounds database decimal identifiers to PostgreSQL bigint and integer domains', () => {

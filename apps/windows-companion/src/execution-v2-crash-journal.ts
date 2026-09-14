@@ -8,6 +8,7 @@ import {
   COMPANION_EXECUTION_PROTOCOL_MODE,
   decodeSignedExecutionAssignment,
   decodeSignedExecutionResult,
+  decodeSignedAuthoritativeExecutionStatus,
   decodeSignedOneUseActionAuthority,
   deriveExecutionAssignmentReplayIdentity,
   deriveOneUseActionAuthorityReplayIdentity,
@@ -16,6 +17,7 @@ import {
   digestOneUseActionAuthorityBody,
   type ExecutionResultOutcome,
   type ExternalAtomicReplayConsumptionReceipt,
+  type SignedAuthoritativeExecutionStatus,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import {
@@ -24,13 +26,12 @@ import {
 } from './windows-data-protection.js';
 
 /**
- * Dormant local crash evidence for execution-contract v2.
+ * Fail-closed local crash evidence for the opt-in execution-contract v2 worker.
  *
- * This module is intentionally not imported by the companion entry point or provider route. A
- * journal snapshot is local, rollbackable evidence only. It never establishes replay freshness,
+ * A journal snapshot is local, rollbackable evidence only. It never establishes replay freshness,
  * proves a database transition, grants action authority, or permits a provider mutation/retry.
  */
-export const WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RUNTIME_ENABLED = false as const;
+export const WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_ACTION_AUTHORITY_ENABLED = false as const;
 export const WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_KIND =
   'windows_companion_execution_v2_local_crash_evidence' as const;
 export const WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RELATIVE_PATH =
@@ -877,7 +878,7 @@ export async function persistWindowsCompanionExecutionV2CrashEvidence(
   options: WindowsCompanionExecutionV2JournalOptions,
 ): Promise<WindowsCompanionExecutionV2PersistenceResult> {
   const next = decodeWindowsCompanionExecutionV2CrashEvidence(nextCandidate);
-  if (!next || WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RUNTIME_ENABLED !== false) {
+  if (!next || WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_ACTION_AUTHORITY_ENABLED !== false) {
     return unavailable();
   }
   const protector =
@@ -977,4 +978,69 @@ export async function assessWindowsCompanionExecutionV2Recovery(
     return recoveryAssessment('stale', result.evidence);
   }
   return recoveryAssessment('locally_consistent_untrusted', result.evidence);
+}
+
+async function removeCurrentJournal(
+  expected: WindowsCompanionExecutionV2CrashEvidence,
+  options: WindowsCompanionExecutionV2JournalOptions,
+): Promise<void> {
+  const journalRoot = await stableJournalRoot(options.dataRoot);
+  const journalPath = resolve(journalRoot, JOURNAL_FILE);
+  const protector =
+    options.protector ??
+    createWindowsCurrentUserDataProtector(process.env, 'execution-v2-crash-evidence');
+  const current = await readJournal(journalPath, protector);
+  if (
+    current.state !== 'locally_consistent_untrusted' ||
+    JSON.stringify(current.evidence) !== JSON.stringify(expected)
+  ) {
+    unavailable();
+  }
+  await rm(journalPath);
+  await syncDirectoryBestEffort(journalRoot);
+}
+
+/** A preparation failure before any database fence may discard only assignment-only evidence. */
+export async function clearWindowsCompanionExecutionV2PreFenceEvidence(
+  evidenceCandidate: unknown,
+  options: WindowsCompanionExecutionV2JournalOptions,
+): Promise<void> {
+  const evidence = decodeWindowsCompanionExecutionV2CrashEvidence(evidenceCandidate);
+  if (!evidence || evidence.phase !== 'assignment_observed') unavailable();
+  await removeCurrentJournal(evidence, options);
+}
+
+/**
+ * Clears a completed local attempt only after the caller has cryptographically verified the
+ * supplied DB-derived terminal status. This helper cross-checks all local identifiers and never
+ * interprets a status as action authority.
+ */
+export async function clearWindowsCompanionExecutionV2TerminalEvidence(
+  evidenceCandidate: unknown,
+  verifiedStatusCandidate: SignedAuthoritativeExecutionStatus,
+  options: WindowsCompanionExecutionV2JournalOptions,
+): Promise<void> {
+  const evidence = decodeWindowsCompanionExecutionV2CrashEvidence(evidenceCandidate);
+  const status = decodeSignedAuthoritativeExecutionStatus(verifiedStatusCandidate);
+  if (
+    !evidence ||
+    !status ||
+    evidence.phase !== 'signed_result_recorded_reconciliation_required' ||
+    status.body.grantsActionAuthority !== false ||
+    status.body.oneUseActionAuthority !== false ||
+    status.body.terminalState === 'non_terminal' ||
+    status.body.assignmentId !== evidence.assignmentId ||
+    status.body.assignmentBodyDigest !== evidence.assignmentBodyDigest ||
+    status.body.activationEpoch !== evidence.activationEpoch ||
+    status.body.intentId !== evidence.intentId ||
+    status.body.jobId !== evidence.jobId ||
+    status.body.attemptId !== evidence.attemptId ||
+    status.body.authorityId !== evidence.authorityId ||
+    status.body.authorityBodyDigest !== evidence.authorityBodyDigest ||
+    status.body.fenceId !== evidence.fenceId ||
+    status.body.executionResultBodyDigest !== evidence.resultBodyDigest
+  ) {
+    unavailable();
+  }
+  await removeCurrentJournal(evidence, options);
 }

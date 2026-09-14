@@ -7,6 +7,12 @@ import {
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
   AGENT_PLATFORM_COMPANION_PAIRING_PATH,
 } from '@fetanagent/agent-platform-companion-contracts';
+import {
+  COMPANION_EXECUTION_AUTHORITY_PATH,
+  COMPANION_EXECUTION_POLL_PATH,
+  COMPANION_EXECUTION_RESULT_PATH,
+  COMPANION_EXECUTION_STATUS_PATH,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CompanionBridgeHttpRequest } from './pairing-handler.js';
@@ -147,7 +153,7 @@ describe('companion device bridge HTTP boundary', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('admits both fixed lookup paths and preserves a strict empty 204 response', async () => {
+  it('admits only the fixed companion paths and preserves a strict empty 204 response', async () => {
     const { handler, server } = start({
       statusCode: 204,
       headers: {
@@ -162,17 +168,26 @@ describe('companion device bridge HTTP boundary', () => {
     for (const path of [
       AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
       AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+      COMPANION_EXECUTION_POLL_PATH,
+      COMPANION_EXECUTION_AUTHORITY_PATH,
+      COMPANION_EXECUTION_RESULT_PATH,
+      COMPANION_EXECUTION_STATUS_PATH,
     ]) {
       const response = await request(Buffer.from('{}', 'utf8'), {}, path);
       expect(response.statusCode).toBe(204);
       expect(response.headers['content-length']).toBe('0');
       expect(response.headers['content-type']).toBeUndefined();
+      expect(response.headers.date).toEqual(expect.any(String));
       expect(response.body).toBe('');
     }
-    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenCalledTimes(6);
     expect(handler.mock.calls.map(([observed]) => observed.path)).toEqual([
       AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
       AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+      COMPANION_EXECUTION_POLL_PATH,
+      COMPANION_EXECUTION_AUTHORITY_PATH,
+      COMPANION_EXECUTION_RESULT_PATH,
+      COMPANION_EXECUTION_STATUS_PATH,
     ]);
   });
 

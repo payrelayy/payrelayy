@@ -15,14 +15,28 @@ const bridgeFunctions = [
   'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)',
   'app.release_agent_platform_companion_lookup_assignment(text)',
   'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb)',
+  'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,text)',
+  'app.complete_agent_platform_companion_execution_assignment(text,jsonb,text,jsonb)',
+  'app.claim_agent_platform_companion_execution_authority(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,jsonb,jsonb)',
+  'app.complete_agent_platform_companion_execution_authority(text,jsonb)',
+  'app.accept_agent_platform_companion_execution_result(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb,jsonb,jsonb)',
+  'app.claim_agent_platform_companion_execution_status(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,jsonb,jsonb,jsonb,jsonb)',
+  'app.complete_agent_platform_companion_execution_status(text,jsonb)',
 ] as const;
-const tables = [
+const pairingTables = [
   'agent_platform_companion_device_revocations',
   'agent_platform_companion_enrollment_certificates',
   'agent_platform_companion_pairing_challenges',
   'agent_platform_companion_server_signer_revocations',
   'agent_platform_companion_server_signers',
 ] as const;
+const executionTables = [
+  'agent_platform_companion_execution_assignments',
+  'agent_platform_companion_execution_control',
+  'agent_platform_companion_execution_http_requests',
+  'agent_platform_companion_execution_statuses',
+] as const;
+const tables = [...pairingTables, ...executionTables] as const;
 
 type IssuedRow = {
   readonly expires_at: Date;
@@ -153,7 +167,7 @@ export function registerCompanionDevicePairingSqlTests(
       });
     });
 
-    it('forces RLS, exposes no base storage, and defines no financial authority column', async () => {
+    it('forces RLS, exposes no base storage, and keeps pairing state free of financial authority', async () => {
       const client = getClient();
       const rls = await client.query(
         `select relation.relname, relation.relrowsecurity, relation.relforcerowsecurity
@@ -185,7 +199,7 @@ export function registerCompanionDevicePairingSqlTests(
           exists (
             select 1 from information_schema.columns
             where table_schema = 'app'
-              and table_name = any(array[${tables.map((name) => `'${name}'`).join(',')}])
+              and table_name = any(array[${pairingTables.map((name) => `'${name}'`).join(',')}])
               and column_name ~ '(amount|balance|transfer|settlement|player|credential|password)'
           ) as financial_column,
           exists (
@@ -198,6 +212,35 @@ export function registerCompanionDevicePairingSqlTests(
       expect(boundary.rows).toEqual([
         { base_access: false, financial_column: false, raw_nonce_column: false },
       ]);
+
+      const dormantExecution = await client.query(`
+        select control_state,
+               certificate_id is null
+                 and device_id is null
+                 and device_key_id is null
+                 and no_money_signer_key_id is null
+                 and execution_signer_key_id is null
+                 and platform_agent_account_id is null
+                 and pilot_revision_id is null
+                 and activation_epoch is null
+                 and active_from is null
+                 and expires_at is null
+                 and activated_at is null as authority_is_empty
+          from app.agent_platform_companion_execution_control
+      `);
+      expect(dormantExecution.rows).toEqual([
+        { authority_is_empty: true, control_state: 'disabled' },
+      ]);
+
+      const armingRoutines = await client.query(`
+        select routine.oid::regprocedure::text as signature
+          from pg_proc routine
+          join pg_namespace namespace on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'app'
+           and routine.proname ~ '(arm|activate|enable).*companion.*execution|companion.*execution.*(arm|activate|enable)'
+         order by signature
+      `);
+      expect(armingRoutines.rows).toEqual([]);
     });
 
     it('issues once, permanently binds one device key, recovers a lost response, and revokes it', async () => {

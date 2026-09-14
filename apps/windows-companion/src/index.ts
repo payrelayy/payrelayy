@@ -1,6 +1,12 @@
 import { pathToFileURL } from 'node:url';
 
-import { loadWindowsCompanionConfig, redactedWindowsCompanionConfig } from './config.js';
+import {
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+  loadWindowsCompanionConfig,
+  redactedWindowsCompanionConfig,
+} from './config.js';
 import {
   ensureCompanionDeviceEnrollment,
   loadCompanionDeviceSigningRuntime,
@@ -10,6 +16,10 @@ import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
 } from './local-kemerbet-session.js';
+import {
+  runCompanionExecutionWorker,
+  type CompanionExecutionWorkerEvent,
+} from './execution-worker.js';
 import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
@@ -104,6 +114,21 @@ function reportLookup(event: CompanionLookupWorkerEvent): void {
   );
 }
 
+function reportExecution(event: CompanionExecutionWorkerEvent): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'one_use_execution_state_changed',
+      state: event.state,
+      amountMinorUnits: event.amountMinorUnits,
+      currencyCode: event.currencyCode,
+      moneyMovedLocally: event.moneyMovedLocally,
+      detailsRedacted: true,
+      identifiersRedacted: true,
+    }),
+  );
+}
+
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
   console.info(
@@ -127,14 +152,42 @@ export async function runWindowsCompanion(): Promise<void> {
       });
       reportEnrollment(enrollment);
       if (!enrollment.devicePaired) return;
-      const device = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
-      await runCompanionLookupWorker({
+      const device = await loadCompanionDeviceSigningRuntime({
         dataRoot: config.dataRoot,
-        device,
-        session,
-        signal: lookupAbort.signal,
-        report: reportLookup,
+        ...(config.executionV2Enabled
+          ? {
+              execution: {
+                expectedPlatformAgentAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
+                trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+                trustedExecutionSignerPublicKeySpki:
+                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+                trustedExecutionSignerPublicKeySpkiSha256:
+                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+              },
+            }
+          : {}),
       });
+      const workers: Promise<void>[] = [
+        runCompanionLookupWorker({
+          dataRoot: config.dataRoot,
+          device,
+          session,
+          signal: lookupAbort.signal,
+          report: reportLookup,
+        }),
+      ];
+      if (config.executionV2Enabled) {
+        workers.push(
+          runCompanionExecutionWorker({
+            dataRoot: config.dataRoot,
+            device,
+            session,
+            signal: lookupAbort.signal,
+            report: reportExecution,
+          }),
+        );
+      }
+      await Promise.all(workers);
     } catch {
       reportEnrollment(undefined);
     }

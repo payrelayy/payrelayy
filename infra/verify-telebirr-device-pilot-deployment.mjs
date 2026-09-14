@@ -27,7 +27,7 @@ const deployHelper = await readFile(
   'utf8',
 );
 const helperInstaller = await readFile(
-  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v4.sh`,
+  `${repositoryRoot}infra/operations/install-fetanagent-telebirr-device-pilot-helper-v5.sh`,
   'utf8',
 );
 const androidTransport = await readFile(
@@ -261,7 +261,7 @@ assert.match(
 );
 assert.match(
   qualityWorkflow,
-  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v3\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v4\.sh/u,
+  /bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v2\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v3\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v4\.sh[\s\S]*?bash -n infra\/operations\/install-fetanagent-telebirr-device-pilot-helper-v5\.sh/u,
 );
 assert.match(
   qualityWorkflow,
@@ -783,13 +783,13 @@ assert.match(
 );
 assert.match(
   helperInstaller,
-  /PREVIOUS_HELPER_SHA256='f8a83549ad36992c1921e42cc77ee86f1f5144ec51df9623077835d6ec11a11e'/u,
+  /PREVIOUS_HELPER_SHA256='c8e6bc84ca348771a386a6c5550cdeff7a212eea9bc29a72d24189a65414635d'/u,
 );
 assert.match(helperInstaller, /run directly in the authenticated DigitalOcean root console/u);
 assert.match(helperInstaller, /"\$0" == "\$INSTALLER"/u);
 assert.match(
   helperInstaller,
-  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v4\.sh:f/u,
+  /fetanagent-telebirr-device-pilot-helper\.sh:f\\ninstall-fetanagent-telebirr-device-pilot-helper-v5\.sh:f/u,
 );
 assert.match(helperInstaller, /flock --exclusive --nonblock 9/u);
 assert.match(helperInstaller, /mv -f -- "\$TARGET_INSTALLING" "\$TARGET"/u);

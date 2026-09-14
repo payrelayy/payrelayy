@@ -10,6 +10,9 @@ describe('Windows companion configuration', () => {
       FETANAGENT_COMPANION_RELEASE_SHA: 'a'.repeat(40),
       FETANAGENT_COMPANION_EXPECTED_AGENT_IDENTITY: 'owner-agent@example.invalid',
       FETANAGENT_COMPANION_PAIRING_PACKAGE: 'fetanagent-companion-pairing-v1.abc',
+      INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
+      FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID:
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     });
     expect(config.profileRoot).toContain('profiles');
     const redacted = JSON.stringify(redactedWindowsCompanionConfig(config));
@@ -18,6 +21,12 @@ describe('Windows companion configuration', () => {
     expect(redacted).not.toContain('fetanagent-companion-pairing-v1.abc');
     expect(redacted).toContain('expectedAgentIdentityProvided');
     expect(redacted).toContain('pairingPackageProvided');
+    expect(redacted).toContain('executionV2Enabled');
+    expect(redacted).not.toContain('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(config.executionV2Enabled).toBe(true);
+    expect(config.executionV2ExpectedPlatformAgentAccountId).toBe(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    );
     expect(redacted).toContain('a'.repeat(40));
     expect(config.takeExpectedAgentIdentity()).toBe('owner-agent@example.invalid');
     expect(config.takeExpectedAgentIdentity()).toBeUndefined();
@@ -59,5 +68,28 @@ describe('Windows companion configuration', () => {
         }),
       ).toThrow();
     }
+    for (const executionFlag of ['', 'false', 'TRUE', '1']) {
+      expect(() =>
+        loadWindowsCompanionConfig({
+          NODE_ENV: 'test',
+          FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+          INTERNAL_COMPANION_EXECUTION_V2_ENABLED: executionFlag,
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+        INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
+      }),
+    ).toThrow();
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+        FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID: 'not-a-uuid',
+      }),
+    ).toThrow();
   });
 });

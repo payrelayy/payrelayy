@@ -58,6 +58,10 @@ describe('Windows current-user data protection', () => {
         process.env,
         'execution-v2-crash-evidence',
       );
+      const attemptProtector = createWindowsCurrentUserDataProtector(
+        process.env,
+        'execution-v2-attempt-chain',
+      );
       const lookupProtector = createWindowsCurrentUserDataProtector(process.env, 'lookup-ledger');
       const cleartext = randomBytes(32);
       let ciphertext: Buffer | null = null;
@@ -65,6 +69,7 @@ describe('Windows current-user data protection', () => {
       try {
         ciphertext = await executionProtector.protect(cleartext);
         await expect(lookupProtector.unprotect(ciphertext)).rejects.toThrow();
+        await expect(attemptProtector.unprotect(ciphertext)).rejects.toThrow();
         opened = await executionProtector.unprotect(ciphertext);
         expect(opened).toEqual(cleartext);
       } finally {

@@ -16,6 +16,9 @@ readonly TELEBIRR_INGRESS_NETWORK='fetanagent-telebirr-device-ingress'
 readonly TELEBIRR_PUBLIC_ORIGIN='https://device.fetanagent.com'
 readonly HELPER_PATH='/usr/local/sbin/fetanagent-production-deploy-helper'
 readonly STAGING_BOT_TOKEN='/srv/fetanagent/secrets/staging/bot-token'
+readonly COMPANION_EXECUTION_V2_MARKER="$STATE_ROOT/companion-execution-v2.release"
+readonly COMPANION_EXECUTION_V2_KEY='/etc/fetanagent/companion-execution-secrets/production-execution-signer.pkcs8.der'
+readonly COMPANION_EXECUTION_V2_KEY_SHA256='c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -113,20 +116,68 @@ validate_rollback_transition() {
   ROLLBACK_PREVIOUS="$previous"
 }
 
+validate_companion_execution_v2_material() {
+  local release="$1" derived
+  [[ ! -L "$COMPANION_EXECUTION_V2_KEY" && -f "$COMPANION_EXECUTION_V2_KEY" &&
+    "$(realpath -- "$COMPANION_EXECUTION_V2_KEY")" == "$COMPANION_EXECUTION_V2_KEY" &&
+    "$(stat --format='%u:%g:%a:%h' "$COMPANION_EXECUTION_V2_KEY")" == '0:0:400:1' ]] ||
+    die 'the protected companion execution signer is absent or unsafe'
+  openssl pkey -inform DER -in "$COMPANION_EXECUTION_V2_KEY" -check -noout >/dev/null 2>&1 ||
+    die 'the protected companion execution signer is invalid'
+  derived="$(openssl pkey -inform DER -in "$COMPANION_EXECUTION_V2_KEY" -pubout -outform DER 2>/dev/null | sha256sum | cut -d ' ' -f 1)"
+  [[ "$derived" == "$COMPANION_EXECUTION_V2_KEY_SHA256" ]] ||
+    die 'the protected companion execution signer identity is wrong'
+  jq -e \
+    --arg execution_digest "sha256:$COMPANION_EXECUTION_V2_KEY_SHA256" \
+    --slurpfile base "$release/secrets/companion-bridge-runtime-manifest.v2.json" '
+      type == "object" and
+      keys == ["contractVersion", "deploymentTarget", "exactFiveReadOnlyLookupAllowed", "executionSignerKeyId", "executionSignerPublicKeySpki", "executionSignerPublicKeySpkiSha256", "executionTransportAllowed", "pairingAllowed", "serverMoneyMovementAllowed", "serverProviderActionAllowed", "serverSignerId", "serverSignerKeyId", "serverSignerPublicKeySpkiSha256"] and
+      .contractVersion == 3 and .deploymentTarget == "production" and
+      .pairingAllowed == true and .exactFiveReadOnlyLookupAllowed == true and
+      .executionTransportAllowed == true and .serverProviderActionAllowed == false and
+      .serverMoneyMovementAllowed == false and
+      .executionSignerKeyId == "companion-execution-production-v1" and
+      .executionSignerPublicKeySpkiSha256 == $execution_digest and
+      .serverSignerId == $base[0].serverSignerId and
+      .serverSignerKeyId == $base[0].serverSignerKeyId and
+      .serverSignerPublicKeySpkiSha256 == $base[0].serverSignerPublicKeySpkiSha256
+    ' "$release/secrets/companion-bridge-runtime-manifest.v3.json" >/dev/null ||
+    die 'the companion execution runtime manifest is invalid'
+}
+
+companion_execution_v2_enabled_for_release() {
+  local release="$1" sha
+  if [[ ! -e "$COMPANION_EXECUTION_V2_MARKER" && ! -L "$COMPANION_EXECUTION_V2_MARKER" ]]; then
+    return 1
+  fi
+  [[ ! -L "$COMPANION_EXECUTION_V2_MARKER" && -f "$COMPANION_EXECUTION_V2_MARKER" &&
+    "$(realpath -- "$COMPANION_EXECUTION_V2_MARKER")" == "$COMPANION_EXECUTION_V2_MARKER" &&
+    "$(stat --format='%u:%g:%a:%h' "$COMPANION_EXECUTION_V2_MARKER")" == '0:0:600:1' ]] ||
+    die 'the companion execution-v2 release marker is unsafe'
+  sha="${release##*/}"
+  [[ "$(<"$COMPANION_EXECUTION_V2_MARKER")" == "$sha" ]] || return 1
+  validate_companion_execution_v2_material "$release"
+  return 0
+}
+
 compose_release() {
   local release="$1"
   shift
   local tag signer_id
+  local -a compose_files=(--file "$release/compose.production.yaml")
   tag="$(<"$release/.image-tag")"
   signer_id="$(<"$release/telebirr-assignment-signer-key-id")"
   require_tag "$tag"
   [[ "$signer_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]] ||
     die 'the production assignment signer identifier is malformed'
+  if companion_execution_v2_enabled_for_release "$release"; then
+    compose_files+=(--file "$release/compose.production.companion-execution-v2.yaml")
+  fi
   FETANAGENT_IMAGE_TAG="$tag" \
     FETANAGENT_PRODUCTION_SECRET_DIR="$release/secrets" \
     FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID="$signer_id" \
     docker compose --project-name "$PROJECT_NAME" \
-      --file "$release/compose.production.yaml" --profile production "$@"
+      "${compose_files[@]}" --profile production "$@"
 }
 
 container_for() {
@@ -234,14 +285,18 @@ verify_release_files() {
     telebirr-device-state-database-url
   )
   if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
-    required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json)
+    required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json companion-bridge-runtime-manifest.v3.json)
+    [[ ! -L "$release/compose.production.companion-execution-v2.yaml" &&
+      -f "$release/compose.production.companion-execution-v2.yaml" &&
+      "$(stat --format='%u:%g:%a:%h' "$release/compose.production.companion-execution-v2.yaml")" == '0:0:444:1' ]] ||
+      die 'the companion execution-v2 production overlay is absent or unsafe'
   fi
   [[ ! -L "$release/secrets" && -d "$release/secrets" ]] || die 'the secret directory is unsafe'
   for name in "${required[@]}"; do
     [[ ! -L "$release/secrets/$name" && -f "$release/secrets/$name" && -s "$release/secrets/$name" ]] ||
       die "the production release is missing $name"
     case "$name" in
-      supabase-ca.crt|cbe-deposit-reference-key-profile.v1.json|deposit-proof-reference-profile.v2.json|telebirr-assignment.spki.der|telebirr-bridge-runtime-manifest.v1.json|companion-bridge-runtime-manifest.v2.json)
+      supabase-ca.crt|cbe-deposit-reference-key-profile.v1.json|deposit-proof-reference-profile.v2.json|telebirr-assignment.spki.der|telebirr-bridge-runtime-manifest.v1.json|companion-bridge-runtime-manifest.v2.json|companion-bridge-runtime-manifest.v3.json)
         [[ "$(stat --format='%u:%g:%a' "$release/secrets/$name")" == '0:0:444' ]] ||
           die "the production config metadata is wrong for $name"
         ;;
@@ -318,7 +373,11 @@ negative_companion_public_smoke() {
   for route in \
     '/v1/companion/device/enrollments:pair' \
     '/v1/companion/device/lookup-assignments:poll' \
-    '/v1/companion/device/lookup-results:submit'
+    '/v1/companion/device/lookup-results:submit' \
+    '/v2/companion/device/execution-assignments:poll' \
+    '/v2/companion/device/execution-authorities:consume' \
+    '/v2/companion/device/execution-results:submit' \
+    '/v2/companion/device/execution-status:query'
   do
     status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
       --proto '=https' --tlsv1.2 --max-time 8 --request POST \
@@ -445,7 +504,7 @@ case "${1:-}" in
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
     expected_count=29
     if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
-      expected_count=32
+      expected_count=34
     fi
     [[ "$local_count" -eq "$expected_count" && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
       die 'the incoming production bundle shape is wrong'
@@ -454,7 +513,7 @@ case "${1:-}" in
     install -d -m 0700 "$incoming/secrets"
     for file in "$incoming"/*; do
       case "${file##*/}" in
-        fetanagent-production-images.tar|compose.production.yaml|telebirr-assignment-signer-key-id|secrets) ;;
+        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|telebirr-assignment-signer-key-id|secrets) ;;
         *) mv -- "$file" "$incoming/secrets/" ;;
       esac
     done
@@ -476,11 +535,15 @@ case "${1:-}" in
       "$incoming/secrets/deposit-proof-reference-profile.v2.json" \
       "$incoming/secrets/telebirr-assignment.spki.der" \
       "$incoming/secrets/telebirr-bridge-runtime-manifest.v1.json"
-    chmod 0444 "$incoming/compose.production.yaml" "$incoming/telebirr-assignment-signer-key-id" \
+    chmod 0444 "$incoming/compose.production.yaml" \
+      "$incoming/compose.production.companion-execution-v2.yaml" \
+      "$incoming/telebirr-assignment-signer-key-id" \
       "$incoming/.release-sha" "$incoming/.image-tag"
     if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
       chown root:root "$incoming/secrets/companion-bridge-runtime-manifest.v2.json"
-      chmod 0444 "$incoming/secrets/companion-bridge-runtime-manifest.v2.json"
+      chown root:root "$incoming/secrets/companion-bridge-runtime-manifest.v3.json"
+      chmod 0444 "$incoming/secrets/companion-bridge-runtime-manifest.v2.json" \
+        "$incoming/secrets/companion-bridge-runtime-manifest.v3.json"
     fi
     mv -- "$incoming" "$release"
     verify_release_files "$release"

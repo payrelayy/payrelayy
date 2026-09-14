@@ -426,7 +426,7 @@ assert.match(helper, /restore_legacy_telebirr_bridge/u);
 assert.match(helper, /negative_telebirr_public_smoke/u);
 assert.match(helper, /negative_companion_public_smoke/u);
 assert.match(helper, /expected_count=29/u);
-assert.match(helper, /expected_count=32/u);
+assert.match(helper, /expected_count=34/u);
 assert.match(helper, /images\+=\(companion-device-bridge\)/u);
 assert.match(helper, /services\+=\(production-companion-device-bridge\)/u);
 assert.match(

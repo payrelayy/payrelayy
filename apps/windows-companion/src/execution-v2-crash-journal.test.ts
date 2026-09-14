@@ -12,13 +12,17 @@ import {
   COMPANION_EXECUTION_PLATFORM_CODE,
   COMPANION_EXECUTION_PROTOCOL_MODE,
   deriveOneUseActionAuthorityReplayIdentity,
+  signAuthoritativeExecutionStatus,
   signExecutionAssignment,
   signExecutionResult,
   signOneUseActionAuthority,
+  type AuthoritativeExecutionStatusBody,
   type ExecutionAssignmentBody,
   type ExecutionResultBody,
   type OneUseActionAuthorityBody,
+  type SignedAuthoritativeExecutionStatus,
   type SignedExecutionAssignment,
+  type SignedExecutionResult,
   type SignedOneUseActionAuthority,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import { describe, expect, it } from 'vitest';
@@ -26,9 +30,11 @@ import { describe, expect, it } from 'vitest';
 import {
   WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_KIND,
   WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RELATIVE_PATH,
-  WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RUNTIME_ENABLED,
+  WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_ACTION_AUTHORITY_ENABLED,
   WindowsCompanionExecutionV2JournalUnavailableError,
   assessWindowsCompanionExecutionV2Recovery,
+  clearWindowsCompanionExecutionV2PreFenceEvidence,
+  clearWindowsCompanionExecutionV2TerminalEvidence,
   createWindowsCompanionExecutionV2AssignmentEvidence,
   decodeWindowsCompanionExecutionV2CrashEvidence,
   isLegalWindowsCompanionExecutionV2JournalTransition,
@@ -181,6 +187,62 @@ function executionResultBody(
   };
 }
 
+function terminalStatusBody(
+  assignment: SignedExecutionAssignment,
+  authority: SignedOneUseActionAuthority,
+  result: SignedExecutionResult,
+): AuthoritativeExecutionStatusBody {
+  const body = assignment.body;
+  return {
+    contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,
+    protocolMode: COMPANION_EXECUTION_PROTOCOL_MODE,
+    statusKind: 'authoritative_execution_status',
+    grantsActionAuthority: false,
+    oneUseActionAuthority: false,
+    capability: COMPANION_EXECUTION_CAPABILITY,
+    actionKind: COMPANION_EXECUTION_ACTION_KIND,
+    statusId: 'authoritative-status-0001',
+    statusSequence: '7',
+    queryNonceDigest: sha('b'),
+    assignmentId: body.assignmentId,
+    assignmentBodyDigest: assignment.bodyDigest,
+    authorityId: authority.body.authorityId,
+    authorityBodyDigest: authority.bodyDigest,
+    activationEpoch: body.activationEpoch,
+    intentId: body.intentId,
+    jobId: body.jobId,
+    attemptId: body.attemptId,
+    platformAgentAccountId: body.platformAgentAccountId,
+    enrollmentId: body.enrollmentId,
+    enrollmentBodyDigest: body.enrollmentBodyDigest,
+    noMoneyCertificateId: body.noMoneyCertificateId,
+    noMoneyCertificateBodyDigest: body.noMoneyCertificateBodyDigest,
+    deviceId: body.deviceId,
+    deviceKeyId: body.deviceKeyId,
+    executionSignerKeyId: body.executionSignerKeyId,
+    platformCode: body.platformCode,
+    pilotId: body.pilotId,
+    pilotRevision: body.pilotRevision,
+    pilotConfigDigest: body.pilotConfigDigest,
+    pilotReservationId: body.pilotReservationId,
+    pilotReservationDigest: body.pilotReservationDigest,
+    amountMinorUnits: body.amountMinorUnits,
+    currencyCode: body.currencyCode,
+    playerIdDigest: body.playerIdDigest,
+    fenceId: authority.body.fenceId,
+    databaseFenceState: 'consumed',
+    databaseAttemptState: 'submission_attempted',
+    databaseReconciliationState: 'succeeded',
+    terminalState: 'succeeded',
+    executionResultBodyDigest: result.bodyDigest,
+    providerResponseDigest: result.body.providerResponseDigest,
+    evidenceDigest: result.body.evidenceDigest,
+    databaseObservedAt: '2026-09-10T12:00:06.000Z',
+    serverIssuedAt: '2026-09-10T12:00:06.100Z',
+    serverValidUntil: '2026-09-10T12:00:10.000Z',
+  };
+}
+
 interface JournalFixture {
   readonly assignment: SignedExecutionAssignment;
   readonly authority: SignedOneUseActionAuthority;
@@ -189,6 +251,8 @@ interface JournalFixture {
   readonly startedEvidence: WindowsCompanionExecutionV2CrashEvidence;
   readonly submissionResultEvidence: WindowsCompanionExecutionV2CrashEvidence;
   readonly noLocalActionResultEvidence: WindowsCompanionExecutionV2CrashEvidence;
+  readonly submissionResult: SignedExecutionResult;
+  readonly terminalStatus: SignedAuthoritativeExecutionStatus;
 }
 
 function fixture(): JournalFixture {
@@ -246,6 +310,13 @@ function fixture(): JournalFixture {
     ),
     'no-local-action result',
   );
+  const terminalStatus = required(
+    signAuthoritativeExecutionStatus(
+      terminalStatusBody(assignment, authority, submissionResult),
+      executionSignerKey,
+    ),
+    'terminal status',
+  );
   return {
     assignment,
     authority,
@@ -268,6 +339,8 @@ function fixture(): JournalFixture {
       ),
       'no-local-action-result evidence',
     ),
+    submissionResult,
+    terminalStatus,
   };
 }
 
@@ -303,9 +376,9 @@ function journalPath(dataRoot: string): string {
 }
 
 describe('Windows companion execution-v2 crash evidence', () => {
-  it('is a dormant, reconciliation-only adapter with no local action authority', () => {
+  it('is a reconciliation-only adapter with no local action authority', () => {
     const value = fixture();
-    expect(WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_RUNTIME_ENABLED).toBe(false);
+    expect(WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_ACTION_AUTHORITY_ENABLED).toBe(false);
     expect(WINDOWS_COMPANION_EXECUTION_V2_JOURNAL_KIND).toBe(
       'windows_companion_execution_v2_local_crash_evidence',
     );
@@ -551,12 +624,56 @@ describe('Windows companion execution-v2 crash evidence', () => {
     });
   });
 
-  it('remains absent from the live companion entry point and provider route', async () => {
-    const runtimeSources = await Promise.all(
-      ['./index.ts', './provider-route.ts'].map(
+  it('clears assignment-only evidence and terminal evidence only through exact guarded paths', async () => {
+    await withDataRoot(async (dataRoot) => {
+      const value = fixture();
+      const options = { dataRoot, protector: testProtector() };
+      await persistWindowsCompanionExecutionV2CrashEvidence(value.assignmentEvidence, options);
+      await clearWindowsCompanionExecutionV2PreFenceEvidence(value.assignmentEvidence, options);
+      await expect(
+        assessWindowsCompanionExecutionV2Recovery({
+          ...options,
+          minimumExpectedJournalRevision: 0,
+        }),
+      ).resolves.toMatchObject({ localEvidenceState: 'missing', localEvidence: null });
+
+      for (const evidence of [
+        value.assignmentEvidence,
+        value.fenceEvidence,
+        value.startedEvidence,
+        value.submissionResultEvidence,
+      ]) {
+        await persistWindowsCompanionExecutionV2CrashEvidence(evidence, options);
+      }
+      await expect(
+        clearWindowsCompanionExecutionV2TerminalEvidence(
+          value.startedEvidence,
+          value.terminalStatus,
+          options,
+        ),
+      ).rejects.toBeInstanceOf(WindowsCompanionExecutionV2JournalUnavailableError);
+      await clearWindowsCompanionExecutionV2TerminalEvidence(
+        value.submissionResultEvidence,
+        value.terminalStatus,
+        options,
+      );
+      await expect(
+        assessWindowsCompanionExecutionV2Recovery({
+          ...options,
+          minimumExpectedJournalRevision: 0,
+        }),
+      ).resolves.toMatchObject({ localEvidenceState: 'missing', localEvidence: null });
+    });
+  });
+
+  it('is reachable only through the execution worker and never grants the provider route authority', async () => {
+    const [entryPoint, worker, providerRoute] = await Promise.all(
+      ['./index.ts', './execution-worker.ts', './provider-route.ts'].map(
         async (relativePath) => await readFile(new URL(relativePath, import.meta.url), 'utf8'),
       ),
     );
-    expect(runtimeSources.join('\n')).not.toContain('execution-v2-crash-journal');
+    expect(entryPoint).toContain('runCompanionExecutionWorker');
+    expect(worker).toContain('execution-v2-crash-journal');
+    expect(providerRoute).not.toContain('execution-v2-crash-journal');
   });
 });

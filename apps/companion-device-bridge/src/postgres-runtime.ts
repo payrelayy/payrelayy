@@ -23,7 +23,21 @@ const COMPLETE_LOOKUP_FUNCTION =
 const RELEASE_LOOKUP_FUNCTION = 'app.release_agent_platform_companion_lookup_assignment(text)';
 const ACCEPT_LOOKUP_RESULT_FUNCTION =
   'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
-const ALLOWED_FUNCTIONS = [
+const CLAIM_EXECUTION_ASSIGNMENT_FUNCTION =
+  'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,text,text,text)';
+const COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION =
+  'app.complete_agent_platform_companion_execution_assignment(text,jsonb,text,jsonb)';
+const CLAIM_EXECUTION_AUTHORITY_FUNCTION =
+  'app.claim_agent_platform_companion_execution_authority(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,jsonb,jsonb)';
+const COMPLETE_EXECUTION_AUTHORITY_FUNCTION =
+  'app.complete_agent_platform_companion_execution_authority(text,jsonb)';
+const ACCEPT_EXECUTION_RESULT_FUNCTION =
+  'app.accept_agent_platform_companion_execution_result(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb,jsonb,jsonb)';
+const CLAIM_EXECUTION_STATUS_FUNCTION =
+  'app.claim_agent_platform_companion_execution_status(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,jsonb,jsonb,jsonb,jsonb)';
+const COMPLETE_EXECUTION_STATUS_FUNCTION =
+  'app.complete_agent_platform_companion_execution_status(text,jsonb)';
+const BASELINE_ALLOWED_FUNCTIONS = [
   CLAIM_PAIRING_FUNCTION,
   COMPLETE_PAIRING_FUNCTION,
   RELEASE_PAIRING_FUNCTION,
@@ -32,7 +46,20 @@ const ALLOWED_FUNCTIONS = [
   RELEASE_LOOKUP_FUNCTION,
   ACCEPT_LOOKUP_RESULT_FUNCTION,
 ] as const;
-const ALLOWED_FUNCTIONS_SQL = ALLOWED_FUNCTIONS.map(
+const EXECUTION_ALLOWED_FUNCTIONS = [
+  ...BASELINE_ALLOWED_FUNCTIONS,
+  CLAIM_EXECUTION_ASSIGNMENT_FUNCTION,
+  COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION,
+  CLAIM_EXECUTION_AUTHORITY_FUNCTION,
+  COMPLETE_EXECUTION_AUTHORITY_FUNCTION,
+  ACCEPT_EXECUTION_RESULT_FUNCTION,
+  CLAIM_EXECUTION_STATUS_FUNCTION,
+  COMPLETE_EXECUTION_STATUS_FUNCTION,
+] as const;
+const ALLOWED_FUNCTIONS_SQL = BASELINE_ALLOWED_FUNCTIONS.map(
+  (signature) => `pg_catalog.to_regprocedure('${signature}')`,
+).join(', ');
+const EXECUTION_ALLOWED_FUNCTIONS_SQL = EXECUTION_ALLOWED_FUNCTIONS.map(
   (signature) => `pg_catalog.to_regprocedure('${signature}')`,
 ).join(', ');
 
@@ -272,6 +299,36 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
     ) as default_function_execution_private
 `;
 
+const EXECUTION_CONTRACT_ROWS_SQL = `,
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_ASSIGNMENT_FUNCTION}'), 13, true,
+          'pg_catalog.record',
+          'table(claim_state text, claim_material jsonb, signed_enrollment jsonb, signed_assignment jsonb, player_id text, signed_authority jsonb, signed_result jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION}'), 4, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_AUTHORITY_FUNCTION}'), 12, true,
+          'pg_catalog.record',
+          'table(claim_state text, authority_body jsonb, signed_authority jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_AUTHORITY_FUNCTION}'), 2, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${ACCEPT_EXECUTION_RESULT_FUNCTION}'), 13, true,
+          'pg_catalog.record', 'table(accepted boolean, replayed boolean)'),
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_STATUS_FUNCTION}'), 14, true,
+          'pg_catalog.record',
+          'table(claim_state text, status_body jsonb, signed_status jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_STATUS_FUNCTION}'), 2, false,
+          'pg_catalog.bool', 'boolean')`;
+
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL =
+  COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL.replaceAll(
+    ALLOWED_FUNCTIONS_SQL,
+    EXECUTION_ALLOWED_FUNCTIONS_SQL,
+  )
+    .replaceAll('count(*) = 7', 'count(*) = 14')
+    .replace(
+      `        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,\n          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')\n      ) expected`,
+      `        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,\n          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')${EXECUTION_CONTRACT_ROWS_SQL}\n      ) expected`,
+    );
+
 interface CompanionDeviceBridgePostgresQuery {
   query(sql: string, values?: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
@@ -297,10 +354,18 @@ export class CompanionDeviceBridgePostgresUnavailableError extends Error {
 
 async function assessCompanionDeviceBridgeCatalogPreflight(
   database: CompanionDeviceBridgePostgresQuery,
+  executionEnabled = false,
 ): Promise<CompanionDeviceBridgeCatalogPreflightAssessment> {
   let rows: readonly unknown[];
   try {
-    rows = (await database.query(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL, [])).rows;
+    rows = (
+      await database.query(
+        executionEnabled
+          ? COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL
+          : COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+        [],
+      )
+    ).rows;
   } catch {
     return Object.freeze({ kind: 'database_query_unavailable' as const });
   }
@@ -341,8 +406,12 @@ async function assessCompanionDeviceBridgeCatalogPreflight(
 
 export async function assertCompanionDeviceBridgeCatalogPreflight(
   database: CompanionDeviceBridgePostgresQuery,
+  executionEnabled = false,
 ): Promise<void> {
-  if ((await assessCompanionDeviceBridgeCatalogPreflight(database)).kind !== 'passed') {
+  if (
+    (await assessCompanionDeviceBridgeCatalogPreflight(database, executionEnabled)).kind !==
+    'passed'
+  ) {
     throw new CompanionDeviceBridgePostgresUnavailableError();
   }
 }
@@ -360,6 +429,7 @@ interface PgModule {
 
 export interface CompanionDeviceBridgePostgresRuntimeDependencies {
   readonly createPool?: (config: Readonly<Record<string, unknown>>) => CompanionDeviceBridgePool;
+  readonly executionSignerKeyId?: string;
   readonly onInitialPreflightFailure?: (
     failure: CompanionDeviceBridgeInitialPreflightFailure,
   ) => void;
@@ -378,6 +448,7 @@ export async function createCompanionDeviceBridgePostgresRuntime(
   dependencies: CompanionDeviceBridgePostgresRuntimeDependencies = {},
 ): Promise<CompanionDeviceBridgePostgresRuntime> {
   const { ca, ...postgresConnection } = connection;
+  const executionEnabled = dependencies.executionSignerKeyId !== undefined;
   const poolConfig = Object.freeze({
     ...postgresConnection,
     application_name: 'fetanagent_companion_device_bridge',
@@ -418,7 +489,7 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     async query(sql, values) {
       if (closed) throw new CompanionDeviceBridgePostgresUnavailableError();
       try {
-        await assertCompanionDeviceBridgeCatalogPreflight(raw);
+        await assertCompanionDeviceBridgeCatalogPreflight(raw, executionEnabled);
         const result = await raw.query(sql, values);
         if (closed) throw new Error();
         return result;
@@ -433,7 +504,7 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     const client = await pool.connect();
     client.release();
     connected = true;
-    const assessment = await assessCompanionDeviceBridgeCatalogPreflight(raw);
+    const assessment = await assessCompanionDeviceBridgeCatalogPreflight(raw, executionEnabled);
     if (assessment.kind !== 'passed') {
       reportInitialPreflightFailure(assessment);
       throw new Error();
@@ -449,14 +520,18 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     throw new CompanionDeviceBridgePostgresUnavailableError();
   }
 
-  const state = new PostgresCompanionDeviceState(guarded, signerKeyId);
+  const state = new PostgresCompanionDeviceState(
+    guarded,
+    signerKeyId,
+    dependencies.executionSignerKeyId,
+  );
   return Object.freeze({
     state,
     database: guarded,
     async ready() {
       if (closed) return false;
       try {
-        await assertCompanionDeviceBridgeCatalogPreflight(raw);
+        await assertCompanionDeviceBridgeCatalogPreflight(raw, executionEnabled);
         return !closed;
       } catch {
         return false;

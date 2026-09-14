@@ -14,11 +14,19 @@ import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import type { WindowsCompanionConfig } from './config.js';
 import { verifyLocalKemerBetIdentity } from './local-kemerbet-identity.js';
 import {
+  createLocalKemerBetDepositAuthorization,
+  executeExactOneUseLocalKemerBetDeposit,
+  type LocalKemerBetFinalAction,
+} from './local-kemerbet-deposit.js';
+import {
   createLocalKemerBetLookupAuthorization,
   executeExactFiveLocalKemerBetLookup,
   type LocalKemerBetLookupOutcome,
 } from './local-kemerbet-lookup.js';
-import { installProviderMutationBoundary } from './provider-route.js';
+import {
+  installProviderMutationBoundary,
+  type LocalKemerBetDepositDispatchOutcome,
+} from './provider-route.js';
 import { isLocalKemerBetProviderUrl, type LocalKemerBetGuardPhase } from './request-guard.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
@@ -68,6 +76,10 @@ export interface LocalKemerBetSession {
       LocalKemerBetLookupOutcome,
     ]
   >;
+  executeExactOneUseDeposit(
+    playerId: string,
+    acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
+  ): Promise<LocalKemerBetDepositDispatchOutcome>;
   stop(): Promise<void>;
 }
 
@@ -114,7 +126,8 @@ export async function startLocalKemerBetSession(
   let phase: LocalKemerBetGuardPhase = 'manual_login';
   let expectedAgentIdentity = config.takeExpectedAgentIdentity();
   const lookupAuthorization = createLocalKemerBetLookupAuthorization();
-  let lookupInProgress = false;
+  const depositAuthorization = createLocalKemerBetDepositAuthorization();
+  let operationInProgress = false;
   let signedInCandidate = false;
   let signedInVerified = false;
   let stopping = false;
@@ -169,6 +182,7 @@ export async function startLocalKemerBetSession(
     terminal = true;
     settleVerified(false);
     lookupAuthorization.clear();
+    depositAuthorization.clear();
     stopping = true;
     identityVerificationEpoch += 1;
     disarmLoginDeadline();
@@ -276,6 +290,7 @@ export async function startLocalKemerBetSession(
         }
       },
       lookupAuthorization,
+      depositAuthorization,
     );
 
     const beginIdentityVerification = async (): Promise<void> => {
@@ -457,15 +472,38 @@ export async function startLocalKemerBetSession(
     verified,
     async executeExactFiveLookup(playerIds: ExactFivePlayerIds) {
       const page = localPage;
-      if (terminal || stopping || !signedInVerified || lookupInProgress || !page) {
+      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
         throw new Error('The local KemerBet lookup session is unavailable.');
       }
-      lookupInProgress = true;
+      operationInProgress = true;
       try {
         return await executeExactFiveLocalKemerBetLookup(page, playerIds, lookupAuthorization);
       } finally {
         lookupAuthorization.clear();
-        lookupInProgress = false;
+        operationInProgress = false;
+      }
+    },
+    async executeExactOneUseDeposit(
+      playerId: string,
+      acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
+    ) {
+      const page = localPage;
+      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+        throw new Error('The local KemerBet execution session is unavailable.');
+      }
+      operationInProgress = true;
+      try {
+        return await executeExactOneUseLocalKemerBetDeposit(
+          page,
+          playerId,
+          lookupAuthorization,
+          depositAuthorization,
+          acquireFinalAction,
+        );
+      } finally {
+        lookupAuthorization.clear();
+        depositAuthorization.clear();
+        operationInProgress = false;
       }
     },
     stop: () => finish('stopped'),

@@ -4,6 +4,7 @@ import type { CompanionDeviceBridgeConnectionConfig } from './config.js';
 import { RELEASE_COMPANION_PAIRING_SQL } from './postgres-state.js';
 import {
   COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL,
   COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS,
   CompanionDeviceBridgePostgresUnavailableError,
   assertCompanionDeviceBridgeCatalogPreflight,
@@ -32,7 +33,10 @@ function fakePool(options: { readonly badPreflight?: boolean } = {}) {
       failNextQuery = false;
       throw new Error('transient connection failure');
     }
-    if (sql === COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL) {
+    if (
+      sql === COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL ||
+      sql === COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL
+    ) {
       const row = passingPreflight();
       if (options.badPreflight) row.runtime_login_is_safe = false;
       return { rows: [row] };
@@ -107,6 +111,33 @@ describe('companion device bridge PostgreSQL runtime', () => {
     await runtime.close();
     expect(fake.pool.end).toHaveBeenCalledTimes(1);
     await expect(runtime.ready()).resolves.toBe(false);
+  });
+
+  it('requires the expanded exact catalog only when the separate execution signer is enabled', async () => {
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 14');
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.claim_agent_platform_companion_execution_assignment',
+    );
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'table(claim_state text, claim_material jsonb, signed_enrollment jsonb, signed_assignment jsonb, player_id text, signed_authority jsonb, signed_result jsonb)',
+    );
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'table(claim_state text, enrollment_body jsonb, assignment_body jsonb',
+    );
+
+    const fake = fakePool();
+    const runtime = await createCompanionDeviceBridgePostgresRuntime(
+      connection,
+      'companion_server_signer_2026_01',
+      {
+        createPool: () => fake.pool,
+        executionSignerKeyId: 'companion_execution_signer_2026_01',
+      },
+    );
+    expect(fake.query.mock.calls.map(([sql]) => sql)).toEqual([
+      COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL,
+    ]);
+    await runtime.close();
   });
 
   it('fails startup closed when any catalog assertion is false', async () => {

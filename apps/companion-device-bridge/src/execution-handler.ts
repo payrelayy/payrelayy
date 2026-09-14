@@ -181,6 +181,18 @@ interface VerifiedExecutionChain {
   readonly identity: TrustedExecutionIdentityContext;
 }
 
+/**
+ * Keep the published execution paths opaque while the separately gated execution transport is
+ * dormant. The HTTP server has already validated the request envelope before this handler runs;
+ * returning the same unauthenticated response as the active handler avoids routing an execution
+ * path through the unrelated pairing protocol and grants no database or signing capability.
+ */
+export function createDormantCompanionExecutionHandler(): (
+  request: CompanionBridgeHttpRequest,
+) => Promise<CompanionBridgeHttpResponse> {
+  return async (_request) => errorResponse(401, 'invalid_request');
+}
+
 function plainRecord(candidate: unknown): candidate is Record<string, unknown> {
   return (
     typeof candidate === 'object' &&

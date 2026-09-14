@@ -146,6 +146,46 @@ export function presentTelegramPlayerIdFlowResult(
           'Automatic credit is not live yet.',
         ].join('\n'),
       };
+    case 'telebirr_live_verification_queued':
+      return {
+        kind: 'menu',
+        menu: {
+          text: [
+            '✅ Transaction number received',
+            `Status: ${result.depositStatus.label}`,
+            '',
+            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
+            'FetanAgent will verify the payment and prepare the KemerBet deposit automatically.',
+          ].join('\n'),
+          buttons: [
+            {
+              text: 'Check status',
+              callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
+            },
+          ],
+        },
+      };
+    case 'telebirr_live_deposit_status':
+      return {
+        kind: 'menu',
+        menu: {
+          text: [
+            '💳 TeleBirr deposit',
+            `Status: ${result.depositStatus.label}`,
+            ...(result.amountMinor === null
+              ? []
+              : [`Amount: ${formatMinorEtb(result.amountMinor)} ETB`]),
+            '',
+            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
+          ].join('\n'),
+          buttons: [
+            {
+              text: 'Refresh status',
+              callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
+            },
+          ],
+        },
+      };
     case 'deposit_status':
       return {
         kind: 'message',

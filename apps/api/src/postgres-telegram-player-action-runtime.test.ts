@@ -448,7 +448,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
             ],
           };
         }
-        if (query.includes('prepare_telegram_telebirr_destination')) {
+        if (query.includes('prepare_telegram_live_telebirr_destination')) {
           return {
             rows: [
               {
@@ -872,7 +872,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls.join('\n')).not.toContain('capture_telegram_telebirr_shadow_proof');
   });
 
-  it('keeps amount-free proof intake unavailable outside dry-run mode', async () => {
+  it('routes a live TeleBirr reference only to the protected live proof boundary', async () => {
     const calls: string[] = [];
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
@@ -884,6 +884,20 @@ describe('Postgres Telegram Player-ID action runtime', () => {
                 inbound_event_id: inboundEventId,
                 received_at: new Date('2026-08-20T12:00:00.000Z'),
                 inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('capture_telegram_live_telebirr_proof')) {
+          return {
+            rows: [
+              {
+                live_proof_id: depositProofRequestId,
+                live_verification_job_id: 'ccf4e0b1-3e56-4599-864e-c9a0f22fb9ed',
+                provider_code: 'telebirr',
+                proof_status: 'verification_pending',
+                submitted_at: new Date('2026-08-20T12:00:00.000Z'),
+                request_replayed: false,
               },
             ],
           };
@@ -905,8 +919,17 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         { ...actionConfig, financialActionsMode: 'live' },
         database,
       ).handle(action, Buffer.from(JSON.stringify(action), 'utf8')),
-    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
-    expect(calls).toHaveLength(1);
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_live_verification_queued',
+      proofToken: encodeTelegramCapabilityId(depositProofRequestId),
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      depositStatus: { label: 'Checking payment', tone: 'working' },
+      financialMode: 'live',
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain('capture_telegram_live_telebirr_proof');
     expect(calls.join('\n')).not.toContain('capture_telegram_dry_run_deposit_proof');
   });
 
@@ -940,6 +963,9 @@ describe('Postgres Telegram Player-ID action runtime', () => {
               ],
             };
           }
+          if (query.includes('app.get_telegram_customer_live_telebirr_proof(')) {
+            return { rows: [] };
+          }
           if (query.includes('app.get_telegram_customer_deposit_proof(')) {
             if ('error' in result) throw result.error;
             return result;
@@ -950,6 +976,60 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       };
       return { calls, database };
     }
+
+    it('reads a live TeleBirr verifier status before the historical dry-run lookup', async () => {
+      const calls: string[] = [];
+      const database: TelegramPlayerActionDatabase = {
+        async query(query) {
+          calls.push(query);
+          if (query.includes('record_public_telegram_action_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-09-15T12:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('app.get_telegram_customer_live_telebirr_proof(')) {
+            return {
+              rows: [
+                {
+                  live_proof_id: depositProofRequestId,
+                  provider_code: 'telebirr',
+                  deposit_status: 'verification_pending',
+                  amount_minor: null,
+                  currency_code: null,
+                  submitted_at: new Date('2026-09-15T11:59:00.000Z'),
+                },
+              ],
+            };
+          }
+          throw new Error('The dry-run status fallback must not run for a live proof.');
+        },
+        async end() {},
+      };
+
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+          action,
+          Buffer.from(JSON.stringify(action)),
+        ),
+      ).resolves.toEqual({
+        version: 1,
+        outcome: 'telebirr_live_deposit_status',
+        proofToken,
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        amountMinor: null,
+        currencyCode: null,
+        depositStatus: { label: 'Checking payment', tone: 'working' },
+        financialMode: 'live',
+      });
+      expect(calls).toHaveLength(2);
+    });
 
     it.each(['telebirr', 'cbe_birr'] as const)(
       'reads the same %s proof with a recreated runtime without calling deposit-intent or financial commands',
@@ -974,8 +1054,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
           ).resolves.toEqual(expected);
           await runtime.close();
         }
-        expect(calls).toHaveLength(4);
-        for (const call of [calls[1], calls[3]]) {
+        expect(calls).toHaveLength(6);
+        for (const call of [calls[2], calls[5]]) {
           expect(call?.values).toEqual([inboundEventId, depositProofRequestId]);
           expect(call?.query).toContain('app.get_telegram_customer_deposit_proof(');
           expect(call?.query).not.toContain('app.get_telegram_customer_deposit(');

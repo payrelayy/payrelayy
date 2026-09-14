@@ -209,6 +209,29 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      readonly outcome: 'telebirr_live_verification_queued';
+      /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
+      readonly proofToken: string;
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly depositStatus: CustomerDepositStatusProjection;
+      readonly financialMode: 'live';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'telebirr_live_deposit_status';
+      /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
+      readonly proofToken: string;
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      /** Amount is disclosed only after authoritative verification produced a settlement candidate. */
+      readonly amountMinor: string | null;
+      readonly currencyCode: 'ETB' | null;
+      readonly depositStatus: CustomerDepositStatusProjection;
+      readonly financialMode: 'live';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_status';
       readonly amountMinor: string;
       readonly currencyCode: 'ETB';

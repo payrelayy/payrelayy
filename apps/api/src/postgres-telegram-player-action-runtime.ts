@@ -24,6 +24,7 @@ import {
 } from './telegram-action-capability.js';
 import { PostgresTelegramPrivateActionNonceStore } from './postgres-telegram-private-action-nonce-store.js';
 import { playerActionCatalogPreflightPassed } from './player-action-catalog-preflight.js';
+import { captureTelegramLiveTelebirrProof } from './telegram-telebirr-live-proof-intake.js';
 import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
 
@@ -94,6 +95,16 @@ const GET_CUSTOMER_DEPOSIT_SQL = `
 const GET_CUSTOMER_DEPOSIT_PROOF_SQL = `
   select deposit_proof_request_id, provider_code, proof_status, submitted_at
   from app.get_telegram_customer_deposit_proof($1::uuid, $2::uuid)
+`;
+const PREPARE_LIVE_TELEBIRR_DESTINATION_SQL = `
+  select provider_code, receiver_revision_id, receiver_account_holder_name,
+         receiver_account_reference_ciphertext, receiver_account_reference_fingerprint,
+         receiver_account_masked, payments_enabled, request_replayed
+  from app.prepare_telegram_live_telebirr_destination($1::uuid, $2::text, $3::text)
+`;
+const GET_CUSTOMER_LIVE_TELEBIRR_PROOF_SQL = `
+  select live_proof_id, provider_code, deposit_status, amount_minor, currency_code, submitted_at
+  from app.get_telegram_customer_live_telebirr_proof($1::uuid, $2::uuid)
 `;
 
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
@@ -368,9 +379,14 @@ async function handleTelebirrDestination(
   >,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
+  const livePaymentPresentation =
+    config.financialActionsMode === 'live' &&
+    !config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
   const semanticHmac = validateSemanticHmac(
     createTelegramActionSemanticHmac({
-      consumer: 'prepare_telegram_telebirr_destination',
+      consumer: livePaymentPresentation
+        ? 'prepare_telegram_live_telebirr_destination'
+        : 'prepare_telegram_telebirr_destination',
       originInboundEventId,
       playerId: action.playerId,
       semanticHmacSecret: config.telegramActionCapability.semanticHmacSecret,
@@ -378,11 +394,12 @@ async function handleTelebirrDestination(
   );
   const row = oneRow(
     (
-      await database.query(PREPARE_TELEBIRR_DESTINATION_SQL, [
-        originInboundEventId,
-        action.playerId,
-        semanticHmac,
-      ])
+      await database.query(
+        livePaymentPresentation
+          ? PREPARE_LIVE_TELEBIRR_DESTINATION_SQL
+          : PREPARE_TELEBIRR_DESTINATION_SQL,
+        [originInboundEventId, action.playerId, semanticHmac],
+      )
     ).rows,
   );
   if (
@@ -409,9 +426,7 @@ async function handleTelebirrDestination(
     receiverAccountHolderName: row.receiver_account_holder_name,
     receiverAccountMasked: row.receiver_account_masked,
   };
-  const receiverReviewEnabled =
-    config.financialActionsMode === 'dry_run' &&
-    config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
+  const receiverReviewEnabled = config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
   if (!row.payments_enabled || (!receiverReviewEnabled && config.financialActionsMode !== 'live')) {
     return {
       ...base,
@@ -445,6 +460,13 @@ async function handleTelebirrDestination(
       receiverAccountReference,
       amountMinor: '2500',
       currencyCode: 'ETB',
+      acceptsPayments: false,
+    };
+  }
+  if (!livePaymentPresentation) {
+    return {
+      ...base,
+      outcome: 'telebirr_deposit_preview',
       acceptsPayments: false,
     };
   }
@@ -578,15 +600,22 @@ async function handleDepositProof(
   action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_proof_command' }>,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
-  if (
-    config.financialActionsMode !== 'dry_run' ||
-    config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled
-  ) {
+  if (config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled) {
     return { version: 1, outcome: 'deposit_unavailable' };
   }
 
   if (action.providerCode === 'telebirr') {
-    return captureTelegramTelebirrShadowProof(database, originInboundEventId, action, config);
+    if (config.financialActionsMode === 'live') {
+      return captureTelegramLiveTelebirrProof(database, originInboundEventId, action, config);
+    }
+    if (config.financialActionsMode === 'dry_run') {
+      return captureTelegramTelebirrShadowProof(database, originInboundEventId, action, config);
+    }
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+
+  if (config.financialActionsMode !== 'dry_run') {
+    return { version: 1, outcome: 'deposit_unavailable' };
   }
 
   const protectedReference = protectDepositProofReference({
@@ -660,6 +689,44 @@ async function handleDepositProofStatus(
   if (!proofRequestId) return { version: 1, outcome: 'deposit_input_invalid' };
   let rows: readonly unknown[];
   try {
+    rows = (
+      await database.query(GET_CUSTOMER_LIVE_TELEBIRR_PROOF_SQL, [
+        originInboundEventId,
+        proofRequestId,
+      ])
+    ).rows;
+    if (rows.length > 0) {
+      const row = oneRow(rows);
+      const amountAvailable =
+        typeof row.amount_minor === 'string' && /^[1-9][0-9]*$/u.test(row.amount_minor);
+      if (
+        Object.keys(row).length !== 6 ||
+        row.live_proof_id !== proofRequestId ||
+        row.provider_code !== 'telebirr' ||
+        typeof row.deposit_status !== 'string' ||
+        !DEPOSIT_STATUSES.has(row.deposit_status as DepositStatus) ||
+        !(
+          (row.amount_minor === null && row.currency_code === null) ||
+          (amountAvailable && row.currency_code === 'ETB')
+        ) ||
+        !(row.submitted_at instanceof Date) ||
+        Number.isNaN(row.submitted_at.getTime())
+      ) {
+        throw new TelegramPlayerActionRuntimeUnavailableError();
+      }
+      return {
+        version: 1,
+        outcome: 'telebirr_live_deposit_status',
+        proofToken: action.proofToken,
+        providerCode: 'telebirr',
+        providerName: 'TeleBirr',
+        amountMinor: amountAvailable ? (row.amount_minor as string) : null,
+        currencyCode: amountAvailable ? 'ETB' : null,
+        depositStatus: projectCustomerDepositStatus(row.deposit_status as DepositStatus),
+        financialMode: 'live',
+      };
+    }
+
     rows = (
       await database.query(GET_CUSTOMER_DEPOSIT_PROOF_SQL, [originInboundEventId, proofRequestId])
     ).rows;

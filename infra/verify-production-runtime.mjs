@@ -450,6 +450,17 @@ assert.match(helper, /quiesce_legacy_telebirr_bridge/u);
 assert.match(helper, /restore_legacy_telebirr_bridge/u);
 assert.match(helper, /negative_telebirr_public_smoke/u);
 assert.match(helper, /negative_companion_public_smoke/u);
+assert.match(helper, /start_release_services_with_session_handoff_retry\(\)/u);
+assert.match(helper, /for attempt in 1 2 3; do/u);
+assert.match(helper, /sleep "\$\(\(attempt \* 5\)\)"/u);
+assert.match(
+  helper,
+  /start_release_services_with_session_handoff_retry "\$release" \\\s*owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker/u,
+);
+assert.match(
+  helper,
+  /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
+);
 assert.match(helper, /expected_count=29/u);
 assert.match(helper, /expected_count=34/u);
 assert.match(helper, /images\+=\(companion-device-bridge\)/u);

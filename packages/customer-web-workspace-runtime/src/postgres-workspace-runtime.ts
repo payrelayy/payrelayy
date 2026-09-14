@@ -300,15 +300,20 @@ function validateEnabledConfig(config: EnabledCustomerWebWorkspaceConfig): void 
     deploymentTarget === 'staging' || deploymentTarget === 'production'
       ? CUSTOMER_WEB_DEPLOYMENT_TARGETS[deploymentTarget]
       : undefined;
+  const targetBoundConnection =
+    target !== undefined &&
+    ((config.connection.host === target.databaseDirectHost &&
+      config.connection.user === CUSTOMER_WEB_DATABASE_RUNTIME_ROLE) ||
+      (config.connection.host === target.databaseSessionPoolerHost &&
+        config.connection.user === target.databaseSessionPoolerRuntimeRole));
   if (
     target === undefined ||
     config.stage !== deploymentTarget ||
     config.projectReference !== target.projectReference ||
     config.tlsMode !== 'verify-full' ||
     config.connection.database !== 'postgres' ||
-    config.connection.host !== target.databaseDirectHost ||
+    !targetBoundConnection ||
     config.connection.port !== 5432 ||
-    config.connection.user !== CUSTOMER_WEB_DATABASE_RUNTIME_ROLE ||
     typeof config.connection.password !== 'string' ||
     config.connection.password === ''
   ) {

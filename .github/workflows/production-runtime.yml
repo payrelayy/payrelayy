@@ -42,6 +42,9 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DROPLET_ID: '593344964'
   PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  # GitHub-hosted runners are IPv4-only. Short-lived administrative SQL uses the
+  # shared transaction pooler; deployed long-lived runtimes remain on session mode 5432.
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
   BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
   CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
@@ -427,7 +430,7 @@ jobs:
           COMPANION_SERVER_SIGNER_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
           PGSSLMODE: verify-full
@@ -547,7 +550,7 @@ jobs:
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
           PGSSLMODE: verify-full
@@ -639,7 +642,7 @@ jobs:
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
-          PGPORT: '5432'
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
           PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
           PGSSLMODE: verify-full

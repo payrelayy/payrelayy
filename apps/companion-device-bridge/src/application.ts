@@ -13,7 +13,10 @@ import {
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import type { CompanionDeviceBridgeConfig } from './config.js';
-import { createCompanionExecutionHandler } from './execution-handler.js';
+import {
+  createCompanionExecutionHandler,
+  createDormantCompanionExecutionHandler,
+} from './execution-handler.js';
 import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
 import {
@@ -236,16 +239,15 @@ export async function startCompanionDeviceBridgeApplication(
           completeStatus: (statusBodyDigest, status) =>
             state.completeExecutionStatus(statusBodyDigest, status),
         })
-      : undefined;
+      : createDormantCompanionExecutionHandler();
     const handler: CompanionDeviceBridgeHandler = (request) =>
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
         ? lookupHandler(request)
-        : executionHandler &&
-            (request.path === COMPANION_EXECUTION_POLL_PATH ||
-              request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
-              request.path === COMPANION_EXECUTION_RESULT_PATH ||
-              request.path === COMPANION_EXECUTION_STATUS_PATH)
+        : request.path === COMPANION_EXECUTION_POLL_PATH ||
+            request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
+            request.path === COMPANION_EXECUTION_RESULT_PATH ||
+            request.path === COMPANION_EXECUTION_STATUS_PATH
           ? executionHandler(request)
           : pairingHandler(request);
     server = createServer(handler);

@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
+import {
+  COMPANION_EXECUTION_AUTHORITY_PATH,
+  COMPANION_EXECUTION_POLL_PATH,
+  COMPANION_EXECUTION_RESULT_PATH,
+  COMPANION_EXECUTION_STATUS_PATH,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import { startCompanionDeviceBridgeApplication } from './application.js';
 import type { CompanionDeviceBridgeConfig } from './config.js';
 import type { CompanionDeviceBridgePostgresRuntime } from './postgres-runtime.js';
 import type { CompanionDeviceBridgeServerRuntime } from './application.js';
+import type { CompanionDeviceBridgeHandler } from './server.js';
 
 const enabledConfig: CompanionDeviceBridgeConfig = {
   enabled: true,
@@ -90,6 +99,43 @@ describe('companion device bridge application lifecycle', () => {
     expect(server.close).toHaveBeenCalledTimes(1);
     expect(postgres.close).toHaveBeenCalledTimes(1);
     await expect(application.ready()).resolves.toBe(false);
+  });
+
+  it('rejects every dormant execution route without calling the pairing or database state', async () => {
+    const postgres = postgresRuntime();
+    const server = serverRuntime();
+    let handler: CompanionDeviceBridgeHandler | undefined;
+    const application = await startCompanionDeviceBridgeApplication(enabledConfig, {
+      createPostgresRuntime: async () => postgres.runtime,
+      createServer: (candidate) => {
+        handler = candidate;
+        return server.runtime;
+      },
+    });
+    if (!handler) throw new Error('expected the application handler');
+
+    for (const path of [
+      COMPANION_EXECUTION_POLL_PATH,
+      COMPANION_EXECUTION_AUTHORITY_PATH,
+      COMPANION_EXECUTION_RESULT_PATH,
+      COMPANION_EXECUTION_STATUS_PATH,
+    ]) {
+      const response = await handler({
+        method: 'POST',
+        path,
+        headers: [
+          ['content-type', AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE],
+          ['accept', AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE],
+        ],
+        body: Buffer.from('{}', 'utf8'),
+      });
+      expect(response.statusCode).toBe(401);
+      expect(JSON.parse(Buffer.from(response.body).toString('utf8'))).toEqual({
+        code: 'invalid_request',
+      });
+    }
+    expect(postgres.runtime.state.claimPairing).not.toHaveBeenCalled();
+    await application.close();
   });
 
   it('rejects disabled startup before constructing any runtime', async () => {

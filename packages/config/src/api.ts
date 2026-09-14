@@ -89,6 +89,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly depositProofReferenceEncryptionMasterSecret: undefined;
       readonly depositProofReferenceFingerprintMasterSecret: undefined;
       readonly depositProofReferenceProfileVersion: undefined;
+      readonly telebirrReceiverReviewEnabled: false;
       readonly tlsMode: undefined;
     }
   | {
@@ -109,6 +110,11 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly depositProofReferenceEncryptionMasterSecret: string;
       readonly depositProofReferenceFingerprintMasterSecret: string;
       readonly depositProofReferenceProfileVersion: 2;
+      /**
+       * Allows the API to disclose the full active TeleBirr receiver in a non-submittable review
+       * message only. PostgreSQL must still confirm the exact live activation epoch.
+       */
+      readonly telebirrReceiverReviewEnabled: boolean;
       readonly tlsMode: 'verify-full';
     };
 
@@ -494,6 +500,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       depositProofReferenceEncryptionMasterSecret: undefined,
       depositProofReferenceFingerprintMasterSecret: undefined,
       depositProofReferenceProfileVersion: undefined,
+      telebirrReceiverReviewEnabled: false,
       tlsMode: undefined,
     };
   }
@@ -505,6 +512,16 @@ function loadApiTelegramPlayerActionRuntimeConfig(
 
   const deploymentTarget = loadPlayerActionDeploymentTarget(environment);
   const databaseTarget = PLAYER_ACTION_DATABASE_TARGETS[deploymentTarget];
+  const telebirrReceiverReviewEnabled = booleanFromEnv(
+    environment.TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED,
+    false,
+    'TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED',
+  );
+  if (telebirrReceiverReviewEnabled && deploymentTarget !== 'production') {
+    throw new Error(
+      'TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED is restricted to the production Player-action target.',
+    );
+  }
 
   const connectionString = secretFromEnvironmentOrFile(
     environment.PLAYER_ACTION_DATABASE_URL,
@@ -649,6 +666,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     depositProofReferenceEncryptionMasterSecret,
     depositProofReferenceFingerprintMasterSecret,
     depositProofReferenceProfileVersion: depositProofReferenceProfile.version,
+    telebirrReceiverReviewEnabled,
     tlsMode: 'verify-full',
   };
 }
@@ -744,6 +762,16 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
     telegramActionChannel,
     telegramActionCapability,
   );
+  const financialActionsMode = loadFinancialActionsMode(environment);
+  if (
+    telegramPlayerActionRuntime.enabled &&
+    telegramPlayerActionRuntime.telebirrReceiverReviewEnabled &&
+    financialActionsMode !== 'dry_run'
+  ) {
+    throw new Error(
+      'TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
+    );
+  }
   assertDistinctApiTelegramHmacSecrets(
     telegramIngress,
     telegramActionCapability,
@@ -753,7 +781,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
 
   return {
     ...runtime,
-    financialActionsMode: loadFinancialActionsMode(environment),
+    financialActionsMode,
     api: {
       host: environment.API_HOST ?? '127.0.0.1',
       port: portFromEnv(environment.API_PORT),
@@ -800,6 +828,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly depositProofReferenceMastersConfigured: boolean;
     readonly depositProofReferenceProfileVersion: 2 | undefined;
     readonly payloadHmacConfigured: boolean;
+    readonly telebirrReceiverReviewEnabled: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
 } {
@@ -839,6 +868,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
       depositProofReferenceProfileVersion:
         config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
       payloadHmacConfigured: config.telegramPlayerActionRuntime.enabled,
+      telebirrReceiverReviewEnabled:
+        config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },
   };

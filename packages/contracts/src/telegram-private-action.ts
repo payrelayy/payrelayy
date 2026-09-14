@@ -147,6 +147,20 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      readonly outcome: 'telebirr_deposit_destination_review';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly receiverAccountHolderName: string;
+      /** Complete digits for an authenticated, activation-bound 25 ETB review. */
+      readonly receiverAccountReference: string;
+      readonly receiverAccountMasked: string;
+      readonly amountMinor: '2500';
+      readonly currencyCode: 'ETB';
+      /** Review messages are deliberately not recognized as payment-proof reply prompts. */
+      readonly acceptsPayments: false;
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_instructions';
       readonly depositToken: string;
       readonly amountMinor: string;

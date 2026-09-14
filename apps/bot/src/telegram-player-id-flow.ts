@@ -51,6 +51,26 @@ export function presentTelegramPlayerIdFlowResult(
           'Tap /menu to go back.',
         ].join('\n'),
       };
+    case 'telebirr_deposit_destination_review': {
+      if (!context.selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
+      return {
+        kind: 'message',
+        text: [
+          '🔎 Live 25 ETB TeleBirr pilot — review only',
+          '',
+          'Receiver:',
+          `👤 Name: ${result.receiverAccountHolderName}`,
+          `📱 Number: ${result.receiverAccountReference}`,
+          '',
+          `🎮 KemerBet Player ID: ${context.selectedPlayerId}`,
+          '💵 Amount: 25 ETB',
+          '',
+          'NO PAYMENT YET.',
+          'This screen is information only and cannot accept payment proof.',
+          'Tap /menu to cancel.',
+        ].join('\n'),
+      };
+    }
     case 'telebirr_deposit_destination': {
       if (!context.selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
       return {

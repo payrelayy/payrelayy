@@ -44,6 +44,13 @@ assert.match(workflow, /--read-only/u);
 assert.match(workflow, /--cap-drop ALL/u);
 assert.match(workflow, /--security-opt no-new-privileges:true/u);
 assert.match(workflow, /trap cleanup EXIT/u);
+assert.match(workflow, /sudo chown 10001:10001 "\$protected\/database-url"/u);
+assert.match(
+  workflow,
+  /sudo chown root:root "\$protected\/pins\.json" "\$protected\/supabase-ca\.crt"/u,
+);
+assert.match(workflow, /chmod 0444 "\$protected\/pins\.json" "\$protected\/supabase-ca\.crt"/u);
+assert.doesNotMatch(workflow, /sudo chown 10001:10001[^\n]*(?:pins\.json|supabase-ca\.crt)/u);
 assert.match(workflow, /production-telebirr-shadow-verifier-once-provision\.sql/u);
 assert.match(workflow, /production-telebirr-shadow-verifier-once-disable\.sql/u);
 assert.match(workflow, /enrollment\.pilot_revision_id = '\$TARGET_PILOT_REVISION_ID'::uuid/u);

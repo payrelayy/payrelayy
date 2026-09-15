@@ -284,7 +284,9 @@ export interface TelebirrShadowVerifierConnectionConfig {
   readonly host: string;
   readonly password: string;
   readonly port: 5432;
-  readonly user: 'fetanagent_telebirr_shadow_verifier_runtime';
+  readonly user:
+    | 'fetanagent_telebirr_shadow_verifier_runtime'
+    | 'fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr';
 }
 
 interface PgModule {

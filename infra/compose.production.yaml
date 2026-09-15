@@ -1,9 +1,10 @@
 name: fetanagent-production
 
-# Long-lived production control and customer services. Financial execution is deliberately absent:
-# this stack can authenticate real users, manage production configuration, admit Telegram users,
-# execute scoped Player-ID actions, and pair the dedicated TeleBirr Android verifier, but it cannot
-# deliver a financial assignment or move money.
+# Long-lived production control and customer services. The Telegram API may accept one protected
+# TeleBirr proof only while the separately activated database epoch authorizes the bounded pilot.
+# Financial execution is deliberately absent: this stack can authenticate real users, manage
+# production configuration, admit Telegram users, execute scoped Player-ID actions, and pair the
+# dedicated TeleBirr Android verifier, but it cannot perform a KemerBet final action or move money.
 x-runtime-defaults: &runtime-defaults
   profiles: [production]
   platform: linux/amd64
@@ -183,8 +184,12 @@ services:
     environment:
       NODE_ENV: production
       LOG_LEVEL: info
-      FINANCIAL_ACTIONS_MODE: dry_run
-      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'
+      # The API's live mode is necessary for the guarded Telegram proof-intake RPCs. PostgreSQL
+      # independently requires the current two-hour pilot, activation epoch, receiver, Player,
+      # provider and complete feature-switch set before disclosing a payable destination or
+      # accepting a proof. No executor or KemerBet final-action capability is mounted here.
+      FINANCIAL_ACTIONS_MODE: live
+      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'
       API_HOST: 0.0.0.0
       API_PORT: '3000'
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate

@@ -67,11 +67,20 @@ for (const [name, service] of applicationServices) {
   assert.match(service, /image: fetanagent-[a-z-]+:\$\{FETANAGENT_IMAGE_TAG:\?/u, name);
   assert.match(service, /<<: \*runtime-defaults/u, name);
   assert.match(service, /NODE_ENV: production/u, name);
-  assert.match(service, /FINANCIAL_ACTIONS_MODE: dry_run/u, name);
+  if (name === 'api') {
+    assert.match(service, /FINANCIAL_ACTIONS_MODE: live/u, name);
+  } else {
+    assert.match(service, /FINANCIAL_ACTIONS_MODE: dry_run/u, name);
+  }
   assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/u, name);
   assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u, name);
   assert.doesNotMatch(service, /password|token:\s*[^/\s$]/iu, `${name} contains inline authority`);
 }
+assert.equal(
+  count(compose, /FINANCIAL_ACTIONS_MODE: live/gu),
+  1,
+  'only the guarded Telegram API may compose in live financial mode',
+);
 
 for (const invariant of [
   /profiles: \[production\]/u,
@@ -111,11 +120,11 @@ assert.match(api, /PLAYER_ACTION_DEPLOYMENT_TARGET: production/u);
 assert.match(api, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/u);
-assert.match(api, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
+assert.match(api, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/u);
 assert.equal(
-  count(compose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/gu),
+  count(compose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/gu),
   1,
-  'the non-submittable receiver review gate must exist only in the production API service',
+  'the live proof-intake review override must be disabled only in the production API service',
 );
 
 const beta = childBlock(services, 'beta-admission');

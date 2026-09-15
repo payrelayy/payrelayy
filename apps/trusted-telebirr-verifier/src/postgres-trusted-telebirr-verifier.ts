@@ -14,6 +14,7 @@ interface TelebirrVerifierCatalogContract {
   readonly authorityFunction: string;
   readonly completionFunction: string;
   readonly groupRole: string;
+  readonly primaryFunctionSearchPath: 'empty' | 'pg_catalog';
   readonly quarantineFunction: string;
   readonly runtimeRole: string;
   readonly stagedEvidenceFunction: string;
@@ -25,6 +26,7 @@ const LIVE_CATALOG_CONTRACT: TelebirrVerifierCatalogContract = Object.freeze({
   completionFunction:
     'app.complete_private_live_telebirr_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
   groupRole: 'fetanagent_trusted_telebirr_verifier',
+  primaryFunctionSearchPath: 'empty',
   quarantineFunction: 'app.quarantine_private_live_telebirr_staged_evidence(uuid,uuid,text,text)',
   runtimeRole: 'fetanagent_trusted_telebirr_verifier_runtime',
   stagedEvidenceFunction: 'app.load_next_private_live_telebirr_staged_evidence()',
@@ -36,6 +38,7 @@ const SHADOW_CATALOG_CONTRACT: TelebirrVerifierCatalogContract = Object.freeze({
   completionFunction:
     'app.complete_private_telebirr_shadow_verification(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)',
   groupRole: 'fetanagent_telebirr_shadow_verifier',
+  primaryFunctionSearchPath: 'pg_catalog',
   quarantineFunction: 'app.quarantine_private_telebirr_shadow_staged_evidence(uuid,uuid,text,text)',
   runtimeRole: 'fetanagent_telebirr_shadow_verifier_runtime',
   stagedEvidenceFunction: 'app.load_next_private_telebirr_shadow_staged_evidence()',
@@ -75,6 +78,10 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
   const STAGED_EVIDENCE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.stagedEvidenceFunction}')`;
   const QUARANTINE_FUNCTION_SQL = `pg_catalog.to_regprocedure('${contract.quarantineFunction}')`;
   const ALLOWED_FUNCTIONS_SQL = `${AUTHORITY_FUNCTION_SQL}, ${COMPLETION_FUNCTION_SQL}, ${STAGED_EVIDENCE_FUNCTION_SQL}, ${QUARANTINE_FUNCTION_SQL}`;
+  const PRIMARY_FUNCTION_PROCONFIG_SQL =
+    contract.primaryFunctionSearchPath === 'empty'
+      ? `array['search_path=""']::text[]`
+      : `array['search_path=pg_catalog']::text[]`;
   return `
   select
     current_user = '${VERIFIER_RUNTIME_ROLE}' and session_user = current_user
@@ -244,7 +251,7 @@ function telebirrVerifierCatalogPreflightSql(contract: TelebirrVerifierCatalogCo
               ${COMPLETION_FUNCTION_SQL},
               ${STAGED_EVIDENCE_FUNCTION_SQL}
             )
-            and routine.proconfig = array['search_path=""']::text[]
+            and routine.proconfig = ${PRIMARY_FUNCTION_PROCONFIG_SQL}
           ) or (
             routine.oid = ${QUARANTINE_FUNCTION_SQL}
             and routine.proconfig = array['search_path=pg_catalog']::text[]

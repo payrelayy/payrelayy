@@ -67,8 +67,11 @@ describe('TeleBirr shadow PostgreSQL boundary', () => {
       'app.complete_private_live_telebirr_verification',
     );
     expect(TELEBIRR_SHADOW_VERIFIER_CATALOG_PREFLIGHT_SQL).not.toContain('deposit_execution');
-    expect(TELEBIRR_SHADOW_VERIFIER_CATALOG_PREFLIGHT_SQL).toContain(
-      "routine.proconfig = array['search_path=pg_catalog']::text[]",
+    expect(TELEBIRR_SHADOW_VERIFIER_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'routine.proconfig = array[\'search_path=""\']::text[]',
+    );
+    expect(TELEBIRR_SHADOW_VERIFIER_CATALOG_PREFLIGHT_SQL).toMatch(
+      /routine\.oid in \([\s\S]*load_private_telebirr_shadow_verification_authority[\s\S]*complete_private_telebirr_shadow_verification[\s\S]*load_next_private_telebirr_shadow_staged_evidence[\s\S]*routine\.proconfig = array\['search_path=pg_catalog'\]::text\[\]/,
     );
 
     await expect(

@@ -101,6 +101,16 @@ assert.match(
   provision,
   /recover_expired_private_live_telebirr_payment_to_shadow\(uuid,uuid,uuid,uuid,text\)/u,
 );
+assert.match(
+  provision,
+  /retry_expired_private_telebirr_shadow_request\(uuid,uuid,uuid,uuid,text\)/u,
+);
+assert.match(provision, /begin transaction isolation level read committed/u);
+assert.match(provision, /create_first_shadow_request/u);
+assert.match(provision, /expired_shadow_retry_no_credit/u);
+assert.match(provision, /untouched_source_and_open_shadow/u);
+assert.match(provision, /shadow_proof\.retry_request_key = :'recovery_request_key'::uuid/u);
+assert.match(workflow, /proof\.retry_request_key = '\$RECOVERY_REQUEST_KEY'::uuid/u);
 assert.match(provision, /login noinherit nocreatedb nocreaterole noreplication nobypassrls/u);
 assert.match(provision, /connection limit 1 password :'shadow_runtime_password'/u);
 assert.match(provision, /interval '20 minutes'/u);

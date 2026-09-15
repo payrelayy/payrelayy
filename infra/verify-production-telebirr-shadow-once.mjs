@@ -65,6 +65,8 @@ assert.match(provision, /private_live_telebirr_verification_outcomes/u);
 assert.match(provision, /feature_key <> 'private_live_deposit_pilot'/u);
 assert.match(provision, /and mode = 'disabled'/u);
 assert.match(provision, /mode = 'dry_run'/u);
+assert.match(provision, /for share of feature_switch/u);
+assert.doesNotMatch(provision, /for share of enrollment/u);
 assert.match(provision, /active_target_enrollment/u);
 assert.match(provision, /device_enrollment_id = enrollment\.id/u);
 assert.match(provision, /count\(\*\) from active_target_enrollment\) = 1/u);

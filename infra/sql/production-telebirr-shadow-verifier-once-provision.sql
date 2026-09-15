@@ -76,7 +76,7 @@ with locked_feature_switches as materialized (
      'private_live_deposit_pilot'
    )
    order by feature_switch.feature_key
-   for share of enrollment
+   for share of feature_switch
 ), armed_shadow_pilot as (
   select pilot.id,
          pilot.configuration_digest

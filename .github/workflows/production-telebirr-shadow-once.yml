@@ -1,0 +1,434 @@
+name: One-time production TeleBirr shadow verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed dry-run replacement pilot UUID
+        required: true
+        type: string
+      confirm_source_live_verification_job_id:
+        description: Type the exact untouched expired live verification-job UUID
+        required: true
+        type: string
+      confirm_recovery_request_key:
+        description: Type one new lowercase UUIDv4 recovery idempotency key
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RUN ONE-TIME PRODUCTION TELEBIRR SHADOW VERIFIER - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-once
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DROPLET_ID: '593344964'
+  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  SHADOW_RUNTIME_ROLE: fetanagent_telebirr_shadow_verifier_runtime
+
+jobs:
+  validate:
+    name: Validate exact no-money production operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_SOURCE_JOB: ${{ inputs.confirm_source_live_verification_job_id }}
+      CONFIRMED_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact targets, UUIDs, and no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_SOURCE_JOB" =~ $uuid ]]
+          [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_OPERATION" == 'RUN ONE-TIME PRODUCTION TELEBIRR SHADOW VERIFIER - NO MONEY' ]]
+
+  verify-once:
+    name: Run one bounded evidence-only verifier
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Build and inspect the no-money verifier image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_SHA:0:12}"
+          image="fetanagent-telebirr-shadow-verifier:$tag"
+          docker build --pull=false --target telebirr-shadow-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$image" .
+          [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
+          [[ "$(docker image inspect "$image" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" == "$GITHUB_SHA" ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" == 'null' ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.Cmd}}')" == \
+            '["node","apps/trusted-telebirr-verifier/dist/telebirr-shadow-verifier-main.js"]' ]]
+
+      - name: Run exactly one bounded production shadow outcome and always revoke
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PIN_MANIFEST_BASE64: ${{ vars.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
+          TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          SOURCE_LIVE_VERIFICATION_JOB_ID: ${{ inputs.confirm_source_live_verification_job_id }}
+          RECOVERY_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: '5432'
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$PGPASSWORD" && -n "$PIN_MANIFEST_BASE64" ]]
+          protected="$RUNNER_TEMP/production-shadow-once"
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/pins.json"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          node --input-type=module - "$protected/pins.json" <<'NODE'
+          import { createHash, createPublicKey } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const text = readFileSync(process.argv[2], 'utf8');
+          const manifest = JSON.parse(text);
+          if (JSON.stringify(manifest) !== text ||
+              Object.keys(manifest).join(',') !== 'contractVersion,assignmentSigners,devices' ||
+              manifest.contractVersion !== 1 ||
+              !Array.isArray(manifest.assignmentSigners) ||
+              !Array.isArray(manifest.devices) ||
+              manifest.assignmentSigners.length < 1 || manifest.assignmentSigners.length > 16 ||
+              manifest.devices.length < 1 || manifest.devices.length > 16) process.exit(1);
+          const ids = new Set();
+          const digests = new Set();
+          for (const pin of [...manifest.assignmentSigners, ...manifest.devices]) {
+            if (Object.keys(pin).join(',') !== 'keyId,publicKeySpkiDerBase64' ||
+                !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(pin.keyId) ||
+                ids.has(pin.keyId)) process.exit(1);
+            const bytes = Buffer.from(pin.publicKeySpkiDerBase64, 'base64');
+            const key = createPublicKey({ key: bytes, format: 'der', type: 'spki' });
+            const canonical = Buffer.from(key.export({ format: 'der', type: 'spki' }));
+            const digest = createHash('sha256').update(bytes).digest('hex');
+            if (bytes.toString('base64') !== pin.publicKeySpkiDerBase64 || bytes.length !== 91 ||
+                !bytes.equals(canonical) || key.asymmetricKeyType !== 'ec' ||
+                key.asymmetricKeyDetails?.namedCurve !== 'prime256v1' ||
+                digests.has(digest)) process.exit(1);
+            ids.add(pin.keyId);
+            digests.add(digest);
+            bytes.fill(0);
+            canonical.fill(0);
+          }
+          NODE
+
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ExitOnForwardFailure=yes -o ConnectTimeout=5 -o ConnectionAttempts=1 \
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -T)
+          tunnel_pid=''
+          container='fetanagent-production-shadow-once'
+          provisioned=0
+          completed=0
+
+          cleanup() {
+            local command_status=$? disable_status=0
+            trap - EXIT INT TERM
+            set +e
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            if [[ "$provisioned" == '1' ]] && kill -0 "$tunnel_pid" 2>/dev/null; then
+              disable_result="$(timeout --signal=TERM --kill-after=5s 45s \
+                psql -X --quiet --tuples-only --no-align \
+                  --file=infra/sql/production-telebirr-shadow-verifier-once-disable.sql)" ||
+                disable_status=$?
+              if [[ "$disable_status" -eq 0 ]]; then
+                jq -e '
+                  .schemaVersion == 1 and
+                  .operation == "shadow_verifier_runtime_disable" and
+                  .deploymentTarget == "production" and
+                  .runtimeLogin == "disabled" and
+                  .financialSwitchesChanged == false
+                ' <<<"$disable_result" >/dev/null || disable_status=1
+              fi
+            elif [[ "$provisioned" == '1' ]]; then
+              disable_status=1
+            fi
+            if [[ "$tunnel_pid" =~ ^[1-9][0-9]*$ ]]; then
+              kill "$tunnel_pid" 2>/dev/null || true
+              wait "$tunnel_pid" 2>/dev/null || true
+            fi
+            if [[ "$protected" == "$RUNNER_TEMP/production-shadow-once" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              sudo find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              sudo rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              command_status=1
+            fi
+            if [[ "$completed" != '1' && "$command_status" -eq 0 ]]; then command_status=1; fi
+            if [[ "$disable_status" -ne 0 ]]; then
+              echo '::error::The one-time shadow runtime could not prove database-role revocation.' >&2
+              command_status=1
+            fi
+            exit "$command_status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          ssh "${ssh_opts[@]}" -N \
+            -L "127.0.0.1:5432:$PRODUCTION_DATABASE_DIRECT_HOST:5432" \
+            "fetanagent-admin@$PRODUCTION_VM_HOST" >/dev/null 2>&1 &
+          tunnel_pid=$!
+          for attempt in {1..40}; do
+            kill -0 "$tunnel_pid" 2>/dev/null
+            if (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null; then
+              exec 3>&-
+              exec 3<&-
+              break
+            fi
+            [[ "$attempt" -lt 40 ]]
+            sleep 0.25
+          done
+
+          enrollment_pins="$(psql -X --quiet --tuples-only --no-align --command "
+            select coalesce(
+              jsonb_agg(
+                jsonb_build_object(
+                  'keyId', enrollment.key_id,
+                  'publicKeySpkiSha256', enrollment.public_key_spki_sha256
+                ) order by enrollment.id
+              ),
+              '[]'::jsonb
+            )::text
+              from app.private_live_telebirr_device_enrollments enrollment
+             where enrollment.pilot_revision_id = '$TARGET_PILOT_REVISION_ID'::uuid
+               and enrollment.valid_from <= clock_timestamp()
+               and enrollment.valid_until > clock_timestamp() + interval '5 minutes'
+               and not exists (
+                 select 1
+                   from app.private_live_telebirr_device_revocations revocation
+                  where revocation.device_enrollment_id = enrollment.id
+               );
+          ")"
+          printf '%s' "$enrollment_pins" >"$protected/enrollment-pins.json"
+          unset enrollment_pins
+          node --input-type=module - "$protected/pins.json" "$protected/enrollment-pins.json" <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const manifest = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          const enrollments = JSON.parse(readFileSync(process.argv[3], 'utf8'));
+          if (!Array.isArray(enrollments) || enrollments.length !== 1) process.exit(1);
+          const enrolled = enrollments[0];
+          const matches = manifest.devices.filter((pin) => {
+            const fingerprint = `sha256:${createHash('sha256')
+              .update(Buffer.from(pin.publicKeySpkiDerBase64, 'base64'))
+              .digest('hex')}`;
+            return pin.keyId === enrolled.keyId && fingerprint === enrolled.publicKeySpkiSha256;
+          });
+          if (matches.length !== 1) process.exit(1);
+          NODE
+
+          runtime_password="$(openssl rand -hex 32)"
+          [[ "$runtime_password" =~ ^[0-9a-f]{64}$ ]]
+          echo "::add-mask::$runtime_password"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$SHADOW_RUNTIME_ROLE" "$runtime_password" "$PRODUCTION_DATABASE_DIRECT_HOST" \
+            >"$protected/database-url"
+          chmod 0400 "$protected/database-url"
+          sudo chown 10001:10001 "$protected/database-url"
+          chmod 0444 "$protected/pins.json" "$protected/supabase-ca.crt"
+
+          export TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD="$runtime_password"
+          provision_result="$(timeout --signal=TERM --kill-after=5s 45s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-telebirr-shadow-verifier-once-provision.sql)"
+          unset TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD runtime_password
+          provisioned=1
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "shadow_verifier_bounded_runtime_provision" and
+            .deploymentTarget == "production" and
+            .financialBoundary == "dry_run" and
+            .runtimeLogin == "bounded_20_minutes"
+          ' <<<"$provision_result" >/dev/null
+
+          tag="${GITHUB_SHA:0:12}"
+          docker run --detach --name "$container" --network host \
+            --add-host "$PRODUCTION_DATABASE_DIRECT_HOST:127.0.0.1" \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true \
+            --pids-limit 64 --memory 256m --cpus 0.50 \
+            --env NODE_ENV=production \
+            --env FINANCIAL_ACTIONS_MODE=dry_run \
+            --env INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED=true \
+            --env TELEBIRR_SHADOW_VERIFICATION_ENABLED=true \
+            --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
+            --env KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false \
+            --env TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET=production \
+            --env TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE=/run/secrets/telebirr_shadow_verifier_database_url \
+            --env TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE=/run/configs/telebirr_shadow_verifier_pins.v1.json \
+            --env NODE_EXTRA_CA_CERTS=/run/configs/supabase_ca_certificate \
+            --env HTTP_PROXY= --env http_proxy= --env HTTPS_PROXY= --env https_proxy= \
+            --env NO_PROXY= --env no_proxy= --env FTP_PROXY= --env ftp_proxy= \
+            --env ALL_PROXY= --env all_proxy= \
+            --volume "$protected/database-url:/run/secrets/telebirr_shadow_verifier_database_url:ro" \
+            --volume "$protected/pins.json:/run/configs/telebirr_shadow_verifier_pins.v1.json:ro" \
+            --volume "$protected/supabase-ca.crt:/run/configs/supabase_ca_certificate:ro" \
+            "fetanagent-telebirr-shadow-verifier:$tag" >/dev/null
+
+          for attempt in {1..45}; do
+            if curl --silent --fail --max-time 3 http://127.0.0.1:8092/readyz >/dev/null; then
+              break
+            fi
+            docker inspect "$container" --format '{{.State.Running}}' | grep -Fx true >/dev/null
+            [[ "$attempt" -lt 45 ]]
+            sleep 2
+          done
+          echo '::notice::The bounded production no-money shadow verifier is ready for the exact recovery request.'
+
+          outcome_state=''
+          for attempt in {1..120}; do
+            docker inspect "$container" --format '{{.State.Running}}' | grep -Fx true >/dev/null
+            outcome_state="$(psql -X --quiet --tuples-only --no-align --command "
+              with recovered as (
+                select proof.id, proof.verification_job_id, proof.source_live_proof_id
+                  from app.private_telebirr_shadow_proof_requests proof
+                 where proof.recovery_request_key = '$RECOVERY_REQUEST_KEY'::uuid
+                   and proof.source_live_verification_job_id =
+                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                   and proof.pilot_revision_id = '$TARGET_PILOT_REVISION_ID'::uuid
+              )
+              select jsonb_build_object(
+                'requestCount', (select count(*) from recovered),
+                'attemptCount', (
+                  select count(*) from app.private_telebirr_shadow_verification_attempts attempt_row
+                  join recovered on recovered.id = attempt_row.shadow_proof_request_id
+                ),
+                'outcomeCount', (
+                  select count(*) from app.private_telebirr_shadow_verification_outcomes outcome
+                  join recovered on recovered.id = outcome.shadow_proof_request_id
+                ),
+                'disposition', (
+                  select outcome.disposition
+                    from app.private_telebirr_shadow_verification_outcomes outcome
+                    join recovered on recovered.id = outcome.shadow_proof_request_id
+                ),
+                'reasonCode', (
+                  select outcome.reason_code
+                    from app.private_telebirr_shadow_verification_outcomes outcome
+                    join recovered on recovered.id = outcome.shadow_proof_request_id
+                ),
+                'wouldVerify', (
+                  select outcome.would_verify
+                    from app.private_telebirr_shadow_verification_outcomes outcome
+                    join recovered on recovered.id = outcome.shadow_proof_request_id
+                ),
+                'sourceLiveAttempts', (
+                  select count(*) from app.private_live_telebirr_verification_attempts live_attempt
+                   where live_attempt.verification_job_id =
+                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                ),
+                'sourceLiveOutcomes', (
+                  select count(*) from app.private_live_telebirr_verification_outcomes live_outcome
+                   where live_outcome.verification_job_id =
+                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                ),
+                'sourceReservations', (
+                  select count(*) from app.private_live_deposit_pilot_reservations reservation
+                  join recovered on recovered.source_live_proof_id =
+                                      reservation.private_live_deposit_pilot_proof_id
+                ),
+                'liveMoneySwitchCount', (
+                  select count(*) from app.feature_switches feature_switch
+                   where feature_switch.feature_key in (
+                     'payment_verification', 'deposit_execution',
+                     'withdrawal_validation', 'withdrawal_collection',
+                     'cbe_birr_authoritative_verification',
+                     'telebirr_authoritative_verification'
+                   )
+                     and feature_switch.mode <> 'disabled'
+                )
+              )::text;
+            ")"
+            if jq -e '.outcomeCount == 1' <<<"$outcome_state" >/dev/null; then
+              break
+            fi
+            [[ "$attempt" -lt 120 ]]
+            sleep 5
+          done
+
+          jq -e '
+            .requestCount == 1 and .attemptCount >= 1 and .outcomeCount == 1 and
+            (.disposition == "settlement_candidate" or
+             .disposition == "review_required" or
+             .disposition == "definite_reject") and
+            (.wouldVerify == true or .wouldVerify == false) and
+            .sourceLiveAttempts == 0 and .sourceLiveOutcomes == 0 and
+            .sourceReservations == 0 and .liveMoneySwitchCount == 0
+          ' <<<"$outcome_state" >/dev/null
+          jq '{disposition, reasonCode, wouldVerify, sourceLiveAttempts, sourceLiveOutcomes, sourceReservations, liveMoneySwitchCount}' \
+            <<<"$outcome_state" >>"$GITHUB_STEP_SUMMARY"
+          completed=1

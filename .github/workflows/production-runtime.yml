@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy, inspect live status, or stop the production application runtime
+        description: Build only, deploy with active TeleBirr authority, deploy inert maintenance, inspect live status, or stop
         required: true
         default: plan
         type: choice
         options:
           - plan
           - deploy
+          - deploy-inert
           - status
           - stop
       confirm_production_project_ref:
@@ -26,15 +27,15 @@ on:
         required: true
         type: string
       confirm_operation:
-        description: Type PLAN PRODUCTION RUNTIME, DEPLOY PRODUCTION RUNTIME, STATUS PRODUCTION RUNTIME, or STOP PRODUCTION RUNTIME
+        description: Type the exact confirmation phrase for the selected production operation
         required: true
         type: string
       confirm_telebirr_pilot_revision_id:
-        description: For deploy type the exact active TeleBirr pilot UUID; otherwise type not-applicable
+        description: For an active deploy type the exact active TeleBirr pilot UUID; otherwise type not-applicable
         required: true
         type: string
       confirm_telebirr_activation_epoch:
-        description: For deploy type the exact active TeleBirr activation epoch; otherwise type not-applicable
+        description: For an active deploy type the exact active TeleBirr activation epoch; otherwise type not-applicable
         required: true
         type: string
 
@@ -85,6 +86,7 @@ jobs:
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy:DEPLOY PRODUCTION RUNTIME'|\
+            'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
             'status:STATUS PRODUCTION RUNTIME'|\
             'stop:STOP PRODUCTION RUNTIME') ;;
             *)
@@ -102,7 +104,7 @@ jobs:
 
   validate-ci:
     name: Require exact production commit CI
-    if: inputs.mode == 'deploy'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -129,7 +131,9 @@ jobs:
     name: Build sealed production images
     if: >-
       always() && !cancelled() && needs.validate-target.result == 'success' &&
-      (inputs.mode == 'plan' || (inputs.mode == 'deploy' && needs.validate-ci.result == 'success'))
+      (inputs.mode == 'plan' ||
+      ((inputs.mode == 'deploy' || inputs.mode == 'deploy-inert') &&
+      needs.validate-ci.result == 'success'))
     needs: [validate-target, validate-ci]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -168,7 +172,7 @@ jobs:
           done
 
       - name: Save sealed image bundle
-        if: inputs.mode == 'deploy'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
         shell: bash
         run: |
           set -euo pipefail
@@ -186,7 +190,7 @@ jobs:
             "fetanagent-gateway:$tag"
 
       - name: Upload sealed image bundle
-        if: inputs.mode == 'deploy'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fetanagent-production-images-${{ github.sha }}
@@ -197,7 +201,7 @@ jobs:
 
   deploy:
     name: Deploy continuous production runtime
-    if: inputs.mode == 'deploy'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
     needs: [validate-target, validate-ci, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -231,6 +235,7 @@ jobs:
         id: protected
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
@@ -282,6 +287,17 @@ jobs:
           secret_dir="$RUNNER_TEMP/production-protected"
           install -d -m 0700 "$secret_dir"
           umask 077
+
+          case "$REQUESTED_MODE" in
+            deploy) runtime_deployment_mode='operational' ;;
+            deploy-inert) runtime_deployment_mode='inert-maintenance' ;;
+            *)
+              echo '::error::A deployment bundle may be prepared only for a deployment mode.'
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$runtime_deployment_mode" >"$RUNNER_TEMP/release/runtime-deployment-mode"
+          chmod 0600 "$RUNNER_TEMP/release/runtime-deployment-mode"
 
           values=(
             "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET"
@@ -430,7 +446,27 @@ jobs:
           echo "bundle_bytes=$bundle_bytes" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
 
+      - name: Prove the complete inert production money boundary
+        if: inputs.mode == 'deploy-inert'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_production_inert_runtime_preflight
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+
       - name: Build the exact active production TeleBirr assignment manifest
+        if: inputs.mode == 'deploy'
         shell: bash
         env:
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
@@ -584,6 +620,7 @@ jobs:
       - name: Transfer and install the sealed release
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
@@ -594,13 +631,31 @@ jobs:
           incoming="/tmp/fetanagent-production-$GITHUB_SHA"
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
-          scp "${ssh_opts[@]}" \
+          transfer_files=(
             "$RUNNER_TEMP/release/fetanagent-production-images.tar" \
+            "$RUNNER_TEMP/release/runtime-deployment-mode" \
             infra/compose.production.yaml \
             infra/compose.production.companion-execution-v2.yaml \
+            infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-database-url,telebirr-assignment-runtime-manifest.v1.json,telebirr-assignment-signer-key-id,telebirr-assignment-signer.pkcs8.der,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url,telebirr-reference-opening-key.v1.json} \
-            "$remote:$incoming/"
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+          )
+          case "$REQUESTED_MODE" in
+            deploy)
+              transfer_files+=(
+                "$SECRET_DIR"/telebirr-assignment-database-url
+                "$SECRET_DIR"/telebirr-assignment-runtime-manifest.v1.json
+                "$SECRET_DIR"/telebirr-assignment-signer.pkcs8.der
+                "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
+              )
+              ;;
+            deploy-inert) ;;
+            *)
+              echo '::error::The release transfer mode is not a deployment mode.'
+              exit 1
+              ;;
+          esac
+          scp "${ssh_opts[@]}" "${transfer_files[@]}" "$remote:$incoming/"
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
@@ -644,6 +699,7 @@ jobs:
       - name: Attest and finalize the production cutover
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
@@ -653,7 +709,11 @@ jobs:
           helper='/usr/local/sbin/fetanagent-production-deploy-helper'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
-          echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live; this deployment changes no database financial switch, and assignment leasing remains bound to the exact active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+            echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and no financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live; this deployment changes no database financial switch, and assignment leasing remains bound to the exact active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
+          fi
           echo 'The independently signed Windows companion production pairing and read-only transport is live on the production database.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back a failed production activation

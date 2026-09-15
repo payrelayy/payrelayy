@@ -121,6 +121,22 @@ and can roll back a failed activation only while the exact pending predecessor r
 Finalization removes that record; the helper rejects rollback of the finalized current release.
 Retaining an older image or release directory does not extend this automatic rollback window.
 
+When an older Owner runtime cannot create the current pilot contract, use `deploy-inert` only
+as a runtime-maintenance bridge. The exact confirmation is
+`DEPLOY INERT PRODUCTION RUNTIME`, and both TeleBirr binding inputs must be
+`not-applicable`. Before any host change, the workflow proves through a serializable read-only
+production transaction that no trusted TeleBirr activation epoch exists, every money switch is
+in its inert state, companion execution is disabled, and the verifier/executor logins and
+sessions are absent. The release then runs the assignment broker in enrollment-only mode with
+no database URL, opening key, assignment manifest, signer key, configuration mount, or network.
+
+This maintenance mode updates the web, Telegram, Android pairing, and Windows companion code;
+it does not create a pilot or authorize evidence assignment. After the Owner creates and reviews
+a fresh twelve-hour pilot, a separate normal `deploy` must bind the exact active pilot UUID and
+activation epoch from a later reviewed main commit; one sealed release identity cannot be reused
+under a different deployment mode. Never remove the inert overlay, invent a manifest, or reuse an
+expired pilot to skip that operational deployment.
+
 A pending record is not sufficient by itself: before stopping any service, the helper checks
 that the current release is still the candidate or its recorded predecessor (or absent for
 an initial activation), and that every production container belongs to one of those exact

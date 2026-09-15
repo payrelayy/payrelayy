@@ -49,6 +49,23 @@ require_release() {
   printf '%s\n' "$release"
 }
 
+release_deployment_mode() {
+  local release="$1" marker="$1/runtime-deployment-mode" mode
+  if [[ ! -e "$marker" && ! -L "$marker" ]]; then
+    printf 'legacy\n'
+    return
+  fi
+  [[ ! -L "$marker" && -f "$marker" && "$(realpath -- "$marker")" == "$marker" &&
+    "$(stat --format='%u:%g:%a:%h' "$marker")" == '0:0:444:1' &&
+    "$(stat --format='%s' "$marker")" -le 64 ]] ||
+    die 'the runtime deployment-mode marker is unsafe'
+  mode="$(<"$marker")"
+  case "$mode" in
+    operational|inert-maintenance) printf '%s\n' "$mode" ;;
+    *) die 'the runtime deployment mode is invalid' ;;
+  esac
+}
+
 acquire_operation_lock() {
   command -v flock >/dev/null || die 'the production operation lock is unavailable'
   [[ ! -L "$STATE_ROOT" ]] || die 'the production state directory is unsafe'
@@ -163,15 +180,19 @@ companion_execution_v2_enabled_for_release() {
 compose_release() {
   local release="$1"
   shift
-  local tag signer_id
+  local tag signer_id deployment_mode
   local -a compose_files=(--file "$release/compose.production.yaml")
   tag="$(<"$release/.image-tag")"
   signer_id="$(<"$release/telebirr-assignment-signer-key-id")"
+  deployment_mode="$(release_deployment_mode "$release")"
   require_tag "$tag"
   [[ "$signer_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]] ||
     die 'the production assignment signer identifier is malformed'
   if companion_execution_v2_enabled_for_release "$release"; then
     compose_files+=(--file "$release/compose.production.companion-execution-v2.yaml")
+  fi
+  if [[ "$deployment_mode" == 'inert-maintenance' ]]; then
+    compose_files+=(--file "$release/compose.production.inert-maintenance.yaml")
   fi
   FETANAGENT_IMAGE_TAG="$tag" \
     FETANAGENT_PRODUCTION_SECRET_DIR="$release/secrets" \
@@ -274,7 +295,7 @@ verify_images() {
 }
 
 verify_release_files() {
-  local release="$1" name
+  local release="$1" name deployment_mode
   local -a required=(
     api-action-capability-hmac
     api-action-payload-hmac
@@ -303,7 +324,21 @@ verify_release_files() {
     telebirr-bridge-server-signer.pkcs8.der
     telebirr-device-state-database-url
   )
-  if grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$release/compose.production.yaml"; then
+  deployment_mode="$(release_deployment_mode "$release")"
+  if [[ "$deployment_mode" != 'legacy' ]]; then
+    [[ ! -L "$release/compose.production.inert-maintenance.yaml" &&
+      -f "$release/compose.production.inert-maintenance.yaml" &&
+      "$(stat --format='%u:%g:%a:%h' "$release/compose.production.inert-maintenance.yaml")" == '0:0:444:1' ]] ||
+      die 'the inert-maintenance production overlay is absent or unsafe'
+    grep -Fq "TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml" ||
+      die 'the inert-maintenance production overlay is malformed'
+    grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
+      die 'the inert-maintenance production overlay is malformed'
+  fi
+  if [[ "$deployment_mode" == 'operational' ]] ||
+    { [[ "$deployment_mode" == 'legacy' ]] &&
+      grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$release/compose.production.yaml"; }; then
     required+=(
       telebirr-assignment-database-url
       telebirr-assignment-runtime-manifest.v1.json
@@ -519,19 +554,53 @@ case "${1:-}" in
       die 'the incoming release directory is unsafe'
     [[ "$(stat --format='%U:%G:%a' "$incoming")" == 'fetanagent-admin:fetanagent-admin:700' ]] ||
       die 'the incoming release owner or mode is wrong'
+    [[ ! -L "$incoming/runtime-deployment-mode" &&
+      -f "$incoming/runtime-deployment-mode" &&
+      "$(stat --format='%s' "$incoming/runtime-deployment-mode")" -le 64 ]] ||
+      die 'the incoming runtime deployment-mode marker is absent or unsafe'
+    deployment_mode="$(<"$incoming/runtime-deployment-mode")"
+    case "$deployment_mode" in
+      operational|inert-maintenance) ;;
+      *) die 'the incoming runtime deployment mode is invalid' ;;
+    esac
+    [[ ! -L "$incoming/compose.production.inert-maintenance.yaml" &&
+      -f "$incoming/compose.production.inert-maintenance.yaml" &&
+      -s "$incoming/compose.production.inert-maintenance.yaml" ]] ||
+      die 'the incoming inert-maintenance production overlay is absent or unsafe'
     release="$RELEASE_ROOT/$sha"
     if [[ -e "$release" || -L "$release" ]]; then
       [[ ! -L "$release" && -d "$release" && "$(<"$release/.release-sha")" == "$sha" &&
         "$(<"$release/.image-tag")" == "$tag" ]] || die 'an unsafe conflicting release already exists'
+      [[ "$(release_deployment_mode "$release")" == "$deployment_mode" ]] ||
+        die 'the exact commit already exists with a different deployment mode'
       rm -rf -- "$incoming"
       verify_release_files "$release"
       verify_images "$sha" "$tag" "$release"
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=29
-    if grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$incoming/compose.production.yaml"; then
+    expected_count=31
+    if [[ "$deployment_mode" == 'operational' ]]; then
       expected_count=$((expected_count + 4))
+      for name in \
+        telebirr-assignment-database-url \
+        telebirr-assignment-runtime-manifest.v1.json \
+        telebirr-assignment-signer.pkcs8.der \
+        telebirr-reference-opening-key.v1.json
+      do
+        [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
+          die "the operational production bundle is missing $name"
+      done
+    else
+      for name in \
+        telebirr-assignment-database-url \
+        telebirr-assignment-runtime-manifest.v1.json \
+        telebirr-assignment-signer.pkcs8.der \
+        telebirr-reference-opening-key.v1.json
+      do
+        [[ ! -e "$incoming/$name" && ! -L "$incoming/$name" ]] ||
+          die "the inert production bundle unexpectedly contains $name"
+      done
     fi
     if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
       expected_count=$((expected_count + 5))
@@ -543,7 +612,7 @@ case "${1:-}" in
     install -d -m 0700 "$incoming/secrets"
     for file in "$incoming"/*; do
       case "${file##*/}" in
-        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|telebirr-assignment-signer-key-id|secrets) ;;
+        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
         *) mv -- "$file" "$incoming/secrets/" ;;
       esac
     done
@@ -567,6 +636,8 @@ case "${1:-}" in
       "$incoming/secrets/telebirr-bridge-runtime-manifest.v1.json"
     chmod 0444 "$incoming/compose.production.yaml" \
       "$incoming/compose.production.companion-execution-v2.yaml" \
+      "$incoming/compose.production.inert-maintenance.yaml" \
+      "$incoming/runtime-deployment-mode" \
       "$incoming/telebirr-assignment-signer-key-id" \
       "$incoming/.release-sha" "$incoming/.image-tag"
     if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then

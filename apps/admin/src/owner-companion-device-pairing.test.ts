@@ -17,7 +17,7 @@ const authUserId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
 const signerKeyId = 'companion_server_signer_2026_01';
 const issuedAt = new Date('2026-09-04T12:00:00.000Z');
-const expiresAt = new Date('2026-09-04T12:10:00.000Z');
+const expiresAt = new Date('2026-09-05T00:00:00.000Z');
 
 function signer() {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });

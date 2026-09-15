@@ -13,7 +13,7 @@ off by default; without the exact opt-in configuration it retains the original r
   key is protected with Windows DPAPI for the current user;
 - later launches must reproduce that same protected local identity binding before the session is
   reported as locally verified;
-- a ten-minute Owner-issued package can enroll one locally generated P-256 public key only after
+- a twelve-hour Owner-issued package can enroll one locally generated P-256 public key only after
   that exact identity verification; the private key is DPAPI-protected for the current Windows user
   and never leaves the computer;
 - exact retries reuse the same locally protected key and signed request, while a stored valid

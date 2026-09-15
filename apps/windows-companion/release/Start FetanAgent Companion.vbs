@@ -32,7 +32,7 @@ enrollmentPath = fileSystem.BuildPath(fileSystem.BuildPath(dataRoot, "device"), 
 If Not fileSystem.FileExists(enrollmentPath) Then
   If MsgBox( _
     "This Windows companion is not paired with the FetanAgent server yet." & vbCrLf & vbCrLf & _
-    "If you already created a ten-minute Windows pairing package on the Owner page, select Yes and paste it now. Select No to open KemerBet without server pairing; no lookup or payment will be enabled.", _
+    "If you already created a twelve-hour Windows pairing package on the Owner page, select Yes and paste it now. Select No to open KemerBet without server pairing; no lookup or payment will be enabled.", _
     36, "FetanAgent Companion") = 6 Then
     pairingCommand = Chr(34) & shell.ExpandEnvironmentStrings("%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe") & Chr(34) & _
       " -NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File " & Chr(34) & pairingDialogPath & Chr(34)

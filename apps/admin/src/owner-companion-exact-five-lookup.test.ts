@@ -14,7 +14,7 @@ const requestId = '22222222-2222-4222-8222-222222222222';
 const assignmentId = '33333333-3333-4333-8333-333333333333';
 const signerKeyId = 'companion_server_signer_2026_01';
 const issuedAt = new Date('2026-09-05T06:00:00.000Z');
-const expiresAt = new Date('2026-09-05T06:10:00.000Z');
+const expiresAt = new Date('2026-09-05T18:00:00.000Z');
 
 function pendingRow(overrides: Record<string, unknown> = {}) {
   return {

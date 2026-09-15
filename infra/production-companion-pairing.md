@@ -30,7 +30,7 @@ previous application release. Earlier nine-service releases remain valid rollbac
 
 ## Pair the Windows computer
 
-Use a fresh ten-minute package from the authenticated production Owner page. Enter it only in the
+Use a fresh twelve-hour package from the authenticated production Owner page. Enter it only in the
 companion's local pairing dialog; do not send it in chat, Git, or logs. Sign in to KemerBet locally.
 The local identity binding and Windows-protected device key stay on the computer.
 

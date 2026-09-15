@@ -133,7 +133,7 @@ credential file to a request-keyed `0400` runtime directory, while the clear pas
 absent from command lines, logs, GitHub outputs, SQL text, and database receipts. Only the SCRAM
 verifier appears in the protected Management API request.
 
-The database transaction validates the one exact active Owner, fresh armed two-hour pilot,
+The database transaction validates the one exact active Owner, fresh armed twelve-hour pilot,
 companion assignment, receiver lineage, complete readiness cohort, role graph, current authority,
 and switch state. It then creates the append-only receipt, bounded runtime login, epoch, pointer,
 and complete verification switch set atomically. The executor roles and processes and both
@@ -214,7 +214,7 @@ operator selects `activate-verification`, all of these are required:
    then stage the exact stopped release with the independently reviewed pin-manifest digest.
 3. Reconfirm production remains at an inert authority/login/session boundary before preparing the
    pilot.
-4. Prepare and companion-verify a fresh exact-five, exact-receiver, two-hour pilot for that action;
+4. Prepare and companion-verify a fresh exact-five, exact-receiver, twelve-hour pilot for that action;
    expired or previously stopped pilots cannot be reused.
 5. Keep the deposit executor process and roles, both withdrawals, and every KemerBet final-action
    gate disabled throughout verification.

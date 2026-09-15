@@ -53,7 +53,7 @@ export const TELEBIRR_DEVICE_BRIDGE_OBSERVATION_UPLOAD_PATH =
 export const TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE =
   'application/vnd.fetanagent.telebirr-device-bridge+json' as const;
 
-const MAX_PAIRING_LIFETIME_MS = 10 * 60 * 1_000;
+const MAX_PAIRING_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const MAX_REQUEST_LIFETIME_MS = 2 * 60 * 1_000;
 const MAX_ACKNOWLEDGEMENT_LIFETIME_MS = 2 * 60 * 1_000;
 const MAX_SPKI_BYTES = 512;

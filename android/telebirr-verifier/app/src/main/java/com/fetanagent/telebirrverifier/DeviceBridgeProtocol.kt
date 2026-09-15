@@ -193,7 +193,7 @@ data class DeviceBridgePairingBody(
     DeviceBridgeProtocol.requireVersion(appVersion, "appVersion")
     val start = DeviceBridgeProtocol.requireTimestamp(issuedAt, "issuedAt")
     val end = DeviceBridgeProtocol.requireTimestamp(expiresAt, "expiresAt")
-    require(end > start && end.toEpochMilli() - start.toEpochMilli() <= 10 * 60 * 1_000)
+    require(end > start && end.toEpochMilli() - start.toEpochMilli() <= 12 * 60 * 60 * 1_000)
     require(oneUse)
   }
 

@@ -60,6 +60,7 @@ import {
   type OwnerPlayerRegistrationDecision,
 } from './owner-player-registration-reviews.js';
 import {
+  PRIVATE_LIVE_PILOT_LIFETIME_MS,
   OwnerPrivateLivePilotRejectedError,
   OwnerPrivateLivePilotUnavailableError,
   type PrepareApprovedPrivateLivePilotRequest,
@@ -1869,7 +1870,7 @@ export function buildOwnerControlApp(
         body.confirmation !== 'owner_confirmed_fixed_telebirr_five_player_pilot' ||
         !activeFrom ||
         !expiresAt ||
-        expiresAt.getTime() !== activeFrom.getTime() + 2 * 60 * 60 * 1_000 ||
+        expiresAt.getTime() !== activeFrom.getTime() + PRIVATE_LIVE_PILOT_LIFETIME_MS ||
         !Array.isArray(playerIds) ||
         playerIds.length !== 5 ||
         playerIds.some((value) => typeof value !== 'string') ||

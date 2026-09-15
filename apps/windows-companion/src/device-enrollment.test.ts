@@ -113,7 +113,7 @@ function pairingPackage(serverPublicKey: Buffer, overrides: Record<string, unkno
     pairingId: '11111111-1111-4111-8111-111111111111',
     pairingNonceDigest: `sha256:${'b'.repeat(64)}`,
     issuedAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + 10 * 60 * 1_000).toISOString(),
+    expiresAt: new Date(now.getTime() + 12 * 60 * 60 * 1_000).toISOString(),
     endpoint: `https://device.fetanagent.com${COMPANION_PAIRING_PATH}`,
     signerKeyId,
     serverSigningPublicKeySpki: serverPublicKey.toString('base64url'),
@@ -233,6 +233,10 @@ function successfulFetch(
     expect(init?.redirect).toBe('error');
     const request = JSON.parse(String(init?.body)) as SignedCompanionPairingRequest;
     expect(verifySignedCompanionPairingRequest(request)).toBe(true);
+    expect(request.body.issuedAt).toBe(now.toISOString());
+    expect(Date.parse(request.body.expiresAt) - Date.parse(request.body.issuedAt)).toBe(
+      12 * 60 * 60 * 1_000,
+    );
     const certificate = signCompanionEnrollmentCertificateForTest(
       { ...certificateBody(request), ...certificateOverrides },
       signerKeyId,
@@ -490,6 +494,9 @@ describe('Windows companion device enrollment', () => {
     const publicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
     const candidates = [
       pairingPackage(publicKey, { expiresAt: now.toISOString() }),
+      pairingPackage(publicKey, {
+        expiresAt: new Date(now.getTime() + 12 * 60 * 60 * 1_000 + 1).toISOString(),
+      }),
       pairingPackage(publicKey, {
         endpoint: `https://example.invalid${COMPANION_PAIRING_PATH}`,
       }),

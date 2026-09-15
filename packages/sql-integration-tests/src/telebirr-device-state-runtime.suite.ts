@@ -647,7 +647,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         const first = await client.query<IssuedRow>(
           `select *
              from app.issue_current_private_telebirr_device_pairing(
-               $1::uuid, $2::uuid, $3::text, '0.5.0'::text
+               $1::uuid, $2::uuid, $3::text, '0.5.4'::text
              )`,
           [ownerAdminId, requestId, signer.rows[0]!.signer_key_id],
         );
@@ -658,12 +658,15 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         expect(first.rows[0]!.pairing_nonce_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
         expect(first.rows[0]!.replayed).toBe(false);
         expect(first.rows[0]!.expires_at.getTime()).toBeGreaterThan(startedAt + 30_000);
-        expect(first.rows[0]!.expires_at.getTime()).toBeLessThanOrEqual(startedAt + 601_000);
+        expect(first.rows[0]!.expires_at.getTime()).toBeGreaterThan(startedAt + 10 * 60 * 1_000);
+        expect(first.rows[0]!.expires_at.getTime()).toBeLessThanOrEqual(
+          startedAt + 12 * 60 * 60 * 1_000 + 1_000,
+        );
 
         const replay = await client.query<IssuedRow>(
           `select *
              from app.issue_current_private_telebirr_device_pairing(
-               $1::uuid, $2::uuid, $3::text, '0.5.0'::text
+               $1::uuid, $2::uuid, $3::text, '0.5.4'::text
              )`,
           [ownerAdminId, requestId, signer.rows[0]!.signer_key_id],
         );
@@ -681,7 +684,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           client.query(
             `select *
                from app.issue_current_private_telebirr_device_pairing(
-                 $1::uuid, $2::uuid, 'unknown_signer_key_0001'::text, '0.5.0'::text
+                 $1::uuid, $2::uuid, 'unknown_signer_key_0001'::text, '0.5.4'::text
                )`,
             [ownerAdminId, randomUUID()],
           ),

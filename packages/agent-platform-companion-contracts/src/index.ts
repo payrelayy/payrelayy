@@ -49,9 +49,9 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const PATH_PATTERN = /^\/[a-z0-9][a-z0-9/_:-]{0,191}$/u;
 const MAX_SPKI_BYTES = 512;
-const MAX_PAIRING_LIFETIME_MS = 10 * 60 * 1_000;
+const MAX_PAIRING_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const MAX_HTTP_REQUEST_LIFETIME_MS = 5 * 60 * 1_000;
-const MAX_ASSIGNMENT_LIFETIME_MS = 10 * 60 * 1_000;
+const MAX_ASSIGNMENT_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 
 export interface CompanionNoMoneySafety {
   readonly accountMutationAllowed: false;

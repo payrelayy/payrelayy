@@ -8,7 +8,7 @@ administrator/service-role credential.
 
 ## Trust boundaries
 
-- The authenticated Owner page issues a one-use package that expires after ten minutes.
+- The authenticated Owner page issues a one-use package that expires after twelve hours.
 - The Windows companion creates its P-256 private key locally and stores only DPAPI-protected key
   material under the current Windows user.
 - The public bridge receives a device-signed request, calls only three pairing and four read-only
@@ -29,7 +29,9 @@ administrator/service-role credential.
   and TCP reachability before replacing an active release. Transaction pooling on port `6543` and
   mismatched host/login combinations are rejected.
 - The runtime login has no calendar expiry. It stays available until the explicit disable workflow
-  is run. Pairing packages still expire after ten minutes and device certificates remain revocable.
+  is run. Human-entered pairing packages and their exact device-bound requests remain available for
+  twelve hours and one use; ordinary HTTP signatures and claim leases stay short, and device
+  certificates remain revocable.
 
 ## One-time DigitalOcean capability bootstrap
 

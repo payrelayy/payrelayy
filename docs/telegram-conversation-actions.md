@@ -89,7 +89,7 @@ semantic-input HMAC uses a
 dedicated versioned key, separate from the capability and transport keys; an old key version must
 remain usable for exact-retry comparison throughout inbound-event retention.
 
-`app.bot_conversation_actions` is the durable source of truth for a flow. It contains an action ID, conversation ID, controlled kind/status, platform ID, expected input kind, origin event, server-generated ten-minute expiry, and terminal timestamps. A partial unique index allows only one `awaiting_input` action per conversation. The conversation JSON is merely its safe projection.
+`app.bot_conversation_actions` is the durable source of truth for a flow. It contains an action ID, conversation ID, controlled kind/status, platform ID, expected input kind, origin event, server-generated twelve-hour expiry, and terminal timestamps. A partial unique index allows only one `awaiting_input` action per conversation. The conversation JSON is merely its safe projection.
 
 Neither table may store raw callback data, message text, Player IDs, payment references, or arbitrary
 state JSON. RLS stays enabled and forced, with no direct table access for the bot, API, worker, or

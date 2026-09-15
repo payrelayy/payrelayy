@@ -42,7 +42,11 @@ concurrency:
 env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DROPLET_ID: '593344964'
-  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  # GitHub-hosted runners are IPv4-only. Use the same proven Supabase pooler split as the
+  # production runtime workflow: transaction mode for bounded administration and session mode
+  # for the short-lived verifier login.
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
   SHADOW_RUNTIME_ROLE: fetanagent_telebirr_shadow_verifier_runtime
 
 jobs:
@@ -117,20 +121,16 @@ jobs:
       - name: Run exactly one bounded production shadow outcome and always revoke
         shell: bash
         env:
-          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
-          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
-          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PIN_MANIFEST_BASE64: ${{ vars.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
           TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
           SOURCE_LIVE_VERIFICATION_JOB_ID: ${{ inputs.confirm_source_live_verification_job_id }}
           RECOVERY_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
-          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
-          PGHOSTADDR: 127.0.0.1
-          PGPORT: '5432'
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
           PGDATABASE: postgres
-          PGUSER: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
           PGSSLMODE: verify-full
           PGCONNECT_TIMEOUT: '5'
           PGSERVICEFILE: /dev/null
@@ -138,18 +138,14 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ -n "$PGPASSWORD" && -n "$PIN_MANIFEST_BASE64" ]]
           protected="$RUNNER_TEMP/production-shadow-once"
           install -d -m 0700 "$protected"
-          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
-          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/pins.json"
           chmod 0600 "$protected"/*
-          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
-          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
           node --input-type=module - "$protected/pins.json" <<'NODE'
           import { createHash, createPublicKey } from 'node:crypto';
           import { readFileSync } from 'node:fs';
@@ -183,11 +179,6 @@ jobs:
           }
           NODE
 
-          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
-            -o ExitOnForwardFailure=yes -o ConnectTimeout=5 -o ConnectionAttempts=1 \
-            -o ServerAliveInterval=5 -o ServerAliveCountMax=1 -T)
-          tunnel_pid=''
           container='fetanagent-production-shadow-once'
           provisioned=0
           completed=0
@@ -197,7 +188,7 @@ jobs:
             trap - EXIT INT TERM
             set +e
             docker rm --force "$container" >/dev/null 2>&1 || true
-            if [[ "$provisioned" == '1' ]] && kill -0 "$tunnel_pid" 2>/dev/null; then
+            if [[ "$provisioned" == '1' ]]; then
               disable_result="$(timeout --signal=TERM --kill-after=5s 45s \
                 psql -X --quiet --tuples-only --no-align \
                   --file=infra/sql/production-telebirr-shadow-verifier-once-disable.sql)" ||
@@ -211,12 +202,6 @@ jobs:
                   .financialSwitchesChanged == false
                 ' <<<"$disable_result" >/dev/null || disable_status=1
               fi
-            elif [[ "$provisioned" == '1' ]]; then
-              disable_status=1
-            fi
-            if [[ "$tunnel_pid" =~ ^[1-9][0-9]*$ ]]; then
-              kill "$tunnel_pid" 2>/dev/null || true
-              wait "$tunnel_pid" 2>/dev/null || true
             fi
             if [[ "$protected" == "$RUNNER_TEMP/production-shadow-once" &&
                   -d "$protected" && ! -L "$protected" &&
@@ -238,20 +223,23 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
 
-          ssh "${ssh_opts[@]}" -N \
-            -L "127.0.0.1:5432:$PRODUCTION_DATABASE_DIRECT_HOST:5432" \
-            "fetanagent-admin@$PRODUCTION_VM_HOST" >/dev/null 2>&1 &
-          tunnel_pid=$!
-          for attempt in {1..40}; do
-            kill -0 "$tunnel_pid" 2>/dev/null
-            if (exec 3<>/dev/tcp/127.0.0.1/5432) 2>/dev/null; then
-              exec 3>&-
-              exec 3<&-
+          # Test the complete TLS/authentication path, not merely a local TCP listener. This is
+          # also the exact administrator identity later used by provision and cleanup.
+          admin_login_ready=false
+          for attempt in 1 2 3 4; do
+            admin_identity="$(
+              psql -X --quiet --tuples-only --no-align \
+                --command "select current_user = 'postgres' and session_user = current_user" \
+                2>/dev/null || true
+            )"
+            if [[ "$admin_identity" == 't' ]]; then
+              admin_login_ready=true
               break
             fi
-            [[ "$attempt" -lt 40 ]]
-            sleep 0.25
+            [[ "$attempt" -lt 4 ]] || break
+            sleep "$((attempt * 2))"
           done
+          [[ "$admin_login_ready" == 'true' ]]
 
           enrollment_pins="$(psql -X --quiet --tuples-only --no-align --command "
             select coalesce(
@@ -294,8 +282,9 @@ jobs:
           runtime_password="$(openssl rand -hex 32)"
           [[ "$runtime_password" =~ ^[0-9a-f]{64}$ ]]
           echo "::add-mask::$runtime_password"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$SHADOW_RUNTIME_ROLE" "$runtime_password" "$PRODUCTION_DATABASE_DIRECT_HOST" \
+          printf 'postgresql://%s.%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$SHADOW_RUNTIME_ROLE" "$PRODUCTION_PROJECT_REF" "$runtime_password" \
+            "$PRODUCTION_DATABASE_POOLER_HOST" \
             >"$protected/database-url"
           chmod 0400 "$protected/database-url"
           sudo chown 10001:10001 "$protected/database-url"
@@ -317,7 +306,6 @@ jobs:
 
           tag="${GITHUB_SHA:0:12}"
           docker run --detach --name "$container" --network host \
-            --add-host "$PRODUCTION_DATABASE_DIRECT_HOST:127.0.0.1" \
             --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
             --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true \
             --pids-limit 64 --memory 256m --cpus 0.50 \

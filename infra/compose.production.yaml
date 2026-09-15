@@ -426,17 +426,49 @@ services:
       FINANCIAL_ACTIONS_MODE: dry_run
       INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true'
       TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
-      TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
       TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
+      TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE: /run/secrets/telebirr_assignment_broker_database_url
+      TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE: /run/secrets/telebirr_assignment_broker_reference_opening_key.v1.json
+      TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_MANIFEST_FILE: /run/secrets/telebirr_assignment_broker_runtime_manifest.v1.json
+      TELEBIRR_ASSIGNMENT_BROKER_SIGNER_PRIVATE_KEY_FILE: /run/secrets/telebirr_assignment_broker_signer.pkcs8.der
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
-    network_mode: none
     volumes:
       - type: volume
         source: telebirr_assignment_socket
         target: /run/fetanagent-telebirr-assignment-broker
         volume:
           nocopy: false
+    secrets:
+      - source: telebirr_assignment_broker_database_url
+        target: telebirr_assignment_broker_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: telebirr_assignment_broker_reference_opening_key
+        target: telebirr_assignment_broker_reference_opening_key.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: telebirr_assignment_broker_runtime_manifest
+        target: telebirr_assignment_broker_runtime_manifest.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: telebirr_assignment_broker_signer
+        target: telebirr_assignment_broker_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - telebirr_assignment_database_egress
     healthcheck:
       test:
         - CMD
@@ -696,6 +728,11 @@ networks:
     enable_ipv6: true
     internal: false
     attachable: false
+  telebirr_assignment_database_egress:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
   companion_device_ingress:
     external: true
     name: fetanagent-companion-device-ingress
@@ -761,6 +798,14 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-transport-hmac
   bot_player_action_transport_hmac:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-action-transport-hmac
+  telebirr_assignment_broker_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-database-url
+  telebirr_assignment_broker_reference_opening_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-reference-opening-key.v1.json
+  telebirr_assignment_broker_runtime_manifest:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-runtime-manifest.v1.json
+  telebirr_assignment_broker_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-signer.pkcs8.der
   telebirr_device_state_broker_database_url:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-device-state-database-url
   telebirr_device_bridge_server_signer:

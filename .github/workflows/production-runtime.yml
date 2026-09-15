@@ -29,6 +29,14 @@ on:
         description: Type PLAN PRODUCTION RUNTIME, DEPLOY PRODUCTION RUNTIME, STATUS PRODUCTION RUNTIME, or STOP PRODUCTION RUNTIME
         required: true
         type: string
+      confirm_telebirr_pilot_revision_id:
+        description: For deploy type the exact active TeleBirr pilot UUID; otherwise type not-applicable
+        required: true
+        type: string
+      confirm_telebirr_activation_epoch:
+        description: For deploy type the exact active TeleBirr activation epoch; otherwise type not-applicable
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -49,6 +57,7 @@ env:
   CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
   PLAYER_ACTION_RUNTIME_ROLE: fetanagent_player_actions_runtime
+  ASSIGNMENT_RUNTIME_ROLE: fetanagent_telebirr_assignment_broker_runtime
 
 jobs:
   validate-target:
@@ -63,6 +72,8 @@ jobs:
           CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
           CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
           CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
+          CONFIRMED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
@@ -81,6 +92,13 @@ jobs:
               exit 1
               ;;
           esac
+          if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
+            [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+            [[ "$CONFIRMED_TELEBIRR_EPOCH" =~ ^[1-9][0-9]{0,17}$ ]]
+          else
+            [[ "$CONFIRMED_TELEBIRR_PILOT" == 'not-applicable' ]]
+            [[ "$CONFIRMED_TELEBIRR_EPOCH" == 'not-applicable' ]]
+          fi
 
   validate-ci:
     name: Require exact production commit CI
@@ -245,6 +263,8 @@ jobs:
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64: ${{ secrets.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64 }}
           TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64 }}
           TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
@@ -255,6 +275,8 @@ jobs:
           TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64: ${{ secrets.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64 }}
         run: |
           set -euo pipefail
           secret_dir="$RUNNER_TEMP/production-protected"
@@ -287,10 +309,12 @@ jobs:
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" == 'telebirr-assignment-production-v1' ]]
+          [[ "$TELEBIRR_ASSIGNMENT_SIGNER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           [[ "$TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID" == 'telebirr-bridge-production-v1' ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" != "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256" ]]
+          [[ "$TELEBIRR_REFERENCE_OPENING_KEY_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
 
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
@@ -319,10 +343,12 @@ jobs:
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$secret_dir/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$secret_dir/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$secret_dir/supabase-ca.crt"
+          printf '%s' "$TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64" | base64 --decode >"$secret_dir/telebirr-assignment-signer.pkcs8.der"
           printf '%s' "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64" | base64 --decode >"$secret_dir/telebirr-assignment.spki.der"
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-server-signer.pkcs8.der"
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge.spki.der"
           printf '%s' "$TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-runtime-manifest.v1.json"
+          printf '%s' "$TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64" | base64 --decode >"$secret_dir/telebirr-reference-opening-key.v1.json"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$OWNER_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/owner-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
@@ -331,6 +357,8 @@ jobs:
             "$BETA_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/beta-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$PLAYER_ACTION_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/player-action-database-url"
+          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+            "$ASSIGNMENT_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-assignment-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             "fetanagent_telebirr_device_state_runtime.$PRODUCTION_PROJECT_REF" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
@@ -359,6 +387,10 @@ jobs:
           [[ "$(stat --format='%s' "$secret_dir/telebirr-bridge.spki.der")" -eq 91 ]]
           [[ "sha256:$(sha256sum "$secret_dir/telebirr-assignment.spki.der" | cut -d ' ' -f 1)" == "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" ]]
           [[ "sha256:$(sha256sum "$secret_dir/telebirr-bridge.spki.der" | cut -d ' ' -f 1)" == "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256" ]]
+          openssl pkey -inform DER -in "$secret_dir/telebirr-assignment-signer.pkcs8.der" -check -noout >/dev/null 2>&1
+          openssl pkey -inform DER -in "$secret_dir/telebirr-assignment-signer.pkcs8.der" -pubout -outform DER \
+            -out "$secret_dir/telebirr-assignment-derived.spki.der" >/dev/null 2>&1
+          cmp --silent "$secret_dir/telebirr-assignment.spki.der" "$secret_dir/telebirr-assignment-derived.spki.der"
           openssl pkey -inform DER -in "$secret_dir/telebirr-bridge-server-signer.pkcs8.der" -check -noout >/dev/null 2>&1
           openssl pkey -inform DER -in "$secret_dir/telebirr-bridge-server-signer.pkcs8.der" -pubout -outform DER \
             -out "$secret_dir/telebirr-bridge-derived.spki.der" >/dev/null 2>&1
@@ -374,7 +406,21 @@ jobs:
              .serverSigningPublicKeySpkiSha256 == $bridge_digest and
              .assignmentSigningPublicKeySpkiSha256 == $assignment_digest' \
             "$secret_dir/telebirr-bridge-runtime-manifest.v1.json" >/dev/null
-          rm -f -- "$secret_dir/telebirr-bridge.spki.der" "$secret_dir/telebirr-bridge-derived.spki.der"
+          jq -e --arg key "$TELEBIRR_REFERENCE_OPENING_KEY_ID" '
+              type == "object" and
+              keys_unsorted == ["contractVersion", "providerCode", "purpose", "keyVersion", "keyId", "keyHex"] and
+              .contractVersion == 1 and .providerCode == "telebirr" and
+              .purpose == "deposit-proof-reference-opening" and .keyVersion == 2 and .keyId == $key and
+              (.keyHex | test("^[0-9a-f]{64}$"))
+            ' "$secret_dir/telebirr-reference-opening-key.v1.json" >/dev/null
+          node --input-type=module --eval '
+            import { readFileSync } from "node:fs";
+            const text = readFileSync(process.argv[1], "utf8");
+            const parsed = JSON.parse(text);
+            if (JSON.stringify(parsed) !== text || /[\0\r\n]/u.test(text)) process.exit(1);
+          ' "$secret_dir/telebirr-reference-opening-key.v1.json"
+          rm -f -- "$secret_dir/telebirr-assignment-derived.spki.der" \
+            "$secret_dir/telebirr-bridge.spki.der" "$secret_dir/telebirr-bridge-derived.spki.der"
           node infra/operations/prepare-production-companion-bundle.mjs "$secret_dir"
           helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)"
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-production-images.tar")"
@@ -383,6 +429,60 @@ jobs:
           echo "helper_sha=$helper_sha" >>"$GITHUB_OUTPUT"
           echo "bundle_bytes=$bundle_bytes" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+
+      - name: Build the exact active production TeleBirr assignment manifest
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          PILOT_REVISION_ID: ${{ inputs.confirm_telebirr_pilot_revision_id }}
+          ACTIVATION_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
+          TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_production_telebirr_assignment_manifest
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          runtime_input="$SECRET_DIR/telebirr-assignment-runtime-input.json"
+          partial_input="$runtime_input.partial"
+          runtime_input_ready=false
+          for attempt in 1 2 3 4; do
+            rm -f -- "$partial_input"
+            if psql -X --quiet --tuples-only --no-align \
+              --set=pilot_revision_id="$PILOT_REVISION_ID" \
+              --set=activation_epoch="$ACTIVATION_EPOCH" \
+              --set=assignment_signer_id="$TELEBIRR_ASSIGNMENT_SIGNER_ID" \
+              --set=assignment_signer_key_id="$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" \
+              --set=assignment_signer_public_spki_sha256="$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" \
+              --file=infra/sql/production-telebirr-assignment-runtime-input.sql \
+              >"$partial_input" 2>/dev/null && [[ -s "$partial_input" ]]; then
+              chmod 0600 "$partial_input"
+              mv -- "$partial_input" "$runtime_input"
+              runtime_input_ready=true
+              break
+            fi
+            [[ "$attempt" -lt 4 ]] || break
+            sleep "$((attempt * 2))"
+          done
+          if [[ "$runtime_input_ready" != true ]]; then
+            rm -f -- "$partial_input"
+            echo '::error::The active production TeleBirr assignment binding is unavailable.'
+            exit 1
+          fi
+          node infra/build-telebirr-assignment-runtime-manifest.mjs \
+            "$runtime_input" \
+            "$SECRET_DIR/telebirr-assignment-runtime-manifest.v1.json"
+          rm -f -- "$runtime_input"
 
       - name: Verify Telegram identity without exposing the token
         shell: bash
@@ -411,23 +511,11 @@ jobs:
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
           echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
 
-      - name: Provision continuous least-privilege production logins
+      - name: Verify the existing continuous least-privilege production logins
         id: provision
         shell: bash
         env:
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
-          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
-          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
-          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
-          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
-          COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
-          COMPANION_SERVER_SIGNER_ID: ${{ vars.COMPANION_SERVER_SIGNER_ID }}
-          COMPANION_SERVER_SIGNER_KEY_ID: ${{ vars.COMPANION_SERVER_SIGNER_KEY_ID }}
-          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL }}
-          COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
-          COMPANION_SERVER_SIGNER_VALID_FROM: ${{ vars.COMPANION_SERVER_SIGNER_VALID_FROM }}
-          COMPANION_SERVER_SIGNER_VALID_UNTIL: ${{ vars.COMPANION_SERVER_SIGNER_VALID_UNTIL }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
@@ -456,18 +544,42 @@ jobs:
           }
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           companion_previous_login="$(psql_with_connection_retry -X -Atc "select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_companion_device_bridge_runtime'")"
-          [[ "$companion_previous_login" == 't' || "$companion_previous_login" == 'f' ]]
+          [[ "$companion_previous_login" == 't' ]]
           echo "companion_previous_login=$companion_previous_login" >>"$GITHUB_OUTPUT"
-          psql_with_connection_retry -X --file=infra/sql/production-nonfinancial-runtimes-provision.sql
-          psql_with_connection_retry -X \
-            --set=companion_signer_id="$COMPANION_SERVER_SIGNER_ID" \
-            --set=companion_signer_key_id="$COMPANION_SERVER_SIGNER_KEY_ID" \
-            --set=companion_signer_public_spki="$COMPANION_SERVER_SIGNER_PUBLIC_SPKI_BASE64URL" \
-            --set=companion_signer_public_spki_sha256="$COMPANION_SERVER_SIGNER_PUBLIC_SPKI_SHA256" \
-            --set=companion_signer_valid_from="$COMPANION_SERVER_SIGNER_VALID_FROM" \
-            --set=companion_signer_valid_until="$COMPANION_SERVER_SIGNER_VALID_UNTIL" \
-            --file=infra/sql/production-companion-server-signer-provision.sql
-          psql_with_connection_retry -X --file=infra/sql/production-companion-bridge-runtime-enable-continuous.sql
+          runtime_catalog_ready="$(psql_with_connection_retry -X -Atc "
+            select count(*) = 6 and pg_catalog.bool_and(
+              rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb
+              and not rolcreaterole and not rolreplication and not rolbypassrls
+              and rolvaliduntil = 'infinity'::timestamptz
+            )
+            from pg_catalog.pg_roles
+            where rolname in (
+              'fetanagent_beta_admission_runtime',
+              'fetanagent_customer_web_runtime',
+              'fetanagent_owner_control_runtime',
+              'fetanagent_player_actions_runtime',
+              'fetanagent_telebirr_assignment_broker_runtime',
+              'fetanagent_telebirr_device_state_runtime'
+            )")"
+          [[ "$runtime_catalog_ready" == 't' ]]
+
+          assignment_login_ready=false
+          for attempt in 1 2 3 4; do
+            assignment_identity="$(
+              PGPORT=5432 \
+              PGUSER="$ASSIGNMENT_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" \
+              PGPASSWORD="$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" \
+                psql -X -Atc "select current_user = 'fetanagent_telebirr_assignment_broker_runtime' and session_user = current_user" \
+                2>/dev/null || true
+            )"
+            if [[ "$assignment_identity" == 't' ]]; then
+              assignment_login_ready=true
+              break
+            fi
+            [[ "$attempt" -lt 4 ]] || break
+            sleep "$((attempt * 2))"
+          done
+          [[ "$assignment_login_ready" == true ]]
 
       - name: Transfer and install the sealed release
         shell: bash
@@ -487,7 +599,7 @@ jobs:
             infra/compose.production.yaml \
             infra/compose.production.companion-execution-v2.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url} \
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-database-url,telebirr-assignment-runtime-manifest.v1.json,telebirr-assignment-signer-key-id,telebirr-assignment-signer.pkcs8.der,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url,telebirr-reference-opening-key.v1.json} \
             "$remote:$incoming/"
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
@@ -541,7 +653,7 @@ jobs:
           helper='/usr/local/sbin/fetanagent-production-deploy-helper'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
-          echo 'Production web, Telegram, and Android enrollment transport are live continuously; this deployment changes no database financial switch, and guarded TeleBirr proof intake still requires a separately active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live; this deployment changes no database financial switch, and assignment leasing remains bound to the exact active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
           echo 'The independently signed Windows companion production pairing and read-only transport is live on the production database.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back a failed production activation

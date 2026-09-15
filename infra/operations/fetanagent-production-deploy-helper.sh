@@ -303,6 +303,14 @@ verify_release_files() {
     telebirr-bridge-server-signer.pkcs8.der
     telebirr-device-state-database-url
   )
+  if grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$release/compose.production.yaml"; then
+    required+=(
+      telebirr-assignment-database-url
+      telebirr-assignment-runtime-manifest.v1.json
+      telebirr-assignment-signer.pkcs8.der
+      telebirr-reference-opening-key.v1.json
+    )
+  fi
   if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
     required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json companion-bridge-runtime-manifest.v3.json)
     [[ ! -L "$release/compose.production.companion-execution-v2.yaml" &&
@@ -522,8 +530,11 @@ case "${1:-}" in
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
     expected_count=29
+    if grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$incoming/compose.production.yaml"; then
+      expected_count=$((expected_count + 4))
+    fi
     if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
-      expected_count=34
+      expected_count=$((expected_count + 5))
     fi
     [[ "$local_count" -eq "$expected_count" && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
       die 'the incoming production bundle shape is wrong'

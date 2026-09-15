@@ -132,7 +132,9 @@ jobs:
             customer-web-rate-limit-hmac deposit-proof-reference-encryption-master \
             deposit-proof-reference-fingerprint-master deposit-proof-reference-profile.v2.json \
             owner-database-url player-action-database-url publishable-key supabase-ca.crt \
-            telebirr-assignment.spki.der telebirr-bridge-runtime-manifest.v1.json \
+            telebirr-assignment-database-url telebirr-assignment-runtime-manifest.v1.json \
+            telebirr-assignment-signer.pkcs8.der telebirr-assignment.spki.der \
+            telebirr-reference-opening-key.v1.json telebirr-bridge-runtime-manifest.v1.json \
             telebirr-bridge-server-signer.pkcs8.der telebirr-device-state-database-url \
             companion-device-database-url companion-bridge-server-signer.pkcs8.der \
             companion-bridge-runtime-manifest.v2.json; do

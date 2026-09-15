@@ -50,6 +50,11 @@ assert.match(
   /sudo chown root:root "\$protected\/pins\.json" "\$protected\/supabase-ca\.crt"/u,
 );
 assert.match(workflow, /chmod 0444 "\$protected\/pins\.json" "\$protected\/supabase-ca\.crt"/u);
+assert.ok(
+  workflow.indexOf('chmod 0444 "$protected/pins.json" "$protected/supabase-ca.crt"') <
+    workflow.indexOf('sudo chown root:root "$protected/pins.json" "$protected/supabase-ca.crt"'),
+  'the runner must set public config modes before transferring ownership to root',
+);
 assert.doesNotMatch(workflow, /sudo chown 10001:10001[^\n]*(?:pins\.json|supabase-ca\.crt)/u);
 assert.match(workflow, /production-telebirr-shadow-verifier-once-provision\.sql/u);
 assert.match(workflow, /production-telebirr-shadow-verifier-once-disable\.sql/u);

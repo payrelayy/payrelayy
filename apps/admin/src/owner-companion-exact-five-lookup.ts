@@ -155,7 +155,7 @@ function statusFromRow(rowCandidate: unknown, includesReplay: boolean): OwnerCom
     !Number.isFinite(row.issued_at.getTime()) ||
     !Number.isFinite(row.expires_at.getTime()) ||
     row.expires_at.getTime() <= row.issued_at.getTime() ||
-    row.expires_at.getTime() - row.issued_at.getTime() > 10 * 60 * 1_000
+    row.expires_at.getTime() - row.issued_at.getTime() > 12 * 60 * 60 * 1_000
   ) {
     throw new OwnerCompanionLookupUnavailableError();
   }

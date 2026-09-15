@@ -111,7 +111,7 @@ export function buildTelegramTelebirrPaymentPrompt(
     '',
     `🎮 KemerBet Player ID: ${input.playerId}`,
     'Amount: choose 25–25,000 ETB in TeleBirr.',
-    'These payment details are valid for 10 minutes.',
+    'These payment details are valid for 12 hours.',
     '',
     'After paying, reply to this message with the TeleBirr transaction number.',
     'You can also paste the receipt link or full SMS.',

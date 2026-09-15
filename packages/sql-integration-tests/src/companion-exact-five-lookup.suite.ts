@@ -239,7 +239,7 @@ async function createPairedDevice(
 
   const issued = await client.query<PairingIssueRow>(
     `select * from app.issue_agent_platform_companion_pairing(
-       $1::uuid, $2::uuid, $3::text, '0.1.5'
+       $1::uuid, $2::uuid, $3::text, '0.1.10'
      )`,
     [ownerAdminId, randomUUID(), signerKeyId],
   );
@@ -254,7 +254,7 @@ async function createPairedDevice(
     `select claim_state, certificate_body
        from app.claim_agent_platform_companion_pairing(
          $1::uuid, $2::text, $3::text, $4::text, $5::text, $6::text,
-         $7::text, '0.1.5', $8::timestamptz, $9::timestamptz,
+         $7::text, '0.1.10', $8::timestamptz, $9::timestamptz,
          $10::timestamptz, $11::text
        )`,
     [

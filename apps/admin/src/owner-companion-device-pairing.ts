@@ -7,7 +7,7 @@ import {
   type CompanionNoMoneySafety,
 } from '@fetanagent/agent-platform-companion-contracts';
 
-export const OWNER_COMPANION_MINIMUM_VERSION = '0.1.5' as const;
+export const OWNER_COMPANION_MINIMUM_VERSION = '0.1.10' as const;
 export const OWNER_COMPANION_PAIRING_ENDPOINT =
   `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_PAIRING_PATH}` as const;
 
@@ -202,7 +202,7 @@ export class PostgresOwnerCompanionDevicePairing {
         !Number.isFinite(row.issued_at.getTime()) ||
         !Number.isFinite(row.expires_at.getTime()) ||
         row.expires_at.getTime() <= row.issued_at.getTime() ||
-        row.expires_at.getTime() - row.issued_at.getTime() > 10 * 60 * 1_000 ||
+        row.expires_at.getTime() - row.issued_at.getTime() > 12 * 60 * 60 * 1_000 ||
         typeof row.signer_key_id !== 'string' ||
         row.signer_key_id !== this.serverSignerKeyId ||
         typeof row.minimum_companion_version !== 'string' ||

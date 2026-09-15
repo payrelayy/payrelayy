@@ -66,7 +66,7 @@ The client and server implement this exact transport contract:
 - `POST /v1/owner/private-live-deposit-pilots/prepare` accepts one exact JSON object containing a
   canonical lowercase UUID-v4 `requestId`, confirmation
   `owner_confirmed_fixed_telebirr_five_player_pilot`, exactly five Player IDs, and canonical ISO
-  activation/expiry timestamps exactly two hours apart. The callable PostgreSQL routine supplies
+  activation/expiry timestamps exactly twelve hours apart. The callable PostgreSQL routine supplies
   only `telebirr`, fixes 2,500 minor units per deposit and Player, 12,500 minor units aggregate and
   five reservations, derives the submitting-customer UUIDs from the Player owners, and rechecks the
   immutable result. The generic provider/amount/customer routine is not callable by the runtime.
@@ -227,7 +227,7 @@ select through the private control plane:
 - the exact receiver revision and provider-specific protected matching material.
 
 The provider is TeleBirr, the caps are 25 ETB per deposit and Player / 125 ETB aggregate / five
-reservations, and the duration is exactly two hours. Changing any of those values requires another
+reservations, and the duration is exactly twelve hours. Changing any of those values requires another
 reviewed forward migration and client/server contract; it is not an Owner form field.
 
 No KemerBet password, provider password, OTP, browser cookie, raw transaction ID, or raw receipt is
@@ -243,7 +243,7 @@ The Owner approved this exact first-run configuration:
 - exactly one 25 ETB immutable reservation per Player ID;
 - 25 ETB per transaction and per Player ID;
 - 125 ETB total exposure and five total reservations;
-- a two-hour activation window; and
+- a twelve-hour activation window; and
 - one supervised transaction at a time, with provider, database, KemerBet balance/history, and
   customer-facing status reconciled before the next Player ID is attempted.
 

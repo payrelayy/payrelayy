@@ -360,7 +360,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <p class="status-ok">Public-key enrollment only</p>
               <h3 id="companion-device-pairing-title">Pair this Windows companion</h3>
               <p class="receipt-label">
-                Create one ten-minute package after the exact local KemerBet identity is verified.
+                Create one twelve-hour package after the exact local KemerBet identity is verified.
                 The companion generates its private P-256 key on this computer and protects it with
                 Windows DPAPI. Only the public key is enrolled. Lookup, Amount, Notes, Transfer,
                 settlement, and money movement are not granted by the pairing package.
@@ -456,7 +456,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <p class="receipt-label">
             Fixed contract: TeleBirr only, exactly five currently eligible KemerBet Players,
             25 ETB maximum per deposit and Player, 125 ETB total, five permanent reservations,
-            and exactly two hours. Customer membership is derived from the selected Player owners
+            and exactly twelve hours. Customer membership is derived from the selected Player owners
             inside PostgreSQL; no customer UUID or credential is entered here.
           </p>
           <p class="pilot-warning">
@@ -468,7 +468,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <form id="pilot-prepare-form">
             <label class="confirmation-row" for="pilot-confirmation">
               <input id="pilot-confirmation" name="confirmation" type="checkbox" />
-              I approve this exact fixed two-hour TeleBirr cohort and understand it remains
+              I approve this exact fixed twelve-hour TeleBirr cohort and understand it remains
               financially disabled after preparation.
             </label>
             <button id="pilot-prepare-button" type="submit" disabled>Prepare fixed pilot</button>
@@ -494,7 +494,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <p class="status-ok">Database-free Android enrollment</p>
             <h3 id="telebirr-device-pairing-title">TeleBirr verifier phone pairing</h3>
             <p class="receipt-label">
-              Create one ten-minute package for the dedicated Android phone only after the pilot
+              Create one twelve-hour package for the dedicated Android phone only after the pilot
               is armed in dry-run. The package can enroll one device; it cannot poll assignments,
               verify a deposit, settle, execute, or move money.
             </p>
@@ -3249,7 +3249,7 @@ function validCompanionDevicePairingReceipt(value) {
         new Date(grant.issuedAt).toISOString() !== grant.issuedAt ||
         grant.expiresAt !== value.expiresAt ||
         Date.parse(grant.expiresAt) <= Date.parse(grant.issuedAt) ||
-        Date.parse(grant.expiresAt) - Date.parse(grant.issuedAt) > 10 * 60 * 1_000 ||
+        Date.parse(grant.expiresAt) - Date.parse(grant.issuedAt) > 12 * 60 * 60 * 1_000 ||
         grant.endpoint !== 'https://device.fetanagent.com/v1/companion/device/enrollments:pair' ||
         typeof grant.signerKeyId !== 'string' ||
         !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(grant.signerKeyId) ||
@@ -3257,7 +3257,7 @@ function validCompanionDevicePairingReceipt(value) {
         !/^[A-Za-z0-9_-]+$/.test(grant.serverSigningPublicKeySpki) ||
         typeof grant.serverSigningPublicKeySpkiSha256 !== 'string' ||
         !/^sha256:[0-9a-f]{64}$/.test(grant.serverSigningPublicKeySpkiSha256) ||
-        grant.minimumCompanionVersion !== '0.1.5' || grant.oneUse !== true ||
+        grant.minimumCompanionVersion !== '0.1.10' || grant.oneUse !== true ||
         grant.accountMutationAllowed !== false || grant.balanceMutationAllowed !== false ||
         grant.providerMutationAllowed !== false || grant.paymentAllowed !== false ||
         grant.depositAllowed !== false || grant.withdrawAllowed !== false ||
@@ -3300,7 +3300,7 @@ function updateCompanionDevicePairingAvailability() {
       'A prior request is pending reconciliation. Create will recover that exact package only.';
   } else {
     companionDevicePairingStatus.textContent =
-      'Ready to create one ten-minute public-key pairing package. Lookup and money authority remain disabled.';
+      'Ready to create one twelve-hour public-key pairing package. Lookup and money authority remain disabled.';
   }
 }
 
@@ -3337,7 +3337,7 @@ function validCompanionLookupStatus(value, issueReceipt = false) {
       typeof value.issuedAt !== 'string' || new Date(value.issuedAt).toISOString() !== value.issuedAt ||
       typeof value.expiresAt !== 'string' || new Date(value.expiresAt).toISOString() !== value.expiresAt ||
       Date.parse(value.expiresAt) <= Date.parse(value.issuedAt) ||
-      Date.parse(value.expiresAt) - Date.parse(value.issuedAt) > 10 * 60 * 1_000 ||
+      Date.parse(value.expiresAt) - Date.parse(value.issuedAt) > 12 * 60 * 60 * 1_000 ||
       value.playerCount !== 5 || value.platformCode !== 'kemerbet' ||
       value.lookupMode !== 'find_only' || value.identifiersRedacted !== true ||
       value.transferDisabled !== true || value.moneyMovementAllowed !== false ||
@@ -3746,7 +3746,7 @@ function updateTelebirrDevicePairingAvailability() {
       'A prior request is pending reconciliation. Create will recover that exact package only.';
   } else {
     telebirrDevicePairingStatus.textContent =
-      'Ready to create one ten-minute pairing-only package. Money authority remains disabled.';
+      'Ready to create one twelve-hour pairing-only package. Money authority remains disabled.';
   }
 }
 
@@ -3831,7 +3831,7 @@ function renderPilotStatus(pilot, statusLoaded = true) {
     ['State', pilot.pilotStatus],
     ['Financial switch', pilot.switchMode],
     ['Financially active', pilot.financiallyActive ? 'YES — stop immediately' : 'No'],
-    ['Within two-hour window', pilot.withinActiveWindow ? 'Yes' : 'No'],
+    ['Within twelve-hour window', pilot.withinActiveWindow ? 'Yes' : 'No'],
     ['Reservations', String(pilot.reservedDepositCount) + '/5'],
     ['Reserved amount', String(Number(pilot.reservedAmountMinor) / 100) + ' / 125 ETB'],
     ['Expires', new Date(pilot.expiresAt).toLocaleString()],
@@ -4428,7 +4428,7 @@ async function issueCompanionDevicePairing() {
   if (ownerAuthConfig?.companionDevicePairingConfigured !== true ||
       currentCompanionDevicePairing || !companionDevicePairingConfirmation.checked) return;
   if (!window.confirm(
-    'Create one ten-minute public-key pairing package for this Windows companion? ' +
+    'Create one twelve-hour public-key pairing package for this Windows companion? ' +
     'Player lookup, Amount, Notes, Transfer, settlement, execution, and money movement remain disabled.',
   )) return;
   const requestId = readPendingCompanionDevicePairingRequestId() ?? crypto.randomUUID();
@@ -4508,7 +4508,7 @@ async function issueTelebirrDevicePairing() {
       currentTelebirrDevicePairing ||
       !telebirrDevicePairingConfirmation.checked) return;
   if (!window.confirm(
-    'Create one ten-minute pairing-only package for the dedicated Android phone? ' +
+    'Create one twelve-hour pairing-only package for the dedicated Android phone? ' +
     'Assignment polling, verification, execution, and money movement remain disabled.',
   )) return;
 
@@ -4587,11 +4587,11 @@ async function prepareFixedPilot() {
   if (!requirePilotDryRunMutation() || currentPilot ||
       selectedPilotPlayerIds.size !== 5 || !pilotConfirmation.checked) return;
   if (!window.confirm(
-    'Prepare exactly five selected Players for the fixed TeleBirr pilot: 25 ETB each, 125 ETB total, one reservation each, and two hours? This remains financially disabled.',
+    'Prepare exactly five selected Players for the fixed TeleBirr pilot: 25 ETB each, 125 ETB total, one reservation each, and twelve hours? This remains financially disabled.',
   )) return;
   const requestId = crypto.randomUUID();
   const activeFrom = new Date(Date.now() + 5_000);
-  const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
+  const expiresAt = new Date(activeFrom.getTime() + 12 * 60 * 60 * 1_000);
   setBusy(pilotPrepareForm, true);
   setNotice('Preparing the fixed dormant TeleBirr pilot…');
   try {

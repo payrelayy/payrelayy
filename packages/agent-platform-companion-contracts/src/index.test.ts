@@ -459,8 +459,14 @@ describe('agent-platform companion contracts', () => {
     expect(Object.isFrozen(decodeCompanionPairingPublicPayload(value.pairing.body))).toBe(true);
   });
 
-  it('rejects a mismatched pairing key digest, a non-P256 key, and an overlong challenge', () => {
+  it('accepts an exact twelve-hour pairing request and rejects an overlong challenge', () => {
     const value = fixture();
+    expect(
+      decodeCompanionPairingPublicPayload({
+        ...value.pairing.body,
+        expiresAt: '2026-09-02T22:00:00.000Z',
+      }),
+    ).toBeDefined();
     expect(
       decodeCompanionPairingPublicPayload({
         ...value.pairing.body,
@@ -478,7 +484,7 @@ describe('agent-platform companion contracts', () => {
     expect(
       decodeCompanionPairingPublicPayload({
         ...value.pairing.body,
-        expiresAt: '2026-09-02T10:10:00.001Z',
+        expiresAt: '2026-09-02T22:00:00.001Z',
       }),
     ).toBeUndefined();
   });
@@ -661,6 +667,20 @@ describe('agent-platform companion contracts', () => {
     expect(verifySignedKemerBetExactFiveLookupAssignment(value.assignment, value.server.spki)).toBe(
       true,
     );
+    expect(
+      decodeKemerBetExactFiveLookupAssignmentBody(
+        assignmentBody(value.certificate.body, {
+          expiresAt: '2026-09-02T22:01:00.000Z',
+        }),
+      ),
+    ).toBeDefined();
+    expect(
+      decodeKemerBetExactFiveLookupAssignmentBody(
+        assignmentBody(value.certificate.body, {
+          expiresAt: '2026-09-02T22:01:00.001Z',
+        }),
+      ),
+    ).toBeUndefined();
 
     for (const invalid of [
       playerIds.slice(0, 4),

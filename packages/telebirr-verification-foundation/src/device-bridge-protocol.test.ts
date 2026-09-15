@@ -21,6 +21,7 @@ import {
   canonicalTelebirrDeviceBridgePairingSignatureBytes,
   canonicalTelebirrDeviceBridgeRequestBodyBytes,
   canonicalTelebirrDeviceBridgeRequestSignatureBytes,
+  decodeTelebirrDeviceBridgePairingBody,
   decodeSignedTelebirrDeviceBridgeAcknowledgement,
   decodeSignedTelebirrDeviceBridgeEnrollmentCertificate,
   decodeTelebirrDeviceBridgeCommandFrame,
@@ -104,7 +105,10 @@ function p1363(privateKey: KeyObject, bytes: Uint8Array): string {
   );
 }
 
-function pairingBody(device: ReturnType<typeof keyPair>): TelebirrDeviceBridgePairingBody {
+function pairingBody(
+  device: ReturnType<typeof keyPair>,
+  overrides: Partial<TelebirrDeviceBridgePairingBody> = {},
+): TelebirrDeviceBridgePairingBody {
   return {
     contractVersion: 1,
     providerCode: 'telebirr',
@@ -122,6 +126,7 @@ function pairingBody(device: ReturnType<typeof keyPair>): TelebirrDeviceBridgePa
     expiresAt: '2026-09-04T10:10:00.000Z',
     oneUse: true,
     ...safety,
+    ...overrides,
   };
 }
 
@@ -484,6 +489,23 @@ describe('TeleBirr Android device bridge protocol', () => {
     expect(
       Object.isFrozen(decodeSignedTelebirrDeviceBridgeEnrollmentCertificate(value.certificate)),
     ).toBe(true);
+  });
+
+  it('accepts an exact twelve-hour pairing request and rejects one millisecond more', () => {
+    const device = keyPair();
+    expect(
+      verifySignedTelebirrDeviceBridgePairingRequest(
+        signedPairing(
+          pairingBody(device, { expiresAt: '2026-09-04T22:00:00.000Z' }),
+          device.privateKey,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      decodeTelebirrDeviceBridgePairingBody(
+        pairingBody(device, { expiresAt: '2026-09-04T22:00:00.001Z' }),
+      ),
+    ).toBeUndefined();
   });
 
   it('verifies a fresh device command and derives an exact replay identity', () => {

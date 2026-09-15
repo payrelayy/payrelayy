@@ -94,7 +94,7 @@ import {
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
 
-export const WINDOWS_COMPANION_VERSION = '0.1.9' as const;
+export const WINDOWS_COMPANION_VERSION = '0.1.10' as const;
 export const COMPANION_PAIRING_PACKAGE_PREFIX = AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX;
 export const COMPANION_PAIRING_CONTENT_TYPE = AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE;
 export const COMPANION_PAIRING_PATH = AGENT_PLATFORM_COMPANION_PAIRING_PATH;
@@ -103,7 +103,7 @@ const DEVICE_KEY_FILE = 'companion-primary.key.json';
 const DEVICE_ENROLLMENT_FILE = 'companion-primary.enrollment.json';
 const MAXIMUM_STORED_FILE_BYTES = 64 * 1_024;
 const MAXIMUM_RESPONSE_BYTES = 64 * 1_024;
-const MAXIMUM_PAIRING_LIFETIME_MS = 10 * 60 * 1_000;
+const MAXIMUM_PAIRING_PACKAGE_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 
@@ -379,7 +379,7 @@ export function decodeCompanionPairingPackage(
       !issuedAt ||
       !expiresAt ||
       Date.parse(expiresAt) <= Date.parse(issuedAt) ||
-      Date.parse(expiresAt) - Date.parse(issuedAt) > MAXIMUM_PAIRING_LIFETIME_MS ||
+      Date.parse(expiresAt) - Date.parse(issuedAt) > MAXIMUM_PAIRING_PACKAGE_LIFETIME_MS ||
       !Number.isFinite(assessedMilliseconds) ||
       assessedMilliseconds < Date.parse(issuedAt) ||
       assessedMilliseconds >= Date.parse(expiresAt) ||

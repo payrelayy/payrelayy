@@ -15,7 +15,7 @@ $message = New-Object System.Windows.Forms.Label
 $message.AutoSize = $false
 $message.Location = New-Object System.Drawing.Point(18, 16)
 $message.Size = New-Object System.Drawing.Size(708, 66)
-$message.Text = "Paste the one-use Windows pairing package created on the FetanAgent Owner page. It expires after ten minutes. It grants public-key enrollment only; Player lookup, Amount, Notes, Transfer, settlement, and money movement remain disabled."
+$message.Text = "Paste the one-use Windows pairing package created on the FetanAgent Owner page. It expires after twelve hours. It grants public-key enrollment only; Player lookup, Amount, Notes, Transfer, settlement, and money movement remain disabled."
 $form.Controls.Add($message)
 
 # Do not use PowerShell's automatic $input variable: a .NET event callback

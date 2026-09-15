@@ -66,7 +66,7 @@ the approved Owner origin (or the SSH loopback origin),
 require the explicit `x-fetanagent-owner-csrf` header, and bind `x-idempotency-key` to the JSON
 request ID. The only callable preparation routine hard-codes the approved first-run policy:
 TeleBirr only, five current KemerBet Players, 25 ETB per deposit and Player, 125 ETB aggregate, five
-immutable reservations, and exactly two hours. PostgreSQL derives the submitting-customer set from
+immutable reservations, and exactly twelve hours. PostgreSQL derives the submitting-customer set from
 the selected Player owners and rechecks that derivation after the canonical preparation locks. The
 generic amount/provider/customer preparation routine is not callable by the Owner runtime.
 

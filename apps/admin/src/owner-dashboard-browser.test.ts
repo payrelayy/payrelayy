@@ -106,7 +106,7 @@ function pairingReceipt(expiresAt: string) {
 
 function companionPairingReceipt(expiresAt: string) {
   const expiresAtMilliseconds = Date.parse(expiresAt);
-  const issuedAt = new Date(expiresAtMilliseconds - 10 * 60 * 1_000).toISOString();
+  const issuedAt = new Date(expiresAtMilliseconds - 12 * 60 * 60 * 1_000).toISOString();
   const pairingPackage =
     'fetanagent-companion-pairing-v1.' +
     Buffer.from(
@@ -121,7 +121,7 @@ function companionPairingReceipt(expiresAt: string) {
         signerKeyId: 'companion-server-staging-v1',
         serverSigningPublicKeySpki: 'A'.repeat(122),
         serverSigningPublicKeySpkiSha256: `sha256:${'b'.repeat(64)}`,
-        minimumCompanionVersion: '0.1.5',
+        minimumCompanionVersion: '0.1.10',
         oneUse: true,
         accountMutationAllowed: false,
         balanceMutationAllowed: false,
@@ -158,7 +158,7 @@ function companionLookupReceipt(state: 'pending' | 'completed' | 'review_require
     assignmentId: '33333333-3333-4333-8333-333333333333',
     state,
     issuedAt: '2099-09-04T12:00:00.000Z',
-    expiresAt: '2099-09-04T12:10:00.000Z',
+    expiresAt: '2099-09-05T00:00:00.000Z',
     ...(terminal
       ? {
           completedAt: '2099-09-04T12:04:00.000Z',

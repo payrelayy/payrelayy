@@ -17,7 +17,7 @@ function preparation(
 ): PrepareApprovedPrivateLivePilotRequest {
   return {
     activeFrom: new Date('2026-08-21T20:00:00.000Z'),
-    expiresAt: new Date('2026-08-21T22:00:00.000Z'),
+    expiresAt: new Date('2026-08-22T08:00:00.000Z'),
     playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
     requestId,
     ...overrides,
@@ -28,7 +28,7 @@ function statusRow(overrides: Record<string, unknown> = {}): Record<string, unkn
   return {
     configuration_digest: `sha256:${'a'.repeat(64)}`,
     contract_version: 1,
-    expires_at: new Date('2026-08-21T22:00:00.000Z'),
+    expires_at: new Date('2026-08-22T08:00:00.000Z'),
     financially_active: false,
     maximum_aggregate_minor: '12500',
     maximum_reservation_count: 5,
@@ -57,7 +57,7 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
           requestId,
           ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
           new Date('2026-08-21T20:00:00.000Z'),
-          new Date('2026-08-21T22:00:00.000Z'),
+          new Date('2026-08-22T08:00:00.000Z'),
         ]);
         return { rows: [{ pilot_revision_id: pilotRevisionId }] };
       }
@@ -79,7 +79,7 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
     expect(result).toEqual({
       configurationDigest: `sha256:${'a'.repeat(64)}`,
       contractVersion: 1,
-      expiresAt: '2026-08-21T22:00:00.000Z',
+      expiresAt: '2026-08-22T08:00:00.000Z',
       financiallyActive: false,
       maximumAggregateMinor: '12500',
       maximumReservationCount: 5,
@@ -100,7 +100,7 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
     expect(JSON.stringify(result)).not.toContain('77777777-7777-4777-8777-777777777777');
   });
 
-  it('rejects malformed, duplicated, or non-two-hour preparation before the database', async () => {
+  it('rejects malformed, duplicated, or non-twelve-hour preparation before the database', async () => {
     const query = vi.fn<PrivateLivePilotDatabase['query']>();
     const control = new PostgresOwnerPrivateLivePilotControl({ query });
     const invalid = preparation({
@@ -114,7 +114,7 @@ describe('Owner private live-deposit pilot PostgreSQL adapter', () => {
       control.prepare(authUserId, preparation({ requestId: requestId.toUpperCase() })),
     ).rejects.toBeInstanceOf(OwnerPrivateLivePilotRejectedError);
     await expect(
-      control.prepare(authUserId, preparation({ expiresAt: new Date('2026-08-21T22:00:00.001Z') })),
+      control.prepare(authUserId, preparation({ expiresAt: new Date('2026-08-22T08:00:00.001Z') })),
     ).rejects.toBeInstanceOf(OwnerPrivateLivePilotRejectedError);
     expect(query).not.toHaveBeenCalled();
   });

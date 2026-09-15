@@ -185,7 +185,7 @@ services:
       NODE_ENV: production
       LOG_LEVEL: info
       # The API's live mode is necessary for the guarded Telegram proof-intake RPCs. PostgreSQL
-      # independently requires the current two-hour pilot, activation epoch, receiver, Player,
+      # independently requires the current twelve-hour pilot, activation epoch, receiver, Player,
       # provider and complete feature-switch set before disclosing a payable destination or
       # accepting a proof. No executor or KemerBet final-action capability is mounted here.
       FINANCIAL_ACTIONS_MODE: live

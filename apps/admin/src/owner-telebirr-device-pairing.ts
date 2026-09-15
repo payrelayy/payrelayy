@@ -1,4 +1,4 @@
-export const OWNER_TELEBIRR_MINIMUM_ANDROID_APP_VERSION = '0.5.0';
+export const OWNER_TELEBIRR_MINIMUM_ANDROID_APP_VERSION = '0.5.4';
 
 export interface OwnerTelebirrDevicePairingReceipt {
   readonly alreadyIssued: boolean;

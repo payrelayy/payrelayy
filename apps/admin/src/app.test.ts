@@ -2567,7 +2567,7 @@ describe('Owner-control HTTP boundary', () => {
         payload: {
           activeFrom: '2026-08-28T12:00:00.000Z',
           confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-          expiresAt: '2026-08-28T14:00:00.000Z',
+          expiresAt: '2026-08-29T00:00:00.000Z',
           playerIds: ['PLAYER_1', 'PLAYER_2', 'PLAYER_3', 'PLAYER_4', 'PLAYER_5'],
           requestId: pilotRequestId,
         },
@@ -3097,7 +3097,7 @@ describe('Owner-control HTTP boundary', () => {
       payload: {
         activeFrom: '2026-09-05T18:00:00.000Z',
         confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-        expiresAt: '2026-09-05T20:00:00.000Z',
+        expiresAt: '2026-09-06T06:00:00.000Z',
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
         requestId: pilotRequestId,
       },
@@ -3211,7 +3211,7 @@ describe('Owner-control HTTP boundary', () => {
       payload: {
         activeFrom: '2026-09-05T18:00:00.000Z',
         confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-        expiresAt: '2026-09-05T20:00:00.000Z',
+        expiresAt: '2026-09-06T06:00:00.000Z',
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
         requestId: pilotRequestId,
       },
@@ -4653,7 +4653,7 @@ describe('Owner-control HTTP boundary', () => {
       payload: {
         activeFrom: '2026-08-21T20:00:00.000Z',
         confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-        expiresAt: '2026-08-21T22:00:00.000Z',
+        expiresAt: '2026-08-22T08:00:00.000Z',
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
         requestId: pilotRequestId,
       },
@@ -4693,7 +4693,7 @@ describe('Owner-control HTTP boundary', () => {
       payload: {
         activeFrom: '2026-08-21T20:00:00.000Z',
         confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-        expiresAt: '2026-08-21T22:00:00.000Z',
+        expiresAt: '2026-08-22T08:00:00.000Z',
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
         requestId: pilotRequestId,
       },
@@ -4741,7 +4741,7 @@ describe('Owner-control HTTP boundary', () => {
       payload: {
         activeFrom: '2026-08-21T20:00:00.000Z',
         confirmation: 'owner_confirmed_fixed_telebirr_five_player_pilot',
-        expiresAt: '2026-08-21T22:00:00.000Z',
+        expiresAt: '2026-08-22T08:00:00.000Z',
         maximumAggregateMinor: 12_500,
         playerIds: ['PLAYER-1', 'PLAYER-2', 'PLAYER-3', 'PLAYER-4', 'PLAYER-5'],
         providerCodes: ['telebirr'],

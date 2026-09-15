@@ -101,6 +101,7 @@ class DeviceProvisioningTest {
     val store = EncryptedFileDeviceProvisioningStore(provisioningDirectory(), TestProvisioningCipher())
     var firstFrame: ByteArray? = null
     var exchangeCount = 0
+    var currentTime = instant("2026-09-04T10:00:00.000Z")
     val exchange =
       DeviceBridgeExchange { path, contentType, frame ->
         assertEquals(DeviceBridgeProtocol.PAIRING_PATH, path)
@@ -142,7 +143,7 @@ class DeviceProvisioningTest {
             else "device_0000000000000001"
           },
         appVersion = "0.5.0-secure-provisioning-inert",
-        clock = MillisClock { instant("2026-09-04T10:00:00.000Z") },
+        clock = MillisClock { currentTime },
       )
 
     val firstFailure = runCatching { coordinator.pair(packageValue) }.exceptionOrNull()
@@ -151,8 +152,9 @@ class DeviceProvisioningTest {
     val pending = store.load() as DeviceProvisioningState.Pending
     assertTrue(requireNotNull(firstFrame).contentEquals(DeviceBridgeJsonCodec.encodePairingRequest(pending.signedPairingRequest)))
     assertEquals("2026-09-04T09:59:30.000Z", pending.signedPairingRequest.body.issuedAt)
-    assertEquals("2026-09-04T10:05:00.000Z", pending.signedPairingRequest.body.expiresAt)
+    assertEquals("2026-09-04T21:59:30.000Z", pending.signedPairingRequest.body.expiresAt)
 
+    currentTime = instant("2026-09-04T10:06:00.000Z")
     val enrolled = coordinator.pair(packageValue)
     assertEquals(2, exchangeCount)
     assertEquals(enrolled, (store.load() as DeviceProvisioningState.Enrolled).certificate)
@@ -288,7 +290,7 @@ class DeviceProvisioningTest {
     DevicePairingGrant(
       pairingId = "11111111-2222-4333-8444-555555555555",
       pairingNonceDigest = repeatedDigest('1'),
-      expiresAt = "2026-09-04T10:20:00.000Z",
+      expiresAt = "2026-09-04T22:00:00.000Z",
     )
 
   private fun provisioningDirectory(): File {

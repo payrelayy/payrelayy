@@ -127,14 +127,14 @@ class DevicePairingCoordinator(
       require(material.publicKeySpkiBase64Url == previous.publicKeySpki)
       require(material.publicKeySpkiSha256 == previous.publicKeySpkiSha256)
     }
+    val issuedAtMillis =
+      (nowMillis - REQUEST_CLOCK_SKEW_TOLERANCE_MILLIS).coerceAtLeast(0L)
     val expiresAtMillis =
       minOf(
         Instant.parse(grant.expiresAt).toEpochMilli(),
-        nowMillis + MAXIMUM_REQUEST_WINDOW_MILLIS,
+        issuedAtMillis + MAXIMUM_REQUEST_WINDOW_MILLIS,
       )
     if (expiresAtMillis <= nowMillis) throw DevicePairingFailure("pairing_challenge_expired")
-    val issuedAtMillis =
-      (nowMillis - REQUEST_CLOCK_SKEW_TOLERANCE_MILLIS).coerceAtLeast(0L)
     val body =
       DeviceBridgePairingBody(
         pairingId = grant.pairingId,
@@ -207,8 +207,8 @@ class DevicePairingCoordinator(
   }
 
   companion object {
-    private const val MAXIMUM_GRANT_WINDOW_MILLIS = 30 * 60 * 1_000L
-    private const val MAXIMUM_REQUEST_WINDOW_MILLIS = 5 * 60 * 1_000L
+    private const val MAXIMUM_GRANT_WINDOW_MILLIS = 12 * 60 * 60 * 1_000L
+    private const val MAXIMUM_REQUEST_WINDOW_MILLIS = 12 * 60 * 60 * 1_000L
     private const val REQUEST_CLOCK_SKEW_TOLERANCE_MILLIS = 30 * 1_000L
   }
 }

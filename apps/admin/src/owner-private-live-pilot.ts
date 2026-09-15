@@ -61,6 +61,7 @@ const PLAYER_ID_PATTERN =
   /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,62}[^\s\u0000-\u001f\u007f])?$/u;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
+export const PRIVATE_LIVE_PILOT_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 const STOP_REASONS = new Set<PrivateLivePilotStopReason>([
   'cap_review',
   'execution_uncertainty',
@@ -167,7 +168,7 @@ function validatePreparation(request: PrepareApprovedPrivateLivePilotRequest): v
     players.some((playerId) => !PLAYER_ID_PATTERN.test(playerId)) ||
     !Number.isFinite(request.activeFrom.getTime()) ||
     !Number.isFinite(request.expiresAt.getTime()) ||
-    request.expiresAt.getTime() !== request.activeFrom.getTime() + 2 * 60 * 60 * 1_000
+    request.expiresAt.getTime() !== request.activeFrom.getTime() + PRIVATE_LIVE_PILOT_LIFETIME_MS
   ) {
     throw new OwnerPrivateLivePilotRejectedError();
   }

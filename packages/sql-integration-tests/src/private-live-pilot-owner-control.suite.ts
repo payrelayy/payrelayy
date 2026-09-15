@@ -373,7 +373,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             randomUUID(),
             prerequisites.playerIds,
             missingEvidenceActiveFrom,
-            new Date(missingEvidenceActiveFrom.getTime() + 2 * 60 * 60 * 1_000),
+            new Date(missingEvidenceActiveFrom.getTime() + 12 * 60 * 60 * 1_000),
           ],
         );
 
@@ -410,7 +410,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
 
         const requestId = randomUUID();
         const activeFrom = new Date(Date.now() - 15_000);
-        const expiresAt = new Date(activeFrom.getTime() + 2 * 60 * 60 * 1_000);
+        const expiresAt = new Date(activeFrom.getTime() + 12 * 60 * 60 * 1_000);
         const prepareValues: readonly SqlValue[] = [
           ownerAuthUserId,
           requestId,
@@ -449,7 +449,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
                     and pilot.maximum_per_player_minor = 2500
                     and pilot.maximum_aggregate_minor = 12500
                     and pilot.maximum_reservation_count = 5 as exact_caps,
-                  pilot.expires_at = pilot.active_from + interval '2 hours' as exact_duration,
+                  pilot.expires_at = pilot.active_from + interval '12 hours' as exact_duration,
                   (
                     select array_agg(member.provider_code_snapshot order by member.provider_code_snapshot)
                       from app.private_live_deposit_pilot_providers member

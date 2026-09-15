@@ -2,8 +2,8 @@ FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable relea
 =================================================================================
 
 1. Extract the complete ZIP file.
-2. In the FetanAgent Owner page, create a one-use Windows pairing package. It is valid for ten
-   minutes. Keep that page open; do not send the package through Telegram, email, chat, or an issue.
+2. In the FetanAgent Owner page, create a one-use Windows pairing package. It is valid for twelve
+   hours. Keep that page open; do not send the package through Telegram, email, chat, or an issue.
 3. Double-click "Start FetanAgent Companion.vbs". Select Yes when asked whether to pair, then paste
    the complete package into the dedicated multiline pairing window.
 4. On the first run only, enter the exact agent identity displayed in the KemerBet account header.

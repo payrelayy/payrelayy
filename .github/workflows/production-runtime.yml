@@ -541,7 +541,7 @@ jobs:
           helper='/usr/local/sbin/fetanagent-production-deploy-helper'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
-          echo 'Production web, Telegram, and Android enrollment transport are live continuously; no calendar expiry is installed and every financial switch remains disabled.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Production web, Telegram, and Android enrollment transport are live continuously; this deployment changes no database financial switch, and guarded TeleBirr proof intake still requires a separately active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
           echo 'The independently signed Windows companion production pairing and read-only transport is live on the production database.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back a failed production activation

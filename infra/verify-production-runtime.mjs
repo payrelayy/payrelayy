@@ -6,17 +6,27 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 const read = (path) => readFile(`${repositoryRoot}/${path}`, 'utf8');
 
-const [compose, workflow, helper, sudoers, provisionSql, disableSql, packageJson, quality] =
-  await Promise.all([
-    read('infra/compose.production.yaml'),
-    read('.github/workflows/production-runtime.yml'),
-    read('infra/operations/fetanagent-production-deploy-helper.sh'),
-    read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
-    read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
-    read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
-    read('package.json'),
-    read('.github/workflows/quality.yml'),
-  ]);
+const [
+  compose,
+  workflow,
+  helper,
+  sudoers,
+  provisionSql,
+  disableSql,
+  assignmentRuntimeInputSql,
+  packageJson,
+  quality,
+] = await Promise.all([
+  read('infra/compose.production.yaml'),
+  read('.github/workflows/production-runtime.yml'),
+  read('infra/operations/fetanagent-production-deploy-helper.sh'),
+  read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
+  read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
+  read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
+  read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
+  read('package.json'),
+  read('.github/workflows/quality.yml'),
+]);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
@@ -168,13 +178,19 @@ for (const [name, service] of [
   assert.match(service, /KEMERBET_EXECUTOR_ENABLED: 'false'/u, name);
   assert.match(service, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u, name);
 }
-assert.match(telebirrAssignment, /TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'/u);
 assert.match(telebirrAssignment, /TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production/u);
-assert.match(telebirrAssignment, /network_mode: none/u);
-assert.doesNotMatch(
-  telebirrAssignment,
-  /DATABASE_URL|REFERENCE_OPENING|RUNTIME_MANIFEST|SIGNER_PRIVATE|NODE_EXTRA_CA_CERTS|secrets:/u,
-);
+for (const expression of [
+  /TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE: \/run\/secrets\/telebirr_assignment_broker_database_url/u,
+  /TELEBIRR_ASSIGNMENT_BROKER_REFERENCE_OPENING_KEY_FILE: \/run\/secrets\/telebirr_assignment_broker_reference_opening_key\.v1\.json/u,
+  /TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_MANIFEST_FILE: \/run\/secrets\/telebirr_assignment_broker_runtime_manifest\.v1\.json/u,
+  /TELEBIRR_ASSIGNMENT_BROKER_SIGNER_PRIVATE_KEY_FILE: \/run\/secrets\/telebirr_assignment_broker_signer\.pkcs8\.der/u,
+  /NODE_EXTRA_CA_CERTS: \/run\/configs\/supabase_ca_certificate/u,
+  /telebirr_assignment_database_egress/u,
+]) {
+  assert.match(telebirrAssignment, expression);
+}
+assert.equal(count(telebirrAssignment, /- source: /gu), 5);
+assert.doesNotMatch(telebirrAssignment, /ENROLLMENT_ONLY|network_mode: none/u);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -229,14 +245,18 @@ assert.match(
 );
 assert.match(
   networks,
+  /telebirr_assignment_database_egress:\s*\r?\n    driver: bridge\s*\r?\n    enable_ipv6: true/u,
+);
+assert.match(
+  networks,
   /telebirr_device_state_database_egress:\s*\r?\n    driver: bridge\s*\r?\n    enable_ipv6: true/u,
 );
 const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 23);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 23);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 27);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 27);
 assert.doesNotMatch(secrets, /sb_publishable_|postgresql:\/\/|[0-9a-f]{64}/u);
 
 assert.match(workflow, /^name: Production application runtime$/mu);
@@ -255,8 +275,8 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  3,
-  'provision, rollback, and stop must share the reviewed administrative pooler route',
+  4,
+  'manifest, provision, rollback, and stop must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
   workflow,
@@ -311,18 +331,26 @@ assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
+assert.match(workflow, /confirm_telebirr_pilot_revision_id:/u);
+assert.match(workflow, /confirm_telebirr_activation_epoch:/u);
+assert.match(workflow, /Build the exact active production TeleBirr assignment manifest/u);
+assert.match(workflow, /production-telebirr-assignment-runtime-input\.sql/u);
+assert.match(workflow, /build-telebirr-assignment-runtime-manifest\.mjs/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
 assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
 assert.match(workflow, /"\$CONFIRMED_PROJECT" != "\$STAGING_PROJECT_REF"/u);
 assert.match(workflow, /Verify restricted server boundary and storage/u);
 assert.match(workflow, /current-state/u);
-assert.match(workflow, /Provision continuous least-privilege production logins/u);
-assert.match(workflow, /production-nonfinancial-runtimes-provision\.sql/u);
+assert.match(workflow, /Verify the existing continuous least-privilege production logins/u);
+assert.doesNotMatch(deployJob, /production-nonfinancial-runtimes-provision\.sql/u);
 assert.match(workflow, /psql_with_connection_retry\(\)/u);
 assert.match(workflow, /for attempt in 1 2 3 4; do/u);
 assert.match(workflow, /"\$status" -eq 2 && "\$attempt" -lt 4/u);
 assert.match(workflow, /sleep "\$\(\(attempt \* 2\)\)"/u);
-assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 4);
+assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 2);
+assert.match(workflow, /assignment_login_ready=false/u);
+assert.match(workflow, /PGPORT=5432/u);
+assert.match(workflow, /PGUSER="\$ASSIGNMENT_RUNTIME_ROLE\.\$PRODUCTION_PROJECT_REF"/u);
 assert.match(workflow, /Atomically activate production and switch the public edge/u);
 assert.match(workflow, /Verify live public production services/u);
 assert.match(workflow, /Private production control/u);
@@ -367,13 +395,25 @@ for (const target of [
   assert.match(workflow, new RegExp(`fetanagent-${target}:\\$tag`, 'u'));
 }
 for (const protectedName of [
+  'TELEBIRR_ASSIGNMENT_SIGNER_ID',
+  'TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64',
   'TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64',
   'TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64',
   'TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64',
+  'TELEBIRR_REFERENCE_OPENING_KEY_ID',
+  'TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64',
+  'telebirr-assignment-database-url',
+  'telebirr-assignment-runtime-manifest.v1.json',
+  'telebirr-assignment-signer.pkcs8.der',
+  'telebirr-reference-opening-key.v1.json',
   'telebirr-device-state-database-url',
 ]) {
   assert.match(workflow, new RegExp(escapeRegExp(protectedName), 'u'));
 }
+assert.match(
+  workflow,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"\$ASSIGNMENT_RUNTIME_ROLE\.\$PRODUCTION_PROJECT_REF"[\s\S]*?"\$PRODUCTION_DATABASE_POOLER_HOST"/u,
+);
 assert.match(
   workflow,
   /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"[\s\S]*?"\$PRODUCTION_DATABASE_POOLER_HOST"/u,
@@ -382,10 +422,8 @@ assert.doesNotMatch(
   workflow,
   /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"/u,
 );
-assert.doesNotMatch(
-  workflow,
-  /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64|secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u,
-);
+assert.match(workflow, /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64/u);
+assert.match(workflow, /secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u);
 
 for (const action of [
   'actions/checkout',
@@ -496,7 +534,16 @@ assert.match(
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
 assert.match(helper, /expected_count=29/u);
-assert.match(helper, /expected_count=34/u);
+assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
+assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
+for (const protectedFile of [
+  'telebirr-assignment-database-url',
+  'telebirr-assignment-runtime-manifest.v1.json',
+  'telebirr-assignment-signer.pkcs8.der',
+  'telebirr-reference-opening-key.v1.json',
+]) {
+  assert.match(helper, new RegExp(escapeRegExp(protectedFile), 'u'));
+}
 assert.match(helper, /images\+=\(companion-device-bridge\)/u);
 assert.match(helper, /services\+=\(production-companion-device-bridge\)/u);
 assert.match(
@@ -535,6 +582,30 @@ assert.match(provisionSql, /Financial runtime logins must remain disabled/u);
 assert.match(provisionSql, /begin transaction isolation level serializable/u);
 assert.match(disableSql, /begin transaction isolation level serializable/u);
 assert.doesNotMatch(`${provisionSql}\n${disableSql}`, /2026-09-0|interval '24 hours'/u);
+
+assert.match(
+  assignmentRuntimeInputSql,
+  /begin transaction isolation level serializable read only/u,
+);
+assert.match(assignmentRuntimeInputSql, /private_trusted_telebirr_activation_control/u);
+assert.match(assignmentRuntimeInputSql, /private_trusted_telebirr_activation_epochs/u);
+assert.match(assignmentRuntimeInputSql, /private_trusted_telebirr_emergency_disable_intents/u);
+assert.match(assignmentRuntimeInputSql, /private_live_telebirr_device_enrollment_certificates/u);
+assert.match(assignmentRuntimeInputSql, /private_live_telebirr_device_revocations/u);
+assert.match(
+  assignmentRuntimeInputSql,
+  /pilot\.expires_at > pg_catalog\.clock_timestamp\(\) \+ interval '10 minutes'/u,
+);
+assert.match(
+  assignmentRuntimeInputSql,
+  /signer\.valid_until > pg_catalog\.clock_timestamp\(\) \+ interval '30 days'/u,
+);
+assert.match(assignmentRuntimeInputSql, /receiverAccountHolderNameSnapshot/u);
+assert.match(assignmentRuntimeInputSql, /rollback;/u);
+assert.doesNotMatch(
+  assignmentRuntimeInputSql,
+  /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
+);
 
 assert.match(packageJson, /node infra\/verify-production-runtime\.mjs/u);
 assert.match(quality, /bash -n infra\/operations\/fetanagent-production-deploy-helper\.sh/u);

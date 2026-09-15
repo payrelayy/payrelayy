@@ -8,12 +8,22 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
+const repairMigrationPath = fileURLToPath(
+  new URL(
+    '../../../supabase/migrations/20260915203500_fix_expired_telebirr_shadow_recovery_least.sql',
+    import.meta.url,
+  ),
+);
 
 let migrationSource = '';
 let recoverySource = '';
+let repairMigrationSource = '';
 
 beforeAll(async () => {
-  migrationSource = await readFile(migrationPath, 'utf8');
+  [migrationSource, repairMigrationSource] = await Promise.all([
+    readFile(migrationPath, 'utf8'),
+    readFile(repairMigrationPath, 'utf8'),
+  ]);
   recoverySource =
     migrationSource.match(
       /create function app\.recover_expired_private_live_telebirr_payment_to_shadow\([\s\S]+?\n\$\$;/u,
@@ -93,5 +103,24 @@ describe('expired-pilot TeleBirr no-credit recovery source boundary', () => {
     );
     expect(recoverySource).toContain('existing_recovery.expires_at');
     expect(recoverySource).toContain('true;');
+  });
+
+  it('repairs only the reviewed LEAST defect and preserves the deployed function boundary', () => {
+    expect(repairMigrationSource).toContain(
+      "defective_expression constant text := 'recovered_until := pg_catalog.least('",
+    );
+    expect(repairMigrationSource).toContain(
+      "corrected_expression constant text := 'recovered_until := least('",
+    );
+    expect(repairMigrationSource).toContain(
+      "'2b82945ec661374530174c236afc916b15717de92165c0e37731bdac6ba1e699'",
+    );
+    expect(repairMigrationSource).toContain('pg_catalog.pg_get_functiondef(routine.oid)');
+    expect(repairMigrationSource).toContain('routine.prosrc = corrected_source');
+    expect(repairMigrationSource).toContain('routine.proowner = original_owner');
+    expect(repairMigrationSource).toContain('routine.proacl is not distinct from original_acl');
+    expect(repairMigrationSource).not.toMatch(
+      /recover_expired_private_live_telebirr_payment_to_shadow\s*\(\s*'[0-9a-f-]+'/iu,
+    );
   });
 });

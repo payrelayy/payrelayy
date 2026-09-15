@@ -35,6 +35,10 @@ export const TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE =
   '/run/configs/supabase_ca_certificate' as const;
 export const TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE =
   'fetanagent_telebirr_shadow_verifier_runtime' as const;
+export const TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST =
+  'aws-0-eu-west-1.pooler.supabase.com' as const;
+export const TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER =
+  `${TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE}.${TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE}` as const;
 export const TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE =
   '/run/secrets/telebirr_shadow_verifier_database_url' as const;
 export const TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE =
@@ -294,16 +298,16 @@ function decodedComponent(value: string): string {
   }
 }
 
-function connectionFromUrl<const RuntimeRole extends string>(
+function connectionFromUrl<const RuntimeUser extends string>(
   value: string,
-  deploymentTarget: TrustedTelebirrVerifierDeploymentTarget,
-  expectedRuntimeRole: RuntimeRole,
+  expectedHost: string,
+  expectedRuntimeUser: RuntimeUser,
 ): Readonly<{
   database: 'postgres';
   host: string;
   password: string;
   port: 5432;
-  user: RuntimeRole;
+  user: RuntimeUser;
 }> {
   let url: URL;
   try {
@@ -315,12 +319,11 @@ function connectionFromUrl<const RuntimeRole extends string>(
   const user = decodedComponent(url.username);
   const password = decodedComponent(url.password);
   const database = decodedComponent(url.pathname.slice(1));
-  const expectedTarget = TRUSTED_TELEBIRR_VERIFIER_DATABASE_TARGETS[deploymentTarget];
   if (
     (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
-    url.hostname !== expectedTarget.host ||
+    url.hostname !== expectedHost ||
     (url.port !== '' && url.port !== '5432') ||
-    user !== expectedRuntimeRole ||
+    user !== expectedRuntimeUser ||
     password.length < 16 ||
     database !== 'postgres' ||
     url.hash !== '' ||
@@ -332,10 +335,10 @@ function connectionFromUrl<const RuntimeRole extends string>(
   }
   return Object.freeze({
     database: 'postgres' as const,
-    host: expectedTarget.host,
+    host: expectedHost,
     password,
     port: 5432 as const,
-    user: expectedRuntimeRole,
+    user: expectedRuntimeUser,
   });
 }
 
@@ -465,7 +468,7 @@ export function loadTrustedTelebirrVerifierConfig(
   }
   const connectionWithoutCa = connectionFromUrl(
     guardedText(readGuarded(databaseFile, dependencies, 'secret')),
-    deploymentTarget,
+    databaseTarget.host,
     TRUSTED_TELEBIRR_VERIFIER_DATABASE_ROLE,
   );
   const pinnedKeys = pinsFromManifest(
@@ -526,10 +529,18 @@ export function loadTelebirrShadowVerifierConfig(
     ) {
       throw new Error();
     }
+    const runtimeHost =
+      deploymentTarget === 'production'
+        ? TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST
+        : databaseTarget.host;
+    const runtimeUser =
+      deploymentTarget === 'production'
+        ? TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER
+        : TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE;
     const connectionWithoutCa = connectionFromUrl(
       guardedText(readGuarded(databaseFile, dependencies, 'secret')),
-      deploymentTarget,
-      TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE,
+      runtimeHost,
+      runtimeUser,
     );
     const pinnedKeys = pinsFromManifest(
       guardedText(readGuarded(pinFile, dependencies, 'public_config')),

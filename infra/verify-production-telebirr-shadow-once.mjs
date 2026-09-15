@@ -13,6 +13,13 @@ const disable = readFileSync(
   new URL('./sql/production-telebirr-shadow-verifier-once-disable.sql', import.meta.url),
   'utf8',
 );
+const verifierConfig = readFileSync(
+  new URL(
+    '../apps/trusted-telebirr-verifier/src/trusted-telebirr-verifier-config.ts',
+    import.meta.url,
+  ),
+  'utf8',
+);
 
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
@@ -52,6 +59,14 @@ assert.doesNotMatch(workflow, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=true/
 assert.doesNotMatch(workflow, /TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=true/u);
 assert.doesNotMatch(workflow, /--publish|-p [0-9]/u);
 assert.doesNotMatch(workflow, /PRODUCTION_DATABASE_DIRECT_HOST|PGHOSTADDR|ssh .*?-L/u);
+assert.match(
+  verifierConfig,
+  /TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST[\s\S]*?'aws-0-eu-west-1\.pooler\.supabase\.com'/u,
+);
+assert.match(
+  verifierConfig,
+  /TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER[\s\S]*?TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE/u,
+);
 
 assert.match(provision, /PRODUCTION_PROJECT_REF/u);
 assert.match(provision, /xzztugbgtulptnbpoelr/u);

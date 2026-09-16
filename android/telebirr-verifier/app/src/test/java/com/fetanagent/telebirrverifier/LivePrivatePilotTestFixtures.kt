@@ -172,3 +172,25 @@ internal fun livePilotProviderFound(html: String = livePilotHtml()): ProviderDoc
     sourceDocumentDigest = LivePilotCanonicalTranscripts.sha256(html.toByteArray()),
     retrievedAt = "2026-08-20T18:03:00.000Z",
   )
+
+internal fun currentOfficialLivePilotHtml(
+  reference: String = PILOT_REFERENCE,
+  receiverName: String = "PILOT RECEIVER",
+  status: String = "Completed",
+): String =
+  """
+  <html><body><h1>Ethio telecom Share Company</h1><table>
+    <tr><td>የከፋይ ስም/Payer Name</td><td>TEST PAYER</td></tr>
+    <tr><td>የገንዘብ ተቀባይ ስም/Credited Party name</td><td>$receiverName</td></tr>
+    <tr><td>የግብይት ሁኔታ/transaction status <td>$status</td></tr>
+    <tr>
+      <td>የደረሰኝ ቁጥር/Invoice No.</td>
+      <td>የክፍያ ቀን/Payment date</td>
+      <td>የተከፈለው መጠን/Settled Amount</td>
+    </tr>
+    <tr><td>$reference</td><td>20-08-2026 21:01:45</td><td>25 Birr</td></tr>
+    <tr><td>የክፍያ ዘዴ/Payment Mode</td><td>telebirr</td><td></td></tr>
+    <tr><td>የክፍያ ምክንያት/Payment Reason</td><td>Send Money to Registered Customer</td><td></td></tr>
+    <tr><td>የክፍያ ቻናል/Payment channel</td><td>API/App</td><td></td></tr>
+  </table></body></html>
+  """.trimIndent()

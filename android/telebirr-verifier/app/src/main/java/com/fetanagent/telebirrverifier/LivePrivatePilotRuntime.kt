@@ -371,11 +371,25 @@ class LivePrivatePilotRuntimeCoordinator(
               ),
           )
         }
-    val observedAt = now()
-    if (observedAt == null) {
+    val completedAt = now()
+    if (completedAt == null) {
       release(assignmentBodyDigest)
       return attention("device_clock_unavailable")
     }
+    if (completedAt < assignment.body.issuedAt || completedAt >= assignment.body.expiresAt) {
+      release(assignmentBodyDigest)
+      return attention("assignment_expired_during_observation")
+    }
+    // A found receipt carries the provider retrieval instant inside the signed facts. The server
+    // deliberately requires the enclosing observation timestamp to equal that instant exactly;
+    // using a second clock read here makes otherwise valid evidence fail whenever parsing and
+    // signing take even one millisecond. Review-only evidence without a retrieval instant keeps
+    // the post-observation clock as its conservative fallback.
+    val observedAt =
+      when (val facts = parsed.facts) {
+        is LivePilotFoundFacts -> facts.retrievedAt
+        is LivePilotReviewRequiredFacts -> facts.retrievedAt ?: completedAt
+      }
     if (observedAt < assignment.body.issuedAt || observedAt >= assignment.body.expiresAt) {
       release(assignmentBodyDigest)
       return attention("assignment_expired_during_observation")

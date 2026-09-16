@@ -194,6 +194,30 @@ class LivePrivatePilotRuntimeTest {
   }
 
   @Test
+  fun `binds a found observation to the provider retrieval instant`() {
+    val fixture = RuntimeFixture()
+    val postRetrievalClock = Instant.parse("2026-08-20T18:03:00.100Z").toEpochMilli()
+    var uploaded: LivePilotSignedObservation? = null
+    val coordinator =
+      fixture.coordinator(
+        clock = MillisClock { postRetrievalClock },
+        uploader = LivePilotObservationUploader { _, observation ->
+          uploaded = observation
+          LivePilotUploadResult.Acknowledged(observation.bodyDigest)
+        },
+      )
+
+    val status = coordinator.runOnce()
+    val observation = requireNotNull(uploaded)
+    val facts = observation.body.facts as LivePilotFoundFacts
+
+    assertEquals(LivePilotRuntimeState.READY, status.state)
+    assertEquals("2026-08-20T18:03:00.000Z", facts.retrievedAt)
+    assertEquals(facts.retrievedAt, observation.body.observedAt)
+    assertNoAuthority(status)
+  }
+
+  @Test
   fun `retries the exact staged observation after an uncertain upload without refetching`() {
     val fixture = RuntimeFixture()
     var sourceCalls = 0

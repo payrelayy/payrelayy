@@ -415,6 +415,10 @@ jobs:
                                proof.id,
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )
+                          or app.private_telebirr_shadow_observation_clock_retry_is_valid(
+                               proof.id,
+                               nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                             )
                         )
                       )
                      or (

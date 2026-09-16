@@ -14,21 +14,15 @@ const workflowPath = fileURLToPath(
     import.meta.url,
   ),
 );
-const operationSqlPath = fileURLToPath(
-  new URL('../../../infra/sql/production-telebirr-shadow-policy-recovery.sql', import.meta.url),
-);
-
 let migrationSource = '';
 let workflowSource = '';
-let operationSqlSource = '';
 let recoverySource = '';
 let triggerSource = '';
 
 beforeAll(async () => {
-  [migrationSource, workflowSource, operationSqlSource] = await Promise.all([
+  [migrationSource, workflowSource] = await Promise.all([
     readFile(migrationPath, 'utf8'),
     readFile(workflowPath, 'utf8'),
-    readFile(operationSqlPath, 'utf8'),
   ]);
   recoverySource =
     migrationSource.match(
@@ -123,11 +117,8 @@ describe('TeleBirr shadow verifier-policy recovery boundary', () => {
     expect(workflowSource).toContain(
       '--file=infra/sql/production-telebirr-shadow-policy-recovery.sql',
     );
-    expect(operationSqlSource).toContain(
-      'app.retry_quarantined_private_telebirr_shadow_after_policy_fix(',
-    );
-    expect(operationSqlSource).toContain("'financialActionsEnabled', false");
-    expect(operationSqlSource).toContain("'kemerBetCreditEnabled', false");
-    expect(operationSqlSource).toContain("quarantine.reason_code = 'trusted_evidence_invalid'");
+    expect(workflowSource).toContain('.financialActionsEnabled == false');
+    expect(workflowSource).toContain('.kemerBetCreditEnabled == false');
+    expect(workflowSource).toContain('.quarantinePreserved == true');
   });
 });

@@ -17,6 +17,9 @@ const [
   assignmentRuntimeInputSql,
   shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
+  assignmentBrokerContinuousRuntimeMigration,
+  assignmentBrokerConfig,
+  assignmentBrokerPostgres,
   packageJson,
   quality,
 ] = await Promise.all([
@@ -30,6 +33,9 @@ const [
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
   read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
+  read('supabase/migrations/20260916142230_telebirr_assignment_broker_continuous_runtime.sql'),
+  read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
+  read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
 ]);
@@ -633,6 +639,46 @@ assert.match(provisionSql, /Financial runtime logins must remain disabled/u);
 assert.match(provisionSql, /begin transaction isolation level serializable/u);
 assert.match(disableSql, /begin transaction isolation level serializable/u);
 assert.doesNotMatch(`${provisionSql}\n${disableSql}`, /2026-09-0|interval '24 hours'/u);
+
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /create or replace function app\.require_telebirr_assignment_broker_session\(\)/u,
+);
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /role\.rolname = 'fetanagent_telebirr_assignment_broker_runtime'/u,
+);
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /role\.rolvaliduntil = 'infinity'::timestamptz/u,
+);
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /role\.rolvaliduntil > pg_catalog\.clock_timestamp\(\) \+ interval '5 minutes'/u,
+);
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /role\.rolvaliduntil\s+<= pg_catalog\.clock_timestamp\(\) \+ interval '24 hours 5 minutes'/u,
+);
+assert.match(
+  assignmentBrokerContinuousRuntimeMigration,
+  /alter function app\.require_telebirr_assignment_broker_session\(\) owner to postgres/u,
+);
+assert.doesNotMatch(
+  assignmentBrokerContinuousRuntimeMigration,
+  /\b(?:grant|revoke|insert|update|delete|truncate|drop)\b/iu,
+);
+assert.match(
+  assignmentBrokerConfig,
+  /deploymentTarget === 'production' \? \('continuous' as const\) : \('bounded_24h' as const\)/u,
+);
+assert.match(assignmentBrokerPostgres, /\$1::text = 'bounded_24h'/u);
+assert.match(assignmentBrokerPostgres, /\$1::text = 'continuous'/u);
+assert.match(assignmentBrokerPostgres, /role\.rolvaliduntil = 'infinity'::timestamptz/u);
+assert.match(
+  assignmentBrokerPostgres,
+  /assertTelebirrAssignmentBrokerCatalogPreflight\(guarded, runtimeCredentialValidity\)/u,
+);
 
 assert.match(
   assignmentRuntimeInputSql,

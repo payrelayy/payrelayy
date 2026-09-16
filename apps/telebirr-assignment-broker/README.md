@@ -33,9 +33,10 @@ Enabled startup reads only these fixed files through `lstat`/`realpath`/`O_NOFOL
 before-and-after checks. Every file must be owned by root or the effective non-root runtime user;
 the actual mount permissions must allow that runtime user to open it:
 
-- `/run/secrets/telebirr_assignment_broker_database_url` — mode `0400`, the dedicated short-lived
-  runtime login on the selected target's exact direct host or session pooler with
-  `sslmode=verify-full`;
+- `/run/secrets/telebirr_assignment_broker_database_url` — mode `0400`, the dedicated runtime login
+  on the selected target's exact direct host or session pooler with `sslmode=verify-full`; staging
+  requires a bounded 24-hour credential, while production requires the separately provisioned
+  continuous non-financial credential;
 - `/run/secrets/telebirr_assignment_broker_reference_opening_key.v1.json` — mode `0400`, only the
   TeleBirr/purpose-scoped child key and its fingerprint;
 - `/run/secrets/telebirr_assignment_broker_runtime_manifest.v1.json` — mode `0400`, canonical
@@ -68,5 +69,5 @@ secret-generation, or enablement action.
 
 No credential, runtime `LOGIN`, receiver value, child key, signer, or bridge deployment has been
 provisioned by this source change. No fixed calendar date stops the broker; only explicit gates,
-database pilot/enrollment/key state, bounded runtime-role validity, and short lease validity windows
-can deny an assignment.
+database pilot/enrollment/key state, target-exact runtime-role validity, and short lease validity
+windows can deny an assignment.

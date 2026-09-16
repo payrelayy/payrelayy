@@ -338,7 +338,7 @@ function decodeUrlComponent(value: string): string {
 function connectionFromUrl(
   value: string,
   deploymentTarget: TelebirrAssignmentBrokerDeploymentTarget,
-): Omit<TelebirrAssignmentBrokerConnectionConfig, 'ca'> {
+): Omit<TelebirrAssignmentBrokerConnectionConfig, 'ca' | 'runtimeCredentialValidity'> {
   let url: URL;
   try {
     url = new URL(value);
@@ -714,7 +714,12 @@ export function loadTelebirrAssignmentBrokerConfig(
     mode: 'operational',
     deploymentTarget,
     projectReference: databaseTarget.projectReference,
-    connection: Object.freeze({ ...connectionWithoutCa, ca }),
+    connection: Object.freeze({
+      ...connectionWithoutCa,
+      ca,
+      runtimeCredentialValidity:
+        deploymentTarget === 'production' ? ('continuous' as const) : ('bounded_24h' as const),
+    }),
     openingKey,
     receiverManifest: manifest.receiverManifest,
     signer,

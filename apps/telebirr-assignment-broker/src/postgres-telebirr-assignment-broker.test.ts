@@ -97,6 +97,19 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
       query: vi.fn(async () => ({ rows: [preflightRow()] })),
     };
     await expect(assertTelebirrAssignmentBrokerCatalogPreflight(database)).resolves.toBeUndefined();
+    await expect(
+      assertTelebirrAssignmentBrokerCatalogPreflight(database, 'continuous'),
+    ).resolves.toBeUndefined();
+    expect(database.query).toHaveBeenNthCalledWith(
+      1,
+      TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL,
+      ['bounded_24h'],
+    );
+    expect(database.query).toHaveBeenNthCalledWith(
+      2,
+      TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL,
+      ['continuous'],
+    );
 
     const unsafe: TelebirrAssignmentBrokerPostgresQuery = {
       query: vi.fn(async () => ({ rows: [preflightRow({ runtime_login_is_safe: false })] })),
@@ -127,6 +140,10 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
     expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain(
+      "role.rolvaliduntil = 'infinity'::timestamptz",
+    );
+    expect(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL).toContain("$1::text = 'bounded_24h'");
   });
 
   it('maps the exact lease projection and converts PostgreSQL timestamps canonically', async () => {
@@ -245,6 +262,7 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
         host: 'db.example.test',
         password: 'synthetic-password-value',
         port: 5432,
+        runtimeCredentialValidity: 'continuous',
         user: 'fetanagent_telebirr_assignment_broker_runtime',
       },
       { createClient },
@@ -256,6 +274,9 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
       }),
     );
     await expect(runtime.ready()).resolves.toBe(true);
+    expect(client.query).toHaveBeenCalledWith(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL, [
+      'continuous',
+    ]);
     await expect(runtime.close()).resolves.toBeUndefined();
     expect(client.end).toHaveBeenCalledOnce();
   });
@@ -276,6 +297,7 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
           host: 'db.example.test',
           password: 'synthetic-password-value',
           port: 5432,
+          runtimeCredentialValidity: 'bounded_24h',
           user: 'fetanagent_telebirr_assignment_broker_runtime',
         },
         { createClient: () => client },

@@ -41,6 +41,8 @@ export const TELEBIRR_ASSIGNMENT_BROKER_PREFLIGHT_KEYS = [
   'default_function_execution_private',
 ] as const;
 
+export type TelebirrAssignmentBrokerRuntimeCredentialValidity = 'bounded_24h' | 'continuous';
+
 export const TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL = `
   select
     current_user = '${BROKER_RUNTIME_ROLE}' and session_user = current_user
@@ -52,8 +54,16 @@ export const TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL = `
         and not role.rolcreatedb and not role.rolcreaterole
         and not role.rolreplication and not role.rolbypassrls
         and role.rolconnlimit = 1 and role.rolvaliduntil is not null
-        and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
-        and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+        and (
+          (
+            $1::text = 'bounded_24h'
+            and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
+            and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+          ) or (
+            $1::text = 'continuous'
+            and role.rolvaliduntil = 'infinity'::timestamptz
+          )
+        )
     ) as runtime_login_is_safe,
     (
       select count(*) = 1 and pg_catalog.bool_and(
@@ -387,9 +397,12 @@ function timestamp(value: unknown): string | undefined {
 
 export async function assertTelebirrAssignmentBrokerCatalogPreflight(
   database: TelebirrAssignmentBrokerPostgresQuery,
+  runtimeCredentialValidity: TelebirrAssignmentBrokerRuntimeCredentialValidity = 'bounded_24h',
 ): Promise<void> {
   try {
-    const result = await database.query(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL, []);
+    const result = await database.query(TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL, [
+      runtimeCredentialValidity,
+    ]);
     if (result.rows.length !== 1 || !exactTrueRow(result.rows[0])) throw new Error();
   } catch {
     throw new TelebirrAssignmentBrokerPostgresUnavailableError();
@@ -397,13 +410,19 @@ export async function assertTelebirrAssignmentBrokerCatalogPreflight(
 }
 
 export class PostgresTelebirrAssignmentBrokerDatabase implements TelebirrAssignmentBrokerDatabase {
-  constructor(private readonly database: TelebirrAssignmentBrokerPostgresQuery) {}
+  constructor(
+    private readonly database: TelebirrAssignmentBrokerPostgresQuery,
+    private readonly runtimeCredentialValidity: TelebirrAssignmentBrokerRuntimeCredentialValidity = 'bounded_24h',
+  ) {}
 
   async leaseAssignment(
     request: TelebirrAssignmentLeaseRequest,
   ): Promise<TelebirrAssignmentLease | null> {
     try {
-      await assertTelebirrAssignmentBrokerCatalogPreflight(this.database);
+      await assertTelebirrAssignmentBrokerCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(LEASE_TELEBIRR_ASSIGNMENT_SQL, [
         request.deviceEnrollmentId,
         request.leasedBy,
@@ -460,7 +479,10 @@ export class PostgresTelebirrAssignmentBrokerDatabase implements TelebirrAssignm
     request: TelebirrAssignmentPersistenceRequest,
   ): Promise<TelebirrPersistedAssignmentSignature> {
     try {
-      await assertTelebirrAssignmentBrokerCatalogPreflight(this.database);
+      await assertTelebirrAssignmentBrokerCatalogPreflight(
+        this.database,
+        this.runtimeCredentialValidity,
+      );
       const result = await this.database.query(PERSIST_TELEBIRR_ASSIGNMENT_SIGNATURE_SQL, [
         request.verificationAttemptId,
         request.leaseToken,
@@ -490,6 +512,7 @@ export interface TelebirrAssignmentBrokerConnectionConfig {
   readonly host: string;
   readonly password: string;
   readonly port: 5432;
+  readonly runtimeCredentialValidity: TelebirrAssignmentBrokerRuntimeCredentialValidity;
   readonly user:
     | 'fetanagent_telebirr_assignment_broker_runtime'
     | 'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl'
@@ -525,7 +548,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
   connection: TelebirrAssignmentBrokerConnectionConfig,
   dependencies: TelebirrAssignmentBrokerPostgresRuntimeDependencies = {},
 ): Promise<TelebirrAssignmentBrokerPostgresRuntime> {
-  const { ca, ...postgresConnection } = connection;
+  const { ca, runtimeCredentialValidity, ...postgresConnection } = connection;
   const clientConfig = Object.freeze({
     ...postgresConnection,
     application_name: 'fetanagent_telebirr_assignment_broker',
@@ -575,7 +598,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
       throw new Error();
     }
     lockHeld = true;
-    await assertTelebirrAssignmentBrokerCatalogPreflight(guarded);
+    await assertTelebirrAssignmentBrokerCatalogPreflight(guarded, runtimeCredentialValidity);
   } catch {
     available = false;
     lockHeld = false;
@@ -586,7 +609,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
   }
 
   return Object.freeze({
-    database: new PostgresTelebirrAssignmentBrokerDatabase(guarded),
+    database: new PostgresTelebirrAssignmentBrokerDatabase(guarded, runtimeCredentialValidity),
     async ready() {
       if (!available || closed || !lockHeld) return false;
       try {
@@ -597,7 +620,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
           markUnavailable();
           return false;
         }
-        await assertTelebirrAssignmentBrokerCatalogPreflight(guarded);
+        await assertTelebirrAssignmentBrokerCatalogPreflight(guarded, runtimeCredentialValidity);
         return available && !closed && lockHeld;
       } catch {
         markUnavailable();

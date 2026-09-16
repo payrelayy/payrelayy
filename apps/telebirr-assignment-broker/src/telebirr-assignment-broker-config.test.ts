@@ -220,6 +220,7 @@ describe('private TeleBirr assignment broker configuration', () => {
         database: 'postgres',
         host: 'aws-1-eu-west-1.pooler.supabase.com',
         port: 5432,
+        runtimeCredentialValidity: 'bounded_24h',
         user: 'fetanagent_telebirr_assignment_broker_runtime.spzpiyxheappsfyswewl',
       },
       receiverManifest: {
@@ -360,7 +361,7 @@ describe('private TeleBirr assignment broker configuration', () => {
       enabled: true,
       deploymentTarget: 'production',
       projectReference: TELEBIRR_ASSIGNMENT_BROKER_DATABASE_TARGETS.production.projectReference,
-      connection: { host, user },
+      connection: { host, runtimeCredentialValidity: 'continuous', user },
     });
   });
 

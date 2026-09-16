@@ -550,7 +550,10 @@ export function registerTelebirrShadowVerificationSqlTests(
         ],
         [
           completionFunction,
-          { timestamp: 'authority_at', finalCheck: 'or authority_at >= proof.expires_at' },
+          {
+            timestamp: 'authority_at',
+            finalCheck: "or authority_at >= proof.submitted_at + interval '12 hours'",
+          },
         ],
       ]);
       const definitions = await client.query<{

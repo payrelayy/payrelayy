@@ -1363,5 +1363,40 @@ export function registerTelebirrShadowVerificationSqlTests(
         { feature_key: 'withdrawal_validation', mode: 'disabled', settings: {} },
       ]);
     });
+
+    it('scopes no-document digest uniqueness to settlement candidates', async () => {
+      const obsoleteConstraints = await getClient().query<{ readonly count: string }>(`
+        select count(*)::text as count
+          from pg_catalog.pg_constraint constraint_row
+         where constraint_row.conrelid =
+               'app.private_telebirr_shadow_verification_outcomes'::regclass
+           and constraint_row.conname in (
+             'private_telebirr_shadow_verification_source_document_digest_key',
+             'private_telebirr_shadow_verification_outcom_evidence_digest_key'
+           )
+      `);
+      expect(obsoleteConstraints.rows).toEqual([{ count: '0' }]);
+
+      const scopedIndexes = await getClient().query<{
+        readonly index_name: string;
+        readonly is_unique: boolean;
+        readonly predicate: string | null;
+      }>(`
+        select index_row.indexrelid::regclass::text as index_name,
+               index_row.indisunique as is_unique,
+               pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid) as predicate
+          from pg_catalog.pg_index index_row
+         where index_row.indexrelid in (
+           'app.telebirr_shadow_outcome_settlement_source_document_uidx'::regclass,
+           'app.telebirr_shadow_outcome_settlement_evidence_uidx'::regclass
+         )
+         order by index_name
+      `);
+      expect(scopedIndexes.rows).toHaveLength(2);
+      expect(scopedIndexes.rows.every((row) => row.is_unique)).toBe(true);
+      expect(
+        scopedIndexes.rows.every((row) => row.predicate?.includes('settlement_candidate')),
+      ).toBe(true);
+    });
   });
 }

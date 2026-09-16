@@ -13,6 +13,13 @@ const disable = readFileSync(
   new URL('./sql/production-telebirr-shadow-verifier-once-disable.sql', import.meta.url),
   'utf8',
 );
+const reviewWindowMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260916164000_extend_direct_telebirr_shadow_review_window.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
 const verifierConfig = readFileSync(
   new URL(
     '../apps/trusted-telebirr-verifier/src/trusted-telebirr-verifier-config.ts',
@@ -27,6 +34,12 @@ assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/u);
 assert.match(workflow, /PRODUCTION_DROPLET_ID: '593344964'/u);
 assert.match(workflow, /PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1\.pooler\.supabase\.com/u);
 assert.match(workflow, /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u);
+assert.match(workflow, /confirm_shadow_proof_request_id:/u);
+assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
+assert.match(workflow, /not-applicable for direct shadow intake/u);
+assert.match(workflow, /proof\.id = '\$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid/u);
+assert.match(workflow, /proof\.source_live_verification_job_id is null/u);
+assert.match(workflow, /nullif\('\$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable'\)::uuid/u);
 assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.PRODUCTION_PROJECT_REF \}\}/u);
 assert.match(workflow, /admin_login_ready=false/u);
 assert.match(workflow, /current_user = 'postgres' and session_user = current_user/u);
@@ -87,8 +100,15 @@ assert.match(
 assert.match(provision, /PRODUCTION_PROJECT_REF/u);
 assert.match(provision, /xzztugbgtulptnbpoelr/u);
 assert.match(provision, /TARGET_PILOT_REVISION_ID/u);
+assert.match(provision, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(provision, /SOURCE_LIVE_VERIFICATION_JOB_ID/u);
 assert.match(provision, /RECOVERY_REQUEST_KEY/u);
+assert.match(provision, /review_direct_shadow_request/u);
+assert.match(provision, /safe_direct_shadow/u);
+assert.match(provision, /shadow_proof\.id = :'target_shadow_proof_request_id'::uuid/u);
+assert.match(provision, /telegram_telebirr_shadow_proof_receipts/u);
+assert.match(provision, /private_telebirr_shadow_device_evidence_staging/u);
+assert.match(provision, /shadow_proof\.submitted_at \+ interval '12 hours'/u);
 assert.match(provision, /source_live_verification_job_id = job\.id/u);
 assert.match(provision, /proof\.submitted_at \+ case/u);
 assert.match(provision, /then interval '36 hours'/u);
@@ -147,21 +167,30 @@ assert.match(provision, /begin transaction isolation level read committed/u);
 assert.match(provision, /create_first_shadow_request/u);
 assert.match(provision, /expired_shadow_retry_no_credit/u);
 assert.match(provision, /safe_source_and_open_shadow/u);
-assert.match(provision, /shadow_proof\.retry_request_key = :'recovery_request_key'::uuid/u);
 assert.match(
   provision,
-  /shadow_proof\.infrastructure_retry_request_key =[\s\S]*?:'recovery_request_key'::uuid/u,
+  /shadow_proof\.retry_request_key =[\s\S]*?nullif\(:'recovery_request_key', 'not-applicable'\)::uuid/u,
 );
 assert.match(
   provision,
-  /shadow_proof\.runtime_retry_request_key =[\s\S]*?:'recovery_request_key'::uuid/u,
+  /shadow_proof\.infrastructure_retry_request_key =[\s\S]*?nullif\(:'recovery_request_key', 'not-applicable'\)::uuid/u,
 );
-assert.match(workflow, /proof\.retry_request_key = '\$RECOVERY_REQUEST_KEY'::uuid/u);
+assert.match(
+  provision,
+  /shadow_proof\.runtime_retry_request_key =[\s\S]*?nullif\(:'recovery_request_key', 'not-applicable'\)::uuid/u,
+);
 assert.match(
   workflow,
-  /proof\.infrastructure_retry_request_key =[\s\S]*?'\$RECOVERY_REQUEST_KEY'::uuid/u,
+  /proof\.retry_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
 );
-assert.match(workflow, /proof\.runtime_retry_request_key =[\s\S]*?'\$RECOVERY_REQUEST_KEY'::uuid/u);
+assert.match(
+  workflow,
+  /proof\.infrastructure_retry_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
+);
+assert.match(
+  workflow,
+  /proof\.runtime_retry_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
+);
 assert.match(provision, /login noinherit nocreatedb nocreaterole noreplication nobypassrls/u);
 assert.match(provision, /connection limit 1 password :'shadow_runtime_password'/u);
 assert.match(provision, /interval '20 minutes'/u);
@@ -179,3 +208,15 @@ assert.match(disable, /pg_catalog\.pg_terminate_backend/u);
 assert.match(disable, /deploymentTarget', 'production'/u);
 assert.match(disable, /'financialSwitchesChanged', false/u);
 assert.doesNotMatch(disable, /update app\.feature_switches/u);
+
+assert.match(reviewWindowMigration, /captured_at \+ interval ''12 hours''/u);
+assert.match(reviewWindowMigration, /proof\.submitted_at \+ interval ''12 hours''/u);
+assert.match(reviewWindowMigration, /staged\.staged_at >= proof\.expires_at/u);
+assert.match(reviewWindowMigration, /staged\.staged_at < proof\.expires_at/u);
+assert.match(reviewWindowMigration, /captured_at < profile\.valid_until/u);
+assert.match(reviewWindowMigration, /captured_at < enrollment\.valid_until/u);
+assert.match(reviewWindowMigration, /captured_at < signer\.valid_until/u);
+assert.match(reviewWindowMigration, /private_live_telebirr_device_revocations/u);
+assert.match(reviewWindowMigration, /private_live_telebirr_assignment_signer_revocations/u);
+assert.doesNotMatch(reviewWindowMigration, /insert into app\./u);
+assert.doesNotMatch(reviewWindowMigration, /update app\./u);

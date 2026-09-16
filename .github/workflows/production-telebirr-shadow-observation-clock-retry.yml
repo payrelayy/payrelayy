@@ -1,0 +1,160 @@
+name: Retry production TeleBirr shadow after observation clock fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed dry-run pilot UUID
+        required: true
+        type: string
+      confirm_source_shadow_proof_request_id:
+        description: Type the exact terminal parser-uncertain shadow proof UUID
+        required: true
+        type: string
+      confirm_retry_request_key:
+        description: Type one fresh UUIDv4 for the immutable retry ledger
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RETRY OBSERVATION-CLOCK PRODUCTION TELEBIRR SHADOW - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-observation-clock-retry
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DROPLET_ID: '593344964'
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate exact immutable no-money retry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_SOURCE_PROOF: ${{ inputs.confirm_source_shadow_proof_request_id }}
+      CONFIRMED_RETRY_KEY: ${{ inputs.confirm_retry_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact targets, UUIDs, and no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_SOURCE_PROOF" =~ $uuid ]]
+          [[ "$CONFIRMED_RETRY_KEY" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RETRY OBSERVATION-CLOCK PRODUCTION TELEBIRR SHADOW - NO MONEY' ]]
+
+  retry:
+    name: Create one immutable replacement shadow request
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Create and verify the one-use no-money retry
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SOURCE_SHADOW_PROOF_REQUEST_ID: ${{ inputs.confirm_source_shadow_proof_request_id }}
+          TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          OBSERVATION_CLOCK_RETRY_REQUEST_KEY: ${{ inputs.confirm_retry_request_key }}
+          REVIEWED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$RUNNER_TEMP/production-shadow-clock-retry"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/production-shadow-clock-retry" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          result="$(timeout --signal=TERM --kill-after=5s 45s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-telebirr-shadow-observation-clock-retry.sql)"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_observation_clock_retry" and
+            .deploymentTarget == "production" and
+            .retryState == "armed" and
+            .financialBoundary == "dry_run" and
+            .moneyMoved == false
+          ' <<<"$result" >/dev/null
+          jq '{retryState, financialBoundary, moneyMoved}' <<<"$result" >>"$GITHUB_STEP_SUMMARY"

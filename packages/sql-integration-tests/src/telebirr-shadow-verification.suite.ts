@@ -22,6 +22,7 @@ const shadowTables = [
   'private_telebirr_shadow_assignment_transcripts',
   'private_telebirr_shadow_device_evidence_staging',
   'private_telebirr_shadow_evidence_quarantine',
+  'private_telebirr_shadow_observation_clock_retries',
   'private_telebirr_shadow_proof_requests',
   'private_telebirr_shadow_source_unavailable_retries',
   'private_telebirr_shadow_verification_attempts',

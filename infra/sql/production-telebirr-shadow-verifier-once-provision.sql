@@ -110,6 +110,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
+       or app.private_telebirr_shadow_observation_clock_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
       and exists (
         select 1
@@ -157,6 +161,20 @@ select :'source_live_verification_job_id' = 'not-applicable'
                     and staged.staged_at >= retry.authorized_at
                )
              )
+             or (
+               app.private_telebirr_shadow_observation_clock_retry_is_valid(
+                 shadow_proof.id,
+                  nullif(:'recovery_request_key', 'not-applicable')::uuid
+                )
+                and exists (
+                  select 1
+                    from app.private_telebirr_shadow_observation_clock_retries retry
+                  where retry.retry_request_key =
+                        nullif(:'recovery_request_key', 'not-applicable')::uuid
+                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                    and staged.staged_at >= retry.authorized_at
+                )
+              )
            )
       )
      and not exists (
@@ -232,6 +250,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
              ) = 1
         )
         or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or app.private_telebirr_shadow_observation_clock_retry_is_valid(
              shadow_proof.id,
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
@@ -430,6 +452,10 @@ with locked_feature_switches as materialized (
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
+       or app.private_telebirr_shadow_observation_clock_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
       and exists (
         select 1
@@ -477,6 +503,20 @@ with locked_feature_switches as materialized (
                     and staged.staged_at >= retry.authorized_at
                )
              )
+             or (
+               app.private_telebirr_shadow_observation_clock_retry_is_valid(
+                 shadow_proof.id,
+                  nullif(:'recovery_request_key', 'not-applicable')::uuid
+                )
+                and exists (
+                  select 1
+                    from app.private_telebirr_shadow_observation_clock_retries retry
+                  where retry.retry_request_key =
+                        nullif(:'recovery_request_key', 'not-applicable')::uuid
+                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                    and staged.staged_at >= retry.authorized_at
+                )
+              )
            )
       )
      and not exists (
@@ -552,6 +592,10 @@ with locked_feature_switches as materialized (
              ) = 1
         )
         or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or app.private_telebirr_shadow_observation_clock_retry_is_valid(
              shadow_proof.id,
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
@@ -672,6 +716,9 @@ select (select count(*) from locked_feature_switches) = 7
         ) is not null
    and pg_catalog.to_regprocedure(
          'app.private_telebirr_shadow_source_unavailable_retry_is_valid(uuid,uuid)'
+       ) is not null
+   and pg_catalog.to_regprocedure(
+         'app.private_telebirr_shadow_observation_clock_retry_is_valid(uuid,uuid)'
        ) is not null
    and (select count(*)
           from locked_feature_switches switch_state

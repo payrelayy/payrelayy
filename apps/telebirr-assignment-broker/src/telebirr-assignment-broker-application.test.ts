@@ -43,6 +43,7 @@ function config(): Extract<TelebirrAssignmentBrokerConfig, { enabled: true }> {
       host: 'db.spzpiyxheappsfyswewl.supabase.co',
       password: 'synthetic-password-123456',
       port: 5432,
+      runtimeCredentialValidity: 'bounded_24h',
       user: 'fetanagent_telebirr_assignment_broker_runtime',
     },
     openingKey: {

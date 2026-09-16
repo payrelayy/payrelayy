@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy with active TeleBirr authority, deploy inert maintenance, inspect live status, or stop
+        description: Build only, deploy active authority, deploy no-money shadow review, deploy inert maintenance, inspect, or stop
         required: true
         default: plan
         type: choice
         options:
           - plan
           - deploy
+          - deploy-shadow
           - deploy-inert
           - status
           - stop
@@ -31,11 +32,11 @@ on:
         required: true
         type: string
       confirm_telebirr_pilot_revision_id:
-        description: For an active deploy type the exact active TeleBirr pilot UUID; otherwise type not-applicable
+        description: For a live or shadow deploy type the exact active TeleBirr pilot UUID; otherwise type not-applicable
         required: true
         type: string
       confirm_telebirr_activation_epoch:
-        description: For an active deploy type the exact active TeleBirr activation epoch; otherwise type not-applicable
+        description: For a live-authority deploy type the exact TeleBirr activation epoch; otherwise type not-applicable
         required: true
         type: string
 
@@ -86,6 +87,7 @@ jobs:
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy:DEPLOY PRODUCTION RUNTIME'|\
+            'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'|\
             'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
             'status:STATUS PRODUCTION RUNTIME'|\
             'stop:STOP PRODUCTION RUNTIME') ;;
@@ -97,6 +99,9 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
             [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
             [[ "$CONFIRMED_TELEBIRR_EPOCH" =~ ^[1-9][0-9]{0,17}$ ]]
+          elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
+            [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+            [[ "$CONFIRMED_TELEBIRR_EPOCH" == 'not-applicable' ]]
           else
             [[ "$CONFIRMED_TELEBIRR_PILOT" == 'not-applicable' ]]
             [[ "$CONFIRMED_TELEBIRR_EPOCH" == 'not-applicable' ]]
@@ -104,7 +109,7 @@ jobs:
 
   validate-ci:
     name: Require exact production commit CI
-    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -132,7 +137,7 @@ jobs:
     if: >-
       always() && !cancelled() && needs.validate-target.result == 'success' &&
       (inputs.mode == 'plan' ||
-      ((inputs.mode == 'deploy' || inputs.mode == 'deploy-inert') &&
+      ((inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert') &&
       needs.validate-ci.result == 'success'))
     needs: [validate-target, validate-ci]
     runs-on: ubuntu-24.04
@@ -172,7 +177,7 @@ jobs:
           done
 
       - name: Save sealed image bundle
-        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
         shell: bash
         run: |
           set -euo pipefail
@@ -190,7 +195,7 @@ jobs:
             "fetanagent-gateway:$tag"
 
       - name: Upload sealed image bundle
-        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fetanagent-production-images-${{ github.sha }}
@@ -201,7 +206,7 @@ jobs:
 
   deploy:
     name: Deploy continuous production runtime
-    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-inert'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
     needs: [validate-target, validate-ci, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -290,6 +295,7 @@ jobs:
 
           case "$REQUESTED_MODE" in
             deploy) runtime_deployment_mode='operational' ;;
+            deploy-shadow) runtime_deployment_mode='operational' ;;
             deploy-inert) runtime_deployment_mode='inert-maintenance' ;;
             *)
               echo '::error::A deployment bundle may be prepared only for a deployment mode.'
@@ -520,6 +526,59 @@ jobs:
             "$SECRET_DIR/telebirr-assignment-runtime-manifest.v1.json"
           rm -f -- "$runtime_input"
 
+      - name: Build the exact no-money production TeleBirr shadow assignment manifest
+        if: inputs.mode == 'deploy-shadow'
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          PILOT_REVISION_ID: ${{ inputs.confirm_telebirr_pilot_revision_id }}
+          TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
+          TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_production_telebirr_shadow_assignment_manifest
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          runtime_input="$SECRET_DIR/telebirr-assignment-runtime-input.json"
+          partial_input="$runtime_input.partial"
+          runtime_input_ready=false
+          for attempt in 1 2 3 4; do
+            rm -f -- "$partial_input"
+            if psql -X --quiet --tuples-only --no-align \
+              --set=pilot_revision_id="$PILOT_REVISION_ID" \
+              --set=assignment_signer_id="$TELEBIRR_ASSIGNMENT_SIGNER_ID" \
+              --set=assignment_signer_key_id="$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" \
+              --set=assignment_signer_public_spki_sha256="$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" \
+              --file=infra/sql/production-telebirr-shadow-assignment-runtime-input.sql \
+              >"$partial_input" 2>/dev/null && [[ -s "$partial_input" ]]; then
+              chmod 0600 "$partial_input"
+              mv -- "$partial_input" "$runtime_input"
+              runtime_input_ready=true
+              break
+            fi
+            [[ "$attempt" -lt 4 ]] || break
+            sleep "$((attempt * 2))"
+          done
+          if [[ "$runtime_input_ready" != true ]]; then
+            rm -f -- "$partial_input"
+            echo '::error::The no-money production TeleBirr shadow assignment binding is unavailable.'
+            exit 1
+          fi
+          node infra/build-telebirr-assignment-runtime-manifest.mjs \
+            "$runtime_input" \
+            "$SECRET_DIR/telebirr-assignment-runtime-manifest.v1.json"
+          rm -f -- "$runtime_input"
+
       - name: Verify Telegram identity without exposing the token
         shell: bash
         env:
@@ -641,7 +700,7 @@ jobs:
             "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
           )
           case "$REQUESTED_MODE" in
-            deploy)
+            deploy|deploy-shadow)
               transfer_files+=(
                 "$SECRET_DIR"/telebirr-assignment-database-url
                 "$SECRET_DIR"/telebirr-assignment-runtime-manifest.v1.json
@@ -711,6 +770,8 @@ jobs:
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and no financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
+            echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live in shadow-review mode. Every financial/provider switch remains disabled, no trusted TeleBirr activation epoch exists, and the assignment broker can lease only dry-run shadow evidence.' >>"$GITHUB_STEP_SUMMARY"
           else
             echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live; this deployment changes no database financial switch, and assignment leasing remains bound to the exact active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
           fi

@@ -20,6 +20,13 @@ const reviewWindowMigration = readFileSync(
   ),
   'utf8',
 );
+const singleOutcomeLoaderMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260916190000_stop_shadow_loader_after_proof_outcome.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
 const verifierConfig = readFileSync(
   new URL(
     '../apps/trusted-telebirr-verifier/src/trusted-telebirr-verifier-config.ts',
@@ -37,8 +44,20 @@ assert.match(workflow, /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u);
 assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(workflow, /not-applicable for direct shadow intake/u);
+assert.match(workflow, /policy-recovery UUIDv4 for recovered direct intake/u);
+assert.match(
+  workflow,
+  /CONFIRMED_SOURCE_JOB" == 'not-applicable'[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
+);
 assert.match(workflow, /proof\.id = '\$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid/u);
 assert.match(workflow, /proof\.source_live_verification_job_id is null/u);
+assert.match(workflow, /private_telebirr_shadow_policy_recoveries recovery/u);
+assert.match(
+  workflow,
+  /recovery\.recovery_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
+);
+assert.match(workflow, /recovery\.retry_expires_at = proof\.expires_at/u);
+assert.match(workflow, /verifier_policy_fix_retry_no_credit/u);
 assert.match(workflow, /nullif\('\$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable'\)::uuid/u);
 assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.PRODUCTION_PROJECT_REF \}\}/u);
 assert.match(workflow, /admin_login_ready=false/u);
@@ -108,6 +127,14 @@ assert.match(provision, /safe_direct_shadow/u);
 assert.match(provision, /shadow_proof\.id = :'target_shadow_proof_request_id'::uuid/u);
 assert.match(provision, /telegram_telebirr_shadow_proof_receipts/u);
 assert.match(provision, /private_telebirr_shadow_device_evidence_staging/u);
+assert.match(provision, /private_telebirr_shadow_policy_recoveries/u);
+assert.match(provision, /private_telebirr_shadow_policy_recovery_digest/u);
+assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);
+assert.match(provision, /\) >= recovery\.prior_attempt_count \+ 1/u);
+assert.match(provision, /staged\.staged_at >= recovery\.recovered_at/u);
+assert.match(provision, /recovery\.retry_expires_at = shadow_proof\.expires_at/u);
+assert.match(provision, /verifier_policy_fix_retry_no_credit/u);
+assert.match(provision, /quarantine\.reason_code = 'trusted_evidence_invalid'/u);
 assert.match(provision, /shadow_proof\.submitted_at \+ interval '12 hours'/u);
 assert.match(provision, /source_live_verification_job_id = job\.id/u);
 assert.match(provision, /proof\.submitted_at \+ case/u);
@@ -220,3 +247,14 @@ assert.match(reviewWindowMigration, /private_live_telebirr_device_revocations/u)
 assert.match(reviewWindowMigration, /private_live_telebirr_assignment_signer_revocations/u);
 assert.doesNotMatch(reviewWindowMigration, /insert into app\./u);
 assert.doesNotMatch(reviewWindowMigration, /update app\./u);
+
+assert.match(
+  singleOutcomeLoaderMigration,
+  /load_next_private_telebirr_shadow_staged_evidence\(\)/u,
+);
+assert.match(singleOutcomeLoaderMigration, /outcome\.shadow_proof_request_id = proof\.id/u);
+assert.match(singleOutcomeLoaderMigration, /old_count = 1 and new_count = 0/u);
+assert.match(singleOutcomeLoaderMigration, /old_count = 1 and new_count = 1/u);
+assert.doesNotMatch(singleOutcomeLoaderMigration, /insert into app\./u);
+assert.doesNotMatch(singleOutcomeLoaderMigration, /update app\./u);
+assert.doesNotMatch(singleOutcomeLoaderMigration, /delete from app\./u);

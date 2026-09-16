@@ -47,7 +47,11 @@ select :'target_pilot_revision_id'
    and (
      (
        :'source_live_verification_job_id' = 'not-applicable'
-       and :'recovery_request_key' = 'not-applicable'
+       and (
+         :'recovery_request_key' = 'not-applicable'
+         or :'recovery_request_key'
+              ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       )
      )
      or (
        :'source_live_verification_job_id'
@@ -71,7 +75,6 @@ select pg_catalog.pg_advisory_xact_lock(
 );
 
 select :'source_live_verification_job_id' = 'not-applicable'
-   and :'recovery_request_key' = 'not-applicable'
   as review_direct_shadow_request
 \gset
 
@@ -102,29 +105,113 @@ select :'source_live_verification_job_id' = 'not-applicable'
          from app.telegram_telebirr_shadow_proof_receipts receipt
         where receipt.shadow_proof_request_id = shadow_proof.id
      )
-     and exists (
-       select 1
-         from app.private_telebirr_shadow_device_evidence_staging staged
-         join app.private_telebirr_shadow_verification_attempts attempt
-           on attempt.id = staged.verification_attempt_id
-        where attempt.shadow_proof_request_id = shadow_proof.id
-          and staged.staged_at < shadow_proof.expires_at
-          and staged.staged_at < attempt.expires_at
-          and staged.observed_at >= attempt.issued_at
-          and staged.observed_at < attempt.expires_at
-     )
+      and exists (
+        select 1
+          from app.private_telebirr_shadow_device_evidence_staging staged
+          join app.private_telebirr_shadow_verification_attempts attempt
+            on attempt.id = staged.verification_attempt_id
+         where attempt.shadow_proof_request_id = shadow_proof.id
+           and staged.staged_at < shadow_proof.expires_at
+           and staged.staged_at < attempt.expires_at
+           and staged.observed_at >= attempt.issued_at
+           and staged.observed_at < attempt.expires_at
+           and not exists (
+             select 1
+               from app.private_telebirr_shadow_evidence_quarantine quarantine
+              where quarantine.verification_attempt_id = attempt.id
+                 or quarantine.observation_body_digest = staged.observation_body_digest
+           )
+           and (
+             nullif(:'recovery_request_key', 'not-applicable')::uuid is null
+             or exists (
+               select 1
+                 from app.private_telebirr_shadow_policy_recoveries recovery
+                where recovery.recovery_request_key =
+                      nullif(:'recovery_request_key', 'not-applicable')::uuid
+                  and recovery.shadow_proof_request_id = shadow_proof.id
+                  and recovery.shadow_verification_job_id = shadow_proof.verification_job_id
+                  and recovery.pilot_revision_id = shadow_proof.pilot_revision_id
+                  and recovery.retry_expires_at = shadow_proof.expires_at
+                  and recovery.retry_expires_at > pg_catalog.clock_timestamp()
+                  and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
+                  and attempt.attempt_number = recovery.prior_attempt_count + 1
+                  and staged.staged_at >= recovery.recovered_at
+             )
+           )
+      )
      and not exists (
        select 1
          from app.private_telebirr_shadow_verification_outcomes outcome
         where outcome.shadow_proof_request_id = shadow_proof.id
      )
-     and not exists (
-       select 1
-         from app.private_telebirr_shadow_evidence_quarantine quarantine
-         join app.private_telebirr_shadow_verification_attempts attempt
-           on attempt.id = quarantine.verification_attempt_id
-        where attempt.shadow_proof_request_id = shadow_proof.id
-     )
+      and (
+        (
+          nullif(:'recovery_request_key', 'not-applicable')::uuid is null
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_policy_recoveries recovery
+             where recovery.shadow_proof_request_id = shadow_proof.id
+          )
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_evidence_quarantine quarantine
+              join app.private_telebirr_shadow_verification_attempts attempt
+                on attempt.id = quarantine.verification_attempt_id
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+        )
+        or exists (
+          select 1
+            from app.private_telebirr_shadow_policy_recoveries recovery
+            join app.private_telebirr_shadow_verification_attempts quarantined_attempt
+              on quarantined_attempt.id = recovery.quarantined_verification_attempt_id
+             and quarantined_attempt.shadow_proof_request_id = shadow_proof.id
+            join app.private_telebirr_shadow_evidence_quarantine quarantine
+              on quarantine.verification_attempt_id = quarantined_attempt.id
+             and quarantine.observation_body_digest =
+                 recovery.quarantined_observation_body_digest
+           where recovery.recovery_request_key =
+                 nullif(:'recovery_request_key', 'not-applicable')::uuid
+             and recovery.shadow_proof_request_id = shadow_proof.id
+             and recovery.shadow_verification_job_id = shadow_proof.verification_job_id
+             and recovery.pilot_revision_id = shadow_proof.pilot_revision_id
+             and recovery.retry_expires_at = shadow_proof.expires_at
+             and recovery.recovery_request_digest =
+                 app.private_telebirr_shadow_policy_recovery_digest(
+                   recovery.recovery_request_key,
+                   recovery.shadow_proof_request_id,
+                   recovery.shadow_verification_job_id,
+                   recovery.pilot_revision_id,
+                   recovery.receiver_profile_id,
+                   recovery.quarantined_verification_attempt_id,
+                   recovery.quarantined_observation_body_digest,
+                   recovery.prior_attempt_count,
+                   recovery.prior_attempt_history_digest,
+                   recovery.evidence_staged_at,
+                   recovery.quarantined_at,
+                   recovery.prior_expires_at,
+                   recovery.recovered_at,
+                   recovery.retry_expires_at,
+                   recovery.reviewed_main_commit_sha,
+                   recovery.reason_code
+                 )
+             and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
+             and quarantine.reason_code = 'trusted_evidence_invalid'
+             and quarantine.quarantined_at = recovery.quarantined_at
+             and (
+               select pg_catalog.count(*)
+                 from app.private_telebirr_shadow_verification_attempts candidate
+                where candidate.shadow_proof_request_id = shadow_proof.id
+             ) >= recovery.prior_attempt_count + 1
+             and (
+               select pg_catalog.count(*)
+                 from app.private_telebirr_shadow_evidence_quarantine held
+                 join app.private_telebirr_shadow_verification_attempts candidate
+                   on candidate.id = held.verification_attempt_id
+                where candidate.shadow_proof_request_id = shadow_proof.id
+             ) = 1
+        )
+      )
   \gset
 \else
   select count(*) = 0 as create_first_shadow_request
@@ -295,7 +382,6 @@ with locked_feature_switches as materialized (
   select shadow_proof.id as shadow_proof_request_id
     from app.private_telebirr_shadow_proof_requests shadow_proof
    where :'source_live_verification_job_id' = 'not-applicable'
-     and :'recovery_request_key' = 'not-applicable'
      and shadow_proof.id = :'target_shadow_proof_request_id'::uuid
      and shadow_proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
      and shadow_proof.proof_status = 'verification_queued'
@@ -315,29 +401,113 @@ with locked_feature_switches as materialized (
          from app.telegram_telebirr_shadow_proof_receipts receipt
         where receipt.shadow_proof_request_id = shadow_proof.id
      )
-     and exists (
-       select 1
-         from app.private_telebirr_shadow_device_evidence_staging staged
-         join app.private_telebirr_shadow_verification_attempts attempt
-           on attempt.id = staged.verification_attempt_id
-        where attempt.shadow_proof_request_id = shadow_proof.id
-          and staged.staged_at < shadow_proof.expires_at
-          and staged.staged_at < attempt.expires_at
-          and staged.observed_at >= attempt.issued_at
-          and staged.observed_at < attempt.expires_at
-     )
+      and exists (
+        select 1
+          from app.private_telebirr_shadow_device_evidence_staging staged
+          join app.private_telebirr_shadow_verification_attempts attempt
+            on attempt.id = staged.verification_attempt_id
+         where attempt.shadow_proof_request_id = shadow_proof.id
+           and staged.staged_at < shadow_proof.expires_at
+           and staged.staged_at < attempt.expires_at
+           and staged.observed_at >= attempt.issued_at
+           and staged.observed_at < attempt.expires_at
+           and not exists (
+             select 1
+               from app.private_telebirr_shadow_evidence_quarantine quarantine
+              where quarantine.verification_attempt_id = attempt.id
+                 or quarantine.observation_body_digest = staged.observation_body_digest
+           )
+           and (
+             nullif(:'recovery_request_key', 'not-applicable')::uuid is null
+             or exists (
+               select 1
+                 from app.private_telebirr_shadow_policy_recoveries recovery
+                where recovery.recovery_request_key =
+                      nullif(:'recovery_request_key', 'not-applicable')::uuid
+                  and recovery.shadow_proof_request_id = shadow_proof.id
+                  and recovery.shadow_verification_job_id = shadow_proof.verification_job_id
+                  and recovery.pilot_revision_id = shadow_proof.pilot_revision_id
+                  and recovery.retry_expires_at = shadow_proof.expires_at
+                  and recovery.retry_expires_at > pg_catalog.clock_timestamp()
+                  and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
+                  and attempt.attempt_number = recovery.prior_attempt_count + 1
+                  and staged.staged_at >= recovery.recovered_at
+             )
+           )
+      )
      and not exists (
        select 1
          from app.private_telebirr_shadow_verification_outcomes outcome
         where outcome.shadow_proof_request_id = shadow_proof.id
      )
-     and not exists (
-       select 1
-         from app.private_telebirr_shadow_evidence_quarantine quarantine
-         join app.private_telebirr_shadow_verification_attempts attempt
-           on attempt.id = quarantine.verification_attempt_id
-        where attempt.shadow_proof_request_id = shadow_proof.id
-     )
+      and (
+        (
+          nullif(:'recovery_request_key', 'not-applicable')::uuid is null
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_policy_recoveries recovery
+             where recovery.shadow_proof_request_id = shadow_proof.id
+          )
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_evidence_quarantine quarantine
+              join app.private_telebirr_shadow_verification_attempts attempt
+                on attempt.id = quarantine.verification_attempt_id
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+        )
+        or exists (
+          select 1
+            from app.private_telebirr_shadow_policy_recoveries recovery
+            join app.private_telebirr_shadow_verification_attempts quarantined_attempt
+              on quarantined_attempt.id = recovery.quarantined_verification_attempt_id
+             and quarantined_attempt.shadow_proof_request_id = shadow_proof.id
+            join app.private_telebirr_shadow_evidence_quarantine quarantine
+              on quarantine.verification_attempt_id = quarantined_attempt.id
+             and quarantine.observation_body_digest =
+                 recovery.quarantined_observation_body_digest
+           where recovery.recovery_request_key =
+                 nullif(:'recovery_request_key', 'not-applicable')::uuid
+             and recovery.shadow_proof_request_id = shadow_proof.id
+             and recovery.shadow_verification_job_id = shadow_proof.verification_job_id
+             and recovery.pilot_revision_id = shadow_proof.pilot_revision_id
+             and recovery.retry_expires_at = shadow_proof.expires_at
+             and recovery.recovery_request_digest =
+                 app.private_telebirr_shadow_policy_recovery_digest(
+                   recovery.recovery_request_key,
+                   recovery.shadow_proof_request_id,
+                   recovery.shadow_verification_job_id,
+                   recovery.pilot_revision_id,
+                   recovery.receiver_profile_id,
+                   recovery.quarantined_verification_attempt_id,
+                   recovery.quarantined_observation_body_digest,
+                   recovery.prior_attempt_count,
+                   recovery.prior_attempt_history_digest,
+                   recovery.evidence_staged_at,
+                   recovery.quarantined_at,
+                   recovery.prior_expires_at,
+                   recovery.recovered_at,
+                   recovery.retry_expires_at,
+                   recovery.reviewed_main_commit_sha,
+                   recovery.reason_code
+                 )
+             and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
+             and quarantine.reason_code = 'trusted_evidence_invalid'
+             and quarantine.quarantined_at = recovery.quarantined_at
+             and (
+               select pg_catalog.count(*)
+                 from app.private_telebirr_shadow_verification_attempts candidate
+                where candidate.shadow_proof_request_id = shadow_proof.id
+              ) >= recovery.prior_attempt_count + 1
+             and (
+               select pg_catalog.count(*)
+                 from app.private_telebirr_shadow_evidence_quarantine held
+                 join app.private_telebirr_shadow_verification_attempts candidate
+                   on candidate.id = held.verification_attempt_id
+                where candidate.shadow_proof_request_id = shadow_proof.id
+             ) = 1
+        )
+      )
 ), safe_source_and_open_shadow as (
   select job.id,
          shadow_proof.id as shadow_proof_request_id

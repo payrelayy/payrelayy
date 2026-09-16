@@ -1,10 +1,8 @@
--- A phone records its assessment clock immediately before the authenticated broker poll. The
--- broker mints the assignment during that poll, so the returned issued_at can be a few
--- milliseconds later than the phone's pre-poll clock. Give only the no-money shadow lease a
--- bounded five-second issue-time allowance. Clamp that allowance to every authority start so a
--- newly created enrollment, profile, or proof can never be backdated outside its validity. This
--- shortens (never extends) the signed lease and leaves every production payment, settlement,
--- credit, reservation, and execution path untouched.
+-- Correct the already-deployed evidence-only timing tolerance. The signed issue time may trail
+-- the phone's pre-poll assessment clock by up to five seconds, but it must never predate the
+-- enrollment, receiver profile, or proof validity boundary. This migration is deliberately
+-- idempotent so databases that received the corrected predecessor validate without another
+-- function rewrite.
 
 do $migration$
 declare
@@ -42,8 +40,6 @@ begin
     end if;
   end if;
 
-  -- An earlier hotfix backdated both clock assignments. Only the final, proof-bound issue time
-  -- needs the allowance; restore the pre-selection clock before validating the resulting shape.
   unsafe_occurrences :=
     (pg_catalog.length(definition) -
       pg_catalog.length(pg_catalog.replace(definition, unsafe_clock, '')))

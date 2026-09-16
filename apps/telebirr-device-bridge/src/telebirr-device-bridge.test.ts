@@ -593,6 +593,31 @@ describe('TeleBirr evidence-only device bridge handler', () => {
     });
   });
 
+  it('assesses a newly leased assignment after the asynchronous broker poll completes', async () => {
+    const value = fixture();
+    await enroll(value);
+    value.state.now = '2026-09-04T10:01:00.000Z';
+    const assignment = liveAssignment(value.assignmentSigner, {
+      issuedAt: '2026-09-04T10:01:00.001Z',
+    });
+    value.spies.poll.mockImplementationOnce(async () => {
+      value.state.now = '2026-09-04T10:01:00.002Z';
+      return { kind: 'assignment', assignment };
+    });
+    const payload = { requestedLeaseSeconds: 120 } as const;
+    const request = signedRequest(value.device, payload);
+
+    const response = await value.handler(
+      httpRequest(request.body.canonicalPath, { request, payload }),
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect((json(response) as unknown as TelebirrDeviceBridgeCommandResponse).assignment).toEqual(
+      assignment,
+    );
+    expect(value.spies.poll).toHaveBeenCalledOnce();
+  });
+
   it('fails closed when an assignment source returns a wrong receiver binding', async () => {
     const value = fixture();
     await enroll(value);

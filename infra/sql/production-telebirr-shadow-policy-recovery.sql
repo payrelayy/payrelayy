@@ -14,68 +14,71 @@ select *
   )
 \gset recovery_
 
-do $policy_recovery_postcondition$
-begin
-  if :'recovery_shadow_proof_request_id'::uuid
-       is distinct from :'shadow_proof_request_id'::uuid
-    or :'recovery_shadow_verification_job_id'::uuid
-         is distinct from :'shadow_verification_job_id'::uuid
-    or :'recovery_retry_expires_at'::timestamptz
-         <= pg_catalog.clock_timestamp() + interval '10 minutes'
-    or (select pg_catalog.count(*)
-          from app.private_telebirr_shadow_policy_recoveries recovery
-         where recovery.recovery_request_key = :'recovery_request_key'::uuid
-           and recovery.shadow_proof_request_id = :'shadow_proof_request_id'::uuid
-           and recovery.shadow_verification_job_id = :'shadow_verification_job_id'::uuid
-           and recovery.pilot_revision_id = :'pilot_revision_id'::uuid
-           and recovery.quarantined_verification_attempt_id =
-               :'quarantined_verification_attempt_id'::uuid
-           and recovery.reviewed_main_commit_sha = :'reviewed_main_commit_sha'::text
-           and recovery.reason_code = 'verifier_policy_fix_retry_no_credit') <> 1
-    or (select proof.expires_at
-          from app.private_telebirr_shadow_proof_requests proof
-         where proof.id = :'shadow_proof_request_id'::uuid
-           and proof.verification_job_id = :'shadow_verification_job_id'::uuid)
-         is distinct from :'recovery_retry_expires_at'::timestamptz
-    or (select pg_catalog.count(*)
-          from app.private_telebirr_shadow_evidence_quarantine quarantine
-         where quarantine.verification_attempt_id =
-               :'quarantined_verification_attempt_id'::uuid
-           and quarantine.reason_code = 'trusted_evidence_invalid') <> 1
-    or exists (
-      select 1 from app.private_telebirr_shadow_verification_outcomes outcome
-       where outcome.shadow_proof_request_id = :'shadow_proof_request_id'::uuid
-    )
-    or exists (
-      select 1 from app.feature_switches feature_switch
-       where feature_switch.feature_key in (
-         'cbe_birr_authoritative_verification',
-         'deposit_execution',
-         'payment_verification',
-         'telebirr_authoritative_verification',
-         'withdrawal_collection',
-         'withdrawal_validation'
+select (
+  :'recovery_shadow_proof_request_id'::uuid
+    is not distinct from :'shadow_proof_request_id'::uuid
+  and :'recovery_shadow_verification_job_id'::uuid
+    is not distinct from :'shadow_verification_job_id'::uuid
+  and :'recovery_retry_expires_at'::timestamptz
+    > pg_catalog.clock_timestamp() + interval '10 minutes'
+  and (select pg_catalog.count(*)
+         from app.private_telebirr_shadow_policy_recoveries recovery
+        where recovery.recovery_request_key = :'recovery_request_key'::uuid
+          and recovery.shadow_proof_request_id = :'shadow_proof_request_id'::uuid
+          and recovery.shadow_verification_job_id = :'shadow_verification_job_id'::uuid
+          and recovery.pilot_revision_id = :'pilot_revision_id'::uuid
+          and recovery.quarantined_verification_attempt_id =
+              :'quarantined_verification_attempt_id'::uuid
+          and recovery.reviewed_main_commit_sha = :'reviewed_main_commit_sha'::text
+          and recovery.reason_code = 'verifier_policy_fix_retry_no_credit') = 1
+  and (select proof.expires_at
+         from app.private_telebirr_shadow_proof_requests proof
+        where proof.id = :'shadow_proof_request_id'::uuid
+          and proof.verification_job_id = :'shadow_verification_job_id'::uuid)
+        is not distinct from :'recovery_retry_expires_at'::timestamptz
+  and (select pg_catalog.count(*)
+         from app.private_telebirr_shadow_evidence_quarantine quarantine
+        where quarantine.verification_attempt_id =
+              :'quarantined_verification_attempt_id'::uuid
+          and quarantine.reason_code = 'trusted_evidence_invalid') = 1
+  and not exists (
+    select 1 from app.private_telebirr_shadow_verification_outcomes outcome
+     where outcome.shadow_proof_request_id = :'shadow_proof_request_id'::uuid
+  )
+  and not exists (
+    select 1 from app.feature_switches feature_switch
+     where feature_switch.feature_key in (
+       'cbe_birr_authoritative_verification',
+       'deposit_execution',
+       'payment_verification',
+       'telebirr_authoritative_verification',
+       'withdrawal_collection',
+       'withdrawal_validation'
+     )
+       and (
+         feature_switch.mode <> 'disabled'
+         or feature_switch.settings <> '{}'::jsonb
        )
-         and (
-           feature_switch.mode <> 'disabled'
-           or feature_switch.settings <> '{}'::jsonb
-         )
-    )
-    or not exists (
-      select 1 from app.feature_switches feature_switch
-       where feature_switch.feature_key = 'private_live_deposit_pilot'
-         and feature_switch.mode = 'dry_run'
-         and feature_switch.settings ->> 'pilot_revision_id' = :'pilot_revision_id'::text
-    )
-    or exists (
-      select 1 from pg_catalog.pg_roles role
-       where role.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'
-         and role.rolcanlogin
-    ) then
-    raise exception 'The production TeleBirr shadow policy-recovery postcondition failed.';
-  end if;
-end;
-$policy_recovery_postcondition$;
+  )
+  and exists (
+    select 1 from app.feature_switches feature_switch
+     where feature_switch.feature_key = 'private_live_deposit_pilot'
+       and feature_switch.mode = 'dry_run'
+       and feature_switch.settings ->> 'pilot_revision_id' = :'pilot_revision_id'::text
+  )
+  and not exists (
+    select 1 from pg_catalog.pg_roles role
+     where role.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'
+       and role.rolcanlogin
+  )
+) as policy_recovery_postcondition_ok
+\gset
+
+\if :policy_recovery_postcondition_ok
+\else
+  \warn 'The production TeleBirr shadow policy-recovery postcondition failed.'
+  select 1 / 0 as rejected;
+\endif
 
 select pg_catalog.jsonb_build_object(
   'schemaVersion', 1,

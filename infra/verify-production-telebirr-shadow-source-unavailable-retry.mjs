@@ -36,7 +36,7 @@ assert.match(workflow, /\.moneyMoved == false/u);
 assert.doesNotMatch(workflow, /FINANCIAL_ACTIONS_MODE=live/u);
 assert.doesNotMatch(workflow, /update app\.feature_switches/u);
 
-assert.match(operation, /begin transaction isolation level serializable/u);
+assert.match(operation, /begin transaction isolation level read committed/u);
 assert.match(operation, /current_user = 'postgres' and session_user = 'postgres'/u);
 assert.match(operation, /retry_private_telebirr_shadow_after_source_unavailable\(/u);
 assert.match(operation, /source_unavailable_review_retry_no_credit/u);

@@ -13,7 +13,7 @@ select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   select 1 / 0 as rejected;
 \endif
 
-begin transaction isolation level serializable;
+begin transaction isolation level read committed;
 set local search_path = pg_catalog;
 set local statement_timeout = '15s';
 set local lock_timeout = '2s';

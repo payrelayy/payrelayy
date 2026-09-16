@@ -90,7 +90,9 @@ assert.match(provision, /TARGET_PILOT_REVISION_ID/u);
 assert.match(provision, /SOURCE_LIVE_VERIFICATION_JOB_ID/u);
 assert.match(provision, /RECOVERY_REQUEST_KEY/u);
 assert.match(provision, /source_live_verification_job_id = job\.id/u);
-assert.match(provision, /proof\.submitted_at \+ interval '24 hours'/u);
+assert.match(provision, /proof\.submitted_at \+ case/u);
+assert.match(provision, /then interval '36 hours'/u);
+assert.match(provision, /else interval '24 hours'/u);
 assert.match(provision, /private_live_telebirr_verification_attempts/u);
 assert.match(provision, /private_live_telebirr_verification_outcomes/u);
 assert.match(provision, /feature_key <> 'private_live_deposit_pilot'/u);
@@ -119,6 +121,10 @@ assert.match(
 );
 assert.match(
   provision,
+  /refresh_private_telebirr_shadow_runtime_retry\(uuid,uuid,uuid,uuid,text\)/u,
+);
+assert.match(
+  provision,
   /recover_expired_private_live_telebirr_payment_to_shadow\([\s\S]+?'expired_pilot_recovery_no_credit'\s*\)\s*\\gset/u,
 );
 assert.match(
@@ -132,6 +138,10 @@ assert.match(
 assert.match(
   provision,
   /retry_expired_private_telebirr_shadow_after_runtime_startup_failure\([\s\S]+?'expired_shadow_runtime_startup_retry_no_credit'\s*\)\s*\\gset/u,
+);
+assert.match(
+  provision,
+  /refresh_private_telebirr_shadow_runtime_retry\([\s\S]+?'expired_shadow_runtime_startup_retry_no_credit'\s*\)\s*\\gset/u,
 );
 assert.match(provision, /begin transaction isolation level read committed/u);
 assert.match(provision, /create_first_shadow_request/u);

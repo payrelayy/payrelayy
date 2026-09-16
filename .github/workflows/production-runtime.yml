@@ -285,8 +285,6 @@ jobs:
           TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
-          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
-          TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64: ${{ secrets.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64 }}
         run: |
           set -euo pipefail
           secret_dir="$RUNNER_TEMP/production-protected"
@@ -336,7 +334,6 @@ jobs:
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256" != "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256" ]]
-          [[ "$TELEBIRR_REFERENCE_OPENING_KEY_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
 
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
@@ -370,7 +367,6 @@ jobs:
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-server-signer.pkcs8.der"
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge.spki.der"
           printf '%s' "$TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-runtime-manifest.v1.json"
-          printf '%s' "$TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64" | base64 --decode >"$secret_dir/telebirr-reference-opening-key.v1.json"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$OWNER_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/owner-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
@@ -399,6 +395,12 @@ jobs:
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-encryption-master"
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-fingerprint-master"
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" >"$secret_dir/deposit-proof-reference-profile.v2.json"
+          telebirr_reference_opening_key_id="$(
+            node infra/operations/derive-telebirr-reference-opening-key.mjs \
+              "$secret_dir/deposit-proof-reference-encryption-master" \
+              "$secret_dir/telebirr-reference-opening-key.v1.json"
+          )"
+          [[ "$telebirr_reference_opening_key_id" =~ ^sha256:[0-9a-f]{64}$ ]]
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
           chmod 0600 "$secret_dir"/*
@@ -428,7 +430,7 @@ jobs:
              .serverSigningPublicKeySpkiSha256 == $bridge_digest and
              .assignmentSigningPublicKeySpkiSha256 == $assignment_digest' \
             "$secret_dir/telebirr-bridge-runtime-manifest.v1.json" >/dev/null
-          jq -e --arg key "$TELEBIRR_REFERENCE_OPENING_KEY_ID" '
+          jq -e --arg key "$telebirr_reference_opening_key_id" '
               type == "object" and
               keys_unsorted == ["contractVersion", "providerCode", "purpose", "keyVersion", "keyId", "keyHex"] and
               .contractVersion == 1 and .providerCode == "telebirr" and
@@ -451,6 +453,7 @@ jobs:
           echo "helper_sha=$helper_sha" >>"$GITHUB_OUTPUT"
           echo "bundle_bytes=$bundle_bytes" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
+          echo "telebirr_reference_opening_key_id=$telebirr_reference_opening_key_id" >>"$GITHUB_OUTPUT"
 
       - name: Prove the complete inert production money boundary
         if: inputs.mode == 'deploy-inert'
@@ -481,7 +484,7 @@ jobs:
           TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
-          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ steps.protected.outputs.telebirr_reference_opening_key_id }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
@@ -535,7 +538,7 @@ jobs:
           TELEBIRR_ASSIGNMENT_SIGNER_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 }}
-          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ vars.TELEBIRR_REFERENCE_OPENING_KEY_ID }}
+          TELEBIRR_REFERENCE_OPENING_KEY_ID: ${{ steps.protected.outputs.telebirr_reference_opening_key_id }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}

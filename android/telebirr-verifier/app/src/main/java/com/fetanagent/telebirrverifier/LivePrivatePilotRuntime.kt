@@ -281,6 +281,10 @@ class LivePrivatePilotRuntimeCoordinator(
         return attention("assignment_response_invalid")
       }
         ?: return ready("no_assignment")
+    // The assignment is minted by the broker while nextAssignment() is in flight. Reusing the
+    // pre-poll clock can therefore make a brand-new assignment appear to have been issued in the
+    // future by a few milliseconds. Assess the returned assignment against a fresh device clock.
+    val assignmentAssessedAt = now() ?: return attention("device_clock_unavailable")
     val assessment =
       LivePilotAssignmentVerifier.verify(
         signer = trustedSigner,
@@ -288,7 +292,7 @@ class LivePrivatePilotRuntimeCoordinator(
         signedAssignment = signedAssignment,
         signerPublicSpkiDer = signerPublicSpkiDer.copyOf(),
         devicePublicMaterial = devicePublicMaterial,
-        assessedAt = assessedAt,
+        assessedAt = assignmentAssessedAt,
       )
     val assignment = assessment.authenticatedAssignment
       ?: return attention(assessment.reasonCode)

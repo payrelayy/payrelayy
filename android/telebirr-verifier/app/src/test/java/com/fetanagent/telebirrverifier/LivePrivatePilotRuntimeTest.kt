@@ -175,6 +175,25 @@ class LivePrivatePilotRuntimeTest {
   }
 
   @Test
+  fun `assesses a broker-minted assignment with a fresh post-poll clock`() {
+    val fixture = RuntimeFixture()
+    val beforePoll = Instant.parse("2026-08-20T18:02:59.900Z").toEpochMilli()
+    val afterPoll = Instant.parse("2026-08-20T18:03:00.100Z").toEpochMilli()
+    var clockReads = 0
+    val coordinator =
+      fixture.coordinator(
+        clock = MillisClock { if (clockReads++ == 0) beforePoll else afterPoll },
+      )
+
+    val status = coordinator.runOnce()
+
+    assertEquals(LivePilotRuntimeState.READY, status.state)
+    assertEquals("observation_acknowledged", status.code)
+    assertTrue(clockReads >= 3)
+    assertNoAuthority(status)
+  }
+
+  @Test
   fun `retries the exact staged observation after an uncertain upload without refetching`() {
     val fixture = RuntimeFixture()
     var sourceCalls = 0
@@ -302,6 +321,10 @@ class LivePrivatePilotRuntimeTest {
         LivePilotObservationUploader { _, observation ->
           LivePilotUploadResult.Acknowledged(observation.bodyDigest)
         },
+      clock: MillisClock =
+        MillisClock {
+          Instant.parse("2026-08-20T18:03:00.000Z").toEpochMilli()
+        },
     ): LivePrivatePilotRuntimeCoordinator =
       LivePrivatePilotRuntimeCoordinator(
         gate = gate,
@@ -314,10 +337,7 @@ class LivePrivatePilotRuntimeTest {
         parser = LivePrivatePilotReceiptParser(),
         uploader = uploader,
         workStore = store,
-        clock =
-          MillisClock {
-            Instant.parse("2026-08-20T18:03:00.000Z").toEpochMilli()
-          },
+        clock = clock,
       )
   }
 }

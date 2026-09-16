@@ -20,6 +20,7 @@ const [
   assignmentBrokerContinuousRuntimeMigration,
   assignmentBrokerConfig,
   assignmentBrokerPostgres,
+  referenceOpeningDeriver,
   packageJson,
   quality,
 ] = await Promise.all([
@@ -36,6 +37,7 @@ const [
   read('supabase/migrations/20260916142230_telebirr_assignment_broker_continuous_runtime.sql'),
   read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
+  read('infra/operations/derive-telebirr-reference-opening-key.mjs'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
 ]);
@@ -448,8 +450,7 @@ for (const protectedName of [
   'TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_BASE64',
   'TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64',
   'TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64',
-  'TELEBIRR_REFERENCE_OPENING_KEY_ID',
-  'TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64',
+  'derive-telebirr-reference-opening-key.mjs',
   'telebirr-assignment-database-url',
   'telebirr-assignment-runtime-manifest.v1.json',
   'telebirr-assignment-signer.pkcs8.der',
@@ -471,7 +472,23 @@ assert.doesNotMatch(
   /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"/u,
 );
 assert.match(workflow, /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64/u);
-assert.match(workflow, /secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u);
+assert.doesNotMatch(workflow, /secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u);
+assert.doesNotMatch(workflow, /vars\.TELEBIRR_REFERENCE_OPENING_KEY_ID/u);
+assert.match(
+  workflow,
+  /derive-telebirr-reference-opening-key\.mjs[\s\S]*?deposit-proof-reference-encryption-master[\s\S]*?telebirr-reference-opening-key\.v1\.json/u,
+);
+assert.match(
+  workflow,
+  /TELEBIRR_REFERENCE_OPENING_KEY_ID: \$\{\{ steps\.protected\.outputs\.telebirr_reference_opening_key_id \}\}/u,
+);
+assert.match(referenceOpeningDeriver, /createHmac\('sha256', master\)/u);
+assert.match(
+  referenceOpeningDeriver,
+  /fetanagent:deposit-proof-reference:encryption-key:v2\\nprovider:telebirr/u,
+);
+assert.match(referenceOpeningDeriver, /purpose: 'deposit-proof-reference-opening'/u);
+assert.match(referenceOpeningDeriver, /writeFileSync\(outputPath, document,[\s\S]*?flag: 'wx'/u);
 
 for (const action of [
   'actions/checkout',

@@ -386,13 +386,15 @@ async function dispatchCommand(
         frame.payload as TelebirrDeviceBridgeAssignmentPollPayload,
       );
       if (result.kind === 'assignment') {
+        const assignmentAssessedAt = canonicalTimestamp(dependencies.now());
         if (
+          assignmentAssessedAt === undefined ||
           !validAssignmentForCertificate(
             result.assignment,
             certificate,
             assignmentSpki,
             assignmentSpkiDigest,
-            assessedAt,
+            assignmentAssessedAt,
           )
         ) {
           return undefined;

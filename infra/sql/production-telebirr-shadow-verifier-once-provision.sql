@@ -133,22 +133,51 @@ select count(*) = 0 as create_first_shadow_request
         )
 \gset
     \else
-      select count(*) = 1 as shadow_request_transition_ready
-        from app.retry_expired_private_telebirr_shadow_after_runtime_startup_failure(
-          (
-            select shadow_proof.id
-              from app.private_telebirr_shadow_proof_requests shadow_proof
-             where shadow_proof.source_live_verification_job_id =
-                   :'source_live_verification_job_id'::uuid
-             order by shadow_proof.created_at, shadow_proof.id
-             limit 1
-          ),
-          :'source_live_verification_job_id'::uuid,
-          :'target_pilot_revision_id'::uuid,
-          :'recovery_request_key'::uuid,
-          'expired_shadow_runtime_startup_retry_no_credit'
-        )
-\gset
+      select count(*) = 1
+         and pg_catalog.bool_and(
+               shadow_proof.runtime_retry_request_key =
+                 :'recovery_request_key'::uuid
+               and shadow_proof.expires_at <= pg_catalog.clock_timestamp()
+             ) as refresh_runtime_retry
+        from app.private_telebirr_shadow_proof_requests shadow_proof
+       where shadow_proof.source_live_verification_job_id =
+             :'source_live_verification_job_id'::uuid
+      \gset
+      \if :refresh_runtime_retry
+        select count(*) = 1 as shadow_request_transition_ready
+          from app.refresh_private_telebirr_shadow_runtime_retry(
+            (
+              select shadow_proof.id
+                from app.private_telebirr_shadow_proof_requests shadow_proof
+               where shadow_proof.source_live_verification_job_id =
+                     :'source_live_verification_job_id'::uuid
+               order by shadow_proof.created_at, shadow_proof.id
+               limit 1
+            ),
+            :'source_live_verification_job_id'::uuid,
+            :'target_pilot_revision_id'::uuid,
+            :'recovery_request_key'::uuid,
+            'expired_shadow_runtime_startup_retry_no_credit'
+          )
+        \gset
+      \else
+        select count(*) = 1 as shadow_request_transition_ready
+          from app.retry_expired_private_telebirr_shadow_after_runtime_startup_failure(
+            (
+              select shadow_proof.id
+                from app.private_telebirr_shadow_proof_requests shadow_proof
+               where shadow_proof.source_live_verification_job_id =
+                     :'source_live_verification_job_id'::uuid
+               order by shadow_proof.created_at, shadow_proof.id
+               limit 1
+            ),
+            :'source_live_verification_job_id'::uuid,
+            :'target_pilot_revision_id'::uuid,
+            :'recovery_request_key'::uuid,
+            'expired_shadow_runtime_startup_retry_no_credit'
+          )
+        \gset
+      \endif
     \endif
   \endif
 \endif
@@ -209,7 +238,11 @@ with locked_feature_switches as materialized (
    where job.id = :'source_live_verification_job_id'::uuid
      and job.expires_at <= pg_catalog.clock_timestamp()
      and proof.submitted_at < pg_catalog.clock_timestamp()
-     and pg_catalog.clock_timestamp() < proof.submitted_at + interval '24 hours'
+      and pg_catalog.clock_timestamp() < proof.submitted_at + case
+        when shadow_proof.runtime_retry_request_key = :'recovery_request_key'::uuid
+          then interval '36 hours'
+        else interval '24 hours'
+      end
      and shadow_proof.expires_at > pg_catalog.clock_timestamp() + interval '60 seconds'
      and shadow_proof.proof_status = 'verification_queued'
      and (
@@ -289,9 +322,12 @@ select (select count(*) from locked_feature_switches) = 7
    and pg_catalog.to_regprocedure(
          'app.retry_expired_private_telebirr_shadow_after_infrastructure_failure(uuid,uuid,uuid,uuid,text)'
        ) is not null
-   and pg_catalog.to_regprocedure(
-         'app.retry_expired_private_telebirr_shadow_after_runtime_startup_failure(uuid,uuid,uuid,uuid,text)'
-       ) is not null
+    and pg_catalog.to_regprocedure(
+          'app.retry_expired_private_telebirr_shadow_after_runtime_startup_failure(uuid,uuid,uuid,uuid,text)'
+        ) is not null
+    and pg_catalog.to_regprocedure(
+          'app.refresh_private_telebirr_shadow_runtime_retry(uuid,uuid,uuid,uuid,text)'
+        ) is not null
    and (select count(*)
           from locked_feature_switches switch_state
           join armed_shadow_pilot pilot

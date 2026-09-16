@@ -15,8 +15,28 @@ select current_user = 'postgres' and session_user = 'postgres'
   select 1 / 0 as rejected;
 \endif
 
-select app.current_private_trusted_telebirr_activation_epoch() is null
-  as trusted_telebirr_authority_absent
+select not exists (
+  select 1
+  from app.private_trusted_telebirr_activation_control activation_control
+  join app.private_trusted_telebirr_activation_epochs authority
+    on authority.epoch = activation_control.current_epoch
+  join app.private_live_deposit_pilot_revisions pilot
+    on pilot.id = authority.pilot_revision_id
+  where activation_control.control_key = 'trusted_telebirr_financial_authority'
+    and authority.authority_state = 'active'
+    and authority.revoked_at is null
+    and authority.active_from <= pg_catalog.clock_timestamp()
+    and authority.expires_at > pg_catalog.clock_timestamp()
+    and pilot.status = 'armed'
+    and pilot.configuration_digest = authority.configuration_digest
+    and pilot.active_from = authority.active_from
+    and pilot.expires_at = authority.expires_at
+    and not exists (
+      select 1
+      from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+      where emergency_intent.expected_epoch = authority.epoch
+    )
+) as trusted_telebirr_authority_absent
 \gset
 \if :trusted_telebirr_authority_absent
 \else

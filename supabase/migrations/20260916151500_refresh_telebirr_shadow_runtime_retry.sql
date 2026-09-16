@@ -114,9 +114,9 @@ declare
 $branch$;
 begin
   definition := pg_catalog.pg_get_functiondef(target);
-  if pg_catalog.position(
+  if pg_catalog.strpos(
+       definition,
        '''app.private_telebirr_shadow_runtime_retry'', true'
-       in definition
      ) > 0 then
     null;
   elsif (

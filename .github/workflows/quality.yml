@@ -46,6 +46,7 @@ jobs:
         shell: bash
         run: |
           node --test infra/operations/require-production-ci.test.mjs
+          node --test infra/operations/verify-postgres-scram-secret.test.mjs
 
       - name: Verify FetanAgent branding
         run: pnpm verify:brand

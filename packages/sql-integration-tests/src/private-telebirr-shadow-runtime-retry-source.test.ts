@@ -8,13 +8,21 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
+const repairMigrationPath = fileURLToPath(
+  new URL(
+    '../../../supabase/migrations/20260916151000_fix_telebirr_shadow_runtime_retry_least.sql',
+    import.meta.url,
+  ),
+);
 
 let migrationSource = '';
+let repairMigrationSource = '';
 let retrySource = '';
 let triggerSource = '';
 
 beforeAll(async () => {
   migrationSource = await readFile(migrationPath, 'utf8');
+  repairMigrationSource = await readFile(repairMigrationPath, 'utf8');
   retrySource =
     migrationSource.match(
       /create function app\.retry_expired_private_telebirr_shadow_after_runtime_startup_failure\([\s\S]+?\n\$\$;/u,
@@ -48,8 +56,28 @@ describe('TeleBirr shadow runtime-startup recovery boundary', () => {
     expect(migrationSource).toContain("expires_at <= runtime_retried_at + interval '12 hours'");
     expect(migrationSource).toContain("expires_at <= submitted_at + interval '24 hours'");
     expect(retrySource).toContain('app.private_telebirr_shadow_retry_attempt_history_digest(');
+    expect(retrySource).toContain('retry_until := least(');
+    expect(retrySource).not.toContain('retry_until := pg_catalog.least(');
     expect(retrySource).not.toMatch(/set\s+pilot_revision_id\s*=/iu);
     expect(retrySource).not.toMatch(/set\s+receiver_profile_id\s*=/iu);
+  });
+
+  it('repairs only the exact deployed LEAST defect while preserving function authority', () => {
+    expect(repairMigrationSource).toContain(
+      "'ec175bae642282fdccc3c3f3beec6fa394c142c6d0e67610bdcf0a95c252a331'",
+    );
+    expect(repairMigrationSource).toContain(
+      "'53db6eac1ea632f7962e106c403cff3f1a476947459576dc37f47b03ef936e8a'",
+    );
+    expect(repairMigrationSource).toContain(
+      "defective_expression constant text := 'retry_until := pg_catalog.least('",
+    );
+    expect(repairMigrationSource).toContain(
+      "corrected_expression constant text := 'retry_until := least('",
+    );
+    expect(repairMigrationSource).toContain('routine.proowner = original_owner');
+    expect(repairMigrationSource).toContain('routine.proacl is not distinct from original_acl');
+    expect(repairMigrationSource).not.toMatch(/grant\s+/iu);
   });
 
   it('requires the complete disabled-money boundary and unchanged dry-run target', () => {

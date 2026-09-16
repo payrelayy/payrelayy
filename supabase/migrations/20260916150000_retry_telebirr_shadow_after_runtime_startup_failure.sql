@@ -828,7 +828,7 @@ begin
     raise exception 'The shadow request is not safely retryable after runtime startup failure.';
   end if;
 
-  retry_until := pg_catalog.least(
+  retry_until := least(
     authorized_at + interval '12 hours',
     target_pilot.expires_at,
     target_profile.valid_until,

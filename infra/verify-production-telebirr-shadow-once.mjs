@@ -39,6 +39,10 @@ assert.match(workflow, /TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false/u);
 assert.match(workflow, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false/u);
 assert.match(workflow, /TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET=production/u);
 assert.match(workflow, /--network host/u);
+assert.match(workflow, /verifier_ready=false/u);
+assert.match(workflow, /for launch_attempt in 1 2 3 4 5 6/u);
+assert.match(workflow, /docker rm --force "\$container"/u);
+assert.match(workflow, /"\$verifier_ready" == 'true'/u);
 assert.match(workflow, /printf 'postgresql:\/\/%s\.%s:%s@%s:5432\/postgres\?sslmode=verify-full'/u);
 assert.match(workflow, /--read-only/u);
 assert.match(workflow, /--cap-drop ALL/u);
@@ -111,6 +115,10 @@ assert.match(
 );
 assert.match(
   provision,
+  /retry_expired_private_telebirr_shadow_after_runtime_startup_failure\(uuid,uuid,uuid,uuid,text\)/u,
+);
+assert.match(
+  provision,
   /recover_expired_private_live_telebirr_payment_to_shadow\([\s\S]+?'expired_pilot_recovery_no_credit'\s*\)\s*\\gset/u,
 );
 assert.match(
@@ -121,20 +129,29 @@ assert.match(
   provision,
   /retry_expired_private_telebirr_shadow_after_infrastructure_failure\([\s\S]+?'expired_shadow_infrastructure_retry_no_credit'\s*\)\s*\\gset/u,
 );
+assert.match(
+  provision,
+  /retry_expired_private_telebirr_shadow_after_runtime_startup_failure\([\s\S]+?'expired_shadow_runtime_startup_retry_no_credit'\s*\)\s*\\gset/u,
+);
 assert.match(provision, /begin transaction isolation level read committed/u);
 assert.match(provision, /create_first_shadow_request/u);
 assert.match(provision, /expired_shadow_retry_no_credit/u);
-assert.match(provision, /untouched_source_and_open_shadow/u);
+assert.match(provision, /safe_source_and_open_shadow/u);
 assert.match(provision, /shadow_proof\.retry_request_key = :'recovery_request_key'::uuid/u);
 assert.match(
   provision,
   /shadow_proof\.infrastructure_retry_request_key =[\s\S]*?:'recovery_request_key'::uuid/u,
+);
+assert.match(
+  provision,
+  /shadow_proof\.runtime_retry_request_key =[\s\S]*?:'recovery_request_key'::uuid/u,
 );
 assert.match(workflow, /proof\.retry_request_key = '\$RECOVERY_REQUEST_KEY'::uuid/u);
 assert.match(
   workflow,
   /proof\.infrastructure_retry_request_key =[\s\S]*?'\$RECOVERY_REQUEST_KEY'::uuid/u,
 );
+assert.match(workflow, /proof\.runtime_retry_request_key =[\s\S]*?'\$RECOVERY_REQUEST_KEY'::uuid/u);
 assert.match(provision, /login noinherit nocreatedb nocreaterole noreplication nobypassrls/u);
 assert.match(provision, /connection limit 1 password :'shadow_runtime_password'/u);
 assert.match(provision, /interval '20 minutes'/u);

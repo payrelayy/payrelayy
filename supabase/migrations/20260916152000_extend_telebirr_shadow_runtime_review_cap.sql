@@ -1,3 +1,5 @@
+-- Production first received the reviewed operational change under hosted version 20260916135027.
+-- This replay-safe canonical finalizer runs after the runtime-retry foundation on clean databases.
 -- The exact no-money runtime retry may be refreshed after infrastructure-only failures. Extend
 -- only that final branch of the existing structural window constraint from 24 to 36 hours, giving
 -- at most one additional 12-hour review period. Earlier recovery branches remain capped at 24

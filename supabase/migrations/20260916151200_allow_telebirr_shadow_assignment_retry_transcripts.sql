@@ -1,3 +1,5 @@
+-- Production first received the reviewed operational change under hosted version 20260916131633.
+-- This replay-safe canonical finalizer runs after the runtime-retry foundation on clean databases.
 -- A payment reference is stable across assignment retries, while the assignment body, lease, and
 -- signature are attempt-bound. Keep the per-attempt transcript immutable and unique, but allow a
 -- later attempt to record the same reference-binding digest after an earlier delivery was lost.

@@ -1,3 +1,5 @@
+-- Production first received the reviewed operational change under hosted version 20260916134810.
+-- This replay-safe canonical finalizer runs after the runtime-retry foundation on clean databases.
 -- A runtime retry can be exhausted by infrastructure defects without producing provider evidence.
 -- Permit the same idempotency key to refresh that no-money review window once the prior window and
 -- every assignment have expired. The source payment remains immutable and every financial path

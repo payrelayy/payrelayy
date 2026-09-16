@@ -1,3 +1,5 @@
+-- Production first received the reviewed operational change under hosted version 20260916134441.
+-- This replay-safe canonical finalizer runs after the runtime-retry foundation on clean databases.
 -- A phone records its assessment clock immediately before the authenticated broker poll. The
 -- broker mints the assignment during that poll, so the returned issued_at can be a few
 -- milliseconds later than the phone's pre-poll clock. Give only the no-money shadow lease a

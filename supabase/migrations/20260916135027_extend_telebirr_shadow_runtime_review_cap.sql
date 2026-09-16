@@ -1,0 +1,6 @@
+-- Hosted production operational migration ledger marker.
+--
+-- Supabase recorded this version when the guarded TeleBirr recovery operation extended only the
+-- evidence-free runtime-review cap. The replay-safe canonical finalizer is 20260916152000. This
+-- no-op marker preserves the exact hosted history without broadening any clean database until the
+-- ordered canonical constraints and prerequisite functions are present.

@@ -12,9 +12,39 @@ const transitionRunbook = readFileSync(
   resolve(root, 'infra/operations/fetanagent-vm-transition.md'),
   'utf8',
 );
-const operationalLedgerMarkerPaths = [
+const stagingOperationalLedgerMarkerPaths = [
   'supabase/migrations/20260829153326_extend_staging_runtime_validity_for_kemerbet_quarantine_recovery_20260829.sql',
   'supabase/migrations/20260829154240_align_staging_player_action_validity_for_kemerbet_quarantine_recovery_20260829.sql',
+];
+const productionOperationalLedgerMarkerPaths = [
+  'supabase/migrations/20260916131633_allow_telebirr_shadow_assignment_retry_transcripts.sql',
+  'supabase/migrations/20260916134441_backdate_telebirr_shadow_assignment_assessment_clock.sql',
+  'supabase/migrations/20260916134810_refresh_telebirr_shadow_runtime_retry.sql',
+  'supabase/migrations/20260916134849_fix_refresh_telebirr_shadow_runtime_retry_least.sql',
+  'supabase/migrations/20260916135027_extend_telebirr_shadow_runtime_review_cap.sql',
+  'supabase/migrations/20260916141308_clamp_telebirr_shadow_assignment_assessment_clock.sql',
+];
+const productionCanonicalFinalizers = [
+  [
+    'supabase/migrations/20260916151200_allow_telebirr_shadow_assignment_retry_transcripts.sql',
+    '20260916131633',
+  ],
+  [
+    'supabase/migrations/20260916151300_backdate_telebirr_shadow_assignment_assessment_clock.sql',
+    '20260916134441',
+  ],
+  [
+    'supabase/migrations/20260916151500_refresh_telebirr_shadow_runtime_retry.sql',
+    '20260916134810',
+  ],
+  [
+    'supabase/migrations/20260916152000_extend_telebirr_shadow_runtime_review_cap.sql',
+    '20260916135027',
+  ],
+  [
+    'supabase/migrations/20260916152500_clamp_telebirr_shadow_assignment_assessment_clock.sql',
+    '20260916141308',
+  ],
 ];
 const telegramProofStatusMigrationPath =
   'supabase/migrations/20260903140617_private_telegram_deposit_proof_status.sql';
@@ -91,7 +121,7 @@ for (const document of [readme, transitionRunbook]) {
   assert.match(document, /same full SHA/i);
 }
 
-for (const markerPath of operationalLedgerMarkerPaths) {
+const readCommentOnlyLedgerMarker = (markerPath) => {
   const marker = readFileSync(resolve(root, markerPath), 'utf8');
   const executableLines = marker
     .split(/\r?\n/u)
@@ -102,11 +132,39 @@ for (const markerPath of operationalLedgerMarkerPaths) {
     [],
     `${markerPath} must remain a comment-only operational ledger marker`,
   );
+  return markerNarrative;
+};
+
+for (const markerPath of stagingOperationalLedgerMarkerPaths) {
+  const markerNarrative = readCommentOnlyLedgerMarker(markerPath);
   assert.match(markerNarrative, /Hosted staging-only operational migration ledger marker\./u);
   assert.match(markerNarrative, /no-op file preserves exact migration-history/u);
   assert.match(
     markerNarrative,
     /without creating a login, credential, schema object, feature switch/u,
+  );
+}
+
+for (const markerPath of productionOperationalLedgerMarkerPaths) {
+  const markerNarrative = readCommentOnlyLedgerMarker(markerPath);
+  assert.match(markerNarrative, /Hosted production operational migration ledger marker\./u);
+  assert.match(markerNarrative, /no-op marker preserves (?:the )?exact hosted history/u);
+}
+
+for (const [finalizerPath, hostedVersion] of productionCanonicalFinalizers) {
+  const finalizer = readFileSync(resolve(root, finalizerPath), 'utf8');
+  assert.match(finalizer, new RegExp(`hosted version ${hostedVersion}`, 'u'));
+  assert.match(finalizer, /replay-safe canonical finalizer/u);
+}
+
+for (const supersededPath of [
+  'supabase/migrations/20260916131500_allow_telebirr_shadow_assignment_retry_transcripts.sql',
+  'supabase/migrations/20260916134500_backdate_telebirr_shadow_assignment_assessment_clock.sql',
+]) {
+  assert.equal(
+    existsSync(resolve(root, supersededPath)),
+    false,
+    `${supersededPath} must not return ahead of its hosted ledger entry`,
   );
 }
 

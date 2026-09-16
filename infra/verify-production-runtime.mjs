@@ -15,6 +15,7 @@ const [
   provisionSql,
   disableSql,
   assignmentRuntimeInputSql,
+  shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
   packageJson,
   quality,
@@ -27,6 +28,7 @@ const [
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
   read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
+  read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
@@ -296,8 +298,8 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  5,
-  'inert preflight, manifest, provision, rollback, and stop must share the reviewed administrative pooler route',
+  6,
+  'inert preflight, live and shadow manifests, provision, rollback, and stop must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
   workflow,
@@ -309,7 +311,10 @@ const ciGate = childBlock(runtimeJobs, 'validate-ci');
 const buildJob = childBlock(runtimeJobs, 'build');
 const deployJob = childBlock(runtimeJobs, 'deploy');
 const operateJob = childBlock(runtimeJobs, 'operate');
-assert.match(ciGate, /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-inert'/u);
+assert.match(
+  ciGate,
+  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-inert'/u,
+);
 assert.match(ciGate, /needs: validate-target/u);
 assert.match(ciGate, /actions: read/u);
 assert.match(ciGate, /node infra\/operations\/require-production-ci\.mjs/u);
@@ -321,10 +326,13 @@ assert.match(
 );
 assert.match(
   buildJob,
-  /inputs\.mode == 'plan'[\s\S]*?inputs\.mode == 'deploy'[\s\S]*?inputs\.mode == 'deploy-inert'[\s\S]*?needs\.validate-ci\.result == 'success'/u,
+  /inputs\.mode == 'plan'[\s\S]*?inputs\.mode == 'deploy'[\s\S]*?inputs\.mode == 'deploy-shadow'[\s\S]*?inputs\.mode == 'deploy-inert'[\s\S]*?needs\.validate-ci\.result == 'success'/u,
 );
 assert.match(deployJob, /needs: \[validate-target, validate-ci, build\]/u);
-assert.match(deployJob, /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-inert'/u);
+assert.match(
+  deployJob,
+  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-inert'/u,
+);
 assert.match(deployJob, /actions: read/u);
 assert.match(deployJob, /node infra\/operations\/require-production-ci\.mjs/u);
 assert.ok(
@@ -353,11 +361,14 @@ assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
+assert.match(workflow, /'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'/u);
 assert.match(workflow, /'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'/u);
 assert.match(workflow, /confirm_telebirr_pilot_revision_id:/u);
 assert.match(workflow, /confirm_telebirr_activation_epoch:/u);
 assert.match(workflow, /Build the exact active production TeleBirr assignment manifest/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy'\s+shell: bash/u);
+assert.match(workflow, /Build the exact no-money production TeleBirr shadow assignment manifest/u);
+assert.match(workflow, /if: inputs\.mode == 'deploy-shadow'\s+shell: bash/u);
 assert.match(workflow, /Prove the complete inert production money boundary/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+shell: bash/u);
 assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
@@ -365,6 +376,7 @@ assert.match(workflow, /runtime_deployment_mode='inert-maintenance'/u);
 assert.match(workflow, /runtime-deployment-mode/u);
 assert.match(workflow, /compose\.production\.inert-maintenance\.yaml/u);
 assert.match(workflow, /production-telebirr-assignment-runtime-input\.sql/u);
+assert.match(workflow, /production-telebirr-shadow-assignment-runtime-input\.sql/u);
 assert.match(workflow, /build-telebirr-assignment-runtime-manifest\.mjs/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
 assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
@@ -643,6 +655,53 @@ assert.match(assignmentRuntimeInputSql, /receiverAccountHolderNameSnapshot/u);
 assert.match(assignmentRuntimeInputSql, /rollback;/u);
 assert.doesNotMatch(
   assignmentRuntimeInputSql,
+  /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
+);
+
+assert.match(
+  shadowAssignmentRuntimeInputSql,
+  /begin transaction isolation level serializable read only/u,
+);
+assert.match(shadowAssignmentRuntimeInputSql, /private_trusted_telebirr_activation_control/u);
+assert.match(shadowAssignmentRuntimeInputSql, /private_trusted_telebirr_activation_epochs/u);
+assert.match(
+  shadowAssignmentRuntimeInputSql,
+  /private_trusted_telebirr_emergency_disable_intents/u,
+);
+for (const feature of [
+  'cbe_birr_authoritative_verification',
+  'deposit_execution',
+  'payment_verification',
+  'telebirr_authoritative_verification',
+  'withdrawal_collection',
+  'withdrawal_validation',
+]) {
+  assert.match(shadowAssignmentRuntimeInputSql, new RegExp(escapeRegExp(feature), 'u'));
+}
+assert.match(shadowAssignmentRuntimeInputSql, /pilot_switch\.mode = 'dry_run'/u);
+assert.match(shadowAssignmentRuntimeInputSql, /pilot\.minimum_amount_minor = 2500/u);
+assert.match(shadowAssignmentRuntimeInputSql, /pilot\.maximum_aggregate_minor = 12500/u);
+assert.match(shadowAssignmentRuntimeInputSql, /agent_platform_companion_execution_control/u);
+assert.match(shadowAssignmentRuntimeInputSql, /execution_control\.control_state = 'disabled'/u);
+assert.match(shadowAssignmentRuntimeInputSql, /fetanagent_trusted_telebirr_verifier_runtime/u);
+assert.match(shadowAssignmentRuntimeInputSql, /fetanagent_deposit_executor_runtime/u);
+assert.match(
+  shadowAssignmentRuntimeInputSql,
+  /private_live_telebirr_device_enrollment_certificates/u,
+);
+assert.match(shadowAssignmentRuntimeInputSql, /private_live_telebirr_device_revocations/u);
+assert.match(
+  shadowAssignmentRuntimeInputSql,
+  /pilot\.expires_at > pg_catalog\.clock_timestamp\(\) \+ interval '10 minutes'/u,
+);
+assert.match(
+  shadowAssignmentRuntimeInputSql,
+  /signer\.valid_until > pg_catalog\.clock_timestamp\(\) \+ interval '30 days'/u,
+);
+assert.match(shadowAssignmentRuntimeInputSql, /receiverAccountHolderNameSnapshot/u);
+assert.match(shadowAssignmentRuntimeInputSql, /rollback;/u);
+assert.doesNotMatch(
+  shadowAssignmentRuntimeInputSql,
   /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
 );
 

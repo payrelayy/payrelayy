@@ -14,17 +14,23 @@ declare
   replacement constant text :=
     'now_at := pg_catalog.date_trunc(''milliseconds'', authority_at - interval ''5 seconds'');';
   occurrences integer;
+  replacement_occurrences integer;
 begin
   definition := pg_catalog.pg_get_functiondef(target);
   occurrences :=
     (pg_catalog.length(definition) - pg_catalog.length(pg_catalog.replace(definition, needle, '')))
       / pg_catalog.length(needle);
+  replacement_occurrences :=
+    (pg_catalog.length(definition) - pg_catalog.length(pg_catalog.replace(definition, replacement, '')))
+      / pg_catalog.length(replacement);
 
-  if occurrences <> 2 then
+  if occurrences = 2 and replacement_occurrences = 0 then
+    execute pg_catalog.replace(definition, needle, replacement);
+  elsif occurrences = 0 and replacement_occurrences = 2 then
+    null;
+  else
     raise exception 'The TeleBirr shadow lease clock definition is not the reviewed shape.';
   end if;
-
-  execute pg_catalog.replace(definition, needle, replacement);
 end;
 $migration$;
 

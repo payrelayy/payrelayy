@@ -14,6 +14,10 @@ declare
     '(expires_at <= (submitted_at + ''24:00:00''::interval))';
   expiry_36 constant text :=
     '(expires_at <= (submitted_at + ''36:00:00''::interval))';
+  runtime_24_count integer;
+  runtime_36_count integer;
+  expiry_24_count integer;
+  expiry_36_count integer;
 begin
   select pg_catalog.pg_get_constraintdef(constraint_row.oid)
     into definition
@@ -22,24 +26,39 @@ begin
          'app.private_telebirr_shadow_proof_requests'::regclass
      and constraint_row.conname = 'private_telebirr_shadow_proof_window_check';
 
-  if definition is null
-    or (
+  runtime_24_count := (
       pg_catalog.length(definition) -
       pg_catalog.length(pg_catalog.replace(definition, runtime_time_24, ''))
-    ) / pg_catalog.length(runtime_time_24) <> 1
-    or (
+    ) / pg_catalog.length(runtime_time_24);
+  runtime_36_count := (
+      pg_catalog.length(definition) -
+      pg_catalog.length(pg_catalog.replace(definition, runtime_time_36, ''))
+    ) / pg_catalog.length(runtime_time_36);
+  expiry_24_count := (
       pg_catalog.length(definition) -
       pg_catalog.length(pg_catalog.replace(definition, expiry_24, ''))
-    ) / pg_catalog.length(expiry_24) <> 1 then
+    ) / pg_catalog.length(expiry_24);
+  expiry_36_count := (
+      pg_catalog.length(definition) -
+      pg_catalog.length(pg_catalog.replace(definition, expiry_36, ''))
+    ) / pg_catalog.length(expiry_36);
+
+  if definition is null then
+    raise exception 'The TeleBirr shadow proof window constraint is not the reviewed shape.';
+  elsif runtime_24_count = 0 and expiry_24_count = 0
+    and runtime_36_count = 1 and expiry_36_count = 1 then
+    null;
+  elsif runtime_24_count = 1 and expiry_24_count = 1
+    and runtime_36_count = 0 and expiry_36_count = 0 then
+    definition := pg_catalog.replace(definition, runtime_time_24, runtime_time_36);
+    definition := pg_catalog.replace(definition, expiry_24, expiry_36);
+    execute 'alter table app.private_telebirr_shadow_proof_requests '
+         || 'drop constraint private_telebirr_shadow_proof_window_check';
+    execute 'alter table app.private_telebirr_shadow_proof_requests '
+         || 'add constraint private_telebirr_shadow_proof_window_check ' || definition;
+  else
     raise exception 'The TeleBirr shadow proof window constraint is not the reviewed shape.';
   end if;
-
-  definition := pg_catalog.replace(definition, runtime_time_24, runtime_time_36);
-  definition := pg_catalog.replace(definition, expiry_24, expiry_36);
-  execute 'alter table app.private_telebirr_shadow_proof_requests '
-       || 'drop constraint private_telebirr_shadow_proof_window_check';
-  execute 'alter table app.private_telebirr_shadow_proof_requests '
-       || 'add constraint private_telebirr_shadow_proof_window_check ' || definition;
 end;
 $migration$;
 

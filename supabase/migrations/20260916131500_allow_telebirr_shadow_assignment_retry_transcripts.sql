@@ -5,9 +5,9 @@
 begin;
 
 alter table app.private_telebirr_shadow_assignment_transcripts
-  drop constraint private_telebirr_shadow_assignment_reference_binding_digest_key;
+  drop constraint if exists private_telebirr_shadow_assignment_reference_binding_digest_key;
 
-create index private_telebirr_shadow_assignment_reference_binding_digest_idx
+create index if not exists private_telebirr_shadow_assignment_reference_binding_digest_idx
   on app.private_telebirr_shadow_assignment_transcripts (
     reference_binding_digest,
     created_at,

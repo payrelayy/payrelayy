@@ -114,17 +114,23 @@ declare
 $branch$;
 begin
   definition := pg_catalog.pg_get_functiondef(target);
-  if (
+  if pg_catalog.position(
+       '''app.private_telebirr_shadow_runtime_retry'', true'
+       in definition
+     ) > 0 then
+    null;
+  elsif (
     pg_catalog.length(definition) -
     pg_catalog.length(pg_catalog.replace(definition, needle, ''))
-  ) / pg_catalog.length(needle) <> 1 then
+  ) / pg_catalog.length(needle) = 1 then
+    execute pg_catalog.replace(definition, needle, branch || needle);
+  else
     raise exception 'The TeleBirr shadow runtime retry trigger is not the reviewed shape.';
   end if;
-  execute pg_catalog.replace(definition, needle, branch || needle);
 end;
 $migration$;
 
-create function app.refresh_private_telebirr_shadow_runtime_retry(
+create or replace function app.refresh_private_telebirr_shadow_runtime_retry(
   p_shadow_proof_request_id uuid,
   p_source_live_verification_job_id uuid,
   p_target_pilot_revision_id uuid,

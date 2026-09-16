@@ -647,10 +647,14 @@ assert.doesNotMatch(
 );
 
 assert.match(inertPreflightSql, /begin transaction isolation level serializable read only/u);
-assert.match(
-  inertPreflightSql,
-  /app\.current_private_trusted_telebirr_activation_epoch\(\) is null/u,
-);
+assert.match(inertPreflightSql, /private_trusted_telebirr_activation_control/u);
+assert.match(inertPreflightSql, /private_trusted_telebirr_activation_epochs/u);
+assert.match(inertPreflightSql, /private_live_deposit_pilot_revisions/u);
+assert.match(inertPreflightSql, /private_trusted_telebirr_emergency_disable_intents/u);
+assert.match(inertPreflightSql, /authority\.authority_state = 'active'/u);
+assert.match(inertPreflightSql, /authority\.revoked_at is null/u);
+assert.match(inertPreflightSql, /authority\.expires_at > pg_catalog\.clock_timestamp\(\)/u);
+assert.doesNotMatch(inertPreflightSql, /current_private_trusted_telebirr_activation_epoch/u);
 for (const feature of [
   'cbe_birr_authoritative_verification',
   'deposit_execution',

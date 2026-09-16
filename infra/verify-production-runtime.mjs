@@ -8,22 +8,26 @@ const read = (path) => readFile(`${repositoryRoot}/${path}`, 'utf8');
 
 const [
   compose,
+  inertCompose,
   workflow,
   helper,
   sudoers,
   provisionSql,
   disableSql,
   assignmentRuntimeInputSql,
+  inertPreflightSql,
   packageJson,
   quality,
 ] = await Promise.all([
   read('infra/compose.production.yaml'),
+  read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
   read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
+  read('infra/sql/production-inert-runtime-preflight.sql'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
 ]);
@@ -191,6 +195,23 @@ for (const expression of [
 }
 assert.equal(count(telebirrAssignment, /- source: /gu), 5);
 assert.doesNotMatch(telebirrAssignment, /ENROLLMENT_ONLY|network_mode: none/u);
+assert.match(inertCompose, /^services:\s*$/mu);
+assert.match(inertCompose, /^  telebirr-assignment-broker:\s*$/mu);
+assert.match(inertCompose, /environment: !override/u);
+assert.match(inertCompose, /TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'/u);
+assert.match(inertCompose, /TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production/u);
+assert.match(inertCompose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
+assert.match(inertCompose, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
+assert.match(inertCompose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
+assert.match(inertCompose, /secrets: !reset \[\]/u);
+assert.match(inertCompose, /configs: !reset \[\]/u);
+assert.match(inertCompose, /networks: !reset \[\]/u);
+assert.match(inertCompose, /network_mode: none/u);
+assert.doesNotMatch(
+  inertCompose,
+  /DATABASE_URL_FILE|REFERENCE_OPENING_KEY_FILE|RUNTIME_MANIFEST_FILE|SIGNER_PRIVATE_KEY_FILE|NODE_EXTRA_CA_CERTS/u,
+);
+assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 1);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -275,8 +296,8 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  4,
-  'manifest, provision, rollback, and stop must share the reviewed administrative pooler route',
+  5,
+  'inert preflight, manifest, provision, rollback, and stop must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
   workflow,
@@ -288,7 +309,7 @@ const ciGate = childBlock(runtimeJobs, 'validate-ci');
 const buildJob = childBlock(runtimeJobs, 'build');
 const deployJob = childBlock(runtimeJobs, 'deploy');
 const operateJob = childBlock(runtimeJobs, 'operate');
-assert.match(ciGate, /if: inputs\.mode == 'deploy'/u);
+assert.match(ciGate, /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-inert'/u);
 assert.match(ciGate, /needs: validate-target/u);
 assert.match(ciGate, /actions: read/u);
 assert.match(ciGate, /node infra\/operations\/require-production-ci\.mjs/u);
@@ -300,9 +321,10 @@ assert.match(
 );
 assert.match(
   buildJob,
-  /inputs\.mode == 'plan' \|\| \(inputs\.mode == 'deploy' && needs\.validate-ci\.result == 'success'\)/u,
+  /inputs\.mode == 'plan'[\s\S]*?inputs\.mode == 'deploy'[\s\S]*?inputs\.mode == 'deploy-inert'[\s\S]*?needs\.validate-ci\.result == 'success'/u,
 );
 assert.match(deployJob, /needs: \[validate-target, validate-ci, build\]/u);
+assert.match(deployJob, /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-inert'/u);
 assert.match(deployJob, /actions: read/u);
 assert.match(deployJob, /node infra\/operations\/require-production-ci\.mjs/u);
 assert.ok(
@@ -331,9 +353,17 @@ assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
+assert.match(workflow, /'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'/u);
 assert.match(workflow, /confirm_telebirr_pilot_revision_id:/u);
 assert.match(workflow, /confirm_telebirr_activation_epoch:/u);
 assert.match(workflow, /Build the exact active production TeleBirr assignment manifest/u);
+assert.match(workflow, /if: inputs\.mode == 'deploy'\s+shell: bash/u);
+assert.match(workflow, /Prove the complete inert production money boundary/u);
+assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+shell: bash/u);
+assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
+assert.match(workflow, /runtime_deployment_mode='inert-maintenance'/u);
+assert.match(workflow, /runtime-deployment-mode/u);
+assert.match(workflow, /compose\.production\.inert-maintenance\.yaml/u);
 assert.match(workflow, /production-telebirr-assignment-runtime-input\.sql/u);
 assert.match(workflow, /build-telebirr-assignment-runtime-manifest\.mjs/u);
 assert.match(workflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
@@ -452,6 +482,12 @@ assert.match(
   /readonly HELPER_PATH='\/usr\/local\/sbin\/fetanagent-production-deploy-helper'/u,
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
+assert.match(helper, /release_deployment_mode\(\)/u);
+assert.match(helper, /operational\|inert-maintenance/u);
+assert.match(
+  helper,
+  /compose_files\+=\(--file "\$release\/compose\.production\.inert-maintenance\.yaml"\)/u,
+);
 assert.match(helper, /current-state\)/u);
 assert.match(helper, /cleanup-incoming\)/u);
 assert.match(helper, /rollback_transition/u);
@@ -533,9 +569,12 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=29/u);
+assert.match(helper, /expected_count=31/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
+assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
+assert.match(helper, /runtime-deployment-mode/u);
+assert.match(helper, /compose\.production\.inert-maintenance\.yaml/u);
 for (const protectedFile of [
   'telebirr-assignment-database-url',
   'telebirr-assignment-runtime-manifest.v1.json',
@@ -604,6 +643,34 @@ assert.match(assignmentRuntimeInputSql, /receiverAccountHolderNameSnapshot/u);
 assert.match(assignmentRuntimeInputSql, /rollback;/u);
 assert.doesNotMatch(
   assignmentRuntimeInputSql,
+  /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
+);
+
+assert.match(inertPreflightSql, /begin transaction isolation level serializable read only/u);
+assert.match(
+  inertPreflightSql,
+  /app\.current_private_trusted_telebirr_activation_epoch\(\) is null/u,
+);
+for (const feature of [
+  'cbe_birr_authoritative_verification',
+  'deposit_execution',
+  'payment_verification',
+  'telebirr_authoritative_verification',
+  'withdrawal_collection',
+  'withdrawal_validation',
+  'private_live_deposit_pilot',
+]) {
+  assert.match(inertPreflightSql, new RegExp(escapeRegExp(feature), 'u'));
+}
+assert.match(inertPreflightSql, /agent_platform_companion_execution_control/u);
+assert.match(inertPreflightSql, /control_state = 'disabled'/u);
+assert.match(inertPreflightSql, /fetanagent_trusted_telebirr_verifier_runtime/u);
+assert.match(inertPreflightSql, /fetanagent_deposit_executor_runtime/u);
+assert.match(inertPreflightSql, /not pg_catalog\.bool_or\(role\.rolcanlogin\)/u);
+assert.match(inertPreflightSql, /pg_catalog\.pg_stat_activity/u);
+assert.match(inertPreflightSql, /rollback;/u);
+assert.doesNotMatch(
+  inertPreflightSql,
   /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
 );
 

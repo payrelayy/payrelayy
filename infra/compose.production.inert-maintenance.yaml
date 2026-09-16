@@ -1,0 +1,20 @@
+# This overlay is used only for a reviewed runtime-maintenance deployment while PostgreSQL proves
+# that no trusted TeleBirr activation epoch or money authority is active. It deliberately restores
+# the assignment broker's enrollment-only, network-isolated shape so a new Owner runtime can be
+# deployed before a fresh pilot exists. A later operational deployment must omit this overlay and
+# bind the broker to one exact active pilot manifest.
+services:
+  telebirr-assignment-broker:
+    environment: !override
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets: !reset []
+    configs: !reset []
+    networks: !reset []
+    network_mode: none

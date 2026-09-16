@@ -52,6 +52,7 @@ assert.match(
 assert.match(workflow, /proof\.id = '\$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid/u);
 assert.match(workflow, /proof\.source_live_verification_job_id is null/u);
 assert.match(workflow, /private_telebirr_shadow_policy_recoveries recovery/u);
+assert.match(workflow, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
 assert.match(
   workflow,
   /recovery\.recovery_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
@@ -129,6 +130,8 @@ assert.match(provision, /telegram_telebirr_shadow_proof_receipts/u);
 assert.match(provision, /private_telebirr_shadow_device_evidence_staging/u);
 assert.match(provision, /private_telebirr_shadow_policy_recoveries/u);
 assert.match(provision, /private_telebirr_shadow_policy_recovery_digest/u);
+assert.match(provision, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
+assert.match(provision, /private_telebirr_shadow_source_unavailable_retries/u);
 assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);
 assert.match(provision, /\) >= recovery\.prior_attempt_count \+ 1/u);
 assert.match(provision, /staged\.staged_at >= recovery\.recovered_at/u);

@@ -100,10 +100,16 @@ select :'source_live_verification_job_id' = 'not-applicable'
      and shadow_proof.runtime_retry_request_key is null
      and pg_catalog.clock_timestamp()
            < shadow_proof.submitted_at + interval '12 hours'
-     and exists (
-       select 1
-         from app.telegram_telebirr_shadow_proof_receipts receipt
-        where receipt.shadow_proof_request_id = shadow_proof.id
+     and (
+       exists (
+         select 1
+           from app.telegram_telebirr_shadow_proof_receipts receipt
+          where receipt.shadow_proof_request_id = shadow_proof.id
+       )
+       or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
       and exists (
         select 1
@@ -136,6 +142,20 @@ select :'source_live_verification_job_id' = 'not-applicable'
                   and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
                   and attempt.attempt_number = recovery.prior_attempt_count + 1
                   and staged.staged_at >= recovery.recovered_at
+             )
+             or (
+               app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                 shadow_proof.id,
+                 nullif(:'recovery_request_key', 'not-applicable')::uuid
+               )
+               and exists (
+                 select 1
+                   from app.private_telebirr_shadow_source_unavailable_retries retry
+                  where retry.retry_request_key =
+                        nullif(:'recovery_request_key', 'not-applicable')::uuid
+                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                    and staged.staged_at >= retry.authorized_at
+               )
              )
            )
       )
@@ -211,6 +231,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
                 where candidate.shadow_proof_request_id = shadow_proof.id
              ) = 1
         )
+        or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
       )
   \gset
 \else
@@ -396,10 +420,16 @@ with locked_feature_switches as materialized (
      and shadow_proof.submitted_at < pg_catalog.clock_timestamp()
      and pg_catalog.clock_timestamp()
            < shadow_proof.submitted_at + interval '12 hours'
-     and exists (
-       select 1
-         from app.telegram_telebirr_shadow_proof_receipts receipt
-        where receipt.shadow_proof_request_id = shadow_proof.id
+     and (
+       exists (
+         select 1
+           from app.telegram_telebirr_shadow_proof_receipts receipt
+          where receipt.shadow_proof_request_id = shadow_proof.id
+       )
+       or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
       and exists (
         select 1
@@ -432,6 +462,20 @@ with locked_feature_switches as materialized (
                   and recovery.reason_code = 'verifier_policy_fix_retry_no_credit'
                   and attempt.attempt_number = recovery.prior_attempt_count + 1
                   and staged.staged_at >= recovery.recovered_at
+             )
+             or (
+               app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                 shadow_proof.id,
+                 nullif(:'recovery_request_key', 'not-applicable')::uuid
+               )
+               and exists (
+                 select 1
+                   from app.private_telebirr_shadow_source_unavailable_retries retry
+                  where retry.retry_request_key =
+                        nullif(:'recovery_request_key', 'not-applicable')::uuid
+                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                    and staged.staged_at >= retry.authorized_at
+               )
              )
            )
       )
@@ -507,6 +551,10 @@ with locked_feature_switches as materialized (
                 where candidate.shadow_proof_request_id = shadow_proof.id
              ) = 1
         )
+        or app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
       )
 ), safe_source_and_open_shadow as (
   select job.id,
@@ -622,6 +670,9 @@ select (select count(*) from locked_feature_switches) = 7
     and pg_catalog.to_regprocedure(
           'app.refresh_private_telebirr_shadow_runtime_retry(uuid,uuid,uuid,uuid,text)'
         ) is not null
+   and pg_catalog.to_regprocedure(
+         'app.private_telebirr_shadow_source_unavailable_retry_is_valid(uuid,uuid)'
+       ) is not null
    and (select count(*)
           from locked_feature_switches switch_state
           join armed_shadow_pilot pilot

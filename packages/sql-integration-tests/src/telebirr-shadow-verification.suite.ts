@@ -23,6 +23,7 @@ const shadowTables = [
   'private_telebirr_shadow_device_evidence_staging',
   'private_telebirr_shadow_evidence_quarantine',
   'private_telebirr_shadow_proof_requests',
+  'private_telebirr_shadow_source_unavailable_retries',
   'private_telebirr_shadow_verification_attempts',
   'private_telebirr_shadow_verification_outcomes',
   'telegram_telebirr_shadow_proof_receipts',
@@ -955,6 +956,299 @@ export function registerTelebirrShadowVerificationSqlTests(
             dry_receipts: '0',
           },
         ]);
+      });
+    });
+
+    it('preserves a source-unavailable outcome and creates exactly one no-money retry request', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const ownerAdminId = getOwnerAdminId();
+        const pilot = await prepareTelebirrPilot(client, ownerAdminId);
+        const gates = await client.query<{ readonly feature_key: string }>(
+          `update app.feature_switches
+              set mode = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then 'dry_run'::app.feature_mode
+                    else 'disabled'::app.feature_mode
+                  end,
+                  settings = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then jsonb_build_object(
+                        'contract_version', 1,
+                        'pilot_revision_id', $1::uuid,
+                        'configuration_digest', $2::text
+                      )
+                    else '{}'::jsonb
+                  end
+            where feature_key in (
+              'private_live_deposit_pilot', 'payment_verification',
+              'deposit_execution', 'withdrawal_validation', 'withdrawal_collection',
+              'cbe_birr_authoritative_verification', 'telebirr_authoritative_verification'
+            )
+            returning feature_key`,
+          [pilot.pilotRevisionId, pilot.configurationDigest],
+        );
+        expect(gates.rows).toHaveLength(7);
+
+        const before = await client.query<{ readonly snapshot: Readonly<Record<string, number>> }>(`
+          select jsonb_build_object(
+            'intents', (select count(*) from app.deposit_intents),
+            'claims', (select count(*) from app.deposit_payment_claims),
+            'jobs', (select count(*) from app.deposit_jobs),
+            'attempts', (select count(*) from app.deposit_execution_attempts),
+            'evidence', (select count(*) from app.provider_payment_evidence),
+            'reconciliations', (select count(*) from app.execution_reconciliations),
+            'live_proofs', (select count(*) from app.private_live_deposit_pilot_proofs),
+            'live_attempts', (select count(*) from app.private_live_telebirr_verification_attempts),
+            'live_outcomes', (select count(*) from app.private_live_telebirr_verification_outcomes)
+          ) as snapshot
+        `);
+
+        const inboundEventId = await createTelegramShadowInbound(
+          client,
+          pilot.submittingCustomerId,
+          ownerAdminId,
+        );
+        const fingerprint = createHash('sha256')
+          .update(`source-unavailable-shadow-proof:${randomUUID()}`, 'utf8')
+          .digest('hex');
+        await client.query('set local role fetanagent_player_actions');
+        const captured = await client.query<ShadowCaptureRow>(
+          `select * from app.capture_telegram_telebirr_shadow_proof(
+             $1::uuid, $2::text, 'telebirr', $3::text, $4::text,
+             $5::text, 2::smallint, 2::smallint, $6::text
+           )`,
+          [
+            inboundEventId,
+            pilot.playerIds[0]!,
+            `v2.telebirr.${'U'.repeat(16)}.${'V'.repeat(22)}.${fingerprint.slice(0, 11)}`,
+            fingerprint,
+            `***${fingerprint.slice(0, 4).toUpperCase()}`,
+            `hmac-sha256-v1:${'d'.repeat(64)}`,
+          ],
+        );
+        await client.query('reset role');
+        const sourceProof = captured.rows[0]!;
+
+        const attemptId = randomUUID();
+        const assignmentId = randomUUID();
+        const observationBodyDigest = digest(`source-unavailable-observation:${attemptId}`);
+        const sourceDocumentDigest = digest('telebirr-unavailable-network-v1');
+        const evidenceDigest = digest('telebirr-source-unavailable-evidence-v1');
+        const observedAt = new Date();
+        await client.query(
+          `insert into app.private_telebirr_shadow_verification_attempts (
+             id, shadow_proof_request_id, verification_job_id, attempt_number,
+             lease_request_key, lease_request_digest, lease_token, request_id,
+             assignment_id, requested_lease_seconds, leased_by, device_enrollment_id,
+             device_id_snapshot, device_key_id_snapshot,
+             device_public_key_spki_sha256_snapshot, lease_nonce_digest,
+             challenge_id, challenge_digest, issued_at, expires_at
+           )
+           select $1::uuid, $2::uuid, $3::uuid, 1,
+                  $4::uuid, $5::text, $6::uuid, $7::uuid,
+                  $8::uuid, 120, 'sql-source-retry-verifier', enrollment.id,
+                  enrollment.device_id, enrollment.key_id,
+                  enrollment.public_key_spki_sha256, $9::text,
+                  $10::uuid, $11::text, $12::timestamptz,
+                  $12::timestamptz + interval '2 minutes'
+             from app.private_live_telebirr_device_enrollments enrollment
+            where enrollment.id = $13::uuid`,
+          [
+            attemptId,
+            sourceProof.shadow_proof_request_id,
+            sourceProof.shadow_verification_job_id,
+            randomUUID(),
+            digest(`source-unavailable-lease:${attemptId}`),
+            randomUUID(),
+            randomUUID(),
+            assignmentId,
+            digest(`source-unavailable-nonce:${attemptId}`),
+            randomUUID(),
+            digest(`source-unavailable-challenge:${attemptId}`),
+            observedAt,
+            pilot.deviceEnrollmentId,
+          ],
+        );
+
+        const transcriptId = randomUUID();
+        const assignmentBodyDigest = digest(`source-unavailable-assignment:${attemptId}`);
+        await client.query(
+          `insert into app.private_telebirr_shadow_assignment_transcripts (
+             id, verification_attempt_id, assignment_signer_id,
+             assignment_body_digest, assignment_signature,
+             assignment_signature_digest, signer_key_id_snapshot,
+             signer_public_key_spki_sha256_snapshot, reference_binding_digest,
+             signed_at
+           )
+           select $1::uuid, $2::uuid, signer.id, $3::text, $4::text,
+                  $5::text, signer.signer_key_id, signer.public_key_spki_sha256,
+                  $6::text, $7::timestamptz
+             from app.private_live_telebirr_assignment_signers signer
+            where signer.id = $8::uuid`,
+          [
+            transcriptId,
+            attemptId,
+            assignmentBodyDigest,
+            signature(0x61).encoded,
+            signature(0x61).digest,
+            digest(`source-unavailable-reference:${attemptId}`),
+            observedAt,
+            pilot.assignmentSignerId,
+          ],
+        );
+        await client.query(
+          `insert into app.private_telebirr_shadow_device_evidence_staging (
+             observation_body_digest, assignment_body_digest,
+             verification_attempt_id, assignment_transcript_id,
+             device_enrollment_id, first_request_body_digest,
+             signed_assignment, signed_observation, observed_at, staged_at
+           ) values (
+             $1::text, $2::text, $3::uuid, $4::uuid, $5::uuid, $6::text,
+             '{}'::jsonb, '{}'::jsonb, $7::timestamptz, $7::timestamptz
+           )`,
+          [
+            observationBodyDigest,
+            assignmentBodyDigest,
+            attemptId,
+            transcriptId,
+            pilot.deviceEnrollmentId,
+            digest(`source-unavailable-request:${attemptId}`),
+            observedAt,
+          ],
+        );
+        const sourceOutcomeId = randomUUID();
+        await client.query(
+          `insert into app.private_telebirr_shadow_verification_outcomes (
+             id, verification_attempt_id, shadow_proof_request_id,
+             verification_job_id, completion_request_key,
+             completion_request_digest, observation_body_digest,
+             observation_signature_digest, replay_identity,
+             source_document_digest, normalized_facts_digest, observed_at,
+             protocol_disposition, protocol_reason_code,
+             assessment_input_digest, assessed_at, disposition, reason_code,
+             evidence_digest, retrieved_at
+           ) values (
+             $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+             $6::text, $7::text, $8::text, $9::text, $10::text,
+             $11::text, $12::timestamptz, 'would_review',
+             'receipt_requires_review', $13::text, $12::timestamptz,
+             'review_required', 'source_unavailable', $14::text,
+             $12::timestamptz
+           )`,
+          [
+            sourceOutcomeId,
+            attemptId,
+            sourceProof.shadow_proof_request_id,
+            sourceProof.shadow_verification_job_id,
+            randomUUID(),
+            digest(`source-unavailable-completion:${attemptId}`),
+            observationBodyDigest,
+            signature(0x62).digest,
+            digest(`source-unavailable-replay:${attemptId}`),
+            sourceDocumentDigest,
+            digest(`source-unavailable-facts:${attemptId}`),
+            observedAt,
+            digest(`source-unavailable-assessment:${attemptId}`),
+            evidenceDigest,
+          ],
+        );
+
+        const retryRequestKey = randomUUID();
+        const retry = await client.query<{
+          readonly already_retried: boolean;
+          readonly retry_expires_at: Date;
+          readonly shadow_proof_request_id: string;
+          readonly shadow_verification_job_id: string;
+        }>(
+          `select * from app.retry_private_telebirr_shadow_after_source_unavailable(
+             $1::uuid, $2::uuid, $3::uuid,
+             'source_unavailable_review_retry_no_credit'
+           )`,
+          [sourceProof.shadow_proof_request_id, pilot.pilotRevisionId, retryRequestKey],
+        );
+        expect(retry.rows).toHaveLength(1);
+        expect(retry.rows[0]!.already_retried).toBe(false);
+        const replay = await client.query(
+          `select * from app.retry_private_telebirr_shadow_after_source_unavailable(
+             $1::uuid, $2::uuid, $3::uuid,
+             'source_unavailable_review_retry_no_credit'
+           )`,
+          [sourceProof.shadow_proof_request_id, pilot.pilotRevisionId, retryRequestKey],
+        );
+        expect(replay.rows).toEqual([{ ...retry.rows[0]!, already_retried: true }]);
+        await expectFailure(
+          client,
+          `select * from app.retry_private_telebirr_shadow_after_source_unavailable(
+             $1::uuid, $2::uuid, $3::uuid,
+             'source_unavailable_review_retry_no_credit'
+           )`,
+          [sourceProof.shadow_proof_request_id, pilot.pilotRevisionId, randomUUID()],
+          /retry replay conflicts/iu,
+        );
+
+        const lineage = await client.query<{
+          readonly child_outcomes: string;
+          readonly child_receipts: string;
+          readonly valid: boolean;
+          readonly source_outcomes: string;
+          readonly source_receipts: string;
+        }>(
+          `select
+             app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+               $2::uuid, $3::uuid
+             ) as valid,
+             (select count(*)::text
+                from app.private_telebirr_shadow_verification_outcomes outcome
+               where outcome.shadow_proof_request_id = $1::uuid) as source_outcomes,
+             (select count(*)::text
+                from app.private_telebirr_shadow_verification_outcomes outcome
+               where outcome.shadow_proof_request_id = $2::uuid) as child_outcomes,
+             (select count(*)::text
+                from app.telegram_telebirr_shadow_proof_receipts receipt
+               where receipt.shadow_proof_request_id = $1::uuid) as source_receipts,
+             (select count(*)::text
+                from app.telegram_telebirr_shadow_proof_receipts receipt
+               where receipt.shadow_proof_request_id = $2::uuid) as child_receipts`,
+          [
+            sourceProof.shadow_proof_request_id,
+            retry.rows[0]!.shadow_proof_request_id,
+            retryRequestKey,
+          ],
+        );
+        expect(lineage.rows).toEqual([
+          {
+            valid: true,
+            source_outcomes: '1',
+            child_outcomes: '0',
+            source_receipts: '1',
+            child_receipts: '0',
+          },
+        ]);
+
+        const assignment = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-source-retry-verifier', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(assignment.rows).toHaveLength(1);
+        expect(assignment.rows[0]!.job_id).toBe(retry.rows[0]!.shadow_verification_job_id);
+
+        const after = await client.query<{ readonly snapshot: Readonly<Record<string, number>> }>(`
+          select jsonb_build_object(
+            'intents', (select count(*) from app.deposit_intents),
+            'claims', (select count(*) from app.deposit_payment_claims),
+            'jobs', (select count(*) from app.deposit_jobs),
+            'attempts', (select count(*) from app.deposit_execution_attempts),
+            'evidence', (select count(*) from app.provider_payment_evidence),
+            'reconciliations', (select count(*) from app.execution_reconciliations),
+            'live_proofs', (select count(*) from app.private_live_deposit_pilot_proofs),
+            'live_attempts', (select count(*) from app.private_live_telebirr_verification_attempts),
+            'live_outcomes', (select count(*) from app.private_live_telebirr_verification_outcomes)
+          ) as snapshot
+        `);
+        expect(after.rows).toEqual(before.rows);
       });
     });
 

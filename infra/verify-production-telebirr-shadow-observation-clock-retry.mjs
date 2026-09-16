@@ -19,6 +19,13 @@ const migration = readFileSync(
   ),
   'utf8',
 );
+const fingerprintBindingMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260917020000_fix_telebirr_shadow_observation_fingerprint_binding.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
 const provision = readFileSync(
   new URL('./sql/production-telebirr-shadow-verifier-once-provision.sql', import.meta.url),
   'utf8',
@@ -86,6 +93,34 @@ assert.doesNotMatch(migration, /grant .*fetanagent_/u);
 assert.doesNotMatch(migration, /update app\.feature_switches/u);
 assert.doesNotMatch(migration, /insert into app\.deposit_payment_claims/u);
 assert.doesNotMatch(migration, /insert into app\.deposit_jobs/u);
+
+assert.match(
+  fingerprintBindingMigration,
+  /85a64e7324a9d66bcd193c88e15479248d5d6902778f9332267a1248b926da4a/u,
+);
+assert.match(
+  fingerprintBindingMigration,
+  /25e200f8fdb7aed9bfa76560e2ad5a6b73340a5890fe0490e1bc315c3b21d93d/u,
+);
+assert.match(fingerprintBindingMigration, /guard_private_telebirr_shadow_clock_retry_insert\(\)/u);
+assert.match(
+  fingerprintBindingMigration,
+  /retry_private_telebirr_shadow_after_observation_clock_fix\(uuid,uuid,uuid,text,text\)/u,
+);
+assert.equal(
+  (
+    fingerprintBindingMigration.match(
+      /'hmac-sha256:' \|\| source_proof\.candidate_reference_fingerprint/g,
+    ) ?? []
+  ).length,
+  2,
+);
+assert.match(fingerprintBindingMigration, /marker_count <> 1/u);
+assert.match(fingerprintBindingMigration, /routine\.proacl is not distinct from original_acl/u);
+assert.doesNotMatch(fingerprintBindingMigration, /grant .*fetanagent_/u);
+assert.doesNotMatch(fingerprintBindingMigration, /update app\.feature_switches/u);
+assert.doesNotMatch(fingerprintBindingMigration, /insert into app\.deposit_payment_claims/u);
+assert.doesNotMatch(fingerprintBindingMigration, /insert into app\.deposit_jobs/u);
 
 assert.equal(
   (provision.match(/private_telebirr_shadow_observation_clock_retry_is_valid/g) ?? []).length,

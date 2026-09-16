@@ -216,8 +216,21 @@ export interface TrustedTelebirrVerifier {
   ): Promise<TrustedTelebirrVerificationResult>;
 }
 
+export type TrustedTelebirrVerifierFailureStage =
+  | 'unavailable'
+  | 'decode_request'
+  | 'load_first_authority'
+  | 'validate_first_authority'
+  | 'authenticate_first_evidence'
+  | 'load_second_authority'
+  | 'validate_second_authority'
+  | 'authenticate_second_evidence'
+  | 'derive_completion_input'
+  | 'persist_completion'
+  | 'validate_completion';
+
 export class TrustedTelebirrVerifierUnavailableError extends Error {
-  constructor() {
+  constructor(readonly failureStage: TrustedTelebirrVerifierFailureStage = 'unavailable') {
     super('The trusted TeleBirr verifier is unavailable.');
     this.name = 'TrustedTelebirrVerifierUnavailableError';
   }
@@ -925,6 +938,7 @@ function createTelebirrVerifier(
 
   return Object.freeze({
     async verifyAndComplete(requestCandidate: TrustedTelebirrVerificationRequest) {
+      let failureStage: TrustedTelebirrVerifierFailureStage = 'decode_request';
       try {
         const request = decodeTrustedTelebirrVerificationRequest(requestCandidate);
         if (!request) throw new Error();
@@ -932,12 +946,15 @@ function createTelebirrVerifier(
         const occurredAt =
           observation.facts.lookupOutcome === 'found' ? observation.facts.occurredAt : null;
 
+        failureStage = 'load_first_authority';
+        const firstAuthorityPayload = await database.loadAuthority(
+          request.verificationAttemptId,
+          request.leaseToken,
+          occurredAt,
+        );
+        failureStage = 'validate_first_authority';
         const firstAuthority = authorityFrom(
-          await database.loadAuthority(
-            request.verificationAttemptId,
-            request.leaseToken,
-            occurredAt,
-          ),
+          firstAuthorityPayload,
           request.verificationAttemptId,
           request.leaseToken,
           verificationMode,
@@ -956,6 +973,7 @@ function createTelebirrVerifier(
           return nonSettlementResult(undefined, verificationMode);
         }
 
+        failureStage = 'authenticate_first_evidence';
         const firstVerification = authenticatedOutcome(
           firstAuthority,
           request.signedAssignment,
@@ -965,12 +983,15 @@ function createTelebirrVerifier(
         );
         if (!firstVerification) return nonSettlementResult(undefined, verificationMode);
 
+        failureStage = 'load_second_authority';
+        const secondAuthorityPayload = await database.loadAuthority(
+          request.verificationAttemptId,
+          request.leaseToken,
+          occurredAt,
+        );
+        failureStage = 'validate_second_authority';
         const secondAuthority = authorityFrom(
-          await database.loadAuthority(
-            request.verificationAttemptId,
-            request.leaseToken,
-            occurredAt,
-          ),
+          secondAuthorityPayload,
           request.verificationAttemptId,
           request.leaseToken,
           verificationMode,
@@ -992,6 +1013,7 @@ function createTelebirrVerifier(
         ) {
           return nonSettlementResult(undefined, verificationMode);
         }
+        failureStage = 'authenticate_second_evidence';
         const secondVerification = authenticatedOutcome(
           secondAuthority,
           request.signedAssignment,
@@ -1002,6 +1024,7 @@ function createTelebirrVerifier(
         if (!secondVerification) return nonSettlementResult(undefined, verificationMode);
         const { outcome: secondOutcome, protocol: secondProtocol } = secondVerification;
 
+        failureStage = 'derive_completion_input';
         const trustedReference = dataRecord(secondAuthority.outcomeInputBase.trustedReference);
         if (
           !trustedReference ||
@@ -1077,8 +1100,11 @@ function createTelebirrVerifier(
         }
         const completionInput = existingCompletion ?? currentCompletionInput;
 
+        failureStage = 'persist_completion';
+        const completionPayload = await database.complete(completionInput);
+        failureStage = 'validate_completion';
         const completed = completionResult(
-          await database.complete(completionInput),
+          completionPayload,
           completionInput.disposition,
           completionInput.reasonCode,
           verificationMode,
@@ -1086,7 +1112,7 @@ function createTelebirrVerifier(
         if (!completed) throw new Error();
         return completed;
       } catch {
-        throw new TrustedTelebirrVerifierUnavailableError();
+        throw new TrustedTelebirrVerifierUnavailableError(failureStage);
       }
     },
   });

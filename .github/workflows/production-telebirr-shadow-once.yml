@@ -199,6 +199,13 @@ jobs:
             local command_status=$? disable_status=0
             trap - EXIT INT TERM
             set +e
+            if [[ "$command_status" -ne 0 ]]; then
+              # The application emits only this fixed stage vocabulary. Whitelist those lines so a
+              # failed detached run remains diagnosable without exposing identifiers or payloads.
+              docker logs --tail 32 "$container" 2>&1 \
+                | grep -E '^FetanAgent TeleBirr shadow verifier (failed closed|failure stage: (load_staged_evidence|unavailable|decode_request|load_first_authority|validate_first_authority|authenticate_first_evidence|load_second_authority|validate_second_authority|authenticate_second_evidence|derive_completion_input|persist_completion|validate_completion|persist_quarantine|unpersisted_result))\.$' \
+                || true
+            fi
             docker rm --force "$container" >/dev/null 2>&1 || true
             if [[ "$provisioned" == '1' ]]; then
               disable_result="$(timeout --signal=TERM --kill-after=5s 45s \

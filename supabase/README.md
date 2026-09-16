@@ -83,6 +83,14 @@ Supabase management migration tool installed the reviewed body under hosted vers
 these facts and requires the operational markers to remain no-op. Do not use `migration repair` to
 erase or invent history when a hosted entry differs; inspect its exact name and effect first.
 
+Production TeleBirr recovery on 2026-09-16 likewise recorded six guarded operational entries under
+hosted versions `20260916131633`, `20260916134441`, `20260916134810`, `20260916134849`,
+`20260916135027`, and `20260916141308`. Their repository files are comment-only ledger markers.
+Replay-safe canonical finalizers follow the runtime-retry foundation at versions `20260916151200`,
+`20260916151300`, `20260916151500`, `20260916152000`, and `20260916152500`; they converge a clean
+database and safely validate an already-correct hosted database. This preserves both truthful hosted
+history and dependency-correct clean replay without migration-ledger repair.
+
 ## First staging Owner
 
 The manual

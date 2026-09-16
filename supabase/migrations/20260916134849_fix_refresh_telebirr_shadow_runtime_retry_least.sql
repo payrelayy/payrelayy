@@ -1,0 +1,6 @@
+-- Hosted production operational migration ledger marker.
+--
+-- Supabase recorded this version for the guarded PostgreSQL LEAST-expression correction to the
+-- intermediate TeleBirr runtime-refresh function. The corrected definition is reproduced by the
+-- replay-safe 20260916151500 canonical finalizer. This no-op marker preserves exact hosted history
+-- without installing the superseded intermediate definition on a clean database.

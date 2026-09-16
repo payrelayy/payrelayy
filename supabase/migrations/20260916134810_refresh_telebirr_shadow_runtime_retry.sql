@@ -1,0 +1,6 @@
+-- Hosted production operational migration ledger marker.
+--
+-- Supabase recorded this version when the guarded TeleBirr recovery operation added the bounded
+-- no-money runtime-review refresh. Its replay-safe canonical finalizer is 20260916151500, after the
+-- runtime-retry foundation it requires. This no-op marker preserves the exact hosted history and
+-- cannot create payment, credit, settlement, execution, or money-movement authority.

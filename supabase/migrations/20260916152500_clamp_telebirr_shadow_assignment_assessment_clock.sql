@@ -1,3 +1,5 @@
+-- Production first received the reviewed operational change under hosted version 20260916141308.
+-- This replay-safe canonical finalizer runs after the runtime-retry foundation on clean databases.
 -- Correct the already-deployed evidence-only timing tolerance. The signed issue time may trail
 -- the phone's pre-poll assessment clock by up to five seconds, but it must never predate the
 -- enrollment, receiver profile, or proof validity boundary. This migration is deliberately

@@ -18,6 +18,7 @@ import {
   digestTelebirrLivePilotObservationBody,
   digestTelebirrLivePilotReceiptFacts,
   digestTelebirrLivePilotReceiverName,
+  verifyTelebirrLivePrivatePilotEvidence,
   type TelebirrLivePilotAssignmentBody,
   type TelebirrLivePilotFoundFacts,
   type TelebirrLivePilotObservationBody,
@@ -541,7 +542,31 @@ describe('trusted TeleBirr verifier', () => {
 
   it('authenticates shadow evidence but accepts only a no-money advisory completion', async () => {
     const value = fixture();
-    value.authority.verificationMode = 'shadow';
+    Object.assign(value.authority, {
+      verificationMode: 'shadow',
+      evidenceStagedAt: value.observation.body.observedAt,
+    });
+    expect(
+      verifyTelebirrLivePrivatePilotEvidence(
+        {
+          contractVersion: 1,
+          providerCode: 'telebirr',
+          protocolMode: 'live_private_pilot_v1',
+          assessedAt: value.observation.body.observedAt,
+          trustedAssignmentSigner: value.authority.trustedAssignmentSigner,
+          trustedRequestBinding: value.authority.trustedRequestBinding,
+          deviceEnrollment: value.authority.deviceEnrollment,
+          signedAssignment: value.assignment,
+          signedObservation: value.observation,
+          serverComputedReplayIdentities: value.authority.replayIdentities,
+        },
+        value.signer.spki,
+        value.device.spki,
+      ),
+    ).toMatchObject({
+      disposition: 'would_forward_signed_evidence',
+      reasonCode: 'signed_evidence_verified',
+    });
     const complete = vi.fn(async (input: TrustedTelebirrCompletionInput) =>
       shadowCompletion(input),
     );
@@ -623,10 +648,80 @@ describe('trusted TeleBirr verifier', () => {
     );
   });
 
+  it('authenticates an on-time staged shadow observation during a later bounded review', async () => {
+    const value = fixture();
+    const lateReviewAt = '2026-08-20T18:30:00.000Z';
+    Object.assign(value.authority, {
+      verificationMode: 'shadow',
+      evidenceStagedAt: value.observation.body.observedAt,
+      capturedAt: lateReviewAt,
+    });
+    value.authority.databaseFacts.currentPolicy.checkedAt = lateReviewAt;
+    value.authority.databaseFacts.currentEligibility.checkedAt = lateReviewAt;
+    value.authority.databaseFacts.duplicateState.checkedAt = lateReviewAt;
+    const complete = vi.fn(async (input: TrustedTelebirrCompletionInput) =>
+      shadowCompletion(input),
+    );
+    const verifier = createTelebirrShadowVerifier(
+      { loadAuthority: async () => value.authority, complete },
+      {
+        assignmentSigners: [
+          { keyId: value.assignment.signerKeyId, publicKeySpkiDer: value.signer.spki },
+        ],
+        devices: [{ keyId: value.assignment.body.keyId, publicKeySpkiDer: value.device.spki }],
+      },
+    );
+
+    await expect(verifier.verifyAndComplete(value.request)).resolves.toMatchObject({
+      status: 'shadow_completed',
+      disposition: 'would_verify',
+      wouldVerify: true,
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete.mock.calls[0]?.[0].assessedAt).toBe(lateReviewAt);
+
+    const lateStage = fixture();
+    Object.assign(lateStage.authority, {
+      verificationMode: 'shadow',
+      evidenceStagedAt: lateStage.assignment.body.expiresAt,
+      capturedAt: lateReviewAt,
+    });
+    lateStage.authority.databaseFacts.currentPolicy.checkedAt = lateReviewAt;
+    lateStage.authority.databaseFacts.currentEligibility.checkedAt = lateReviewAt;
+    lateStage.authority.databaseFacts.duplicateState.checkedAt = lateReviewAt;
+    const rejectedComplete = vi.fn();
+    const rejectedVerifier = createTelebirrShadowVerifier(
+      { loadAuthority: async () => lateStage.authority, complete: rejectedComplete },
+      {
+        assignmentSigners: [
+          {
+            keyId: lateStage.assignment.signerKeyId,
+            publicKeySpkiDer: lateStage.signer.spki,
+          },
+        ],
+        devices: [
+          {
+            keyId: lateStage.assignment.body.keyId,
+            publicKeySpkiDer: lateStage.device.spki,
+          },
+        ],
+      },
+    );
+    await expect(rejectedVerifier.verifyAndComplete(lateStage.request)).resolves.toEqual({
+      status: 'shadow_not_completed',
+      disposition: 'would_reject',
+      reasonCode: 'trusted_evidence_invalid',
+    });
+    expect(rejectedComplete).not.toHaveBeenCalled();
+  });
+
   it('rejects cross-wired live and shadow authority modes before completion', async () => {
     const live = fixture();
     const shadow = fixture();
-    shadow.authority.verificationMode = 'shadow';
+    Object.assign(shadow.authority, {
+      verificationMode: 'shadow',
+      evidenceStagedAt: shadow.observation.body.observedAt,
+    });
     const liveRuntime = verifierFor(shadow);
     await expect(liveRuntime.verifier.verifyAndComplete(shadow.request)).rejects.toBeInstanceOf(
       TrustedTelebirrVerifierUnavailableError,

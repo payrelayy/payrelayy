@@ -426,7 +426,7 @@ begin
     raise exception 'The source-unavailable shadow proof is not safely retryable.';
   end if;
 
-  retry_until := pg_catalog.least(
+  retry_until := least(
     source_proof.submitted_at + interval '12 hours',
     pilot.expires_at,
     profile.valid_until

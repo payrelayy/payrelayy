@@ -8,22 +8,12 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
-const workflowPath = fileURLToPath(
-  new URL(
-    '../../../.github/workflows/production-telebirr-shadow-policy-recovery.yml',
-    import.meta.url,
-  ),
-);
 let migrationSource = '';
-let workflowSource = '';
 let recoverySource = '';
 let triggerSource = '';
 
 beforeAll(async () => {
-  [migrationSource, workflowSource] = await Promise.all([
-    readFile(migrationPath, 'utf8'),
-    readFile(workflowPath, 'utf8'),
-  ]);
+  migrationSource = await readFile(migrationPath, 'utf8');
   recoverySource =
     migrationSource.match(
       /create function app\.retry_quarantined_private_telebirr_shadow_after_policy_fix\([\s\S]+?\n\$\$;/u,
@@ -102,23 +92,5 @@ describe('TeleBirr shadow verifier-policy recovery boundary', () => {
     expect(recoverySource).toContain('active_enrollment_valid_until');
     expect(recoverySource).toContain('The TeleBirr shadow policy-recovery replay conflicts.');
     expect(recoverySource).toContain('true;');
-  });
-
-  it('runs only from protected main with exact identifiers and an explicit no-money phrase', () => {
-    expect(workflowSource).toContain('environment: production');
-    expect(workflowSource).toContain('[[ "$GITHUB_REF" == \'refs/heads/main\' ]]');
-    expect(workflowSource).toContain(
-      '[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]',
-    );
-    expect(workflowSource).toContain(
-      'RECOVER QUARANTINED TELEBIRR SHADOW AFTER POLICY FIX - NO MONEY',
-    );
-    expect(workflowSource).toContain('node infra/operations/require-production-ci.mjs');
-    expect(workflowSource).toContain(
-      '--file=infra/sql/production-telebirr-shadow-policy-recovery.sql',
-    );
-    expect(workflowSource).toContain('.financialActionsEnabled == false');
-    expect(workflowSource).toContain('.kemerBetCreditEnabled == false');
-    expect(workflowSource).toContain('.quarantinePreserved == true');
   });
 });

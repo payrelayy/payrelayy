@@ -61,7 +61,7 @@ release_deployment_mode() {
     die 'the runtime deployment-mode marker is unsafe'
   mode="$(<"$marker")"
   case "$mode" in
-    operational|inert-maintenance) printf '%s\n' "$mode" ;;
+    operational|shadow-review|inert-maintenance) printf '%s\n' "$mode" ;;
     *) die 'the runtime deployment mode is invalid' ;;
   esac
 }
@@ -191,6 +191,9 @@ compose_release() {
   if companion_execution_v2_enabled_for_release "$release"; then
     compose_files+=(--file "$release/compose.production.companion-execution-v2.yaml")
   fi
+  if [[ "$deployment_mode" == 'shadow-review' ]]; then
+    compose_files+=(--file "$release/compose.production.shadow-review.yaml")
+  fi
   if [[ "$deployment_mode" == 'inert-maintenance' ]]; then
     compose_files+=(--file "$release/compose.production.inert-maintenance.yaml")
   fi
@@ -229,6 +232,26 @@ container_for() {
   )
   [[ "${#matches[@]}" -le 1 ]] || die "multiple $project/$service containers are present"
   if [[ "${#matches[@]}" -eq 1 ]]; then printf '%s\n' "${matches[0]}"; fi
+}
+
+verify_api_financial_mode_for_release() {
+  local release="$1" deployment_mode expected id
+  local -a configured_modes=()
+  deployment_mode="$(release_deployment_mode "$release")"
+  case "$deployment_mode" in
+    shadow-review) expected='dry_run' ;;
+    operational|inert-maintenance) expected='live' ;;
+    legacy) return ;;
+    *) die 'the runtime deployment mode is invalid' ;;
+  esac
+  id="$(container_for "$PROJECT_NAME" api)"
+  container_running "$id" || die 'the production API is not running'
+  mapfile -t configured_modes < <(
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" |
+      sed -n 's/^FINANCIAL_ACTIONS_MODE=//p'
+  )
+  [[ "${#configured_modes[@]}" -eq 1 && "${configured_modes[0]}" == "$expected" ]] ||
+    die 'the production API financial mode does not match the sealed deployment mode'
 }
 
 container_running() {
@@ -326,6 +349,13 @@ verify_release_files() {
   )
   deployment_mode="$(release_deployment_mode "$release")"
   if [[ "$deployment_mode" != 'legacy' ]]; then
+    [[ ! -L "$release/compose.production.shadow-review.yaml" &&
+      -f "$release/compose.production.shadow-review.yaml" &&
+      "$(stat --format='%u:%g:%a:%h' "$release/compose.production.shadow-review.yaml")" == '0:0:444:1' ]] ||
+      die 'the shadow-review production overlay is absent or unsafe'
+    grep -Fq 'FINANCIAL_ACTIONS_MODE: dry_run' \
+      "$release/compose.production.shadow-review.yaml" ||
+      die 'the shadow-review production overlay is malformed'
     [[ ! -L "$release/compose.production.inert-maintenance.yaml" &&
       -f "$release/compose.production.inert-maintenance.yaml" &&
       "$(stat --format='%u:%g:%a:%h' "$release/compose.production.inert-maintenance.yaml")" == '0:0:444:1' ]] ||
@@ -336,7 +366,7 @@ verify_release_files() {
     grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
       die 'the inert-maintenance production overlay is malformed'
   fi
-  if [[ "$deployment_mode" == 'operational' ]] ||
+  if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]] ||
     { [[ "$deployment_mode" == 'legacy' ]] &&
       grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$release/compose.production.yaml"; }; then
     required+=(
@@ -560,9 +590,13 @@ case "${1:-}" in
       die 'the incoming runtime deployment-mode marker is absent or unsafe'
     deployment_mode="$(<"$incoming/runtime-deployment-mode")"
     case "$deployment_mode" in
-      operational|inert-maintenance) ;;
+      operational|shadow-review|inert-maintenance) ;;
       *) die 'the incoming runtime deployment mode is invalid' ;;
     esac
+    [[ ! -L "$incoming/compose.production.shadow-review.yaml" &&
+      -f "$incoming/compose.production.shadow-review.yaml" &&
+      -s "$incoming/compose.production.shadow-review.yaml" ]] ||
+      die 'the incoming shadow-review production overlay is absent or unsafe'
     [[ ! -L "$incoming/compose.production.inert-maintenance.yaml" &&
       -f "$incoming/compose.production.inert-maintenance.yaml" &&
       -s "$incoming/compose.production.inert-maintenance.yaml" ]] ||
@@ -579,8 +613,8 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=31
-    if [[ "$deployment_mode" == 'operational' ]]; then
+    expected_count=32
+    if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]]; then
       expected_count=$((expected_count + 4))
       for name in \
         telebirr-assignment-database-url \
@@ -612,7 +646,7 @@ case "${1:-}" in
     install -d -m 0700 "$incoming/secrets"
     for file in "$incoming"/*; do
       case "${file##*/}" in
-        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
+        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.shadow-review.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
         *) mv -- "$file" "$incoming/secrets/" ;;
       esac
     done
@@ -636,6 +670,7 @@ case "${1:-}" in
       "$incoming/secrets/telebirr-bridge-runtime-manifest.v1.json"
     chmod 0444 "$incoming/compose.production.yaml" \
       "$incoming/compose.production.companion-execution-v2.yaml" \
+      "$incoming/compose.production.shadow-review.yaml" \
       "$incoming/compose.production.inert-maintenance.yaml" \
       "$incoming/runtime-deployment-mode" \
       "$incoming/telebirr-assignment-signer-key-id" \
@@ -678,6 +713,7 @@ case "${1:-}" in
     compose_release "$release" config --quiet
     start_release_services_with_session_handoff_retry "$release" \
       owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker
+    verify_api_financial_mode_for_release "$release"
     stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
     if [[ -z "$previous" ]]; then
       stop_if_running "$(container_for "$STAGING_PROJECT" gateway)"
@@ -725,6 +761,7 @@ case "${1:-}" in
       [[ "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" == "$sha" ]] ||
         die "$service revision is wrong"
     done
+    verify_api_financial_mode_for_release "$release"
     id="$(container_for "$PROJECT_NAME" bot)"
     container_running "$id" || die 'the Telegram bot is not running'
     [[ "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$id")" == "$sha" ]] ||

@@ -306,36 +306,50 @@ jobs:
           ' <<<"$provision_result" >/dev/null
 
           tag="${GITHUB_SHA:0:12}"
-          docker run --detach --name "$container" --network host \
-            --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
-            --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true \
-            --pids-limit 64 --memory 256m --cpus 0.50 \
-            --env NODE_ENV=production \
-            --env FINANCIAL_ACTIONS_MODE=dry_run \
-            --env INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED=true \
-            --env TELEBIRR_SHADOW_VERIFICATION_ENABLED=true \
-            --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
-            --env KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false \
-            --env TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET=production \
-            --env TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE=/run/secrets/telebirr_shadow_verifier_database_url \
-            --env TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE=/run/configs/telebirr_shadow_verifier_pins.v1.json \
-            --env NODE_EXTRA_CA_CERTS=/run/configs/supabase_ca_certificate \
-            --env HTTP_PROXY= --env http_proxy= --env HTTPS_PROXY= --env https_proxy= \
-            --env NO_PROXY= --env no_proxy= --env FTP_PROXY= --env ftp_proxy= \
-            --env ALL_PROXY= --env all_proxy= \
-            --volume "$protected/database-url:/run/secrets/telebirr_shadow_verifier_database_url:ro" \
-            --volume "$protected/pins.json:/run/configs/telebirr_shadow_verifier_pins.v1.json:ro" \
-            --volume "$protected/supabase-ca.crt:/run/configs/supabase_ca_certificate:ro" \
-            "fetanagent-telebirr-shadow-verifier:$tag" >/dev/null
+          verifier_ready=false
+          # Supabase's session pooler can briefly retain the role state that preceded this exact
+          # credential rotation. Retry only container startup with the same bounded secret and
+          # immutable request; never reopen the proof, rotate again, or widen database authority.
+          for launch_attempt in 1 2 3 4 5 6; do
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            docker run --detach --name "$container" --network host \
+              --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777 \
+              --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges:true \
+              --pids-limit 64 --memory 256m --cpus 0.50 \
+              --env NODE_ENV=production \
+              --env FINANCIAL_ACTIONS_MODE=dry_run \
+              --env INTERNAL_TELEBIRR_SHADOW_VERIFIER_ENABLED=true \
+              --env TELEBIRR_SHADOW_VERIFICATION_ENABLED=true \
+              --env TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=false \
+              --env KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=false \
+              --env TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET=production \
+              --env TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE=/run/secrets/telebirr_shadow_verifier_database_url \
+              --env TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE=/run/configs/telebirr_shadow_verifier_pins.v1.json \
+              --env NODE_EXTRA_CA_CERTS=/run/configs/supabase_ca_certificate \
+              --env HTTP_PROXY= --env http_proxy= --env HTTPS_PROXY= --env https_proxy= \
+              --env NO_PROXY= --env no_proxy= --env FTP_PROXY= --env ftp_proxy= \
+              --env ALL_PROXY= --env all_proxy= \
+              --volume "$protected/database-url:/run/secrets/telebirr_shadow_verifier_database_url:ro" \
+              --volume "$protected/pins.json:/run/configs/telebirr_shadow_verifier_pins.v1.json:ro" \
+              --volume "$protected/supabase-ca.crt:/run/configs/supabase_ca_certificate:ro" \
+              "fetanagent-telebirr-shadow-verifier:$tag" >/dev/null
 
-          for attempt in {1..45}; do
-            if curl --silent --fail --max-time 3 http://127.0.0.1:8092/readyz >/dev/null; then
-              break
-            fi
-            docker inspect "$container" --format '{{.State.Running}}' | grep -Fx true >/dev/null
-            [[ "$attempt" -lt 45 ]]
-            sleep 2
+            for readiness_attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if curl --silent --fail --max-time 3 http://127.0.0.1:8092/readyz >/dev/null; then
+                verifier_ready=true
+                break
+              fi
+              if ! docker inspect "$container" --format '{{.State.Running}}' \
+                | grep -Fx true >/dev/null; then
+                break
+              fi
+              sleep 2
+            done
+            [[ "$verifier_ready" == 'false' ]] || break
+            [[ "$launch_attempt" -lt 6 ]] || break
+            sleep "$((launch_attempt * 3))"
           done
+          [[ "$verifier_ready" == 'true' ]]
           echo '::notice::The bounded production no-money shadow verifier is ready for the exact recovery request.'
 
           outcome_state=''
@@ -349,6 +363,8 @@ jobs:
                    proof.recovery_request_key = '$RECOVERY_REQUEST_KEY'::uuid
                    or proof.retry_request_key = '$RECOVERY_REQUEST_KEY'::uuid
                    or proof.infrastructure_retry_request_key =
+                        '$RECOVERY_REQUEST_KEY'::uuid
+                   or proof.runtime_retry_request_key =
                         '$RECOVERY_REQUEST_KEY'::uuid
                  )
                    and proof.source_live_verification_job_id =

@@ -609,7 +609,7 @@ jobs:
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
           echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
 
-      - name: Verify the existing continuous least-privilege production logins
+      - name: Verify the existing continuous least-privilege production credentials
         id: provision
         shell: bash
         env:
@@ -661,23 +661,26 @@ jobs:
             )")"
           [[ "$runtime_catalog_ready" == 't' ]]
 
-          assignment_login_ready=false
-          for attempt in 1 2 3 4; do
-            assignment_identity="$(
-              PGPORT=5432 \
-              PGUSER="$ASSIGNMENT_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" \
-              PGPASSWORD="$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" \
-                psql -X -Atc "select current_user = 'fetanagent_telebirr_assignment_broker_runtime' and session_user = current_user" \
-                2>/dev/null || true
-            )"
-            if [[ "$assignment_identity" == 't' ]]; then
-              assignment_login_ready=true
-              break
-            fi
-            [[ "$attempt" -lt 4 ]] || break
-            sleep "$((attempt * 2))"
-          done
-          [[ "$assignment_login_ready" == true ]]
+          # The assignment role intentionally has CONNECTION LIMIT 1, and the healthy current
+          # broker owns that session. Opening a second session here would reject every rolling
+          # deployment even when the protected credential is exact. Compare the supplied secret
+          # with PostgreSQL's SCRAM verifier through the bounded administrator connection instead.
+          umask 077
+          assignment_verifier="$RUNNER_TEMP/telebirr-assignment-runtime.scram"
+          trap 'rm -f -- "$assignment_verifier"' EXIT
+          psql_with_connection_retry -X -Atc "
+            select rolpassword
+            from pg_catalog.pg_authid
+            where rolname = 'fetanagent_telebirr_assignment_broker_runtime'
+              and rolcanlogin
+              and rolconnlimit = 1
+              and rolvaliduntil = 'infinity'::timestamptz
+          " >"$assignment_verifier"
+          chmod 0600 "$assignment_verifier"
+          POSTGRES_SCRAM_SECRET="$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" \
+            node infra/operations/verify-postgres-scram-secret.mjs "$assignment_verifier"
+          rm -f -- "$assignment_verifier"
+          trap - EXIT
 
       - name: Transfer and install the sealed release
         shell: bash

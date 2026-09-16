@@ -21,6 +21,7 @@ const [
   assignmentBrokerConfig,
   assignmentBrokerPostgres,
   referenceOpeningDeriver,
+  postgresScramVerifier,
   packageJson,
   quality,
 ] = await Promise.all([
@@ -38,6 +39,7 @@ const [
   read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
   read('infra/operations/derive-telebirr-reference-opening-key.mjs'),
+  read('infra/operations/verify-postgres-scram-secret.mjs'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
 ]);
@@ -368,6 +370,7 @@ assert.doesNotMatch(operateJob, /validate-ci|actions: read|require-production-ci
 assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
+assert.match(quality, /node --test infra\/operations\/verify-postgres-scram-secret\.test\.mjs/u);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
 assert.match(workflow, /'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'/u);
 assert.match(workflow, /'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'/u);
@@ -391,16 +394,24 @@ assert.match(workflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
 assert.match(workflow, /"\$CONFIRMED_PROJECT" != "\$STAGING_PROJECT_REF"/u);
 assert.match(workflow, /Verify restricted server boundary and storage/u);
 assert.match(workflow, /current-state/u);
-assert.match(workflow, /Verify the existing continuous least-privilege production logins/u);
+assert.match(workflow, /Verify the existing continuous least-privilege production credentials/u);
 assert.doesNotMatch(deployJob, /production-nonfinancial-runtimes-provision\.sql/u);
 assert.match(workflow, /psql_with_connection_retry\(\)/u);
 assert.match(workflow, /for attempt in 1 2 3 4; do/u);
 assert.match(workflow, /"\$status" -eq 2 && "\$attempt" -lt 4/u);
 assert.match(workflow, /sleep "\$\(\(attempt \* 2\)\)"/u);
-assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 2);
-assert.match(workflow, /assignment_login_ready=false/u);
-assert.match(workflow, /PGPORT=5432/u);
-assert.match(workflow, /PGUSER="\$ASSIGNMENT_RUNTIME_ROLE\.\$PRODUCTION_PROJECT_REF"/u);
+assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 3);
+assert.doesNotMatch(workflow, /assignment_login_ready=false/u);
+assert.doesNotMatch(workflow, /PGPORT=5432/u);
+assert.match(workflow, /from pg_catalog\.pg_authid/u);
+assert.match(workflow, /rolconnlimit = 1/u);
+assert.match(workflow, /verify-postgres-scram-secret\.mjs/u);
+assert.match(workflow, /POSTGRES_SCRAM_SECRET="\$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD"/u);
+assert.match(postgresScramVerifier, /pbkdf2Sync\(secret, salt, iterations, 32, 'sha256'\)/u);
+assert.match(postgresScramVerifier, /update\('Client Key'\)/u);
+assert.match(postgresScramVerifier, /update\('Server Key'\)/u);
+assert.match(postgresScramVerifier, /timingSafeEqual\(storedKey, expectedStoredKey\)/u);
+assert.doesNotMatch(postgresScramVerifier, /console\.|process\.stdout|process\.stderr/u);
 assert.match(workflow, /Atomically activate production and switch the public edge/u);
 assert.match(workflow, /Verify live public production services/u);
 assert.match(workflow, /Private production control/u);

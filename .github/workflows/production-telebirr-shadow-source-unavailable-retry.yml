@@ -84,20 +84,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-    env:
-      SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
-      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      SOURCE_SHADOW_PROOF_REQUEST_ID: ${{ inputs.confirm_source_shadow_proof_request_id }}
-      TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
-      SOURCE_UNAVAILABLE_RETRY_REQUEST_KEY: ${{ inputs.confirm_retry_request_key }}
-      PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
-      PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
-      PGDATABASE: postgres
-      PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
-      PGSSLMODE: verify-full
-      PGCONNECT_TIMEOUT: '5'
-      PGSERVICEFILE: /dev/null
-      PGPASSFILE: /dev/null
     steps:
       - name: Check out the exact production contract
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,6 +102,20 @@ jobs:
 
       - name: Create and verify the one-use no-money retry
         shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SOURCE_SHADOW_PROOF_REQUEST_ID: ${{ inputs.confirm_source_shadow_proof_request_id }}
+          TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          SOURCE_UNAVAILABLE_RETRY_REQUEST_KEY: ${{ inputs.confirm_retry_request_key }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
           umask 077

@@ -128,6 +128,8 @@ export async function createTelebirrShadowVerifierApplication(
           verifier: pinnedVerifier,
           onResult: (result) =>
             console.info(result, 'TeleBirr shadow verification result recorded.'),
+          onFailureStage: (stage) =>
+            console.error(`FetanAgent TeleBirr shadow verifier failure stage: ${stage}.`),
         }))
     )(exactRuntime.workSource, verifier);
 

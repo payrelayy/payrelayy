@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { TrustedTelebirrVerifierWorkSource } from './postgres-trusted-telebirr-verifier.js';
-import type {
-  TrustedTelebirrVerificationRequest,
-  TrustedTelebirrVerifier,
+import {
+  TrustedTelebirrVerifierUnavailableError,
+  type TrustedTelebirrVerificationRequest,
+  type TrustedTelebirrVerifier,
 } from './trusted-telebirr-verifier.js';
 import {
   createTrustedTelebirrVerifierWorker,
   TrustedTelebirrVerifierWorkerUnavailableError,
+  type TrustedTelebirrVerifierWorkerFailureStage,
 } from './trusted-telebirr-verifier-worker.js';
 
 const request = {
@@ -146,15 +148,33 @@ describe('trusted TeleBirr verifier staged-evidence worker', () => {
   });
 
   it('fails closed on a source error or an unpersisted non-terminal result', async () => {
+    const sourceFailureStages: TrustedTelebirrVerifierWorkerFailureStage[] = [];
     const unavailable = createTrustedTelebirrVerifierWorker({
       source: source(async () => {
         throw new Error('database detail');
       }),
       verifier: { verifyAndComplete: vi.fn() },
+      onFailureStage: (stage) => sourceFailureStages.push(stage),
     });
     await expect(unavailable.run()).rejects.toEqual(
       new TrustedTelebirrVerifierWorkerUnavailableError(),
     );
+    expect(sourceFailureStages).toEqual(['load_staged_evidence']);
+
+    const verifierFailureStages: TrustedTelebirrVerifierWorkerFailureStage[] = [];
+    const verifierUnavailable = createTrustedTelebirrVerifierWorker({
+      source: source(async () => request),
+      verifier: {
+        verifyAndComplete: vi.fn(async () => {
+          throw new TrustedTelebirrVerifierUnavailableError('persist_completion');
+        }),
+      },
+      onFailureStage: (stage) => verifierFailureStages.push(stage),
+    });
+    await expect(verifierUnavailable.run()).rejects.toEqual(
+      new TrustedTelebirrVerifierWorkerUnavailableError(),
+    );
+    expect(verifierFailureStages).toEqual(['persist_completion']);
 
     const unpersisted = createTrustedTelebirrVerifierWorker({
       source: source(async () => request),

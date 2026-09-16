@@ -105,6 +105,14 @@ assert.match(
   provision,
   /retry_expired_private_telebirr_shadow_request\(uuid,uuid,uuid,uuid,text\)/u,
 );
+assert.match(
+  provision,
+  /recover_expired_private_live_telebirr_payment_to_shadow\([\s\S]+?'expired_pilot_recovery_no_credit'\s*\)\s*\\gset/u,
+);
+assert.match(
+  provision,
+  /retry_expired_private_telebirr_shadow_request\([\s\S]+?'expired_shadow_retry_no_credit'\s*\)\s*\\gset/u,
+);
 assert.match(provision, /begin transaction isolation level read committed/u);
 assert.match(provision, /create_first_shadow_request/u);
 assert.match(provision, /expired_shadow_retry_no_credit/u);

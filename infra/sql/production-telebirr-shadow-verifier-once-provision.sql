@@ -80,7 +80,8 @@ select count(*) = 0 as create_first_shadow_request
       :'target_pilot_revision_id'::uuid,
       :'recovery_request_key'::uuid,
       'expired_pilot_recovery_no_credit'
-    );
+    )
+\gset
 \else
   select count(*) = 1 as shadow_request_transition_ready
     from app.retry_expired_private_telebirr_shadow_request(
@@ -96,7 +97,8 @@ select count(*) = 0 as create_first_shadow_request
       :'target_pilot_revision_id'::uuid,
       :'recovery_request_key'::uuid,
       'expired_shadow_retry_no_credit'
-    );
+    )
+\gset
 \endif
 \if :shadow_request_transition_ready
 \else

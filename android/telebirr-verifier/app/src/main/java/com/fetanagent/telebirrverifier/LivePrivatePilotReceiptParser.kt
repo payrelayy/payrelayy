@@ -118,13 +118,44 @@ class LivePrivatePilotReceiptParser {
   private fun parseRows(html: String): Map<String, List<String>>? {
     if (html.length > MAX_HTML_CHARACTERS || html.indexOf('\u0000') >= 0) return null
     val rows = linkedMapOf<String, MutableList<String>>()
-    for (match in rowPattern.findAll(html)) {
-      val cells = cellPattern.findAll(match.groupValues[1]).map { visibleText(it.groupValues[1]) }.toList()
-      if (cells.size != 2) continue
-      val label = canonicalLabel(cells[0]) ?: continue
-      val value = cells[1].trim()
-      if (value.isEmpty() || value.length > MAX_CELL_CHARACTERS) return null
-      rows.getOrPut(label) { mutableListOf() } += value
+    val tableRows =
+      rowPattern.findAll(html).map { match ->
+        cellPattern
+          .findAll(match.groupValues[1])
+          .map { visibleText(it.groupValues[1]) }
+          .toList()
+      }.toList()
+
+    fun add(label: String, value: String): Boolean {
+      val bounded = value.trim()
+      if (bounded.isEmpty() || bounded.length > MAX_CELL_CHARACTERS) return false
+      rows.getOrPut(label) { mutableListOf() } += bounded
+      return true
+    }
+
+    for ((index, cells) in tableRows.withIndex()) {
+      if (cells.isEmpty()) continue
+
+      if (cells.map(::canonicalLabel) == invoiceColumnLabels) {
+        val values = tableRows.getOrNull(index + 1) ?: return null
+        if (values.size != invoiceColumnLabels.size) return null
+        for (column in invoiceColumnLabels.indices) {
+          if (!add(invoiceColumnLabels[column], values[column])) return null
+        }
+        continue
+      }
+
+      val label = canonicalLabel(cells[0])
+      if (label != null) {
+        val values = cells.drop(1).map(String::trim).filter(String::isNotEmpty)
+        if (values.size != 1 || !add(label, values.single())) return null
+        continue
+      }
+
+      if (cells.size == 1) {
+        val inline = canonicalInlinePair(cells.single()) ?: continue
+        if (!add(inline.first, inline.second)) return null
+      }
     }
     return rows
   }
@@ -133,7 +164,7 @@ class LivePrivatePilotReceiptParser {
     rows[label]?.singleOrNull()
 
   private fun canonicalLabel(raw: String): String? {
-    val english = raw.substringAfterLast('/').trim().lowercase(Locale.ROOT).replace(whitespace, " ")
+    val english = canonicalEnglish(raw)
     return when (english.removeSuffix(".")) {
       "invoice no" -> "invoice no"
       "payment date" -> "payment date"
@@ -146,6 +177,16 @@ class LivePrivatePilotReceiptParser {
       else -> null
     }
   }
+
+  private fun canonicalInlinePair(raw: String): Pair<String, String>? {
+    val english = canonicalEnglish(raw)
+    val label = inlineCanonicalLabels.singleOrNull { english.startsWith("$it ") } ?: return null
+    val value = english.removePrefix(label).trim()
+    return label to value
+  }
+
+  private fun canonicalEnglish(raw: String): String =
+    raw.substringAfterLast('/').trim().lowercase(Locale.ROOT).replace(whitespace, " ")
 
   private fun visibleText(fragment: String): String =
     decodeEntities(
@@ -245,6 +286,8 @@ class LivePrivatePilotReceiptParser {
     private val whitespace = Regex("\\s+")
     private val amountPattern =
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
+    private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
+    private val inlineCanonicalLabels = listOf("transaction status")
     private val dateFormatters =
       listOf("dd-MM-uuuu HH:mm:ss", "dd/MM/uuuu HH:mm:ss").map {
         DateTimeFormatter.ofPattern(it, Locale.ROOT).withResolverStyle(ResolverStyle.STRICT)

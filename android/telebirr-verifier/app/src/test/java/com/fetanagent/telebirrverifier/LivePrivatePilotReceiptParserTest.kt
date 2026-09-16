@@ -129,4 +129,32 @@ class LivePrivatePilotReceiptParserTest {
     assertEquals("completed", facts.providerFinalStatus)
     assertEquals("recognized_layout_v1", facts.layoutAttestation)
   }
+
+  @Test
+  fun `accepts the current official three-column receipt with malformed status markup`() {
+    val facts =
+      parser.parse(livePilotProviderFound(currentOfficialLivePilotHtml()), assignment).facts
+        as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("telebirr", facts.paymentMode)
+    assertEquals("send_money_to_registered_customer", facts.paymentReason)
+    assertEquals("api_app", facts.paymentChannel)
+  }
+
+  @Test
+  fun `rejects ambiguous values in current three-cell detail rows`() {
+    val ambiguous =
+      currentOfficialLivePilotHtml().replace(
+        "<td>telebirr</td><td></td>",
+        "<td>telebirr</td><td>unexpected</td>",
+      )
+    val facts = parser.parse(livePilotProviderFound(ambiguous), assignment).facts
+
+    assertTrue(facts is LivePilotReviewRequiredFacts)
+    assertEquals("invalid_layout", (facts as LivePilotReviewRequiredFacts).reviewReason)
+  }
 }

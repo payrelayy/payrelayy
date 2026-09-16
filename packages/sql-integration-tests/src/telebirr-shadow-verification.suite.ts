@@ -1235,6 +1235,156 @@ export function registerTelebirrShadowVerificationSqlTests(
         expect(assignment.rows).toHaveLength(1);
         expect(assignment.rows[0]!.job_id).toBe(retry.rows[0]!.shadow_verification_job_id);
 
+        const olderAttempt = assignment.rows[0]!;
+        const olderObservedAt = new Date(olderAttempt.issued_at.getTime() + 250);
+        const olderTranscriptId = randomUUID();
+        const olderAssignmentDigest = digest(
+          `source-retry-assignment:${olderAttempt.assignment_id}`,
+        );
+        const olderObservationDigest = digest(
+          `source-retry-observation:${olderAttempt.assignment_id}`,
+        );
+        await client.query(
+          `insert into app.private_telebirr_shadow_assignment_transcripts (
+             id, verification_attempt_id, assignment_signer_id,
+             assignment_body_digest, assignment_signature,
+             assignment_signature_digest, signer_key_id_snapshot,
+             signer_public_key_spki_sha256_snapshot, reference_binding_digest,
+             signed_at
+           )
+           select $1::uuid, $2::uuid, signer.id, $3::text, $4::text,
+                  $5::text, signer.signer_key_id, signer.public_key_spki_sha256,
+                  $6::text, $7::timestamptz
+             from app.private_live_telebirr_assignment_signers signer
+            where signer.id = $8::uuid`,
+          [
+            olderTranscriptId,
+            olderAttempt.verification_attempt_id,
+            olderAssignmentDigest,
+            signature(0x71).encoded,
+            signature(0x71).digest,
+            digest(`source-retry-reference:${olderAttempt.assignment_id}`),
+            olderObservedAt,
+            pilot.assignmentSignerId,
+          ],
+        );
+        await client.query(
+          `insert into app.private_telebirr_shadow_device_evidence_staging (
+             observation_body_digest, assignment_body_digest,
+             verification_attempt_id, assignment_transcript_id,
+             device_enrollment_id, first_request_body_digest,
+             signed_assignment, signed_observation, observed_at, staged_at
+           ) values (
+             $1::text, $2::text, $3::uuid, $4::uuid, $5::uuid, $6::text,
+             '{}'::jsonb, '{}'::jsonb, $7::timestamptz, $7::timestamptz
+           )`,
+          [
+            olderObservationDigest,
+            olderAssignmentDigest,
+            olderAttempt.verification_attempt_id,
+            olderTranscriptId,
+            pilot.deviceEnrollmentId,
+            digest(`source-retry-request:${olderAttempt.assignment_id}`),
+            olderObservedAt,
+          ],
+        );
+
+        const newerAttemptId = randomUUID();
+        const newerAssignmentId = randomUUID();
+        const newerIssuedAt = new Date(olderAttempt.issued_at.getTime() + 1_000);
+        await client.query(
+          `insert into app.private_telebirr_shadow_verification_attempts (
+             id, shadow_proof_request_id, verification_job_id, attempt_number,
+             lease_request_key, lease_request_digest, lease_token, request_id,
+             assignment_id, requested_lease_seconds, leased_by, device_enrollment_id,
+             device_id_snapshot, device_key_id_snapshot,
+             device_public_key_spki_sha256_snapshot, lease_nonce_digest,
+             challenge_id, challenge_digest, issued_at, expires_at
+           )
+           select $1::uuid, $2::uuid, $3::uuid, 2,
+                  $4::uuid, $5::text, $6::uuid, $7::uuid,
+                  $8::uuid, 120, 'sql-latest-source-retry-verifier', enrollment.id,
+                  enrollment.device_id, enrollment.key_id,
+                  enrollment.public_key_spki_sha256, $9::text,
+                  $10::uuid, $11::text, $12::timestamptz,
+                  $12::timestamptz + interval '2 minutes'
+             from app.private_live_telebirr_device_enrollments enrollment
+            where enrollment.id = $13::uuid`,
+          [
+            newerAttemptId,
+            retry.rows[0]!.shadow_proof_request_id,
+            retry.rows[0]!.shadow_verification_job_id,
+            randomUUID(),
+            digest(`source-retry-lease:${newerAttemptId}`),
+            randomUUID(),
+            randomUUID(),
+            newerAssignmentId,
+            digest(`source-retry-nonce:${newerAttemptId}`),
+            randomUUID(),
+            digest(`source-retry-challenge:${newerAttemptId}`),
+            newerIssuedAt,
+            pilot.deviceEnrollmentId,
+          ],
+        );
+        const newerObservedAt = new Date(newerIssuedAt.getTime() + 250);
+        const newerTranscriptId = randomUUID();
+        const newerAssignmentDigest = digest(`source-retry-assignment:${newerAssignmentId}`);
+        const newerObservationDigest = digest(`source-retry-observation:${newerAssignmentId}`);
+        await client.query(
+          `insert into app.private_telebirr_shadow_assignment_transcripts (
+             id, verification_attempt_id, assignment_signer_id,
+             assignment_body_digest, assignment_signature,
+             assignment_signature_digest, signer_key_id_snapshot,
+             signer_public_key_spki_sha256_snapshot, reference_binding_digest,
+             signed_at
+           )
+           select $1::uuid, $2::uuid, signer.id, $3::text, $4::text,
+                  $5::text, signer.signer_key_id, signer.public_key_spki_sha256,
+                  $6::text, $7::timestamptz
+             from app.private_live_telebirr_assignment_signers signer
+            where signer.id = $8::uuid`,
+          [
+            newerTranscriptId,
+            newerAttemptId,
+            newerAssignmentDigest,
+            signature(0x72).encoded,
+            signature(0x72).digest,
+            digest(`source-retry-reference:${newerAssignmentId}`),
+            newerObservedAt,
+            pilot.assignmentSignerId,
+          ],
+        );
+        await client.query(
+          `insert into app.private_telebirr_shadow_device_evidence_staging (
+             observation_body_digest, assignment_body_digest,
+             verification_attempt_id, assignment_transcript_id,
+             device_enrollment_id, first_request_body_digest,
+             signed_assignment, signed_observation, observed_at, staged_at
+           ) values (
+             $1::text, $2::text, $3::uuid, $4::uuid, $5::uuid, $6::text,
+             '{}'::jsonb, '{}'::jsonb, $7::timestamptz, $7::timestamptz
+           )`,
+          [
+            newerObservationDigest,
+            newerAssignmentDigest,
+            newerAttemptId,
+            newerTranscriptId,
+            pilot.deviceEnrollmentId,
+            digest(`source-retry-request:${newerAssignmentId}`),
+            newerObservedAt,
+          ],
+        );
+
+        const queuedRetryEvidence = await client.query<{
+          readonly observation_body_digest: string;
+          readonly verification_attempt_id: string;
+        }>(`select * from app.load_next_private_telebirr_shadow_staged_evidence()`);
+        expect(queuedRetryEvidence.rows).toHaveLength(1);
+        expect(queuedRetryEvidence.rows[0]).toMatchObject({
+          observation_body_digest: newerObservationDigest,
+          verification_attempt_id: newerAttemptId,
+        });
+
         const after = await client.query<{ readonly snapshot: Readonly<Record<string, number>> }>(`
           select jsonb_build_object(
             'intents', (select count(*) from app.deposit_intents),

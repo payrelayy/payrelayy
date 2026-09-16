@@ -348,6 +348,8 @@ jobs:
                  where (
                    proof.recovery_request_key = '$RECOVERY_REQUEST_KEY'::uuid
                    or proof.retry_request_key = '$RECOVERY_REQUEST_KEY'::uuid
+                   or proof.infrastructure_retry_request_key =
+                        '$RECOVERY_REQUEST_KEY'::uuid
                  )
                    and proof.source_live_verification_job_id =
                          '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid

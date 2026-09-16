@@ -2,6 +2,7 @@
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv shadow_runtime_password TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD
 \getenv target_pilot_revision_id TARGET_PILOT_REVISION_ID
+\getenv target_shadow_proof_request_id TARGET_SHADOW_PROOF_REQUEST_ID
 \getenv source_live_verification_job_id SOURCE_LIVE_VERIFICATION_JOB_ID
 \getenv recovery_request_key RECOVERY_REQUEST_KEY
 
@@ -41,10 +42,20 @@ select :'shadow_runtime_password' ~ '^[0-9a-f]{64}$'
 
 select :'target_pilot_revision_id'
          ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-   and :'source_live_verification_job_id'
+   and :'target_shadow_proof_request_id'
          ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-   and :'recovery_request_key'
+   and (
+     (
+       :'source_live_verification_job_id' = 'not-applicable'
+       and :'recovery_request_key' = 'not-applicable'
+     )
+     or (
+       :'source_live_verification_job_id'
+         ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       and :'recovery_request_key'
          ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     )
+   )
   as exact_request_identifiers
 \gset
 \if :exact_request_identifiers
@@ -59,27 +70,80 @@ select pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('fetanagent:production:telebirr-shadow-verifier-runtime', 0)
 );
 
--- Create the first no-money shadow request, rebind an untouched expired recovery once, reopen it
+select :'source_live_verification_job_id' = 'not-applicable'
+   and :'recovery_request_key' = 'not-applicable'
+  as review_direct_shadow_request
+\gset
+
+-- Review an exact direct shadow request without mutating it, create the first no-money recovery,
+-- rebind an untouched expired recovery once, reopen it
 -- after an infrastructure-only failure, or perform the final runtime-startup recovery while
 -- retaining and binding every expired phone assignment. Every transition retains the original
 -- protected reference, live proof/job lineage, and shadow request/job identities. None can enable
 -- a switch, create a reservation, settle, enqueue execution, credit KemerBet, or move money.
-select count(*) = 0 as create_first_shadow_request
-  from app.private_telebirr_shadow_proof_requests shadow_proof
- where shadow_proof.source_live_verification_job_id =
-       :'source_live_verification_job_id'::uuid
-\gset
-\if :create_first_shadow_request
+\if :review_direct_shadow_request
+  select count(*) = 1 as shadow_request_transition_ready
+    from app.private_telebirr_shadow_proof_requests shadow_proof
+   where shadow_proof.id = :'target_shadow_proof_request_id'::uuid
+     and shadow_proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
+     and shadow_proof.proof_status = 'verification_queued'
+     and shadow_proof.source_live_verification_job_id is null
+     and shadow_proof.source_live_proof_id is null
+     and shadow_proof.source_pilot_revision_id is null
+     and shadow_proof.source_receiver_profile_id is null
+     and shadow_proof.recovery_request_key is null
+     and shadow_proof.retry_request_key is null
+     and shadow_proof.infrastructure_retry_request_key is null
+     and shadow_proof.runtime_retry_request_key is null
+     and pg_catalog.clock_timestamp()
+           < shadow_proof.submitted_at + interval '12 hours'
+     and exists (
+       select 1
+         from app.telegram_telebirr_shadow_proof_receipts receipt
+        where receipt.shadow_proof_request_id = shadow_proof.id
+     )
+     and exists (
+       select 1
+         from app.private_telebirr_shadow_device_evidence_staging staged
+         join app.private_telebirr_shadow_verification_attempts attempt
+           on attempt.id = staged.verification_attempt_id
+        where attempt.shadow_proof_request_id = shadow_proof.id
+          and staged.staged_at < shadow_proof.expires_at
+          and staged.staged_at < attempt.expires_at
+          and staged.observed_at >= attempt.issued_at
+          and staged.observed_at < attempt.expires_at
+     )
+     and not exists (
+       select 1
+         from app.private_telebirr_shadow_verification_outcomes outcome
+        where outcome.shadow_proof_request_id = shadow_proof.id
+     )
+     and not exists (
+       select 1
+         from app.private_telebirr_shadow_evidence_quarantine quarantine
+         join app.private_telebirr_shadow_verification_attempts attempt
+           on attempt.id = quarantine.verification_attempt_id
+        where attempt.shadow_proof_request_id = shadow_proof.id
+     )
+  \gset
+\else
+  select count(*) = 0 as create_first_shadow_request
+    from app.private_telebirr_shadow_proof_requests shadow_proof
+   where shadow_proof.source_live_verification_job_id =
+         nullif(:'source_live_verification_job_id', 'not-applicable')::uuid
+  \gset
+  \if :create_first_shadow_request
   select count(*) = 1 as shadow_request_transition_ready
     from app.recover_expired_private_live_telebirr_payment_to_shadow(
-      :'source_live_verification_job_id'::uuid,
+      nullif(:'source_live_verification_job_id', 'not-applicable')::uuid,
       (
         select job.pilot_revision_id
           from app.private_live_telebirr_verification_jobs job
-         where job.id = :'source_live_verification_job_id'::uuid
+         where job.id =
+               nullif(:'source_live_verification_job_id', 'not-applicable')::uuid
       ),
       :'target_pilot_revision_id'::uuid,
-      :'recovery_request_key'::uuid,
+      nullif(:'recovery_request_key', 'not-applicable')::uuid,
       'expired_pilot_recovery_no_credit'
     )
 \gset
@@ -180,6 +244,7 @@ select count(*) = 0 as create_first_shadow_request
       \endif
     \endif
   \endif
+  \endif
 \endif
 \if :shadow_request_transition_ready
 \else
@@ -226,6 +291,53 @@ with locked_feature_switches as materialized (
         where revocation.device_enrollment_id = enrollment.id
      )
    for share
+), safe_direct_shadow as (
+  select shadow_proof.id as shadow_proof_request_id
+    from app.private_telebirr_shadow_proof_requests shadow_proof
+   where :'source_live_verification_job_id' = 'not-applicable'
+     and :'recovery_request_key' = 'not-applicable'
+     and shadow_proof.id = :'target_shadow_proof_request_id'::uuid
+     and shadow_proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
+     and shadow_proof.proof_status = 'verification_queued'
+     and shadow_proof.source_live_verification_job_id is null
+     and shadow_proof.source_live_proof_id is null
+     and shadow_proof.source_pilot_revision_id is null
+     and shadow_proof.source_receiver_profile_id is null
+     and shadow_proof.recovery_request_key is null
+     and shadow_proof.retry_request_key is null
+     and shadow_proof.infrastructure_retry_request_key is null
+     and shadow_proof.runtime_retry_request_key is null
+     and shadow_proof.submitted_at < pg_catalog.clock_timestamp()
+     and pg_catalog.clock_timestamp()
+           < shadow_proof.submitted_at + interval '12 hours'
+     and exists (
+       select 1
+         from app.telegram_telebirr_shadow_proof_receipts receipt
+        where receipt.shadow_proof_request_id = shadow_proof.id
+     )
+     and exists (
+       select 1
+         from app.private_telebirr_shadow_device_evidence_staging staged
+         join app.private_telebirr_shadow_verification_attempts attempt
+           on attempt.id = staged.verification_attempt_id
+        where attempt.shadow_proof_request_id = shadow_proof.id
+          and staged.staged_at < shadow_proof.expires_at
+          and staged.staged_at < attempt.expires_at
+          and staged.observed_at >= attempt.issued_at
+          and staged.observed_at < attempt.expires_at
+     )
+     and not exists (
+       select 1
+         from app.private_telebirr_shadow_verification_outcomes outcome
+        where outcome.shadow_proof_request_id = shadow_proof.id
+     )
+     and not exists (
+       select 1
+         from app.private_telebirr_shadow_evidence_quarantine quarantine
+         join app.private_telebirr_shadow_verification_attempts attempt
+           on attempt.id = quarantine.verification_attempt_id
+        where attempt.shadow_proof_request_id = shadow_proof.id
+     )
 ), safe_source_and_open_shadow as (
   select job.id,
          shadow_proof.id as shadow_proof_request_id
@@ -235,23 +347,28 @@ with locked_feature_switches as materialized (
     join app.private_telebirr_shadow_proof_requests shadow_proof
       on shadow_proof.source_live_verification_job_id = job.id
      and shadow_proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
-   where job.id = :'source_live_verification_job_id'::uuid
+     and shadow_proof.id = :'target_shadow_proof_request_id'::uuid
+   where job.id =
+         nullif(:'source_live_verification_job_id', 'not-applicable')::uuid
      and job.expires_at <= pg_catalog.clock_timestamp()
      and proof.submitted_at < pg_catalog.clock_timestamp()
       and pg_catalog.clock_timestamp() < proof.submitted_at + case
-        when shadow_proof.runtime_retry_request_key = :'recovery_request_key'::uuid
+        when shadow_proof.runtime_retry_request_key =
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
           then interval '36 hours'
         else interval '24 hours'
       end
      and shadow_proof.expires_at > pg_catalog.clock_timestamp() + interval '60 seconds'
      and shadow_proof.proof_status = 'verification_queued'
      and (
-       shadow_proof.recovery_request_key = :'recovery_request_key'::uuid
-       or shadow_proof.retry_request_key = :'recovery_request_key'::uuid
+       shadow_proof.recovery_request_key =
+         nullif(:'recovery_request_key', 'not-applicable')::uuid
+       or shadow_proof.retry_request_key =
+         nullif(:'recovery_request_key', 'not-applicable')::uuid
        or shadow_proof.infrastructure_retry_request_key =
-            :'recovery_request_key'::uuid
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
        or shadow_proof.runtime_retry_request_key =
-            :'recovery_request_key'::uuid
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
      )
      and not exists (
        select 1 from app.private_live_telebirr_verification_attempts attempt
@@ -292,7 +409,8 @@ with locked_feature_switches as materialized (
          )
        )
        or (
-         shadow_proof.runtime_retry_request_key = :'recovery_request_key'::uuid
+         shadow_proof.runtime_retry_request_key =
+           nullif(:'recovery_request_key', 'not-applicable')::uuid
          and exists (
            select 1 from app.private_telebirr_shadow_verification_attempts attempt
             where attempt.shadow_proof_request_id = shadow_proof.id
@@ -304,6 +422,12 @@ with locked_feature_switches as materialized (
          )
        )
      )
+), safe_exact_shadow as (
+  select direct.shadow_proof_request_id
+    from safe_direct_shadow direct
+  union all
+  select recovered.shadow_proof_request_id
+    from safe_source_and_open_shadow recovered
 )
 select (select count(*) from locked_feature_switches) = 7
    and (select count(*) from locked_feature_switches
@@ -312,7 +436,7 @@ select (select count(*) from locked_feature_switches) = 7
            and settings = '{}'::jsonb) = 6
    and (select count(*) from armed_shadow_pilot) = 1
    and (select count(*) from active_target_enrollment) = 1
-   and (select count(*) from safe_source_and_open_shadow) = 1
+   and (select count(*) from safe_exact_shadow) = 1
    and pg_catalog.to_regprocedure(
          'app.recover_expired_private_live_telebirr_payment_to_shadow(uuid,uuid,uuid,uuid,text)'
        ) is not null

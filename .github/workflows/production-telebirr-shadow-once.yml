@@ -19,12 +19,16 @@ on:
         description: Type the exact armed dry-run replacement pilot UUID
         required: true
         type: string
+      confirm_shadow_proof_request_id:
+        description: Type the exact immutable shadow proof UUID to review
+        required: true
+        type: string
       confirm_source_live_verification_job_id:
-        description: Type the exact untouched expired live verification-job UUID
+        description: Type the exact source live verification-job UUID, or not-applicable for direct shadow intake
         required: true
         type: string
       confirm_recovery_request_key:
-        description: Type one new lowercase UUIDv4 recovery or retry idempotency key
+        description: Type the exact recovery/retry UUIDv4, or not-applicable for direct shadow intake
         required: true
         type: string
       confirm_operation:
@@ -59,6 +63,7 @@ jobs:
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
       CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_PROOF: ${{ inputs.confirm_shadow_proof_request_id }}
       CONFIRMED_SOURCE_JOB: ${{ inputs.confirm_source_live_verification_job_id }}
       CONFIRMED_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
@@ -74,8 +79,15 @@ jobs:
           uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           [[ "$CONFIRMED_PILOT" =~ $uuid ]]
-          [[ "$CONFIRMED_SOURCE_JOB" =~ $uuid ]]
-          [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_PROOF" =~ $uuid ]]
+          if [[ "$CONFIRMED_SOURCE_JOB" == 'not-applicable' ||
+                "$CONFIRMED_REQUEST_KEY" == 'not-applicable' ]]; then
+            [[ "$CONFIRMED_SOURCE_JOB" == 'not-applicable' ]]
+            [[ "$CONFIRMED_REQUEST_KEY" == 'not-applicable' ]]
+          else
+            [[ "$CONFIRMED_SOURCE_JOB" =~ $uuid ]]
+            [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
+          fi
           [[ "$CONFIRMED_OPERATION" == 'RUN ONE-TIME PRODUCTION TELEBIRR SHADOW VERIFIER - NO MONEY' ]]
 
   verify-once:
@@ -125,6 +137,7 @@ jobs:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PIN_MANIFEST_BASE64: ${{ vars.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
           TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          TARGET_SHADOW_PROOF_REQUEST_ID: ${{ inputs.confirm_shadow_proof_request_id }}
           SOURCE_LIVE_VERIFICATION_JOB_ID: ${{ inputs.confirm_source_live_verification_job_id }}
           RECOVERY_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
@@ -359,17 +372,34 @@ jobs:
               with recovered as (
                 select proof.id, proof.verification_job_id, proof.source_live_proof_id
                   from app.private_telebirr_shadow_proof_requests proof
-                 where (
-                   proof.recovery_request_key = '$RECOVERY_REQUEST_KEY'::uuid
-                   or proof.retry_request_key = '$RECOVERY_REQUEST_KEY'::uuid
-                   or proof.infrastructure_retry_request_key =
-                        '$RECOVERY_REQUEST_KEY'::uuid
-                   or proof.runtime_retry_request_key =
-                        '$RECOVERY_REQUEST_KEY'::uuid
-                 )
-                   and proof.source_live_verification_job_id =
-                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                 where proof.id = '$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid
                    and proof.pilot_revision_id = '$TARGET_PILOT_REVISION_ID'::uuid
+                   and (
+                     (
+                       '$SOURCE_LIVE_VERIFICATION_JOB_ID' = 'not-applicable'
+                       and '$RECOVERY_REQUEST_KEY' = 'not-applicable'
+                       and proof.source_live_verification_job_id is null
+                       and proof.source_live_proof_id is null
+                       and proof.recovery_request_key is null
+                       and proof.retry_request_key is null
+                       and proof.infrastructure_retry_request_key is null
+                       and proof.runtime_retry_request_key is null
+                     )
+                     or (
+                       proof.source_live_verification_job_id =
+                         nullif('$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable')::uuid
+                       and (
+                         proof.recovery_request_key =
+                           nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                         or proof.retry_request_key =
+                           nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                         or proof.infrastructure_retry_request_key =
+                           nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                         or proof.runtime_retry_request_key =
+                           nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                       )
+                     )
+                   )
               )
               select jsonb_build_object(
                 'requestCount', (select count(*) from recovered),
@@ -399,12 +429,12 @@ jobs:
                 'sourceLiveAttempts', (
                   select count(*) from app.private_live_telebirr_verification_attempts live_attempt
                    where live_attempt.verification_job_id =
-                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                         nullif('$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable')::uuid
                 ),
                 'sourceLiveOutcomes', (
                   select count(*) from app.private_live_telebirr_verification_outcomes live_outcome
                    where live_outcome.verification_job_id =
-                         '$SOURCE_LIVE_VERIFICATION_JOB_ID'::uuid
+                         nullif('$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable')::uuid
                 ),
                 'sourceReservations', (
                   select count(*) from app.private_live_deposit_pilot_reservations reservation

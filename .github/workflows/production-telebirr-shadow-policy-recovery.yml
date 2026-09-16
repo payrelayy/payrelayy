@@ -1,0 +1,177 @@
+name: One-time production TeleBirr shadow policy recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed dry-run pilot UUID
+        required: true
+        type: string
+      confirm_shadow_proof_request_id:
+        description: Type the exact expired direct shadow proof UUID
+        required: true
+        type: string
+      confirm_shadow_verification_job_id:
+        description: Type the exact shadow verification-job UUID
+        required: true
+        type: string
+      confirm_quarantined_verification_attempt_id:
+        description: Type the exact quarantined shadow attempt UUID
+        required: true
+        type: string
+      confirm_recovery_request_key:
+        description: Type one fresh UUIDv4 for this idempotent recovery
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RECOVER QUARANTINED TELEBIRR SHADOW AFTER POLICY FIX - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-policy-recovery
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate exact no-money policy recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_PROOF: ${{ inputs.confirm_shadow_proof_request_id }}
+      CONFIRMED_JOB: ${{ inputs.confirm_shadow_verification_job_id }}
+      CONFIRMED_ATTEMPT: ${{ inputs.confirm_quarantined_verification_attempt_id }}
+      CONFIRMED_REQUEST: ${{ inputs.confirm_recovery_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact identifiers, and no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_PROOF" =~ $uuid ]]
+          [[ "$CONFIRMED_JOB" =~ $uuid ]]
+          [[ "$CONFIRMED_ATTEMPT" =~ $uuid ]]
+          [[ "$CONFIRMED_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RECOVER QUARANTINED TELEBIRR SHADOW AFTER POLICY FIX - NO MONEY' ]]
+
+  recover:
+    name: Preserve quarantine and reopen one proof
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Recover only the exact quarantined no-money proof
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          SHADOW_PROOF_REQUEST_ID: ${{ inputs.confirm_shadow_proof_request_id }}
+          SHADOW_VERIFICATION_JOB_ID: ${{ inputs.confirm_shadow_verification_job_id }}
+          QUARANTINED_VERIFICATION_ATTEMPT_ID: ${{ inputs.confirm_quarantined_verification_attempt_id }}
+          RECOVERY_REQUEST_KEY: ${{ inputs.confirm_recovery_request_key }}
+          REVIEWED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          ca_file="$RUNNER_TEMP/fetanagent-production-policy-recovery-ca.crt"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$ca_file" == "$RUNNER_TEMP/fetanagent-production-policy-recovery-ca.crt" && \
+                  -f "$ca_file" && ! -L "$ca_file" ]]; then
+              shred --force --remove=unlink --zero "$ca_file" 2>/dev/null || rm --force "$ca_file"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+
+          result="$(
+            timeout --signal=TERM --kill-after=5s 90s \
+              psql -X --quiet --tuples-only --no-align \
+                --set=shadow_proof_request_id="$SHADOW_PROOF_REQUEST_ID" \
+                --set=shadow_verification_job_id="$SHADOW_VERIFICATION_JOB_ID" \
+                --set=pilot_revision_id="$PILOT_REVISION_ID" \
+                --set=quarantined_verification_attempt_id="$QUARANTINED_VERIFICATION_ATTEMPT_ID" \
+                --set=recovery_request_key="$RECOVERY_REQUEST_KEY" \
+                --set=reviewed_main_commit_sha="$REVIEWED_MAIN_COMMIT_SHA" \
+                --file=infra/sql/production-telebirr-shadow-policy-recovery.sql
+          )"
+          jq -e --arg proof "$SHADOW_PROOF_REQUEST_ID" \
+                --arg job "$SHADOW_VERIFICATION_JOB_ID" \
+                --arg pilot "$PILOT_REVISION_ID" \
+                --arg attempt "$QUARANTINED_VERIFICATION_ATTEMPT_ID" \
+                --arg request "$RECOVERY_REQUEST_KEY" '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_policy_recovery" and
+            .deploymentTarget == "production" and
+            .shadowProofRequestId == $proof and
+            .shadowVerificationJobId == $job and
+            .pilotRevisionId == $pilot and
+            .quarantinedVerificationAttemptId == $attempt and
+            .recoveryRequestKey == $request and
+            .quarantinePreserved == true and
+            .financialActionsEnabled == false and
+            .kemerBetCreditEnabled == false
+          ' <<<"$result" >/dev/null
+          echo '::notice::The exact quarantined proof is reopened for one fresh signed Android attempt; no money authority was enabled.'

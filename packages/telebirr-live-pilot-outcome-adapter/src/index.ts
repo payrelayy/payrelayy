@@ -153,6 +153,11 @@ export interface TelebirrLivePilotOutcomeAdapterInput {
   readonly providerCode: 'telebirr';
   readonly protocolMode: typeof TELEBIRR_LIVE_PILOT_PROTOCOL_MODE;
   readonly assessedAt: string;
+  /**
+   * Optional trusted server time used to validate the short signed assignment when immutable
+   * evidence is reviewed later. Current database facts remain bound to `assessedAt`.
+   */
+  readonly protocolAssessedAt?: string;
   readonly trustedRequest: TelebirrLivePilotOutcomeTrustedRequestBinding;
   readonly trustedPilot: TelebirrLivePilotOutcomeTrustedPilotBinding;
   readonly trustedPlayer: TelebirrLivePilotOutcomeTrustedPlayerBinding;
@@ -177,6 +182,7 @@ type CanonicalJsonValue =
 
 interface ParsedInput {
   readonly assessedAt: string;
+  readonly protocolAssessedAt: string;
   readonly request: TelebirrLivePilotOutcomeTrustedRequestBinding;
   readonly pilot: TelebirrLivePilotOutcomeTrustedPilotBinding;
   readonly player: TelebirrLivePilotOutcomeTrustedPlayerBinding;
@@ -203,6 +209,7 @@ const inputKeys = [
   'trustedDatabaseSnapshot',
   'verificationInput',
 ] as const;
+const delayedReviewInputKeys = [...inputKeys, 'protocolAssessedAt'] as const;
 const requestKeys = [
   'proofRequestId',
   'submittingCustomerId',
@@ -931,10 +938,15 @@ function parseDatabaseSnapshot(
 }
 
 function parseInput(candidate: unknown): ParsedInput | undefined {
-  if (!isPlainNonProxyRecord(candidate) || !hasExactEnumerableDataKeys(candidate, inputKeys)) {
+  if (!isPlainNonProxyRecord(candidate)) {
     return undefined;
   }
+  const delayedReview = hasExactEnumerableDataKeys(candidate, delayedReviewInputKeys);
+  if (!delayedReview && !hasExactEnumerableDataKeys(candidate, inputKeys)) return undefined;
   const assessedAt = parseTimestamp(ownDataValue(candidate, 'assessedAt'));
+  const protocolAssessedAt = delayedReview
+    ? parseTimestamp(ownDataValue(candidate, 'protocolAssessedAt'))
+    : assessedAt;
   const request = parseRequest(ownDataValue(candidate, 'trustedRequest'));
   const pilot = parsePilot(ownDataValue(candidate, 'trustedPilot'));
   const player = parsePlayer(ownDataValue(candidate, 'trustedPlayer'));
@@ -952,6 +964,8 @@ function parseInput(candidate: unknown): ParsedInput | undefined {
     ownDataValue(candidate, 'providerCode') !== 'telebirr' ||
     ownDataValue(candidate, 'protocolMode') !== TELEBIRR_LIVE_PILOT_PROTOCOL_MODE ||
     !assessedAt ||
+    !protocolAssessedAt ||
+    Date.parse(protocolAssessedAt) > Date.parse(assessedAt) ||
     !request ||
     !pilot ||
     !player ||
@@ -966,6 +980,7 @@ function parseInput(candidate: unknown): ParsedInput | undefined {
   }
   return Object.freeze({
     assessedAt,
+    protocolAssessedAt,
     request,
     pilot,
     player,
@@ -1194,7 +1209,7 @@ function bindingsMatch(
 
   return Boolean(
     protocolRequest &&
-    verificationAssessedAt === input.assessedAt &&
+    verificationAssessedAt === input.protocolAssessedAt &&
     protocolRequest.requestId === input.request.proofRequestId &&
     protocolRequest.pilotRevisionId === input.request.pilotRevisionId &&
     protocolRequest.referenceFingerprint === `hmac-sha256:${input.request.referenceFingerprint}` &&

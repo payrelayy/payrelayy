@@ -57,6 +57,7 @@ const AUTHORITY_KEYS = [
   'databaseAuthority',
   'databaseFacts',
 ] as const;
+const SHADOW_AUTHORITY_KEYS = [...AUTHORITY_KEYS, 'evidenceStagedAt'] as const;
 const ATTEMPT_KEYS = [
   'assignmentId',
   'requestId',
@@ -433,6 +434,7 @@ function databaseFactsFrom(value: unknown): Readonly<Record<string, unknown>> | 
 
 interface ParsedAuthority {
   readonly capturedAt: string;
+  readonly evidenceStagedAt: string | null;
   readonly authorityStateDigest: string;
   readonly attempt: DataRecord;
   readonly assignmentTranscript: DataRecord;
@@ -537,8 +539,16 @@ function authorityFrom(
   expectedLeaseToken: string,
   expectedVerificationMode: TrustedTelebirrVerificationMode,
 ): ParsedAuthority | undefined {
-  const record = exactDataRecord(value, AUTHORITY_KEYS);
+  const candidate = dataRecord(value);
+  const record = exactDataRecord(
+    value,
+    candidate?.verificationMode === 'shadow' ? SHADOW_AUTHORITY_KEYS : AUTHORITY_KEYS,
+  );
   const capturedAt = canonicalTimestamp(record?.capturedAt);
+  const evidenceStagedAt =
+    record?.verificationMode === 'shadow'
+      ? (canonicalTimestamp(record.evidenceStagedAt) ?? null)
+      : null;
   const attempt = exactDataRecord(record?.attempt, ATTEMPT_KEYS);
   const transcript = exactDataRecord(record?.assignmentTranscript, TRANSCRIPT_KEYS);
   const signer = timestampFields(record?.trustedAssignmentSigner, ['validFrom', 'validUntil']);
@@ -560,6 +570,7 @@ function authorityFrom(
     record.verificationAttemptId !== expectedAttemptId ||
     record.leaseTokenAccepted !== true ||
     !capturedAt ||
+    (record.verificationMode === 'shadow' && !evidenceStagedAt) ||
     typeof record.authorityStateDigest !== 'string' ||
     !SHA256_PATTERN.test(record.authorityStateDigest) ||
     !attempt ||
@@ -591,6 +602,7 @@ function authorityFrom(
   if (!issuedAt || !expiresAt || !signedAt) return undefined;
   return Object.freeze({
     capturedAt,
+    evidenceStagedAt,
     authorityStateDigest: record.authorityStateDigest,
     attempt: Object.freeze({ ...attempt, issuedAt, expiresAt }),
     assignmentTranscript: Object.freeze({ ...transcript, signedAt }),
@@ -650,7 +662,10 @@ function verificationInput(
     contractVersion: TELEBIRR_LIVE_PILOT_CONTRACT_VERSION,
     providerCode: 'telebirr' as const,
     protocolMode: TELEBIRR_LIVE_PILOT_PROTOCOL_MODE,
-    assessedAt: authority.capturedAt,
+    // Shadow evidence may be reviewed after its short assignment lease. The database supplies the
+    // immutable server staging time, which remains inside that lease, while capturedAt continues
+    // to bind the outcome adapter to current database authority and policy facts.
+    assessedAt: authority.evidenceStagedAt ?? authority.capturedAt,
     trustedAssignmentSigner: authority.signer,
     trustedRequestBinding: authority.trustedRequestBinding,
     deviceEnrollment: authority.device,
@@ -711,6 +726,9 @@ function authenticatedOutcome(
       providerCode: 'telebirr',
       protocolMode: TELEBIRR_LIVE_PILOT_PROTOCOL_MODE,
       assessedAt: authority.capturedAt,
+      ...(authority.evidenceStagedAt === null
+        ? {}
+        : { protocolAssessedAt: authority.evidenceStagedAt }),
       trustedRequest: authority.outcomeInputBase.trustedRequest,
       trustedPilot: authority.outcomeInputBase.trustedPilot,
       trustedPlayer: authority.outcomeInputBase.trustedPlayer,

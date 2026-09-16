@@ -225,10 +225,10 @@ as $$
           || '|assignment_id=' || attempt.assignment_id::text
           || '|device_enrollment_id=' || attempt.device_enrollment_id::text
           || '|issued_at_us=' || (
-            pg_catalog.extract(epoch from attempt.issued_at) * 1000000
+            extract(epoch from attempt.issued_at) * 1000000
           )::bigint::text
           || '|expires_at_us=' || (
-            pg_catalog.extract(epoch from attempt.expires_at) * 1000000
+            extract(epoch from attempt.expires_at) * 1000000
           )::bigint::text,
         E'\n' order by attempt.attempt_number, attempt.id
       )
@@ -304,13 +304,13 @@ begin
       || '|target_receiver_profile_id=' || p_target_receiver_profile_id::text
       || '|target_configuration_digest=' || p_target_configuration_digest
       || '|original_retry_expires_at_us=' || (
-        pg_catalog.extract(epoch from p_original_retry_expires_at) * 1000000
+        extract(epoch from p_original_retry_expires_at) * 1000000
       )::bigint::text
       || '|runtime_retried_at_us=' || (
-        pg_catalog.extract(epoch from p_runtime_retried_at) * 1000000
+        extract(epoch from p_runtime_retried_at) * 1000000
       )::bigint::text
       || '|runtime_retry_expires_at_us=' || (
-        pg_catalog.extract(epoch from p_runtime_retry_expires_at) * 1000000
+        extract(epoch from p_runtime_retry_expires_at) * 1000000
       )::bigint::text
       || '|prior_attempt_count=' || p_prior_attempt_count::text
       || '|prior_attempt_history_digest=' || p_prior_attempt_history_digest

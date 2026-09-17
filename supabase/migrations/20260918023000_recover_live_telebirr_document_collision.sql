@@ -463,7 +463,7 @@ declare
   expected_source_sha constant text :=
     '4d93dceeff811a24ca7b2efb71d8739591e9e225baf2b4a45255837c68fdbe18';
   expected_patched_sha constant text :=
-    '170a1b727b58b965fe2a935c87c64aed2ff83ac527da2389b1af13597e3ff567';
+    'ca6ef3eb6c184a3017cfaa8c38ff7a02c121de8f7b56c85a5a9c00933c09bf45';
   old_marker constant text := $old$  if session_user <> 'postgres'
 $old$;
   new_marker constant text := $new$  if old.source_document_retry_original_expires_at is not null

@@ -121,7 +121,7 @@ select (select count(*) from supabase_migrations.schema_migrations migration
                 extensions.digest(
                   pg_catalog.convert_to(routine.prosrc, 'UTF8'), 'sha256'
                 ), 'hex'
-              ) = '170a1b727b58b965fe2a935c87c64aed2ff83ac527da2389b1af13597e3ff567'
+              ) = 'ca6ef3eb6c184a3017cfaa8c38ff7a02c121de8f7b56c85a5a9c00933c09bf45'
         ) from mutation_guard routine)
    and (select pg_catalog.bool_and(
           routine.prokind = 'f'

@@ -127,6 +127,9 @@ describe('live TeleBirr source-document retry boundary', () => {
     expect(sha256(patchedGuard)).toBe(
       '170a1b727b58b965fe2a935c87c64aed2ff83ac527da2389b1af13597e3ff567',
     );
+    expect(recoverySource).toContain(
+      'ca6ef3eb6c184a3017cfaa8c38ff7a02c121de8f7b56c85a5a9c00933c09bf45',
+    );
   });
 
   it('accepts only the exact expired four-attempt, two-evidence collision shape', () => {

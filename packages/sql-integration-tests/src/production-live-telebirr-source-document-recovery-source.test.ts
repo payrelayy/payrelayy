@@ -41,7 +41,7 @@ describe('protected production live TeleBirr source-document recovery', () => {
     for (const digest of [
       'cf004b38b587d4a3894217d1db721af3a6217481a791297f35a0017f3a888a4f',
       '682c4c2347d73fed98cd5839a8a0702dae1fc5714973a437a70015892b84aa6a',
-      '170a1b727b58b965fe2a935c87c64aed2ff83ac527da2389b1af13597e3ff567',
+      'ca6ef3eb6c184a3017cfaa8c38ff7a02c121de8f7b56c85a5a9c00933c09bf45',
       'be5588fd9107174dcf7251e4adeb9f518c508d8ac59fefd78194248013655cbb',
       '0431435bcb3f0ca3e3cd9a3f525a6a5cd6dc2a17a6cbe4a72e750ba858ffc52c',
     ]) {

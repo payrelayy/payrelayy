@@ -129,6 +129,26 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Require the commit-bound shadow operation
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          shadow_release_mode="$(<infra/production-shadow-release-mode)"
+          case "$REQUESTED_MODE:$shadow_release_mode" in
+            'deploy:receiver-review'|\
+            'deploy:shadow-intake'|\
+            'deploy-shadow:receiver-review'|\
+            'deploy-shadow-intake:shadow-intake'|\
+            'deploy-inert:receiver-review'|\
+            'deploy-inert:shadow-intake') ;;
+            *)
+              echo '::error::This exact production commit is not bound to the requested shadow operation.'
+              exit 1
+              ;;
+          esac
+
       - name: Require latest passing main push CI before building
         env:
           GH_TOKEN: ${{ github.token }}
@@ -226,6 +246,26 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
+
+      - name: Recheck the commit-bound shadow operation
+        shell: bash
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          shadow_release_mode="$(<infra/production-shadow-release-mode)"
+          case "$REQUESTED_MODE:$shadow_release_mode" in
+            'deploy:receiver-review'|\
+            'deploy:shadow-intake'|\
+            'deploy-shadow:receiver-review'|\
+            'deploy-shadow-intake:shadow-intake'|\
+            'deploy-inert:receiver-review'|\
+            'deploy-inert:shadow-intake') ;;
+            *)
+              echo '::error::This exact production commit is not bound to the requested shadow operation.'
+              exit 1
+              ;;
+          esac
 
       - name: Recheck latest main push CI before production secrets
         env:

@@ -803,7 +803,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           leaseNonceDigest: assignment.lease_nonce_digest,
           challengeId: assignment.challenge_id,
           challengeDigest: assignment.challenge_digest,
-          referenceFingerprint: assignment.candidate_reference_fingerprint,
+          referenceFingerprint: `hmac-sha256:${assignment.candidate_reference_fingerprint}`,
           referenceBindingDigest,
           receiverRevisionId: assignment.receiver_revision_id,
           receiverProfileId: assignment.receiver_profile_id,
@@ -826,6 +826,34 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
             observedAt: new Date().toISOString(),
           },
         };
+        const rawFingerprintBinding = {
+          ...binding,
+          referenceFingerprint: assignment.candidate_reference_fingerprint,
+        };
+        const rejectedRawFingerprint = await client.query(
+          `select *
+             from app.stage_private_telebirr_device_evidence(
+               $1::uuid, $2::text, $3::text, $4::text, $5::jsonb, $6::jsonb
+             )`,
+          [
+            paired.enrollmentId,
+            sha(`raw-fingerprint-upload-request:${randomUUID()}`),
+            assignmentBodyDigest,
+            observationBodyDigest,
+            { ...signedAssignment, body: rawFingerprintBinding },
+            {
+              ...signedObservation,
+              body: {
+                ...rawFingerprintBinding,
+                assignmentBodyDigest,
+                observedAt: signedObservation.body.observedAt,
+              },
+            },
+          ],
+        );
+        expect(rejectedRawFingerprint.rows).toEqual([
+          { outcome: 'rejected', reason_code: 'binding_mismatch', replayed: false },
+        ]);
         const before = await client.query<{
           readonly observations: string;
           readonly outcomes: string;
@@ -942,6 +970,307 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           [assignment.verification_attempt_id, observationBodyDigest],
         );
         expect(quarantine.rows).toEqual([{ quarantines: '1' }]);
+      });
+    });
+
+    it('opens one bounded retry for an expired pre-evidence binding-mismatch attempt', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareTelebirrPilot(client, getOwnerAdminId());
+        const submittedAt = new Date(Date.now() - 10 * 60 * 1_000);
+        const expiredAt = new Date(submittedAt.getTime() + 5 * 60 * 1_000);
+        const proof = await createLiveProof(client, pilot, 0, { submittedAt });
+        const jobId = randomUUID();
+        const insertedJob = await client.query<{ readonly id: string }>(
+          `insert into app.private_live_telebirr_verification_jobs (
+             id,
+             enqueue_request_key,
+             enqueue_request_digest,
+             private_live_deposit_pilot_proof_id,
+             pilot_revision_id,
+             submitting_customer_id,
+             player_account_id,
+             payment_provider_id,
+             provider_code,
+             receiver_profile_id,
+             receiver_account_id,
+             receiver_account_version,
+             pilot_configuration_digest,
+             receiver_profile_digest,
+             receiver_configuration_digest,
+             receiver_identity_digest,
+             expected_receiver_name_digest,
+             deposit_policy_version_id,
+             deposit_policy_version,
+             minimum_principal_amount_minor,
+             maximum_principal_amount_minor,
+             policy_digest,
+             candidate_reference_fingerprint,
+             reference_encryption_key_version,
+             reference_profile_version,
+             submitted_at,
+             not_before,
+             expires_at
+           )
+           select $1::uuid,
+                  $2::uuid,
+                  $3::text,
+                  proof.id,
+                  proof.pilot_revision_id,
+                  proof.submitting_customer_id,
+                  proof.player_account_id,
+                  proof.payment_provider_id,
+                  'telebirr',
+                  profile.id,
+                  profile.receiver_account_id,
+                  profile.receiver_account_version,
+                  profile.pilot_configuration_digest,
+                  profile.receiver_profile_digest,
+                  profile.receiver_configuration_digest,
+                  profile.receiver_identity_digest,
+                  profile.expected_receiver_name_digest,
+                  profile.deposit_policy_version_id,
+                  profile.deposit_policy_version,
+                  profile.minimum_principal_amount_minor,
+                  profile.maximum_principal_amount_minor,
+                  profile.policy_digest,
+                  proof.candidate_reference_fingerprint,
+                  proof.reference_encryption_key_version,
+                  proof.reference_profile_version,
+                  proof.submitted_at,
+                  proof.submitted_at,
+                  $5::timestamptz
+             from app.private_live_deposit_pilot_proofs proof
+             join app.private_live_telebirr_receiver_profiles profile
+               on profile.pilot_revision_id = proof.pilot_revision_id
+              and profile.payment_provider_id = proof.payment_provider_id
+            where proof.id = $4::uuid
+           returning id`,
+          [jobId, randomUUID(), sha(`expired-job:${jobId}`), proof.id, expiredAt],
+        );
+        expect(insertedJob.rows).toEqual([{ id: jobId }]);
+
+        const failedAttemptId = randomUUID();
+        const failedAttemptIssuedAt = new Date(submittedAt.getTime() + 60_000);
+        const failedAttemptExpiresAt = new Date(failedAttemptIssuedAt.getTime() + 120_000);
+        const failedAssignmentId = randomUUID();
+        const insertedAttempt = await client.query<{ readonly id: string }>(
+          `insert into app.private_live_telebirr_verification_attempts (
+             id,
+             verification_job_id,
+             attempt_number,
+             lease_request_key,
+             lease_request_digest,
+             lease_token,
+             request_id,
+             assignment_id,
+             requested_lease_seconds,
+             leased_by,
+             device_enrollment_id,
+             device_id_snapshot,
+             device_key_id_snapshot,
+             device_public_key_spki_sha256_snapshot,
+             lease_nonce_digest,
+             challenge_id,
+             challenge_digest,
+             issued_at,
+             expires_at
+           )
+           select $1::uuid,
+                  $2::uuid,
+                  1,
+                  $3::uuid,
+                  $4::text,
+                  $5::uuid,
+                  $6::uuid,
+                  $7::uuid,
+                  120,
+                  'sql-binding-recovery-01',
+                  enrollment.id,
+                  enrollment.device_id,
+                  enrollment.key_id,
+                  enrollment.public_key_spki_sha256,
+                  $9::text,
+                  $10::uuid,
+                  $11::text,
+                  $12::timestamptz,
+                  $13::timestamptz
+             from app.private_live_telebirr_device_enrollments enrollment
+            where enrollment.id = $8::uuid
+           returning id`,
+          [
+            failedAttemptId,
+            jobId,
+            randomUUID(),
+            sha(`failed-lease-request:${failedAttemptId}`),
+            randomUUID(),
+            randomUUID(),
+            failedAssignmentId,
+            pilot.deviceEnrollmentId,
+            sha(`failed-lease-nonce:${failedAttemptId}`),
+            randomUUID(),
+            sha(`failed-challenge:${failedAttemptId}`),
+            failedAttemptIssuedAt,
+            failedAttemptExpiresAt,
+          ],
+        );
+        expect(insertedAttempt.rows).toEqual([{ id: failedAttemptId }]);
+
+        const assignmentTranscriptId = randomUUID();
+        const assignmentBodyDigest = sha(`failed-assignment-body:${failedAssignmentId}`);
+        const referenceBindingDigest = sha(`failed-reference-binding:${failedAssignmentId}`);
+        const assignmentSignature = signature(0x61);
+        const signedAt = new Date(failedAttemptIssuedAt.getTime() + 1_000);
+        const insertedTranscript = await client.query<{ readonly id: string }>(
+          `insert into app.private_live_telebirr_assignment_transcripts (
+             id,
+             verification_attempt_id,
+             assignment_signer_id,
+             assignment_body_digest,
+             signer_key_id_snapshot,
+             signer_public_key_spki_sha256_snapshot,
+             assignment_signature_digest,
+             reference_binding_digest,
+             signed_at
+           )
+           select $1::uuid,
+                  $2::uuid,
+                  signer.id,
+                  $4::text,
+                  signer.signer_key_id,
+                  signer.public_key_spki_sha256,
+                  $5::text,
+                  $6::text,
+                  $7::timestamptz
+             from app.private_live_telebirr_assignment_signers signer
+            where signer.id = $3::uuid
+           returning id`,
+          [
+            assignmentTranscriptId,
+            failedAttemptId,
+            pilot.assignmentSignerId,
+            assignmentBodyDigest,
+            assignmentSignature.digest,
+            referenceBindingDigest,
+            signedAt,
+          ],
+        );
+        expect(insertedTranscript.rows).toEqual([{ id: assignmentTranscriptId }]);
+        await client.query(
+          `insert into app.private_live_telebirr_assignment_deliveries (
+             verification_attempt_id,
+             assignment_transcript_id,
+             assignment_signature,
+             assignment_signature_digest
+           ) values ($1::uuid, $2::uuid, $3::text, $4::text)`,
+          [
+            failedAttemptId,
+            assignmentTranscriptId,
+            assignmentSignature.encoded,
+            assignmentSignature.digest,
+          ],
+        );
+
+        const epoch = await client.query<{ readonly activation_epoch: string }>(
+          `select app.current_private_trusted_telebirr_activation_epoch()::text
+             as activation_epoch`,
+        );
+        const recoveryRequestKey = randomUUID();
+        const recover = () =>
+          client.query<{
+            readonly already_recovered: boolean;
+            readonly original_job_expires_at: Date;
+            readonly recovered_job_expires_at: Date;
+            readonly verification_job_id: string;
+          }>(
+            `select *
+               from app.recover_attempted_private_live_telebirr_binding_mismatch_job(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'device_evidence_binding_mismatch'::text
+               )`,
+            [jobId, pilot.pilotRevisionId, epoch.rows[0]!.activation_epoch, recoveryRequestKey],
+          );
+
+        const recovered = await recover();
+        expect(recovered.rows).toHaveLength(1);
+        expect(recovered.rows[0]).toMatchObject({
+          already_recovered: false,
+          original_job_expires_at: expiredAt,
+          verification_job_id: jobId,
+        });
+        expect(recovered.rows[0]!.recovered_job_expires_at.getTime()).toBeGreaterThan(
+          Date.now() + 60_000,
+        );
+
+        const replayedRecovery = await recover();
+        expect(replayedRecovery.rows).toEqual([{ ...recovered.rows[0]!, already_recovered: true }]);
+
+        const secondAttempt = await client.query<{
+          readonly attempt_number: number;
+          readonly job_id: string;
+        }>(
+          `select job_id, attempt_number
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, 'sql-binding-recovery-02', $2::uuid, 120
+             )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(secondAttempt.rows).toEqual([{ attempt_number: 2, job_id: jobId }]);
+
+        const downstream = await client.query<{
+          readonly deposit_jobs: string;
+          readonly enabled_executor_logins: string;
+          readonly outcomes: string;
+          readonly reservations: string;
+          readonly staged_evidence: string;
+        }>(
+          `select
+             (select count(*)::text
+                from app.private_live_telebirr_device_evidence_staging staged
+               where staged.verification_attempt_id = $1::uuid) as staged_evidence,
+             (select count(*)::text
+                from app.private_live_telebirr_verification_outcomes outcome
+               where outcome.verification_job_id = $2::uuid) as outcomes,
+             (select count(*)::text
+                from app.private_live_deposit_pilot_reservations reservation
+               where reservation.private_live_deposit_pilot_proof_id = $3::uuid) as reservations,
+             (select count(*)::text
+                from app.deposit_jobs job
+               where job.deposit_intent_id in (
+                 select outcome.deposit_intent_id
+                   from app.private_live_telebirr_verification_outcomes outcome
+                  where outcome.verification_job_id = $2::uuid
+                    and outcome.deposit_intent_id is not null
+               )) as deposit_jobs,
+             (select count(*)::text
+                from pg_catalog.pg_roles role
+               where role.rolname in (
+                 'fetanagent_deposit_executor',
+                 'fetanagent_deposit_executor_runtime'
+               )
+                 and role.rolcanlogin) as enabled_executor_logins`,
+          [failedAttemptId, jobId, proof.id],
+        );
+        expect(downstream.rows).toEqual([
+          {
+            deposit_jobs: '0',
+            enabled_executor_logins: '0',
+            outcomes: '0',
+            reservations: '0',
+            staged_evidence: '0',
+          },
+        ]);
+
+        await expect(
+          client.query(
+            `select *
+               from app.recover_attempted_private_live_telebirr_binding_mismatch_job(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'device_evidence_binding_mismatch'::text
+               )`,
+            [jobId, pilot.pilotRevisionId, epoch.rows[0]!.activation_epoch, randomUUID()],
+          ),
+        ).rejects.toThrow(/replay conflicts/iu);
       });
     });
 

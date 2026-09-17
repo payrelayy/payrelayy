@@ -49,6 +49,7 @@ jobs:
           node --test infra/operations/verify-postgres-scram-secret.test.mjs
           node --test infra/operations/production-live-telebirr-network-binding-recovery-workflow.test.mjs
           node --test infra/operations/production-live-telebirr-network-binding-observe-workflow.test.mjs
+          node --test infra/operations/production-live-telebirr-source-document-recovery-workflow.test.mjs
 
       - name: Verify FetanAgent branding
         run: pnpm verify:brand

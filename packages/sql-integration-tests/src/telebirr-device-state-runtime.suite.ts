@@ -1023,7 +1023,6 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         );
         expect(stored.rows).toEqual([{ count: '1' }]);
 
-        await client.query('savepoint binding_recovery_conflict');
         await expect(
           client.query(
             `select *
@@ -1653,6 +1652,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           },
         ]);
 
+        await client.query('savepoint binding_recovery_conflict');
         await expect(
           client.query(
             `select *

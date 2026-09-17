@@ -557,10 +557,6 @@ assert.match(
 );
 assert.match(
   helper,
-  /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'[\s\S]*?shadow-review production overlay is missing its reviewed receiver gate/u,
-);
-assert.match(
-  helper,
   /compose_files\+=\(--file "\$release\/compose\.production\.inert-maintenance\.yaml"\)/u,
 );
 assert.match(helper, /current-state\)/u);

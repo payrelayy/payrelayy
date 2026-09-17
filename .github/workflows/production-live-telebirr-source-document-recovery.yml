@@ -1,0 +1,321 @@
+name: Recover production live TeleBirr source document retry
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed live-pilot UUID
+        required: true
+        type: string
+      confirm_activation_epoch:
+        description: Type the exact active trusted TeleBirr epoch
+        required: true
+        type: string
+      confirm_network_binding_recovery_request_key:
+        description: Type the exact preceding network-binding recovery UUIDv4
+        required: true
+        type: string
+      confirm_source_document_recovery_request_key:
+        description: Type one fresh UUIDv4 for this idempotent recovery
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RECOVER LIVE TELEBIRR SOURCE DOCUMENT COLLISION - KEMERBET DISABLED
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-live-telebirr-source-document-recovery
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate the exact live recovery authorization
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_EPOCH: ${{ inputs.confirm_activation_epoch }}
+      CONFIRMED_NETWORK_REQUEST: ${{ inputs.confirm_network_binding_recovery_request_key }}
+      CONFIRMED_DOCUMENT_REQUEST: ${{ inputs.confirm_source_document_recovery_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact identifiers, and disabled-executor phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          epoch='^[1-9][0-9]{0,18}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_EPOCH" =~ $epoch ]]
+          [[ "$CONFIRMED_NETWORK_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_DOCUMENT_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_NETWORK_REQUEST" != "$CONFIRMED_DOCUMENT_REQUEST" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RECOVER LIVE TELEBIRR SOURCE DOCUMENT COLLISION - KEMERBET DISABLED' ]]
+
+  recover-and-observe:
+    name: Reopen once and stop at one queued deposit
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production operation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Recover the exact document collision and observe only through queue creation
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          TARGET_ACTIVATION_EPOCH: ${{ inputs.confirm_activation_epoch }}
+          NETWORK_BINDING_RECOVERY_REQUEST_KEY: ${{ inputs.confirm_network_binding_recovery_request_key }}
+          SOURCE_DOCUMENT_RECOVERY_REQUEST_KEY: ${{ inputs.confirm_source_document_recovery_request_key }}
+          REVIEWED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-live-telebirr-source-document-recovery"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == \
+                    "$RUNNER_TEMP/production-live-telebirr-source-document-recovery" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          eligibility_result="$(
+            timeout --signal=TERM --kill-after=5s 30s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-source-document-eligibility.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_source_document_eligibility" and
+            .deploymentTarget == "production" and
+            (.eligibilityState | IN("eligible", "ineligible")) and
+            (.reasonCode | IN(
+              "eligible", "target_not_exact", "attempt_shape_mismatch",
+              "evidence_shape_mismatch", "same_reference_collision_missing",
+              "document_already_settled", "downstream_rows_present",
+              "authority_unavailable", "proof_profile_unavailable",
+              "device_unavailable", "signer_unavailable",
+              "broker_session_unavailable", "verifier_session_unavailable",
+              "kemerbet_enabled"
+            )) and
+            ([
+              .targetCount, .attempts, .expiredAttempts, .assignmentTranscripts,
+              .assignmentDeliveries, .deviceEvidence, .sameReferenceCollisions,
+              .settledDocuments, .outcomes, .reservations,
+              .assignmentBrokerSessions, .trustedVerifierSessions,
+              .kemerBetLoginRoles, .kemerBetSessions
+            ] | all(type == "number" and . >= 0 and . <= 8)) and
+            ([.alreadyRecovered, .executionEnabled, .readOnly, .moneyMoved]
+              | all(type == "boolean")) and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false and
+            .readOnly == true and
+            .moneyMoved == false
+          ' <<<"$eligibility_result" >/dev/null
+          jq '{
+            eligibilityState,
+            reasonCode,
+            targetCount,
+            attempts,
+            expiredAttempts,
+            assignmentTranscripts,
+            assignmentDeliveries,
+            deviceEvidence,
+            sameReferenceCollisions,
+            settledDocuments,
+            outcomes,
+            reservations,
+            assignmentBrokerSessions,
+            trustedVerifierSessions,
+            executionEnabled,
+            readOnly,
+            moneyMoved
+          }' <<<"$eligibility_result" >>"$GITHUB_STEP_SUMMARY"
+
+          if [[ "$(jq -r '.eligibilityState' <<<"$eligibility_result")" != 'eligible' ]]; then
+            reason="$(jq -r '.reasonCode' <<<"$eligibility_result")"
+            echo "::error::The redacted source-document eligibility diagnosis returned ${reason}." >&2
+            exit 4
+          fi
+
+          recovery_result="$(
+            timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-source-document-recovery.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_source_document_recovery" and
+            .deploymentTarget == "production" and
+            (.recoveryState | IN("armed", "replayed")) and
+            (.alreadyRecovered | type == "boolean") and
+            (.remainingSeconds | type == "number" and . >= 0 and . <= 300) and
+            .financialRowsCreated == false and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false
+          ' <<<"$recovery_result" >/dev/null
+          jq '{recoveryState, alreadyRecovered, remainingSeconds, financialRowsCreated, executionEnabled}' \
+            <<<"$recovery_result" >>"$GITHUB_STEP_SUMMARY"
+
+          terminal_state=''
+          terminal_result=''
+          for _ in $(seq 1 48); do
+            status_result="$(
+              timeout --signal=TERM --kill-after=5s 30s \
+                psql -X --quiet --tuples-only --no-align \
+                  --file=infra/sql/production-live-telebirr-source-document-status.sql
+            )"
+            jq -e '
+              .schemaVersion == 1 and
+              .operation == "live_telebirr_source_document_status" and
+              .deploymentTarget == "production" and
+              .targetCount == 1 and
+              (.verificationState | IN(
+                "waiting", "queued", "review_required", "definite_reject", "expired"
+              )) and
+              ([
+                .attempts, .assignmentTranscripts, .assignmentDeliveries,
+                .deviceEvidence, .observations, .outcomes, .reservations,
+                .settlementReceipts, .settlementDocuments,
+                .depositExecutionJobs, .queuedDepositJobs
+              ] | all(type == "number" and . >= 0 and . <= 8)) and
+              .kemerBetLoginRoles == 0 and
+              .kemerBetSessions == 0 and
+              .executionEnabled == false
+            ' <<<"$status_result" >/dev/null
+
+            state="$(jq -r '.verificationState' <<<"$status_result")"
+            case "$state" in
+              waiting)
+                sleep 10
+                ;;
+              queued|review_required|definite_reject|expired)
+                terminal_state="$state"
+                terminal_result="$status_result"
+                break
+                ;;
+              *)
+                echo '::error::The redacted live TeleBirr status is invalid.' >&2
+                exit 1
+                ;;
+            esac
+          done
+
+          if [[ -z "$terminal_state" ]]; then
+            echo '::error::The bounded observation window ended without a terminal result.' >&2
+            exit 1
+          fi
+
+          jq '{
+            verificationState,
+            outcomeReasonCode,
+            attempts,
+            assignmentTranscripts,
+            assignmentDeliveries,
+            deviceEvidence,
+            observations,
+            outcomes,
+            reservations,
+            settlementReceipts,
+            settlementDocuments,
+            depositExecutionJobs,
+            queuedDepositJobs,
+            executionEnabled
+          }' <<<"$terminal_result" >>"$GITHUB_STEP_SUMMARY"
+
+          if [[ "$terminal_state" != 'queued' ]]; then
+            echo "::error::The bounded live TeleBirr verification ended in ${terminal_state}." >&2
+            exit 1
+          fi
+
+          jq -e '
+            .outcomeReasonCode == "exact_proof_match" and
+            (.attempts >= 5 and .attempts <= 8) and
+            .assignmentTranscripts >= 3 and
+            .assignmentDeliveries >= 3 and
+            .deviceEvidence >= 3 and
+            .observations == 1 and
+            .outcomes == 1 and
+            .reservations == 1 and
+            .settlementReceipts == 1 and
+            .settlementDocuments == 1 and
+            .depositExecutionJobs == 1 and
+            .queuedDepositJobs == 1 and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false
+          ' <<<"$terminal_result" >/dev/null
+          echo '::notice::One authorized deposit reached the untouched queue; KemerBet execution remains disabled.'

@@ -119,7 +119,9 @@ const lineageTables = [
   'private_live_telebirr_verification_attempts',
   'private_live_telebirr_assignment_transcripts',
   'private_live_telebirr_observation_transcripts',
+  'private_live_telebirr_source_document_bindings',
   'private_live_telebirr_verification_outcomes',
+  'private_live_telebirr_settlement_documents',
   'private_live_telebirr_settlement_receipts',
 ] as const;
 
@@ -1750,11 +1752,25 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
           /settlement candidate is not authorized/u,
         );
 
-        const receipt = await client.query<{ readonly count: number }>(
-          `select count(*)::integer as count
-             from app.private_live_telebirr_settlement_receipts`,
+        const receipt = await client.query<{
+          readonly bindings: number;
+          readonly receipts: number;
+          readonly settlement_documents: number;
+        }>(
+          `select (
+                    select count(*)::integer
+                      from app.private_live_telebirr_settlement_receipts
+                  ) as receipts,
+                  (
+                    select count(*)::integer
+                      from app.private_live_telebirr_source_document_bindings
+                  ) as bindings,
+                  (
+                    select count(*)::integer
+                      from app.private_live_telebirr_settlement_documents
+                  ) as settlement_documents`,
         );
-        expect(receipt.rows).toEqual([{ count: 1 }]);
+        expect(receipt.rows).toEqual([{ bindings: 1, receipts: 1, settlement_documents: 1 }]);
 
         await queryAsMigrationOwner(
           client,

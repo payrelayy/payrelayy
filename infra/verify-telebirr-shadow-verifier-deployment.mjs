@@ -15,6 +15,7 @@ const [
   healthSource,
   mainSource,
   migrationSource,
+  authenticatedReviewMigrationSource,
   environmentExample,
   workflowSource,
   ownerStatusSource,
@@ -29,6 +30,7 @@ const [
   read('apps/trusted-telebirr-verifier/src/trusted-telebirr-verifier-health.ts'),
   read('apps/trusted-telebirr-verifier/src/telebirr-shadow-verifier-main.ts'),
   read('supabase/migrations/20260909220000_private_telebirr_shadow_verification.sql'),
+  read('supabase/migrations/20260917030000_allow_authenticated_shadow_policy_review.sql'),
   read('.env.example'),
   read('.github/workflows/telebirr-shadow-verifier-image-smoke.yml'),
   read('apps/admin/src/owner-telebirr-shadow-verification-status.ts'),
@@ -284,6 +286,31 @@ assert.match(completionBody, /app\.private_telebirr_shadow_evidence_quarantine/u
 for (const advisoryOutcome of ['would_verify', 'would_review', 'would_reject']) {
   assert.match(completionBody, new RegExp(`'${advisoryOutcome}'`, 'u'));
 }
+assert.match(
+  authenticatedReviewMigrationSource,
+  /p_protocol_disposition = 'would_forward_signed_evidence'[\s\S]*p_protocol_reason_code <> 'signed_evidence_verified'/u,
+  'authenticated protocol forwarding must remain bound to signed_evidence_verified',
+);
+assert.match(
+  authenticatedReviewMigrationSource,
+  /p_disposition = 'settlement_candidate'[\s\S]*p_protocol_disposition <> 'would_forward_signed_evidence'[\s\S]*p_reason_code <> 'exact_proof_match'/u,
+  'only the exact authenticated policy outcome may remain a settlement candidate',
+);
+assert.doesNotMatch(
+  authenticatedReviewMigrationSource,
+  /p_disposition <> 'settlement_candidate'[\s\S]{0,180}p_protocol_disposition <> 'would_review'/u,
+  'an independent policy downgrade must not erase authenticated protocol evidence',
+);
+assert.match(
+  authenticatedReviewMigrationSource,
+  /p_disposition <> 'settlement_candidate'[\s\S]*p_reason_code = 'exact_proof_match'[\s\S]*p_receipt_principal_amount_minor is not null[\s\S]*p_occurred_at is not null[\s\S]*p_receiver_identity_digest is not null/u,
+  'every non-settlement outcome must continue to reject settlement-only facts',
+);
+assert.doesNotMatch(
+  authenticatedReviewMigrationSource,
+  /insert\s+into\s+app\.(?:deposit_|provider_payment_evidence|private_live_)/iu,
+  'the compatibility repair must not write any financial or live-pilot table',
+);
 assert.match(ownerStatusSource, /would_verify_count/u);
 assert.match(ownerStatusSource, /would_review_count/u);
 assert.match(ownerStatusSource, /would_reject_count/u);

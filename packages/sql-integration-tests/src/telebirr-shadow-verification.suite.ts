@@ -1739,6 +1739,75 @@ export function registerTelebirrShadowVerificationSqlTests(
           await client.query('release savepoint shadow_quarantine_completion_guard');
         }
 
+        const authenticatedPolicyReviewValues = [
+          assigned.verification_attempt_id,
+          assigned.lease_token,
+          leaseRequestKey,
+          observationBodyDigest,
+          observationSignature.digest,
+          digest(`shadow-replay:${assigned.assignment_id}`),
+          sourceDocumentDigest,
+          normalizedFactsDigest,
+          observedAt,
+          'would_forward_signed_evidence',
+          'signed_evidence_verified',
+          digest(`shadow-policy-review-assessment:${assigned.assignment_id}`),
+          assessedAt,
+          'review_required',
+          'policy_contract_mismatch',
+          digest(`shadow-evidence:${assigned.assignment_id}`),
+          observedAt,
+          null,
+          null,
+          null,
+        ] as const;
+
+        await client.query('savepoint shadow_authenticated_policy_review_guard');
+        try {
+          const reviewed = await client.query<ShadowCompletionRow>(completionSql, [
+            ...authenticatedPolicyReviewValues,
+          ]);
+          expect(reviewed.rows).toHaveLength(1);
+          expect(reviewed.rows[0]).toMatchObject({
+            outcome_disposition: 'would_review',
+            outcome_reason_code: 'policy_contract_mismatch',
+            deposit_intent_id: null,
+            deposit_payment_claim_id: null,
+            execution_job_id: null,
+            settlement_created: false,
+            already_completed: false,
+          });
+          const reviewedReplay = await client.query<ShadowCompletionRow>(completionSql, [
+            ...authenticatedPolicyReviewValues,
+          ]);
+          expect(reviewedReplay.rows).toEqual([{ ...reviewed.rows[0]!, already_completed: true }]);
+          const storedReview = await client.query<{
+            readonly protocol_disposition: string;
+            readonly protocol_reason_code: string;
+            readonly disposition: string;
+            readonly reason_code: string;
+            readonly would_verify: boolean;
+          }>(
+            `select protocol_disposition, protocol_reason_code, disposition,
+                    reason_code, would_verify
+               from app.private_telebirr_shadow_verification_outcomes
+              where verification_attempt_id = $1::uuid`,
+            [assigned.verification_attempt_id],
+          );
+          expect(storedReview.rows).toEqual([
+            {
+              protocol_disposition: 'would_forward_signed_evidence',
+              protocol_reason_code: 'signed_evidence_verified',
+              disposition: 'review_required',
+              reason_code: 'policy_contract_mismatch',
+              would_verify: false,
+            },
+          ]);
+        } finally {
+          await client.query('rollback to savepoint shadow_authenticated_policy_review_guard');
+          await client.query('release savepoint shadow_authenticated_policy_review_guard');
+        }
+
         const completed = await client.query<ShadowCompletionRow>(completionSql, [
           ...completionValues,
         ]);

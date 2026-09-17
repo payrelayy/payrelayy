@@ -221,10 +221,65 @@ with pilot_jobs as materialized (
                         and advisory_lock.objsubid = 2
                         and advisory_lock.granted
                    )), 2)::integer as broker_lock_holders,
-         coalesce(
-           app.current_private_trusted_telebirr_activation_epoch() =
-             :'target_activation_epoch'::bigint,
-           false
+         exists (
+           select 1
+             from app.private_trusted_telebirr_activation_control activation_control
+             join app.private_trusted_telebirr_activation_epochs authority
+               on authority.epoch = activation_control.current_epoch
+             join app.private_live_deposit_pilot_revisions pilot
+               on pilot.id = authority.pilot_revision_id
+            where activation_control.control_key =
+                  'trusted_telebirr_financial_authority'
+              and activation_control.current_epoch = :'target_activation_epoch'::bigint
+              and authority.pilot_revision_id = :'target_pilot_revision_id'::uuid
+              and authority.authority_state = 'active'
+              and authority.revoked_at is null
+              and pg_catalog.clock_timestamp() >= authority.active_from
+              and pg_catalog.clock_timestamp() < authority.expires_at
+              and not exists (
+                select 1
+                  from app.private_trusted_telebirr_emergency_disable_intents emergency
+                 where emergency.expected_epoch = authority.epoch
+              )
+              and pilot.status = 'armed'
+              and pilot.configuration_digest = authority.configuration_digest
+              and pilot.active_from = authority.active_from
+              and pilot.expires_at = authority.expires_at
+              and (select count(*)
+                     from app.feature_switches feature_switch
+                    where feature_switch.feature_key in (
+                      'cbe_birr_authoritative_verification',
+                      'deposit_execution',
+                      'payment_verification',
+                      'private_live_deposit_pilot',
+                      'telebirr_authoritative_verification'
+                    )) = 5
+              and exists (
+                select 1 from app.feature_switches feature_switch
+                 where feature_switch.feature_key =
+                       'cbe_birr_authoritative_verification'
+                   and feature_switch.mode = 'disabled'
+                   and feature_switch.settings = '{}'::jsonb
+              )
+              and (select count(*)
+                     from app.feature_switches feature_switch
+                    where feature_switch.feature_key in (
+                      'deposit_execution',
+                      'payment_verification',
+                      'telebirr_authoritative_verification'
+                    )
+                      and feature_switch.mode = 'live'
+                      and feature_switch.settings = '{}'::jsonb) = 3
+              and exists (
+                select 1 from app.feature_switches feature_switch
+                 where feature_switch.feature_key = 'private_live_deposit_pilot'
+                   and feature_switch.mode = 'live'
+                   and feature_switch.settings = pg_catalog.jsonb_build_object(
+                     'contract_version', 1,
+                     'pilot_revision_id', pilot.id,
+                     'configuration_digest', pilot.configuration_digest
+                   )
+              )
          ) as active_epoch_matches,
          app.is_private_live_deposit_pilot_enforced() as pilot_enforced,
          exists (

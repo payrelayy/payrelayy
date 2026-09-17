@@ -88,6 +88,15 @@ describe('protected production live TeleBirr network-binding recovery', () => {
       expect(eligibilitySqlSource).toContain(fragment);
     }
     expect(eligibilitySqlSource).toContain('least((select count(*)');
+    expect(eligibilitySqlSource).toContain(
+      'private_trusted_telebirr_activation_control activation_control',
+    );
+    expect(eligibilitySqlSource).toContain(
+      "activation_control.control_key =\n                  'trusted_telebirr_financial_authority'",
+    );
+    expect(eligibilitySqlSource).not.toContain(
+      'app.current_private_trusted_telebirr_activation_epoch()',
+    );
     expect(eligibilitySqlSource).not.toContain("'verificationJobId'");
     expect(eligibilitySqlSource).not.toContain("'proofId'");
     expect(eligibilitySqlSource).not.toContain("'transactionReference'");

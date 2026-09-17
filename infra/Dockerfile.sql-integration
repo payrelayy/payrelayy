@@ -50,6 +50,8 @@ COPY infra/sql/staging-telebirr-shadow-verifier-disable.sql \
   ./infra/sql/staging-telebirr-shadow-verifier-disable.sql
 COPY infra/sql/production-live-telebirr-network-binding-recovery.sql \
   ./infra/sql/production-live-telebirr-network-binding-recovery.sql
+COPY infra/sql/production-live-telebirr-network-binding-eligibility.sql \
+  ./infra/sql/production-live-telebirr-network-binding-eligibility.sql
 COPY infra/sql/production-live-telebirr-network-binding-status.sql \
   ./infra/sql/production-live-telebirr-network-binding-status.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \

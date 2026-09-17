@@ -8,6 +8,12 @@ const recoverySqlPath = fileURLToPath(
     import.meta.url,
   ),
 );
+const eligibilitySqlPath = fileURLToPath(
+  new URL(
+    '../../../infra/sql/production-live-telebirr-network-binding-eligibility.sql',
+    import.meta.url,
+  ),
+);
 const statusSqlPath = fileURLToPath(
   new URL(
     '../../../infra/sql/production-live-telebirr-network-binding-status.sql',
@@ -16,11 +22,13 @@ const statusSqlPath = fileURLToPath(
 );
 
 let recoverySqlSource = '';
+let eligibilitySqlSource = '';
 let statusSqlSource = '';
 
 beforeAll(async () => {
-  [recoverySqlSource, statusSqlSource] = await Promise.all([
+  [recoverySqlSource, eligibilitySqlSource, statusSqlSource] = await Promise.all([
     readFile(recoverySqlPath, 'utf8'),
+    readFile(eligibilitySqlPath, 'utf8'),
     readFile(statusSqlPath, 'utf8'),
   ]);
 });
@@ -63,6 +71,28 @@ describe('protected production live TeleBirr network-binding recovery', () => {
     expect(recoverySqlSource).toContain("'scoped_ledger_after'::jsonb");
   });
 
+  it('diagnoses every eligibility boundary with only capped counts and fixed states', () => {
+    for (const fragment of [
+      'begin transaction isolation level read committed read only',
+      "then 'pilot_scope_missing'",
+      "then 'network_retry_lineage_missing'",
+      "then 'replacement_transcript_exists'",
+      "then 'source_outcome_invalid'",
+      "then 'source_binding_missing'",
+      "then 'device_heartbeat_unavailable'",
+      "then 'assignment_broker_unavailable'",
+      "else 'eligible'",
+      "'readOnly', true",
+      "'moneyMoved', false",
+    ]) {
+      expect(eligibilitySqlSource).toContain(fragment);
+    }
+    expect(eligibilitySqlSource).toContain('least((select count(*)');
+    expect(eligibilitySqlSource).not.toContain("'verificationJobId'");
+    expect(eligibilitySqlSource).not.toContain("'proofId'");
+    expect(eligibilitySqlSource).not.toContain("'transactionReference'");
+  });
+
   it('recognizes only one untouched queued job as success', () => {
     expect(statusSqlSource).toContain("deposit_job.status = 'queued'");
     expect(statusSqlSource).toContain('deposit_job.attempt_count = 0');
@@ -74,7 +104,7 @@ describe('protected production live TeleBirr network-binding recovery', () => {
   });
 
   it('keeps KemerBet disabled and emits only redacted counts and states', () => {
-    for (const source of [recoverySqlSource, statusSqlSource]) {
+    for (const source of [recoverySqlSource, eligibilitySqlSource, statusSqlSource]) {
       expect(source).toContain('fetanagent_deposit_executor_runtime');
     }
     for (const source of [recoverySqlSource, statusSqlSource]) {
@@ -94,6 +124,9 @@ describe('protected production live TeleBirr network-binding recovery', () => {
     );
     expect(statusSqlSource).toContain('read committed read only');
     expect(statusSqlSource).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate|alter|create|drop)\s+app\./iu,
+    );
+    expect(eligibilitySqlSource).not.toMatch(
       /\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate|alter|create|drop)\s+app\./iu,
     );
   });

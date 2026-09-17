@@ -29,6 +29,11 @@ test('requires an exact main commit, production environment, CI, and explicit di
 test('uses only the reviewed recovery and redacted status SQL with a bounded terminal poll', () => {
   assert.ok(
     workflowSource.includes(
+      '--file=infra/sql/production-live-telebirr-network-binding-eligibility.sql',
+    ),
+  );
+  assert.ok(
+    workflowSource.includes(
       '--file=infra/sql/production-live-telebirr-network-binding-recovery.sql',
     ),
   );
@@ -38,6 +43,10 @@ test('uses only the reviewed recovery and redacted status SQL with a bounded ter
   assert.ok(workflowSource.includes('for _ in $(seq 1 48)'));
   assert.ok(workflowSource.includes('queued|review_required|definite_reject|expired'));
   assert.ok(workflowSource.includes('[[ "$terminal_state" != \'queued\' ]]'));
+  assert.ok(workflowSource.includes('.eligibilityState | IN("eligible", "ineligible")'));
+  assert.ok(workflowSource.includes('.readOnly == true'));
+  assert.ok(workflowSource.includes('.moneyMoved == false'));
+  assert.ok(workflowSource.includes('exit 4'));
 });
 
 test('never enables or invokes KemerBet and never emits protected identifiers', () => {

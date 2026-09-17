@@ -977,11 +977,12 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
       const client = getClient();
       await withRollback(client, async () => {
         const pilot = await prepareTelebirrPilot(client, getOwnerAdminId());
-        const submittedAt = new Date(Date.now() - 10 * 60 * 1_000);
-        const expiredAt = new Date(submittedAt.getTime() + 5 * 60 * 1_000);
-        const proof = await createLiveProof(client, pilot, 0, { submittedAt });
+        const proof = await createLiveProof(client, pilot);
         const jobId = randomUUID();
-        const insertedJob = await client.query<{ readonly id: string }>(
+        const insertedJob = await client.query<{
+          readonly expires_at: Date;
+          readonly id: string;
+        }>(
           `insert into app.private_live_telebirr_verification_jobs (
              id,
              enqueue_request_key,
@@ -1037,22 +1038,22 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
                   proof.candidate_reference_fingerprint,
                   proof.reference_encryption_key_version,
                   proof.reference_profile_version,
-                  proof.submitted_at,
-                  proof.submitted_at,
-                  $5::timestamptz
+                   proof.submitted_at,
+                   proof.submitted_at,
+                   proof.submitted_at + interval '1 millisecond'
              from app.private_live_deposit_pilot_proofs proof
              join app.private_live_telebirr_receiver_profiles profile
                on profile.pilot_revision_id = proof.pilot_revision_id
               and profile.payment_provider_id = proof.payment_provider_id
             where proof.id = $4::uuid
-           returning id`,
-          [jobId, randomUUID(), sha(`expired-job:${jobId}`), proof.id, expiredAt],
+           returning id, expires_at`,
+          [jobId, randomUUID(), sha(`expired-job:${jobId}`), proof.id],
         );
-        expect(insertedJob.rows).toEqual([{ id: jobId }]);
+        expect(insertedJob.rows).toHaveLength(1);
+        expect(insertedJob.rows[0]!.id).toBe(jobId);
+        const expiredAt = insertedJob.rows[0]!.expires_at;
 
         const failedAttemptId = randomUUID();
-        const failedAttemptIssuedAt = new Date(submittedAt.getTime() + 60_000);
-        const failedAttemptExpiresAt = new Date(failedAttemptIssuedAt.getTime() + 120_000);
         const failedAssignmentId = randomUUID();
         const insertedAttempt = await client.query<{ readonly id: string }>(
           `insert into app.private_live_telebirr_verification_attempts (
@@ -1093,10 +1094,12 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
                   $9::text,
                   $10::uuid,
                   $11::text,
-                  $12::timestamptz,
-                  $13::timestamptz
+                   verification_job.not_before,
+                   verification_job.expires_at
              from app.private_live_telebirr_device_enrollments enrollment
+             cross join app.private_live_telebirr_verification_jobs verification_job
             where enrollment.id = $8::uuid
+              and verification_job.id = $2::uuid
            returning id`,
           [
             failedAttemptId,
@@ -1110,8 +1113,6 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
             sha(`failed-lease-nonce:${failedAttemptId}`),
             randomUUID(),
             sha(`failed-challenge:${failedAttemptId}`),
-            failedAttemptIssuedAt,
-            failedAttemptExpiresAt,
           ],
         );
         expect(insertedAttempt.rows).toEqual([{ id: failedAttemptId }]);
@@ -1120,7 +1121,6 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         const assignmentBodyDigest = sha(`failed-assignment-body:${failedAssignmentId}`);
         const referenceBindingDigest = sha(`failed-reference-binding:${failedAssignmentId}`);
         const assignmentSignature = signature(0x61);
-        const signedAt = new Date(failedAttemptIssuedAt.getTime() + 1_000);
         const insertedTranscript = await client.query<{ readonly id: string }>(
           `insert into app.private_live_telebirr_assignment_transcripts (
              id,
@@ -1140,10 +1140,12 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
                   signer.signer_key_id,
                   signer.public_key_spki_sha256,
                   $5::text,
-                  $6::text,
-                  $7::timestamptz
+                   $6::text,
+                   attempt.issued_at
              from app.private_live_telebirr_assignment_signers signer
+             cross join app.private_live_telebirr_verification_attempts attempt
             where signer.id = $3::uuid
+              and attempt.id = $2::uuid
            returning id`,
           [
             assignmentTranscriptId,
@@ -1152,7 +1154,6 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
             assignmentBodyDigest,
             assignmentSignature.digest,
             referenceBindingDigest,
-            signedAt,
           ],
         );
         expect(insertedTranscript.rows).toEqual([{ id: assignmentTranscriptId }]);
@@ -1170,6 +1171,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
             assignmentSignature.digest,
           ],
         );
+        await client.query(`select pg_catalog.pg_sleep(0.005)`);
 
         const epoch = await client.query<{ readonly activation_epoch: string }>(
           `select app.current_private_trusted_telebirr_activation_epoch()::text

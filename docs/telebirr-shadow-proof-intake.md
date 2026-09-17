@@ -103,6 +103,12 @@ workflow choice and exact confirmation phrase distinguish the two operator opera
 single transferred overlay contains only the reviewed mode's API settings. Adding shadow intake
 therefore requires no host-helper or sudoers rotation.
 
+An exact production commit is bound to one shadow operation by
+`infra/production-shadow-release-mode`. The receiver-review and shadow-intake deployments must use
+different reviewed `main` commits, so an already installed immutable release can never be silently
+reinterpreted as the other mode. Both the pre-build CI gate and the protected deploy job recheck
+that binding before production secrets are consumed.
+
 Even after shadow observations succeed, a separate decision and authorization are required before
 enabling live payment verification or any automatic deposit. A queued shadow check is never proof
 that a payment was completed or that a Player ID was credited.

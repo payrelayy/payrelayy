@@ -10,6 +10,7 @@ const [
   compose,
   shadowCompose,
   shadowIntakeCompose,
+  shadowReleaseMode,
   inertCompose,
   workflow,
   helper,
@@ -30,6 +31,7 @@ const [
   read('infra/compose.production.yaml'),
   read('infra/compose.production.shadow-review.yaml'),
   read('infra/compose.production.shadow-intake.yaml'),
+  read('infra/production-shadow-release-mode'),
   read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
@@ -130,6 +132,10 @@ assert.equal(
 );
 assert.doesNotMatch(shadowIntakeCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
 assert.doesNotMatch(shadowIntakeCompose, /KEMERBET_|secrets:|configs:|networks:|volumes:/u);
+assert.ok(
+  shadowReleaseMode === 'receiver-review\n' || shadowReleaseMode === 'shadow-intake\n',
+  'the exact commit must declare one canonical production shadow operation',
+);
 
 for (const invariant of [
   /profiles: \[production\]/u,
@@ -368,10 +374,38 @@ assert.match(
 );
 assert.match(deployJob, /actions: read/u);
 assert.match(deployJob, /node infra\/operations\/require-production-ci\.mjs/u);
+assert.equal(
+  count(workflow, /shadow_release_mode="\$\(<infra\/production-shadow-release-mode\)"/gu),
+  2,
+  'the pre-build and protected deploy gates must both read the commit-bound shadow operation',
+);
+for (const binding of ["'deploy-shadow:receiver-review'", "'deploy-shadow-intake:shadow-intake'"]) {
+  assert.equal(
+    count(workflow, new RegExp(escapeRegExp(binding), 'gu')),
+    2,
+    `${binding} must be enforced before build and before protected deployment`,
+  );
+}
+assert.doesNotMatch(
+  workflow,
+  /'deploy-shadow:shadow-intake'|'deploy-shadow-intake:receiver-review'/u,
+  'a production commit must never authorize both shadow operations',
+);
+assert.equal(
+  count(
+    workflow,
+    /This exact production commit is not bound to the requested shadow operation\./gu,
+  ),
+  2,
+);
 assert.ok(
   deployJob.indexOf('node infra/operations/require-production-ci.mjs') <
     deployJob.indexOf('secrets.'),
   'production secrets must not be consumed before the fresh CI recheck',
+);
+assert.ok(
+  deployJob.indexOf('Recheck the commit-bound shadow operation') < deployJob.indexOf('secrets.'),
+  'the exact shadow-operation binding must be rechecked before production secrets',
 );
 const activationStep = deployJob
   .split('      - name: Atomically activate production and switch the public edge')[1]

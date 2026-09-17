@@ -345,6 +345,211 @@ export function registerTelegramLiveTelebirrProofIntakeSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('Telegram live TeleBirr proof intake SQL boundary', () => {
+    async function disableMoneyForReceiverReview(client: Client): Promise<void> {
+      await client.query(`
+        update app.feature_switches set mode = 'disabled', settings = '{}'::jsonb
+         where feature_key in (
+           'cbe_birr_authoritative_verification', 'deposit_execution', 'payment_verification',
+           'telebirr_authoritative_verification', 'withdrawal_collection', 'withdrawal_validation'
+         );
+        update app.feature_switches set mode = 'dry_run'
+         where feature_key = 'private_live_deposit_pilot';
+      `);
+    }
+
+    it('discloses the bound receiver for no-money review while creating no live payment authority', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const { actor, pilot } = await preparePilotAndActor(client, getOwnerAdminId());
+        await disableMoneyForReceiverReview(client);
+        const reviewEvent = await createInboundEvent(client, actor.identityId, 'no-money-review');
+        const args = [reviewEvent, pilot.playerIds[0]!, semanticHmac()];
+        const rows = await queryAsPlayerActions<DestinationRow>(
+          client,
+          legacyDestinationStatement,
+          args,
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          payments_enabled: false,
+          request_replayed: false,
+          receiver_revision_id: pilot.receiverAccountId,
+          receiver_account_masked: '***7001',
+        });
+        expect(rows[0]!.receiver_account_reference_ciphertext).toMatch(/^receiver-v1\.telebirr\./u);
+        expect(rows[0]!.receiver_account_reference_fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+        expect(
+          await queryAsPlayerActions<DestinationRow>(client, legacyDestinationStatement, args),
+        ).toEqual([{ ...rows[0], request_replayed: true }]);
+
+        const binding = await client.query(
+          `
+          select review.pilot_revision_id, review.configuration_digest,
+                 receipt.activation_epoch is null as nonfinancial,
+                 receipt.payment_presentation_expires_at = receipt.created_at + interval '12 hours'
+                   as twelve_hour_window
+            from app.telegram_telebirr_receiver_review_receipts review
+            join app.telegram_telebirr_destination_receipts receipt using (origin_inbound_event_id)
+           where review.origin_inbound_event_id = $1::uuid
+        `,
+          [reviewEvent],
+        );
+        expect(binding.rows).toEqual([
+          {
+            pilot_revision_id: pilot.pilotRevisionId,
+            configuration_digest: pilot.configurationDigest,
+            nonfinancial: true,
+            twelve_hour_window: true,
+          },
+        ]);
+        expect(await readIntakeCounts(client, pilot, reviewEvent)).toEqual({
+          inbound_processed: true,
+          jobs: 0,
+          presentations: 0,
+          proof_receipts: 0,
+          proofs: 0,
+        });
+        const proofEvent = await createInboundEvent(client, actor.identityId, 'review-cannot-pay');
+        await expectPlayerActionsFailure(
+          client,
+          captureStatement,
+          [
+            proofEvent,
+            pilot.playerIds[0]!,
+            referenceCiphertext(),
+            referenceFingerprint(),
+            '***0042',
+            semanticHmac(),
+          ],
+          /live|payment|authority/iu,
+        );
+        expect(await readIntakeCounts(client, pilot, proofEvent)).toEqual({
+          inbound_processed: false,
+          jobs: 0,
+          presentations: 0,
+          proof_receipts: 0,
+          proofs: 0,
+        });
+
+        // Disabling the Owner's pilot also withdraws read-only disclosure on exact replay.
+        await client.query(`update app.feature_switches set mode = 'disabled', settings = '{}'::jsonb
+          where feature_key = 'private_live_deposit_pilot'`);
+        const stopped = await queryAsPlayerActions<DestinationRow>(
+          client,
+          legacyDestinationStatement,
+          args,
+        );
+        expect(stopped[0]).toMatchObject({
+          payments_enabled: false,
+          request_replayed: true,
+          receiver_account_reference_ciphertext: null,
+          receiver_account_reference_fingerprint: null,
+        });
+      });
+    });
+
+    it('does not upgrade an old masked preview into a no-money review by replaying it', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const { actor, pilot } = await preparePilotAndActor(client, getOwnerAdminId());
+        await disableMoneyForReceiverReview(client);
+        await client.query(`update app.feature_switches set mode = 'disabled', settings = '{}'::jsonb
+          where feature_key = 'private_live_deposit_pilot'`);
+        const event = await createInboundEvent(client, actor.identityId, 'masked-before-review');
+        const args = [event, pilot.playerIds[0]!, semanticHmac()];
+        const before = await queryAsPlayerActions<DestinationRow>(
+          client,
+          legacyDestinationStatement,
+          args,
+        );
+        expect(before[0]).toMatchObject({
+          payments_enabled: false,
+          receiver_account_reference_ciphertext: null,
+          receiver_account_reference_fingerprint: null,
+        });
+        await client.query(
+          `update app.feature_switches set mode = 'dry_run',
+          settings = jsonb_build_object('contract_version', 1, 'pilot_revision_id', $1::uuid,
+            'configuration_digest', $2::text)
+          where feature_key = 'private_live_deposit_pilot'`,
+          [pilot.pilotRevisionId, pilot.configurationDigest],
+        );
+        expect(
+          await queryAsPlayerActions<DestinationRow>(client, legacyDestinationStatement, args),
+        ).toEqual([{ ...before[0], request_replayed: true }]);
+        const newEvent = await createInboundEvent(client, actor.identityId, 'fresh-review');
+        const fresh = await queryAsPlayerActions<DestinationRow>(
+          client,
+          legacyDestinationStatement,
+          [newEvent, pilot.playerIds[0]!, semanticHmac()],
+        );
+        expect(fresh[0]!.payments_enabled).toBe(false);
+        expect(fresh[0]!.receiver_account_reference_ciphertext).toMatch(
+          /^receiver-v1\.telebirr\./u,
+        );
+      });
+    });
+
+    it('keeps review masked if any money-related feature is not disabled', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const { actor, pilot } = await preparePilotAndActor(client, getOwnerAdminId());
+        await disableMoneyForReceiverReview(client);
+        for (const key of [
+          'cbe_birr_authoritative_verification',
+          'deposit_execution',
+          'payment_verification',
+          'telebirr_authoritative_verification',
+          'withdrawal_collection',
+          'withdrawal_validation',
+        ]) {
+          await client.query(
+            `update app.feature_switches set mode = 'dry_run' where feature_key = $1`,
+            [key],
+          );
+          const event = await createInboundEvent(client, actor.identityId, `unsafe-review-${key}`);
+          const rows = await queryAsPlayerActions<DestinationRow>(
+            client,
+            legacyDestinationStatement,
+            [event, pilot.playerIds[0]!, semanticHmac()],
+          );
+          expect(rows[0]).toMatchObject({
+            payments_enabled: false,
+            receiver_account_reference_ciphertext: null,
+            receiver_account_reference_fingerprint: null,
+          });
+          await client.query(
+            `update app.feature_switches set mode = 'disabled' where feature_key = $1`,
+            [key],
+          );
+        }
+      });
+    });
+
+    it('keeps review bindings and the review helper inaccessible to the Player-action runtime', async () => {
+      const client = getClient();
+      const boundary = await client.query(`
+        select table_info.relrowsecurity, table_info.relforcerowsecurity,
+          (select count(*)::integer from pg_policy
+            where polrelid = table_info.oid) as policies,
+          has_table_privilege('fetanagent_player_actions_runtime', table_info.oid,
+            'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') as table_access,
+          has_function_privilege('fetanagent_player_actions_runtime',
+            'app.lock_private_telebirr_receiver_review_pilot()', 'EXECUTE') as helper_access
+        from pg_class table_info
+        where table_info.oid = 'app.telegram_telebirr_receiver_review_receipts'::regclass
+      `);
+      expect(boundary.rows).toEqual([
+        {
+          relrowsecurity: true,
+          relforcerowsecurity: true,
+          policies: 0,
+          table_access: false,
+          helper_access: false,
+        },
+      ]);
+    });
+
     it('creates one live presentation, one proof, and one verifier job with exact replay and identity-scoped status', async () => {
       const client = getClient();
       await withRollback(client, async () => {

@@ -150,7 +150,7 @@ describe('Telegram Player-ID flow presentation', () => {
     }
   });
 
-  it('renders the live 25 ETB receiver review as a plain non-submittable message', () => {
+  it('renders the no-money receiver review as a plain non-submittable message', () => {
     const presentation = presentTelegramPlayerIdFlowResult(
       {
         version: 1,
@@ -169,7 +169,7 @@ describe('Telegram Player-ID flow presentation', () => {
 
     expect(presentation).toEqual({
       kind: 'message',
-      text: expect.stringContaining('🔎 Live 25 ETB TeleBirr pilot — review only'),
+      text: expect.stringContaining('🔎 TeleBirr receiver — review only'),
     });
     if (presentation.kind === 'message') {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
@@ -177,6 +177,7 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
       expect(presentation.text).toContain('💵 Amount: 25 ETB');
       expect(presentation.text).toContain('NO PAYMENT YET');
+      expect(presentation.text).not.toContain('Live');
       expect(presentation.text).not.toMatch(/transaction number|receipt|full SMS/iu);
     }
   });

@@ -58,7 +58,10 @@ const SUBMIT_INPUT_SQL = `
 const PREPARE_TELEBIRR_DESTINATION_SQL = `
   select provider_code, receiver_revision_id, receiver_account_holder_name,
          receiver_account_reference_ciphertext, receiver_account_reference_fingerprint,
-         receiver_account_masked, payments_enabled, request_replayed
+         receiver_account_masked, payments_enabled, request_replayed,
+         (not payments_enabled
+           and receiver_account_reference_ciphertext is not null
+           and receiver_account_reference_fingerprint is not null) as receiver_review_enabled
   from app.prepare_telegram_telebirr_destination($1::uuid, $2::text, $3::text)
 `;
 const EXPIRE_ACTION_SQL = `
@@ -427,7 +430,14 @@ async function handleTelebirrDestination(
     receiverAccountMasked: row.receiver_account_masked,
   };
   const receiverReviewEnabled = config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
-  if (!row.payments_enabled || (!receiverReviewEnabled && config.financialActionsMode !== 'live')) {
+  // Review permission is independent of payment permission. The private database boundary
+  // releases an envelope for an exact no-money pilot without setting payments_enabled.
+  const mayDiscloseReceiver = receiverReviewEnabled
+    ? config.financialActionsMode === 'dry_run' &&
+      row.payments_enabled === false &&
+      row.receiver_review_enabled === true
+    : livePaymentPresentation && row.payments_enabled;
+  if (!mayDiscloseReceiver) {
     return {
       ...base,
       outcome: 'telebirr_deposit_preview',

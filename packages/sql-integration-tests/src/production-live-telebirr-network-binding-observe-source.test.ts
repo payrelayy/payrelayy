@@ -98,4 +98,24 @@ describe('production live TeleBirr network-binding observer', () => {
     expect(observerSqlSource).not.toContain("'signedAssignment'");
     expect(observerSqlSource).not.toContain("'signedObservation'");
   });
+
+  it('derives financial authority without calling a lock-taking runtime interlock', () => {
+    for (const fragment of [
+      'read_only_financial_authority as materialized',
+      "activation_control.control_key = 'trusted_telebirr_financial_authority'",
+      "activation_epoch.authority_state = 'active'",
+      'activation_epoch.revoked_at is null',
+      'private_trusted_telebirr_emergency_disable_intents',
+      "feature_switch.feature_key = 'cbe_birr_authoritative_verification'",
+      "feature_switch.feature_key = 'private_live_deposit_pilot'",
+      'exists (select 1 from read_only_financial_authority)',
+    ]) {
+      expect(observerSqlSource).toContain(fragment);
+    }
+    expect(observerSqlSource).not.toContain(
+      'app.current_private_trusted_telebirr_activation_epoch()',
+    );
+    expect(observerSqlSource).not.toMatch(/\bfor\s+(?:key\s+)?share\b/iu);
+    expect(observerSqlSource).not.toMatch(/\bfor\s+(?:no\s+key\s+)?update\b/iu);
+  });
 });

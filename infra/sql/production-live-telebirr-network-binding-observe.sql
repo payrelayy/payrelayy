@@ -170,8 +170,70 @@ with recent_recovery_targets as materialized (
      'payment_verification',
      'private_live_deposit_pilot',
      'telebirr_authoritative_verification'
-   )
-     and feature_switch.mode = 'live'
+    )
+      and feature_switch.mode = 'live'
+), read_only_financial_authority as materialized (
+  select activation_epoch.epoch
+    from app.private_trusted_telebirr_activation_control activation_control
+    join app.private_trusted_telebirr_activation_epochs activation_epoch
+      on activation_epoch.epoch = activation_control.current_epoch
+    join app.private_live_deposit_pilot_revisions pilot
+      on pilot.id = activation_epoch.pilot_revision_id
+   where activation_control.control_key = 'trusted_telebirr_financial_authority'
+     and activation_epoch.authority_state = 'active'
+     and activation_epoch.revoked_at is null
+     and pg_catalog.clock_timestamp() >= activation_epoch.active_from
+     and pg_catalog.clock_timestamp() < activation_epoch.expires_at
+     and pilot.status = 'armed'
+     and pilot.configuration_digest is not distinct from
+         activation_epoch.configuration_digest
+     and pilot.active_from is not distinct from activation_epoch.active_from
+     and pilot.expires_at is not distinct from activation_epoch.expires_at
+     and not exists (
+       select 1
+         from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+        where emergency_intent.expected_epoch = activation_epoch.epoch
+     )
+     and (
+       select count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'cbe_birr_authoritative_verification',
+          'deposit_execution',
+          'payment_verification',
+          'private_live_deposit_pilot',
+          'telebirr_authoritative_verification'
+        )
+     ) = 5
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'cbe_birr_authoritative_verification'
+          and feature_switch.mode = 'disabled'
+          and feature_switch.settings = '{}'::jsonb
+     )
+     and (
+       select count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'deposit_execution',
+          'payment_verification',
+          'telebirr_authoritative_verification'
+        )
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = '{}'::jsonb
+     ) = 3
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'private_live_deposit_pilot'
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = pg_catalog.jsonb_build_object(
+            'contract_version', 1,
+            'pilot_revision_id', pilot.id,
+            'configuration_digest', pilot.configuration_digest
+          )
+     )
 ), kemer_login_roles as materialized (
   select role.oid
     from pg_catalog.pg_roles role
@@ -269,7 +331,7 @@ with recent_recovery_targets as materialized (
             from trusted_verifier_sessions verifier_session
            where verifier_session.application_name is distinct from
                  'fetanagent_trusted_telebirr_verifier') as unexpected_verifier_sessions,
-         app.current_private_trusted_telebirr_activation_epoch() is not null
+         exists (select 1 from read_only_financial_authority)
            as financial_authority_active,
          (select count(*)::integer from live_verification_switches) = 4
            as verification_switch_boundary_live,

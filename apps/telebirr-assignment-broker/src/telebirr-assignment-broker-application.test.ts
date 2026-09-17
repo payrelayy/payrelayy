@@ -14,6 +14,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS,
   TelebirrAssignmentBrokerApplicationError,
   startTelebirrAssignmentBrokerApplication,
   type TelebirrAssignmentBrokerApplicationDependencies,
@@ -238,6 +239,54 @@ describe('private TeleBirr assignment broker application', () => {
     vi.mocked(fixture.postgres.ready).mockRejectedValueOnce(new Error('private database detail'));
     await expect(application.ready()).resolves.toBe(false);
     await application.close();
+  });
+
+  it('closes both authorities when the periodic database readiness check fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = runtimeFixture({ postgresReady: [true, true, false] });
+      const application = await startTelebirrAssignmentBrokerApplication(
+        config(),
+        fixture.dependencies,
+      );
+
+      await vi.advanceTimersByTimeAsync(TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS);
+
+      expect(fixture.events.slice(-3)).toEqual([
+        'postgres.ready',
+        'server.close',
+        'postgres.close',
+      ]);
+      expect(fixture.server.close).toHaveBeenCalledOnce();
+      expect(fixture.postgres.close).toHaveBeenCalledOnce();
+      await expect(application.ready()).resolves.toBe(false);
+      await expect(application.close()).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears the periodic readiness check during an orderly close', async () => {
+    vi.useFakeTimers();
+    try {
+      const fixture = runtimeFixture();
+      const application = await startTelebirrAssignmentBrokerApplication(
+        config(),
+        fixture.dependencies,
+      );
+      await application.close();
+      const readyCallsAfterClose = vi.mocked(fixture.postgres.ready).mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(
+        TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS * 2,
+      );
+
+      expect(fixture.postgres.ready).toHaveBeenCalledTimes(readyCallsAfterClose);
+      expect(fixture.server.close).toHaveBeenCalledOnce();
+      expect(fixture.postgres.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('attempts both closes and returns only a fixed error if either close fails', async () => {

@@ -11,6 +11,8 @@ import {
 import type { TelebirrAssignmentBrokerConfig } from './telebirr-assignment-broker-config.js';
 import { createTelebirrAssignmentBroker } from './telebirr-assignment-broker.js';
 
+export const TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS = 5_000;
+
 type OperationalConfig = Extract<
   TelebirrAssignmentBrokerConfig,
   { readonly enabled: true; readonly mode: 'operational' }
@@ -117,21 +119,40 @@ export async function startTelebirrAssignmentBrokerApplication(
   const activeLocalServer = localServer;
   let closePromise: Promise<void> | undefined;
   let closed = false;
-  return Object.freeze({
-    ready: async () => {
-      if (closed || !activeLocalServer.server.listening) return false;
-      try {
-        return await activePostgres.ready();
-      } catch {
-        return false;
+  let readinessCheckInFlight = false;
+  let readinessTimer: NodeJS.Timeout | undefined;
+  const closeApplication = (): Promise<void> => {
+    closePromise ??= (async () => {
+      closed = true;
+      if (readinessTimer !== undefined) {
+        clearInterval(readinessTimer);
+        readinessTimer = undefined;
       }
-    },
-    close: () => {
-      closePromise ??= (async () => {
-        closed = true;
-        await closeRuntimes(activeLocalServer, activePostgres);
-      })();
-      return closePromise;
-    },
+      await closeRuntimes(activeLocalServer, activePostgres);
+    })();
+    return closePromise;
+  };
+  const checkReadiness = async (): Promise<boolean> => {
+    if (closed || !activeLocalServer.server.listening) return false;
+    try {
+      const ready = await activePostgres.ready();
+      if (!ready) void closeApplication().catch(() => undefined);
+      return ready;
+    } catch {
+      void closeApplication().catch(() => undefined);
+      return false;
+    }
+  };
+  readinessTimer = setInterval(() => {
+    if (closed || readinessCheckInFlight) return;
+    readinessCheckInFlight = true;
+    void checkReadiness().finally(() => {
+      readinessCheckInFlight = false;
+    });
+  }, TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS);
+  readinessTimer.unref();
+  return Object.freeze({
+    ready: checkReadiness,
+    close: closeApplication,
   });
 }

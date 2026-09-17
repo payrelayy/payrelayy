@@ -76,6 +76,8 @@ describe('protected production live TeleBirr network-binding recovery', () => {
       'begin transaction isolation level read committed read only',
       "then 'pilot_scope_missing'",
       "then 'network_retry_lineage_missing'",
+      "then 'replacement_attempt_missing'",
+      "then 'replacement_attempts_multiple'",
       "then 'replacement_transcript_exists'",
       "then 'source_outcome_invalid'",
       "then 'source_binding_missing'",
@@ -84,6 +86,7 @@ describe('protected production live TeleBirr network-binding recovery', () => {
       "else 'eligible'",
       "'readOnly', true",
       "'moneyMoved', false",
+      "'replacementAttempts', classified.replacement_attempts",
     ]) {
       expect(eligibilitySqlSource).toContain(fragment);
     }

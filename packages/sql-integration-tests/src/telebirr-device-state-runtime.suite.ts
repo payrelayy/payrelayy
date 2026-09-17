@@ -314,6 +314,349 @@ async function pairDevice(
   };
 }
 
+type StrandedBindingRetry = {
+  readonly activationEpoch: string;
+  readonly failedAttemptId: string;
+  readonly firstRecoveryRequestKey: string;
+  readonly jobId: string;
+  readonly originalJobExpiresAt: Date;
+  readonly pilot: TelebirrPilot;
+  readonly proofId: string;
+  readonly referenceBindingDigest: string;
+  readonly retryAttemptId: string;
+  readonly strandedRetryExpiresAt: Date;
+};
+
+async function prepareStrandedBindingRetry(
+  client: Client,
+  ownerAdminId: string,
+): Promise<StrandedBindingRetry> {
+  const pilot = await prepareTelebirrPilot(client, ownerAdminId);
+  const proof = await createLiveProof(client, pilot);
+  const submittedAt = new Date(Date.now() - 10 * 60 * 1_000);
+  await client.query(`set local session_replication_role = 'replica'`);
+  await client.query(
+    `update app.private_live_deposit_pilot_proofs
+        set submitted_at = $2::timestamptz,
+            created_at = $2::timestamptz
+      where id = $1::uuid`,
+    [proof.id, submittedAt],
+  );
+  await client.query(`set local session_replication_role = 'origin'`);
+  const jobId = randomUUID();
+  const failedAttemptId = randomUUID();
+  const failedAssignmentId = randomUUID();
+  const failedAssignmentBodyDigest = sha(`retry-fix-assignment-body:${failedAssignmentId}`);
+  const referenceBindingDigest = sha(`retry-fix-reference-binding:${failedAssignmentId}`);
+  const firstRecoveryRequestKey = randomUUID();
+  const originalExpiresAt = new Date(submittedAt.getTime() + 1);
+  const recoveredAt = new Date(submittedAt.getTime() + 2);
+  const firstRecoveredExpiresAt = new Date(recoveredAt.getTime() + 61_000);
+  const firstRecoveryRequestDigest = sha(
+    'fetanagent:telebirr:private-live-pilot:binding-mismatch-job-recovery:v1' +
+      `|request_key=${firstRecoveryRequestKey}` +
+      `|job_id=${jobId}` +
+      `|pilot_revision_id=${pilot.pilotRevisionId}` +
+      `|failed_attempt_id=${failedAttemptId}` +
+      `|failed_assignment_body_digest=${failedAssignmentBodyDigest}` +
+      `|failed_reference_binding_digest=${referenceBindingDigest}` +
+      '|defect_source_sha256=' +
+      'sha256:dfe90415f8fa49a7de6f2034e07ebe081f26d1c066d734d74d0f0626617f65b9' +
+      `|original_expires_at_us=${originalExpiresAt.getTime() * 1_000}` +
+      `|recovered_at_us=${recoveredAt.getTime() * 1_000}` +
+      `|recovered_expires_at_us=${firstRecoveredExpiresAt.getTime() * 1_000}` +
+      '|reason_code=device_evidence_binding_mismatch',
+  );
+  const insertedJob = await client.query<{ readonly id: string }>(
+    `insert into app.private_live_telebirr_verification_jobs (
+       id,
+       enqueue_request_key,
+       enqueue_request_digest,
+       private_live_deposit_pilot_proof_id,
+       pilot_revision_id,
+       submitting_customer_id,
+       player_account_id,
+       payment_provider_id,
+       provider_code,
+       receiver_profile_id,
+       receiver_account_id,
+       receiver_account_version,
+       pilot_configuration_digest,
+       receiver_profile_digest,
+       receiver_configuration_digest,
+       receiver_identity_digest,
+       expected_receiver_name_digest,
+       deposit_policy_version_id,
+       deposit_policy_version,
+       minimum_principal_amount_minor,
+       maximum_principal_amount_minor,
+       policy_digest,
+       candidate_reference_fingerprint,
+       reference_encryption_key_version,
+       reference_profile_version,
+       submitted_at,
+       not_before,
+       expires_at,
+       original_expires_at,
+       recovered_at,
+       recovery_request_key,
+       recovery_request_digest,
+       recovery_reason_code
+     )
+     select $1::uuid,
+            $2::uuid,
+            $3::text,
+            proof.id,
+            proof.pilot_revision_id,
+            proof.submitting_customer_id,
+            proof.player_account_id,
+            proof.payment_provider_id,
+            'telebirr',
+            profile.id,
+            profile.receiver_account_id,
+            profile.receiver_account_version,
+            profile.pilot_configuration_digest,
+            profile.receiver_profile_digest,
+            profile.receiver_configuration_digest,
+            profile.receiver_identity_digest,
+            profile.expected_receiver_name_digest,
+            profile.deposit_policy_version_id,
+            profile.deposit_policy_version,
+            profile.minimum_principal_amount_minor,
+            profile.maximum_principal_amount_minor,
+            profile.policy_digest,
+            proof.candidate_reference_fingerprint,
+            proof.reference_encryption_key_version,
+             proof.reference_profile_version,
+             proof.submitted_at,
+             proof.submitted_at,
+             $5::timestamptz,
+             $6::timestamptz,
+             $7::timestamptz,
+             $8::uuid,
+             $9::text,
+             'device_evidence_binding_mismatch'
+       from app.private_live_deposit_pilot_proofs proof
+       join app.private_live_telebirr_receiver_profiles profile
+         on profile.pilot_revision_id = proof.pilot_revision_id
+        and profile.payment_provider_id = proof.payment_provider_id
+      where proof.id = $4::uuid
+     returning id`,
+    [
+      jobId,
+      randomUUID(),
+      sha(`retry-fix-job:${jobId}`),
+      proof.id,
+      firstRecoveredExpiresAt,
+      originalExpiresAt,
+      recoveredAt,
+      firstRecoveryRequestKey,
+      firstRecoveryRequestDigest,
+    ],
+  );
+  expect(insertedJob.rows).toEqual([{ id: jobId }]);
+
+  const insertedFailedAttempt = await client.query<{ readonly id: string }>(
+    `insert into app.private_live_telebirr_verification_attempts (
+       id,
+       verification_job_id,
+       attempt_number,
+       lease_request_key,
+       lease_request_digest,
+       lease_token,
+       request_id,
+       assignment_id,
+       requested_lease_seconds,
+       leased_by,
+       device_enrollment_id,
+       device_id_snapshot,
+       device_key_id_snapshot,
+       device_public_key_spki_sha256_snapshot,
+       lease_nonce_digest,
+       challenge_id,
+       challenge_digest,
+       issued_at,
+       expires_at
+     )
+     select $1::uuid,
+            $2::uuid,
+            1,
+            $3::uuid,
+            $4::text,
+            $5::uuid,
+            $6::uuid,
+            $7::uuid,
+            120,
+            'sql-binding-uniqueness-failed-01',
+            enrollment.id,
+            enrollment.device_id,
+            enrollment.key_id,
+            enrollment.public_key_spki_sha256,
+            $9::text,
+             $10::uuid,
+             $11::text,
+             verification_job.not_before,
+             verification_job.original_expires_at
+       from app.private_live_telebirr_device_enrollments enrollment
+       cross join app.private_live_telebirr_verification_jobs verification_job
+      where enrollment.id = $8::uuid
+        and verification_job.id = $2::uuid
+     returning id`,
+    [
+      failedAttemptId,
+      jobId,
+      randomUUID(),
+      sha(`retry-fix-failed-lease-request:${failedAttemptId}`),
+      randomUUID(),
+      randomUUID(),
+      failedAssignmentId,
+      pilot.deviceEnrollmentId,
+      sha(`retry-fix-failed-lease-nonce:${failedAttemptId}`),
+      randomUUID(),
+      sha(`retry-fix-failed-challenge:${failedAttemptId}`),
+    ],
+  );
+  expect(insertedFailedAttempt.rows).toEqual([{ id: failedAttemptId }]);
+
+  const assignmentTranscriptId = randomUUID();
+  const failedAssignmentSignature = signature(0x64);
+  const insertedTranscript = await client.query<{ readonly id: string }>(
+    `insert into app.private_live_telebirr_assignment_transcripts (
+       id,
+       verification_attempt_id,
+       assignment_signer_id,
+       assignment_body_digest,
+       signer_key_id_snapshot,
+       signer_public_key_spki_sha256_snapshot,
+       assignment_signature_digest,
+       reference_binding_digest,
+       signed_at
+     )
+     select $1::uuid,
+            $2::uuid,
+            signer.id,
+            $4::text,
+            signer.signer_key_id,
+            signer.public_key_spki_sha256,
+            $5::text,
+            $6::text,
+            attempt.issued_at
+       from app.private_live_telebirr_assignment_signers signer
+       cross join app.private_live_telebirr_verification_attempts attempt
+      where signer.id = $3::uuid
+        and attempt.id = $2::uuid
+     returning id`,
+    [
+      assignmentTranscriptId,
+      failedAttemptId,
+      pilot.assignmentSignerId,
+      failedAssignmentBodyDigest,
+      failedAssignmentSignature.digest,
+      referenceBindingDigest,
+    ],
+  );
+  expect(insertedTranscript.rows).toEqual([{ id: assignmentTranscriptId }]);
+  await client.query(
+    `insert into app.private_live_telebirr_assignment_deliveries (
+       verification_attempt_id,
+       assignment_transcript_id,
+       assignment_signature,
+       assignment_signature_digest
+     ) values ($1::uuid, $2::uuid, $3::text, $4::text)`,
+    [
+      failedAttemptId,
+      assignmentTranscriptId,
+      failedAssignmentSignature.encoded,
+      failedAssignmentSignature.digest,
+    ],
+  );
+
+  const epoch = await client.query<{ readonly activation_epoch: string }>(
+    `select app.current_private_trusted_telebirr_activation_epoch()::text
+       as activation_epoch`,
+  );
+  const retryAttemptId = randomUUID();
+  const retryAssignmentId = randomUUID();
+  const insertedRetryAttempt = await client.query<{
+    readonly expires_at: Date;
+    readonly id: string;
+  }>(
+    `insert into app.private_live_telebirr_verification_attempts (
+       id,
+       verification_job_id,
+       attempt_number,
+       lease_request_key,
+       lease_request_digest,
+       lease_token,
+       request_id,
+       assignment_id,
+       requested_lease_seconds,
+       leased_by,
+       device_enrollment_id,
+       device_id_snapshot,
+       device_key_id_snapshot,
+       device_public_key_spki_sha256_snapshot,
+       lease_nonce_digest,
+       challenge_id,
+       challenge_digest,
+       issued_at,
+       expires_at
+     )
+     select $1::uuid,
+            $2::uuid,
+            2,
+            $3::uuid,
+            $4::text,
+            $5::uuid,
+            $6::uuid,
+            $7::uuid,
+            120,
+            'sql-binding-uniqueness-stranded-02',
+            enrollment.id,
+            enrollment.device_id,
+            enrollment.key_id,
+            enrollment.public_key_spki_sha256,
+            $9::text,
+             $10::uuid,
+             $11::text,
+             verification_job.recovered_at,
+             verification_job.expires_at
+       from app.private_live_telebirr_device_enrollments enrollment
+       cross join app.private_live_telebirr_verification_jobs verification_job
+      where enrollment.id = $8::uuid
+        and verification_job.id = $2::uuid
+     returning id, expires_at`,
+    [
+      retryAttemptId,
+      jobId,
+      randomUUID(),
+      sha(`retry-fix-stranded-lease-request:${retryAttemptId}`),
+      randomUUID(),
+      randomUUID(),
+      retryAssignmentId,
+      pilot.deviceEnrollmentId,
+      sha(`retry-fix-stranded-lease-nonce:${retryAttemptId}`),
+      randomUUID(),
+      sha(`retry-fix-stranded-challenge:${retryAttemptId}`),
+    ],
+  );
+  expect(insertedRetryAttempt.rows).toHaveLength(1);
+  expect(insertedRetryAttempt.rows[0]!.id).toBe(retryAttemptId);
+
+  return {
+    activationEpoch: epoch.rows[0]!.activation_epoch,
+    failedAttemptId,
+    firstRecoveryRequestKey,
+    jobId,
+    originalJobExpiresAt: originalExpiresAt,
+    pilot,
+    proofId: proof.id,
+    referenceBindingDigest,
+    retryAttemptId,
+    strandedRetryExpiresAt: insertedRetryAttempt.rows[0]!.expires_at,
+  };
+}
+
 export function registerTelebirrDeviceStateRuntimeSqlTests(
   getClient: () => Client,
   getOwnerAdminId: () => string,
@@ -1210,14 +1553,60 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
         const secondAttempt = await client.query<{
           readonly attempt_number: number;
           readonly job_id: string;
+          readonly lease_token: string;
+          readonly verification_attempt_id: string;
         }>(
-          `select job_id, attempt_number
+          `select verification_attempt_id, lease_token, job_id, attempt_number
              from app.lease_private_live_telebirr_assignment_broker(
                $1::uuid, 'sql-binding-recovery-02', $2::uuid, 120
              )`,
           [pilot.deviceEnrollmentId, randomUUID()],
         );
-        expect(secondAttempt.rows).toEqual([{ attempt_number: 2, job_id: jobId }]);
+        expect(secondAttempt.rows).toHaveLength(1);
+        expect(secondAttempt.rows[0]).toMatchObject({ attempt_number: 2, job_id: jobId });
+
+        const retryAssignmentSignature = signature(0x62);
+        const recordedRetry = await client.query<{
+          readonly assignment_signature_digest: string;
+          readonly replayed: boolean;
+        }>(
+          `select assignment_signature_digest, replayed
+             from app.persist_private_live_telebirr_assignment_broker_signature(
+               $1::uuid, $2::uuid, $3::uuid, $4::text,
+               $5::text, $6::text, $7::text
+             )`,
+          [
+            secondAttempt.rows[0]!.verification_attempt_id,
+            secondAttempt.rows[0]!.lease_token,
+            pilot.assignmentSignerId,
+            sha(`retry-assignment-body:${secondAttempt.rows[0]!.verification_attempt_id}`),
+            retryAssignmentSignature.encoded,
+            retryAssignmentSignature.digest,
+            referenceBindingDigest,
+          ],
+        );
+        expect(recordedRetry.rows).toEqual([
+          { assignment_signature_digest: retryAssignmentSignature.digest, replayed: false },
+        ]);
+
+        const sameJobBinding = await client.query<{
+          readonly binding_rows: string;
+          readonly transcript_rows: string;
+        }>(
+          `select
+             (select count(*)::text
+                from app.private_live_telebirr_assignment_reference_bindings binding
+               where binding.reference_binding_digest = $1::text
+                 and binding.verification_job_id = $2::uuid) as binding_rows,
+             (select count(*)::text
+                from app.private_live_telebirr_assignment_transcripts transcript
+                join app.private_live_telebirr_verification_attempts attempt
+                  on attempt.id = transcript.verification_attempt_id
+               where transcript.reference_binding_digest = $1::text
+                 and attempt.verification_job_id = $2::uuid) as transcript_rows`,
+          [referenceBindingDigest, jobId],
+        );
+        expect(sameJobBinding.rows).toEqual([{ binding_rows: '1', transcript_rows: '2' }]);
 
         const downstream = await client.query<{
           readonly deposit_jobs: string;
@@ -1263,6 +1652,7 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
           },
         ]);
 
+        await client.query('savepoint binding_recovery_conflict');
         await expect(
           client.query(
             `select *
@@ -1271,6 +1661,210 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
                  'device_evidence_binding_mismatch'::text
                )`,
             [jobId, pilot.pilotRevisionId, epoch.rows[0]!.activation_epoch, randomUUID()],
+          ),
+        ).rejects.toThrow(/replay conflicts/iu);
+        await client.query('rollback to savepoint binding_recovery_conflict');
+        await client.query('release savepoint binding_recovery_conflict');
+
+        const otherProof = await createLiveProof(client, pilot, 1);
+        const otherStage = await stageProof(client, otherProof.id);
+        const otherLease = await client.query<LeaseRow>(
+          `select *
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, 'sql-binding-recovery-cross-job', $2::uuid, 120
+             )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(otherLease.rows).toHaveLength(1);
+        expect(otherLease.rows[0]!.job_id).toBe(otherStage.row.verification_job_id);
+
+        const crossJobSignature = signature(0x63);
+        await expect(
+          client.query(
+            `select *
+               from app.persist_private_live_telebirr_assignment_broker_signature(
+                 $1::uuid, $2::uuid, $3::uuid, $4::text,
+                 $5::text, $6::text, $7::text
+               )`,
+            [
+              otherLease.rows[0]!.verification_attempt_id,
+              otherLease.rows[0]!.lease_token,
+              pilot.assignmentSignerId,
+              sha(`cross-job-assignment-body:${otherLease.rows[0]!.verification_attempt_id}`),
+              crossJobSignature.encoded,
+              crossJobSignature.digest,
+              referenceBindingDigest,
+            ],
+          ),
+        ).rejects.toThrow(/belongs to another verification job/iu);
+      });
+    });
+
+    it('opens one final bounded window for the exact retry stranded by binding uniqueness', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await prepareStrandedBindingRetry(client, getOwnerAdminId());
+        const recoveryRequestKey = randomUUID();
+        const recover = () =>
+          client.query<{
+            readonly already_recovered: boolean;
+            readonly recovered_job_expires_at: Date;
+            readonly stranded_retry_expires_at: Date;
+            readonly verification_job_id: string;
+          }>(
+            `select *
+               from app.recover_private_live_telebirr_assignment_binding_retry(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'assignment_reference_binding_uniqueness'::text
+               )`,
+            [
+              fixture.jobId,
+              fixture.pilot.pilotRevisionId,
+              fixture.activationEpoch,
+              recoveryRequestKey,
+            ],
+          );
+
+        const recovered = await recover();
+        expect(recovered.rows).toHaveLength(1);
+        expect(recovered.rows[0]).toMatchObject({
+          already_recovered: false,
+          stranded_retry_expires_at: fixture.strandedRetryExpiresAt,
+          verification_job_id: fixture.jobId,
+        });
+        expect(recovered.rows[0]!.recovered_job_expires_at.getTime()).toBeGreaterThan(
+          Date.now() + 60_000,
+        );
+
+        const replayedRecovery = await recover();
+        expect(replayedRecovery.rows).toEqual([{ ...recovered.rows[0]!, already_recovered: true }]);
+
+        const replayedFirstRecovery = await client.query<{
+          readonly already_recovered: boolean;
+          readonly original_job_expires_at: Date;
+          readonly recovered_job_expires_at: Date;
+          readonly verification_job_id: string;
+        }>(
+          `select *
+             from app.recover_attempted_private_live_telebirr_binding_mismatch_job(
+               $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+               'device_evidence_binding_mismatch'::text
+             )`,
+          [
+            fixture.jobId,
+            fixture.pilot.pilotRevisionId,
+            fixture.activationEpoch,
+            fixture.firstRecoveryRequestKey,
+          ],
+        );
+        expect(replayedFirstRecovery.rows).toEqual([
+          {
+            already_recovered: true,
+            original_job_expires_at: fixture.originalJobExpiresAt,
+            recovered_job_expires_at: fixture.strandedRetryExpiresAt,
+            verification_job_id: fixture.jobId,
+          },
+        ]);
+
+        const recoveryAudit = await client.query<{
+          readonly retry_fields_complete: boolean;
+          readonly retry_original_expires_at: Date;
+          readonly retry_recovery_reason_code: string;
+        }>(
+          `select retry_original_expires_at,
+                  retry_recovery_reason_code,
+                  retry_original_expires_at is not null
+                    and retry_recovered_at is not null
+                    and retry_recovery_request_key is not null
+                    and retry_recovery_request_digest is not null
+                    and retry_recovery_reason_code is not null
+                    as retry_fields_complete
+             from app.private_live_telebirr_verification_jobs
+            where id = $1::uuid`,
+          [fixture.jobId],
+        );
+        expect(recoveryAudit.rows).toEqual([
+          {
+            retry_fields_complete: true,
+            retry_original_expires_at: fixture.strandedRetryExpiresAt,
+            retry_recovery_reason_code: 'assignment_reference_binding_uniqueness',
+          },
+        ]);
+
+        const thirdAttempt = await client.query<{
+          readonly attempt_number: number;
+          readonly job_id: string;
+        }>(
+          `select job_id, attempt_number
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, 'sql-binding-uniqueness-recovered-03', $2::uuid, 120
+             )`,
+          [fixture.pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(thirdAttempt.rows).toEqual([{ attempt_number: 3, job_id: fixture.jobId }]);
+
+        const safeState = await client.query<{
+          readonly deposit_jobs: string;
+          readonly enabled_executor_logins: string;
+          readonly executor_sessions: string;
+          readonly outcomes: string;
+          readonly reservations: string;
+          readonly staged_evidence: string;
+        }>(
+          `select
+             (select count(*)::text
+                from app.private_live_telebirr_device_evidence_staging staged
+                join app.private_live_telebirr_verification_attempts attempt
+                  on attempt.id = staged.verification_attempt_id
+               where attempt.verification_job_id = $1::uuid) as staged_evidence,
+             (select count(*)::text
+                from app.private_live_telebirr_verification_outcomes outcome
+               where outcome.verification_job_id = $1::uuid) as outcomes,
+             (select count(*)::text
+                from app.private_live_deposit_pilot_reservations reservation
+               where reservation.private_live_deposit_pilot_proof_id = $2::uuid) as reservations,
+             (select count(*)::text
+                from app.deposit_jobs deposit_job
+               where deposit_job.deposit_intent_id in (
+                 select outcome.deposit_intent_id
+                   from app.private_live_telebirr_verification_outcomes outcome
+                  where outcome.verification_job_id = $1::uuid
+                    and outcome.deposit_intent_id is not null
+               )) as deposit_jobs,
+             (select count(*)::text
+                from pg_catalog.pg_roles role
+               where role.rolname in (
+                 'fetanagent_deposit_executor',
+                 'fetanagent_deposit_executor_runtime'
+               )
+                 and role.rolcanlogin) as enabled_executor_logins,
+             (select count(*)::text
+                from pg_catalog.pg_stat_activity activity
+               where activity.usename in (
+                 'fetanagent_deposit_executor',
+                 'fetanagent_deposit_executor_runtime'
+               )) as executor_sessions`,
+          [fixture.jobId, fixture.proofId],
+        );
+        expect(safeState.rows).toEqual([
+          {
+            deposit_jobs: '0',
+            enabled_executor_logins: '0',
+            executor_sessions: '0',
+            outcomes: '0',
+            reservations: '0',
+            staged_evidence: '0',
+          },
+        ]);
+
+        await expect(
+          client.query(
+            `select *
+               from app.recover_private_live_telebirr_assignment_binding_retry(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'assignment_reference_binding_uniqueness'::text
+               )`,
+            [fixture.jobId, fixture.pilot.pilotRevisionId, fixture.activationEpoch, randomUUID()],
           ),
         ).rejects.toThrow(/replay conflicts/iu);
       });

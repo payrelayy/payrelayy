@@ -373,6 +373,11 @@ with pilot_jobs as materialized (
          least((select count(*) from recovery_shape_retries), 2)::integer
            as recovery_shape_retries,
          least((select count(*) from expired_retries), 2)::integer as expired_retries,
+         least((select count(*)
+                  from app.private_live_telebirr_verification_attempts attempt
+                  join expired_retries job
+                    on job.id = attempt.verification_job_id), 3)::integer
+           as replacement_attempts,
          least((select count(*) from single_attempt_retries), 2)::integer
            as single_attempt_retries,
          least((select count(*) from expired_attempt_retries), 2)::integer
@@ -406,6 +411,12 @@ with pilot_jobs as materialized (
            when summary.digest_retries = 0 then 'network_retry_digest_invalid'
            when summary.recovery_shape_retries = 0 then 'recovery_shape_conflict'
            when summary.expired_retries = 0 then 'retry_not_expired'
+           when summary.single_attempt_retries = 0
+             and summary.replacement_attempts = 0
+             then 'replacement_attempt_missing'
+           when summary.single_attempt_retries = 0
+             and summary.replacement_attempts >= 2
+             then 'replacement_attempts_multiple'
            when summary.single_attempt_retries = 0 then 'attempt_cardinality_invalid'
            when summary.expired_attempt_retries = 0 then 'attempt_not_expired'
            when summary.no_transcript_retries = 0 then 'replacement_transcript_exists'
@@ -446,6 +457,7 @@ select pg_catalog.jsonb_build_object(
   'digestRetries', classified.digest_retries,
   'recoveryShapeRetries', classified.recovery_shape_retries,
   'expiredRetries', classified.expired_retries,
+  'replacementAttempts', classified.replacement_attempts,
   'singleAttemptRetries', classified.single_attempt_retries,
   'expiredAttemptRetries', classified.expired_attempt_retries,
   'noTranscriptRetries', classified.no_transcript_retries,

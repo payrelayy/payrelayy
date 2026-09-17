@@ -201,6 +201,31 @@ The current release is still financially disabled. In particular,
 `INTERNAL_KEMERBET_EXECUTION_RUNTIME_ENABLED=false` remain required. Public reachability, a visible
 Owner screen, a launched companion, or a historical lookup is not evidence of real-money readiness.
 
+## Supervised Phase 5 transition — 2026-09-17
+
+The exact production pilot completed its no-money shadow exit gate with one fresh 25 ETB receipt.
+The enrolled phone supplied signed evidence, the trusted shadow verifier produced an exact proof
+match, and the audit confirmed that no live intent, evidence, claim, reservation, job, execution,
+or reconciliation record was created. A temporary official-source outage was resolved through the
+single bounded no-money retry; it did not relax any acceptance rule.
+
+The Owner then separately authorized the bounded TeleBirr verification, global-claim, immutable
+reservation, settlement, and enqueue phase while explicitly keeping KemerBet execution disabled.
+That authority is limited to the existing armed five-Player, TeleBirr-only pilot and its fixed
+25 ETB per-deposit and per-Player cap, 125 ETB aggregate cap, five-reservation cap, and twelve-hour
+expiry. Withdrawals and CBE Birr authority remain disabled.
+
+The trusted verifier may therefore run with one activation-bound database session, and the
+operational API may accept a new pilot proof into the live accounting path. The KemerBet executor
+login, process, lease, final-action fence, amount entry, and `Transfer` action remain unavailable.
+The historical shadow proof must never be promoted or replayed into this phase; Phase 5 requires a
+new proof after the operational runtime is live. Phase 6 execution remains separately blocked and
+requires another explicit Owner authorization.
+
+The prior application commit is immutably installed as a shadow-intake release. Production must
+use this later reviewed main commit for the operational cutover rather than relabeling, deleting,
+or reusing that sealed release identity.
+
 ## Non-negotiable pilot contract
 
 The first real-money pilot is fixed and cannot be expanded from an operator form:

@@ -6,3 +6,6 @@ services:
   api:
     environment:
       FINANCIAL_ACTIONS_MODE: dry_run
+      # The shadow deployment may reveal only the activation-bound fixed 25 ETB destination.
+      # It remains non-submittable and cannot create a deposit, execution job, or settlement.
+      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'

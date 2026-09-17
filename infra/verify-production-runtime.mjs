@@ -111,6 +111,12 @@ assert.equal(
 );
 assert.match(shadowCompose, /^services:\s*\r?\n  api:/mu);
 assert.match(shadowCompose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
+assert.match(shadowCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
+assert.equal(
+  count(shadowCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/gu),
+  1,
+  'the shadow-review overlay must enable exactly one non-submittable receiver review gate',
+);
 assert.doesNotMatch(shadowCompose, /KEMERBET_|secrets:|configs:|networks:|volumes:/u);
 
 for (const invariant of [
@@ -548,6 +554,10 @@ assert.equal(count(helper, /verify_api_financial_mode_for_release "\$release"/gu
 assert.match(
   helper,
   /compose_files\+=\(--file "\$release\/compose\.production\.shadow-review\.yaml"\)/u,
+);
+assert.match(
+  helper,
+  /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'[\s\S]*?shadow-review production overlay is missing its reviewed receiver gate/u,
 );
 assert.match(
   helper,

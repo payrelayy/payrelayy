@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy active authority, deploy no-money shadow review, deploy inert maintenance, inspect, or stop
+        description: Build only, deploy active authority, deploy no-money receiver review, deploy no-money shadow intake, deploy inert maintenance, inspect, or stop
         required: true
         default: plan
         type: choice
@@ -12,6 +12,7 @@ on:
           - plan
           - deploy
           - deploy-shadow
+          - deploy-shadow-intake
           - deploy-inert
           - status
           - stop
@@ -88,6 +89,7 @@ jobs:
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy:DEPLOY PRODUCTION RUNTIME'|\
             'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'|\
+            'deploy-shadow-intake:DEPLOY PRODUCTION SHADOW INTAKE RUNTIME - NO MONEY'|\
             'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
             'status:STATUS PRODUCTION RUNTIME'|\
             'stop:STOP PRODUCTION RUNTIME') ;;
@@ -99,7 +101,7 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
             [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
             [[ "$CONFIRMED_TELEBIRR_EPOCH" =~ ^[1-9][0-9]{0,17}$ ]]
-          elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
+          elif [[ "$REQUESTED_MODE" == 'deploy-shadow' || "$REQUESTED_MODE" == 'deploy-shadow-intake' ]]; then
             [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
             [[ "$CONFIRMED_TELEBIRR_EPOCH" == 'not-applicable' ]]
           else
@@ -109,7 +111,7 @@ jobs:
 
   validate-ci:
     name: Require exact production commit CI
-    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake' || inputs.mode == 'deploy-inert'
     needs: validate-target
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -137,7 +139,7 @@ jobs:
     if: >-
       always() && !cancelled() && needs.validate-target.result == 'success' &&
       (inputs.mode == 'plan' ||
-      ((inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert') &&
+      ((inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake' || inputs.mode == 'deploy-inert') &&
       needs.validate-ci.result == 'success'))
     needs: [validate-target, validate-ci]
     runs-on: ubuntu-24.04
@@ -177,7 +179,7 @@ jobs:
           done
 
       - name: Save sealed image bundle
-        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake' || inputs.mode == 'deploy-inert'
         shell: bash
         run: |
           set -euo pipefail
@@ -195,7 +197,7 @@ jobs:
             "fetanagent-gateway:$tag"
 
       - name: Upload sealed image bundle
-        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake' || inputs.mode == 'deploy-inert'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fetanagent-production-images-${{ github.sha }}
@@ -206,7 +208,7 @@ jobs:
 
   deploy:
     name: Deploy continuous production runtime
-    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-inert'
+    if: inputs.mode == 'deploy' || inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake' || inputs.mode == 'deploy-inert'
     needs: [validate-target, validate-ci, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -294,6 +296,7 @@ jobs:
           case "$REQUESTED_MODE" in
             deploy) runtime_deployment_mode='operational' ;;
             deploy-shadow) runtime_deployment_mode='shadow-review' ;;
+            deploy-shadow-intake) runtime_deployment_mode='shadow-intake' ;;
             deploy-inert) runtime_deployment_mode='inert-maintenance' ;;
             *)
               echo '::error::A deployment bundle may be prepared only for a deployment mode.'
@@ -530,7 +533,7 @@ jobs:
           rm -f -- "$runtime_input"
 
       - name: Build the exact no-money production TeleBirr shadow assignment manifest
-        if: inputs.mode == 'deploy-shadow'
+        if: inputs.mode == 'deploy-shadow' || inputs.mode == 'deploy-shadow-intake'
         shell: bash
         env:
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
@@ -702,12 +705,13 @@ jobs:
             infra/compose.production.yaml \
             infra/compose.production.companion-execution-v2.yaml \
             infra/compose.production.shadow-review.yaml \
+            infra/compose.production.shadow-intake.yaml \
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
             "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
           )
           case "$REQUESTED_MODE" in
-            deploy|deploy-shadow)
+            deploy|deploy-shadow|deploy-shadow-intake)
               transfer_files+=(
                 "$SECRET_DIR"/telebirr-assignment-database-url
                 "$SECRET_DIR"/telebirr-assignment-runtime-manifest.v1.json
@@ -778,7 +782,9 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and no financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
-            echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live in shadow-review mode. Every financial/provider switch remains disabled, no trusted TeleBirr activation epoch exists, and the assignment broker can lease only dry-run shadow evidence.' >>"$GITHUB_STEP_SUMMARY"
+            echo 'Production web and Telegram are live in receiver-review-only mode. The exact pilot-bound destination may be reviewed, proof submission is unavailable, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUESTED_MODE" == 'deploy-shadow-intake' ]]; then
+            echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live in no-money shadow-intake mode. Receiver disclosure is disabled, proof submissions can create only advisory shadow work, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
           else
             echo 'Production web, Telegram, and the pilot-bound Android evidence transport are live; this deployment changes no database financial switch, and assignment leasing remains bound to the exact active pilot epoch.' >>"$GITHUB_STEP_SUMMARY"
           fi

@@ -1,0 +1,9 @@
+# This overlay is used only after the Owner has completed the separate no-money receiver review.
+# It keeps the API in dry-run mode, hides the full receiver destination, and accepts a fresh
+# TeleBirr reference only into the advisory shadow-proof queue. PostgreSQL still requires the
+# exact armed pilot and every financial/provider switch to remain disabled.
+services:
+  api:
+    environment:
+      FINANCIAL_ACTIONS_MODE: dry_run
+      TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'

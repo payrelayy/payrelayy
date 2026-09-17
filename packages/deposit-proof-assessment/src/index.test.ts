@@ -346,6 +346,34 @@ describe('provider-neutral official deposit proof assessment', () => {
     ).toMatchObject({ disposition: 'would_review', reasonCode: 'policy_contract_mismatch' });
   });
 
+  it('accepts a stricter principal window inside the reviewed policy envelope', () => {
+    expect(
+      assessOfficialDepositProof(
+        inputWith({
+          officialObservation: { principalAmountMinor: '2500' },
+          currentPolicy: {
+            minimumPrincipalAmountMinor: '2500',
+            maximumPrincipalAmountMinor: '2500',
+          },
+        }),
+      ),
+    ).toMatchObject({ disposition: 'would_verify', reasonCode: 'exact_proof_match' });
+  });
+
+  it('enforces a stricter policy maximum after accepting the bounded envelope', () => {
+    expect(
+      assessOfficialDepositProof(
+        inputWith({
+          officialObservation: { principalAmountMinor: '2501' },
+          currentPolicy: {
+            minimumPrincipalAmountMinor: '2500',
+            maximumPrincipalAmountMinor: '2500',
+          },
+        }),
+      ),
+    ).toMatchObject({ disposition: 'would_review', reasonCode: 'amount_out_of_range' });
+  });
+
   it.each([
     ['policy provider', { currentPolicy: { providerCode: 'telebirr' } }],
     ['policy timestamp', { currentPolicy: { checkedAt: '2026-08-20T12:01:59.999Z' } }],

@@ -989,11 +989,17 @@ function verifyDecision(
   });
 }
 
-function policyIsPinned(policy: ParsedCurrentPolicyFact): boolean {
+function policyIsWithinPinnedEnvelope(policy: ParsedCurrentPolicyFact): boolean {
+  if (policy.minimumPrincipalAmountMinor === null || policy.maximumPrincipalAmountMinor === null) {
+    return false;
+  }
+  const minimumPrincipal = BigInt(policy.minimumPrincipalAmountMinor);
+  const maximumPrincipal = BigInt(policy.maximumPrincipalAmountMinor);
   return (
     policy.currencyCode === 'ETB' &&
-    policy.minimumPrincipalAmountMinor === DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR &&
-    policy.maximumPrincipalAmountMinor === DEPOSIT_PROOF_MAXIMUM_PRINCIPAL_MINOR &&
+    minimumPrincipal >= BigInt(DEPOSIT_PROOF_MINIMUM_PRINCIPAL_MINOR) &&
+    maximumPrincipal <= BigInt(DEPOSIT_PROOF_MAXIMUM_PRINCIPAL_MINOR) &&
+    minimumPrincipal <= maximumPrincipal &&
     policy.automaticFreshnessSeconds === DEPOSIT_PROOF_AUTOMATIC_FRESHNESS_SECONDS &&
     policy.maximumFutureSkewSeconds !== null &&
     policy.maximumFutureSkewSeconds <= DEPOSIT_PROOF_MAXIMUM_FUTURE_SKEW_SECONDS &&
@@ -1033,7 +1039,9 @@ export function assessOfficialDepositProof(
     }
 
     if (policy.state === 'unavailable') return reviewDecision(provider, 'policy_unavailable');
-    if (!policyIsPinned(policy)) return reviewDecision(provider, 'policy_contract_mismatch');
+    if (!policyIsWithinPinnedEnvelope(policy)) {
+      return reviewDecision(provider, 'policy_contract_mismatch');
+    }
 
     if (eligibility.state === 'unavailable') {
       return reviewDecision(provider, 'eligibility_unavailable');

@@ -21,6 +21,11 @@ import {
   type TelebirrAssignmentBrokerLocalServerRuntime,
 } from './telebirr-assignment-broker-application.js';
 import type { TelebirrAssignmentBrokerConfig } from './telebirr-assignment-broker-config.js';
+import {
+  superviseTelebirrAssignmentBrokerProcess,
+  TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS,
+  type TelebirrAssignmentBrokerProcessRuntime,
+} from './telebirr-assignment-broker-main.js';
 import type { TelebirrAssignmentBrokerPostgresRuntime } from './postgres-telebirr-assignment-broker.js';
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
@@ -300,6 +305,87 @@ describe('private TeleBirr assignment broker application', () => {
     expect(fixture.postgres.close).toHaveBeenCalledOnce();
   });
 
+  it('exits nonzero after runtime authority is lost so Docker can restart the broker', async () => {
+    vi.useFakeTimers();
+    try {
+      const signalListeners = new Map<string, () => void>();
+      const processRuntime: TelebirrAssignmentBrokerProcessRuntime = {
+        exitCode: undefined,
+        once: vi.fn((event, listener) => {
+          signalListeners.set(event, listener);
+        }),
+        removeListener: vi.fn((event, listener) => {
+          if (signalListeners.get(event) === listener) signalListeners.delete(event);
+        }),
+      };
+      const application = {
+        ready: vi.fn(async () => false),
+        close: vi.fn(async () => undefined),
+      };
+      const reportRuntimeUnavailable = vi.fn();
+
+      superviseTelebirrAssignmentBrokerProcess(application, {
+        processRuntime,
+        reportRuntimeUnavailable,
+      });
+      await vi.advanceTimersByTimeAsync(
+        TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS,
+      );
+
+      expect(application.ready).toHaveBeenCalledOnce();
+      expect(application.close).toHaveBeenCalledOnce();
+      expect(processRuntime.exitCode).toBe(1);
+      expect(reportRuntimeUnavailable).toHaveBeenCalledOnce();
+      expect(signalListeners.size).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(
+        TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS * 2,
+      );
+      expect(application.ready).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('detaches the process watchdog during an orderly signal shutdown', async () => {
+    vi.useFakeTimers();
+    try {
+      const signalListeners = new Map<string, () => void>();
+      const processRuntime: TelebirrAssignmentBrokerProcessRuntime = {
+        exitCode: undefined,
+        once: vi.fn((event, listener) => {
+          signalListeners.set(event, listener);
+        }),
+        removeListener: vi.fn((event, listener) => {
+          if (signalListeners.get(event) === listener) signalListeners.delete(event);
+        }),
+      };
+      const application = {
+        ready: vi.fn(async () => true),
+        close: vi.fn(async () => undefined),
+      };
+      const reportRuntimeUnavailable = vi.fn();
+
+      superviseTelebirrAssignmentBrokerProcess(application, {
+        processRuntime,
+        reportRuntimeUnavailable,
+      });
+      signalListeners.get('SIGTERM')?.();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(
+        TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS * 2,
+      );
+
+      expect(application.close).toHaveBeenCalledOnce();
+      expect(application.ready).not.toHaveBeenCalled();
+      expect(processRuntime.exitCode).toBeUndefined();
+      expect(reportRuntimeUnavailable).not.toHaveBeenCalled();
+      expect(signalListeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the main entrypoint redacted and free of a calendar stop', async () => {
     const source = await readFile(
       new URL('./telebirr-assignment-broker-main.ts', import.meta.url),
@@ -307,6 +393,10 @@ describe('private TeleBirr assignment broker application', () => {
     );
     expect(source).toContain("event: 'listening'");
     expect(source).toContain("event: 'startup_failed'");
+    expect(source).toContain("event: 'runtime_unavailable'");
+    expect(source).toContain('.ready()');
+    expect(source).toContain("processRuntime.removeListener('SIGINT', close)");
+    expect(source).toContain("processRuntime.removeListener('SIGTERM', close)");
     expect(source).toContain('detailsRedacted: true');
     expect(source).not.toMatch(/console\.(?:info|error)\([^\n]*(?:error|config)/u);
     expect(source).not.toMatch(/2026-09-04|shutdownAt|stopAt/u);

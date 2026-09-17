@@ -37,14 +37,24 @@ describe('protected production live TeleBirr network-binding recovery', () => {
   it('pins the reviewed migration functions and invokes only the postgres-only recovery', () => {
     for (const digest of [
       '23809205c5d3e85e26d9909236b83bd153622b3704d48022095ef73f6ecbe70e',
-      '71fe68f4d142b8cb84fdb52f174fc2e7fc782d7d707bf01bf24778e165142651',
+      '4d93dceeff811a24ca7b2efb71d8739591e9e225baf2b4a45255837c68fdbe18',
+      '5dc91392f85dd5d33420f64e6e0bd612f352364ec149379eedf1baa5e414ac9b',
       '237330eccfa5dfde5dd6c26de8694d32d1fd701964eeb65d5ef1d9049d1584d6',
+      'dfdb229faea840e7c39e273eab6d9829b2ff5032cbe10758920ff828c184c194',
     ]) {
       expect(recoverySqlSource).toContain(digest);
     }
     expect(recoverySqlSource).toContain("current_user = 'postgres'");
     expect(recoverySqlSource).toContain("session_user = 'postgres'");
-    expect(recoverySqlSource).toContain('app.recover_private_live_telebirr_network_retry_binding(');
+    expect(recoverySqlSource).toContain(
+      'app.recover_private_live_telebirr_network_retry_binding_v2(',
+    );
+    expect(recoverySqlSource).toMatch(
+      /select \*\s+from app\.recover_private_live_telebirr_network_retry_binding_v2\(/u,
+    );
+    expect(recoverySqlSource).not.toMatch(
+      /select \*\s+from app\.recover_private_live_telebirr_network_retry_binding\(/u,
+    );
     expect(recoverySqlSource).toContain("'network_retry_reference_binding_registry'");
     expect(recoverySqlSource).toContain('transaction isolation level serializable');
   });
@@ -53,7 +63,8 @@ describe('protected production live TeleBirr network-binding recovery', () => {
     for (const fragment of [
       "job.network_retry_reason_code = 'official_receipt_network_unavailable'",
       'job.network_binding_recovery_request_key is null',
-      'attempt.attempt_number = 1',
+      'attempt.attempt_number between 1 and 2',
+      'attempt.expires_at <= pg_catalog.clock_timestamp()',
       "source_outcome.disposition = 'review_required'",
       "source_outcome.reason_code = 'source_unavailable'",
       'private_live_telebirr_assignment_reference_bindings',
@@ -77,7 +88,8 @@ describe('protected production live TeleBirr network-binding recovery', () => {
       "then 'pilot_scope_missing'",
       "then 'network_retry_lineage_missing'",
       "then 'replacement_attempt_missing'",
-      "then 'replacement_attempts_multiple'",
+      "then 'replacement_second_attempt_missing'",
+      "then 'replacement_attempts_exceeded'",
       "then 'replacement_transcript_exists'",
       "then 'source_outcome_invalid'",
       "then 'source_binding_missing'",
@@ -87,6 +99,7 @@ describe('protected production live TeleBirr network-binding recovery', () => {
       "'readOnly', true",
       "'moneyMoved', false",
       "'replacementAttempts', classified.replacement_attempts",
+      "'twoAttemptRetries', classified.two_attempt_retries",
     ]) {
       expect(eligibilitySqlSource).toContain(fragment);
     }
@@ -111,7 +124,7 @@ describe('protected production live TeleBirr network-binding recovery', () => {
     expect(statusSqlSource).toContain('deposit_job.lease_token is null');
     expect(statusSqlSource).toContain("summary.reason_code = 'exact_proof_match'");
     expect(statusSqlSource).toContain("then 'queued'");
-    expect(statusSqlSource).toContain('summary.attempts = 2');
+    expect(statusSqlSource).toContain('summary.attempts = 3');
     expect(statusSqlSource).toContain('summary.queued_jobs = 1');
   });
 

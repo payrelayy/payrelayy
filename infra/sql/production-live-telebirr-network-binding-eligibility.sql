@@ -66,22 +66,20 @@ with pilot_jobs as materialized (
   select job.*
     from recovery_shape_retries job
    where job.expires_at <= pg_catalog.clock_timestamp()
-), single_attempt_retries as materialized (
+), two_attempt_retries as materialized (
   select job.*
     from expired_retries job
    where (select count(*)
             from app.private_live_telebirr_verification_attempts attempt
-           where attempt.verification_job_id = job.id) = 1
+           where attempt.verification_job_id = job.id) = 2
 ), expired_attempt_retries as materialized (
   select job.*
-    from single_attempt_retries job
-   where exists (
-     select 1
-       from app.private_live_telebirr_verification_attempts attempt
-      where attempt.verification_job_id = job.id
-        and attempt.attempt_number = 1
-        and attempt.expires_at <= pg_catalog.clock_timestamp()
-   )
+    from two_attempt_retries job
+   where (select count(*)
+            from app.private_live_telebirr_verification_attempts attempt
+           where attempt.verification_job_id = job.id
+             and attempt.attempt_number between 1 and 2
+             and attempt.expires_at <= pg_catalog.clock_timestamp()) = 2
 ), no_transcript_retries as materialized (
   select job.*
     from expired_attempt_retries job
@@ -174,7 +172,7 @@ with pilot_jobs as materialized (
   select attempt.*
     from app.private_live_telebirr_verification_attempts attempt
     join source_binding_retries job on job.id = attempt.verification_job_id
-   where attempt.attempt_number = 1
+   where attempt.attempt_number = 2
 ), target_source_outcomes as materialized (
   select source_outcome.*, job.id as target_job_id
     from source_binding_retries job
@@ -378,8 +376,8 @@ with pilot_jobs as materialized (
                   join expired_retries job
                     on job.id = attempt.verification_job_id), 3)::integer
            as replacement_attempts,
-         least((select count(*) from single_attempt_retries), 2)::integer
-           as single_attempt_retries,
+         least((select count(*) from two_attempt_retries), 2)::integer
+           as two_attempt_retries,
          least((select count(*) from expired_attempt_retries), 2)::integer
            as expired_attempt_retries,
          least((select count(*) from no_transcript_retries), 2)::integer
@@ -411,13 +409,16 @@ with pilot_jobs as materialized (
            when summary.digest_retries = 0 then 'network_retry_digest_invalid'
            when summary.recovery_shape_retries = 0 then 'recovery_shape_conflict'
            when summary.expired_retries = 0 then 'retry_not_expired'
-           when summary.single_attempt_retries = 0
+           when summary.two_attempt_retries = 0
              and summary.replacement_attempts = 0
              then 'replacement_attempt_missing'
-           when summary.single_attempt_retries = 0
-             and summary.replacement_attempts >= 2
-             then 'replacement_attempts_multiple'
-           when summary.single_attempt_retries = 0 then 'attempt_cardinality_invalid'
+           when summary.two_attempt_retries = 0
+             and summary.replacement_attempts = 1
+             then 'replacement_second_attempt_missing'
+           when summary.two_attempt_retries = 0
+             and summary.replacement_attempts >= 3
+             then 'replacement_attempts_exceeded'
+           when summary.two_attempt_retries = 0 then 'attempt_cardinality_invalid'
            when summary.expired_attempt_retries = 0 then 'attempt_not_expired'
            when summary.no_transcript_retries = 0 then 'replacement_transcript_exists'
            when summary.no_delivery_retries = 0 then 'replacement_delivery_exists'
@@ -458,7 +459,7 @@ select pg_catalog.jsonb_build_object(
   'recoveryShapeRetries', classified.recovery_shape_retries,
   'expiredRetries', classified.expired_retries,
   'replacementAttempts', classified.replacement_attempts,
-  'singleAttemptRetries', classified.single_attempt_retries,
+  'twoAttemptRetries', classified.two_attempt_retries,
   'expiredAttemptRetries', classified.expired_attempt_retries,
   'noTranscriptRetries', classified.no_transcript_retries,
   'noDeliveryRetries', classified.no_delivery_retries,

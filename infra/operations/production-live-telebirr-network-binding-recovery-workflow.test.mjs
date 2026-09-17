@@ -47,6 +47,9 @@ test('uses only the reviewed recovery and redacted status SQL with a bounded ter
   assert.ok(workflowSource.includes('.readOnly == true'));
   assert.ok(workflowSource.includes('.moneyMoved == false'));
   assert.ok(workflowSource.includes('.replacementAttempts | type == "number"'));
+  assert.ok(workflowSource.includes('.twoAttemptRetries'));
+  assert.ok(workflowSource.includes('.attempts == 3'));
+  assert.ok(!workflowSource.includes('.singleAttemptRetries'));
   assert.ok(workflowSource.includes('replacementAttempts=${attempts}; capped at 3'));
   assert.ok(workflowSource.includes('exit 4'));
 });

@@ -1,0 +1,76 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+const observerSqlPath = fileURLToPath(
+  new URL(
+    '../../../infra/sql/production-live-telebirr-network-binding-observe.sql',
+    import.meta.url,
+  ),
+);
+
+let observerSqlSource = '';
+
+beforeAll(async () => {
+  observerSqlSource = await readFile(observerSqlPath, 'utf8');
+});
+
+describe('production live TeleBirr network-binding observer', () => {
+  it('derives exactly one recent recovered target without protected identifier inputs', () => {
+    for (const fragment of [
+      "job.network_retry_reason_code = 'official_receipt_network_unavailable'",
+      'job.network_retry_source_job_id is not null',
+      'job.network_binding_recovered_at is not null',
+      "'network_retry_reference_binding_registry'",
+      "pg_catalog.clock_timestamp() - interval '24 hours'",
+      '(select count(*) from recent_recovery_targets) = 1',
+    ]) {
+      expect(observerSqlSource).toContain(fragment);
+    }
+    expect(observerSqlSource).not.toContain('TARGET_PILOT_REVISION_ID');
+    expect(observerSqlSource).not.toContain('NETWORK_BINDING_RECOVERY_REQUEST_KEY');
+  });
+
+  it('recognizes append-only attempts while requiring one untouched queued job', () => {
+    for (const fragment of [
+      'summary.attempts >= 3',
+      'summary.contiguous_attempts',
+      "deposit_job.status = 'queued'",
+      'deposit_job.attempt_count = 0',
+      'deposit_job.lease_token is null',
+      'deposit_job.last_error_code is null',
+      'summary.execution_jobs = 1',
+      'summary.queued_jobs = 1',
+      "then 'queued'",
+    ]) {
+      expect(observerSqlSource).toContain(fragment);
+    }
+    expect(observerSqlSource).not.toContain('summary.attempts = 3');
+  });
+
+  it('keeps the observer read only and reports only redacted counts and fixed states', () => {
+    expect(observerSqlSource).toContain(
+      'begin transaction isolation level read committed read only',
+    );
+    expect(observerSqlSource).not.toMatch(
+      /\b(?:insert\s+into|update|delete\s+from|merge\s+into|truncate|alter|create|drop)\s+app\./iu,
+    );
+    expect(observerSqlSource).not.toContain("'verificationJobId'");
+    expect(observerSqlSource).not.toContain("'recoveryRequestKey'");
+    expect(observerSqlSource).not.toContain("'transactionReference'");
+    expect(observerSqlSource).toContain("'readOnly', true");
+    expect(observerSqlSource).toContain("'moneyMoved', false");
+    expect(observerSqlSource).toContain("'recentRecoveryTargets'");
+    expect(observerSqlSource).toContain("'lastAttemptNumber'");
+  });
+
+  it('treats every KemerBet execution boundary as unsafe unless disabled', () => {
+    expect(observerSqlSource).toContain("feature_switch.feature_key = 'deposit_execution'");
+    expect(observerSqlSource).toContain("feature_switch.mode = 'disabled'");
+    expect(observerSqlSource).toContain('fetanagent_deposit_executor_runtime');
+    expect(observerSqlSource).toContain("'depositExecutionSwitchDisabled'");
+    expect(observerSqlSource).toContain("'kemerBetLoginRoles'");
+    expect(observerSqlSource).toContain("'kemerBetSessions'");
+    expect(observerSqlSource).toContain("'executionEnabled'");
+  });
+});

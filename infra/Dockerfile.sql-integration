@@ -54,6 +54,8 @@ COPY infra/sql/production-live-telebirr-network-binding-eligibility.sql \
   ./infra/sql/production-live-telebirr-network-binding-eligibility.sql
 COPY infra/sql/production-live-telebirr-network-binding-status.sql \
   ./infra/sql/production-live-telebirr-network-binding-status.sql
+COPY infra/sql/production-live-telebirr-network-binding-observe.sql \
+  ./infra/sql/production-live-telebirr-network-binding-observe.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
 COPY supabase/migrations ./supabase/migrations

@@ -645,6 +645,7 @@ $new$;
   original_acl aclitem[];
   patched_source text;
   patched_definition text;
+  actual_patched_sha text;
 begin
   select routine.prosrc,
          pg_catalog.pg_get_functiondef(routine.oid),
@@ -674,12 +675,16 @@ begin
 
   patched_source := pg_catalog.replace(original_source, old_marker, new_marker);
   patched_definition := pg_catalog.replace(original_definition, old_marker, new_marker);
+  actual_patched_sha := pg_catalog.encode(
+    extensions.digest(pg_catalog.convert_to(patched_source, 'UTF8'), 'sha256'),
+    'hex'
+  );
 
-  if pg_catalog.encode(
-       extensions.digest(pg_catalog.convert_to(patched_source, 'UTF8'), 'sha256'),
-       'hex'
-     ) is distinct from expected_patched_sha then
-    raise exception 'The TeleBirr source-document recovery guard is not reviewed.';
+  if actual_patched_sha is distinct from expected_patched_sha then
+    raise exception
+      'The TeleBirr source-document recovery guard is not reviewed (expected %, actual %).',
+      expected_patched_sha,
+      actual_patched_sha;
   end if;
 
   execute patched_definition;

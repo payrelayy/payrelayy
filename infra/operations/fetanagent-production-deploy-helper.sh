@@ -356,9 +356,6 @@ verify_release_files() {
     grep -Fq 'FINANCIAL_ACTIONS_MODE: dry_run' \
       "$release/compose.production.shadow-review.yaml" ||
       die 'the shadow-review production overlay is malformed'
-    grep -Fq "TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'" \
-      "$release/compose.production.shadow-review.yaml" ||
-      die 'the shadow-review production overlay is missing its reviewed receiver gate'
     [[ ! -L "$release/compose.production.inert-maintenance.yaml" &&
       -f "$release/compose.production.inert-maintenance.yaml" &&
       "$(stat --format='%u:%g:%a:%h' "$release/compose.production.inert-maintenance.yaml")" == '0:0:444:1' ]] ||

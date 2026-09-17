@@ -316,6 +316,7 @@ async function pairDevice(
 
 type StrandedBindingRetry = {
   readonly activationEpoch: string;
+  readonly failedAssignmentBodyDigest: string;
   readonly failedAttemptId: string;
   readonly firstRecoveryRequestKey: string;
   readonly jobId: string;
@@ -645,6 +646,7 @@ async function prepareStrandedBindingRetry(
 
   return {
     activationEpoch: epoch.rows[0]!.activation_epoch,
+    failedAssignmentBodyDigest,
     failedAttemptId,
     firstRecoveryRequestKey,
     jobId,
@@ -1863,6 +1865,239 @@ export function registerTelebirrDeviceStateRuntimeSqlTests(
                from app.recover_private_live_telebirr_assignment_binding_retry(
                  $1::uuid, $2::uuid, $3::bigint, $4::uuid,
                  'assignment_reference_binding_uniqueness'::text
+               )`,
+            [fixture.jobId, fixture.pilot.pilotRevisionId, fixture.activationEpoch, randomUUID()],
+          ),
+        ).rejects.toThrow(/replay conflicts/iu);
+      });
+    });
+
+    it('opens one broker-runtime recovery window after the repaired retry expired unassigned', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await prepareStrandedBindingRetry(client, getOwnerAdminId());
+        const bindingRecoveryRequestKey = randomUUID();
+        const bindingRecovery = await client.query<{
+          readonly already_recovered: boolean;
+          readonly recovered_job_expires_at: Date;
+          readonly verification_job_id: string;
+        }>(
+          `select verification_job_id, recovered_job_expires_at, already_recovered
+             from app.recover_private_live_telebirr_assignment_binding_retry(
+               $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+               'assignment_reference_binding_uniqueness'::text
+             )`,
+          [
+            fixture.jobId,
+            fixture.pilot.pilotRevisionId,
+            fixture.activationEpoch,
+            bindingRecoveryRequestKey,
+          ],
+        );
+        expect(bindingRecovery.rows).toHaveLength(1);
+        expect(bindingRecovery.rows[0]).toMatchObject({
+          already_recovered: false,
+          verification_job_id: fixture.jobId,
+        });
+
+        const retryLineage = await client.query<{
+          readonly first_recovery_request_digest: string;
+          readonly repair_source_sha256: string;
+          readonly retry_assignment_id: string;
+          readonly retry_challenge_digest: string;
+          readonly retry_lease_nonce_digest: string;
+          readonly retry_lease_request_digest: string;
+          readonly retry_original_expires_at: Date;
+        }>(
+          `select job.recovery_request_digest as first_recovery_request_digest,
+                  job.retry_original_expires_at,
+                  attempt.assignment_id::text as retry_assignment_id,
+                  attempt.lease_request_digest as retry_lease_request_digest,
+                  attempt.lease_nonce_digest as retry_lease_nonce_digest,
+                  attempt.challenge_digest as retry_challenge_digest,
+                  pg_catalog.encode(
+                    extensions.digest(
+                      pg_catalog.convert_to(routine.prosrc, 'UTF8'), 'sha256'
+                    ), 'hex'
+                  ) as repair_source_sha256
+             from app.private_live_telebirr_verification_jobs job
+             join app.private_live_telebirr_verification_attempts attempt
+               on attempt.verification_job_id = job.id
+              and attempt.attempt_number = 2
+             cross join pg_catalog.pg_proc routine
+            where job.id = $1::uuid
+              and routine.oid = pg_catalog.to_regprocedure(
+                'app.enforce_private_live_telebirr_assignment_reference_binding()'
+              )`,
+          [fixture.jobId],
+        );
+        expect(retryLineage.rows).toHaveLength(1);
+        const lineage = retryLineage.rows[0]!;
+        const expiredRetryRecoveredAt = lineage.retry_original_expires_at;
+        const expiredRetryExpiresAt = new Date(expiredRetryRecoveredAt.getTime() + 61_000);
+        expect(expiredRetryExpiresAt.getTime()).toBeLessThan(Date.now());
+        const adjustedBindingRecoveryDigest = sha(
+          'fetanagent:telebirr:private-live-pilot:assignment-binding-retry-recovery:v1' +
+            `|request_key=${bindingRecoveryRequestKey}` +
+            `|job_id=${fixture.jobId}` +
+            `|pilot_revision_id=${fixture.pilot.pilotRevisionId}` +
+            `|first_recovery_request_digest=${lineage.first_recovery_request_digest}` +
+            `|failed_attempt_id=${fixture.failedAttemptId}` +
+            `|failed_assignment_body_digest=${fixture.failedAssignmentBodyDigest}` +
+            `|failed_reference_binding_digest=${fixture.referenceBindingDigest}` +
+            `|stranded_retry_attempt_id=${fixture.retryAttemptId}` +
+            `|stranded_retry_assignment_id=${lineage.retry_assignment_id}` +
+            `|stranded_retry_lease_request_digest=${lineage.retry_lease_request_digest}` +
+            `|stranded_retry_lease_nonce_digest=${lineage.retry_lease_nonce_digest}` +
+            `|stranded_retry_challenge_digest=${lineage.retry_challenge_digest}` +
+            '|replaced_unique_constraint=' +
+            'private_live_telebirr_assignment_t_reference_binding_digest_key' +
+            '|repair_migration=20260917161516' +
+            `|repair_source_sha256=sha256:${lineage.repair_source_sha256}` +
+            `|retry_original_expires_at_us=${lineage.retry_original_expires_at.getTime() * 1_000}` +
+            `|retry_recovered_at_us=${expiredRetryRecoveredAt.getTime() * 1_000}` +
+            `|retry_recovered_expires_at_us=${expiredRetryExpiresAt.getTime() * 1_000}` +
+            '|reason_code=assignment_reference_binding_uniqueness',
+        );
+
+        await client.query(`set local session_replication_role = 'replica'`);
+        await client.query(
+          `update app.private_live_telebirr_verification_jobs
+              set retry_recovered_at = $2::timestamptz,
+                  retry_recovery_request_digest = $3::text,
+                  expires_at = $4::timestamptz
+            where id = $1::uuid`,
+          [
+            fixture.jobId,
+            expiredRetryRecoveredAt,
+            adjustedBindingRecoveryDigest,
+            expiredRetryExpiresAt,
+          ],
+        );
+        await client.query(`set local session_replication_role = 'origin'`);
+
+        const brokerRecoveryRequestKey = randomUUID();
+        const recover = () =>
+          client.query<{
+            readonly already_recovered: boolean;
+            readonly recovered_job_expires_at: Date;
+            readonly stranded_broker_expires_at: Date;
+            readonly verification_job_id: string;
+          }>(
+            `select *
+               from app.recover_private_live_telebirr_assignment_broker_runtime(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'assignment_broker_runtime_unavailable'::text
+               )`,
+            [
+              fixture.jobId,
+              fixture.pilot.pilotRevisionId,
+              fixture.activationEpoch,
+              brokerRecoveryRequestKey,
+            ],
+          );
+
+        const recovered = await recover();
+        expect(recovered.rows).toHaveLength(1);
+        expect(recovered.rows[0]).toMatchObject({
+          already_recovered: false,
+          stranded_broker_expires_at: expiredRetryExpiresAt,
+          verification_job_id: fixture.jobId,
+        });
+        expect(recovered.rows[0]!.recovered_job_expires_at.getTime()).toBeGreaterThan(
+          Date.now() + 60_000,
+        );
+
+        const replayed = await recover();
+        expect(replayed.rows).toEqual([{ ...recovered.rows[0]!, already_recovered: true }]);
+
+        const bindingReplay = await client.query<{
+          readonly already_recovered: boolean;
+          readonly recovered_job_expires_at: Date;
+        }>(
+          `select recovered_job_expires_at, already_recovered
+             from app.recover_private_live_telebirr_assignment_binding_retry(
+               $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+               'assignment_reference_binding_uniqueness'::text
+             )`,
+          [
+            fixture.jobId,
+            fixture.pilot.pilotRevisionId,
+            fixture.activationEpoch,
+            bindingRecoveryRequestKey,
+          ],
+        );
+        expect(bindingReplay.rows).toEqual([
+          { already_recovered: true, recovered_job_expires_at: expiredRetryExpiresAt },
+        ]);
+
+        const thirdAttempt = await client.query<{
+          readonly attempt_number: number;
+          readonly job_id: string;
+        }>(
+          `select job_id, attempt_number
+             from app.lease_private_live_telebirr_assignment_broker(
+               $1::uuid, 'sql-broker-runtime-recovered-03', $2::uuid, 120
+             )`,
+          [fixture.pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(thirdAttempt.rows).toEqual([{ attempt_number: 3, job_id: fixture.jobId }]);
+
+        const audit = await client.query<{
+          readonly broker_fields_complete: boolean;
+          readonly broker_recovery_reason_code: string;
+          readonly enabled_executor_logins: string;
+          readonly outcomes: string;
+          readonly reservations: string;
+          readonly staged_evidence: string;
+        }>(
+          `select job.broker_recovery_reason_code,
+                  job.broker_original_expires_at is not null
+                    and job.broker_recovered_at is not null
+                    and job.broker_recovery_request_key is not null
+                    and job.broker_recovery_request_digest is not null
+                    and job.broker_recovery_reason_code is not null
+                    as broker_fields_complete,
+                  (select count(*)::text
+                     from app.private_live_telebirr_device_evidence_staging staged
+                     join app.private_live_telebirr_verification_attempts attempt
+                       on attempt.id = staged.verification_attempt_id
+                    where attempt.verification_job_id = job.id) as staged_evidence,
+                  (select count(*)::text
+                     from app.private_live_telebirr_verification_outcomes outcome
+                    where outcome.verification_job_id = job.id) as outcomes,
+                  (select count(*)::text
+                     from app.private_live_deposit_pilot_reservations reservation
+                    where reservation.private_live_deposit_pilot_proof_id =
+                          job.private_live_deposit_pilot_proof_id) as reservations,
+                  (select count(*)::text
+                     from pg_catalog.pg_roles role
+                    where role.rolname in (
+                      'fetanagent_deposit_executor',
+                      'fetanagent_deposit_executor_runtime'
+                    )
+                      and role.rolcanlogin) as enabled_executor_logins
+             from app.private_live_telebirr_verification_jobs job
+            where job.id = $1::uuid`,
+          [fixture.jobId],
+        );
+        expect(audit.rows).toEqual([
+          {
+            broker_fields_complete: true,
+            broker_recovery_reason_code: 'assignment_broker_runtime_unavailable',
+            enabled_executor_logins: '0',
+            outcomes: '0',
+            reservations: '0',
+            staged_evidence: '0',
+          },
+        ]);
+
+        await expect(
+          client.query(
+            `select *
+               from app.recover_private_live_telebirr_assignment_broker_runtime(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid,
+                 'assignment_broker_runtime_unavailable'::text
                )`,
             [fixture.jobId, fixture.pilot.pilotRevisionId, fixture.activationEpoch, randomUUID()],
           ),

@@ -142,6 +142,96 @@ jobs:
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
 
+          eligibility_result="$(
+            timeout --signal=TERM --kill-after=5s 30s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-network-binding-eligibility.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_network_binding_eligibility" and
+            .deploymentTarget == "production" and
+            (.eligibilityState | IN("eligible", "ineligible")) and
+            (.reasonCode | type == "string") and
+            ([
+              .pilotJobs,
+              .linkedRetries,
+              .digestRetries,
+              .recoveryShapeRetries,
+              .expiredRetries,
+              .singleAttemptRetries,
+              .expiredAttemptRetries,
+              .noTranscriptRetries,
+              .noDeliveryRetries,
+              .noEvidenceRetries,
+              .noObservationRetries,
+              .noOutcomeRetries,
+              .noReservationRetries,
+              .sourceOutcomeRetries,
+              .targetCount,
+              .assignmentBrokerSessions,
+              .assignmentBrokerLockHolders,
+              .kemerBetLoginRoles,
+              .kemerBetSessions
+            ] | all(type == "number" and . >= 0 and . <= 2)) and
+            ([
+              .activeEpochMatches,
+              .authorityReady,
+              .proofWindowReady,
+              .receiverProfileReady,
+              .deviceEnrollmentReady,
+              .deviceHeartbeatReady,
+              .assignmentSignerReady,
+              .verificationPolicyReady,
+              .executionEnabled,
+              .readOnly,
+              .moneyMoved
+            ] | all(type == "boolean")) and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false and
+            .readOnly == true and
+            .moneyMoved == false
+          ' <<<"$eligibility_result" >/dev/null
+          jq '{
+            eligibilityState,
+            reasonCode,
+            pilotJobs,
+            linkedRetries,
+            digestRetries,
+            recoveryShapeRetries,
+            expiredRetries,
+            singleAttemptRetries,
+            expiredAttemptRetries,
+            noTranscriptRetries,
+            noDeliveryRetries,
+            noEvidenceRetries,
+            noObservationRetries,
+            noOutcomeRetries,
+            noReservationRetries,
+            sourceOutcomeRetries,
+            targetCount,
+            activeEpochMatches,
+            authorityReady,
+            proofWindowReady,
+            receiverProfileReady,
+            deviceEnrollmentReady,
+            deviceHeartbeatReady,
+            assignmentSignerReady,
+            verificationPolicyReady,
+            assignmentBrokerSessions,
+            assignmentBrokerLockHolders,
+            executionEnabled,
+            readOnly,
+            moneyMoved
+          }' <<<"$eligibility_result" >>"$GITHUB_STEP_SUMMARY"
+
+          if [[ "$(jq -r '.eligibilityState' <<<"$eligibility_result")" != 'eligible' ]]; then
+            reason="$(jq -r '.reasonCode' <<<"$eligibility_result")"
+            echo "::error::The read-only live TeleBirr eligibility diagnosis returned ${reason}." >&2
+            exit 4
+          fi
+
           recovery_result="$(
             timeout --signal=TERM --kill-after=5s 60s \
               psql -X --quiet --tuples-only --no-align \

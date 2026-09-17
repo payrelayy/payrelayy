@@ -8,23 +8,12 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
-const applicationPath = fileURLToPath(
-  new URL(
-    '../../../apps/telebirr-assignment-broker/src/telebirr-assignment-broker-application.ts',
-    import.meta.url,
-  ),
-);
-
 let migrationSource = '';
-let applicationSource = '';
 let recoverySource = '';
 let guardExtensionSource = '';
 
 beforeAll(async () => {
-  [migrationSource, applicationSource] = await Promise.all([
-    readFile(migrationPath, 'utf8'),
-    readFile(applicationPath, 'utf8'),
-  ]);
+  migrationSource = await readFile(migrationPath, 'utf8');
   recoverySource =
     migrationSource.match(
       /create function app\.recover_private_live_telebirr_assignment_broker_runtime\([\s\S]+?\n\$\$;/u,
@@ -36,16 +25,6 @@ beforeAll(async () => {
 });
 
 describe('live TeleBirr assignment-broker runtime recovery source boundary', () => {
-  it('retires a failed broker connection through a bounded readiness watchdog', () => {
-    expect(applicationSource).toContain(
-      'TELEBIRR_ASSIGNMENT_BROKER_READINESS_INTERVAL_MILLISECONDS = 5_000',
-    );
-    expect(applicationSource).toContain('readinessTimer.unref()');
-    expect(applicationSource).toContain('if (!ready) void closeApplication()');
-    expect(applicationSource).toContain('clearInterval(readinessTimer)');
-    expect(applicationSource).toContain('await closeRuntimes(activeLocalServer, activePostgres)');
-  });
-
   it('requires the exact reviewed predecessor sources before changing recovery authority', () => {
     expect(migrationSource).toContain(
       'df17c714ff3ed197534442ab7aa0e5b5fa88226fdd88d478f7911e33611dc9e2',

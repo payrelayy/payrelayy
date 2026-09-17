@@ -97,6 +97,12 @@ disclosure, and permits a fresh reference to enter only this advisory shadow que
 require the exact armed pilot UUID, no activation epoch, and every financial/provider switch to
 remain disabled.
 
+The protected workflow seals the selected review or intake overlay under the existing
+`shadow-review` host contract. This preserves the already installed digest-bound root helper: the
+workflow choice and exact confirmation phrase distinguish the two operator operations, while the
+single transferred overlay contains only the reviewed mode's API settings. Adding shadow intake
+therefore requires no host-helper or sudoers rotation.
+
 Even after shadow observations succeed, a separate decision and authorization are required before
 enabling live payment verification or any automatic deposit. A queued shadow check is never proof
 that a payment was completed or that a Player ID was credited.

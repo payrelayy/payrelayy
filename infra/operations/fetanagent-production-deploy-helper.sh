@@ -61,7 +61,7 @@ release_deployment_mode() {
     die 'the runtime deployment-mode marker is unsafe'
   mode="$(<"$marker")"
   case "$mode" in
-    operational|shadow-review|shadow-intake|inert-maintenance) printf '%s\n' "$mode" ;;
+    operational|shadow-review|inert-maintenance) printf '%s\n' "$mode" ;;
     *) die 'the runtime deployment mode is invalid' ;;
   esac
 }
@@ -194,9 +194,6 @@ compose_release() {
   if [[ "$deployment_mode" == 'shadow-review' ]]; then
     compose_files+=(--file "$release/compose.production.shadow-review.yaml")
   fi
-  if [[ "$deployment_mode" == 'shadow-intake' ]]; then
-    compose_files+=(--file "$release/compose.production.shadow-intake.yaml")
-  fi
   if [[ "$deployment_mode" == 'inert-maintenance' ]]; then
     compose_files+=(--file "$release/compose.production.inert-maintenance.yaml")
   fi
@@ -242,7 +239,7 @@ verify_api_financial_mode_for_release() {
   local -a configured_modes=()
   deployment_mode="$(release_deployment_mode "$release")"
   case "$deployment_mode" in
-    shadow-review|shadow-intake) expected='dry_run' ;;
+    shadow-review) expected='dry_run' ;;
     operational|inert-maintenance) expected='live' ;;
     legacy) return ;;
     *) die 'the runtime deployment mode is invalid' ;;
@@ -359,16 +356,6 @@ verify_release_files() {
     grep -Fq 'FINANCIAL_ACTIONS_MODE: dry_run' \
       "$release/compose.production.shadow-review.yaml" ||
       die 'the shadow-review production overlay is malformed'
-    [[ ! -L "$release/compose.production.shadow-intake.yaml" &&
-      -f "$release/compose.production.shadow-intake.yaml" &&
-      "$(stat --format='%u:%g:%a:%h' "$release/compose.production.shadow-intake.yaml")" == '0:0:444:1' ]] ||
-      die 'the shadow-intake production overlay is absent or unsafe'
-    grep -Fq 'FINANCIAL_ACTIONS_MODE: dry_run' \
-      "$release/compose.production.shadow-intake.yaml" ||
-      die 'the shadow-intake production overlay is malformed'
-    grep -Fq "TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'" \
-      "$release/compose.production.shadow-intake.yaml" ||
-      die 'the shadow-intake production overlay is malformed'
     [[ ! -L "$release/compose.production.inert-maintenance.yaml" &&
       -f "$release/compose.production.inert-maintenance.yaml" &&
       "$(stat --format='%u:%g:%a:%h' "$release/compose.production.inert-maintenance.yaml")" == '0:0:444:1' ]] ||
@@ -379,8 +366,7 @@ verify_release_files() {
     grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
       die 'the inert-maintenance production overlay is malformed'
   fi
-  if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ||
-    "$deployment_mode" == 'shadow-intake' ]] ||
+  if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]] ||
     { [[ "$deployment_mode" == 'legacy' ]] &&
       grep -Fq 'TELEBIRR_ASSIGNMENT_BROKER_DATABASE_URL_FILE:' "$release/compose.production.yaml"; }; then
     required+=(
@@ -604,17 +590,13 @@ case "${1:-}" in
       die 'the incoming runtime deployment-mode marker is absent or unsafe'
     deployment_mode="$(<"$incoming/runtime-deployment-mode")"
     case "$deployment_mode" in
-      operational|shadow-review|shadow-intake|inert-maintenance) ;;
+      operational|shadow-review|inert-maintenance) ;;
       *) die 'the incoming runtime deployment mode is invalid' ;;
     esac
     [[ ! -L "$incoming/compose.production.shadow-review.yaml" &&
       -f "$incoming/compose.production.shadow-review.yaml" &&
       -s "$incoming/compose.production.shadow-review.yaml" ]] ||
       die 'the incoming shadow-review production overlay is absent or unsafe'
-    [[ ! -L "$incoming/compose.production.shadow-intake.yaml" &&
-      -f "$incoming/compose.production.shadow-intake.yaml" &&
-      -s "$incoming/compose.production.shadow-intake.yaml" ]] ||
-      die 'the incoming shadow-intake production overlay is absent or unsafe'
     [[ ! -L "$incoming/compose.production.inert-maintenance.yaml" &&
       -f "$incoming/compose.production.inert-maintenance.yaml" &&
       -s "$incoming/compose.production.inert-maintenance.yaml" ]] ||
@@ -631,9 +613,8 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=33
-    if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ||
-      "$deployment_mode" == 'shadow-intake' ]]; then
+    expected_count=32
+    if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]]; then
       expected_count=$((expected_count + 4))
       for name in \
         telebirr-assignment-database-url \
@@ -665,7 +646,7 @@ case "${1:-}" in
     install -d -m 0700 "$incoming/secrets"
     for file in "$incoming"/*; do
       case "${file##*/}" in
-        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.shadow-review.yaml|compose.production.shadow-intake.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
+        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.shadow-review.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
         *) mv -- "$file" "$incoming/secrets/" ;;
       esac
     done
@@ -690,7 +671,6 @@ case "${1:-}" in
     chmod 0444 "$incoming/compose.production.yaml" \
       "$incoming/compose.production.companion-execution-v2.yaml" \
       "$incoming/compose.production.shadow-review.yaml" \
-      "$incoming/compose.production.shadow-intake.yaml" \
       "$incoming/compose.production.inert-maintenance.yaml" \
       "$incoming/runtime-deployment-mode" \
       "$incoming/telebirr-assignment-signer-key-id" \

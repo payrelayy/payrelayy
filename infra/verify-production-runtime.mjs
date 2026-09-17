@@ -414,11 +414,30 @@ assert.match(workflow, /Prove the complete inert production money boundary/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+shell: bash/u);
 assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
 assert.match(workflow, /runtime_deployment_mode='inert-maintenance'/u);
-assert.match(workflow, /deploy-shadow\) runtime_deployment_mode='shadow-review'/u);
-assert.match(workflow, /deploy-shadow-intake\) runtime_deployment_mode='shadow-intake'/u);
+assert.match(
+  workflow,
+  /deploy-shadow\)\s+runtime_deployment_mode='shadow-review'\s+shadow_overlay_source='infra\/compose\.production\.shadow-review\.yaml'/u,
+);
+assert.match(
+  workflow,
+  /deploy-shadow-intake\)\s+runtime_deployment_mode='shadow-review'\s+shadow_overlay_source='infra\/compose\.production\.shadow-intake\.yaml'/u,
+);
 assert.match(workflow, /runtime-deployment-mode/u);
 assert.match(workflow, /compose\.production\.shadow-review\.yaml/u);
 assert.match(workflow, /compose\.production\.shadow-intake\.yaml/u);
+assert.match(
+  workflow,
+  /install -m 0600 -- "\$shadow_overlay_source"[\s\S]*?"\$RUNNER_TEMP\/release\/compose\.production\.shadow-review\.yaml"/u,
+);
+assert.match(
+  workflow,
+  /cmp --silent -- "\$shadow_overlay_source"[\s\S]*?"\$RUNNER_TEMP\/release\/compose\.production\.shadow-review\.yaml"/u,
+);
+assert.equal(
+  count(workflow, /"\$RUNNER_TEMP\/release\/compose\.production\.shadow-review\.yaml"/gu),
+  3,
+  'the selected shadow contract must be created, compared, and transferred exactly once',
+);
 assert.match(workflow, /compose\.production\.inert-maintenance\.yaml/u);
 assert.match(workflow, /production-telebirr-assignment-runtime-input\.sql/u);
 assert.match(workflow, /production-telebirr-shadow-assignment-runtime-input\.sql/u);
@@ -563,9 +582,9 @@ assert.match(
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
 assert.match(helper, /release_deployment_mode\(\)/u);
-assert.match(helper, /operational\|shadow-review\|shadow-intake\|inert-maintenance/u);
+assert.match(helper, /operational\|shadow-review\|inert-maintenance/u);
 assert.match(helper, /verify_api_financial_mode_for_release\(\)/u);
-assert.match(helper, /shadow-review\|shadow-intake\) expected='dry_run'/u);
+assert.match(helper, /shadow-review\) expected='dry_run'/u);
 assert.match(helper, /operational\|inert-maintenance\) expected='live'/u);
 assert.match(
   helper,
@@ -576,10 +595,7 @@ assert.match(
   helper,
   /compose_files\+=\(--file "\$release\/compose\.production\.shadow-review\.yaml"\)/u,
 );
-assert.match(
-  helper,
-  /compose_files\+=\(--file "\$release\/compose\.production\.shadow-intake\.yaml"\)/u,
-);
+assert.doesNotMatch(helper, /shadow-intake|compose\.production\.shadow-intake\.yaml/u);
 assert.match(
   helper,
   /compose_files\+=\(--file "\$release\/compose\.production\.inert-maintenance\.yaml"\)/u,
@@ -665,13 +681,12 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=33/u);
+assert.match(helper, /expected_count=32/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
 assert.match(helper, /runtime-deployment-mode/u);
 assert.match(helper, /compose\.production\.shadow-review\.yaml/u);
-assert.match(helper, /compose\.production\.shadow-intake\.yaml/u);
 assert.match(helper, /compose\.production\.inert-maintenance\.yaml/u);
 for (const protectedFile of [
   'telebirr-assignment-database-url',

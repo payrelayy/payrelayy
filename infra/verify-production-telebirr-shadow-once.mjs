@@ -34,13 +34,17 @@ const verifierConfig = readFileSync(
   ),
   'utf8',
 );
+const productionTunnel = readFileSync(
+  new URL('./operations/fetanagent-production-direct-database-tunnel.sh', import.meta.url),
+  'utf8',
+);
 
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/u);
 assert.match(workflow, /PRODUCTION_DROPLET_ID: '593344964'/u);
-assert.match(workflow, /PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1\.pooler\.supabase\.com/u);
-assert.match(workflow, /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u);
+assert.match(workflow, /PRODUCTION_DATABASE_DIRECT_HOST: db\.xzztugbgtulptnbpoelr\.supabase\.co/u);
+assert.match(workflow, /PRODUCTION_DATABASE_TUNNEL_PORT: '5432'/u);
 assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(workflow, /not-applicable for direct shadow intake/u);
@@ -60,11 +64,18 @@ assert.match(
 assert.match(workflow, /recovery\.retry_expires_at = proof\.expires_at/u);
 assert.match(workflow, /verifier_policy_fix_retry_no_credit/u);
 assert.match(workflow, /nullif\('\$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable'\)::uuid/u);
-assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.PRODUCTION_PROJECT_REF \}\}/u);
+assert.match(workflow, /PGHOSTADDR: 127\.0\.0\.1/u);
+assert.match(workflow, /PGUSER: postgres\s/u);
 assert.match(workflow, /admin_login_ready=false/u);
 assert.match(workflow, /current_user = 'postgres' and session_user = current_user/u);
 assert.match(workflow, /"\$admin_login_ready" == 'true'/u);
 assert.match(workflow, /export PGSSLROOTCERT="\$protected\/supabase-ca\.crt"/u);
+assert.match(workflow, /fetanagent-production-direct-database-tunnel\.sh/u);
+assert.match(workflow, /fetanagent_open_production_direct_database_tunnel/u);
+assert.match(workflow, /fetanagent_close_production_direct_database_tunnel/u);
+assert.match(workflow, /PRODUCTION_VM_SSH_PRIVATE_KEY/u);
+assert.match(workflow, /PRODUCTION_VM_KNOWN_HOSTS/u);
+assert.match(workflow, /--add-host "\$PRODUCTION_DATABASE_DIRECT_HOST:127\.0\.0\.1"/u);
 assert.match(workflow, /require-production-ci\.mjs/u);
 assert.match(workflow, /--target telebirr-shadow-verifier/u);
 assert.match(workflow, /FINANCIAL_ACTIONS_MODE=dry_run/u);
@@ -76,7 +87,7 @@ assert.match(workflow, /verifier_ready=false/u);
 assert.match(workflow, /for launch_attempt in 1 2 3 4 5 6/u);
 assert.match(workflow, /docker rm --force "\$container"/u);
 assert.match(workflow, /"\$verifier_ready" == 'true'/u);
-assert.match(workflow, /printf 'postgresql:\/\/%s\.%s:%s@%s:5432\/postgres\?sslmode=verify-full'/u);
+assert.match(workflow, /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full'/u);
 assert.match(workflow, /--read-only/u);
 assert.match(workflow, /--cap-drop ALL/u);
 assert.match(workflow, /--security-opt no-new-privileges:true/u);
@@ -107,15 +118,17 @@ assert.doesNotMatch(workflow, /FINANCIAL_ACTIONS_MODE=live/u);
 assert.doesNotMatch(workflow, /KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=true/u);
 assert.doesNotMatch(workflow, /TRUSTED_TELEBIRR_PRIVATE_LIVE_PILOT_ENABLED=true/u);
 assert.doesNotMatch(workflow, /--publish|-p [0-9]/u);
-assert.doesNotMatch(workflow, /PRODUCTION_DATABASE_DIRECT_HOST|PGHOSTADDR|ssh .*?-L/u);
+assert.doesNotMatch(workflow, /aws-0-eu-west-1\.pooler\.supabase\.com/u);
 assert.match(
   verifierConfig,
-  /TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST[\s\S]*?'aws-0-eu-west-1\.pooler\.supabase\.com'/u,
+  /databaseTarget\.host,[\s\S]*?TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE/u,
 );
-assert.match(
-  verifierConfig,
-  /TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER[\s\S]*?TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE/u,
-);
+assert.doesNotMatch(verifierConfig, /SESSION_POOLER|pooler\.supabase\.com/u);
+assert.match(productionTunnel, /db\.xzztugbgtulptnbpoelr\.supabase\.co/u);
+assert.match(productionTunnel, /local_port" == '25432' \|\| "\$local_port" == '5432'/u);
+assert.match(productionTunnel, /StrictHostKeyChecking=yes/u);
+assert.match(productionTunnel, /ExitOnForwardFailure=yes/u);
+assert.match(productionTunnel, /127\.0\.0\.1:\$local_port:\$database_host:5432/u);
 
 assert.match(provision, /PRODUCTION_PROJECT_REF/u);
 assert.match(provision, /xzztugbgtulptnbpoelr/u);

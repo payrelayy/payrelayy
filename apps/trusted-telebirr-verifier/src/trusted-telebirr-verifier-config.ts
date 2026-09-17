@@ -35,10 +35,6 @@ export const TRUSTED_TELEBIRR_VERIFIER_SUPABASE_CA_FILE =
   '/run/configs/supabase_ca_certificate' as const;
 export const TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE =
   'fetanagent_telebirr_shadow_verifier_runtime' as const;
-export const TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST =
-  'aws-0-eu-west-1.pooler.supabase.com' as const;
-export const TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER =
-  `${TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE}.${TRUSTED_TELEBIRR_VERIFIER_PRODUCTION_PROJECT_REFERENCE}` as const;
 export const TELEBIRR_SHADOW_VERIFIER_DATABASE_URL_FILE =
   '/run/secrets/telebirr_shadow_verifier_database_url' as const;
 export const TELEBIRR_SHADOW_VERIFIER_PIN_MANIFEST_FILE =
@@ -529,18 +525,10 @@ export function loadTelebirrShadowVerifierConfig(
     ) {
       throw new Error();
     }
-    const runtimeHost =
-      deploymentTarget === 'production'
-        ? TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_HOST
-        : databaseTarget.host;
-    const runtimeUser =
-      deploymentTarget === 'production'
-        ? TELEBIRR_SHADOW_VERIFIER_PRODUCTION_SESSION_POOLER_USER
-        : TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE;
     const connectionWithoutCa = connectionFromUrl(
       guardedText(readGuarded(databaseFile, dependencies, 'secret')),
-      runtimeHost,
-      runtimeUser,
+      databaseTarget.host,
+      TELEBIRR_SHADOW_VERIFIER_DATABASE_ROLE,
     );
     const pinnedKeys = pinsFromManifest(
       guardedText(readGuarded(pinFile, dependencies, 'public_config')),

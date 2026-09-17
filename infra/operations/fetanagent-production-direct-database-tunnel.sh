@@ -16,7 +16,10 @@ fetanagent_open_production_direct_database_tunnel() {
   [[ "$(stat -c '%a' "$protected/known-hosts")" == '600' ]] || return 2
   [[ "$vm_host" =~ ^[A-Za-z0-9.-]+$ ]] || return 2
   [[ "$database_host" == 'db.xzztugbgtulptnbpoelr.supabase.co' ]] || return 2
-  [[ "$local_port" == '25432' ]] || return 2
+  # The long-lived verifier uses the collision-resistant high port. The isolated one-time
+  # shadow container uses 5432 so its pinned direct-database URL stays identical to production;
+  # that container resolves the exact database hostname to this loopback listener only.
+  [[ "$local_port" == '25432' || "$local_port" == '5432' ]] || return 2
   if (exec 3<>"/dev/tcp/127.0.0.1/$local_port") 2>/dev/null; then
     exec 3>&-
     exec 3<&-

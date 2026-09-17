@@ -22,7 +22,7 @@ const productionDatabaseUrl =
 const shadowDatabaseUrl =
   'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const productionShadowDatabaseUrl =
-  'postgresql://fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr:synthetic-password-123456@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+  'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full';
 const caCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n-----END CERTIFICATE-----\n`;
 const paddedCaCertificate = `-----BEGIN CERTIFICATE-----\n${'A'.repeat(64)}\n${'A'.repeat(11)}=\n-----END CERTIFICATE-----\n`;
 
@@ -428,7 +428,7 @@ describe('TeleBirr shadow verifier configuration', () => {
     });
   });
 
-  it('uses only the exact production session-pooler route for the one-time shadow runtime', () => {
+  it('uses only the exact production direct-database route for the one-time shadow runtime', () => {
     const productionEnvironment = {
       ...shadowEnvironment,
       TELEBIRR_SHADOW_VERIFIER_DEPLOYMENT_TARGET: 'production',
@@ -445,18 +445,20 @@ describe('TeleBirr shadow verifier configuration', () => {
       projectReference: 'xzztugbgtulptnbpoelr',
       connection: {
         database: 'postgres',
-        host: 'aws-0-eu-west-1.pooler.supabase.com',
+        host: 'db.xzztugbgtulptnbpoelr.supabase.co',
         port: 5432,
-        user: 'fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr',
+        user: 'fetanagent_telebirr_shadow_verifier_runtime',
       },
     });
 
     for (const rejectedUrl of [
-      'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
       'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
       'postgresql://fetanagent_telebirr_shadow_verifier_runtime.wrongprojectref00000:synthetic-password-123456@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
       'postgresql://fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full',
       'postgresql://fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr:synthetic-password-123456@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=verify-full',
+      'postgresql://fetanagent_telebirr_shadow_verifier_runtime.xzztugbgtulptnbpoelr:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+      'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.wrongprojectref00000.supabase.co:5432/postgres?sslmode=verify-full',
+      'postgresql://fetanagent_telebirr_shadow_verifier_runtime:synthetic-password-123456@db.xzztugbgtulptnbpoelr.supabase.co:6543/postgres?sslmode=verify-full',
     ]) {
       expect(() =>
         loadTelebirrShadowVerifierConfig(

@@ -56,7 +56,7 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          '🔎 Live 25 ETB TeleBirr pilot — review only',
+          '🔎 TeleBirr receiver — review only',
           '',
           'Receiver:',
           `👤 Name: ${result.receiverAccountHolderName}`,

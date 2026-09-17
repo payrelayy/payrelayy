@@ -355,7 +355,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(JSON.stringify(calls)).not.toContain('must-not-be-opened');
   });
 
-  it('opens one non-submittable 25 ETB receiver review only when its dedicated gate and database epoch are live', async () => {
+  it('opens a non-submittable 25 ETB receiver review with payment authorization disabled', async () => {
     const protectedReceiver = protectReceiverAccountReference(
       {
         provider: 'telebirr',
@@ -390,7 +390,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
                 receiver_account_reference_ciphertext: protectedReceiver.ciphertext,
                 receiver_account_reference_fingerprint: protectedReceiver.fingerprint,
                 receiver_account_masked: protectedReceiver.masked,
-                payments_enabled: true,
+                payments_enabled: false,
+                receiver_review_enabled: true,
                 request_replayed: false,
               },
             ],
@@ -422,6 +423,62 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       acceptsPayments: false,
     });
   });
+
+  it.each([
+    { payments_enabled: false, receiver_review_enabled: false },
+    { payments_enabled: false, receiver_review_enabled: undefined },
+    { payments_enabled: false, receiver_review_enabled: 'true' },
+    { payments_enabled: true, receiver_review_enabled: true },
+  ])(
+    'keeps review masked when the no-money disclosure contract is not exact: %j',
+    async (flags) => {
+      const database: TelegramPlayerActionDatabase = {
+        async query(query) {
+          if (query.includes('record_public_telegram_action_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-09-17T07:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('prepare_telegram_telebirr_destination')) {
+            expect(query).toContain('as receiver_review_enabled');
+            return {
+              rows: [
+                {
+                  provider_code: 'telebirr',
+                  receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                  receiver_account_holder_name: 'Demo Receiver',
+                  receiver_account_reference_ciphertext: 'must-not-be-decrypted',
+                  receiver_account_reference_fingerprint: 'must-not-be-decrypted',
+                  receiver_account_masked: '***0042',
+                  request_replayed: false,
+                  ...flags,
+                },
+              ],
+            };
+          }
+          throw new Error('unexpected statement');
+        },
+        async end() {},
+      };
+      const action: TelegramPrivateActionEnvelope = {
+        ...rootAction,
+        kind: 'telebirr_deposit_destination_command',
+        playerId: 'PLAYER-DEMO-42',
+      };
+      await expect(
+        createPostgresTelegramPlayerActionRuntime(receiverReviewActionConfig, database).handle(
+          action,
+          Buffer.from(JSON.stringify(action)),
+        ),
+      ).resolves.toMatchObject({ outcome: 'telebirr_deposit_preview', acceptsPayments: false });
+    },
+  );
 
   it('opens the protected receiver only when both database and API gates are live', async () => {
     const protectedReceiver = protectReceiverAccountReference(

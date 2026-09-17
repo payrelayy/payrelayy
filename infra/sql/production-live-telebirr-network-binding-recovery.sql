@@ -55,15 +55,27 @@ with binding_guard as materialized (
    where routine.oid = pg_catalog.to_regprocedure(
      'app.reject_private_live_telebirr_network_retry_mutation()'
    )
-), recovery_function as materialized (
+), recovery_digest_v2 as materialized (
+  select routine.*
+    from pg_catalog.pg_proc routine
+   where routine.oid = pg_catalog.to_regprocedure(
+     'app.private_live_telebirr_network_binding_recovery_digest_v2(uuid,uuid,uuid,text,uuid,uuid,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'
+   )
+), predecessor_recovery_function as materialized (
   select routine.*
     from pg_catalog.pg_proc routine
    where routine.oid = pg_catalog.to_regprocedure(
      'app.recover_private_live_telebirr_network_retry_binding(uuid,uuid,bigint,uuid,text)'
    )
+), recovery_function_v2 as materialized (
+  select routine.*
+    from pg_catalog.pg_proc routine
+   where routine.oid = pg_catalog.to_regprocedure(
+     'app.recover_private_live_telebirr_network_retry_binding_v2(uuid,uuid,bigint,uuid,text)'
+   )
 )
 select (select count(*) from supabase_migrations.schema_migrations migration
-         where migration.version = '20260917220932') = 1
+         where migration.version = '20260918002000') = 1
    and (select count(*) from binding_guard) = 1
    and (select pg_catalog.bool_and(
           routine.prokind = 'f'
@@ -100,9 +112,29 @@ select (select count(*) from supabase_migrations.schema_migrations migration
                   'sha256'
                 ),
                 'hex'
-              ) = '71fe68f4d142b8cb84fdb52f174fc2e7fc782d7d707bf01bf24778e165142651'
+              ) = '4d93dceeff811a24ca7b2efb71d8739591e9e225baf2b4a45255837c68fdbe18'
         ) from mutation_guard routine)
-   and (select count(*) from recovery_function) = 1
+   and (select count(*) from recovery_digest_v2) = 1
+   and (select pg_catalog.bool_and(
+          routine.prokind = 'f'
+          and routine.prosecdef
+          and not routine.proretset
+          and routine.pronargs = 14
+          and routine.provolatile = 'i'
+          and routine.proconfig = array['search_path=pg_catalog']::text[]
+          and routine.proowner = (
+            select role.oid from pg_catalog.pg_roles role where role.rolname = 'postgres'
+          )
+          and routine.proacl = array['postgres=X/postgres']::aclitem[]
+          and pg_catalog.encode(
+                extensions.digest(
+                  pg_catalog.convert_to(routine.prosrc, 'UTF8'),
+                  'sha256'
+                ),
+                'hex'
+              ) = '5dc91392f85dd5d33420f64e6e0bd612f352364ec149379eedf1baa5e414ac9b'
+        ) from recovery_digest_v2 routine)
+   and (select count(*) from predecessor_recovery_function) = 1
    and (select pg_catalog.bool_and(
           routine.prokind = 'f'
           and routine.prosecdef
@@ -120,7 +152,26 @@ select (select count(*) from supabase_migrations.schema_migrations migration
                 ),
                 'hex'
               ) = '237330eccfa5dfde5dd6c26de8694d32d1fd701964eeb65d5ef1d9049d1584d6'
-        ) from recovery_function routine)
+        ) from predecessor_recovery_function routine)
+   and (select count(*) from recovery_function_v2) = 1
+   and (select pg_catalog.bool_and(
+          routine.prokind = 'f'
+          and routine.prosecdef
+          and routine.proretset
+          and routine.pronargs = 5
+          and routine.proconfig = array['search_path=pg_catalog']::text[]
+          and routine.proowner = (
+            select role.oid from pg_catalog.pg_roles role where role.rolname = 'postgres'
+          )
+          and routine.proacl = array['postgres=X/postgres']::aclitem[]
+          and pg_catalog.encode(
+                extensions.digest(
+                  pg_catalog.convert_to(routine.prosrc, 'UTF8'),
+                  'sha256'
+                ),
+                'hex'
+              ) = 'dfdb229faea840e7c39e273eab6d9829b2ff5032cbe10758920ff828c184c194'
+        ) from recovery_function_v2 routine)
    and (select count(*)
           from pg_catalog.pg_trigger trigger_row
          where trigger_row.tgrelid =
@@ -145,6 +196,7 @@ with candidates as materialized (
     join app.private_live_telebirr_verification_jobs source_job
       on source_job.id = job.network_retry_source_job_id
      and source_job.network_retry_source_job_id is null
+     and source_job.pilot_revision_id = :'target_pilot_revision_id'::uuid
    where job.pilot_revision_id = :'target_pilot_revision_id'::uuid
      and job.network_retry_reason_code = 'official_receipt_network_unavailable'
      and job.network_retry_request_digest ~ '^sha256:[0-9a-f]{64}$'
@@ -159,14 +211,12 @@ with candidates as materialized (
          and job.expires_at <= pg_catalog.clock_timestamp()
          and (select count(*)
                 from app.private_live_telebirr_verification_attempts attempt
-               where attempt.verification_job_id = job.id) = 1
-         and exists (
-           select 1
-             from app.private_live_telebirr_verification_attempts attempt
-            where attempt.verification_job_id = job.id
-              and attempt.attempt_number = 1
-              and attempt.expires_at <= pg_catalog.clock_timestamp()
-         )
+               where attempt.verification_job_id = job.id) = 2
+         and (select count(*)
+                from app.private_live_telebirr_verification_attempts attempt
+               where attempt.verification_job_id = job.id
+                 and attempt.attempt_number between 1 and 2
+                 and attempt.expires_at <= pg_catalog.clock_timestamp()) = 2
          and not exists (
            select 1
              from app.private_live_telebirr_verification_attempts attempt
@@ -199,13 +249,16 @@ with candidates as materialized (
            select 1 from app.private_live_telebirr_verification_outcomes outcome
             where outcome.verification_job_id = job.id
          )
+         and not exists (
+           select 1 from app.private_live_deposit_pilot_reservations reservation
+            where reservation.private_live_deposit_pilot_proof_id =
+                  job.private_live_deposit_pilot_proof_id
+         )
        )
      )
      and (select count(*)
             from app.private_live_telebirr_verification_outcomes source_outcome
-           where source_outcome.verification_job_id = source_job.id
-             and source_outcome.disposition = 'review_required'
-             and source_outcome.reason_code = 'source_unavailable') = 1
+           where source_outcome.verification_job_id = source_job.id) = 1
      and exists (
        select 1
          from app.private_live_telebirr_verification_outcomes source_outcome
@@ -287,7 +340,7 @@ select pg_catalog.jsonb_build_object(
 \gset
 
 select *
-  from app.recover_private_live_telebirr_network_retry_binding(
+  from app.recover_private_live_telebirr_network_retry_binding_v2(
     :'target_verification_job_id'::uuid,
     :'target_pilot_revision_id'::uuid,
     :'target_activation_epoch'::bigint,

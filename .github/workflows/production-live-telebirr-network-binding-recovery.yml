@@ -159,7 +159,7 @@ jobs:
               .digestRetries,
               .recoveryShapeRetries,
               .expiredRetries,
-              .singleAttemptRetries,
+              .twoAttemptRetries,
               .expiredAttemptRetries,
               .noTranscriptRetries,
               .noDeliveryRetries,
@@ -203,7 +203,7 @@ jobs:
             recoveryShapeRetries,
             expiredRetries,
             replacementAttempts,
-            singleAttemptRetries,
+            twoAttemptRetries,
             expiredAttemptRetries,
             noTranscriptRetries,
             noDeliveryRetries,
@@ -334,7 +334,7 @@ jobs:
 
           jq -e '
             .outcomeReasonCode == "exact_proof_match" and
-            .attempts == 2 and
+            .attempts == 3 and
             .assignmentTranscripts == 1 and
             .assignmentDeliveries == 1 and
             .deviceEvidence == 1 and

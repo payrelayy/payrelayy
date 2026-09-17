@@ -137,7 +137,7 @@ select pg_catalog.jsonb_build_object(
       or not summary.recovery_shape_valid
       or summary.kemer_logins <> 0
       or summary.kemer_sessions <> 0
-      or summary.attempts not between 1 and 2
+      or summary.attempts not between 2 and 3
       or summary.transcripts not between 0 and 1
       or summary.deliveries not between 0 and 1
       or summary.evidence not between 0 and 1
@@ -153,7 +153,7 @@ select pg_catalog.jsonb_build_object(
       then 'waiting'
     when summary.disposition = 'settlement_candidate'
       and summary.reason_code = 'exact_proof_match'
-      and summary.attempts = 2
+      and summary.attempts = 3
       and summary.transcripts = 1
       and summary.deliveries = 1
       and summary.evidence = 1

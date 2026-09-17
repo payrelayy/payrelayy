@@ -1,7 +1,7 @@
 # This overlay is used only for a reviewed no-money production shadow deployment. The base
 # production API defaults to the guarded live intake adapter so an operational deployment can
-# never silently downgrade a real payment. Shadow review must opt in explicitly to the dry-run
-# adapter, whose only TeleBirr write surface is the advisory shadow-proof queue.
+# never silently downgrade a real payment. Receiver review opts in explicitly to the dry-run
+# adapter and the separate review gate, which refuses all payment-proof submissions.
 services:
   api:
     environment:

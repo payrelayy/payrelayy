@@ -623,17 +623,20 @@ remain impossible.
 
 ### Required work
 
-1. Submit a fresh pilot proof through the intended Telegram flow into the dedicated authenticated
+1. After the receiver details have been reviewed, deploy the separately confirmed production
+   `shadow-intake` runtime for the exact pilot. It keeps every financial/provider switch disabled,
+   exposes no payable destination, and grants no activation epoch.
+2. Submit a fresh pilot proof through the intended Telegram flow into the dedicated authenticated
    shadow lineage. Return no internal proof/job identifier or customer tracking token; the fixed
    customer response states that no payment was verified or credited.
-2. Lease it only to the enrolled verifier device.
-3. Retrieve and authenticate the official TeleBirr observation.
-4. Recompute protected-reference, receiver, policy, database-snapshot, assignment, device, and
+3. Lease it only to the enrolled verifier device.
+4. Retrieve and authenticate the official TeleBirr observation.
+5. Recompute protected-reference, receiver, policy, database-snapshot, assignment, device, and
    outcome digests.
-5. Compare the result manually with the official TeleBirr app.
-6. Exercise rejected, review-required, provider-unavailable, duplicate, expired, and revoked-device
+6. Compare the result manually with the official TeleBirr app.
+7. Exercise rejected, review-required, provider-unavailable, duplicate, expired, and revoked-device
    paths.
-7. Confirm no claim, reservation, job, or balance change can exist.
+8. Confirm no claim, reservation, job, or balance change can exist.
 
 The repository contract for this phase is documented in
 [`telebirr-shadow-verification.md`](telebirr-shadow-verification.md). It reuses only the signed

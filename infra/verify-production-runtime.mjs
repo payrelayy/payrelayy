@@ -9,6 +9,7 @@ const read = (path) => readFile(`${repositoryRoot}/${path}`, 'utf8');
 const [
   compose,
   shadowCompose,
+  shadowIntakeCompose,
   inertCompose,
   workflow,
   helper,
@@ -28,6 +29,7 @@ const [
 ] = await Promise.all([
   read('infra/compose.production.yaml'),
   read('infra/compose.production.shadow-review.yaml'),
+  read('infra/compose.production.shadow-intake.yaml'),
   read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
@@ -118,6 +120,16 @@ assert.equal(
   'the shadow-review overlay must enable exactly one non-submittable receiver review gate',
 );
 assert.doesNotMatch(shadowCompose, /KEMERBET_|secrets:|configs:|networks:|volumes:/u);
+assert.match(shadowIntakeCompose, /^services:\s*\r?\n  api:/mu);
+assert.match(shadowIntakeCompose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
+assert.match(shadowIntakeCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/u);
+assert.equal(
+  count(shadowIntakeCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/gu),
+  1,
+  'the shadow-intake overlay must disable exactly one receiver-review gate',
+);
+assert.doesNotMatch(shadowIntakeCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
+assert.doesNotMatch(shadowIntakeCompose, /KEMERBET_|secrets:|configs:|networks:|volumes:/u);
 
 for (const invariant of [
   /profiles: \[production\]/u,
@@ -334,7 +346,7 @@ const deployJob = childBlock(runtimeJobs, 'deploy');
 const operateJob = childBlock(runtimeJobs, 'operate');
 assert.match(
   ciGate,
-  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-inert'/u,
+  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-shadow-intake' \|\| inputs\.mode == 'deploy-inert'/u,
 );
 assert.match(ciGate, /needs: validate-target/u);
 assert.match(ciGate, /actions: read/u);
@@ -347,12 +359,12 @@ assert.match(
 );
 assert.match(
   buildJob,
-  /inputs\.mode == 'plan'[\s\S]*?inputs\.mode == 'deploy'[\s\S]*?inputs\.mode == 'deploy-shadow'[\s\S]*?inputs\.mode == 'deploy-inert'[\s\S]*?needs\.validate-ci\.result == 'success'/u,
+  /inputs\.mode == 'plan'[\s\S]*?inputs\.mode == 'deploy'[\s\S]*?inputs\.mode == 'deploy-shadow'[\s\S]*?inputs\.mode == 'deploy-shadow-intake'[\s\S]*?inputs\.mode == 'deploy-inert'[\s\S]*?needs\.validate-ci\.result == 'success'/u,
 );
 assert.match(deployJob, /needs: \[validate-target, validate-ci, build\]/u);
 assert.match(
   deployJob,
-  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-inert'/u,
+  /if: inputs\.mode == 'deploy' \|\| inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-shadow-intake' \|\| inputs\.mode == 'deploy-inert'/u,
 );
 assert.match(deployJob, /actions: read/u);
 assert.match(deployJob, /node infra\/operations\/require-production-ci\.mjs/u);
@@ -384,20 +396,29 @@ assert.match(quality, /node --test infra\/operations\/require-production-ci\.tes
 assert.match(quality, /node --test infra\/operations\/verify-postgres-scram-secret\.test\.mjs/u);
 assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
 assert.match(workflow, /'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'/u);
+assert.match(
+  workflow,
+  /'deploy-shadow-intake:DEPLOY PRODUCTION SHADOW INTAKE RUNTIME - NO MONEY'/u,
+);
 assert.match(workflow, /'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'/u);
 assert.match(workflow, /confirm_telebirr_pilot_revision_id:/u);
 assert.match(workflow, /confirm_telebirr_activation_epoch:/u);
 assert.match(workflow, /Build the exact active production TeleBirr assignment manifest/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy'\s+shell: bash/u);
 assert.match(workflow, /Build the exact no-money production TeleBirr shadow assignment manifest/u);
-assert.match(workflow, /if: inputs\.mode == 'deploy-shadow'\s+shell: bash/u);
+assert.match(
+  workflow,
+  /if: inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-shadow-intake'\s+shell: bash/u,
+);
 assert.match(workflow, /Prove the complete inert production money boundary/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+shell: bash/u);
 assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
 assert.match(workflow, /runtime_deployment_mode='inert-maintenance'/u);
 assert.match(workflow, /deploy-shadow\) runtime_deployment_mode='shadow-review'/u);
+assert.match(workflow, /deploy-shadow-intake\) runtime_deployment_mode='shadow-intake'/u);
 assert.match(workflow, /runtime-deployment-mode/u);
 assert.match(workflow, /compose\.production\.shadow-review\.yaml/u);
+assert.match(workflow, /compose\.production\.shadow-intake\.yaml/u);
 assert.match(workflow, /compose\.production\.inert-maintenance\.yaml/u);
 assert.match(workflow, /production-telebirr-assignment-runtime-input\.sql/u);
 assert.match(workflow, /production-telebirr-shadow-assignment-runtime-input\.sql/u);
@@ -542,9 +563,9 @@ assert.match(
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
 assert.match(helper, /release_deployment_mode\(\)/u);
-assert.match(helper, /operational\|shadow-review\|inert-maintenance/u);
+assert.match(helper, /operational\|shadow-review\|shadow-intake\|inert-maintenance/u);
 assert.match(helper, /verify_api_financial_mode_for_release\(\)/u);
-assert.match(helper, /shadow-review\) expected='dry_run'/u);
+assert.match(helper, /shadow-review\|shadow-intake\) expected='dry_run'/u);
 assert.match(helper, /operational\|inert-maintenance\) expected='live'/u);
 assert.match(
   helper,
@@ -554,6 +575,10 @@ assert.equal(count(helper, /verify_api_financial_mode_for_release "\$release"/gu
 assert.match(
   helper,
   /compose_files\+=\(--file "\$release\/compose\.production\.shadow-review\.yaml"\)/u,
+);
+assert.match(
+  helper,
+  /compose_files\+=\(--file "\$release\/compose\.production\.shadow-intake\.yaml"\)/u,
 );
 assert.match(
   helper,
@@ -640,12 +665,13 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=32/u);
+assert.match(helper, /expected_count=33/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
 assert.match(helper, /runtime-deployment-mode/u);
 assert.match(helper, /compose\.production\.shadow-review\.yaml/u);
+assert.match(helper, /compose\.production\.shadow-intake\.yaml/u);
 assert.match(helper, /compose\.production\.inert-maintenance\.yaml/u);
 for (const protectedFile of [
   'telebirr-assignment-database-url',

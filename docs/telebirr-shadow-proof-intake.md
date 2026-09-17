@@ -90,6 +90,13 @@ financial activation are separate operations. This change performs none of them.
 apply and verify the database migration before deploying this adapter; otherwise the exact catalog
 preflight remains unready. Pilot preparation/arming requires its own reviewed operator ceremony.
 
+Production also separates receiver disclosure from shadow-proof capture. `deploy-shadow` is the
+non-submittable receiver-review mode. After that review is complete, the separately confirmed
+`deploy-shadow-intake` mode keeps `FINANCIAL_ACTIONS_MODE=dry_run`, disables full receiver
+disclosure, and permits a fresh reference to enter only this advisory shadow queue. Both modes
+require the exact armed pilot UUID, no activation epoch, and every financial/provider switch to
+remain disabled.
+
 Even after shadow observations succeed, a separate decision and authorization are required before
 enabling live payment verification or any automatic deposit. A queued shadow check is never proof
 that a payment was completed or that a Player ID was credited.

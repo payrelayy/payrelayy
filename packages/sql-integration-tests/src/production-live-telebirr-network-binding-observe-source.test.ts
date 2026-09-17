@@ -41,6 +41,8 @@ describe('production live TeleBirr network-binding observer', () => {
       'deposit_job.last_error_code is null',
       'summary.execution_jobs = 1',
       'summary.queued_jobs = 1',
+      'summary.transcripts not between 0 and summary.attempts',
+      'summary.evidence not between 0 and summary.attempts',
       "then 'queued'",
     ]) {
       expect(observerSqlSource).toContain(fragment);
@@ -72,5 +74,28 @@ describe('production live TeleBirr network-binding observer', () => {
     expect(observerSqlSource).toContain("'kemerBetLoginRoles'");
     expect(observerSqlSource).toContain("'kemerBetSessions'");
     expect(observerSqlSource).toContain("'executionEnabled'");
+    expect(observerSqlSource).toContain(
+      'summary.kemer_logins <> 0\n           or summary.kemer_sessions <> 0 as execution_enabled',
+    );
+  });
+
+  it('diagnoses the trusted verifier gap without exposing evidence contents', () => {
+    for (const fragment of [
+      "'trustedVerifierLoginState'",
+      "'trustedVerifierSessions'",
+      "'unexpectedVerifierSessions'",
+      "'financialAuthorityActive'",
+      "'verificationBoundaryLive'",
+      "'evidenceQuarantines'",
+      "'eligibleEvidenceNow'",
+      "'minimumEvidenceLeadSeconds'",
+      "then 'staged_evidence_unconsumed'",
+      "then 'trusted_verifier_login_unavailable'",
+      "then 'trusted_verifier_session_unavailable'",
+    ]) {
+      expect(observerSqlSource).toContain(fragment);
+    }
+    expect(observerSqlSource).not.toContain("'signedAssignment'");
+    expect(observerSqlSource).not.toContain("'signedObservation'");
   });
 });

@@ -31,10 +31,15 @@ test('invokes only the redacted read-only observer and emits its bounded result'
     ),
   );
   assert.ok(workflowSource.includes('.verificationState | IN('));
+  assert.ok(workflowSource.includes('.diagnosis | IN('));
+  assert.ok(workflowSource.includes('"staged_evidence_unconsumed"'));
   assert.ok(workflowSource.includes('"invalid"'));
   assert.ok(workflowSource.includes('.readOnly == true'));
   assert.ok(workflowSource.includes('.moneyMoved == false'));
   assert.ok(workflowSource.includes('tee -a "$GITHUB_STEP_SUMMARY"'));
+  assert.ok(workflowSource.includes('.kemerBetLoginRoles == 0'));
+  assert.ok(workflowSource.includes('.kemerBetSessions == 0'));
+  assert.ok(!workflowSource.includes('.depositExecutionSwitchDisabled == true'));
 });
 
 test('takes no protected identifier inputs and never enables or invokes KemerBet', () => {

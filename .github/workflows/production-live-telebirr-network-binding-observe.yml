@@ -123,7 +123,20 @@ jobs:
             (.verificationState | IN(
               "waiting", "queued", "review_required", "definite_reject", "expired", "invalid"
             )) and
+            (.diagnosis | IN(
+              "invalid",
+              "queued",
+              "terminal_non_settlement",
+              "trusted_evidence_quarantined",
+              "trusted_verifier_login_unavailable",
+              "trusted_verifier_session_unavailable",
+              "staged_evidence_unconsumed",
+              "device_evidence_missing",
+              "verification_expired",
+              "verification_waiting"
+            )) and
             (.outcomeReasonCode | IN("pending", "exact_proof_match", "non_match", "invalid")) and
+            (.trustedVerifierLoginState | IN("bounded", "disabled", "unsafe", "missing")) and
             ([
               .recentRecoveryTargets,
               .targetCount,
@@ -138,15 +151,24 @@ jobs:
               .outcomes,
               .reservations,
               .settlementReceipts,
+              .evidenceQuarantines,
+              .eligibleEvidenceNow,
+              .evidenceStagedBeforeExpiry,
+              .evidenceWithTenSecondLead,
               .depositExecutionJobs,
               .queuedDepositJobs,
+              .trustedVerifierSessions,
+              .unexpectedVerifierSessions,
               .kemerBetLoginRoles,
               .kemerBetSessions
             ] | all(type == "number" and . >= 0 and . <= 100)) and
             (.remainingSeconds | type == "number" and . >= 0 and . <= 300) and
+            (.minimumEvidenceLeadSeconds | type == "number" and . >= 0 and . <= 300) and
             ([
               .contiguousAttempts,
               .depositExecutionSwitchDisabled,
+              .financialAuthorityActive,
+              .verificationBoundaryLive,
               .executionEnabled,
               .readOnly,
               .moneyMoved
@@ -155,6 +177,7 @@ jobs:
 
           redacted_result="$(jq '{
             verificationState,
+            diagnosis,
             outcomeReasonCode,
             recentRecoveryTargets,
             targetCount,
@@ -171,9 +194,19 @@ jobs:
             outcomes,
             reservations,
             settlementReceipts,
+            evidenceQuarantines,
+            eligibleEvidenceNow,
+            evidenceStagedBeforeExpiry,
+            evidenceWithTenSecondLead,
+            minimumEvidenceLeadSeconds,
             depositExecutionJobs,
             queuedDepositJobs,
             depositExecutionSwitchDisabled,
+            trustedVerifierLoginState,
+            trustedVerifierSessions,
+            unexpectedVerifierSessions,
+            financialAuthorityActive,
+            verificationBoundaryLive,
             kemerBetLoginRoles,
             kemerBetSessions,
             executionEnabled,
@@ -185,7 +218,6 @@ jobs:
           jq -e '
             .readOnly == true and
             .moneyMoved == false and
-            .depositExecutionSwitchDisabled == true and
             .kemerBetLoginRoles == 0 and
             .kemerBetSessions == 0 and
             .executionEnabled == false

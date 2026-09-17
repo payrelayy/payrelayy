@@ -79,6 +79,24 @@ with recent_recovery_targets as materialized (
   select evidence.*
     from app.private_live_telebirr_device_evidence_staging evidence
     join attempts attempt on attempt.id = evidence.verification_attempt_id
+), evidence_timing as materialized (
+  select count(*) filter (
+           where evidence.staged_at < attempt.expires_at
+         )::integer as evidence_staged_before_expiry,
+         count(*) filter (
+           where evidence.staged_at <= attempt.expires_at - interval '10 seconds'
+         )::integer as evidence_with_ten_second_lead,
+         coalesce(least(
+           300,
+           greatest(
+             0,
+             floor(min(extract(epoch from (
+               attempt.expires_at - evidence.staged_at
+             ))))::integer
+           )
+         ), 0) as minimum_evidence_lead_seconds
+    from device_evidence evidence
+    join attempts attempt on attempt.id = evidence.verification_attempt_id
 ), observations as materialized (
   select observation.*
     from app.private_live_telebirr_observation_transcripts observation
@@ -97,6 +115,35 @@ with recent_recovery_targets as materialized (
   select receipt.*
     from app.private_live_telebirr_settlement_receipts receipt
     join outcomes outcome on outcome.id = receipt.verification_outcome_id
+), evidence_quarantines as materialized (
+  select quarantine.*
+    from app.private_live_telebirr_verifier_evidence_quarantine quarantine
+    join attempts attempt on attempt.id = quarantine.verification_attempt_id
+), eligible_evidence_now as materialized (
+  select evidence.observation_body_digest
+    from device_evidence evidence
+    join attempts attempt on attempt.id = evidence.verification_attempt_id
+    join target job on job.id = attempt.verification_job_id
+    join app.private_live_deposit_pilot_revisions pilot
+      on pilot.id = job.pilot_revision_id
+   where pilot.status = 'armed'
+     and pg_catalog.clock_timestamp() >= pilot.active_from
+     and pg_catalog.clock_timestamp() < pilot.expires_at
+     and pg_catalog.clock_timestamp() >= job.not_before
+     and pg_catalog.clock_timestamp() < job.expires_at
+     and pg_catalog.clock_timestamp() < attempt.expires_at
+     and evidence.observed_at >= attempt.issued_at
+     and evidence.observed_at < attempt.expires_at
+     and not exists (
+       select 1
+         from outcomes outcome
+        where outcome.verification_attempt_id = attempt.id
+     )
+     and not exists (
+       select 1
+         from evidence_quarantines quarantine
+        where quarantine.verification_attempt_id = attempt.id
+     )
 ), deposit_execution_jobs as materialized (
   select deposit_job.*
     from app.deposit_jobs deposit_job
@@ -115,6 +162,16 @@ with recent_recovery_targets as materialized (
   select feature_switch.mode
     from app.feature_switches feature_switch
    where feature_switch.feature_key = 'deposit_execution'
+), live_verification_switches as materialized (
+  select feature_switch.feature_key
+    from app.feature_switches feature_switch
+   where feature_switch.feature_key in (
+     'deposit_execution',
+     'payment_verification',
+     'private_live_deposit_pilot',
+     'telebirr_authoritative_verification'
+   )
+     and feature_switch.mode = 'live'
 ), kemer_login_roles as materialized (
   select role.oid
     from pg_catalog.pg_roles role
@@ -129,6 +186,11 @@ with recent_recovery_targets as materialized (
      'fetanagent_deposit_executor',
      'fetanagent_deposit_executor_runtime'
    )
+), trusted_verifier_sessions as materialized (
+  select activity.pid, activity.application_name
+    from pg_catalog.pg_stat_activity activity
+   where activity.usename = 'fetanagent_trusted_telebirr_verifier_runtime'
+     and activity.pid <> pg_catalog.pg_backend_pid()
 ), summary as materialized (
   select least(
            (select count(*)::integer from recent_recovery_targets),
@@ -147,6 +209,11 @@ with recent_recovery_targets as materialized (
          (select count(*)::integer from outcomes) as outcomes,
          (select count(*)::integer from reservations) as reservations,
          (select count(*)::integer from settlement_receipts) as settlements,
+         (select count(*)::integer from evidence_quarantines) as quarantines,
+         (select count(*)::integer from eligible_evidence_now) as eligible_evidence,
+         evidence_timing.evidence_staged_before_expiry,
+         evidence_timing.evidence_with_ten_second_lead,
+         evidence_timing.minimum_evidence_lead_seconds,
          (select count(*)::integer from deposit_execution_jobs) as execution_jobs,
          (select count(*)::integer from queued_deposit_jobs) as queued_jobs,
          (select count(*)::integer from deposit_execution_switch) as switch_count,
@@ -156,6 +223,56 @@ with recent_recovery_targets as materialized (
          ), false) as switch_disabled,
          (select count(*)::integer from kemer_login_roles) as kemer_logins,
          (select count(*)::integer from kemer_sessions) as kemer_sessions,
+         coalesce((
+           select case
+             when role.rolcanlogin
+              and not role.rolinherit
+              and not role.rolsuper
+              and not role.rolcreatedb
+              and not role.rolcreaterole
+              and not role.rolreplication
+              and not role.rolbypassrls
+              and role.rolconnlimit = 1
+              and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '5 minutes'
+              and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '24 hours 5 minutes'
+              and (select count(*)
+                     from pg_catalog.pg_auth_members membership
+                    where membership.member = role.oid) = 1
+              and exists (
+                select 1
+                  from pg_catalog.pg_auth_members membership
+                  join pg_catalog.pg_roles granted_role
+                    on granted_role.oid = membership.roleid
+                 where membership.member = role.oid
+                   and granted_role.rolname = 'fetanagent_trusted_telebirr_verifier'
+                   and membership.inherit_option
+                   and not membership.set_option
+                   and not membership.admin_option
+              ) then 'bounded'
+             when not role.rolcanlogin
+              and not role.rolinherit
+              and not role.rolsuper
+              and not role.rolcreatedb
+              and not role.rolcreaterole
+              and not role.rolreplication
+              and not role.rolbypassrls
+              and role.rolconnlimit = 1
+              and auth.rolpassword is null then 'disabled'
+             else 'unsafe'
+           end
+             from pg_catalog.pg_roles role
+             join pg_catalog.pg_authid auth on auth.oid = role.oid
+            where role.rolname = 'fetanagent_trusted_telebirr_verifier_runtime'
+         ), 'missing') as verifier_login_state,
+         (select count(*)::integer from trusted_verifier_sessions) as verifier_sessions,
+         (select count(*)::integer
+            from trusted_verifier_sessions verifier_session
+           where verifier_session.application_name is distinct from
+                 'fetanagent_trusted_telebirr_verifier') as unexpected_verifier_sessions,
+         app.current_private_trusted_telebirr_activation_epoch() is not null
+           as financial_authority_active,
+         (select count(*)::integer from live_verification_switches) = 4
+           as verification_switch_boundary_live,
          (select outcome.disposition from outcomes outcome limit 1) as disposition,
          (select outcome.reason_code from outcomes outcome limit 1) as reason_code,
          (select job.expires_at from target job limit 1) as expires_at,
@@ -171,30 +288,31 @@ with recent_recovery_targets as materialized (
            ) from target job
          ), false) as recovery_shape_valid
     from attempt_summary
+    cross join evidence_timing
 ), classified as materialized (
   select summary.*,
-         summary.switch_count <> 1
-           or not summary.switch_disabled
-           or summary.kemer_logins <> 0
+         summary.kemer_logins <> 0
            or summary.kemer_sessions <> 0 as execution_enabled,
          case
            when summary.recent_recovery_targets <> 1
              or summary.target_count <> 1
              or not summary.recovery_shape_valid
              or summary.switch_count <> 1
-             or not summary.switch_disabled
              or summary.kemer_logins <> 0
              or summary.kemer_sessions <> 0
              or summary.attempts not between 2 and 100
              or summary.expired_attempts + summary.active_attempts <> summary.attempts
              or not summary.contiguous_attempts
-             or summary.transcripts not between 0 and 1
-             or summary.deliveries not between 0 and 1
-             or summary.evidence not between 0 and 1
+             or summary.transcripts not between 0 and summary.attempts
+             or summary.deliveries not between 0 and summary.attempts
+             or summary.evidence not between 0 and summary.attempts
              or summary.observations not between 0 and 1
              or summary.outcomes not between 0 and 1
              or summary.reservations not between 0 and 1
              or summary.settlements not between 0 and 1
+             or summary.quarantines not between 0 and summary.evidence
+             or summary.eligible_evidence not between 0 and summary.evidence
+             or summary.evidence_staged_before_expiry <> summary.evidence
              or summary.execution_jobs not between 0 and 1
              or summary.queued_jobs not between 0 and 1
              then 'invalid'
@@ -236,7 +354,45 @@ with recent_recovery_targets as materialized (
              and summary.queued_jobs = 0
              then 'definite_reject'
            else 'invalid'
-         end as verification_state
+         end as verification_state,
+         case
+           when summary.recent_recovery_targets <> 1
+             or summary.target_count <> 1
+             or not summary.recovery_shape_valid
+             or summary.switch_count <> 1
+             or summary.kemer_logins <> 0
+             or summary.kemer_sessions <> 0
+             or summary.attempts not between 2 and 100
+             or not summary.contiguous_attempts
+             then 'invalid'
+           when summary.outcomes = 1
+             and summary.disposition = 'settlement_candidate'
+             and summary.reason_code = 'exact_proof_match'
+             and summary.execution_jobs = 1
+             and summary.queued_jobs = 1
+             then 'queued'
+           when summary.outcomes = 1 then 'terminal_non_settlement'
+           when summary.quarantines > 0 then 'trusted_evidence_quarantined'
+           when summary.evidence > 0
+             and summary.observations = 0
+             and summary.verifier_login_state <> 'bounded'
+             then 'trusted_verifier_login_unavailable'
+           when summary.evidence > 0
+             and summary.observations = 0
+             and summary.verifier_sessions = 0
+             then 'trusted_verifier_session_unavailable'
+           when summary.evidence > 0
+             and summary.observations = 0
+             and summary.expires_at <= pg_catalog.clock_timestamp()
+             then 'staged_evidence_unconsumed'
+           when summary.transcripts > 0
+             and summary.evidence = 0
+             and summary.expires_at <= pg_catalog.clock_timestamp()
+             then 'device_evidence_missing'
+           when summary.expires_at <= pg_catalog.clock_timestamp()
+             then 'verification_expired'
+           else 'verification_waiting'
+         end as diagnosis
     from summary
 )
 select pg_catalog.jsonb_build_object(
@@ -246,6 +402,7 @@ select pg_catalog.jsonb_build_object(
   'recentRecoveryTargets', classified.recent_recovery_targets,
   'targetCount', classified.target_count,
   'verificationState', classified.verification_state,
+  'diagnosis', classified.diagnosis,
   'outcomeReasonCode', case
     when classified.outcomes = 0 then 'pending'
     when classified.reason_code = 'exact_proof_match' then 'exact_proof_match'
@@ -270,9 +427,21 @@ select pg_catalog.jsonb_build_object(
   'outcomes', classified.outcomes,
   'reservations', classified.reservations,
   'settlementReceipts', classified.settlements,
+  'evidenceQuarantines', classified.quarantines,
+  'eligibleEvidenceNow', classified.eligible_evidence,
+  'evidenceStagedBeforeExpiry', classified.evidence_staged_before_expiry,
+  'evidenceWithTenSecondLead', classified.evidence_with_ten_second_lead,
+  'minimumEvidenceLeadSeconds', classified.minimum_evidence_lead_seconds,
   'depositExecutionJobs', classified.execution_jobs,
   'queuedDepositJobs', classified.queued_jobs,
   'depositExecutionSwitchDisabled', classified.switch_disabled,
+  'trustedVerifierLoginState', classified.verifier_login_state,
+  'trustedVerifierSessions', classified.verifier_sessions,
+  'unexpectedVerifierSessions', classified.unexpected_verifier_sessions,
+  'financialAuthorityActive', classified.financial_authority_active,
+  'verificationBoundaryLive',
+    classified.verification_switch_boundary_live
+      and classified.financial_authority_active,
   'kemerBetLoginRoles', classified.kemer_logins,
   'kemerBetSessions', classified.kemer_sessions,
   'executionEnabled', classified.execution_enabled,

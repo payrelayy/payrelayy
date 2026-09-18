@@ -471,6 +471,27 @@ select pg_catalog.jsonb_build_object(
     when classified.outcomes = 1 then 'non_match'
     else 'invalid'
   end,
+  'outcomeDetailCode', case
+    when classified.outcomes = 0 then 'pending'
+    when classified.disposition = 'settlement_candidate'
+      and classified.reason_code = 'exact_proof_match' then 'exact_proof_match'
+    when classified.disposition = 'review_required'
+      and classified.reason_code in (
+        'invalid_assessment_input', 'database_facts_unbound',
+        'policy_unavailable', 'policy_contract_mismatch',
+        'eligibility_unavailable', 'eligibility_ambiguous',
+        'duplicate_check_unavailable', 'duplicate_check_ambiguous',
+        'source_unavailable', 'source_ambiguous', 'source_uncertain',
+        'source_unsupported', 'observation_version_unsupported',
+        'parser_uncertain', 'receipt_pending', 'receipt_status_unknown',
+        'transaction_type_unsupported', 'receiver_history_gap',
+        'receiver_history_overlap', 'receiver_history_unavailable',
+        'receiver_match_basis_unsupported', 'amount_out_of_range',
+        'receipt_too_old', 'receipt_after_submission', 'future_skew_exceeded'
+      ) then classified.reason_code
+    when classified.disposition = 'definite_reject' then 'definite_reject'
+    else 'invalid'
+  end,
   'remainingSeconds', coalesce(greatest(
     0,
     floor(extract(epoch from (

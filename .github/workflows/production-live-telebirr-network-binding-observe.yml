@@ -136,6 +136,20 @@ jobs:
               "verification_waiting"
             )) and
             (.outcomeReasonCode | IN("pending", "exact_proof_match", "non_match", "invalid")) and
+            (.outcomeDetailCode | IN(
+              "pending", "exact_proof_match", "definite_reject", "invalid",
+              "invalid_assessment_input", "database_facts_unbound",
+              "policy_unavailable", "policy_contract_mismatch",
+              "eligibility_unavailable", "eligibility_ambiguous",
+              "duplicate_check_unavailable", "duplicate_check_ambiguous",
+              "source_unavailable", "source_ambiguous", "source_uncertain",
+              "source_unsupported", "observation_version_unsupported",
+              "parser_uncertain", "receipt_pending", "receipt_status_unknown",
+              "transaction_type_unsupported", "receiver_history_gap",
+              "receiver_history_overlap", "receiver_history_unavailable",
+              "receiver_match_basis_unsupported", "amount_out_of_range",
+              "receipt_too_old", "receipt_after_submission", "future_skew_exceeded"
+            )) and
             (.trustedVerifierLoginState | IN("bounded", "disabled", "unsafe", "missing")) and
             ([
               .recentRecoveryTargets,
@@ -179,6 +193,7 @@ jobs:
             verificationState,
             diagnosis,
             outcomeReasonCode,
+            outcomeDetailCode,
             recentRecoveryTargets,
             targetCount,
             remainingSeconds,

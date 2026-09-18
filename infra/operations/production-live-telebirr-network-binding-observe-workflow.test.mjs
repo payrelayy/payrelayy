@@ -2,12 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workflowSource = await readFile(
-  new URL(
+const [workflowSource, observerSql] = await Promise.all(
+  [
     '../../.github/workflows/production-live-telebirr-network-binding-observe.yml',
-    import.meta.url,
-  ),
-  'utf8',
+    '../sql/production-live-telebirr-network-binding-observe.sql',
+  ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')),
 );
 
 test('requires an exact passing main commit and protected production environment', () => {
@@ -32,6 +31,12 @@ test('invokes only the redacted read-only observer and emits its bounded result'
   );
   assert.ok(workflowSource.includes('.verificationState | IN('));
   assert.ok(workflowSource.includes('.diagnosis | IN('));
+  assert.ok(workflowSource.includes('.outcomeDetailCode | IN('));
+  assert.ok(workflowSource.includes('"receipt_too_old"'));
+  assert.ok(workflowSource.includes('"reference_mismatch"') === false);
+  assert.ok(observerSql.includes("'outcomeDetailCode', case"));
+  assert.ok(observerSql.includes("when classified.disposition = 'review_required'"));
+  assert.ok(observerSql.includes('then classified.reason_code'));
   assert.ok(workflowSource.includes('"staged_evidence_unconsumed"'));
   assert.ok(workflowSource.includes('"invalid"'));
   assert.ok(workflowSource.includes('.readOnly == true'));

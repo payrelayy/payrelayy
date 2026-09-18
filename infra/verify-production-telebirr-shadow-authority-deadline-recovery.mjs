@@ -24,6 +24,8 @@ assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/u);
 assert.match(workflow, /RECOVER TELEBIRR SHADOW AUTHORITY DEADLINE - 12H NO MONEY/u);
+assert.doesNotMatch(workflow, /confirm_source_shadow_verification_job_id/u);
+assert.doesNotMatch(workflow, /SOURCE_SHADOW_VERIFICATION_JOB_ID/u);
 assert.match(workflow, /require-production-ci\.mjs/u);
 assert.match(workflow, /environment: production/u);
 assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.PRODUCTION_PROJECT_REF \}\}/u);
@@ -39,6 +41,9 @@ assert.doesNotMatch(workflow, /update app\.feature_switches/u);
 
 assert.match(operation, /begin transaction isolation level read committed/u);
 assert.match(operation, /current_user = 'postgres' and session_user = 'postgres'/u);
+assert.match(operation, /proof\.verification_job_id::text as source_shadow_verification_job_id/u);
+assert.match(operation, /exact_source_proof_ready/u);
+assert.doesNotMatch(operation, /\\getenv source_shadow_verification_job_id/u);
 assert.match(operation, /retry_private_telebirr_shadow_after_authority_deadline_fix\(/u);
 assert.match(operation, /source_recovery_authority_deadline_retry_no_credit/u);
 assert.match(operation, /private_telebirr_shadow_authority_deadline_retry_is_valid\(/u);

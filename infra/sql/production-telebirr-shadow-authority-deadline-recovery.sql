@@ -1,7 +1,6 @@
 \set ON_ERROR_STOP on
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv source_shadow_proof_request_id SOURCE_SHADOW_PROOF_REQUEST_ID
-\getenv source_shadow_verification_job_id SOURCE_SHADOW_VERIFICATION_JOB_ID
 \getenv pilot_revision_id PILOT_REVISION_ID
 \getenv retry_request_key AUTHORITY_DEADLINE_RETRY_REQUEST_KEY
 \getenv reviewed_main_commit_sha REVIEWED_MAIN_COMMIT_SHA
@@ -32,8 +31,6 @@ select current_user = 'postgres' and session_user = 'postgres'
 
 select :'source_shadow_proof_request_id'
          ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-   and :'source_shadow_verification_job_id'
-         ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
    and :'pilot_revision_id'
          ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
    and :'retry_request_key'
@@ -46,6 +43,29 @@ select :'source_shadow_proof_request_id'
   \warn 'The exact authority-deadline retry identifiers are invalid.'
   select 1 / 0 as rejected;
 \endif
+
+select pg_catalog.count(*) = 1 as exact_source_proof_ready
+  from app.private_telebirr_shadow_proof_requests proof
+ where proof.id = :'source_shadow_proof_request_id'::uuid
+   and proof.pilot_revision_id = :'pilot_revision_id'::uuid
+   and proof.proof_status = 'verification_queued'
+   and proof.provider_code = 'telebirr'
+   and proof.recovery_request_key is not null
+   and proof.recovery_request_digest is not null
+   and proof.recovery_reason_code = 'expired_pilot_recovery_no_credit'
+   and proof.authority_deadline_retry_source_id is null
+\gset
+\if :exact_source_proof_ready
+\else
+  \warn 'The exact immutable source-recovery shadow proof is unavailable.'
+  select 1 / 0 as rejected;
+\endif
+
+select proof.verification_job_id::text as source_shadow_verification_job_id
+  from app.private_telebirr_shadow_proof_requests proof
+ where proof.id = :'source_shadow_proof_request_id'::uuid
+   and proof.pilot_revision_id = :'pilot_revision_id'::uuid
+\gset
 
 select pg_catalog.jsonb_build_object(
          'depositIntents', (select count(*) from app.deposit_intents),

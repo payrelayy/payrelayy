@@ -12,6 +12,7 @@ import { registerCompanionDevicePairingSqlTests } from './companion-device-pairi
 import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
+import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
@@ -9683,6 +9684,7 @@ registerCompanionExactFiveLookupSqlTests(
   () => ownerAdminId,
 );
 registerDryRunDepositProofIntakeSqlTests(() => client);
+registerExpiredLiveTelebirrEvidenceRecoverySqlTests(() => client);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
 registerOwnerReceiverAccountControlSqlTests(

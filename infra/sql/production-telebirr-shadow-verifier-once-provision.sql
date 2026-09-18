@@ -682,12 +682,18 @@ with locked_feature_switches as materialized (
          nullif(:'source_live_verification_job_id', 'not-applicable')::uuid
      and job.expires_at <= pg_catalog.clock_timestamp()
      and proof.submitted_at < pg_catalog.clock_timestamp()
-      and pg_catalog.clock_timestamp() < proof.submitted_at + case
-        when shadow_proof.runtime_retry_request_key =
-             nullif(:'recovery_request_key', 'not-applicable')::uuid
-          then interval '36 hours'
-        else interval '24 hours'
-      end
+     and (
+       pg_catalog.clock_timestamp() < proof.submitted_at + case
+         when shadow_proof.runtime_retry_request_key =
+              nullif(:'recovery_request_key', 'not-applicable')::uuid
+           then interval '36 hours'
+         else interval '24 hours'
+       end
+       or app.private_live_telebirr_source_recovery_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
+     )
      and shadow_proof.expires_at > pg_catalog.clock_timestamp() + interval '60 seconds'
      and shadow_proof.proof_status = 'verification_queued'
      and (

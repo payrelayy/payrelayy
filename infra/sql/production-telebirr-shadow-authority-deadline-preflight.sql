@@ -209,6 +209,12 @@ with authority_at as materialized (
       ) from target_proof proof
     ), false) as source_recovery_valid,
     coalesce((
+      select app.private_live_telebirr_source_recovery_history_is_valid(
+        proof.id,
+        proof.recovery_request_key
+      ) from target_proof proof
+    ), false) as source_recovery_history_valid,
+    coalesce((
       select recovery.recovery_request_digest is not null
          and recovery.replacement_shadow_verification_job_id = proof.verification_job_id
         from target_recovery recovery
@@ -251,6 +257,10 @@ with authority_at as materialized (
         from target_pilot pilot cross join authority_at
     ), false) as pilot_twelve_hours,
     coalesce((
+      select pilot.expires_at > authority_at.value + interval '5 minutes'
+        from target_pilot pilot cross join authority_at
+    ), false) as pilot_assignment_window,
+    coalesce((
       select pilot.configuration_digest = proof.pilot_configuration_digest
         from target_pilot pilot
         join target_proof proof on true
@@ -265,6 +275,10 @@ with authority_at as materialized (
         from target_profile profile cross join authority_at
     ), false) as profile_twelve_hours,
     coalesce((
+      select profile.valid_until > authority_at.value + interval '5 minutes'
+        from target_profile profile cross join authority_at
+    ), false) as profile_assignment_window,
+    coalesce((
       select profile.pilot_revision_id = pilot.id
          and profile.payment_provider_id = proof.payment_provider_id
          and profile.pilot_configuration_digest = pilot.configuration_digest
@@ -276,6 +290,9 @@ with authority_at as materialized (
     (select count(*) from active_enrollments enrollment cross join authority_at
       where enrollment.valid_until >= authority_at.value + interval '12 hours') = 1
       as enrollment_twelve_hours,
+    (select count(*) from active_enrollments enrollment cross join authority_at
+      where enrollment.valid_until > authority_at.value + interval '5 minutes') = 1
+      as enrollment_assignment_window,
     (select count(*) from active_signers) = 1 as signer_current,
     (select count(*) from active_signers signer cross join authority_at
       where signer.valid_until >= authority_at.value + interval '12 hours') = 1
@@ -330,7 +347,7 @@ with authority_at as materialized (
            'recovery_present', true,
            'proof_shape_exact', true,
            'proof_expired', true,
-           'source_recovery_valid', true,
+           'source_recovery_history_valid', true,
            'source_recovery_shape_exact', true,
            'attempts_bounded', true,
            'attempt_history_present', true,
@@ -340,13 +357,13 @@ with authority_at as materialized (
            'no_shadow_outcome', true,
            'no_provider_evidence', true,
            'pilot_current', true,
-           'pilot_twelve_hours', true,
+           'pilot_assignment_window', true,
            'pilot_binding_valid', true,
            'profile_current', true,
-           'profile_twelve_hours', true,
+           'profile_assignment_window', true,
            'profile_binding_valid', true,
            'enrollment_current', true,
-           'enrollment_twelve_hours', true,
+           'enrollment_assignment_window', true,
            'signer_current', true,
            'signer_twelve_hours', true,
            'switches_safe', true,

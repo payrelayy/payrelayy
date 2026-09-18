@@ -43,7 +43,7 @@ begin
      and feature_switch.settings = '{}'::jsonb
    ) or (
      feature_switch.feature_key = 'private_live_deposit_pilot'
-     and feature_switch.mode = 'dry_run'
+     and feature_switch.mode in ('disabled', 'dry_run')
    );
 
   select pg_catalog.count(*)::integer

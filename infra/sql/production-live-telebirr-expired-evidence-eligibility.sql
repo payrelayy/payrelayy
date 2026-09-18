@@ -175,16 +175,79 @@ with target as materialized (
               on activation_epoch.epoch = activation_control.current_epoch
             join target job
               on job.pilot_revision_id = activation_epoch.pilot_revision_id
+            join app.private_live_deposit_pilot_revisions pilot
+              on pilot.id = job.pilot_revision_id
+            join latest_evidence staged on true
+            left join app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+              on emergency_intent.expected_epoch = activation_epoch.epoch
            where activation_control.control_key = 'trusted_telebirr_financial_authority'
              and activation_epoch.epoch = :'target_expired_activation_epoch'::bigint
              and activation_epoch.authority_state = 'active'
-             and activation_epoch.revoked_at is null
-             and activation_epoch.expires_at <= pg_catalog.clock_timestamp())
+             and activation_epoch.configuration_digest = pilot.configuration_digest
+             and activation_epoch.expires_at <= pg_catalog.clock_timestamp()
+             and (
+               (
+                 activation_epoch.revoked_at is null
+                 and emergency_intent.request_key is null
+                 and pilot.status = 'armed'
+               )
+               or (
+                 activation_epoch.revoked_at is not null
+                 and activation_epoch.revocation_reason_code = 'execution_uncertainty'
+                 and emergency_intent.request_key is not null
+                 and emergency_intent.reason_code =
+                     activation_epoch.revocation_reason_code
+                 and emergency_intent.requested_at is not distinct from
+                     activation_epoch.revoked_at
+                 and activation_epoch.expires_at <= emergency_intent.requested_at
+                 and pilot.status = 'stopped'
+                 and pilot.stopped_at is not distinct from emergency_intent.requested_at
+                 and pilot.stopped_by_admin_id is not distinct from
+                     emergency_intent.requested_by_admin_id
+                 and pilot.stop_reason_code is not distinct from
+                     emergency_intent.reason_code
+                 and pilot.expires_at <= emergency_intent.requested_at
+                 and staged.observed_at < emergency_intent.requested_at
+                 and staged.staged_at < emergency_intent.requested_at
+                 and app.current_private_trusted_telebirr_activation_epoch() is null
+               )
+             ))
            as expired_authority_count,
+         (select count(*)::integer
+            from app.private_trusted_telebirr_activation_control activation_control
+            join app.private_trusted_telebirr_activation_epochs activation_epoch
+              on activation_epoch.epoch = activation_control.current_epoch
+            join target job
+              on job.pilot_revision_id = activation_epoch.pilot_revision_id
+            join app.private_live_deposit_pilot_revisions pilot
+              on pilot.id = job.pilot_revision_id
+            join latest_evidence staged on true
+            join app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+              on emergency_intent.expected_epoch = activation_epoch.epoch
+           where activation_control.control_key = 'trusted_telebirr_financial_authority'
+             and activation_epoch.epoch = :'target_expired_activation_epoch'::bigint
+             and activation_epoch.authority_state = 'active'
+             and activation_epoch.configuration_digest = pilot.configuration_digest
+             and activation_epoch.revoked_at is not null
+             and activation_epoch.revocation_reason_code = 'execution_uncertainty'
+             and emergency_intent.reason_code = activation_epoch.revocation_reason_code
+             and emergency_intent.requested_at is not distinct from
+                 activation_epoch.revoked_at
+             and activation_epoch.expires_at <= emergency_intent.requested_at
+             and pilot.status = 'stopped'
+             and pilot.stopped_at is not distinct from emergency_intent.requested_at
+             and pilot.stopped_by_admin_id is not distinct from
+                 emergency_intent.requested_by_admin_id
+             and pilot.stop_reason_code is not distinct from emergency_intent.reason_code
+             and pilot.expires_at <= emergency_intent.requested_at
+             and staged.observed_at < emergency_intent.requested_at
+             and staged.staged_at < emergency_intent.requested_at
+             and app.current_private_trusted_telebirr_activation_epoch() is null)
+           as post_emergency_authority_count,
          (select count(*)::integer
             from app.private_live_deposit_pilot_revisions pilot
             join target job on job.pilot_revision_id = pilot.id
-           where pilot.status = 'armed'
+           where pilot.status in ('armed', 'stopped')
              and pilot.expires_at <= pg_catalog.clock_timestamp()) as expired_pilot_count,
          (select count(*)::integer
             from app.private_live_telebirr_receiver_profiles profile
@@ -200,6 +263,13 @@ with target as materialized (
              'deposit_execution', 'payment_verification',
              'private_live_deposit_pilot', 'telebirr_authoritative_verification'
            ) and feature_switch.mode = 'live') as live_switch_count,
+         (select count(*)::integer from app.feature_switches feature_switch
+           where feature_switch.feature_key in (
+             'deposit_execution', 'payment_verification',
+             'private_live_deposit_pilot', 'telebirr_authoritative_verification'
+           ) and feature_switch.mode = 'disabled'
+             and feature_switch.settings = '{}'::jsonb)
+           as disabled_recovery_switch_count,
          (select count(*)::integer from app.feature_switches feature_switch
            where feature_switch.feature_key in (
              'cbe_birr_authoritative_verification', 'withdrawal_collection',
@@ -229,7 +299,16 @@ with target as materialized (
            when summary.expired_pilot_count <> 1 then 'expired_pilot_not_exact'
            when summary.expired_profile_count <> 1 then 'expired_profile_not_exact'
            when summary.valid_proof_count <> 1 then 'proof_window_unavailable'
-           when summary.live_switch_count <> 4 or summary.disabled_switch_count <> 3
+           when summary.disabled_switch_count <> 3
+             or not (
+               summary.live_switch_count = 4
+               or (
+                 summary.post_emergency_authority_count = 1
+                 and
+                 summary.live_switch_count = 0
+                 and summary.disabled_recovery_switch_count = 4
+               )
+             )
              then 'switch_boundary_unavailable'
            when summary.active_verifier_logins <> 0 or summary.verifier_sessions <> 0
              then 'verifier_not_inert'

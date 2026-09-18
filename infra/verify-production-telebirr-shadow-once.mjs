@@ -53,10 +53,15 @@ assert.match(
   workflow,
   /CONFIRMED_SOURCE_JOB" == 'not-applicable'[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
 );
+assert.match(
+  workflow,
+  /CONFIRMED_SOURCE_JOB" =~ \$uuid[\s\S]*?CONFIRMED_PROOF" =~ \$uuid_v4[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
+);
 assert.match(workflow, /proof\.id = '\$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid/u);
 assert.match(workflow, /proof\.source_live_verification_job_id is null/u);
 assert.match(workflow, /private_telebirr_shadow_policy_recoveries recovery/u);
 assert.match(workflow, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
+assert.match(workflow, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(
   workflow,
   /recovery\.recovery_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
@@ -110,8 +115,10 @@ assert.match(workflow, /enrollment\.pilot_revision_id = '\$TARGET_PILOT_REVISION
 assert.match(workflow, /enrollments\.length !== 1/u);
 assert.match(workflow, /pin\.keyId === enrolled\.keyId/u);
 assert.match(workflow, /fingerprint === enrolled\.publicKeySpkiSha256/u);
-assert.match(workflow, /\.sourceLiveAttempts == 0/u);
-assert.match(workflow, /\.sourceLiveOutcomes == 0/u);
+assert.match(
+  workflow,
+  /\(\.sourceLiveAttempts == 0 and \.sourceLiveOutcomes == 0\) or[\s\S]*?\.sourceLiveAttempts == 4 and \.sourceLiveOutcomes == 1 and[\s\S]*?\.sourceUnavailableRecoveryValid == true/u,
+);
 assert.match(workflow, /\.sourceReservations == 0/u);
 assert.match(workflow, /\.liveMoneySwitchCount == 0/u);
 assert.doesNotMatch(workflow, /FINANCIAL_ACTIONS_MODE=live/u);
@@ -144,6 +151,7 @@ assert.match(provision, /private_telebirr_shadow_device_evidence_staging/u);
 assert.match(provision, /private_telebirr_shadow_policy_recoveries/u);
 assert.match(provision, /private_telebirr_shadow_policy_recovery_digest/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
+assert.match(provision, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retries/u);
 assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);
 assert.match(provision, /\) >= recovery\.prior_attempt_count \+ 1/u);
@@ -172,6 +180,10 @@ assert.match(
 );
 assert.match(
   provision,
+  /recover_private_live_telebirr_source_to_shadow\(uuid,uuid,uuid,uuid,uuid,text\)/u,
+);
+assert.match(
+  provision,
   /retry_expired_private_telebirr_shadow_request\(uuid,uuid,uuid,uuid,text\)/u,
 );
 assert.match(
@@ -190,6 +202,13 @@ assert.match(
   provision,
   /recover_expired_private_live_telebirr_payment_to_shadow\([\s\S]+?'expired_pilot_recovery_no_credit'\s*\)\s*\\gset/u,
 );
+assert.match(
+  provision,
+  /recover_private_live_telebirr_source_to_shadow\([\s\S]+?'terminal_source_unavailable_recovery_no_credit'\s*\)\s*\\gset/u,
+);
+assert.match(provision, /no_terminal_source_unavailable_recovery/u);
+assert.match(provision, /replay_terminal_source_unavailable_recovery/u);
+assert.match(provision, /select false as shadow_request_transition_ready/u);
 assert.match(
   provision,
   /retry_expired_private_telebirr_shadow_request\([\s\S]+?'expired_shadow_retry_no_credit'\s*\)\s*\\gset/u,

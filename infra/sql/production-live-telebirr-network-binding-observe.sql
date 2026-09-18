@@ -395,20 +395,20 @@ with recent_recovery_targets as materialized (
              and summary.execution_jobs = 1
              and summary.queued_jobs = 1
              then 'queued'
-           when summary.disposition = 'review_required'
-             and summary.transcripts = 1
-             and summary.deliveries = 1
-             and summary.evidence = 1
-             and summary.observations = 1
+            when summary.disposition = 'review_required'
+              and summary.transcripts between 1 and summary.attempts
+              and summary.deliveries = summary.transcripts
+              and summary.evidence = summary.deliveries
+              and summary.observations = 1
              and summary.reservations = 0
              and summary.settlements = 0
              and summary.execution_jobs = 0
              and summary.queued_jobs = 0
              then 'review_required'
-           when summary.disposition = 'definite_reject'
-             and summary.transcripts = 1
-             and summary.deliveries = 1
-             and summary.evidence = 1
+            when summary.disposition = 'definite_reject'
+              and summary.transcripts between 1 and summary.attempts
+              and summary.deliveries = summary.transcripts
+              and summary.evidence = summary.deliveries
              and summary.observations = 1
              and summary.reservations = 0
              and summary.settlements = 0

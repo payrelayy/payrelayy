@@ -20,7 +20,7 @@ on:
         required: true
         type: string
       confirm_shadow_proof_request_id:
-        description: Type the exact immutable shadow proof UUID to review
+        description: Type the exact immutable shadow proof UUID to review, or one fresh UUIDv4 for a live-source recovery
         required: true
         type: string
       confirm_source_live_verification_job_id:
@@ -84,6 +84,7 @@ jobs:
                "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
           else
             [[ "$CONFIRMED_SOURCE_JOB" =~ $uuid ]]
+            [[ "$CONFIRMED_PROOF" =~ $uuid_v4 ]]
             [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
           fi
           [[ "$CONFIRMED_OPERATION" == 'RUN ONE-TIME PRODUCTION TELEBIRR SHADOW VERIFIER - NO MONEY' ]]
@@ -485,6 +486,13 @@ jobs:
                    where live_outcome.verification_job_id =
                          nullif('$SOURCE_LIVE_VERIFICATION_JOB_ID', 'not-applicable')::uuid
                 ),
+                'sourceUnavailableRecoveryValid', coalesce((
+                  select app.private_live_telebirr_source_recovery_is_valid(
+                           recovered.id,
+                           nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                         )
+                    from recovered
+                ), false),
                 'sourceReservations', (
                   select count(*) from app.private_live_deposit_pilot_reservations reservation
                   join recovered on recovered.source_live_proof_id =
@@ -515,9 +523,11 @@ jobs:
              .disposition == "review_required" or
              .disposition == "definite_reject") and
             (.wouldVerify == true or .wouldVerify == false) and
-            .sourceLiveAttempts == 0 and .sourceLiveOutcomes == 0 and
+            ((.sourceLiveAttempts == 0 and .sourceLiveOutcomes == 0) or
+             (.sourceLiveAttempts == 4 and .sourceLiveOutcomes == 1 and
+              .sourceUnavailableRecoveryValid == true)) and
             .sourceReservations == 0 and .liveMoneySwitchCount == 0
           ' <<<"$outcome_state" >/dev/null
-          jq '{disposition, reasonCode, wouldVerify, sourceLiveAttempts, sourceLiveOutcomes, sourceReservations, liveMoneySwitchCount}' \
+          jq '{disposition, reasonCode, wouldVerify, sourceLiveAttempts, sourceLiveOutcomes, sourceUnavailableRecoveryValid, sourceReservations, liveMoneySwitchCount}' \
             <<<"$outcome_state" >>"$GITHUB_STEP_SUMMARY"
           completed=1

@@ -50,6 +50,15 @@ describe('production live TeleBirr network-binding observer', () => {
     expect(observerSqlSource).not.toContain('summary.attempts = 3');
   });
 
+  it('accepts retained duplicate evidence only when the terminal chain remains one-to-one', () => {
+    expect(observerSqlSource).toContain('summary.transcripts between 1 and summary.attempts');
+    expect(observerSqlSource).toContain('summary.deliveries = summary.transcripts');
+    expect(observerSqlSource).toContain('summary.evidence = summary.deliveries');
+    expect(observerSqlSource).not.toContain(
+      "when summary.disposition = 'review_required'\n              and summary.transcripts = 1",
+    );
+  });
+
   it('keeps the observer read only and reports only redacted counts and fixed states', () => {
     expect(observerSqlSource).toContain(
       'begin transaction isolation level read committed read only',

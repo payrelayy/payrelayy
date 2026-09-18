@@ -9684,7 +9684,10 @@ registerCompanionExactFiveLookupSqlTests(
   () => ownerAdminId,
 );
 registerDryRunDepositProofIntakeSqlTests(() => client);
-registerExpiredLiveTelebirrEvidenceRecoverySqlTests(() => client);
+registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
 registerOwnerReceiverAccountControlSqlTests(

@@ -526,7 +526,13 @@ select pg_temp.apply_exact_historical_function_patch(
         from app.feature_switches provider_switch
        where provider_switch.feature_key = 'telebirr_authoritative_verification'
          and provider_switch.mode = 'live'
-    )$marker$
+    )$marker$,
+    $marker$      or not exists (
+        select 1
+          from app.feature_switches provider_switch
+         where provider_switch.feature_key = 'telebirr_authoritative_verification'
+           and provider_switch.mode = 'live'
+      )$marker$
   ],
   array[
     $replacement$  if (
@@ -556,9 +562,20 @@ select pg_temp.apply_exact_historical_function_patch(
          where provider_switch.feature_key = 'telebirr_authoritative_verification'
            and provider_switch.mode = 'live'
       )
-    )$replacement$
+    )$replacement$,
+    $replacement$      or (
+        not app.is_private_live_telebirr_historical_attempt_authorized(
+          attempt.id, p_lease_token, p_observation_body_digest, p_source_document_digest
+        )
+        and not exists (
+          select 1
+            from app.feature_switches provider_switch
+           where provider_switch.feature_key = 'telebirr_authoritative_verification'
+             and provider_switch.mode = 'live'
+        )
+      )$replacement$
   ],
-  array[1, 3, 3, 2]
+  array[1, 3, 3, 2, 1]
 );
 
 select pg_temp.apply_exact_historical_function_patch(

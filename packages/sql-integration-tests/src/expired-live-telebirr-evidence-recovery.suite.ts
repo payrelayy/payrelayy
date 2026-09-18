@@ -286,16 +286,16 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
         expect(authorized.rows).toEqual([{ authorized: true }]);
 
         const patchedSource = await client.query<{ readonly source_excerpt: string }>(`
-          select pg_catalog.substring(
-                   routine.prosrc
-                   from greatest(
+          select pg_catalog.substr(
+                   routine.prosrc,
+                   greatest(
                      1,
                      pg_catalog.strpos(
                        routine.prosrc,
                        'The private live TeleBirr settlement candidate authority expired.'
                      ) - 2600
-                   )
-                   for 3000
+                   ),
+                   3000
                  ) as source_excerpt
             from pg_catalog.pg_proc routine
            where routine.oid =

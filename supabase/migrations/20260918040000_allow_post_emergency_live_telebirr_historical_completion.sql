@@ -559,7 +559,7 @@ select pg_temp.apply_exact_historical_function_patch(
       )
     )$replacement$
   ],
-  array[1, 1, 3, 3]
+  array[1, 1, 3, 2]
 );
 
 select pg_temp.apply_exact_historical_function_patch(

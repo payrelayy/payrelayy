@@ -398,7 +398,7 @@ select pg_temp.apply_exact_historical_function_patch(
 
   select existing.*$marker$,
     $marker$    or activation_epoch.revoked_at is not null$marker$,
-    $marker$    or pilot.status <> 'armed'$marker$,
+    $marker$pilot.status <> 'armed'$marker$,
     $marker$    or (select pg_catalog.count(*) from app.feature_switches feature_switch
          where feature_switch.feature_key in (
            'deposit_execution', 'payment_verification',
@@ -535,8 +535,7 @@ select pg_temp.apply_exact_historical_function_patch(
       attempt.id, p_lease_token, p_observation_body_digest, p_source_document_digest
     )
   )$replacement$,
-    $replacement$    or (
-      pilot.status <> 'armed'
+    $replacement$(pilot.status <> 'armed'
       and not app.is_private_live_telebirr_historical_attempt_authorized(
         attempt.id, p_lease_token, p_observation_body_digest, p_source_document_digest
       )
@@ -559,7 +558,7 @@ select pg_temp.apply_exact_historical_function_patch(
       )
     )$replacement$
   ],
-  array[1, 1, 3, 2]
+  array[1, 3, 3, 2]
 );
 
 select pg_temp.apply_exact_historical_function_patch(

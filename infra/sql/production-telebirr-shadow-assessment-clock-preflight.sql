@@ -281,7 +281,15 @@ with authority_at as materialized (
     coalesce((
       select outcome.disposition = 'review_required'
          and outcome.reason_code = 'receipt_too_old'
-         and outcome.protocol_disposition = 'would_review'
+         and (
+           (
+             outcome.protocol_disposition = 'would_review'
+             and outcome.protocol_reason_code <> 'signed_evidence_verified'
+           ) or (
+             outcome.protocol_disposition = 'would_forward_signed_evidence'
+             and outcome.protocol_reason_code = 'signed_evidence_verified'
+           )
+         )
          and not outcome.would_verify
          and outcome.principal_amount_minor is null
          and outcome.occurred_at is null
@@ -332,26 +340,26 @@ with authority_at as materialized (
     coalesce((
       select pilot.status = 'armed'
          and pilot.active_from <= authority_at.value
-         and pilot.expires_at >= authority_at.value + interval '12 hours'
+         and pilot.expires_at > authority_at.value + interval '1 hour'
         from pilot cross join authority_at
-    ), false) as pilot_twelve_hours,
+    ), false) as pilot_machine_window,
     coalesce((
       select profile.valid_from <= authority_at.value
-         and profile.valid_until >= authority_at.value + interval '12 hours'
+         and profile.valid_until > authority_at.value + interval '1 hour'
         from profile cross join authority_at
-    ), false) as profile_twelve_hours,
+    ), false) as profile_machine_window,
     (select pg_catalog.count(*) = 1
        from app.private_live_telebirr_device_enrollments enrollment
        join profile on profile.id = enrollment.receiver_profile_id
        join pilot on pilot.id = enrollment.pilot_revision_id
        cross join authority_at
       where enrollment.valid_from <= authority_at.value
-        and enrollment.valid_until >= authority_at.value + interval '12 hours'
+        and enrollment.valid_until > authority_at.value + interval '1 hour'
         and not exists (
           select 1 from app.private_live_telebirr_device_revocations revocation
            where revocation.device_enrollment_id = enrollment.id
         )
-    ) as enrollment_twelve_hours,
+    ) as enrollment_machine_window,
     (select pg_catalog.count(*) = 1
        from app.private_live_telebirr_assignment_signers signer
        cross join authority_at
@@ -384,9 +392,9 @@ with authority_at as materialized (
            and readiness.no_reservations
            and readiness.no_settlement_receipts
            and readiness.not_already_retried
-           and readiness.pilot_twelve_hours
-           and readiness.profile_twelve_hours
-           and readiness.enrollment_twelve_hours
+           and readiness.pilot_machine_window
+           and readiness.profile_machine_window
+           and readiness.enrollment_machine_window
            and readiness.signer_twelve_hours
            and readiness.money_switches_disabled
            and readiness.pilot_dry_run

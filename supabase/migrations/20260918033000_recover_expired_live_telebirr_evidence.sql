@@ -127,9 +127,9 @@ as $$
       || '|observation_body_digest=' || p_observation_body_digest
       || '|source_document_digest=' || p_source_document_digest
       || '|authorized_at_us='
-      || (pg_catalog.extract(epoch from p_authorized_at) * 1000000)::bigint::text
+      || (pg_catalog.date_part('epoch', p_authorized_at) * 1000000)::bigint::text
       || '|expires_at_us='
-      || (pg_catalog.extract(epoch from p_expires_at) * 1000000)::bigint::text
+      || (pg_catalog.date_part('epoch', p_expires_at) * 1000000)::bigint::text
       || '|reason_code=' || p_reason_code
   )
 $$;

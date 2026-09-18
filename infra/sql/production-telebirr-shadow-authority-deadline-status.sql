@@ -268,6 +268,79 @@ with authority_at as materialized (
        where quarantine.reason_code <> 'trusted_evidence_invalid'
     ) as quarantine_reasons_expected,
     (select pg_catalog.count(*)::integer from target_outcomes) as outcome_count,
+    coalesce((
+      select case
+        when outcome.disposition = 'settlement_candidate'
+          and outcome.reason_code = 'exact_proof_match'
+          and outcome.would_verify
+          and outcome.protocol_disposition = 'would_forward_signed_evidence'
+          and outcome.protocol_reason_code = 'signed_evidence_verified'
+          and outcome.principal_amount_minor = 2500
+          and outcome.occurred_at is not null
+          and outcome.receiver_identity_digest ~ '^sha256:[0-9a-f]{64}$'
+          then 'would_verify_exact_25_etb_match'
+        when outcome.disposition = 'review_required'
+          and not outcome.would_verify
+          and outcome.reason_code in (
+            'invalid_assessment_input', 'database_facts_unbound',
+            'policy_unavailable', 'policy_contract_mismatch',
+            'eligibility_unavailable', 'eligibility_ambiguous',
+            'duplicate_check_unavailable', 'duplicate_check_ambiguous',
+            'source_unavailable', 'source_ambiguous', 'source_uncertain',
+            'source_unsupported', 'observation_version_unsupported',
+            'parser_uncertain', 'receipt_pending', 'receipt_status_unknown',
+            'transaction_type_unsupported', 'receiver_history_gap',
+            'receiver_history_overlap', 'receiver_history_unavailable',
+            'receiver_match_basis_unsupported', 'amount_out_of_range',
+            'receipt_too_old', 'receipt_after_submission', 'future_skew_exceeded'
+          )
+          and outcome.principal_amount_minor is null
+          and outcome.occurred_at is null
+          and outcome.receiver_identity_digest is null
+          then 'would_review'
+        when outcome.disposition = 'definite_reject'
+          and not outcome.would_verify
+          and outcome.reason_code in (
+            'player_ineligible', 'duplicate_reference_reused',
+            'reference_not_found', 'provider_mismatch', 'reference_mismatch',
+            'receipt_failed', 'currency_not_etb', 'receiver_mismatch'
+          )
+          and outcome.principal_amount_minor is null
+          and outcome.occurred_at is null
+          and outcome.receiver_identity_digest is null
+          then 'would_reject'
+        else 'inconsistent_shadow_outcome'
+      end
+        from target_outcomes outcome
+    ), 'none') as outcome_class,
+    coalesce((
+      select case
+        when outcome.reason_code in (
+          'exact_proof_match', 'player_ineligible', 'duplicate_reference_reused',
+          'reference_not_found', 'provider_mismatch', 'reference_mismatch',
+          'receipt_failed', 'currency_not_etb', 'receiver_mismatch',
+          'invalid_assessment_input', 'database_facts_unbound',
+          'policy_unavailable', 'policy_contract_mismatch',
+          'eligibility_unavailable', 'eligibility_ambiguous',
+          'duplicate_check_unavailable', 'duplicate_check_ambiguous',
+          'source_unavailable', 'source_ambiguous', 'source_uncertain',
+          'source_unsupported', 'observation_version_unsupported',
+          'parser_uncertain', 'receipt_pending', 'receipt_status_unknown',
+          'transaction_type_unsupported', 'receiver_history_gap',
+          'receiver_history_overlap', 'receiver_history_unavailable',
+          'receiver_match_basis_unsupported', 'amount_out_of_range',
+          'receipt_too_old', 'receipt_after_submission', 'future_skew_exceeded'
+        ) then outcome.reason_code
+        else 'unexpected_reason_code'
+      end
+        from target_outcomes outcome
+    ), 'none') as outcome_reason_class,
+    coalesce((
+      select outcome.created_at >= retry.authorized_at
+         and outcome.created_at < retry.authorized_at + interval '12 hours'
+        from target_outcomes outcome
+        join target_retry retry on true
+    ), false) as outcome_created_inside_review_window,
     (select pg_catalog.count(*)::integer from target_loader_base_candidates)
       as target_loader_base_candidate_count,
     (select pg_catalog.count(*)::integer from loader_pick) as global_loader_row_count,

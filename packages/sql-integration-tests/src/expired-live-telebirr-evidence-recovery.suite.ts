@@ -285,6 +285,26 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
         );
         expect(authorized.rows).toEqual([{ authorized: true }]);
 
+        const patchedSource = await client.query<{ readonly source_excerpt: string }>(`
+          select pg_catalog.substring(
+                   routine.prosrc
+                   from greatest(
+                     1,
+                     pg_catalog.strpos(
+                       routine.prosrc,
+                       'The private live TeleBirr settlement candidate authority expired.'
+                     ) - 2600
+                   )
+                   for 3000
+                 ) as source_excerpt
+            from pg_catalog.pg_proc routine
+           where routine.oid =
+                 'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)'::regprocedure
+        `);
+        throw new Error(
+          `temporary patched-source diagnostic:\n${patchedSource.rows[0]!.source_excerpt}`,
+        );
+
         const completed = await client.query<{
           readonly execution_job_id: string;
           readonly outcome_disposition: string;

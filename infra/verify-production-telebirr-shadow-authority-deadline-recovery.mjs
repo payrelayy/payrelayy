@@ -73,15 +73,19 @@ assert.match(preflight, /interval '12 hours'/u);
 assert.match(preflight, /'minimumReviewWindowHours', 12/u);
 assert.match(preflight, /proof_shape_exact/u);
 assert.match(preflight, /source_recovery_valid/u);
+assert.match(preflight, /source_recovery_history_valid/u);
 assert.match(preflight, /source_recovery_shape_exact/u);
 assert.match(preflight, /attempt_history_present/u);
 assert.match(preflight, /quarantine_history_present/u);
 assert.match(preflight, /staged_bindings_valid/u);
 assert.match(preflight, /pilot_twelve_hours/u);
+assert.match(preflight, /pilot_assignment_window/u);
 assert.match(preflight, /pilot_binding_valid/u);
 assert.match(preflight, /profile_twelve_hours/u);
+assert.match(preflight, /profile_assignment_window/u);
 assert.match(preflight, /profile_binding_valid/u);
 assert.match(preflight, /enrollment_twelve_hours/u);
+assert.match(preflight, /enrollment_assignment_window/u);
 assert.match(preflight, /signer_twelve_hours/u);
 assert.match(preflight, /switches_safe/u);
 assert.match(preflight, /companion_disabled/u);
@@ -114,6 +118,25 @@ assert.doesNotMatch(migration, /^\s*grant\s+/imu);
 assert.doesNotMatch(migration, /update app\.feature_switches/u);
 assert.doesNotMatch(
   migration,
+  /(?:insert\s+into|update|delete\s+from|truncate)\s+app\.(?:deposit_intents|deposit_submissions|provider_payment_evidence|deposit_verification_attempts|deposit_payment_claims|deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
+);
+
+const historicalLineageMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260918204000_allow_expired_source_authority_retry_assignment_window.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+assert.match(historicalLineageMigration, /private_live_telebirr_source_recovery_history_is_valid/u);
+assert.match(historicalLineageMigration, /interval ''5 minutes''/u);
+assert.match(historicalLineageMigration, /interval ''12 hours''/u);
+assert.match(historicalLineageMigration, /current_private_trusted_telebirr_activation_epoch/u);
+assert.match(historicalLineageMigration, /control_state = 'disabled'/u);
+assert.doesNotMatch(historicalLineageMigration, /FINANCIAL_ACTIONS_MODE=live/u);
+assert.doesNotMatch(historicalLineageMigration, /update app\.feature_switches/u);
+assert.doesNotMatch(
+  historicalLineageMigration,
   /(?:insert\s+into|update|delete\s+from|truncate)\s+app\.(?:deposit_intents|deposit_submissions|provider_payment_evidence|deposit_verification_attempts|deposit_payment_claims|deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
 );
 

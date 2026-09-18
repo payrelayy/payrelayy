@@ -114,6 +114,68 @@ with authority_at as materialized (
        'configuration_digest', pilot.configuration_digest
      )
    )
+), live_trusted_authority as materialized (
+  select authority.epoch
+    from app.private_trusted_telebirr_activation_control activation_control
+    join app.private_trusted_telebirr_activation_epochs authority
+      on authority.epoch = activation_control.current_epoch
+    join app.private_live_deposit_pilot_revisions authority_pilot
+      on authority_pilot.id = authority.pilot_revision_id
+    cross join authority_at
+   where activation_control.control_key = 'trusted_telebirr_financial_authority'
+     and authority.authority_state = 'active'
+     and authority.revoked_at is null
+     and authority_at.value >= authority.active_from
+     and authority_at.value < authority.expires_at
+     and authority_pilot.status = 'armed'
+     and authority_pilot.configuration_digest = authority.configuration_digest
+     and authority_pilot.active_from = authority.active_from
+     and authority_pilot.expires_at = authority.expires_at
+     and not exists (
+       select 1
+         from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+        where emergency_intent.expected_epoch = authority.epoch
+     )
+     and (
+       select pg_catalog.count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'cbe_birr_authoritative_verification',
+          'deposit_execution',
+          'payment_verification',
+          'private_live_deposit_pilot',
+          'telebirr_authoritative_verification'
+        )
+     ) = 5
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'cbe_birr_authoritative_verification'
+          and feature_switch.mode = 'disabled'
+          and feature_switch.settings = '{}'::jsonb
+     )
+     and (
+       select pg_catalog.count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'deposit_execution',
+          'payment_verification',
+          'telebirr_authoritative_verification'
+        )
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = '{}'::jsonb
+     ) = 3
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'private_live_deposit_pilot'
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = pg_catalog.jsonb_build_object(
+            'contract_version', 1,
+            'pilot_revision_id', authority_pilot.id,
+            'configuration_digest', authority_pilot.configuration_digest
+          )
+     )
 ), gates as materialized (
   select
     (select count(*) from target_proof) = 1 as proof_present,
@@ -242,8 +304,7 @@ with authority_at as materialized (
         and execution_control.disabled_at is null
         and execution_control.disable_reason_code is null
     ) as companion_disabled,
-    app.current_private_trusted_telebirr_activation_epoch() is null
-      as trusted_authority_inactive,
+    not exists (select 1 from live_trusted_authority) as trusted_authority_inactive,
     not exists (
       select 1 from pg_catalog.pg_roles role
        where role.rolname in (

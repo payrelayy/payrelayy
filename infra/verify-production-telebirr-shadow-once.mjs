@@ -48,7 +48,7 @@ assert.match(workflow, /PRODUCTION_DATABASE_TUNNEL_PORT: '5432'/u);
 assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(workflow, /not-applicable for direct shadow intake/u);
-assert.match(workflow, /policy-recovery UUIDv4 for recovered direct intake/u);
+assert.match(workflow, /including an authority-deadline child-proof retry/u);
 assert.match(
   workflow,
   /CONFIRMED_SOURCE_JOB" == 'not-applicable'[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
@@ -61,6 +61,7 @@ assert.match(workflow, /proof\.id = '\$TARGET_SHADOW_PROOF_REQUEST_ID'::uuid/u);
 assert.match(workflow, /proof\.source_live_verification_job_id is null/u);
 assert.match(workflow, /private_telebirr_shadow_policy_recoveries recovery/u);
 assert.match(workflow, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
+assert.match(workflow, /private_telebirr_shadow_authority_deadline_retry_is_valid/u);
 assert.match(workflow, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(
   workflow,
@@ -152,6 +153,8 @@ assert.match(provision, /private_telebirr_shadow_device_evidence_staging/u);
 assert.match(provision, /private_telebirr_shadow_policy_recoveries/u);
 assert.match(provision, /private_telebirr_shadow_policy_recovery_digest/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
+assert.match(provision, /private_telebirr_shadow_authority_deadline_retry_is_valid/u);
+assert.match(provision, /private_telebirr_shadow_authority_deadline_retries/u);
 assert.match(provision, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retries/u);
 assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);

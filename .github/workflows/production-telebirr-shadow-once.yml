@@ -28,7 +28,7 @@ on:
         required: true
         type: string
       confirm_recovery_request_key:
-        description: Type the exact recovery/retry UUIDv4, the policy-recovery UUIDv4 for recovered direct intake, or not-applicable for untouched direct intake
+        description: Type the exact recovery/retry UUIDv4, including an authority-deadline child-proof retry, or not-applicable for untouched direct intake
         required: true
         type: string
       confirm_operation:
@@ -430,6 +430,10 @@ jobs:
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )
                           or app.private_telebirr_shadow_observation_clock_retry_is_valid(
+                               proof.id,
+                               nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                             )
+                          or app.private_telebirr_shadow_authority_deadline_retry_is_valid(
                                proof.id,
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )

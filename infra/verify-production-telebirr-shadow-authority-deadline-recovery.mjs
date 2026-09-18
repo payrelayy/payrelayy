@@ -12,6 +12,10 @@ const operation = readFileSync(
   new URL('./sql/production-telebirr-shadow-authority-deadline-recovery.sql', import.meta.url),
   'utf8',
 );
+const preflight = readFileSync(
+  new URL('./sql/production-telebirr-shadow-authority-deadline-preflight.sql', import.meta.url),
+  'utf8',
+);
 const migration = readFileSync(
   new URL(
     '../supabase/migrations/20260918192428_recover_source_shadow_authority_deadline_quarantine.sql',
@@ -31,7 +35,15 @@ assert.match(workflow, /environment: production/u);
 assert.match(workflow, /PGUSER: postgres\.\$\{\{ env\.PRODUCTION_PROJECT_REF \}\}/u);
 assert.match(workflow, /PGSSLMODE: verify-full/u);
 assert.match(workflow, /export PGSSLROOTCERT="\$ca_file"/u);
+assert.match(workflow, /production-telebirr-shadow-authority-deadline-preflight\.sql/u);
 assert.match(workflow, /production-telebirr-shadow-authority-deadline-recovery\.sql/u);
+assert.ok(
+  workflow.indexOf('production-telebirr-shadow-authority-deadline-preflight.sql') <
+    workflow.indexOf('production-telebirr-shadow-authority-deadline-recovery.sql'),
+  'The read-only readiness report must run before the recovery transaction.',
+);
+assert.match(workflow, /\.minimumReviewWindowHours == 12/u);
+assert.match(workflow, /\.ready == true/u);
 assert.match(workflow, /\.reviewWindowHours == 12/u);
 assert.match(workflow, /\.financialBoundary == "dry_run"/u);
 assert.match(workflow, /\.kemerBetExecutionEnabled == false/u);
@@ -55,6 +67,29 @@ assert.match(operation, /'kemerBetExecutionEnabled', false/u);
 assert.match(operation, /'moneyMoved', false/u);
 assert.doesNotMatch(operation, /update app\.feature_switches/u);
 assert.doesNotMatch(operation, /delete from app\./u);
+
+assert.match(preflight, /begin transaction isolation level repeatable read read only/u);
+assert.match(preflight, /interval '12 hours'/u);
+assert.match(preflight, /'minimumReviewWindowHours', 12/u);
+assert.match(preflight, /proof_shape_exact/u);
+assert.match(preflight, /source_recovery_valid/u);
+assert.match(preflight, /source_recovery_shape_exact/u);
+assert.match(preflight, /attempt_history_present/u);
+assert.match(preflight, /quarantine_history_present/u);
+assert.match(preflight, /staged_bindings_valid/u);
+assert.match(preflight, /pilot_twelve_hours/u);
+assert.match(preflight, /pilot_binding_valid/u);
+assert.match(preflight, /profile_twelve_hours/u);
+assert.match(preflight, /profile_binding_valid/u);
+assert.match(preflight, /enrollment_twelve_hours/u);
+assert.match(preflight, /signer_twelve_hours/u);
+assert.match(preflight, /switches_safe/u);
+assert.match(preflight, /companion_disabled/u);
+assert.match(preflight, /trusted_authority_inactive/u);
+assert.match(preflight, /privileged_logins_disabled/u);
+assert.match(preflight, /privileged_sessions_absent/u);
+assert.match(preflight, /rollback;/u);
+assert.doesNotMatch(preflight, /^\s*(?:insert|update|delete|truncate|alter|create|drop)\s/imu);
 
 assert.match(migration, /add column authority_deadline_retry_source_id uuid/u);
 assert.match(migration, /create table app\.private_telebirr_shadow_authority_deadline_retries/u);

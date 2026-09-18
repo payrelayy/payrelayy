@@ -1205,7 +1205,7 @@ function bindingsMatch(
   });
   const rawReference = assignment.body.rawReference;
   const expectedMask = `***${rawReference.slice(-4)}`;
-  const assessedAtMs = Date.parse(input.assessedAt);
+  const protocolAssessedAtMs = Date.parse(input.protocolAssessedAt);
 
   return Boolean(
     protocolRequest &&
@@ -1241,8 +1241,8 @@ function bindingsMatch(
     input.request.policyVersion === input.policy.policyVersion &&
     input.request.databaseSnapshotId === input.databaseSnapshot.snapshotId &&
     input.pilot.state === 'armed' &&
-    assessedAtMs >= Date.parse(input.pilot.validFrom) &&
-    assessedAtMs < Date.parse(input.pilot.validUntil) &&
+    protocolAssessedAtMs >= Date.parse(input.pilot.validFrom) &&
+    protocolAssessedAtMs < Date.parse(input.pilot.validUntil) &&
     input.provider.state === 'active' &&
     input.reference.masked === expectedMask &&
     input.receiver.revisionId === protocolRequest.receiverRevisionId &&

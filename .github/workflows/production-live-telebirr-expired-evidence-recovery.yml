@@ -1,0 +1,416 @@
+name: Recover expired production live TeleBirr evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact expired live-pilot UUID
+        required: true
+        type: string
+      confirm_expired_activation_epoch:
+        description: Type the exact expired trusted TeleBirr epoch
+        required: true
+        type: string
+      confirm_network_binding_recovery_request_key:
+        description: Type the exact preceding network-binding recovery UUIDv4
+        required: true
+        type: string
+      confirm_historical_completion_request_key:
+        description: Type one fresh UUIDv4 for this one-use completion
+        required: true
+        type: string
+      confirm_pin_manifest_sha256:
+        description: Type the exact sha256-prefixed production verifier pin digest
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RECOVER EXPIRED LIVE TELEBIRR EVIDENCE - KEMERBET DISABLED
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-live-telebirr-expired-evidence-recovery
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate the exact historical completion authorization
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_EPOCH: ${{ inputs.confirm_expired_activation_epoch }}
+      CONFIRMED_NETWORK_REQUEST: ${{ inputs.confirm_network_binding_recovery_request_key }}
+      CONFIRMED_COMPLETION_REQUEST: ${{ inputs.confirm_historical_completion_request_key }}
+      CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact identifiers, and disabled-executor phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          epoch='^[1-9][0-9]{0,18}$'
+          pin='^sha256:[0-9a-f]{64}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_EPOCH" =~ $epoch ]]
+          [[ "$CONFIRMED_NETWORK_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_COMPLETION_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_NETWORK_REQUEST" != "$CONFIRMED_COMPLETION_REQUEST" ]]
+          [[ "$CONFIRMED_PIN_DIGEST" =~ $pin ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RECOVER EXPIRED LIVE TELEBIRR EVIDENCE - KEMERBET DISABLED' ]]
+
+  recover-verify-and-close:
+    name: Complete staged evidence and stop at one untouched queue item
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production operation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Verify staged evidence, enqueue once, and revoke verifier access
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          TARGET_EXPIRED_ACTIVATION_EPOCH: ${{ inputs.confirm_expired_activation_epoch }}
+          NETWORK_BINDING_RECOVERY_REQUEST_KEY: ${{ inputs.confirm_network_binding_recovery_request_key }}
+          HISTORICAL_COMPLETION_REQUEST_KEY: ${{ inputs.confirm_historical_completion_request_key }}
+          PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+
+          protected="$RUNNER_TEMP/production-live-telebirr-expired-evidence"
+          install -d -m 0700 "$protected"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          node infra/operations/create-production-trusted-telebirr-runtime-credential.mjs \
+            --database-url-output "$protected/trusted-telebirr-verifier-database-url" \
+            --scram-output "$protected/trusted-telebirr-verifier.scram"
+
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
+          helper_sha="$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)"
+          remote="fetanagent-admin@$PRODUCTION_VM_HOST"
+          remote_credential="/tmp/fetanagent-production-trusted-telebirr-verifier-credential-$HISTORICAL_COMPLETION_REQUEST_KEY"
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ConnectTimeout=8 -o ConnectionAttempts=1 -o ServerAliveInterval=5 \
+            -o ServerAliveCountMax=1)
+          host_touched=0
+          authority_may_exist=0
+          queue_observed=0
+          cleanup_done=0
+
+          run_psql() {
+            local file="$1"
+            timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align --file="$file"
+          }
+
+          close_database() {
+            local reason="$1" result
+            export CLOSE_REASON_CODE="$reason"
+            result="$(run_psql \
+              infra/sql/production-live-telebirr-expired-evidence-close.sql)"
+            unset CLOSE_REASON_CODE
+            jq -e '
+              .schemaVersion == 1 and
+              .operation == "live_telebirr_expired_evidence_close" and
+              .deploymentTarget == "production" and
+              (.authorityRecorded | type == "boolean") and
+              (.closeReasonCode | IN("completed", "operator_stop")) and
+              .verifierLoginDisabled == true and
+              .trustedVerifierSessions == 0 and
+              .kemerBetLoginRoles == 0 and
+              .kemerBetSessions == 0 and
+              .executionEnabled == false
+            ' <<<"$result" >/dev/null
+          }
+
+          stop_host() {
+            timeout --signal=TERM --kill-after=15s 150s \
+              ssh "${ssh_opts[@]}" "$remote" \
+                "sudo -n '$helper' emergency-stop && sudo -n '$helper' discard-activation '$HISTORICAL_COMPLETION_REQUEST_KEY'"
+          }
+
+          cleanup() {
+            local status=$? close_status=0 host_status=0 local_status=0 reason='operator_stop'
+            trap - EXIT INT TERM
+            set +e
+            if [[ "$cleanup_done" != '1' ]]; then
+              if [[ "$queue_observed" == '1' ]]; then reason='completed'; fi
+              if [[ "$authority_may_exist" == '1' ]]; then
+                close_database "$reason" || close_status=$?
+              fi
+              if [[ "$host_touched" == '1' ]]; then
+                stop_host || host_status=$?
+              fi
+            fi
+            if [[ -e "$protected" || -L "$protected" ]]; then
+              if [[ -d "$protected" && ! -L "$protected" &&
+                    "$(realpath -- "$protected")" == "$protected" ]]; then
+                find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+                rmdir -- "$protected" || local_status=$?
+              else
+                local_status=1
+              fi
+            fi
+            if [[ "$close_status" -ne 0 || "$host_status" -ne 0 || "$local_status" -ne 0 ]]; then
+              echo '::error::The independent verifier shutdown needs immediate operator follow-up.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          eligibility_result="$(run_psql \
+            infra/sql/production-live-telebirr-expired-evidence-eligibility.sql)"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_expired_evidence_eligibility" and
+            .deploymentTarget == "production" and
+            (.eligibilityState | IN("eligible", "ineligible")) and
+            (.reasonCode | IN(
+              "eligible", "target_not_exact", "attempt_shape_mismatch",
+              "evidence_shape_mismatch", "same_reference_collision_missing",
+              "document_already_settled", "payment_already_used",
+              "evidence_quarantined", "downstream_rows_present",
+              "recovery_already_recorded", "expired_authority_not_exact",
+              "expired_pilot_not_exact", "expired_profile_not_exact",
+              "proof_window_unavailable", "switch_boundary_unavailable",
+              "verifier_not_inert", "kemerbet_enabled"
+            )) and
+            ([
+              .targetCount, .attempts, .expiredAttempts, .assignmentTranscripts,
+              .assignmentDeliveries, .deviceEvidence, .sameReferenceCollisions,
+              .outcomes, .reservations, .settlementReceipts,
+              .depositExecutionJobs, .historicalAuthorities,
+              .activeVerifierLoginRoles, .trustedVerifierSessions,
+              .kemerBetLoginRoles, .kemerBetSessions
+            ] | all(type == "number" and . >= 0 and . <= 32)) and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false and
+            .readOnly == true and
+            .moneyMoved == false
+          ' <<<"$eligibility_result" >/dev/null
+          jq '{
+            eligibilityState, reasonCode, targetCount, attempts, expiredAttempts,
+            assignmentTranscripts, assignmentDeliveries, deviceEvidence,
+            sameReferenceCollisions, outcomes, reservations, settlementReceipts,
+            depositExecutionJobs, trustedVerifierSessions, executionEnabled,
+            readOnly, moneyMoved
+          }' <<<"$eligibility_result" >>"$GITHUB_STEP_SUMMARY"
+          if [[ "$(jq -r '.eligibilityState' <<<"$eligibility_result")" != 'eligible' ]]; then
+            reason="$(jq -r '.reasonCode' <<<"$eligibility_result")"
+            echo "::error::The redacted expired-evidence diagnosis returned ${reason}." >&2
+            exit 4
+          fi
+
+          host_touched=1
+          timeout --signal=TERM --kill-after=15s 150s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' verify '$helper_sha' && sudo -n '$helper' emergency-stop && sudo -n '$helper' discard-activation '$HISTORICAL_COMPLETION_REQUEST_KEY' && sudo -n '$helper' status-inert"
+          timeout --signal=TERM --kill-after=10s 60s \
+            scp "${ssh_opts[@]}" \
+              "$protected/trusted-telebirr-verifier-database-url" \
+              "$remote:$remote_credential"
+          timeout --signal=TERM --kill-after=10s 90s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "chmod 0600 '$remote_credential' && sudo -n '$helper' prepare-activation '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$PIN_DIGEST'"
+
+          authority_may_exist=1
+          TRUSTED_TELEBIRR_SCRAM_VERIFIER="$(<"$protected/trusted-telebirr-verifier.scram")"
+          export TRUSTED_TELEBIRR_SCRAM_VERIFIER
+          arm_result="$(run_psql \
+            infra/sql/production-live-telebirr-expired-evidence-arm.sql)"
+          unset TRUSTED_TELEBIRR_SCRAM_VERIFIER
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_expired_evidence_arm" and
+            .deploymentTarget == "production" and
+            .recoveryState == "armed" and
+            .alreadyArmed == false and
+            (.remainingSeconds | type == "number" and . >= 420 and . <= 1200) and
+            .verifierLoginBounded == true and
+            .financialRowsCreated == false and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false
+          ' <<<"$arm_result" >/dev/null
+          jq '{
+            recoveryState, alreadyArmed, remainingSeconds, verifierLoginBounded,
+            financialRowsCreated, executionEnabled
+          }' <<<"$arm_result" >>"$GITHUB_STEP_SUMMARY"
+
+          timeout --signal=TERM --kill-after=15s 150s \
+            ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' start-activated '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST' && sudo -n '$helper' status-active '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST'"
+
+          terminal_state=''
+          terminal_result=''
+          for _ in $(seq 1 60); do
+            status_result="$(run_psql \
+              infra/sql/production-live-telebirr-expired-evidence-status.sql)"
+            jq -e '
+              .schemaVersion == 1 and
+              .operation == "live_telebirr_expired_evidence_status" and
+              .deploymentTarget == "production" and
+              .targetCount == 1 and
+              (.verificationState | IN(
+                "waiting", "queued", "review_required", "definite_reject", "expired"
+              )) and
+              ([
+                .attempts, .assignmentTranscripts, .assignmentDeliveries,
+                .deviceEvidence, .observations, .outcomes,
+                .authorityConsumptions, .authorityClosures, .reservations,
+                .settlementReceipts, .settlementDocuments,
+                .depositExecutionJobs, .queuedDepositJobs,
+                .trustedVerifierSessions
+              ] | all(type == "number" and . >= 0 and . <= 4)) and
+              .kemerBetLoginRoles == 0 and
+              .kemerBetSessions == 0 and
+              .executionEnabled == false
+            ' <<<"$status_result" >/dev/null
+            state="$(jq -r '.verificationState' <<<"$status_result")"
+            case "$state" in
+              waiting) sleep 5 ;;
+              queued|review_required|definite_reject|expired)
+                terminal_state="$state"
+                terminal_result="$status_result"
+                break
+                ;;
+              *)
+                echo '::error::The redacted expired-evidence status is invalid.' >&2
+                exit 1
+                ;;
+            esac
+          done
+
+          [[ -n "$terminal_state" ]]
+          jq '{
+            verificationState, outcomeReasonCode, attempts, assignmentTranscripts,
+            assignmentDeliveries, deviceEvidence, observations, outcomes,
+            authorityConsumptions, reservations, settlementReceipts,
+            settlementDocuments, depositExecutionJobs, queuedDepositJobs,
+            trustedVerifierSessions, executionEnabled
+          }' <<<"$terminal_result" >>"$GITHUB_STEP_SUMMARY"
+          if [[ "$terminal_state" != 'queued' ]]; then
+            echo "::error::Historical verification ended in ${terminal_state}." >&2
+            exit 1
+          fi
+          jq -e '
+            .outcomeReasonCode == "exact_proof_match" and
+            .attempts == 4 and
+            .assignmentTranscripts == 2 and
+            .assignmentDeliveries == 2 and
+            .deviceEvidence == 2 and
+            .observations == 1 and
+            .outcomes == 1 and
+            .authorityConsumptions == 1 and
+            .reservations == 1 and
+            .settlementReceipts == 1 and
+            .settlementDocuments == 1 and
+            .depositExecutionJobs == 1 and
+            .queuedDepositJobs == 1 and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false
+          ' <<<"$terminal_result" >/dev/null
+          queue_observed=1
+
+          close_database completed
+          stop_host
+
+          final_result="$(run_psql \
+            infra/sql/production-live-telebirr-expired-evidence-status.sql)"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "live_telebirr_expired_evidence_status" and
+            .deploymentTarget == "production" and
+            .verificationState == "queued" and
+            .attempts == 4 and
+            .assignmentTranscripts == 2 and
+            .assignmentDeliveries == 2 and
+            .deviceEvidence == 2 and
+            .observations == 1 and
+            .outcomes == 1 and
+            .authorityConsumptions == 1 and
+            .authorityClosures == 1 and
+            .reservations == 1 and
+            .settlementReceipts == 1 and
+            .settlementDocuments == 1 and
+            .depositExecutionJobs == 1 and
+            .queuedDepositJobs == 1 and
+            .trustedVerifierSessions == 0 and
+            .kemerBetLoginRoles == 0 and
+            .kemerBetSessions == 0 and
+            .executionEnabled == false
+          ' <<<"$final_result" >/dev/null
+
+          cleanup_done=1
+          echo '::notice::One authorized deposit reached the untouched queue; all verifier access was revoked and KemerBet remains disabled.'

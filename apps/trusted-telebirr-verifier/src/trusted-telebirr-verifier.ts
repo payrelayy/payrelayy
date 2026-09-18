@@ -58,6 +58,11 @@ const AUTHORITY_KEYS = [
   'databaseFacts',
 ] as const;
 const SHADOW_AUTHORITY_KEYS = [...AUTHORITY_KEYS, 'evidenceStagedAt'] as const;
+const HISTORICAL_COMPLETION_AUTHORITY_KEYS = [
+  ...AUTHORITY_KEYS,
+  'historicalCompletionRecovery',
+  'evidenceStagedAt',
+] as const;
 const ATTEMPT_KEYS = [
   'assignmentId',
   'requestId',
@@ -553,14 +558,20 @@ function authorityFrom(
   expectedVerificationMode: TrustedTelebirrVerificationMode,
 ): ParsedAuthority | undefined {
   const candidate = dataRecord(value);
+  const historicalCompletionRecovery =
+    candidate?.verificationMode === 'live' && candidate.historicalCompletionRecovery === true;
   const record = exactDataRecord(
     value,
-    candidate?.verificationMode === 'shadow' ? SHADOW_AUTHORITY_KEYS : AUTHORITY_KEYS,
+    candidate?.verificationMode === 'shadow'
+      ? SHADOW_AUTHORITY_KEYS
+      : historicalCompletionRecovery
+        ? HISTORICAL_COMPLETION_AUTHORITY_KEYS
+        : AUTHORITY_KEYS,
   );
   const capturedAt = canonicalTimestamp(record?.capturedAt);
   const evidenceStagedAt =
-    record?.verificationMode === 'shadow'
-      ? (canonicalTimestamp(record.evidenceStagedAt) ?? null)
+    record?.verificationMode === 'shadow' || historicalCompletionRecovery
+      ? (canonicalTimestamp(record?.evidenceStagedAt) ?? null)
       : null;
   const attempt = exactDataRecord(record?.attempt, ATTEMPT_KEYS);
   const transcript = exactDataRecord(record?.assignmentTranscript, TRANSCRIPT_KEYS);
@@ -580,10 +591,11 @@ function authorityFrom(
     !record ||
     record.contractVersion !== TRUSTED_TELEBIRR_VERIFIER_CONTRACT_VERSION ||
     record.verificationMode !== expectedVerificationMode ||
+    (historicalCompletionRecovery && record.historicalCompletionRecovery !== true) ||
     record.verificationAttemptId !== expectedAttemptId ||
     record.leaseTokenAccepted !== true ||
     !capturedAt ||
-    (record.verificationMode === 'shadow' && !evidenceStagedAt) ||
+    ((record.verificationMode === 'shadow' || historicalCompletionRecovery) && !evidenceStagedAt) ||
     typeof record.authorityStateDigest !== 'string' ||
     !SHA256_PATTERN.test(record.authorityStateDigest) ||
     !attempt ||
@@ -675,9 +687,10 @@ function verificationInput(
     contractVersion: TELEBIRR_LIVE_PILOT_CONTRACT_VERSION,
     providerCode: 'telebirr' as const,
     protocolMode: TELEBIRR_LIVE_PILOT_PROTOCOL_MODE,
-    // Shadow evidence may be reviewed after its short assignment lease. The database supplies the
-    // immutable server staging time, which remains inside that lease, while capturedAt continues
-    // to bind the outcome adapter to current database authority and policy facts.
+    // Shadow evidence and an exact database-authorized historical live completion may be reviewed
+    // after their short assignment lease. The database supplies the immutable server staging time,
+    // which remains inside that lease, while capturedAt continues to bind the outcome adapter to
+    // current database authority and policy facts.
     assessedAt: authority.evidenceStagedAt ?? authority.capturedAt,
     trustedAssignmentSigner: authority.signer,
     trustedRequestBinding: authority.trustedRequestBinding,

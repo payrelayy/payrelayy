@@ -1345,7 +1345,7 @@ begin
     and not historical_recovery then
     raise exception using
       errcode = '42501',
-      message = 'The trusted TeleBirr verification authority is not currently authorized.';
+      message = 'The trusted TeleBirr activation epoch is not currently authorized.';
   end if;
 
   authority := app.load_private_live_telebirr_verification_authority_pre_epoch(
@@ -1427,7 +1427,7 @@ begin
     and recovery_request_key is null then
     raise exception using
       errcode = '42501',
-      message = 'The trusted TeleBirr verification authority is not currently authorized.';
+      message = 'The trusted TeleBirr activation epoch is not currently authorized.';
   end if;
 
   select result.* into completed

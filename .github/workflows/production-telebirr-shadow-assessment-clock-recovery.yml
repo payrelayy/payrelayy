@@ -1,0 +1,205 @@
+name: Recover production TeleBirr shadow assessment clock
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed dry-run pilot UUID
+        required: true
+        type: string
+      confirm_source_authority_retry_request_key:
+        description: Type the existing authority-deadline retry UUIDv4
+        required: true
+        type: string
+      confirm_retry_request_key:
+        description: Type one fresh UUIDv4 for the append-only retry ledger
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RECOVER TELEBIRR ASSESSMENT CLOCK - 12H NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-assessment-clock-recovery
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate exact append-only 12-hour no-money recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_SOURCE_REQUEST: ${{ inputs.confirm_source_authority_retry_request_key }}
+      CONFIRMED_REQUEST: ${{ inputs.confirm_retry_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact identifiers, and twelve-hour no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_SOURCE_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_SOURCE_REQUEST" != "$CONFIRMED_REQUEST" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RECOVER TELEBIRR ASSESSMENT CLOCK - 12H NO MONEY' ]]
+
+  recover:
+    name: Preserve the original assessment clock in one 12-hour child
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Create only the reviewed append-only no-money replacement
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          SOURCE_AUTHORITY_RETRY_REQUEST_KEY: ${{ inputs.confirm_source_authority_retry_request_key }}
+          ASSESSMENT_CLOCK_RETRY_REQUEST_KEY: ${{ inputs.confirm_retry_request_key }}
+          REVIEWED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          ca_file="$RUNNER_TEMP/fetanagent-production-assessment-clock-recovery-ca.crt"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$ca_file" == \
+                  "$RUNNER_TEMP/fetanagent-production-assessment-clock-recovery-ca.crt" && \
+                  -f "$ca_file" && ! -L "$ca_file" ]]; then
+              shred --force --remove=unlink --zero "$ca_file" 2>/dev/null || rm --force "$ca_file"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+
+          preflight="$(
+            timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-shadow-assessment-clock-preflight.sql
+          )"
+          jq '{
+            ready,
+            minimumReviewWindowHours,
+            authorityRetryPresent: .authority_retry_present,
+            sourceProofPresent: .source_proof_present,
+            originalProofPresent: .original_proof_present,
+            sourceOutcomePresent: .source_outcome_present,
+            authorityRetryDigestValid: .authority_retry_digest_valid,
+            authorityRetryShapeExact: .authority_retry_shape_exact,
+            sourceRecoveryHistoryValid: .source_recovery_history_valid,
+            originalAssessmentClockAvailable: .original_assessment_clock_available,
+            exactReceiptTooOldOutcome: .exact_receipt_too_old_outcome,
+            sourceOutcomeInsidePriorWindow: .source_outcome_inside_prior_window,
+            attemptsBounded: .attempts_bounded,
+            everyAttemptStaged: .every_attempt_staged,
+            noQuarantines: .no_quarantines,
+            noProviderEvidence: .no_provider_evidence,
+            noReservations: .no_reservations,
+            noSettlementReceipts: .no_settlement_receipts,
+            notAlreadyRetried: .not_already_retried,
+            pilotTwelveHours: .pilot_twelve_hours,
+            profileTwelveHours: .profile_twelve_hours,
+            enrollmentTwelveHours: .enrollment_twelve_hours,
+            signerTwelveHours: .signer_twelve_hours,
+            moneySwitchesDisabled: .money_switches_disabled,
+            pilotDryRun: .pilot_dry_run,
+            companionDisabled: .companion_disabled,
+            trustedAuthorityInactive: .trusted_authority_inactive,
+            privilegedLoginsDisabled: .privileged_logins_disabled,
+            privilegedSessionsAbsent: .privileged_sessions_absent,
+            financialBoundary,
+            kemerBetExecutionEnabled,
+            moneyMoved
+          }' <<<"$preflight" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_assessment_clock_preflight" and
+            .deploymentTarget == "production" and
+            .minimumReviewWindowHours == 12 and
+            .ready == true and
+            .financialBoundary == "dry_run" and
+            .kemerBetExecutionEnabled == false and
+            .moneyMoved == false
+          ' <<<"$preflight" >/dev/null
+
+          result="$(
+            timeout --signal=TERM --kill-after=5s 90s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-shadow-assessment-clock-recovery.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_assessment_clock_recovery" and
+            .deploymentTarget == "production" and
+            .retryState == "armed" and
+            .reviewWindowHours == 12 and
+            .originalAssessmentClockPreserved == true and
+            .priorEvidencePreserved == true and
+            .priorOutcomePreserved == true and
+            .financialBoundary == "dry_run" and
+            .kemerBetExecutionEnabled == false and
+            .moneyMoved == false
+          ' <<<"$result" >/dev/null
+          echo '::notice::One append-only 12-hour shadow review request is armed with the original assessment clock; no money authority was enabled.'

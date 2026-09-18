@@ -211,7 +211,7 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
         ]);
 
         const recoveryRequestKey = randomUUID();
-        const authority = await client.query<{ readonly expires_at: Date }>(
+        const authority = await client.query<{ readonly expires_at_text: string }>(
           `with boundary as materialized (
              select pg_catalog.clock_timestamp() as authorized_at
            )
@@ -249,7 +249,7 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
                   boundary.authorized_at,
                   boundary.authorized_at + interval '15 minutes'
              from boundary
-           returning expires_at`,
+           returning expires_at::text as expires_at_text`,
           [
             recoveryRequestKey,
             prepared.stage.verification_job_id,
@@ -269,7 +269,7 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
         await client.query(
           `alter role fetanagent_trusted_telebirr_verifier_runtime
              login password '${scramVerifier}'
-             valid until '${authority.rows[0]!.expires_at.toISOString()}'`,
+             valid until '${authority.rows[0]!.expires_at_text}'`,
         );
 
         const authorized = await client.query<{ readonly authorized: boolean }>(

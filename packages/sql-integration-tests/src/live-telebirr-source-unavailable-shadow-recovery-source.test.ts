@@ -8,21 +8,9 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
-const provisionPath = fileURLToPath(
-  new URL(
-    '../../../infra/sql/production-telebirr-shadow-verifier-once-provision.sql',
-    import.meta.url,
-  ),
-);
-const workflowPath = fileURLToPath(
-  new URL('../../../.github/workflows/production-telebirr-shadow-once.yml', import.meta.url),
-);
-
 let migrationSource = '';
 let recoverySource = '';
 let validatorSource = '';
-let provisionSource = '';
-let workflowSource = '';
 
 function extractFunction(source: string, functionName: string): string {
   const declaration = source.indexOf(`create function app.${functionName}(`);
@@ -33,11 +21,7 @@ function extractFunction(source: string, functionName: string): string {
 }
 
 beforeAll(async () => {
-  [migrationSource, provisionSource, workflowSource] = await Promise.all([
-    readFile(migrationPath, 'utf8'),
-    readFile(provisionPath, 'utf8'),
-    readFile(workflowPath, 'utf8'),
-  ]);
+  migrationSource = await readFile(migrationPath, 'utf8');
   recoverySource = extractFunction(
     migrationSource,
     'recover_private_live_telebirr_source_to_shadow',
@@ -160,31 +144,5 @@ describe('terminal live TeleBirr source-unavailable shadow recovery', () => {
       'app.private_telebirr_shadow_mode_is_ready(recovery.target_pilot_revision_id)',
     );
     expect(validatorSource).toContain('app.provider_payment_evidence');
-  });
-
-  it('routes only the exact terminal branch through the reviewed no-money workflow', () => {
-    for (const fragment of [
-      'create_terminal_source_unavailable_recovery',
-      'app.recover_private_live_telebirr_source_to_shadow(',
-      "'terminal_source_unavailable_recovery_no_credit'",
-      'app.private_live_telebirr_source_recovery_is_valid(',
-      'replay_terminal_source_unavailable_recovery',
-      'no_terminal_source_unavailable_recovery',
-    ]) {
-      expect(provisionSource).toContain(fragment);
-    }
-    expect(provisionSource).toContain('select false as shadow_request_transition_ready');
-    expect(workflowSource).toContain("'sourceUnavailableRecoveryValid'");
-    expect(workflowSource).toContain('[[ "$CONFIRMED_PROOF" =~ $uuid_v4 ]]');
-    expect(provisionSource).toMatch(
-      /:'target_shadow_proof_request_id'\s+~ '\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-4/,
-    );
-    expect(workflowSource).toContain('.sourceLiveAttempts == 4');
-    expect(workflowSource).toContain('.sourceLiveOutcomes == 1');
-    expect(workflowSource).toContain('.sourceUnavailableRecoveryValid == true');
-    expect(workflowSource).toContain('.sourceReservations == 0');
-    expect(workflowSource).toContain('.liveMoneySwitchCount == 0');
-    expect(workflowSource).not.toContain('FINANCIAL_ACTIONS_MODE=live');
-    expect(workflowSource).not.toContain('KEMERBET_PRIVATE_LIVE_DEPOSIT_PILOT_ENABLED=true');
   });
 });

@@ -184,6 +184,10 @@ assert.match(
 );
 assert.match(
   provision,
+  /:'source_live_verification_job_id'[\s\S]*?and :'target_shadow_proof_request_id'[\s\S]*?\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-4/u,
+);
+assert.match(
+  provision,
   /retry_expired_private_telebirr_shadow_request\(uuid,uuid,uuid,uuid,text\)/u,
 );
 assert.match(

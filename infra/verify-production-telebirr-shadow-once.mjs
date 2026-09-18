@@ -47,8 +47,13 @@ assert.match(workflow, /PRODUCTION_DATABASE_DIRECT_HOST: db\.xzztugbgtulptnbpoel
 assert.match(workflow, /PRODUCTION_DATABASE_TUNNEL_PORT: '5432'/u);
 assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
+assert.match(workflow, /resolve-authority-deadline-child/u);
 assert.match(workflow, /not-applicable for direct shadow intake/u);
 assert.match(workflow, /including an authority-deadline child-proof retry/u);
+assert.match(
+  workflow,
+  /CONFIRMED_PROOF" == 'resolve-authority-deadline-child'[\s\S]*?CONFIRMED_SOURCE_JOB" == 'not-applicable'[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
+);
 assert.match(
   workflow,
   /CONFIRMED_SOURCE_JOB" == 'not-applicable'[\s\S]*?CONFIRMED_REQUEST_KEY" =~ \$uuid_v4/u,
@@ -75,6 +80,23 @@ assert.match(workflow, /PGUSER: postgres\s/u);
 assert.match(workflow, /admin_login_ready=false/u);
 assert.match(workflow, /current_user = 'postgres' and session_user = current_user/u);
 assert.match(workflow, /"\$admin_login_ready" == 'true'/u);
+assert.match(workflow, /private_telebirr_shadow_authority_deadline_retries retry/u);
+assert.match(
+  workflow,
+  /retry\.retry_request_key = '\$RECOVERY_REQUEST_KEY'::uuid[\s\S]*?retry\.pilot_revision_id = '\$TARGET_PILOT_REVISION_ID'::uuid/u,
+);
+assert.match(
+  workflow,
+  /retry\.retry_expires_at > pg_catalog\.clock_timestamp\(\) \+ interval '60 seconds'/u,
+);
+assert.match(workflow, /proof\.authority_deadline_retry_source_id =/u);
+assert.match(workflow, /::add-mask::\$resolved_target_shadow_proof_request_id/u);
+assert.match(workflow, /export TARGET_SHADOW_PROOF_REQUEST_ID/u);
+assert.ok(
+  workflow.indexOf('::add-mask::$resolved_target_shadow_proof_request_id') <
+    workflow.indexOf('TARGET_SHADOW_PROOF_REQUEST_ID="$resolved_target_shadow_proof_request_id"'),
+  'the internally resolved child proof must be masked before it is assigned for later commands',
+);
 assert.match(workflow, /export PGSSLROOTCERT="\$protected\/supabase-ca\.crt"/u);
 assert.match(workflow, /fetanagent-production-direct-database-tunnel\.sh/u);
 assert.match(workflow, /fetanagent_open_production_direct_database_tunnel/u);

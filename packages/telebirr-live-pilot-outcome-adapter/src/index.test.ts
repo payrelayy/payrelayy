@@ -519,6 +519,50 @@ describe('TeleBirr live-pilot outcome adapter', () => {
     ).toBe(true);
   });
 
+  it('uses immutable protocol time for an expired pilot while binding database facts to review time', () => {
+    const value = fixture();
+    const recoveryAt = '2026-08-21T08:03:05.000Z';
+    const facts = {
+      ...value.input.trustedDatabaseSnapshot.facts,
+      currentPolicy: {
+        ...value.input.trustedDatabaseSnapshot.facts.currentPolicy,
+        checkedAt: recoveryAt,
+      },
+      currentEligibility: {
+        ...value.input.trustedDatabaseSnapshot.facts.currentEligibility,
+        checkedAt: recoveryAt,
+      },
+      duplicateState: {
+        ...value.input.trustedDatabaseSnapshot.facts.duplicateState,
+        checkedAt: recoveryAt,
+      },
+    };
+    const snapshotMaterial = {
+      snapshotId: value.input.trustedDatabaseSnapshot.snapshotId,
+      capturedAt: recoveryAt,
+      authority: value.input.trustedDatabaseSnapshot.authority,
+      facts,
+    };
+    const delayed: Fixture = {
+      ...value,
+      input: {
+        ...value.input,
+        assessedAt: recoveryAt,
+        protocolAssessedAt: assessedAt,
+        trustedDatabaseSnapshot: {
+          ...snapshotMaterial,
+          snapshotDigest: deriveTelebirrLivePilotDatabaseSnapshotDigest(snapshotMaterial)!,
+        },
+      },
+    };
+
+    expect(adapt(delayed)).toMatchObject({
+      assessedAt: recoveryAt,
+      disposition: 'settlement_candidate',
+      reasonCode: 'exact_proof_match',
+    });
+  });
+
   it('also permits an exact same-customer proof without requiring submitter/owner equality', () => {
     const value = fixture();
     const sameCustomer = withAuthority(

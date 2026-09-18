@@ -311,7 +311,7 @@ jobs:
 
           timeout --signal=TERM --kill-after=10s 60s \
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' verify '$HELPER_SHA' && sudo -n '$helper' preflight '$bytes' && sudo -n '$helper' cleanup-incoming '$GITHUB_SHA' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
+              "sudo -n '$helper' verify '$HELPER_SHA' && sudo -n '$helper' emergency-stop && sudo -n '$helper' preflight '$bytes' && sudo -n '$helper' cleanup-incoming '$GITHUB_SHA' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
           timeout --signal=TERM --kill-after=30s 10m \
             scp "${ssh_opts[@]}" \
             "$image_tar" \
@@ -323,7 +323,7 @@ jobs:
           timeout --signal=TERM --kill-after=10s 90s \
             ssh "${ssh_opts[@]}" "$remote" \
               "chmod 0600 '$incoming'/* && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$PIN_DIGEST' '$incoming'"
-          echo 'The immutable production verifier release is staged with all process gates fixed off and a random unprovisioned database credential. No login, service, or financial switch changed.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'The prior verifier process was fenced and stopped, then the immutable production verifier release was staged with all process gates fixed off and a random unprovisioned database credential. No database login or financial switch changed.' >>"$GITHUB_STEP_SUMMARY"
       - name: Remove runner-local protected material
         if: always()
         shell: bash

@@ -715,6 +715,45 @@ describe('trusted TeleBirr verifier', () => {
     expect(rejectedComplete).not.toHaveBeenCalled();
   });
 
+  it('completes exact staged live evidence after its pilot expires only with historical authority', async () => {
+    const value = fixture();
+    const recoveryAt = '2026-08-21T08:30:00.000Z';
+    Object.assign(value.authority, {
+      historicalCompletionRecovery: true,
+      evidenceStagedAt: value.observation.body.observedAt,
+      capturedAt: recoveryAt,
+    });
+    value.authority.databaseFacts.currentPolicy.checkedAt = recoveryAt;
+    value.authority.databaseFacts.currentEligibility.checkedAt = recoveryAt;
+    value.authority.databaseFacts.duplicateState.checkedAt = recoveryAt;
+
+    const { verifier, complete } = verifierFor(value);
+    const result = await verifier.verifyAndComplete(value.request);
+    expect(result).toMatchObject({
+      status: 'settled',
+      alreadyCompleted: false,
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(complete.mock.calls[0]?.[0]).toMatchObject({
+      assessedAt: recoveryAt,
+      disposition: 'settlement_candidate',
+      reasonCode: 'exact_proof_match',
+    });
+
+    const unauthorized = fixture();
+    unauthorized.authority.capturedAt = recoveryAt;
+    unauthorized.authority.databaseFacts.currentPolicy.checkedAt = recoveryAt;
+    unauthorized.authority.databaseFacts.currentEligibility.checkedAt = recoveryAt;
+    unauthorized.authority.databaseFacts.duplicateState.checkedAt = recoveryAt;
+    const rejected = verifierFor(unauthorized);
+    await expect(rejected.verifier.verifyAndComplete(unauthorized.request)).resolves.toEqual({
+      status: 'not_settled',
+      disposition: 'invalid',
+      reasonCode: 'trusted_evidence_invalid',
+    });
+    expect(rejected.complete).not.toHaveBeenCalled();
+  });
+
   it('rejects cross-wired live and shadow authority modes before completion', async () => {
     const live = fixture();
     const shadow = fixture();

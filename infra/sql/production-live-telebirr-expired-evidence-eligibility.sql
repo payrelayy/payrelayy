@@ -209,7 +209,6 @@ with target as materialized (
                  and pilot.expires_at <= emergency_intent.requested_at
                  and staged.observed_at < emergency_intent.requested_at
                  and staged.staged_at < emergency_intent.requested_at
-                 and app.current_private_trusted_telebirr_activation_epoch() is null
                )
              ))
            as expired_authority_count,
@@ -241,8 +240,7 @@ with target as materialized (
              and pilot.stop_reason_code is not distinct from emergency_intent.reason_code
              and pilot.expires_at <= emergency_intent.requested_at
              and staged.observed_at < emergency_intent.requested_at
-             and staged.staged_at < emergency_intent.requested_at
-             and app.current_private_trusted_telebirr_activation_epoch() is null)
+             and staged.staged_at < emergency_intent.requested_at)
            as post_emergency_authority_count,
          (select count(*)::integer
             from app.private_live_deposit_pilot_revisions pilot

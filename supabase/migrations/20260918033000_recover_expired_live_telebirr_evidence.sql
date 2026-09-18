@@ -1219,14 +1219,22 @@ declare
   signature constant regprocedure := pg_catalog.to_regprocedure(
     'app.finalize_private_live_verified_deposit_and_enqueue_execution(uuid,uuid,uuid)'
   );
-  old_marker constant text := $old$    or checked_at < pilot.active_from
+  old_or_marker constant text := $old$    or checked_at < pilot.active_from
     or checked_at >= pilot.expires_at$old$;
-  new_marker constant text := $new$    or (
+  new_or_marker constant text := $new$    or (
       (checked_at < pilot.active_from or checked_at >= pilot.expires_at)
       and not app.is_private_live_telebirr_historical_intent_authorized(
         p_deposit_intent_id
       )
     )$new$;
+  old_if_marker constant text := $old$  if checked_at < pilot.active_from
+    or checked_at >= pilot.expires_at$old$;
+  new_if_marker constant text := $new$  if (
+    (checked_at < pilot.active_from or checked_at >= pilot.expires_at)
+    and not app.is_private_live_telebirr_historical_intent_authorized(
+      p_deposit_intent_id
+    )
+  )$new$;
   definition text;
   source text;
   owner_id oid;
@@ -1238,12 +1246,17 @@ begin
     from pg_catalog.pg_proc routine where routine.oid = signature;
   if signature is null
     or (pg_catalog.length(source) - pg_catalog.length(
-          pg_catalog.replace(source, old_marker, '')
-        )) / pg_catalog.length(old_marker) <> 2 then
+          pg_catalog.replace(source, old_or_marker, '')
+        )) / pg_catalog.length(old_or_marker) <> 1
+    or (pg_catalog.length(source) - pg_catalog.length(
+          pg_catalog.replace(source, old_if_marker, '')
+        )) / pg_catalog.length(old_if_marker) <> 1 then
     raise exception 'The private-pilot finalizer source does not match.';
   end if;
-  source := pg_catalog.replace(source, old_marker, new_marker);
-  definition := pg_catalog.replace(definition, old_marker, new_marker);
+  source := pg_catalog.replace(source, old_or_marker, new_or_marker);
+  source := pg_catalog.replace(source, old_if_marker, new_if_marker);
+  definition := pg_catalog.replace(definition, old_or_marker, new_or_marker);
+  definition := pg_catalog.replace(definition, old_if_marker, new_if_marker);
   execute definition;
   if not exists (
     select 1 from pg_catalog.pg_proc routine where routine.oid = signature

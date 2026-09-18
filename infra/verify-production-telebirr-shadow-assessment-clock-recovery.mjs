@@ -23,6 +23,13 @@ const migration = readFileSync(
   ),
   'utf8',
 );
+const authenticatedReviewMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260919103000_allow_authenticated_assessment_clock_policy_review.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
 const onceWorkflow = readFileSync(
   new URL('../.github/workflows/production-telebirr-shadow-once.yml', import.meta.url),
   'utf8',
@@ -59,11 +66,14 @@ assert.match(preflight, /begin transaction isolation level repeatable read read 
 assert.match(preflight, /source_recovery_history_valid/u);
 assert.match(preflight, /exact_receipt_too_old_outcome/u);
 assert.match(preflight, /original_assessment_clock_available/u);
-assert.match(preflight, /pilot_twelve_hours/u);
-assert.match(preflight, /profile_twelve_hours/u);
-assert.match(preflight, /enrollment_twelve_hours/u);
+assert.match(preflight, /pilot_machine_window/u);
+assert.match(preflight, /profile_machine_window/u);
+assert.match(preflight, /enrollment_machine_window/u);
 assert.match(preflight, /signer_twelve_hours/u);
 assert.match(preflight, /interval '12 hours'/u);
+assert.match(preflight, /interval '1 hour'/u);
+assert.match(preflight, /would_forward_signed_evidence/u);
+assert.match(preflight, /signed_evidence_verified/u);
 assert.match(preflight, /private_trusted_telebirr_activation_control/u);
 assert.match(preflight, /private_trusted_telebirr_activation_epochs/u);
 assert.match(preflight, /private_trusted_telebirr_emergency_disable_intents/u);
@@ -116,6 +126,29 @@ assert.doesNotMatch(migration, /^\s*grant\s+/imu);
 assert.doesNotMatch(migration, /update app\.feature_switches/u);
 assert.doesNotMatch(
   migration,
+  /(?:insert\s+into|update|delete\s+from|truncate)\s+app\.(?:deposit_intents|deposit_submissions|provider_payment_evidence|deposit_verification_attempts|deposit_payment_claims|deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
+);
+
+assert.match(
+  authenticatedReviewMigration,
+  /guard_private_telebirr_shadow_assessment_clock_retry_insert/u,
+);
+assert.match(
+  authenticatedReviewMigration,
+  /retry_private_telebirr_shadow_after_assessment_clock_fix/u,
+);
+assert.match(
+  authenticatedReviewMigration,
+  /private_telebirr_shadow_assessment_clock_retry_history_is_valid/u,
+);
+assert.match(authenticatedReviewMigration, /would_forward_signed_evidence/u);
+assert.match(authenticatedReviewMigration, /signed_evidence_verified/u);
+assert.match(authenticatedReviewMigration, /interval ''1 hour''/u);
+assert.match(authenticatedReviewMigration, /interval ''12 hours''/u);
+assert.doesNotMatch(authenticatedReviewMigration, /^\s*grant\s+/imu);
+assert.doesNotMatch(authenticatedReviewMigration, /update app\.feature_switches/u);
+assert.doesNotMatch(
+  authenticatedReviewMigration,
   /(?:insert\s+into|update|delete\s+from|truncate)\s+app\.(?:deposit_intents|deposit_submissions|provider_payment_evidence|deposit_verification_attempts|deposit_payment_claims|deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
 );
 

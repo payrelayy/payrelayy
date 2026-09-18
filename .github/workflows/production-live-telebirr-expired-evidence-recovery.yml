@@ -146,10 +146,6 @@ jobs:
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
 
-          node infra/operations/create-production-trusted-telebirr-runtime-credential.mjs \
-            --database-url-output "$protected/trusted-telebirr-verifier-database-url" \
-            --scram-output "$protected/trusted-telebirr-verifier.scram"
-
           helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
           helper_sha="$(sha256sum infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh | cut -d ' ' -f 1)"
           remote="fetanagent-admin@$PRODUCTION_VM_HOST"
@@ -271,6 +267,11 @@ jobs:
             exit 4
           fi
 
+          authority_may_exist=1
+          node infra/operations/create-production-trusted-telebirr-runtime-credential.mjs \
+            --database-url-output "$protected/trusted-telebirr-verifier-database-url" \
+            --scram-output "$protected/trusted-telebirr-verifier.scram"
+
           host_touched=1
           timeout --signal=TERM --kill-after=15s 150s \
             ssh "${ssh_opts[@]}" "$remote" \
@@ -283,7 +284,6 @@ jobs:
             ssh "${ssh_opts[@]}" "$remote" \
               "chmod 0600 '$remote_credential' && sudo -n '$helper' prepare-activation '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$PIN_DIGEST'"
 
-          authority_may_exist=1
           TRUSTED_TELEBIRR_SCRAM_VERIFIER="$(<"$protected/trusted-telebirr-verifier.scram")"
           export TRUSTED_TELEBIRR_SCRAM_VERIFIER
           arm_result="$(run_psql \

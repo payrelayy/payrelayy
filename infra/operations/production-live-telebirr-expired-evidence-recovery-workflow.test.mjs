@@ -48,6 +48,17 @@ test('uses only the reviewed eligibility, one-use arm, status, and fail-closed o
   assert.ok(workflow.includes("sudo -n '$helper' start-activated"));
   assert.ok(workflow.includes("sudo -n '$helper' discard-activation"));
   assert.ok(workflow.includes('.verifierLoginDisabled == true'));
+
+  const eligibilityIndex = workflow.indexOf('eligibility_result="$(run_psql');
+  const credentialIndex = workflow.indexOf(
+    'node infra/operations/create-production-trusted-telebirr-runtime-credential.mjs',
+  );
+  const databaseCleanupFenceIndex = workflow.indexOf('authority_may_exist=1');
+  const hostTouchedIndex = workflow.indexOf('host_touched=1');
+  assert.ok(eligibilityIndex >= 0);
+  assert.ok(databaseCleanupFenceIndex > eligibilityIndex);
+  assert.ok(credentialIndex > databaseCleanupFenceIndex);
+  assert.ok(hostTouchedIndex > credentialIndex);
 });
 
 test('stops at exactly one untouched queue item and never enables or invokes KemerBet', () => {
@@ -133,6 +144,9 @@ test('operation SQL emits redacted state only and checks an untouched queue', ()
   }
   assert.ok(eligibility.includes("'readOnly', true"));
   assert.ok(eligibility.includes("'moneyMoved', false"));
+  assert.ok(eligibility.includes('begin transaction isolation level read committed read only;'));
+  assert.doesNotMatch(eligibility, /app\.current_private_trusted_telebirr_activation_epoch\(\)/u);
+  assert.doesNotMatch(eligibility, /\bfor\s+(?:share|update)\b/iu);
   assert.ok(arm.includes('app.arm_private_live_telebirr_historical_completion'));
   assert.ok(close.includes('app.close_private_live_telebirr_historical_completion'));
 });

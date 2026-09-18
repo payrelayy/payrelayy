@@ -133,6 +133,55 @@ jobs:
           openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$ca_file"
 
+          preflight="$(
+            timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-shadow-authority-deadline-preflight.sql
+          )"
+          jq '{
+            ready,
+            minimumReviewWindowHours,
+            proofPresent: .proof_present,
+            recoveryPresent: .recovery_present,
+            proofShapeExact: .proof_shape_exact,
+            proofExpired: .proof_expired,
+            sourceRecoveryValid: .source_recovery_valid,
+            sourceRecoveryShapeExact: .source_recovery_shape_exact,
+            attemptsBounded: .attempts_bounded,
+            attemptHistoryPresent: .attempt_history_present,
+            everyAttemptQuarantined: .every_attempt_quarantined,
+            quarantineHistoryPresent: .quarantine_history_present,
+            stagedBindingsValid: .staged_bindings_valid,
+            noShadowOutcome: .no_shadow_outcome,
+            noProviderEvidence: .no_provider_evidence,
+            pilotCurrent: .pilot_current,
+            pilotTwelveHours: .pilot_twelve_hours,
+            pilotBindingValid: .pilot_binding_valid,
+            profileCurrent: .profile_current,
+            profileTwelveHours: .profile_twelve_hours,
+            profileBindingValid: .profile_binding_valid,
+            enrollmentCurrent: .enrollment_current,
+            enrollmentTwelveHours: .enrollment_twelve_hours,
+            signerCurrent: .signer_current,
+            signerTwelveHours: .signer_twelve_hours,
+            switchesSafe: .switches_safe,
+            companionDisabled: .companion_disabled,
+            trustedAuthorityInactive: .trusted_authority_inactive,
+            privilegedLoginsDisabled: .privileged_logins_disabled,
+            privilegedSessionsAbsent: .privileged_sessions_absent,
+            financialBoundary,
+            moneyMoved
+          }' <<<"$preflight" | tee -a "$GITHUB_STEP_SUMMARY"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_authority_deadline_preflight" and
+            .deploymentTarget == "production" and
+            .minimumReviewWindowHours == 12 and
+            .ready == true and
+            .financialBoundary == "dry_run" and
+            .moneyMoved == false
+          ' <<<"$preflight" >/dev/null
+
           result="$(
             timeout --signal=TERM --kill-after=5s 90s \
               psql -X --quiet --tuples-only --no-align \

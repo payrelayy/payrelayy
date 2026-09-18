@@ -398,7 +398,7 @@ select pg_temp.apply_exact_historical_function_patch(
 
   select existing.*$marker$,
     $marker$    or activation_epoch.revoked_at is not null$marker$,
-    $marker$pilot.status <> 'armed'$marker$,
+    $marker$    or pilot.status <> 'armed'$marker$,
     $marker$    or (select pg_catalog.count(*) from app.feature_switches feature_switch
          where feature_switch.feature_key in (
            'deposit_execution', 'payment_verification',
@@ -519,7 +519,7 @@ select pg_temp.apply_exact_historical_function_patch(
   'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,text,text,text,timestamp with time zone,bigint,timestamp with time zone,text)'::regprocedure,
   array[
     $marker$  if switch_count <> 5$marker$,
-    $marker$    or pilot.status <> 'armed'$marker$,
+    $marker$pilot.status <> 'armed'$marker$,
     $marker$    or not app.is_private_live_deposit_pilot_enforced()$marker$,
     $marker$    or not exists (
       select 1

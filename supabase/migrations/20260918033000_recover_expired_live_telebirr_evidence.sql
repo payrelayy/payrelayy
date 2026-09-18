@@ -146,7 +146,7 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select pg_catalog.coalesce(pg_catalog.bool_and(
+  select coalesce(pg_catalog.bool_and(
     authority.verification_attempt_id = attempt.id
     and authority.verification_job_id = job.id
     and authority.private_live_deposit_pilot_proof_id = job.private_live_deposit_pilot_proof_id
@@ -271,7 +271,7 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select pg_catalog.coalesce(pg_catalog.bool_and(
+  select coalesce(pg_catalog.bool_and(
     outcome.deposit_intent_id = p_deposit_intent_id
     and outcome.verification_attempt_id = authority.verification_attempt_id
     and outcome.verification_job_id = authority.verification_job_id
@@ -321,7 +321,7 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select pg_catalog.coalesce(
+  select coalesce(
     app.is_private_live_telebirr_historical_intent_authorized(
       claim.deposit_intent_id
     ),
@@ -472,7 +472,7 @@ begin
   source_document_digest :=
     staged.signed_observation -> 'body' ->> 'sourceDocumentDigest';
   armed_at := pg_catalog.clock_timestamp();
-  armed_until := pg_catalog.least(
+  armed_until := least(
     armed_at + interval '20 minutes',
     proof.submitted_at + interval '24 hours'
   );

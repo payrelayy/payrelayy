@@ -14,16 +14,8 @@ const originalMigrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
-const provisionPath = fileURLToPath(
-  new URL(
-    '../../../infra/sql/production-telebirr-shadow-verifier-once-provision.sql',
-    import.meta.url,
-  ),
-);
-
 let migrationSource = '';
 let originalMigrationSource = '';
-let provisionSource = '';
 let bindingSource = '';
 let recoverySource = '';
 let validatorSource = '';
@@ -43,10 +35,9 @@ function extractFunction(source: string, functionName: string): string {
 }
 
 beforeAll(async () => {
-  [migrationSource, originalMigrationSource, provisionSource] = await Promise.all([
+  [migrationSource, originalMigrationSource] = await Promise.all([
     readFile(migrationPath, 'utf8'),
     readFile(originalMigrationPath, 'utf8'),
-    readFile(provisionPath, 'utf8'),
   ]);
   bindingSource = extractFunction(
     migrationSource,
@@ -180,14 +171,5 @@ describe('expired live TeleBirr source-unavailable shadow recovery preparation',
     ]) {
       expect(validatorSource).toContain(fragment);
     }
-  });
-
-  it('lets the provisioner cross the old age gate only through the private validator', () => {
-    expect(provisionSource).toMatch(
-      /pg_catalog\.clock_timestamp\(\) < proof\.submitted_at \+ case[\s\S]*?else interval '24 hours'[\s\S]*?or app\.private_live_telebirr_source_recovery_is_valid\(/u,
-    );
-    expect(provisionSource).toContain(
-      "shadow_proof.expires_at > pg_catalog.clock_timestamp() + interval '60 seconds'",
-    );
   });
 });

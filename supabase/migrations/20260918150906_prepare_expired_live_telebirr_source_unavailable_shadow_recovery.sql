@@ -330,10 +330,10 @@ begin
    where proof.id = terminal_job.private_live_deposit_pilot_proof_id
    for key share;
 
-  select authorization.*
+  select candidate_authorization.*
     into expired_source_authorization
-    from app.private_live_telebirr_expired_source_authorizations authorization
-   where authorization.source_proof_binding_digest =
+    from app.private_live_telebirr_expired_source_authorizations candidate_authorization
+   where candidate_authorization.source_proof_binding_digest =
          app.private_live_telebirr_expired_source_binding_digest(source_proof.id)
    for share;
 
@@ -1039,9 +1039,9 @@ begin
   select proof.* into source_proof
     from app.private_live_deposit_pilot_proofs proof
    where proof.id = recovery.source_live_proof_id;
-  select authorization.* into expired_source_authorization
-    from app.private_live_telebirr_expired_source_authorizations authorization
-   where authorization.source_proof_binding_digest =
+  select candidate_authorization.* into expired_source_authorization
+    from app.private_live_telebirr_expired_source_authorizations candidate_authorization
+   where candidate_authorization.source_proof_binding_digest =
          app.private_live_telebirr_expired_source_binding_digest(source_proof.id);
   select outcome.* into root_outcome
     from app.private_live_telebirr_verification_outcomes outcome

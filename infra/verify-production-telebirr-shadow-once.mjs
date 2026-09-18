@@ -164,6 +164,14 @@ assert.match(provision, /source_live_verification_job_id = job\.id/u);
 assert.match(provision, /proof\.submitted_at \+ case/u);
 assert.match(provision, /then interval '36 hours'/u);
 assert.match(provision, /else interval '24 hours'/u);
+assert.match(
+  provision,
+  /pg_catalog\.clock_timestamp\(\) < proof\.submitted_at \+ case[\s\S]*?else interval '24 hours'[\s\S]*?or app\.private_live_telebirr_source_recovery_is_valid\(/u,
+);
+assert.match(
+  provision,
+  /shadow_proof\.expires_at > pg_catalog\.clock_timestamp\(\) \+ interval '60 seconds'/u,
+);
 assert.match(provision, /private_live_telebirr_verification_attempts/u);
 assert.match(provision, /private_live_telebirr_verification_outcomes/u);
 assert.match(provision, /feature_key <> 'private_live_deposit_pilot'/u);

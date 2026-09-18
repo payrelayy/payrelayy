@@ -1,0 +1,191 @@
+name: Diagnose production TeleBirr assessment retry delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_pilot_revision_id:
+        description: Type the exact armed dry-run pilot UUID
+        required: true
+        type: string
+      confirm_retry_request_key:
+        description: Type the existing assessment-clock retry UUIDv4
+        required: true
+        type: string
+      confirm_operation:
+        description: Type DIAGNOSE TELEBIRR ASSESSMENT RETRY DELIVERY - READ ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-assessment-clock-status
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate exact read-only diagnosis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
+      CONFIRMED_REQUEST: ${{ inputs.confirm_retry_request_key }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact identifiers, and read-only phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
+          [[ "$CONFIRMED_REQUEST" =~ $uuid_v4 ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'DIAGNOSE TELEBIRR ASSESSMENT RETRY DELIVERY - READ ONLY' ]]
+
+  inspect:
+    name: Inspect only redacted child and delivery gates
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Read only the redacted assessment retry delivery state
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
+          ASSESSMENT_CLOCK_RETRY_REQUEST_KEY: ${{ inputs.confirm_retry_request_key }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          ca_file="$RUNNER_TEMP/fetanagent-production-assessment-clock-status-ca.crt"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$ca_file" == \
+                  "$RUNNER_TEMP/fetanagent-production-assessment-clock-status-ca.crt" && \
+                  -f "$ca_file" && ! -L "$ca_file" ]]; then
+              shred --force --remove=unlink --zero "$ca_file" 2>/dev/null || rm --force "$ca_file"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+
+          status="$(timeout --signal=TERM --kill-after=5s 60s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-telebirr-shadow-assessment-clock-status.sql)"
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_shadow_assessment_clock_status" and
+            .deploymentTarget == "production" and
+            .minimumReviewWindowHours == 12 and
+            .inspectionOnly == true and
+            .retry_present == true and
+            .proof_present == true and
+            .retry_history_valid == true and
+            .trusted_authority_inactive == true and
+            .money_switches_disabled == true and
+            .pilot_dry_run == true and
+            .companion_disabled == true and
+            .privileged_logins_disabled == true and
+            .privileged_sessions_absent == true and
+            .financialBoundary == "dry_run" and
+            .kemerBetExecutionEnabled == false and
+            .moneyMoved == false
+          ' <<<"$status" >/dev/null
+
+          jq '{
+            deliveryState: .delivery_state,
+            retryHistoryValid: .retry_history_valid,
+            reviewWindowOpen: .review_window_open,
+            minimumReviewWindowHours,
+            proofQueued: .proof_queued,
+            shadowModeReady: .shadow_mode_ready,
+            pilotCurrent: .pilot_current,
+            profileCurrent: .profile_current,
+            enrollmentCurrent: .enrollment_current,
+            signerCurrent: .signer_current,
+            deviceHeartbeatFresh: .device_heartbeat_fresh,
+            deviceRuntimeState: .device_runtime_state,
+            deviceStatusClass: .device_status_class,
+            assignmentBrokerLoginEnabled: .assignment_broker_login_enabled,
+            deviceStateLoginEnabled: .device_state_login_enabled,
+            assignmentBrokerSessionPresent: .assignment_broker_session_present,
+            deviceStateSessionPresent: .device_state_session_present,
+            targetAssignmentBaseEligible: .target_assignment_base_eligible,
+            earlierEligibleCandidateCount: .earlier_eligible_candidate_count,
+            attemptCount: .attempt_count,
+            activeAttemptCount: .active_attempt_count,
+            signedAssignmentCount: .signed_assignment_count,
+            stagedCount: .staged_count,
+            unquarantinedStagedCount: .unquarantined_staged_count,
+            quarantineCount: .quarantine_count,
+            outcomeCount: .outcome_count,
+            outcomeClass: .outcome_class,
+            outcomeReasonClass: .outcome_reason_class,
+            trustedAuthorityInactive: .trusted_authority_inactive,
+            moneySwitchesDisabled: .money_switches_disabled,
+            pilotDryRun: .pilot_dry_run,
+            companionDisabled: .companion_disabled,
+            privilegedLoginsDisabled: .privileged_logins_disabled,
+            privilegedSessionsAbsent: .privileged_sessions_absent,
+            financialBoundary,
+            kemerBetExecutionEnabled,
+            moneyMoved
+          }' <<<"$status" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '::notice::The production assessment child and paired-device delivery path were inspected read-only; only redacted states and counts were emitted.'

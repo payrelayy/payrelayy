@@ -766,12 +766,66 @@ with locked_feature_switches as materialized (
          )
        )
      )
+), safe_reviewable_source_recovery as (
+  -- A terminal source-unavailable recovery keeps its original transfer submitted_at. Once the
+  -- short proof/assignment lease has closed, admit only evidence that was immutably staged inside
+  -- that lease and whose exact recovery lineage remains inside its separate twelve-hour review
+  -- window. This grants the isolated verifier a login only; it does not reopen phone pickup or any
+  -- financial path.
+  select job.id,
+         shadow_proof.id as shadow_proof_request_id
+    from app.private_live_telebirr_verification_jobs job
+    join app.private_live_deposit_pilot_proofs proof
+      on proof.id = job.private_live_deposit_pilot_proof_id
+    join app.private_telebirr_shadow_proof_requests shadow_proof
+      on shadow_proof.source_live_verification_job_id = job.id
+     and shadow_proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
+     and shadow_proof.id = :'target_shadow_proof_request_id'::uuid
+   where job.id =
+         nullif(:'source_live_verification_job_id', 'not-applicable')::uuid
+     and shadow_proof.proof_status = 'verification_queued'
+     and shadow_proof.recovery_request_key =
+         nullif(:'recovery_request_key', 'not-applicable')::uuid
+     and shadow_proof.recovery_reason_code = 'expired_pilot_recovery_no_credit'
+     and shadow_proof.recovered_at is not null
+     and shadow_proof.recovered_at <= pg_catalog.clock_timestamp()
+     and pg_catalog.clock_timestamp() < shadow_proof.recovered_at + interval '12 hours'
+     and app.private_live_telebirr_source_recovery_is_valid(
+           shadow_proof.id,
+           nullif(:'recovery_request_key', 'not-applicable')::uuid
+         )
+     and not exists (
+       select 1
+         from app.private_telebirr_shadow_verification_outcomes outcome
+        where outcome.shadow_proof_request_id = shadow_proof.id
+     )
+     and exists (
+       select 1
+         from app.private_telebirr_shadow_device_evidence_staging staged
+         join app.private_telebirr_shadow_verification_attempts attempt
+           on attempt.id = staged.verification_attempt_id
+          and attempt.shadow_proof_request_id = shadow_proof.id
+          and attempt.verification_job_id = shadow_proof.verification_job_id
+        where staged.staged_at < shadow_proof.expires_at
+          and staged.staged_at < attempt.expires_at
+          and staged.observed_at >= attempt.issued_at
+          and staged.observed_at < attempt.expires_at
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_evidence_quarantine quarantine
+             where quarantine.verification_attempt_id = attempt.id
+                or quarantine.observation_body_digest = staged.observation_body_digest
+          )
+     )
 ), safe_exact_shadow as (
   select direct.shadow_proof_request_id
     from safe_direct_shadow direct
   union all
   select recovered.shadow_proof_request_id
     from safe_source_and_open_shadow recovered
+  union all
+  select reviewable.shadow_proof_request_id
+    from safe_reviewable_source_recovery reviewable
 )
 select (select count(*) from locked_feature_switches) = 7
    and (select count(*) from locked_feature_switches

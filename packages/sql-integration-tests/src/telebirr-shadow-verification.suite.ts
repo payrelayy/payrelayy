@@ -554,7 +554,7 @@ export function registerTelebirrShadowVerificationSqlTests(
           completionFunction,
           {
             timestamp: 'authority_at',
-            finalCheck: "or authority_at >= proof.submitted_at + interval '12 hours'",
+            finalCheck: 'or authority_at >= (case',
           },
         ],
       ]);
@@ -618,6 +618,22 @@ export function registerTelebirrShadowVerificationSqlTests(
             expect(finalRefreshIndex, row.signature).toBeGreaterThan(finalBlockingBoundaryIndex);
             expect(finalCheckIndex, row.signature).toBeGreaterThan(finalRefreshIndex);
             expect(firstWriteIndex, row.signature).toBeGreaterThan(finalCheckIndex);
+
+            if (row.signature === completionFunction) {
+              expect(
+                row.definition.match(/authority_at >= \(case/gu) ?? [],
+                row.signature,
+              ).toHaveLength(2);
+              for (const recoveryBoundaryFragment of [
+                'when proof.recovery_request_key is not null',
+                'and proof.recovered_at is not null',
+                'and app.private_live_telebirr_source_recovery_is_valid(',
+                "then proof.recovered_at + interval '12 hours'",
+                "else proof.submitted_at + interval '12 hours'",
+              ]) {
+                expect(row.definition, row.signature).toContain(recoveryBoundaryFragment);
+              }
+            }
           }
 
           if (row.signature === quarantineFunction) {

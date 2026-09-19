@@ -25,6 +25,54 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('expired live TeleBirr evidence recovery', () => {
+    it('compiles the reviewed source-binding retry guard as one 12-hour sidecar', async () => {
+      const client = getClient();
+      const scramVerifier =
+        `SCRAM-SHA-256$4096:${'A'.repeat(22)}==` + `$${'B'.repeat(43)}=:${'C'.repeat(43)}=`;
+
+      await client.query('begin');
+      try {
+        const constraint = await client.query<{ readonly definition: string }>(`
+          select pg_catalog.pg_get_constraintdef(constraint_row.oid) as definition
+            from pg_catalog.pg_constraint constraint_row
+           where constraint_row.conrelid =
+                 'app.private_live_telebirr_source_binding_recovery_retries'::regclass
+             and constraint_row.conname =
+                 'private_live_tbirr_source_binding_retry_window'
+        `);
+        expect(constraint.rows).toHaveLength(1);
+        expect(constraint.rows[0]!.definition).toContain('12:00:00');
+
+        let failure: unknown;
+        try {
+          await client.query(
+            `select *
+               from app.arm_private_live_telebirr_source_binding_recovery(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid, $5::text, $6::text
+               )`,
+            [
+              '00000000-0000-4000-8000-000000000021',
+              '00000000-0000-4000-8000-000000000022',
+              '1',
+              '00000000-0000-4000-8000-000000000023',
+              scramVerifier,
+              'source_binding_supersession_after_nonfinancial_review',
+            ],
+          );
+        } catch (error) {
+          failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(
+          'The reviewed TeleBirr source binding is not recoverable.',
+        );
+        expect((failure as Error).message).not.toContain('ambiguous');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('compiles the one-attempt 12-hour arming guard without ambiguous references', async () => {
       const client = getClient();
       const scramVerifier =

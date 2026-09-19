@@ -290,6 +290,19 @@ inspect_active_container() {
     die 'the production verifier network is not exact and IPv6-enabled'
 }
 
+report_redacted_verifier_failure_stage() {
+  local container_id="$1" diagnostic
+  diagnostic="$(
+    timeout --signal=TERM --kill-after=5s 20s docker container logs --tail 80 "$container_id" \
+      2>/dev/null |
+      grep -E '^FetanAgent trusted TeleBirr verifier failed closed at stage: (load_staged_evidence|unavailable|decode_request|load_first_authority|validate_first_authority|authenticate_first_evidence|load_second_authority|validate_second_authority|authenticate_second_evidence|derive_completion_input|persist_completion|validate_completion|persist_quarantine|unpersisted_result)\.$' |
+      tail -n 1 || true
+  )"
+  if [[ -n "$diagnostic" ]]; then
+    printf '%s\n' "$diagnostic" >&2
+  fi
+}
+
 verify_active_record() {
   local sha="$1" request_key="$2" epoch="$3" pilot_revision_id="$4" expected
   [[ ! -L "$ACTIVE_RECORD" && -f "$ACTIVE_RECORD" &&
@@ -682,7 +695,10 @@ case "${1:-}" in
         --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id")" ||
         die 'the verifier health inspection failed'
       if [[ "$health" == 'healthy' ]]; then break; fi
-      [[ "$health" == 'starting' ]] || die 'the verifier became unhealthy during startup'
+      if [[ "$health" != 'starting' ]]; then
+        report_redacted_verifier_failure_stage "$container_id"
+        die 'the verifier became unhealthy during startup'
+      fi
       [[ "$attempt" != '45' ]] || die 'the verifier did not become healthy before the deadline'
       sleep 2
     done

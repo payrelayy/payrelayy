@@ -154,7 +154,8 @@ jobs:
             verificationState, outcomeReasonCode, remainingSeconds,
             targetCount, attempts, assignmentTranscripts, assignmentDeliveries,
             deviceEvidence, observations, outcomes, sourceBindingRetries,
-            sourceBindingRetryClosures, authorityConsumptions, reservations,
+            sourceBindingRetryClosures, authorityConsumptions,
+            validNonSettlementAuthorityConsumptions, reservations,
             settlementReceipts, settlementDocuments, depositExecutionJobs,
             queuedDepositJobs, liveToShadowRecoveries, shadowProofRequests,
             shadowSourceUnavailableRetries, shadowAttempts, shadowOutcomes,
@@ -162,7 +163,8 @@ jobs:
             openPairingChallenges, completedPairingChallenges,
             validVerifierEnrollments, readyVerifierEnrollments,
             trustedVerifierSessions, financialSwitchesLive,
-            financialSwitchesDisabled, kemerBetLoginRoles, kemerBetSessions,
+            financialSwitchesDisabled, dryRunPilotSwitches,
+            kemerBetLoginRoles, kemerBetSessions,
             executionEnabled, readOnly, moneyMoved
           }' <<<"$observer_result")"
           printf '%s\n' "$redacted_result" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -173,6 +175,7 @@ jobs:
               .assignmentTranscripts, .assignmentDeliveries, .deviceEvidence,
               .observations, .outcomes, .sourceBindingRetries,
               .sourceBindingRetryClosures, .authorityConsumptions,
+              .validNonSettlementAuthorityConsumptions,
               .reservations, .settlementReceipts, .settlementDocuments,
               .depositExecutionJobs, .queuedDepositJobs,
               .liveToShadowRecoveries, .shadowProofRequests,
@@ -180,11 +183,15 @@ jobs:
               .openPairingChallenges, .completedPairingChallenges,
               .validVerifierEnrollments, .readyVerifierEnrollments,
               .trustedVerifierSessions, .financialSwitchesLive,
-              .financialSwitchesDisabled, .kemerBetLoginRoles, .kemerBetSessions
+              .financialSwitchesDisabled, .dryRunPilotSwitches,
+              .kemerBetLoginRoles, .kemerBetSessions
             ] | all(type == "number" and . >= 0 and . <= 64)) and
             (.remainingSeconds | type == "number" and . >= 0 and . <= 43200) and
             .financialSwitchesLive == 0 and
-            .financialSwitchesDisabled == 7 and
+            (
+              (.financialSwitchesDisabled == 7 and .dryRunPilotSwitches == 0) or
+              (.financialSwitchesDisabled == 6 and .dryRunPilotSwitches == 1)
+            ) and
             .kemerBetLoginRoles == 0 and
             .kemerBetSessions == 0 and
             .executionEnabled == false and

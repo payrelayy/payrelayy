@@ -48,6 +48,7 @@ assert.match(workflow, /PRODUCTION_DATABASE_TUNNEL_PORT: '5432'/u);
 assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(workflow, /resolve-authority-deadline-child/u);
+assert.match(workflow, /resolve-reviewed-source-binding/u);
 assert.match(workflow, /not-applicable for direct shadow intake/u);
 assert.match(workflow, /including an authority-deadline child-proof retry/u);
 assert.match(
@@ -68,6 +69,12 @@ assert.match(workflow, /private_telebirr_shadow_policy_recoveries recovery/u);
 assert.match(workflow, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
 assert.match(workflow, /private_telebirr_shadow_authority_deadline_retry_is_valid/u);
 assert.match(workflow, /private_live_telebirr_source_recovery_is_valid/u);
+assert.match(workflow, /private_live_telebirr_source_binding_shadow_recoveries/u);
+assert.match(workflow, /private_live_telebirr_source_binding_shadow_recovery_is_valid/u);
+assert.match(workflow, /::add-mask::\$resolved_pilot/u);
+assert.match(workflow, /::add-mask::\$resolved_proof/u);
+assert.match(workflow, /::add-mask::\$resolved_source_job/u);
+assert.match(workflow, /::add-mask::\$resolved_request/u);
 assert.match(
   workflow,
   /recovery\.recovery_request_key =[\s\S]*?nullif\('\$RECOVERY_REQUEST_KEY', 'not-applicable'\)::uuid/u,
@@ -140,7 +147,7 @@ assert.match(workflow, /pin\.keyId === enrolled\.keyId/u);
 assert.match(workflow, /fingerprint === enrolled\.publicKeySpkiSha256/u);
 assert.match(
   workflow,
-  /\(\.sourceLiveAttempts == 0 and \.sourceLiveOutcomes == 0\) or[\s\S]*?\.sourceLiveAttempts == 4 and \.sourceLiveOutcomes == 1 and[\s\S]*?\.sourceUnavailableRecoveryValid == true/u,
+  /\(\.sourceLiveAttempts == 0 and \.sourceLiveOutcomes == 0\) or[\s\S]*?\.sourceLiveAttempts == 1 or \.sourceLiveAttempts == 4[\s\S]*?\.sourceLiveOutcomes == 1 and[\s\S]*?\.sourceUnavailableRecoveryValid == true/u,
 );
 assert.match(workflow, /\.sourceReservations == 0/u);
 assert.match(workflow, /\.liveMoneySwitchCount == 0/u);
@@ -187,6 +194,7 @@ assert.match(provision, /verifier_policy_fix_retry_no_credit/u);
 assert.match(provision, /quarantine\.reason_code = 'trusted_evidence_invalid'/u);
 assert.match(provision, /shadow_proof\.submitted_at \+ interval '12 hours'/u);
 assert.match(provision, /shadow_proof\.recovered_at \+ interval '12 hours'/u);
+assert.match(provision, /reviewed_source_binding_source_unavailable_recovery_no_credit/u);
 assert.match(provision, /staged\.staged_at < shadow_proof\.expires_at/u);
 assert.match(provision, /staged\.staged_at < attempt\.expires_at/u);
 assert.match(provision, /staged\.observed_at >= attempt\.issued_at/u);

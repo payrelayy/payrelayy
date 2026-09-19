@@ -874,7 +874,10 @@ with locked_feature_switches as materialized (
      and shadow_proof.proof_status = 'verification_queued'
      and shadow_proof.recovery_request_key =
          nullif(:'recovery_request_key', 'not-applicable')::uuid
-     and shadow_proof.recovery_reason_code = 'expired_pilot_recovery_no_credit'
+     and shadow_proof.recovery_reason_code in (
+       'expired_pilot_recovery_no_credit',
+       'reviewed_source_binding_source_unavailable_recovery_no_credit'
+     )
      and shadow_proof.recovered_at is not null
      and shadow_proof.recovered_at <= pg_catalog.clock_timestamp()
      and pg_catalog.clock_timestamp() < shadow_proof.recovered_at + interval '12 hours'

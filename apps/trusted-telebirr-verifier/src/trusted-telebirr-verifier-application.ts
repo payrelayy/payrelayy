@@ -25,6 +25,7 @@ import {
 import {
   createTrustedTelebirrVerifierWorker,
   type TrustedTelebirrVerifierWorker,
+  type TrustedTelebirrVerifierWorkerFailureStage,
 } from './trusted-telebirr-verifier-worker.js';
 
 export const TRUSTED_TELEBIRR_VERIFIER_SHUTDOWN_TIMEOUT_MS = 15_000 as const;
@@ -55,6 +56,7 @@ export interface TrustedTelebirrVerifierApplicationDependencies {
     source: TrustedTelebirrPostgresRuntime['workSource'],
     verifier: TrustedTelebirrVerifier,
   ) => TrustedTelebirrVerifierWorker;
+  readonly reportFailureStage?: (stage: TrustedTelebirrVerifierWorkerFailureStage) => void;
   readonly signalSource?: TrustedTelebirrVerifierSignalSource;
   readonly shutdownTimeoutMilliseconds?: number;
 }
@@ -136,6 +138,12 @@ export async function createTrustedTelebirrVerifierApplication(
           verifier: pinnedVerifier,
           onResult: (result) =>
             console.info(result, 'Trusted TeleBirr verification result recorded.'),
+          onFailureStage:
+            dependencies.reportFailureStage ??
+            ((stage) =>
+              console.error(
+                `FetanAgent trusted TeleBirr verifier failed closed at stage: ${stage}.`,
+              )),
         }))
     )(exactRuntime.workSource, verifier);
 

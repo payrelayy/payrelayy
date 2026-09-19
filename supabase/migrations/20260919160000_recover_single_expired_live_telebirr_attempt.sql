@@ -223,7 +223,7 @@ declare
   proof app.private_live_deposit_pilot_proofs%rowtype;
   signer app.private_live_telebirr_assignment_signers%rowtype;
   staged app.private_live_telebirr_device_evidence_staging%rowtype;
-  source_document_digest text;
+  exact_source_document_digest text;
   request_digest text;
   armed_at timestamptz;
   armed_until timestamptz;
@@ -318,7 +318,7 @@ begin
    where transcript.verification_attempt_id = attempt.id
    for share of transcript, assignment_signer;
 
-  source_document_digest :=
+  exact_source_document_digest :=
     staged.signed_observation -> 'body' ->> 'sourceDocumentDigest';
   armed_at := pg_catalog.clock_timestamp();
   armed_until := armed_at + interval '12 hours';
@@ -338,7 +338,7 @@ begin
       or authority.pilot_revision_id is distinct from pilot.id
       or authority.expired_activation_epoch is distinct from p_activation_epoch
       or authority.observation_body_digest is distinct from staged.observation_body_digest
-      or authority.source_document_digest is distinct from source_document_digest
+      or authority.source_document_digest is distinct from exact_source_document_digest
       or authority.reason_code is distinct from p_reason_code
       or authority.expires_at <= armed_at + interval '5 minutes'
       or not app.is_private_live_telebirr_historical_boundary_authorized(
@@ -364,8 +364,8 @@ begin
     or proof.submitted_at + interval '24 hours' < armed_until
     or attempt.id is null or staged.observation_body_digest is null
     or enrollment.id is null or signer.id is null
-    or source_document_digest is null
-    or source_document_digest !~ '^sha256:[0-9a-f]{64}$'
+    or exact_source_document_digest is null
+    or exact_source_document_digest !~ '^sha256:[0-9a-f]{64}$'
     or job.expires_at > armed_at
     or attempt.expires_at > armed_at
     or attempt.issued_at < job.recovered_at
@@ -403,7 +403,7 @@ begin
     or exists (select 1 from app.private_live_deposit_pilot_reservations reservation
                 where reservation.private_live_deposit_pilot_proof_id = proof.id)
     or exists (select 1 from app.private_live_telebirr_settlement_documents settled
-                where settled.source_document_digest = source_document_digest)
+                where settled.source_document_digest = exact_source_document_digest)
     or exists (select 1 from app.private_live_telebirr_verifier_evidence_quarantine quarantine
                 where quarantine.verification_attempt_id = attempt.id
                    or quarantine.observation_body_digest = staged.observation_body_digest)
@@ -485,7 +485,7 @@ begin
 
   request_digest := app.private_live_telebirr_historical_completion_digest(
     p_request_key, job.id, attempt.id, pilot.id, p_activation_epoch,
-    staged.observation_body_digest, source_document_digest,
+    staged.observation_body_digest, exact_source_document_digest,
     armed_at, armed_until, p_reason_code
   );
 
@@ -496,7 +496,7 @@ begin
     reason_code, request_digest, authorized_at, expires_at
   ) values (
     p_request_key, job.id, attempt.id, proof.id, pilot.id, profile.id,
-    p_activation_epoch, staged.observation_body_digest, source_document_digest,
+    p_activation_epoch, staged.observation_body_digest, exact_source_document_digest,
     p_reason_code, request_digest, armed_at, armed_until
   ) returning * into authority;
 

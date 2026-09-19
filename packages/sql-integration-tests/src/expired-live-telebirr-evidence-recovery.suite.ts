@@ -32,6 +32,17 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
 
       await client.query('begin');
       try {
+        const constraint = await client.query<{ readonly definition: string }>(`
+          select pg_catalog.pg_get_constraintdef(constraint_row.oid) as definition
+            from pg_catalog.pg_constraint constraint_row
+           where constraint_row.conrelid =
+                 'app.private_live_telebirr_historical_completion_authorities'::regclass
+             and constraint_row.conname =
+                 'private_live_telebirr_historical_completion_window'
+        `);
+        expect(constraint.rows).toHaveLength(1);
+        expect(constraint.rows[0]!.definition).toContain('12:00:00');
+
         let failure: unknown;
         try {
           await client.query(
@@ -57,17 +68,6 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
           'The staged TeleBirr evidence is not recoverable.',
         );
         expect((failure as Error).message).not.toContain('ambiguous');
-
-        const constraint = await client.query<{ readonly definition: string }>(`
-          select pg_catalog.pg_get_constraintdef(constraint_row.oid) as definition
-            from pg_catalog.pg_constraint constraint_row
-           where constraint_row.conrelid =
-                 'app.private_live_telebirr_historical_completion_authorities'::regclass
-             and constraint_row.conname =
-                 'private_live_telebirr_historical_completion_window'
-        `);
-        expect(constraint.rows).toHaveLength(1);
-        expect(constraint.rows[0]!.definition).toContain('12:00:00');
       } finally {
         await client.query('rollback');
       }

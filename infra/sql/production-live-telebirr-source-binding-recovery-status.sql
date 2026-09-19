@@ -106,6 +106,72 @@ with target as materialized (
      and execution_job.lease_expires_at is null
      and execution_job.last_error_code is null
      and execution_job.completed_at is null
+), live_to_shadow_recoveries as materialized (
+  select recovery.*
+    from app.private_live_telebirr_source_recoveries recovery
+    join target job
+      on job.private_live_deposit_pilot_proof_id = recovery.source_live_proof_id
+), shadow_source_proofs as materialized (
+  select proof.*
+    from app.private_telebirr_shadow_proof_requests proof
+    join live_to_shadow_recoveries recovery
+      on recovery.replacement_shadow_proof_request_id = proof.id
+), shadow_retries as materialized (
+  select shadow_retry.*
+    from app.private_telebirr_shadow_source_unavailable_retries shadow_retry
+    join shadow_source_proofs source_proof
+      on source_proof.id = shadow_retry.source_shadow_proof_request_id
+), shadow_proofs as materialized (
+  select source_proof.* from shadow_source_proofs source_proof
+  union
+  select replacement.*
+    from app.private_telebirr_shadow_proof_requests replacement
+    join shadow_retries shadow_retry
+      on shadow_retry.replacement_shadow_proof_request_id = replacement.id
+), shadow_attempts as materialized (
+  select attempt.*
+    from app.private_telebirr_shadow_verification_attempts attempt
+    join shadow_proofs proof on proof.id = attempt.shadow_proof_request_id
+), shadow_outcomes as materialized (
+  select outcome.*
+    from app.private_telebirr_shadow_verification_outcomes outcome
+    join shadow_proofs proof on proof.id = outcome.shadow_proof_request_id
+), latest_shadow_outcome as materialized (
+  select outcome.*
+    from shadow_outcomes outcome
+   order by outcome.created_at desc, outcome.id desc
+   limit 1
+), relevant_shadow_pilots as materialized (
+  select distinct proof.pilot_revision_id, proof.receiver_profile_id
+    from shadow_proofs proof
+), relevant_pairing_challenges as materialized (
+  select challenge.*
+    from app.private_live_telebirr_device_pairing_challenges challenge
+    join relevant_shadow_pilots pilot
+      on pilot.pilot_revision_id = challenge.pilot_revision_id
+     and pilot.receiver_profile_id = challenge.receiver_profile_id
+), relevant_enrollments as materialized (
+  select enrollment.*
+    from app.private_live_telebirr_device_enrollments enrollment
+    join relevant_shadow_pilots pilot
+      on pilot.pilot_revision_id = enrollment.pilot_revision_id
+     and pilot.receiver_profile_id = enrollment.receiver_profile_id
+   where enrollment.valid_from <= pg_catalog.clock_timestamp()
+     and enrollment.valid_until > pg_catalog.clock_timestamp()
+     and not exists (
+       select 1
+         from app.private_live_telebirr_device_revocations revocation
+        where revocation.device_enrollment_id = enrollment.id
+          and revocation.revoked_at <= pg_catalog.clock_timestamp()
+     )
+), ready_enrollments as materialized (
+  select enrollment.*
+    from relevant_enrollments enrollment
+    join app.private_live_telebirr_device_heartbeats heartbeat
+      on heartbeat.device_enrollment_id = enrollment.id
+   where heartbeat.runtime_state = 'ready'
+     and heartbeat.status_code = 'no_assignment'
+     and heartbeat.last_seen_at > pg_catalog.clock_timestamp() - interval '6 minutes'
 ), summary as materialized (
   select
     (select count(*)::integer from target) as targets,
@@ -124,6 +190,20 @@ with target as materialized (
     (select count(*)::integer from documents) as documents,
     (select count(*)::integer from execution_jobs) as execution_jobs,
     (select count(*)::integer from queued_jobs) as queued_jobs,
+    (select count(*)::integer from live_to_shadow_recoveries) as live_to_shadow_recoveries,
+    (select count(*)::integer from shadow_proofs) as shadow_proofs,
+    (select count(*)::integer from shadow_retries) as shadow_retries,
+    (select count(*)::integer from shadow_attempts) as shadow_attempts,
+    (select count(*)::integer from shadow_outcomes) as shadow_outcomes,
+    (select disposition from latest_shadow_outcome) as latest_shadow_disposition,
+    (select reason_code from latest_shadow_outcome) as latest_shadow_reason_code,
+    (select count(*)::integer from relevant_pairing_challenges
+      where state = 'open' and expires_at > pg_catalog.clock_timestamp())
+      as open_pairing_challenges,
+    (select count(*)::integer from relevant_pairing_challenges
+      where state = 'completed') as completed_pairing_challenges,
+    (select count(*)::integer from relevant_enrollments) as valid_enrollments,
+    (select count(*)::integer from ready_enrollments) as ready_enrollments,
     (select outcome.disposition from outcomes outcome limit 1) as disposition,
     (select outcome.reason_code from outcomes outcome limit 1) as reason_code,
     (select recovery.expires_at from retry recovery limit 1) as expires_at,
@@ -207,6 +287,17 @@ select pg_catalog.jsonb_build_object(
   'settlementDocuments', classified.documents,
   'depositExecutionJobs', classified.execution_jobs,
   'queuedDepositJobs', classified.queued_jobs,
+  'liveToShadowRecoveries', classified.live_to_shadow_recoveries,
+  'shadowProofRequests', classified.shadow_proofs,
+  'shadowSourceUnavailableRetries', classified.shadow_retries,
+  'shadowAttempts', classified.shadow_attempts,
+  'shadowOutcomes', classified.shadow_outcomes,
+  'latestShadowDisposition', coalesce(classified.latest_shadow_disposition, 'none'),
+  'latestShadowReasonCode', coalesce(classified.latest_shadow_reason_code, 'none'),
+  'openPairingChallenges', classified.open_pairing_challenges,
+  'completedPairingChallenges', classified.completed_pairing_challenges,
+  'validVerifierEnrollments', classified.valid_enrollments,
+  'readyVerifierEnrollments', classified.ready_enrollments,
   'trustedVerifierSessions', classified.verifier_sessions,
   'financialSwitchesLive', classified.live_financial_switches,
   'financialSwitchesDisabled', classified.disabled_financial_switches,

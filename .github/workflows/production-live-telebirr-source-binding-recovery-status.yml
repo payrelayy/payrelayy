@@ -145,6 +145,24 @@ jobs:
             (.verificationState | IN(
               "waiting", "queued", "review_required", "definite_reject", "expired", "invalid"
             )) and
+            (.executionEnabled | type == "boolean") and
+            .readOnly == true and
+            .moneyMoved == false
+          ' <<<"$observer_result" >/dev/null
+
+          redacted_result="$(jq '{
+            verificationState, outcomeReasonCode, remainingSeconds,
+            targetCount, attempts, assignmentTranscripts, assignmentDeliveries,
+            deviceEvidence, observations, outcomes, sourceBindingRetries,
+            sourceBindingRetryClosures, authorityConsumptions, reservations,
+            settlementReceipts, settlementDocuments, depositExecutionJobs,
+            queuedDepositJobs, trustedVerifierSessions, financialSwitchesLive,
+            financialSwitchesDisabled, kemerBetLoginRoles, kemerBetSessions,
+            executionEnabled, readOnly, moneyMoved
+          }' <<<"$observer_result")"
+          printf '%s\n' "$redacted_result" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          jq -e '
             ([
               .targetCount, .remainingSeconds, .attempts,
               .assignmentTranscripts, .assignmentDeliveries, .deviceEvidence,
@@ -163,17 +181,6 @@ jobs:
             .readOnly == true and
             .moneyMoved == false
           ' <<<"$observer_result" >/dev/null
-
-          jq '{
-            verificationState, outcomeReasonCode, remainingSeconds,
-            targetCount, attempts, assignmentTranscripts, assignmentDeliveries,
-            deviceEvidence, observations, outcomes, sourceBindingRetries,
-            sourceBindingRetryClosures, authorityConsumptions, reservations,
-            settlementReceipts, settlementDocuments, depositExecutionJobs,
-            queuedDepositJobs, trustedVerifierSessions, financialSwitchesLive,
-            financialSwitchesDisabled, kemerBetLoginRoles, kemerBetSessions,
-            executionEnabled, readOnly, moneyMoved
-          }' <<<"$observer_result" | tee -a "$GITHUB_STEP_SUMMARY"
 
           state="$(jq -r '.verificationState' <<<"$observer_result")"
           echo "::notice::The redacted source-binding recovery observer completed with state ${state}; all financial execution remains disabled."

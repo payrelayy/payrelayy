@@ -58,3 +58,11 @@ test('cannot mutate production or enable any financial path', () => {
   assert.ok(workflow.includes('.kemerBetSessions == 0'));
   assert.ok(workflow.includes('.executionEnabled == false'));
 });
+
+test('publishes the redacted snapshot before enforcing the safety boundary', () => {
+  const publish = workflow.indexOf('printf \'%s\\n\' "$redacted_result"');
+  const safety = workflow.indexOf('.financialSwitchesDisabled == 7', publish);
+  assert.notEqual(publish, -1);
+  assert.ok(safety > publish);
+  assert.ok(!workflow.includes('tee -a "$GITHUB_STEP_SUMMARY" <<<"$observer_result"'));
+});

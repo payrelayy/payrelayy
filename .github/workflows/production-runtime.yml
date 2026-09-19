@@ -129,13 +129,16 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Require the commit-bound shadow operation
+      - name: Require the commit-bound runtime operation
         shell: bash
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
         run: |
           set -euo pipefail
           shadow_release_mode="$(<infra/production-shadow-release-mode)"
+          pilot_binding="$(<infra/production-telebirr-pilot-binding)"
+          [[ "$pilot_binding" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           case "$REQUESTED_MODE:$shadow_release_mode" in
             'deploy:receiver-review'|\
             'deploy:shadow-intake'|\
@@ -146,6 +149,17 @@ jobs:
             *)
               echo '::error::This exact production commit is not bound to the requested shadow operation.'
               exit 1
+              ;;
+          esac
+          case "$REQUESTED_MODE" in
+            deploy|deploy-shadow|deploy-shadow-intake)
+              if [[ "$REQUESTED_TELEBIRR_PILOT" != "$pilot_binding" ]]; then
+                echo '::error::This exact production commit is not bound to the requested TeleBirr pilot.'
+                exit 1
+              fi
+              ;;
+            deploy-inert)
+              [[ "$REQUESTED_TELEBIRR_PILOT" == 'not-applicable' ]]
               ;;
           esac
 
@@ -247,13 +261,16 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Recheck the commit-bound shadow operation
+      - name: Recheck the commit-bound runtime operation
         shell: bash
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
         run: |
           set -euo pipefail
           shadow_release_mode="$(<infra/production-shadow-release-mode)"
+          pilot_binding="$(<infra/production-telebirr-pilot-binding)"
+          [[ "$pilot_binding" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           case "$REQUESTED_MODE:$shadow_release_mode" in
             'deploy:receiver-review'|\
             'deploy:shadow-intake'|\
@@ -264,6 +281,17 @@ jobs:
             *)
               echo '::error::This exact production commit is not bound to the requested shadow operation.'
               exit 1
+              ;;
+          esac
+          case "$REQUESTED_MODE" in
+            deploy|deploy-shadow|deploy-shadow-intake)
+              if [[ "$REQUESTED_TELEBIRR_PILOT" != "$pilot_binding" ]]; then
+                echo '::error::This exact production commit is not bound to the requested TeleBirr pilot.'
+                exit 1
+              fi
+              ;;
+            deploy-inert)
+              [[ "$REQUESTED_TELEBIRR_PILOT" == 'not-applicable' ]]
               ;;
           esac
 

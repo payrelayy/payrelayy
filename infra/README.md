@@ -9,6 +9,12 @@ download troubleshooting, and verification limits. The production stack does not
 financial executor. The inactive and staging contracts below are retained separately; they do
 not describe the currently deployed production services.
 
+Every live or shadow TeleBirr deployment is also bound to the reviewed pilot UUID in
+[`production-telebirr-pilot-binding`](production-telebirr-pilot-binding). Rotate that marker in a
+reviewed commit before deploying a different pilot. This ensures that a pilot change produces a
+new immutable production release instead of silently reusing a finalized commit with stale
+assignment-broker configuration.
+
 ## Legacy inactive and staging contracts
 
 The Stage 14A contract remains inactive and exposes no public HTTP(S) listener. A separately

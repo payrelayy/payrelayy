@@ -183,6 +183,14 @@ test('uses redacted read-only preflight and fail-closed cleanup', () => {
   assert.ok(eligibility.includes('begin transaction isolation level read committed read only;'));
   assert.ok(eligibility.includes("'readOnly', true"));
   assert.ok(eligibility.includes("'moneyMoved', false"));
+  assert.match(
+    eligibility,
+    /from pg_catalog\.pg_authid role\s+where role\.rolname in \(\s*'fetanagent_trusted_telebirr_verifier',\s*'fetanagent_trusted_telebirr_verifier_runtime'\s*\) and \(role\.rolcanlogin or role\.rolpassword is not null\)/u,
+  );
+  assert.doesNotMatch(
+    eligibility,
+    /from pg_catalog\.pg_roles role\s+where role\.rolname in \(\s*'fetanagent_trusted_telebirr_verifier',\s*'fetanagent_trusted_telebirr_verifier_runtime'\s*\) and \(role\.rolcanlogin or role\.rolpassword is not null\)/u,
+  );
   assert.doesNotMatch(eligibility, /\bfor\s+(?:share|update)\b/iu);
 });
 

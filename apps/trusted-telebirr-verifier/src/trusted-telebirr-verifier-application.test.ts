@@ -188,4 +188,27 @@ describe('trusted TeleBirr verifier application', () => {
       new TrustedTelebirrVerifierApplicationUnavailableError(),
     );
   });
+
+  it('reports only the fixed redacted worker failure stage', async () => {
+    const events: string[] = [];
+    const postgres = runtime(events);
+    postgres.workSource.loadNext = vi.fn(async () => {
+      throw new Error('sensitive database detail');
+    });
+    const reportFailureStage = vi.fn();
+    const application = await createTrustedTelebirrVerifierApplication({
+      loadConfiguration: () => ENABLED_CONFIG,
+      createPostgresRuntime: async () => postgres,
+      createVerifier: () => ({ verifyAndComplete: vi.fn() }),
+      createHealthServer: () => healthServer(events),
+      reportFailureStage,
+    });
+
+    await expect(application.run()).rejects.toEqual(
+      new TrustedTelebirrVerifierApplicationUnavailableError(),
+    );
+    expect(reportFailureStage).toHaveBeenCalledOnce();
+    expect(reportFailureStage).toHaveBeenCalledWith('load_staged_evidence');
+    expect(reportFailureStage).not.toHaveBeenCalledWith('sensitive database detail');
+  });
 });

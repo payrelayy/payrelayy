@@ -25,6 +25,54 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('expired live TeleBirr evidence recovery', () => {
+    it('compiles the one-attempt 12-hour arming guard without ambiguous references', async () => {
+      const client = getClient();
+      const scramVerifier =
+        `SCRAM-SHA-256$4096:${'A'.repeat(22)}==` + `$${'B'.repeat(43)}=:${'C'.repeat(43)}=`;
+
+      await client.query('begin');
+      try {
+        let failure: unknown;
+        try {
+          await client.query(
+            `select *
+               from app.arm_private_live_telebirr_staged_attempt_completion(
+                 $1::uuid, $2::uuid, $3::bigint, $4::uuid, $5::text, $6::text
+               )`,
+            [
+              '00000000-0000-4000-8000-000000000011',
+              '00000000-0000-4000-8000-000000000012',
+              '1',
+              '00000000-0000-4000-8000-000000000013',
+              scramVerifier,
+              'expired_attempt_staged_evidence_completion',
+            ],
+          );
+        } catch (error) {
+          failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(
+          'The staged TeleBirr evidence is not recoverable.',
+        );
+        expect((failure as Error).message).not.toContain('ambiguous');
+
+        const constraint = await client.query<{ readonly definition: string }>(`
+          select pg_catalog.pg_get_constraintdef(constraint_row.oid) as definition
+            from pg_catalog.pg_constraint constraint_row
+           where constraint_row.conrelid =
+                 'app.private_live_telebirr_historical_completion_authorities'::regclass
+             and constraint_row.conname =
+                 'private_live_telebirr_historical_completion_window'
+        `);
+        expect(constraint.rows).toHaveLength(1);
+        expect(constraint.rows[0]!.definition).toContain('12:00:00');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('compiles the historical arming guard without ambiguous local references', async () => {
       const client = getClient();
       const scramVerifier =

@@ -11,6 +11,7 @@ const [
   shadowCompose,
   shadowIntakeCompose,
   shadowReleaseMode,
+  telebirrPilotBinding,
   inertCompose,
   workflow,
   helper,
@@ -32,6 +33,7 @@ const [
   read('infra/compose.production.shadow-review.yaml'),
   read('infra/compose.production.shadow-intake.yaml'),
   read('infra/production-shadow-release-mode'),
+  read('infra/production-telebirr-pilot-binding'),
   read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
@@ -73,6 +75,26 @@ function childBlock(section, name) {
 function count(source, expression) {
   return [...source.matchAll(expression)].length;
 }
+
+assert.match(
+  telebirrPilotBinding,
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\r?\n?$/u,
+);
+assert.equal(
+  count(workflow, /pilot_binding="\$\(<infra\/production-telebirr-pilot-binding\)"/gu),
+  2,
+);
+assert.equal(
+  count(
+    workflow,
+    /REQUESTED_TELEBIRR_PILOT: \$\{\{ inputs\.confirm_telebirr_pilot_revision_id \}\}/gu,
+  ),
+  2,
+);
+assert.equal(
+  count(workflow, /This exact production commit is not bound to the requested TeleBirr pilot\./gu),
+  2,
+);
 
 const services = topLevelSection(compose, 'services');
 const serviceNames = [...services.matchAll(/^  ([a-z][a-z0-9-]*):\s*$/gmu)].map(
@@ -132,8 +154,9 @@ assert.equal(
 );
 assert.doesNotMatch(shadowIntakeCompose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'true'/u);
 assert.doesNotMatch(shadowIntakeCompose, /KEMERBET_|secrets:|configs:|networks:|volumes:/u);
-assert.ok(
-  shadowReleaseMode === 'receiver-review\n' || shadowReleaseMode === 'shadow-intake\n',
+assert.match(
+  shadowReleaseMode,
+  /^(receiver-review|shadow-intake)\r?\n$/u,
   'the exact commit must declare one canonical production shadow operation',
 );
 

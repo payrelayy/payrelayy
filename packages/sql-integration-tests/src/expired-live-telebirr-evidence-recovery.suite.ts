@@ -228,6 +228,12 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
 
         await client.query("set local session_replication_role = 'replica'");
         await client.query(
+          `update app.private_live_deposit_pilot_proofs
+              set origin_channel = 'telegram'
+            where id = $1::uuid`,
+          [prepared.proof.id],
+        );
+        await client.query(
           `update app.private_live_telebirr_verification_jobs
               set expires_at = $1::timestamptz
             where id = $2::uuid`,

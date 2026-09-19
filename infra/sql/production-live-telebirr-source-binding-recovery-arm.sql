@@ -64,6 +64,12 @@ with runtime as materialized (
     (select count(*)::integer
        from app.private_live_telebirr_source_binding_recovery_closures closure
       where closure.retry_request_key = :'retry_request_key'::uuid) as retry_closures,
+    (select count(*)::integer
+       from app.private_live_telebirr_source_binding_recovery_retries retry
+      where retry.retry_request_key = :'retry_request_key'::uuid
+        and app.is_private_live_telebirr_source_binding_post_emergency_ready(
+          retry.original_authority_request_key
+        )) as post_emergency_boundaries,
     (select count(*)::integer from pg_catalog.pg_authid role
       where role.rolname = 'fetanagent_trusted_telebirr_verifier_runtime'
         and role.rolcanlogin
@@ -77,6 +83,21 @@ with runtime as materialized (
       where activity.usename in (
         'fetanagent_deposit_executor', 'fetanagent_deposit_executor_runtime'
       )) as kemer_sessions,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'live') as live_financial_switches,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'disabled'
+        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches,
     (select count(*)::integer
        from app.private_live_telebirr_verification_outcomes outcome
       where outcome.verification_job_id = :'target_verification_job_id'::uuid)
@@ -94,13 +115,20 @@ select pg_catalog.jsonb_build_object(
   'deploymentTarget', 'production',
   'recoveryState', case when runtime.retries = 1
     and runtime.retry_closures = 0 and runtime.bounded_logins = 1
+    and runtime.post_emergency_boundaries = 1
+    and runtime.live_financial_switches = 0
+    and runtime.disabled_financial_switches = 7
     then 'armed' else 'invalid' end,
+  'authorityBoundary', case when runtime.post_emergency_boundaries = 1
+    then 'post_emergency' else 'unavailable' end,
   'alreadyArmed', :'armed_already_armed'::boolean,
   'remainingSeconds', greatest(0, floor(extract(epoch from (
     :'armed_expires_at'::timestamptz - pg_catalog.clock_timestamp()
   )))::integer),
   'verifierLoginBounded', runtime.bounded_logins = 1,
   'financialRowsCreated', runtime.outcomes <> 0 or runtime.reservations <> 0,
+  'financialSwitchesLive', runtime.live_financial_switches,
+  'financialSwitchesDisabled', runtime.disabled_financial_switches,
   'kemerBetLoginRoles', runtime.kemer_logins,
   'kemerBetSessions', runtime.kemer_sessions,
   'executionEnabled', runtime.kemer_logins <> 0 or runtime.kemer_sessions <> 0

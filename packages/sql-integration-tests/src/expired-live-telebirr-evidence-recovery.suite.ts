@@ -158,6 +158,312 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
       }
     });
 
+    it('recognizes one exact source-binding authority after an early emergency stop', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const ownerAdminId = getOwnerAdminId();
+        const pilot = await prepareTelebirrPilot(client, ownerAdminId);
+        const prepared = await prepareVerification(client, pilot);
+        const attempt = await client.query<{
+          readonly assignment_body_digest: string;
+          readonly assignment_transcript_id: string;
+          readonly issued_at: Date;
+        }>(
+          `select transcript.assignment_body_digest,
+                  transcript.id as assignment_transcript_id,
+                  attempt.issued_at
+             from app.private_live_telebirr_verification_attempts attempt
+             join app.private_live_telebirr_assignment_transcripts transcript
+               on transcript.verification_attempt_id = attempt.id
+            where attempt.id = $1::uuid`,
+          [prepared.lease.verification_attempt_id],
+        );
+        expect(attempt.rows).toHaveLength(1);
+
+        const observationBodyDigest = sha256(`post-emergency-observation:${randomUUID()}`);
+        const sourceDocumentDigest = sha256(`post-emergency-document:${randomUUID()}`);
+        const observedAt = new Date(attempt.rows[0]!.issued_at.getTime() + 1);
+        const stagedAt = new Date(attempt.rows[0]!.issued_at.getTime() + 2);
+        const expiredAt = new Date(attempt.rows[0]!.issued_at.getTime() + 20);
+
+        await client.query(
+          `insert into app.private_live_telebirr_device_evidence_staging (
+             observation_body_digest,
+             assignment_body_digest,
+             verification_attempt_id,
+             assignment_transcript_id,
+             device_enrollment_id,
+             first_request_body_digest,
+             signed_assignment,
+             signed_observation,
+             observed_at,
+             staged_at
+           ) values (
+             $1::text, $2::text, $3::uuid, $4::uuid, $5::uuid, $6::text,
+             '{}'::jsonb,
+             jsonb_build_object(
+               'body', jsonb_build_object('sourceDocumentDigest', $7::text)
+             ),
+             $8::timestamptz, $9::timestamptz
+           )`,
+          [
+            observationBodyDigest,
+            attempt.rows[0]!.assignment_body_digest,
+            prepared.lease.verification_attempt_id,
+            attempt.rows[0]!.assignment_transcript_id,
+            pilot.deviceEnrollmentId,
+            sha256(`post-emergency-upload:${randomUUID()}`),
+            sourceDocumentDigest,
+            observedAt,
+            stagedAt,
+          ],
+        );
+
+        const activation = await client.query<{ readonly epoch: string }>(`
+          select current_epoch::text as epoch
+            from app.private_trusted_telebirr_activation_control
+           where control_key = 'trusted_telebirr_financial_authority'
+        `);
+        expect(activation.rows).toHaveLength(1);
+
+        await client.query("set local session_replication_role = 'replica'");
+        await client.query(
+          `update app.private_live_deposit_pilot_proofs
+              set origin_channel = 'telegram'
+            where id = $1::uuid`,
+          [prepared.proof.id],
+        );
+        await client.query(
+          `update app.private_live_telebirr_verification_jobs
+              set expires_at = $1::timestamptz
+            where id = $2::uuid`,
+          [expiredAt, prepared.stage.verification_job_id],
+        );
+        await client.query(
+          `update app.private_live_telebirr_verification_attempts
+              set expires_at = $1::timestamptz
+            where id = $2::uuid`,
+          [expiredAt, prepared.lease.verification_attempt_id],
+        );
+        await client.query("set local session_replication_role = 'origin'");
+        await client.query('select pg_catalog.pg_sleep(0.05)');
+
+        const authorityRequestKey = randomUUID();
+        await client.query(
+          `with boundary as materialized (
+             select pg_catalog.clock_timestamp() as authorized_at
+           )
+           insert into app.private_live_telebirr_historical_completion_authorities (
+             request_key,
+             verification_job_id,
+             verification_attempt_id,
+             private_live_deposit_pilot_proof_id,
+             pilot_revision_id,
+             receiver_profile_id,
+             expired_activation_epoch,
+             observation_body_digest,
+             source_document_digest,
+             reason_code,
+             request_digest,
+             authorized_at,
+             expires_at
+           )
+           select $1::uuid,
+                  $2::uuid,
+                  $3::uuid,
+                  $4::uuid,
+                  $5::uuid,
+                  $6::uuid,
+                  $7::bigint,
+                  $8::text,
+                  $9::text,
+                  'expired_attempt_staged_evidence_completion',
+                  app.private_live_telebirr_historical_completion_digest(
+                    $1::uuid, $2::uuid, $3::uuid, $5::uuid, $7::bigint,
+                    $8::text, $9::text, boundary.authorized_at,
+                    boundary.authorized_at + interval '12 hours',
+                    'expired_attempt_staged_evidence_completion'
+                  ),
+                  boundary.authorized_at,
+                  boundary.authorized_at + interval '12 hours'
+             from boundary`,
+          [
+            authorityRequestKey,
+            prepared.stage.verification_job_id,
+            prepared.lease.verification_attempt_id,
+            prepared.proof.id,
+            pilot.pilotRevisionId,
+            pilot.receiverProfileId,
+            activation.rows[0]!.epoch,
+            observationBodyDigest,
+            sourceDocumentDigest,
+          ],
+        );
+        await client.query(
+          `select *
+             from app.close_private_live_telebirr_historical_completion(
+               $1::uuid, 'operator_stop'
+             )`,
+          [authorityRequestKey],
+        );
+        await client.query('select pg_catalog.pg_sleep(0.005)');
+        await client.query(
+          `select *
+             from app.request_private_trusted_telebirr_emergency_disable(
+               $1::uuid, $2::bigint, $3::uuid, 'execution_uncertainty'
+             )`,
+          [ownerAdminId, activation.rows[0]!.epoch, randomUUID()],
+        );
+
+        const boundary = await client.query<{
+          readonly activation_ready: boolean;
+          readonly all_disabled_switches: number;
+          readonly authority_ready: boolean;
+          readonly boundary_rows: number;
+          readonly current_authority: string | null;
+          readonly evidence_ready: boolean;
+          readonly lineage_ready: boolean;
+          readonly pilot_ready: boolean;
+          readonly post_emergency_ready: boolean;
+        }>(
+          `with boundary_rows as materialized (
+             select authority.*, job.id as job_id, job.pilot_revision_id as job_pilot_id,
+                    job.pilot_configuration_digest as job_configuration_digest,
+                    job.receiver_profile_id as job_receiver_profile_id,
+                    attempt.id as attempt_id,
+                    attempt.verification_job_id as attempt_job_id,
+                    attempt.issued_at as attempt_issued_at,
+                    attempt.expires_at as attempt_expires_at,
+                    staged.observation_body_digest as staged_observation_digest,
+                    staged.signed_observation as staged_observation,
+                    staged.observed_at, staged.staged_at,
+                    proof.id as proof_id, proof.pilot_revision_id as proof_pilot_id,
+                    proof.origin_channel, proof.input_kind, proof.submitted_at,
+                    pilot.id as pilot_id, pilot.configuration_digest,
+                    pilot.active_from as pilot_active_from,
+                    pilot.expires_at as pilot_expires_at,
+                    pilot.status as pilot_status, pilot.stopped_at,
+                    pilot.stopped_by_admin_id, pilot.stop_reason_code,
+                    control.current_epoch,
+                    activation.authority_state, activation.pilot_revision_id as activation_pilot_id,
+                    activation.configuration_digest as activation_configuration_digest,
+                    activation.active_from as activation_active_from,
+                    activation.expires_at as activation_expires_at,
+                    activation.revoked_at, activation.revocation_reason_code,
+                    emergency.expected_epoch, emergency.requested_by_admin_id,
+                    emergency.reason_code as emergency_reason_code, emergency.requested_at,
+                    closure.reason_code as closure_reason_code, closure.closed_at
+               from app.private_live_telebirr_historical_completion_authorities authority
+               join app.private_live_telebirr_verification_jobs job
+                 on job.id = authority.verification_job_id
+               join app.private_live_telebirr_verification_attempts attempt
+                 on attempt.id = authority.verification_attempt_id
+                and attempt.verification_job_id = job.id
+               join app.private_live_telebirr_device_evidence_staging staged
+                 on staged.verification_attempt_id = attempt.id
+               join app.private_live_deposit_pilot_proofs proof
+                 on proof.id = authority.private_live_deposit_pilot_proof_id
+               join app.private_live_deposit_pilot_revisions pilot
+                 on pilot.id = authority.pilot_revision_id
+               join app.private_trusted_telebirr_activation_control control
+                 on control.control_key = 'trusted_telebirr_financial_authority'
+               join app.private_trusted_telebirr_activation_epochs activation
+                 on activation.epoch = control.current_epoch
+                and activation.epoch = authority.expired_activation_epoch
+               join app.private_trusted_telebirr_emergency_disable_intents emergency
+                 on emergency.expected_epoch = activation.epoch
+               join app.private_live_telebirr_historical_completion_closures closure
+                 on closure.request_key = authority.request_key
+              where authority.request_key = $1::uuid
+           )
+           select
+             app.is_private_live_telebirr_source_binding_post_emergency_ready(
+               $1::uuid
+             ) as post_emergency_ready,
+             app.current_private_trusted_telebirr_activation_epoch()::text
+               as current_authority,
+             (select count(*)::integer
+                from app.feature_switches feature_switch
+               where feature_switch.feature_key in (
+                 'cbe_birr_authoritative_verification', 'deposit_execution',
+                 'payment_verification', 'private_live_deposit_pilot',
+                 'telebirr_authoritative_verification', 'withdrawal_collection',
+                 'withdrawal_validation'
+               ) and feature_switch.mode = 'disabled'
+                 and feature_switch.settings = '{}'::jsonb) as all_disabled_switches,
+             (select count(*)::integer from boundary_rows) as boundary_rows,
+             (select bool_and(
+                request_key = $1::uuid
+                and reason_code = 'expired_attempt_staged_evidence_completion'
+                and verification_job_id = job_id
+                and verification_attempt_id = attempt_id
+                and private_live_deposit_pilot_proof_id = proof_id
+                and pilot_revision_id = pilot_id
+                and receiver_profile_id = job_receiver_profile_id
+                and observation_body_digest = staged_observation_digest
+                and source_document_digest =
+                    staged_observation -> 'body' ->> 'sourceDocumentDigest'
+              ) from boundary_rows) as lineage_ready,
+             (select bool_and(
+                authorized_at < requested_at
+                and closure_reason_code = 'operator_stop'
+                and closed_at >= authorized_at
+                and closed_at <= requested_at
+              ) from boundary_rows) as authority_ready,
+             (select bool_and(
+                current_epoch = expired_activation_epoch
+                and authority_state = 'active'
+                and activation_pilot_id = pilot_id
+                and activation_configuration_digest = configuration_digest
+                and revoked_at is not null
+                and revocation_reason_code = 'execution_uncertainty'
+                and revoked_at is not distinct from requested_at
+                and expected_epoch = expired_activation_epoch
+                and emergency_reason_code = revocation_reason_code
+              ) from boundary_rows) as activation_ready,
+             (select bool_and(
+                pilot_status = 'stopped'
+                and stopped_at is not distinct from requested_at
+                and stopped_by_admin_id is not distinct from requested_by_admin_id
+                and stop_reason_code is not distinct from emergency_reason_code
+                and job_pilot_id = pilot_id
+                and job_configuration_digest = configuration_digest
+                and proof_pilot_id = pilot_id
+                and origin_channel = 'telegram'
+                and input_kind = 'direct_transaction_id'
+                and submitted_at + interval '24 hours' > pg_catalog.clock_timestamp()
+              ) from boundary_rows) as pilot_ready,
+             (select bool_and(
+                attempt_job_id = job_id
+                and attempt_issued_at >= pilot_active_from
+                and attempt_expires_at <= pilot_expires_at
+                and attempt_issued_at >= activation_active_from
+                and attempt_expires_at <= activation_expires_at
+                and attempt_expires_at <= pg_catalog.clock_timestamp()
+                and observed_at >= attempt_issued_at
+                and observed_at < attempt_expires_at
+                and staged_at < attempt_expires_at
+                and observed_at < requested_at
+                and staged_at < requested_at
+              ) from boundary_rows) as evidence_ready`,
+          [authorityRequestKey],
+        );
+        expect(boundary.rows).toEqual([
+          {
+            activation_ready: true,
+            all_disabled_switches: 7,
+            authority_ready: true,
+            boundary_rows: 1,
+            current_authority: null,
+            evidence_ready: true,
+            lineage_ready: true,
+            pilot_ready: true,
+            post_emergency_ready: true,
+          },
+        ]);
+      });
+    });
+
     it('completes one emergency-stopped historical payment without restoring global authority', async () => {
       const client = getClient();
       await withRollback(client, async () => {

@@ -71,7 +71,22 @@ with runtime as materialized (
     (select count(*)::integer from pg_catalog.pg_stat_activity activity
       where activity.usename in (
         'fetanagent_deposit_executor', 'fetanagent_deposit_executor_runtime'
-      )) as kemer_sessions
+      )) as kemer_sessions,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'live') as live_financial_switches,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'disabled'
+        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches
 )
 select pg_catalog.jsonb_build_object(
   'schemaVersion', 1,
@@ -81,6 +96,8 @@ select pg_catalog.jsonb_build_object(
   'closeReasonCode', :'close_reason_code',
   'verifierLoginDisabled', runtime.verifier_credentials = 0,
   'trustedVerifierSessions', runtime.verifier_sessions,
+  'financialSwitchesLive', runtime.live_financial_switches,
+  'financialSwitchesDisabled', runtime.disabled_financial_switches,
   'kemerBetLoginRoles', runtime.kemer_logins,
   'kemerBetSessions', runtime.kemer_sessions,
   'executionEnabled', runtime.kemer_logins <> 0 or runtime.kemer_sessions <> 0

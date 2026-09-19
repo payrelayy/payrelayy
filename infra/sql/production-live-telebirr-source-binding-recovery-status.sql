@@ -139,7 +139,22 @@ with target as materialized (
     (select count(*)::integer from pg_catalog.pg_stat_activity activity
       where activity.usename in (
         'fetanagent_deposit_executor', 'fetanagent_deposit_executor_runtime'
-      )) as kemer_sessions
+      )) as kemer_sessions,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'live') as live_financial_switches,
+    (select count(*)::integer from app.feature_switches feature_switch
+      where feature_switch.feature_key in (
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'disabled'
+        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches
 ), classified as materialized (
   select summary.*,
     case
@@ -150,6 +165,7 @@ with target as materialized (
         or reservations not between 0 and 1 or receipts not between 0 and 1
         or documents not between 0 and 1 or execution_jobs not between 0 and 1
         or queued_jobs not between 0 and 1 or kemer_logins <> 0 or kemer_sessions <> 0
+        or live_financial_switches <> 0 or disabled_financial_switches <> 7
         then 'invalid'
       when outcomes = 0 and expires_at <= pg_catalog.clock_timestamp() then 'expired'
       when outcomes = 0 then 'waiting'
@@ -192,6 +208,8 @@ select pg_catalog.jsonb_build_object(
   'depositExecutionJobs', classified.execution_jobs,
   'queuedDepositJobs', classified.queued_jobs,
   'trustedVerifierSessions', classified.verifier_sessions,
+  'financialSwitchesLive', classified.live_financial_switches,
+  'financialSwitchesDisabled', classified.disabled_financial_switches,
   'kemerBetLoginRoles', classified.kemer_logins,
   'kemerBetSessions', classified.kemer_sessions,
   'executionEnabled', classified.kemer_logins <> 0 or classified.kemer_sessions <> 0

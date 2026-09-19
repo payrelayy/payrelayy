@@ -3,17 +3,19 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const root = new URL('../../', import.meta.url);
-const [workflow, migration, eligibility, arm, status, close, helper] = await Promise.all(
-  [
-    '.github/workflows/production-live-telebirr-source-binding-recovery.yml',
-    'supabase/migrations/20260919173000_recover_reviewed_telebirr_source_binding.sql',
-    'infra/sql/production-live-telebirr-source-binding-recovery-eligibility.sql',
-    'infra/sql/production-live-telebirr-source-binding-recovery-arm.sql',
-    'infra/sql/production-live-telebirr-source-binding-recovery-status.sql',
-    'infra/sql/production-live-telebirr-source-binding-recovery-close.sql',
-    'infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh',
-  ].map((path) => readFile(new URL(path, root), 'utf8')),
-);
+const [workflow, migration, postEmergencyMigration, eligibility, arm, status, close, helper] =
+  await Promise.all(
+    [
+      '.github/workflows/production-live-telebirr-source-binding-recovery.yml',
+      'supabase/migrations/20260919173000_recover_reviewed_telebirr_source_binding.sql',
+      'supabase/migrations/20260919181500_allow_post_emergency_telebirr_source_binding_recovery.sql',
+      'infra/sql/production-live-telebirr-source-binding-recovery-eligibility.sql',
+      'infra/sql/production-live-telebirr-source-binding-recovery-arm.sql',
+      'infra/sql/production-live-telebirr-source-binding-recovery-status.sql',
+      'infra/sql/production-live-telebirr-source-binding-recovery-close.sql',
+      'infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh',
+    ].map((path) => readFile(new URL(path, root), 'utf8')),
+  );
 
 test('requires reviewed main, production protection, CI, and disabled KemerBet', () => {
   assert.match(workflow, /environment: production/u);
@@ -47,6 +49,43 @@ test('records one append-only 12-hour supersession without mutating the original
   assert.ok(!migration.includes('to fetanagent_deposit_executor;'));
   assert.ok(!migration.includes('to fetanagent_deposit_executor_runtime;'));
 });
+
+test('accepts only the exact all-disabled post-emergency source-binding boundary', () => {
+  for (const fragment of [
+    'app.is_private_live_telebirr_source_binding_post_emergency_ready',
+    "activation_epoch.revocation_reason_code = 'execution_uncertainty'",
+    'activation_epoch.revoked_at is not distinct from emergency_intent.requested_at',
+    "pilot.status = 'stopped'",
+    "feature_switch.mode = 'disabled'",
+    "feature_switch.settings = '{}'::jsonb",
+    ') = 7',
+    'staged.observed_at < emergency_intent.requested_at',
+    'staged.staged_at < emergency_intent.requested_at',
+    "armed_until := armed_at + interval '12 hours'",
+    'and not post_emergency_authority',
+  ]) {
+    assert.ok(postEmergencyMigration.includes(fragment), fragment);
+  }
+  assert.doesNotMatch(postEmergencyMigration, /update\s+app\.feature_switches/iu);
+  assert.doesNotMatch(postEmergencyMigration, /alter\s+role\s+fetanagent_deposit_executor/iu);
+  assert.ok(workflow.includes('.authorityBoundary == "post_emergency"'));
+  assert.ok(workflow.includes('.financialSwitchesLive == 0'));
+  assert.ok(workflow.includes('.financialSwitchesDisabled == 7'));
+});
+
+test('patches only source-exact reviewed predecessor function markers', () => {
+  const markers = [...postEmergencyMigration.matchAll(/\$marker\$([\s\S]*?)\$marker\$/gu)].map(
+    (match) => match[1],
+  );
+  expectExactMarkerCount(markers.length, 5);
+  for (const marker of markers) {
+    expectExactMarkerCount(migration.split(marker).length - 1, 1);
+  }
+});
+
+function expectExactMarkerCount(actual, expected) {
+  assert.equal(actual, expected);
+}
 
 test('requires the exact prior nonfinancial and current one-attempt shapes', () => {
   for (const fragment of [

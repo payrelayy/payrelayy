@@ -214,33 +214,26 @@ with target as materialized (
         and proof.submitted_at + interval '24 hours' >=
             pg_catalog.clock_timestamp() + interval '12 hours 5 minutes') as proof_windows,
     (select count(*)::integer
-       from target job
-       join app.private_live_deposit_pilot_revisions pilot
-         on pilot.id = job.pilot_revision_id
-      where pilot.status = 'armed'
-        and pg_catalog.clock_timestamp() >= pilot.active_from
-        and pg_catalog.clock_timestamp() < pilot.expires_at) as live_pilots,
-    (select count(*)::integer
-       from app.private_trusted_telebirr_activation_control control
-       join app.private_trusted_telebirr_activation_epochs activation
-         on activation.epoch = control.current_epoch
-       join target job on job.pilot_revision_id = activation.pilot_revision_id
-      where control.control_key = 'trusted_telebirr_financial_authority'
-        and activation.epoch = :'target_activation_epoch'::bigint
-        and activation.authority_state = 'active'
-        and activation.revoked_at is null
-        and activation.expires_at > pg_catalog.clock_timestamp()) as live_activations,
+       from authority completion
+      where completion.expired_activation_epoch = :'target_activation_epoch'::bigint
+        and app.is_private_live_telebirr_source_binding_post_emergency_ready(
+          completion.request_key
+        )) as post_emergency_boundaries,
     (select count(*)::integer from app.feature_switches feature_switch
       where feature_switch.feature_key in (
-        'deposit_execution', 'payment_verification',
-        'private_live_deposit_pilot', 'telebirr_authoritative_verification'
-      ) and feature_switch.mode = 'live') as live_switches,
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
+        'withdrawal_validation'
+      ) and feature_switch.mode = 'live') as live_financial_switches,
     (select count(*)::integer from app.feature_switches feature_switch
       where feature_switch.feature_key in (
-        'cbe_birr_authoritative_verification', 'withdrawal_collection',
+        'cbe_birr_authoritative_verification', 'deposit_execution',
+        'payment_verification', 'private_live_deposit_pilot',
+        'telebirr_authoritative_verification', 'withdrawal_collection',
         'withdrawal_validation'
       ) and feature_switch.mode = 'disabled'
-        and feature_switch.settings = '{}'::jsonb) as disabled_switches,
+        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches,
     (select count(*)::integer from pg_catalog.pg_roles role
       where role.rolname in (
         'fetanagent_trusted_telebirr_verifier',
@@ -300,9 +293,9 @@ with target as materialized (
         then 'financial_or_downstream_rows_present'
       when retries <> 0 then 'recovery_already_recorded'
       when proof_windows <> 1 then 'proof_window_unavailable'
-      when live_pilots <> 1 or live_activations <> 1
-        then 'pilot_authority_unavailable'
-      when live_switches <> 4 or disabled_switches <> 3
+      when post_emergency_boundaries <> 1
+        then 'post_emergency_boundary_unavailable'
+      when live_financial_switches <> 0 or disabled_financial_switches <> 7
         then 'switch_boundary_unavailable'
       when verifier_credentials <> 0 or verifier_sessions <> 0
         then 'verifier_not_inert'
@@ -318,6 +311,8 @@ select pg_catalog.jsonb_build_object(
   'eligibilityState', case when classified.reason_code = 'eligible'
     then 'eligible' else 'ineligible' end,
   'reasonCode', classified.reason_code,
+  'authorityBoundary', case when classified.post_emergency_boundaries = 1
+    then 'post_emergency' else 'unavailable' end,
   'targetCount', classified.targets,
   'attempts', classified.attempts,
   'assignmentTranscripts', classified.transcripts,
@@ -335,6 +330,8 @@ select pg_catalog.jsonb_build_object(
   'settlementReceipts', classified.receipts,
   'depositExecutionJobs', classified.execution_jobs,
   'trustedVerifierSessions', classified.verifier_sessions,
+  'financialSwitchesLive', classified.live_financial_switches,
+  'financialSwitchesDisabled', classified.disabled_financial_switches,
   'kemerBetLoginRoles', classified.kemer_logins,
   'kemerBetSessions', classified.kemer_sessions,
   'executionEnabled', classified.kemer_logins <> 0 or classified.kemer_sessions <> 0,

@@ -234,7 +234,7 @@ with target as materialized (
         'withdrawal_validation'
       ) and feature_switch.mode = 'disabled'
         and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches,
-    (select count(*)::integer from pg_catalog.pg_roles role
+    (select count(*)::integer from pg_catalog.pg_authid role
       where role.rolname in (
         'fetanagent_trusted_telebirr_verifier',
         'fetanagent_trusted_telebirr_verifier_runtime'

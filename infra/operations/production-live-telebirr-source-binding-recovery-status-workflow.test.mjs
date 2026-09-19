@@ -29,6 +29,7 @@ test('uses the existing read-only status query and publishes only redacted facts
     'assignmentDeliveries',
     'sourceBindingRetryClosures',
     'authorityConsumptions',
+    'validNonSettlementAuthorityConsumptions',
     'queuedDepositJobs',
     'liveToShadowRecoveries',
     'shadowProofRequests',
@@ -40,6 +41,7 @@ test('uses the existing read-only status query and publishes only redacted facts
     'readyVerifierEnrollments',
     'trustedVerifierSessions',
     'financialSwitchesDisabled',
+    'dryRunPilotSwitches',
     'kemerBetLoginRoles',
     'executionEnabled',
     'readOnly',
@@ -50,6 +52,13 @@ test('uses the existing read-only status query and publishes only redacted facts
   assert.ok(status.includes('begin transaction isolation level read committed read only;'));
   assert.ok(status.includes("'readOnly', true"));
   assert.ok(status.includes("'moneyMoved', false"));
+  assert.ok(status.includes('valid_nonsettlement_consumptions as materialized'));
+  assert.ok(status.includes('not consumption.settlement_created'));
+  assert.ok(status.includes('consumption.pilot_reservation_id is null'));
+  assert.ok(status.includes('consumption.settlement_receipt_id is null'));
+  assert.ok(status.includes('consumption.execution_job_id is null'));
+  assert.ok(status.includes("feature_switch.mode = 'dry_run'"));
+  assert.ok(status.includes("pilot.expires_at = pilot.active_from + interval '12 hours'"));
   assert.ok(!status.includes("'verificationJobId',"));
   assert.ok(!status.includes("'retryRequestKey',"));
   assert.ok(!status.includes("'sourceDocumentDigest',"));
@@ -62,6 +71,9 @@ test('cannot mutate production or enable any financial path', () => {
   }
   assert.ok(workflow.includes('.financialSwitchesLive == 0'));
   assert.ok(workflow.includes('.financialSwitchesDisabled == 7'));
+  assert.ok(workflow.includes('.dryRunPilotSwitches == 0'));
+  assert.ok(workflow.includes('.financialSwitchesDisabled == 6'));
+  assert.ok(workflow.includes('.dryRunPilotSwitches == 1'));
   assert.ok(workflow.includes('.kemerBetLoginRoles == 0'));
   assert.ok(workflow.includes('.kemerBetSessions == 0'));
   assert.ok(workflow.includes('.executionEnabled == false'));

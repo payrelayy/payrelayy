@@ -79,6 +79,17 @@ with target as materialized (
   select consumption.*
     from app.private_live_telebirr_historical_completion_consumptions consumption
     join authority completion on completion.request_key = consumption.request_key
+), valid_nonsettlement_consumptions as materialized (
+  select consumption.*
+    from consumptions consumption
+    join outcomes outcome on outcome.id = consumption.verification_outcome_id
+    join retry_closure closure on true
+   where not consumption.settlement_created
+     and consumption.pilot_reservation_id is null
+     and consumption.settlement_receipt_id is null
+     and consumption.execution_job_id is null
+     and consumption.consumed_at >= outcome.created_at
+     and consumption.consumed_at <= closure.closed_at
 ), reservations as materialized (
   select reservation.*
     from app.private_live_deposit_pilot_reservations reservation
@@ -190,6 +201,8 @@ with target as materialized (
     (select count(*)::integer from retry_closure) as retry_closures,
     (select count(*)::integer from authority) as authorities,
     (select count(*)::integer from consumptions) as consumptions,
+    (select count(*)::integer from valid_nonsettlement_consumptions)
+      as valid_nonsettlement_consumptions,
     (select count(*)::integer from reservations) as reservations,
     (select count(*)::integer from receipts) as receipts,
     (select count(*)::integer from documents) as documents,
@@ -239,18 +252,39 @@ with target as materialized (
         'telebirr_authoritative_verification', 'withdrawal_collection',
         'withdrawal_validation'
       ) and feature_switch.mode = 'disabled'
-        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches
+        and feature_switch.settings = '{}'::jsonb) as disabled_financial_switches,
+    (select count(*)::integer
+       from app.feature_switches feature_switch
+       join app.private_live_deposit_pilot_revisions pilot
+         on feature_switch.settings = pg_catalog.jsonb_build_object(
+              'contract_version', 1,
+              'pilot_revision_id', pilot.id,
+              'configuration_digest', pilot.configuration_digest
+            )
+      where feature_switch.feature_key = 'private_live_deposit_pilot'
+        and feature_switch.mode = 'dry_run'
+        and pilot.status = 'armed'
+        and pilot.active_from <= pg_catalog.clock_timestamp()
+        and pilot.expires_at > pg_catalog.clock_timestamp()
+        and pilot.expires_at = pilot.active_from + interval '12 hours')
+      as dry_run_pilot_switches
 ), classified as materialized (
   select summary.*,
     case
       when targets <> 1 or attempts <> 1 or transcripts <> 1 or deliveries <> 1
         or evidence <> 1 or retries <> 1 or authorities <> 1
         or observations not between 0 and 1 or outcomes not between 0 and 1
-        or consumptions not between 0 and 1 or retry_closures not between 0 and 1
+        or consumptions not between 0 and 1
+        or valid_nonsettlement_consumptions not between 0 and 1
+        or retry_closures not between 0 and 1
         or reservations not between 0 and 1 or receipts not between 0 and 1
         or documents not between 0 and 1 or execution_jobs not between 0 and 1
         or queued_jobs not between 0 and 1 or kemer_logins <> 0 or kemer_sessions <> 0
-        or live_financial_switches <> 0 or disabled_financial_switches <> 7
+        or live_financial_switches <> 0
+        or not (
+          (disabled_financial_switches = 7 and dry_run_pilot_switches = 0)
+          or (disabled_financial_switches = 6 and dry_run_pilot_switches = 1)
+        )
         then 'invalid'
       when outcomes = 0 and expires_at <= pg_catalog.clock_timestamp() then 'expired'
       when outcomes = 0 then 'waiting'
@@ -258,10 +292,12 @@ with target as materialized (
         and consumptions = 1 and observations = 1 and reservations = 1
         and receipts = 1 and documents = 1 and execution_jobs = 1
         and queued_jobs = 1 then 'queued'
-      when disposition = 'review_required' and consumptions = 1 and observations = 1
+      when disposition = 'review_required' and consumptions = 1
+        and valid_nonsettlement_consumptions = 1 and observations = 1
         and reservations = 0 and receipts = 0 and documents = 0
         and execution_jobs = 0 then 'review_required'
-      when disposition = 'definite_reject' and consumptions = 1 and observations = 1
+      when disposition = 'definite_reject' and consumptions = 1
+        and valid_nonsettlement_consumptions = 1 and observations = 1
         and reservations = 0 and receipts = 0 and documents = 0
         and execution_jobs = 0 then 'definite_reject'
       else 'invalid'
@@ -287,6 +323,8 @@ select pg_catalog.jsonb_build_object(
   'sourceBindingRetries', classified.retries,
   'sourceBindingRetryClosures', classified.retry_closures,
   'authorityConsumptions', classified.consumptions,
+  'validNonSettlementAuthorityConsumptions',
+    classified.valid_nonsettlement_consumptions,
   'reservations', classified.reservations,
   'settlementReceipts', classified.receipts,
   'settlementDocuments', classified.documents,
@@ -306,6 +344,7 @@ select pg_catalog.jsonb_build_object(
   'trustedVerifierSessions', classified.verifier_sessions,
   'financialSwitchesLive', classified.live_financial_switches,
   'financialSwitchesDisabled', classified.disabled_financial_switches,
+  'dryRunPilotSwitches', classified.dry_run_pilot_switches,
   'kemerBetLoginRoles', classified.kemer_logins,
   'kemerBetSessions', classified.kemer_sessions,
   'executionEnabled', classified.kemer_logins <> 0 or classified.kemer_sessions <> 0,

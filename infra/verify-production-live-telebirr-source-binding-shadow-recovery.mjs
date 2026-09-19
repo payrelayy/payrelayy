@@ -19,6 +19,13 @@ const migration = readFileSync(
   ),
   'utf8',
 );
+const correctiveMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260920003000_fix_reviewed_source_binding_shadow_consumption.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
 
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
@@ -56,9 +63,28 @@ assert.match(migration, /private_live_tbirr_binding_shadow_recoveries_immutable/
 assert.match(migration, /private_live_tbirr_binding_shadow_recoveries_no_truncate/u);
 assert.match(migration, /private_live_telebirr_source_recovery_legacy_is_valid/u);
 assert.match(migration, /private_live_telebirr_source_recovery_is_valid/u);
-assert.doesNotMatch(
-  migration,
-  /insert into app\.(?:deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
+assert.match(
+  correctiveMigration,
+  /private_live_telebirr_source_binding_nonsettlement_consumption_is_valid/u,
 );
+assert.match(
+  correctiveMigration,
+  /consumption\.verification_outcome_id = p_verification_outcome_id/u,
+);
+assert.match(correctiveMigration, /not consumption\.settlement_created/u);
+assert.match(correctiveMigration, /consumption\.pilot_reservation_id is null/u);
+assert.match(correctiveMigration, /consumption\.settlement_receipt_id is null/u);
+assert.match(correctiveMigration, /consumption\.execution_job_id is null/u);
+assert.match(correctiveMigration, /consumption\.consumed_at >= outcome\.created_at/u);
+assert.match(correctiveMigration, /consumption\.consumed_at <= p_closed_at/u);
+assert.match(correctiveMigration, /marker_count <> 2/u);
+assert.match(correctiveMigration, /marker_count <> 3/u);
+assert.match(correctiveMigration, /financial authority/u);
+for (const source of [migration, correctiveMigration]) {
+  assert.doesNotMatch(
+    source,
+    /insert into app\.(?:deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts)/iu,
+  );
+}
 
 console.log('Production reviewed source-binding shadow recovery contract verified.');

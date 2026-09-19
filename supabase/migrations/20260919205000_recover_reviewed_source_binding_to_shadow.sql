@@ -197,7 +197,9 @@ begin
   end if;
 
   prior_expression := pg_catalog.substring(
-    definition from 8 for pg_catalog.length(definition) - 8
+    definition,
+    8,
+    pg_catalog.length(definition) - 8
   );
   execute 'alter table app.private_telebirr_shadow_proof_requests '
        || 'drop constraint private_telebirr_shadow_proof_window_check';

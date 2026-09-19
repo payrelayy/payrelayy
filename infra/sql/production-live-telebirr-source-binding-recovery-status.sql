@@ -212,7 +212,9 @@ select pg_catalog.jsonb_build_object(
   'financialSwitchesDisabled', classified.disabled_financial_switches,
   'kemerBetLoginRoles', classified.kemer_logins,
   'kemerBetSessions', classified.kemer_sessions,
-  'executionEnabled', classified.kemer_logins <> 0 or classified.kemer_sessions <> 0
+  'executionEnabled', classified.kemer_logins <> 0 or classified.kemer_sessions <> 0,
+  'readOnly', true,
+  'moneyMoved', false
 )::text from classified;
 
 commit;

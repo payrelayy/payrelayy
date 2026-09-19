@@ -177,6 +177,8 @@ jobs:
               (.closeReasonCode | IN("completed", "operator_stop")) and
               .verifierLoginDisabled == true and
               .trustedVerifierSessions == 0 and
+              .financialSwitchesLive == 0 and
+              .financialSwitchesDisabled == 7 and
               .kemerBetLoginRoles == 0 and
               .kemerBetSessions == 0 and
               .executionEnabled == false
@@ -233,18 +235,21 @@ jobs:
               "closed_authority_shape_mismatch", "source_binding_lineage_mismatch",
               "prior_review_shape_mismatch", "financial_or_downstream_rows_present",
               "recovery_already_recorded", "proof_window_unavailable",
-              "pilot_authority_unavailable", "switch_boundary_unavailable",
+              "post_emergency_boundary_unavailable", "switch_boundary_unavailable",
               "verifier_not_inert", "kemerbet_enabled"
             )) and
+            .authorityBoundary == "post_emergency" and
+            .financialSwitchesLive == 0 and .financialSwitchesDisabled == 7 and
             .kemerBetLoginRoles == 0 and .kemerBetSessions == 0 and
             .executionEnabled == false and .readOnly == true and .moneyMoved == false
           ' <<<"$eligibility_result" >/dev/null
-          jq '{eligibilityState, reasonCode, targetCount, attempts,
+          jq '{eligibilityState, reasonCode, authorityBoundary, targetCount, attempts,
             assignmentTranscripts, assignmentDeliveries, deviceEvidence,
             historicalAuthorities, historicalAuthorityClosures, priorAttempts,
             priorAssignmentTranscripts, priorAssignmentDeliveries, priorDeviceEvidence,
             priorObservations, priorNonfinancialReviews, reservations,
             settlementReceipts, depositExecutionJobs, trustedVerifierSessions,
+            financialSwitchesLive, financialSwitchesDisabled,
             executionEnabled, readOnly, moneyMoved}' \
             <<<"$eligibility_result" >>"$GITHUB_STEP_SUMMARY"
           if [[ "$(jq -r '.eligibilityState' <<<"$eligibility_result")" != 'eligible' ]]; then
@@ -278,13 +283,17 @@ jobs:
             .operation == "live_telebirr_source_binding_recovery_arm" and
             .deploymentTarget == "production" and
             .recoveryState == "armed" and .alreadyArmed == false and
+            .authorityBoundary == "post_emergency" and
             (.remainingSeconds | type == "number" and . >= 43140 and . <= 43500) and
             .verifierLoginBounded == true and .financialRowsCreated == false and
+            .financialSwitchesLive == 0 and .financialSwitchesDisabled == 7 and
             .kemerBetLoginRoles == 0 and .kemerBetSessions == 0 and
             .executionEnabled == false
           ' <<<"$arm_result" >/dev/null
-          jq '{recoveryState, alreadyArmed, remainingSeconds, verifierLoginBounded,
-            financialRowsCreated, executionEnabled}' <<<"$arm_result" >>"$GITHUB_STEP_SUMMARY"
+          jq '{recoveryState, authorityBoundary, alreadyArmed, remainingSeconds,
+            verifierLoginBounded, financialRowsCreated, financialSwitchesLive,
+            financialSwitchesDisabled, executionEnabled}' \
+            <<<"$arm_result" >>"$GITHUB_STEP_SUMMARY"
 
           timeout --signal=TERM --kill-after=15s 150s \
             ssh "${ssh_opts[@]}" "$remote" \
@@ -303,6 +312,7 @@ jobs:
               )) and .attempts == 1 and .assignmentTranscripts == 1 and
               .assignmentDeliveries == 1 and .deviceEvidence == 1 and
               .sourceBindingRetries == 1 and .kemerBetLoginRoles == 0 and
+              .financialSwitchesLive == 0 and .financialSwitchesDisabled == 7 and
               .kemerBetSessions == 0 and .executionEnabled == false
             ' <<<"$status_result" >/dev/null
             state="$(jq -r '.verificationState' <<<"$status_result")"
@@ -322,6 +332,7 @@ jobs:
             sourceBindingRetries, sourceBindingRetryClosures, authorityConsumptions,
             reservations, settlementReceipts, settlementDocuments,
             depositExecutionJobs, queuedDepositJobs, trustedVerifierSessions,
+            financialSwitchesLive, financialSwitchesDisabled,
             executionEnabled}' <<<"$terminal_result" >>"$GITHUB_STEP_SUMMARY"
           [[ "$terminal_state" == 'queued' ]]
           jq -e '
@@ -330,6 +341,7 @@ jobs:
             .reservations == 1 and .settlementReceipts == 1 and
             .settlementDocuments == 1 and .depositExecutionJobs == 1 and
             .queuedDepositJobs == 1 and .kemerBetLoginRoles == 0 and
+            .financialSwitchesLive == 0 and .financialSwitchesDisabled == 7 and
             .kemerBetSessions == 0 and .executionEnabled == false
           ' <<<"$terminal_result" >/dev/null
           terminal_observed=1
@@ -347,6 +359,7 @@ jobs:
             .settlementReceipts == 1 and .settlementDocuments == 1 and
             .depositExecutionJobs == 1 and .queuedDepositJobs == 1 and
             .trustedVerifierSessions == 0 and .kemerBetLoginRoles == 0 and
+            .financialSwitchesLive == 0 and .financialSwitchesDisabled == 7 and
             .kemerBetSessions == 0 and .executionEnabled == false
           ' <<<"$final_result" >/dev/null
 

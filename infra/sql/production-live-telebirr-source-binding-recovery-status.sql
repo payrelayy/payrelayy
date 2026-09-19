@@ -107,10 +107,15 @@ with target as materialized (
      and execution_job.last_error_code is null
      and execution_job.completed_at is null
 ), live_to_shadow_recoveries as materialized (
-  select recovery.*
+  select recovery.replacement_shadow_proof_request_id
     from app.private_live_telebirr_source_recoveries recovery
     join target job
       on job.private_live_deposit_pilot_proof_id = recovery.source_live_proof_id
+  union all
+  select recovery.replacement_shadow_proof_request_id
+    from app.private_live_telebirr_source_binding_shadow_recoveries recovery
+    join retry source_retry
+      on source_retry.retry_request_key = recovery.source_binding_retry_request_key
 ), shadow_source_proofs as materialized (
   select proof.*
     from app.private_telebirr_shadow_proof_requests proof

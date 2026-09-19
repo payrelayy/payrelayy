@@ -1,0 +1,150 @@
+name: Recover reviewed production TeleBirr source binding to shadow
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type CREATE ONE REVIEWED TELEBIRR SHADOW REQUEST - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-live-telebirr-source-binding-shadow-recovery
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+
+jobs:
+  validate:
+    name: Validate the exact no-money continuation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main and the exact no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'CREATE ONE REVIEWED TELEBIRR SHADOW REQUEST - NO MONEY' ]]
+
+  recover:
+    name: Create one append-only shadow request
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production operation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Create and verify one redacted no-money shadow continuation
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-source-binding-shadow-recovery"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == \
+                    "$RUNNER_TEMP/production-source-binding-shadow-recovery" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          recovery_result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-source-binding-shadow-recovery.sql
+          )"
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "reviewed_source_binding_shadow_recovery" and
+            .deploymentTarget == "production" and
+            (.created | type == "boolean") and
+            .shadowRequestCount == 1 and
+            .shadowAttemptCount == 0 and
+            .shadowOutcomeCount == 0 and
+            .configuredWindowSeconds == 43200 and
+            (.remainingSeconds | type == "number" and . >= 42601 and . <= 43205) and
+            .disabledFinancialSwitches == 6 and
+            .dryRunPilotSwitches == 1 and
+            .activeTelebirrEpochs == 0 and
+            .executorLoginRoles == 0 and
+            .executorSessions == 0 and
+            .reservations == 0 and
+            .settlementReceipts == 0 and
+            .depositJobs == 0 and
+            .moneyMoved == false and
+            .identifiersRedacted == true
+          ' <<<"$recovery_result" >/dev/null
+
+          redacted_result="$(jq '{
+            created, shadowRequestCount, shadowAttemptCount, shadowOutcomeCount,
+            configuredWindowSeconds, remainingSeconds, disabledFinancialSwitches,
+            dryRunPilotSwitches, activeTelebirrEpochs, executorLoginRoles,
+            executorSessions, reservations, settlementReceipts, depositJobs,
+            moneyMoved, identifiersRedacted
+          }' <<<"$recovery_result")"
+          printf '%s\n' "$redacted_result" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '::notice::One reviewed TeleBirr source-binding proof is queued for a fresh no-money shadow observation; execution remains disabled.'

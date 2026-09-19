@@ -16,19 +16,19 @@ on:
         required: true
         type: string
       confirm_pilot_revision_id:
-        description: Type the exact armed dry-run replacement pilot UUID
+        description: Type the exact armed dry-run replacement pilot UUID, or resolve-reviewed-source-binding
         required: true
         type: string
       confirm_shadow_proof_request_id:
-        description: Type the exact shadow proof UUID, one fresh UUIDv4 for live recovery, resolve-authority-deadline-child, or resolve-assessment-clock-child
+        description: Type the exact shadow proof UUID, one fresh UUIDv4 for live recovery, resolve-authority-deadline-child, resolve-assessment-clock-child, or resolve-reviewed-source-binding
         required: true
         type: string
       confirm_source_live_verification_job_id:
-        description: Type the exact source live verification-job UUID, or not-applicable for direct shadow intake
+        description: Type the exact source live verification-job UUID, not-applicable for direct shadow intake, or resolve-reviewed-source-binding
         required: true
         type: string
       confirm_recovery_request_key:
-        description: Type the exact recovery/retry UUIDv4, including an authority-deadline child-proof retry or assessment-clock child-proof retry, or not-applicable for untouched direct intake
+        description: Type the exact recovery/retry UUIDv4, including an authority-deadline child-proof retry, not-applicable for untouched direct intake, or resolve-reviewed-source-binding
         required: true
         type: string
       confirm_operation:
@@ -77,16 +77,22 @@ jobs:
           [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
           uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-          [[ "$CONFIRMED_PILOT" =~ $uuid ]]
-          if [[ "$CONFIRMED_PROOF" == 'resolve-authority-deadline-child' ||
+          if [[ "$CONFIRMED_PILOT" == 'resolve-reviewed-source-binding' ]]; then
+            [[ "$CONFIRMED_PROOF" == 'resolve-reviewed-source-binding' ]]
+            [[ "$CONFIRMED_SOURCE_JOB" == 'resolve-reviewed-source-binding' ]]
+            [[ "$CONFIRMED_REQUEST_KEY" == 'resolve-reviewed-source-binding' ]]
+          elif [[ "$CONFIRMED_PROOF" == 'resolve-authority-deadline-child' ||
                 "$CONFIRMED_PROOF" == 'resolve-assessment-clock-child' ]]; then
+            [[ "$CONFIRMED_PILOT" =~ $uuid ]]
             [[ "$CONFIRMED_SOURCE_JOB" == 'not-applicable' ]]
             [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
           elif [[ "$CONFIRMED_SOURCE_JOB" == 'not-applicable' ]]; then
+            [[ "$CONFIRMED_PILOT" =~ $uuid ]]
             [[ "$CONFIRMED_PROOF" =~ $uuid ]]
             [[ "$CONFIRMED_REQUEST_KEY" == 'not-applicable' ||
                "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
           else
+            [[ "$CONFIRMED_PILOT" =~ $uuid ]]
             [[ "$CONFIRMED_SOURCE_JOB" =~ $uuid ]]
             [[ "$CONFIRMED_PROOF" =~ $uuid_v4 ]]
             [[ "$CONFIRMED_REQUEST_KEY" =~ $uuid_v4 ]]
@@ -279,7 +285,61 @@ jobs:
           done
           [[ "$admin_login_ready" == 'true' ]]
 
-          if [[ "$TARGET_SHADOW_PROOF_REQUEST_ID" == 'resolve-authority-deadline-child' ]]; then
+          if [[ "$TARGET_PILOT_REVISION_ID" == 'resolve-reviewed-source-binding' ]]; then
+            resolved_source_binding_lineage="$(
+              psql -X --quiet --tuples-only --no-align --set=ON_ERROR_STOP=1 --command "
+                select pg_catalog.concat_ws(
+                         '|',
+                         recovery.target_pilot_revision_id::text,
+                         recovery.replacement_shadow_proof_request_id::text,
+                         retry.current_verification_job_id::text,
+                         recovery.recovery_request_key::text
+                       )
+                  from app.private_live_telebirr_source_binding_shadow_recoveries recovery
+                  join app.private_live_telebirr_source_binding_recovery_retries retry
+                    on retry.retry_request_key =
+                       recovery.source_binding_retry_request_key
+                  join app.private_telebirr_shadow_proof_requests proof
+                    on proof.id = recovery.replacement_shadow_proof_request_id
+                   and proof.verification_job_id =
+                       recovery.replacement_shadow_verification_job_id
+                 where recovery.reason_code =
+                       'reviewed_source_binding_source_unavailable_recovery_no_credit'
+                   and proof.proof_status = 'verification_queued'
+                   and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
+                   and app.private_live_telebirr_source_binding_shadow_recovery_is_valid(
+                         proof.id,
+                         recovery.recovery_request_key
+                       )
+                   and not exists (
+                     select 1
+                       from app.private_telebirr_shadow_verification_outcomes outcome
+                      where outcome.shadow_proof_request_id = proof.id
+                   );
+              "
+            )"
+            IFS='|' read -r resolved_pilot resolved_proof resolved_source_job resolved_request \
+              <<<"$resolved_source_binding_lineage"
+            uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            [[ "$resolved_pilot" =~ $uuid ]]
+            [[ "$resolved_proof" =~ $uuid_v4 ]]
+            [[ "$resolved_source_job" =~ $uuid ]]
+            [[ "$resolved_request" =~ $uuid_v4 ]]
+            echo "::add-mask::$resolved_pilot"
+            echo "::add-mask::$resolved_proof"
+            echo "::add-mask::$resolved_source_job"
+            echo "::add-mask::$resolved_request"
+            TARGET_PILOT_REVISION_ID="$resolved_pilot"
+            TARGET_SHADOW_PROOF_REQUEST_ID="$resolved_proof"
+            SOURCE_LIVE_VERIFICATION_JOB_ID="$resolved_source_job"
+            RECOVERY_REQUEST_KEY="$resolved_request"
+            export TARGET_PILOT_REVISION_ID TARGET_SHADOW_PROOF_REQUEST_ID
+            export SOURCE_LIVE_VERIFICATION_JOB_ID RECOVERY_REQUEST_KEY
+            unset resolved_source_binding_lineage resolved_pilot resolved_proof
+            unset resolved_source_job resolved_request uuid uuid_v4
+            echo '::notice::Resolved the reviewed source-binding shadow lineage internally without exposing its identifiers.'
+          elif [[ "$TARGET_SHADOW_PROOF_REQUEST_ID" == 'resolve-authority-deadline-child' ]]; then
             resolved_target_shadow_proof_request_id="$(
               psql -X --quiet --tuples-only --no-align --set=ON_ERROR_STOP=1 --command "
                 select retry.replacement_shadow_proof_request_id::text
@@ -610,7 +670,8 @@ jobs:
              .disposition == "definite_reject") and
             (.wouldVerify == true or .wouldVerify == false) and
             ((.sourceLiveAttempts == 0 and .sourceLiveOutcomes == 0) or
-             (.sourceLiveAttempts == 4 and .sourceLiveOutcomes == 1 and
+             ((.sourceLiveAttempts == 1 or .sourceLiveAttempts == 4) and
+              .sourceLiveOutcomes == 1 and
               .sourceUnavailableRecoveryValid == true)) and
             .sourceReservations == 0 and .liveMoneySwitchCount == 0
           ' <<<"$outcome_state" >/dev/null

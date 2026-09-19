@@ -52,6 +52,7 @@ jobs:
           node --test infra/operations/production-live-telebirr-source-document-recovery-workflow.test.mjs
           node --test infra/operations/production-live-telebirr-expired-evidence-recovery-workflow.test.mjs
           node --test infra/operations/production-live-telebirr-staged-attempt-recovery-workflow.test.mjs
+          node --test infra/operations/production-live-telebirr-source-binding-recovery-workflow.test.mjs
 
       - name: Verify FetanAgent branding
         run: pnpm verify:brand

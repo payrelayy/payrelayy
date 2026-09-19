@@ -25,6 +25,34 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('expired live TeleBirr evidence recovery', () => {
+    it('keeps the post-emergency source-binding predicate lock-free', async () => {
+      const client = getClient();
+      const definition = await client.query<{
+        readonly has_legacy_locking_helper: boolean;
+        readonly has_row_lock: boolean;
+        readonly is_security_definer: boolean;
+        readonly volatility: string;
+      }>(
+        `select routine.prosrc like
+                  '%current_private_trusted_telebirr_activation_epoch()%' as has_legacy_locking_helper,
+                routine.prosrc ~* E'\\\\mfor\\\\s+(share|update)\\\\M' as has_row_lock,
+                routine.prosecdef as is_security_definer,
+                routine.provolatile::text as volatility
+           from pg_catalog.pg_proc routine
+          where routine.oid =
+            'app.is_private_live_telebirr_source_binding_post_emergency_ready(uuid)'::regprocedure`,
+      );
+
+      expect(definition.rows).toEqual([
+        {
+          has_legacy_locking_helper: false,
+          has_row_lock: false,
+          is_security_definer: true,
+          volatility: 's',
+        },
+      ]);
+    });
+
     it('compiles the reviewed source-binding retry guard as one 12-hour sidecar', async () => {
       const client = getClient();
       const scramVerifier =

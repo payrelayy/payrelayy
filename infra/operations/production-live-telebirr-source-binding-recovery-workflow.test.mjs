@@ -3,19 +3,29 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const root = new URL('../../', import.meta.url);
-const [workflow, migration, postEmergencyMigration, eligibility, arm, status, close, helper] =
-  await Promise.all(
-    [
-      '.github/workflows/production-live-telebirr-source-binding-recovery.yml',
-      'supabase/migrations/20260919173000_recover_reviewed_telebirr_source_binding.sql',
-      'supabase/migrations/20260919181500_allow_post_emergency_telebirr_source_binding_recovery.sql',
-      'infra/sql/production-live-telebirr-source-binding-recovery-eligibility.sql',
-      'infra/sql/production-live-telebirr-source-binding-recovery-arm.sql',
-      'infra/sql/production-live-telebirr-source-binding-recovery-status.sql',
-      'infra/sql/production-live-telebirr-source-binding-recovery-close.sql',
-      'infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh',
-    ].map((path) => readFile(new URL(path, root), 'utf8')),
-  );
+const [
+  workflow,
+  migration,
+  postEmergencyMigration,
+  readOnlyPatchMigration,
+  eligibility,
+  arm,
+  status,
+  close,
+  helper,
+] = await Promise.all(
+  [
+    '.github/workflows/production-live-telebirr-source-binding-recovery.yml',
+    'supabase/migrations/20260919173000_recover_reviewed_telebirr_source_binding.sql',
+    'supabase/migrations/20260919181500_allow_post_emergency_telebirr_source_binding_recovery.sql',
+    'supabase/migrations/20260919190500_make_post_emergency_source_binding_preflight_read_only.sql',
+    'infra/sql/production-live-telebirr-source-binding-recovery-eligibility.sql',
+    'infra/sql/production-live-telebirr-source-binding-recovery-arm.sql',
+    'infra/sql/production-live-telebirr-source-binding-recovery-status.sql',
+    'infra/sql/production-live-telebirr-source-binding-recovery-close.sql',
+    'infra/operations/fetanagent-production-trusted-telebirr-verifier-helper.sh',
+  ].map((path) => readFile(new URL(path, root), 'utf8')),
+);
 
 test('requires reviewed main, production protection, CI, and disabled KemerBet', () => {
   assert.match(workflow, /environment: production/u);
@@ -81,6 +91,35 @@ test('patches only source-exact reviewed predecessor function markers', () => {
   for (const marker of markers) {
     expectExactMarkerCount(migration.split(marker).length - 1, 1);
   }
+});
+
+test('keeps the post-emergency eligibility predicate compatible with a read-only transaction', () => {
+  for (const fragment of [
+    'activation_control.current_epoch = activation_epoch.epoch',
+    'activation_epoch.revoked_at is not null',
+    'activation_epoch.revoked_at is not distinct from emergency_intent.requested_at',
+    'emergency_intent.expected_epoch = activation_epoch.epoch',
+    "pilot.status = ''stopped''",
+    "feature_switch.mode = ''disabled''",
+    "feature_switch.settings = ''{}''::jsonb",
+    "routine.provolatile = 's'",
+  ]) {
+    assert.ok(readOnlyPatchMigration.includes(fragment), fragment);
+  }
+  assert.ok(
+    readOnlyPatchMigration.includes(
+      "'      and app.current_private_trusted_telebirr_activation_epoch() is null'",
+    ),
+  );
+  assert.ok(readOnlyPatchMigration.includes('marker_count <> 1'));
+  assert.ok(readOnlyPatchMigration.includes("patched_source ~* E'\\\\mfor"));
+  assert.ok(
+    readOnlyPatchMigration.includes(
+      "patched_source like '%current_private_trusted_telebirr_activation_epoch()%'",
+    ),
+  );
+  assert.doesNotMatch(readOnlyPatchMigration, /update\s+app\.feature_switches/iu);
+  assert.doesNotMatch(readOnlyPatchMigration, /alter\s+role/iu);
 });
 
 function expectExactMarkerCount(actual, expected) {

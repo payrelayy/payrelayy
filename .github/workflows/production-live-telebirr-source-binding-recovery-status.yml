@@ -156,7 +156,12 @@ jobs:
             deviceEvidence, observations, outcomes, sourceBindingRetries,
             sourceBindingRetryClosures, authorityConsumptions, reservations,
             settlementReceipts, settlementDocuments, depositExecutionJobs,
-            queuedDepositJobs, trustedVerifierSessions, financialSwitchesLive,
+            queuedDepositJobs, liveToShadowRecoveries, shadowProofRequests,
+            shadowSourceUnavailableRetries, shadowAttempts, shadowOutcomes,
+            latestShadowDisposition, latestShadowReasonCode,
+            openPairingChallenges, completedPairingChallenges,
+            validVerifierEnrollments, readyVerifierEnrollments,
+            trustedVerifierSessions, financialSwitchesLive,
             financialSwitchesDisabled, kemerBetLoginRoles, kemerBetSessions,
             executionEnabled, readOnly, moneyMoved
           }' <<<"$observer_result")"
@@ -164,15 +169,20 @@ jobs:
 
           jq -e '
             ([
-              .targetCount, .remainingSeconds, .attempts,
+              .targetCount, .attempts,
               .assignmentTranscripts, .assignmentDeliveries, .deviceEvidence,
               .observations, .outcomes, .sourceBindingRetries,
               .sourceBindingRetryClosures, .authorityConsumptions,
               .reservations, .settlementReceipts, .settlementDocuments,
               .depositExecutionJobs, .queuedDepositJobs,
+              .liveToShadowRecoveries, .shadowProofRequests,
+              .shadowSourceUnavailableRetries, .shadowAttempts, .shadowOutcomes,
+              .openPairingChallenges, .completedPairingChallenges,
+              .validVerifierEnrollments, .readyVerifierEnrollments,
               .trustedVerifierSessions, .financialSwitchesLive,
               .financialSwitchesDisabled, .kemerBetLoginRoles, .kemerBetSessions
-            ] | all(type == "number" and . >= 0 and . <= 16)) and
+            ] | all(type == "number" and . >= 0 and . <= 64)) and
+            (.remainingSeconds | type == "number" and . >= 0 and . <= 43200) and
             .financialSwitchesLive == 0 and
             .financialSwitchesDisabled == 7 and
             .kemerBetLoginRoles == 0 and

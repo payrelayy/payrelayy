@@ -30,6 +30,14 @@ test('uses the existing read-only status query and publishes only redacted facts
     'sourceBindingRetryClosures',
     'authorityConsumptions',
     'queuedDepositJobs',
+    'liveToShadowRecoveries',
+    'shadowProofRequests',
+    'shadowSourceUnavailableRetries',
+    'latestShadowDisposition',
+    'latestShadowReasonCode',
+    'openPairingChallenges',
+    'validVerifierEnrollments',
+    'readyVerifierEnrollments',
     'trustedVerifierSessions',
     'financialSwitchesDisabled',
     'kemerBetLoginRoles',
@@ -65,4 +73,6 @@ test('publishes the redacted snapshot before enforcing the safety boundary', () 
   assert.notEqual(publish, -1);
   assert.ok(safety > publish);
   assert.ok(!workflow.includes('tee -a "$GITHUB_STEP_SUMMARY" <<<"$observer_result"'));
+  assert.ok(workflow.includes('(.remainingSeconds | type == "number"'));
+  assert.ok(!workflow.includes('.targetCount, .remainingSeconds, .attempts'));
 });

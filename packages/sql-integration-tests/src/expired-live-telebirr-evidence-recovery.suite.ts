@@ -310,11 +310,67 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
         );
 
         const boundary = await client.query<{
+          readonly activation_ready: boolean;
           readonly all_disabled_switches: number;
+          readonly authority_ready: boolean;
+          readonly boundary_rows: number;
           readonly current_authority: string | null;
+          readonly evidence_ready: boolean;
+          readonly lineage_ready: boolean;
+          readonly pilot_ready: boolean;
           readonly post_emergency_ready: boolean;
         }>(
-          `select
+          `with boundary_rows as materialized (
+             select authority.*, job.id as job_id, job.pilot_revision_id as job_pilot_id,
+                    job.pilot_configuration_digest as job_configuration_digest,
+                    job.receiver_profile_id as job_receiver_profile_id,
+                    attempt.id as attempt_id,
+                    attempt.verification_job_id as attempt_job_id,
+                    attempt.issued_at as attempt_issued_at,
+                    attempt.expires_at as attempt_expires_at,
+                    staged.observation_body_digest as staged_observation_digest,
+                    staged.signed_observation as staged_observation,
+                    staged.observed_at, staged.staged_at,
+                    proof.id as proof_id, proof.pilot_revision_id as proof_pilot_id,
+                    proof.origin_channel, proof.input_kind, proof.submitted_at,
+                    pilot.id as pilot_id, pilot.configuration_digest,
+                    pilot.active_from as pilot_active_from,
+                    pilot.expires_at as pilot_expires_at,
+                    pilot.status as pilot_status, pilot.stopped_at,
+                    pilot.stopped_by_admin_id, pilot.stop_reason_code,
+                    control.current_epoch,
+                    activation.authority_state, activation.pilot_revision_id as activation_pilot_id,
+                    activation.configuration_digest as activation_configuration_digest,
+                    activation.active_from as activation_active_from,
+                    activation.expires_at as activation_expires_at,
+                    activation.revoked_at, activation.revocation_reason_code,
+                    emergency.expected_epoch, emergency.requested_by_admin_id,
+                    emergency.reason_code as emergency_reason_code, emergency.requested_at,
+                    closure.reason_code as closure_reason_code, closure.closed_at
+               from app.private_live_telebirr_historical_completion_authorities authority
+               join app.private_live_telebirr_verification_jobs job
+                 on job.id = authority.verification_job_id
+               join app.private_live_telebirr_verification_attempts attempt
+                 on attempt.id = authority.verification_attempt_id
+                and attempt.verification_job_id = job.id
+               join app.private_live_telebirr_device_evidence_staging staged
+                 on staged.verification_attempt_id = attempt.id
+               join app.private_live_deposit_pilot_proofs proof
+                 on proof.id = authority.private_live_deposit_pilot_proof_id
+               join app.private_live_deposit_pilot_revisions pilot
+                 on pilot.id = authority.pilot_revision_id
+               join app.private_trusted_telebirr_activation_control control
+                 on control.control_key = 'trusted_telebirr_financial_authority'
+               join app.private_trusted_telebirr_activation_epochs activation
+                 on activation.epoch = control.current_epoch
+                and activation.epoch = authority.expired_activation_epoch
+               join app.private_trusted_telebirr_emergency_disable_intents emergency
+                 on emergency.expected_epoch = activation.epoch
+               join app.private_live_telebirr_historical_completion_closures closure
+                 on closure.request_key = authority.request_key
+              where authority.request_key = $1::uuid
+           )
+           select
              app.is_private_live_telebirr_source_binding_post_emergency_ready(
                $1::uuid
              ) as post_emergency_ready,
@@ -328,13 +384,74 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
                  'telebirr_authoritative_verification', 'withdrawal_collection',
                  'withdrawal_validation'
                ) and feature_switch.mode = 'disabled'
-                 and feature_switch.settings = '{}'::jsonb) as all_disabled_switches`,
+                 and feature_switch.settings = '{}'::jsonb) as all_disabled_switches,
+             (select count(*)::integer from boundary_rows) as boundary_rows,
+             (select bool_and(
+                request_key = $1::uuid
+                and reason_code = 'expired_attempt_staged_evidence_completion'
+                and verification_job_id = job_id
+                and verification_attempt_id = attempt_id
+                and private_live_deposit_pilot_proof_id = proof_id
+                and pilot_revision_id = pilot_id
+                and receiver_profile_id = job_receiver_profile_id
+                and observation_body_digest = staged_observation_digest
+                and source_document_digest =
+                    staged_observation -> 'body' ->> 'sourceDocumentDigest'
+              ) from boundary_rows) as lineage_ready,
+             (select bool_and(
+                authorized_at < requested_at
+                and closure_reason_code = 'operator_stop'
+                and closed_at >= authorized_at
+                and closed_at <= requested_at
+              ) from boundary_rows) as authority_ready,
+             (select bool_and(
+                current_epoch = expired_activation_epoch
+                and authority_state = 'active'
+                and activation_pilot_id = pilot_id
+                and activation_configuration_digest = configuration_digest
+                and revoked_at is not null
+                and revocation_reason_code = 'execution_uncertainty'
+                and revoked_at is not distinct from requested_at
+                and expected_epoch = expired_activation_epoch
+                and emergency_reason_code = revocation_reason_code
+              ) from boundary_rows) as activation_ready,
+             (select bool_and(
+                pilot_status = 'stopped'
+                and stopped_at is not distinct from requested_at
+                and stopped_by_admin_id is not distinct from requested_by_admin_id
+                and stop_reason_code is not distinct from emergency_reason_code
+                and job_pilot_id = pilot_id
+                and job_configuration_digest = configuration_digest
+                and proof_pilot_id = pilot_id
+                and origin_channel = 'telegram'
+                and input_kind = 'direct_transaction_id'
+                and submitted_at + interval '24 hours' > pg_catalog.clock_timestamp()
+              ) from boundary_rows) as pilot_ready,
+             (select bool_and(
+                attempt_job_id = job_id
+                and attempt_issued_at >= pilot_active_from
+                and attempt_expires_at <= pilot_expires_at
+                and attempt_issued_at >= activation_active_from
+                and attempt_expires_at <= activation_expires_at
+                and attempt_expires_at <= pg_catalog.clock_timestamp()
+                and observed_at >= attempt_issued_at
+                and observed_at < attempt_expires_at
+                and staged_at < attempt_expires_at
+                and observed_at < requested_at
+                and staged_at < requested_at
+              ) from boundary_rows) as evidence_ready`,
           [authorityRequestKey],
         );
         expect(boundary.rows).toEqual([
           {
+            activation_ready: true,
             all_disabled_switches: 7,
+            authority_ready: true,
+            boundary_rows: 1,
             current_authority: null,
+            evidence_ready: true,
+            lineage_ready: true,
+            pilot_ready: true,
             post_emergency_ready: true,
           },
         ]);

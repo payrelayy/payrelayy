@@ -1171,8 +1171,8 @@ declare
   source_profile app.private_live_telebirr_receiver_profiles%rowtype;
   target_pilot app.private_live_deposit_pilot_revisions%rowtype;
   target_profile app.private_live_telebirr_receiver_profiles%rowtype;
-  target_enrollment app.private_live_telebirr_device_enrollments%rowtype;
-  target_signer app.private_live_telebirr_assignment_signers%rowtype;
+  target_enrollment_id uuid;
+  target_signer_id uuid;
   inserted_proof app.private_telebirr_shadow_proof_requests%rowtype;
   candidate_count integer;
   existing_retry_count integer;
@@ -1388,8 +1388,8 @@ begin
           and revocation.revoked_at <= authorized_at
      );
 
-  select enrollment, signer
-    into target_enrollment, target_signer
+  select enrollment.id, signer.id
+    into target_enrollment_id, target_signer_id
     from app.private_live_telebirr_device_enrollments enrollment
     join app.private_live_telebirr_device_enrollment_certificates certificate
       on certificate.device_enrollment_id = enrollment.id
@@ -1437,8 +1437,8 @@ begin
     or target_pilot.id is null
     or target_profile.id is null
     or ready_enrollment_count <> 1
-    or target_enrollment.id is null
-    or target_signer.id is null
+    or target_enrollment_id is null
+    or target_signer_id is null
     or source_attempts <> 0
     or source_outcomes <> 0
     or source_proof.proof_status <> 'verification_queued'
@@ -1464,8 +1464,8 @@ begin
     or not app.private_telebirr_shadow_source_binding_window_enrollment_is_ready(
          target_pilot.id,
          target_profile.id,
-         target_enrollment.id,
-         target_signer.id,
+         target_enrollment_id,
+         target_signer_id,
          authorized_at + interval '5 minutes'
        )
     or not app.private_telebirr_shadow_source_binding_window_boundary_is_ready(
@@ -1504,8 +1504,8 @@ begin
     source_profile.id,
     target_pilot.id,
     target_profile.id,
-    target_enrollment.id,
-    target_signer.id,
+    target_enrollment_id,
+    target_signer_id,
     source_attempts,
     source_outcomes,
     authorized_at,
@@ -1548,8 +1548,8 @@ begin
     source_profile.id,
     target_pilot.id,
     target_profile.id,
-    target_enrollment.id,
-    target_signer.id,
+    target_enrollment_id,
+    target_signer_id,
     source_attempts,
     source_outcomes,
     authorized_at,

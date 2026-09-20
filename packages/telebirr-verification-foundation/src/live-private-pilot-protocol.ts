@@ -321,6 +321,15 @@ export type TelebirrLivePilotReviewReason =
   | 'provider_unavailable'
   | 'network_unavailable'
   | 'unknown_layout'
+  | 'unknown_layout_provider_identity'
+  | 'unknown_layout_invoice_number'
+  | 'unknown_layout_transaction_status'
+  | 'unknown_layout_settled_amount'
+  | 'unknown_layout_payment_date'
+  | 'unknown_layout_credited_party_name'
+  | 'unknown_layout_payment_mode'
+  | 'unknown_layout_payment_reason'
+  | 'unknown_layout_payment_channel'
   | 'invalid_layout'
   | 'parser_uncertain'
   | 'device_error';
@@ -1006,6 +1015,15 @@ export function decodeTelebirrLivePilotReceiptFacts(
           'provider_unavailable',
           'network_unavailable',
           'unknown_layout',
+          'unknown_layout_provider_identity',
+          'unknown_layout_invoice_number',
+          'unknown_layout_transaction_status',
+          'unknown_layout_settled_amount',
+          'unknown_layout_payment_date',
+          'unknown_layout_credited_party_name',
+          'unknown_layout_payment_mode',
+          'unknown_layout_payment_reason',
+          'unknown_layout_payment_channel',
           'invalid_layout',
           'parser_uncertain',
           'device_error',

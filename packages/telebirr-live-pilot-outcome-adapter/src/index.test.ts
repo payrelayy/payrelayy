@@ -677,6 +677,21 @@ describe('TeleBirr live-pilot outcome adapter', () => {
     });
   });
 
+  it('keeps a fixed receipt-layout diagnostic in parser review without exposing receipt data', () => {
+    const outcome = adapt(
+      fixture({
+        lookupOutcome: 'review_required',
+        reviewReason: 'unknown_layout_payment_channel',
+        retrievedAt: '2026-08-20T18:03:00.000Z',
+      }),
+    );
+    expect(outcome).toMatchObject({
+      disposition: 'review_required',
+      reasonCode: 'parser_uncertain',
+    });
+    expect(JSON.stringify(outcome)).not.toMatch(/invoice|receiver|reference|html/iu);
+  });
+
   it.each([
     [foundFacts({ referenceMatch: 'mismatched' }), 'reference_mismatch'],
     [

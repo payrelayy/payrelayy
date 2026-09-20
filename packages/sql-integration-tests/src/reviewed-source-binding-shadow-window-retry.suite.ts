@@ -122,6 +122,48 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
       ]);
     });
 
+    it('loads the append-only child against its reviewed retry deadline', async () => {
+      const client = getClient();
+      const result = await client.query<{
+        readonly is_security_definer: boolean;
+        readonly owner_name: string;
+        readonly preserves_newest_attempt_rule: boolean;
+        readonly preserves_ordinary_deadline: boolean;
+        readonly safe_search_path: boolean;
+        readonly uses_retry_deadline: boolean;
+      }>(`
+        select loader.prosecdef as is_security_definer,
+               loader.proconfig = array['search_path=pg_catalog']::text[]
+                 as safe_search_path,
+               pg_catalog.pg_get_userbyid(loader.proowner) as owner_name,
+               loader.prosrc like
+                 '%when proof.source_binding_window_retry_source_id is not null%'
+                 and loader.prosrc like
+                   '%then app.private_telebirr_shadow_source_binding_window_review_deadline(%'
+                 as uses_retry_deadline,
+               loader.prosrc like
+                 '%else proof.submitted_at + interval ''12 hours''%'
+                 as preserves_ordinary_deadline,
+               loader.prosrc like
+                 '%proof.source_binding_window_retry_source_id is null%'
+                 as preserves_newest_attempt_rule
+          from pg_catalog.pg_proc loader
+         where loader.oid =
+               'app.load_next_private_telebirr_shadow_staged_evidence()'::regprocedure
+      `);
+
+      expect(result.rows).toEqual([
+        {
+          is_security_definer: true,
+          owner_name: 'postgres',
+          preserves_newest_attempt_rule: true,
+          preserves_ordinary_deadline: true,
+          safe_search_path: true,
+          uses_retry_deadline: true,
+        },
+      ]);
+    });
+
     it('fails safely and without writes when the unique reviewed source is absent', async () => {
       const client = getClient();
       await client.query('begin');

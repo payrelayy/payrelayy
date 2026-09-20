@@ -164,6 +164,58 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
       ]);
     });
 
+    it('completes the append-only child against its reviewed retry deadline', async () => {
+      const client = getClient();
+      const result = await client.query<{
+        readonly guards_both_terminal_checks: boolean;
+        readonly is_security_definer: boolean;
+        readonly owner_name: string;
+        readonly preserves_ordinary_deadline: boolean;
+        readonly preserves_source_recovery_deadline: boolean;
+        readonly safe_search_path: boolean;
+        readonly uses_fail_closed_retry_deadline: boolean;
+      }>(`
+        select completion.prosecdef as is_security_definer,
+               completion.proconfig = array['search_path=pg_catalog']::text[]
+                 as safe_search_path,
+               pg_catalog.pg_get_userbyid(completion.proowner) as owner_name,
+               (
+                 pg_catalog.length(completion.prosrc)
+                 - pg_catalog.length(pg_catalog.replace(
+                     completion.prosrc,
+                     'when proof.source_binding_window_retry_source_id is not null',
+                     ''
+                   ))
+               ) / pg_catalog.length(
+                 'when proof.source_binding_window_retry_source_id is not null'
+               ) = 2 as guards_both_terminal_checks,
+               completion.prosrc like
+                 '%then coalesce(%private_telebirr_shadow_source_binding_window_review_deadline(%'
+                 as uses_fail_closed_retry_deadline,
+               completion.prosrc like
+                 '%and app.private_live_telebirr_source_recovery_is_valid(%'
+                 as preserves_source_recovery_deadline,
+               completion.prosrc like
+                 '%else proof.submitted_at + interval ''12 hours''%'
+                 as preserves_ordinary_deadline
+          from pg_catalog.pg_proc completion
+         where completion.oid =
+               'app.complete_private_telebirr_shadow_verification(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure
+      `);
+
+      expect(result.rows).toEqual([
+        {
+          guards_both_terminal_checks: true,
+          is_security_definer: true,
+          owner_name: 'postgres',
+          preserves_ordinary_deadline: true,
+          preserves_source_recovery_deadline: true,
+          safe_search_path: true,
+          uses_fail_closed_retry_deadline: true,
+        },
+      ]);
+    });
+
     it('fails safely and without writes when the unique reviewed source is absent', async () => {
       const client = getClient();
       await client.query('begin');

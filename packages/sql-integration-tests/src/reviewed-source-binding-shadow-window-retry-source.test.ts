@@ -60,7 +60,7 @@ describe('reviewed source-binding shadow window retry', () => {
     for (const fragment of [
       'private_live_telebirr_source_binding_shadow_recovery_history_is_valid',
       "source_proof.proof_status <> 'verification_queued'",
-      'source_proof.expires_at > authorized_at',
+      'source_proof.expires_at > v_authorized_at',
       'source_attempts <> 0',
       'source_outcomes <> 0',
       'source_binding_window_retry_source_id',
@@ -72,7 +72,7 @@ describe('reviewed source-binding shadow window retry', () => {
 
   it('creates an exact twelve-hour child while preserving the original assessment clock', () => {
     expect(migrationSource).toContain("retry_expires_at = authorized_at + interval '12 hours'");
-    expect(retrySource).toContain("retry_until := authorized_at + interval '12 hours'");
+    expect(retrySource).toContain("v_retry_until := v_authorized_at + interval '12 hours'");
     expect(retrySource).toContain('source_proof.submitted_at');
     expect(retrySource).toContain('source_proof.not_before');
     expect(retrySource).toContain('authorized_at,');
@@ -90,7 +90,7 @@ describe('reviewed source-binding shadow window retry', () => {
       "pairing.state = 'completed'",
       "authorized_at + interval '5 minutes'",
       "target_pilot.active_from + interval '12 hours'",
-      "target_pilot.expires_at <= authorized_at + interval '11 hours 50 minutes'",
+      "target_pilot.expires_at <= v_authorized_at + interval '11 hours 50 minutes'",
     ]) {
       expect(retrySource).toContain(fragment);
     }

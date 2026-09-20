@@ -1180,12 +1180,12 @@ declare
   ready_enrollment_count integer;
   source_attempts integer;
   source_outcomes integer;
-  retry_request_key uuid;
+  v_retry_request_key uuid;
   replacement_proof_id uuid;
   replacement_job_id uuid;
   retry_digest text;
-  authorized_at timestamptz;
-  retry_until timestamptz;
+  v_authorized_at timestamptz;
+  v_retry_until timestamptz;
 begin
   if session_user <> 'postgres'
     or p_reviewed_main_commit_sha !~ '^[0-9a-f]{40}$'
@@ -1218,8 +1218,8 @@ begin
    for update;
   get diagnostics locked_switch_count = row_count;
 
-  authorized_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
-  retry_until := authorized_at + interval '12 hours';
+  v_authorized_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  v_retry_until := v_authorized_at + interval '12 hours';
 
   select pg_catalog.count(*)::integer into existing_retry_count
     from app.private_telebirr_shadow_source_binding_window_retries retry;
@@ -1279,7 +1279,7 @@ begin
      and recovery.reason_code =
          'reviewed_source_binding_source_unavailable_recovery_no_credit'
      and proof.proof_status = 'verification_queued'
-     and proof.expires_at <= authorized_at
+     and proof.expires_at <= v_authorized_at
      and app.private_live_telebirr_source_binding_shadow_recovery_history_is_valid(
            proof.id,
            recovery.recovery_request_key
@@ -1310,7 +1310,7 @@ begin
      and recovery.reason_code =
          'reviewed_source_binding_source_unavailable_recovery_no_credit'
      and proof.proof_status = 'verification_queued'
-     and proof.expires_at <= authorized_at
+     and proof.expires_at <= v_authorized_at
      and not exists (
        select 1 from app.private_telebirr_shadow_verification_attempts attempt
         where attempt.shadow_proof_request_id = proof.id
@@ -1370,22 +1370,22 @@ begin
      and pairing.receiver_profile_id = target_profile.id
      and pairing.state = 'completed'
      and pairing.completed_at is not null
-     and enrollment.valid_from <= authorized_at
-     and enrollment.valid_until > authorized_at + interval '5 minutes'
-     and pairing.certificate_valid_from <= authorized_at
-     and pairing.certificate_valid_until > authorized_at + interval '5 minutes'
-     and signer.valid_from <= authorized_at
-     and signer.valid_until > authorized_at + interval '5 minutes'
+     and enrollment.valid_from <= v_authorized_at
+     and enrollment.valid_until > v_authorized_at + interval '5 minutes'
+     and pairing.certificate_valid_from <= v_authorized_at
+     and pairing.certificate_valid_until > v_authorized_at + interval '5 minutes'
+     and signer.valid_from <= v_authorized_at
+     and signer.valid_until > v_authorized_at + interval '5 minutes'
      and not exists (
        select 1 from app.private_live_telebirr_device_revocations revocation
         where revocation.device_enrollment_id = enrollment.id
-          and revocation.revoked_at <= authorized_at
+          and revocation.revoked_at <= v_authorized_at
      )
      and not exists (
        select 1
          from app.private_live_telebirr_assignment_signer_revocations revocation
         where revocation.assignment_signer_id = signer.id
-          and revocation.revoked_at <= authorized_at
+          and revocation.revoked_at <= v_authorized_at
      );
 
   select enrollment.id, signer.id
@@ -1403,22 +1403,22 @@ begin
      and pairing.pilot_revision_id = target_pilot.id
      and pairing.receiver_profile_id = target_profile.id
      and pairing.state = 'completed'
-     and enrollment.valid_from <= authorized_at
-     and enrollment.valid_until > authorized_at + interval '5 minutes'
-     and pairing.certificate_valid_from <= authorized_at
-     and pairing.certificate_valid_until > authorized_at + interval '5 minutes'
-     and signer.valid_from <= authorized_at
-     and signer.valid_until > authorized_at + interval '5 minutes'
+     and enrollment.valid_from <= v_authorized_at
+     and enrollment.valid_until > v_authorized_at + interval '5 minutes'
+     and pairing.certificate_valid_from <= v_authorized_at
+     and pairing.certificate_valid_until > v_authorized_at + interval '5 minutes'
+     and signer.valid_from <= v_authorized_at
+     and signer.valid_until > v_authorized_at + interval '5 minutes'
      and not exists (
        select 1 from app.private_live_telebirr_device_revocations revocation
         where revocation.device_enrollment_id = enrollment.id
-          and revocation.revoked_at <= authorized_at
+          and revocation.revoked_at <= v_authorized_at
      )
      and not exists (
        select 1
          from app.private_live_telebirr_assignment_signer_revocations revocation
         where revocation.assignment_signer_id = signer.id
-          and revocation.revoked_at <= authorized_at
+          and revocation.revoked_at <= v_authorized_at
      )
    for share of enrollment, certificate, pairing, signer;
 
@@ -1442,13 +1442,13 @@ begin
     or source_attempts <> 0
     or source_outcomes <> 0
     or source_proof.proof_status <> 'verification_queued'
-    or source_proof.expires_at > authorized_at
+    or source_proof.expires_at > v_authorized_at
     or target_pilot.id = source_pilot.id
     or target_pilot.expires_at is distinct from
        target_pilot.active_from + interval '12 hours'
-    or target_pilot.expires_at <= authorized_at + interval '11 hours 50 minutes'
-    or target_profile.valid_from > authorized_at
-    or target_profile.valid_until <= authorized_at + interval '5 minutes'
+    or target_pilot.expires_at <= v_authorized_at + interval '11 hours 50 minutes'
+    or target_profile.valid_from > v_authorized_at
+    or target_profile.valid_until <= v_authorized_at + interval '5 minutes'
     or not app.private_live_telebirr_source_binding_shadow_recovery_history_is_valid(
          source_proof.id,
          source_recovery.recovery_request_key
@@ -1466,7 +1466,7 @@ begin
          target_profile.id,
          target_enrollment_id,
          target_signer_id,
-         authorized_at + interval '5 minutes'
+         v_authorized_at + interval '5 minutes'
        )
     or not app.private_telebirr_shadow_source_binding_window_boundary_is_ready(
          target_pilot.id
@@ -1489,11 +1489,11 @@ begin
     raise exception 'The expired reviewed source-binding shadow request is not safely retryable.';
   end if;
 
-  retry_request_key := pg_catalog.gen_random_uuid();
+  v_retry_request_key := pg_catalog.gen_random_uuid();
   replacement_proof_id := pg_catalog.gen_random_uuid();
   replacement_job_id := pg_catalog.gen_random_uuid();
   retry_digest := app.private_telebirr_shadow_source_binding_window_retry_digest(
-    retry_request_key,
+    v_retry_request_key,
     source_recovery.recovery_request_key,
     source_recovery.recovery_request_digest,
     source_proof.id,
@@ -1508,8 +1508,8 @@ begin
     target_signer_id,
     source_attempts,
     source_outcomes,
-    authorized_at,
-    retry_until,
+    v_authorized_at,
+    v_retry_until,
     p_reviewed_main_commit_sha,
     p_reason_code
   );
@@ -1536,7 +1536,7 @@ begin
     reviewed_main_commit_sha,
     reason_code
   ) values (
-    retry_request_key,
+    v_retry_request_key,
     retry_digest,
     source_recovery.recovery_request_key,
     source_recovery.recovery_request_digest,
@@ -1552,15 +1552,15 @@ begin
     target_signer_id,
     source_attempts,
     source_outcomes,
-    authorized_at,
-    retry_until,
+    v_authorized_at,
+    v_retry_until,
     p_reviewed_main_commit_sha,
     p_reason_code
   );
 
   perform pg_catalog.set_config(
     'app.private_telebirr_shadow_source_binding_window_retry',
-    retry_request_key::text,
+    v_retry_request_key::text,
     true
   );
   insert into app.private_telebirr_shadow_proof_requests (
@@ -1606,8 +1606,8 @@ begin
     'verification_queued',
     source_proof.submitted_at,
     source_proof.not_before,
-    retry_until,
-    authorized_at,
+    v_retry_until,
+    v_authorized_at,
     source_proof.id
   ) returning * into inserted_proof;
   perform pg_catalog.set_config(
@@ -1618,7 +1618,7 @@ begin
 
   if not app.private_telebirr_shadow_source_binding_window_retry_is_valid(
     inserted_proof.id,
-    retry_request_key
+    v_retry_request_key
   ) then
     raise exception 'The source-binding shadow window retry did not validate exactly.';
   end if;
@@ -1658,7 +1658,7 @@ begin
          43200,
          greatest(
            0,
-           extract(epoch from (retry_until - pg_catalog.clock_timestamp()))::integer
+           extract(epoch from (v_retry_until - pg_catalog.clock_timestamp()))::integer
          ),
          false;
 end;

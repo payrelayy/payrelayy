@@ -143,6 +143,7 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
         `);
 
         let failure: unknown;
+        await client.query('savepoint expected_missing_source_failure');
         try {
           await client.query(
             `select *
@@ -154,6 +155,9 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
           );
         } catch (error) {
           failure = error;
+        } finally {
+          await client.query('rollback to savepoint expected_missing_source_failure');
+          await client.query('release savepoint expected_missing_source_failure');
         }
 
         expect(failure).toBeInstanceOf(Error);

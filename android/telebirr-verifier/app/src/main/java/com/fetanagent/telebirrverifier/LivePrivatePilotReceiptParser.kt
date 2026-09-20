@@ -56,24 +56,60 @@ class LivePrivatePilotReceiptParser {
     val rows = parseRows(document.utf8Body)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
     if (!visibleText(document.utf8Body).contains("Ethio telecom Share Company", ignoreCase = true)) {
-      return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_provider_identity",
+        document.retrievedAt,
+      )
     }
     val invoiceNumber = unique(rows, "invoice no")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_invoice_number",
+        document.retrievedAt,
+      )
     val status = unique(rows, "transaction status")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_transaction_status",
+        document.retrievedAt,
+      )
     val amount = unique(rows, "settled amount")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_settled_amount",
+        document.retrievedAt,
+      )
     val paymentDate = unique(rows, "payment date")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_payment_date",
+        document.retrievedAt,
+      )
     val receiverName = unique(rows, "credited party name")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_credited_party_name",
+        document.retrievedAt,
+      )
     val paymentMode = unique(rows, "payment mode")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_payment_mode",
+        document.retrievedAt,
+      )
     val paymentReason = unique(rows, "payment reason")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_payment_reason",
+        document.retrievedAt,
+      )
     val paymentChannel = unique(rows, "payment channel")
-      ?: return review(document.sourceDocumentDigest, "unknown_layout", document.retrievedAt)
+      ?: return review(
+        document.sourceDocumentDigest,
+        "unknown_layout_payment_channel",
+        document.retrievedAt,
+      )
 
     if (!Regex("^[A-Z0-9]{8,64}$").matches(invoiceNumber)) {
       return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
@@ -117,8 +153,8 @@ class LivePrivatePilotReceiptParser {
 
   private fun parseRows(html: String): Map<String, List<String>>? {
     if (html.length > MAX_HTML_CHARACTERS || html.indexOf('\u0000') >= 0) return null
-    val rows = linkedMapOf<String, MutableList<String>>()
-    val tableRows =
+    val tableRowsByLabel = linkedMapOf<String, MutableList<String>>()
+    val tableCells =
       rowPattern.findAll(html).map { match ->
         cellPattern
           .findAll(match.groupValues[1])
@@ -126,21 +162,25 @@ class LivePrivatePilotReceiptParser {
           .toList()
       }.toList()
 
-    fun add(label: String, value: String): Boolean {
+    fun add(
+      destination: MutableMap<String, MutableList<String>>,
+      label: String,
+      value: String,
+    ): Boolean {
       val bounded = value.trim()
       if (bounded.isEmpty() || bounded.length > MAX_CELL_CHARACTERS) return false
-      rows.getOrPut(label) { mutableListOf() } += bounded
+      destination.getOrPut(label) { mutableListOf() } += bounded
       return true
     }
 
-    for ((index, cells) in tableRows.withIndex()) {
+    for ((index, cells) in tableCells.withIndex()) {
       if (cells.isEmpty()) continue
 
       if (cells.map(::canonicalLabel) == invoiceColumnLabels) {
-        val values = tableRows.getOrNull(index + 1) ?: return null
+        val values = tableCells.getOrNull(index + 1) ?: return null
         if (values.size != invoiceColumnLabels.size) return null
         for (column in invoiceColumnLabels.indices) {
-          if (!add(invoiceColumnLabels[column], values[column])) return null
+          if (!add(tableRowsByLabel, invoiceColumnLabels[column], values[column])) return null
         }
         continue
       }
@@ -148,16 +188,42 @@ class LivePrivatePilotReceiptParser {
       val label = canonicalLabel(cells[0])
       if (label != null) {
         val values = cells.drop(1).map(String::trim).filter(String::isNotEmpty)
-        if (values.size != 1 || !add(label, values.single())) return null
+        if (values.size != 1 || !add(tableRowsByLabel, label, values.single())) return null
         continue
       }
 
       if (cells.size == 1) {
         val inline = canonicalInlinePair(cells.single()) ?: continue
-        if (!add(inline.first, inline.second)) return null
+        if (!add(tableRowsByLabel, inline.first, inline.second)) return null
       }
     }
-    return rows
+
+    // The official receipt has used both table rows and card/definition-list containers. Keep the
+    // accepted vocabulary identical and only pair a canonical label with its immediately adjacent
+    // leaf value. Raw labels, values, and HTML never leave the device.
+    val cardRowsByLabel = linkedMapOf<String, MutableList<String>>()
+    val leafElements =
+      leafElementPattern.findAll(html).map { match -> visibleText(match.groupValues[2]) }.toList()
+    var elementIndex = 0
+    while (elementIndex < leafElements.size - 1) {
+      val label = canonicalLabel(leafElements[elementIndex])
+      if (label == null) {
+        elementIndex += 1
+        continue
+      }
+      val value = leafElements[elementIndex + 1]
+      if (canonicalLabel(value) != null || !add(cardRowsByLabel, label, value)) return null
+      elementIndex += 2
+    }
+
+    val candidates = listOf(tableRowsByLabel, cardRowsByLabel).filter { it.isNotEmpty() }
+    if (candidates.isEmpty()) return emptyMap()
+    val bestCount = candidates.maxOf { candidate -> candidate.keys.count(requiredLabels::contains) }
+    val best = candidates.filter { candidate ->
+      candidate.keys.count(requiredLabels::contains) == bestCount
+    }
+    if (best.size == 1) return best.single()
+    return best.firstOrNull()?.takeIf { candidate -> best.all(candidate::equals) }
   }
 
   private fun unique(rows: Map<String, List<String>>, label: String): String? =
@@ -165,7 +231,7 @@ class LivePrivatePilotReceiptParser {
 
   private fun canonicalLabel(raw: String): String? {
     val english = canonicalEnglish(raw)
-    return when (english.removeSuffix(".")) {
+    return when (english.removeSuffix(":").removeSuffix(".")) {
       "invoice no" -> "invoice no"
       "payment date" -> "payment date"
       "settled amount" -> "settled amount"
@@ -271,6 +337,11 @@ class LivePrivatePilotReceiptParser {
         "<(?:td|th)\\b[^>]*>(.*?)</(?:td|th)>",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
       )
+    private val leafElementPattern =
+      Regex(
+        "<(div|span|p|li|dt|dd)\\b[^>]*>((?:(?!<(?:div|span|p|li|dt|dd)\\b).)*)</\\1>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+      )
     private val commentPattern = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     private val scriptPattern =
       Regex(
@@ -288,6 +359,17 @@ class LivePrivatePilotReceiptParser {
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
     private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
     private val inlineCanonicalLabels = listOf("transaction status")
+    private val requiredLabels =
+      setOf(
+        "invoice no",
+        "payment date",
+        "settled amount",
+        "credited party name",
+        "transaction status",
+        "payment mode",
+        "payment reason",
+        "payment channel",
+      )
     private val dateFormatters =
       listOf("dd-MM-uuuu HH:mm:ss", "dd/MM/uuuu HH:mm:ss").map {
         DateTimeFormatter.ofPattern(it, Locale.ROOT).withResolverStyle(ResolverStyle.STRICT)

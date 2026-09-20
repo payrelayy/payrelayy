@@ -92,10 +92,14 @@ class LivePrivatePilotReceiptParserTest {
       )
     val facts = documents.map { parser.parse(it, assignment).facts }
     assertTrue(facts.all { it is LivePilotReviewRequiredFacts })
-    assertTrue(
-      facts
-        .map { (it as LivePilotReviewRequiredFacts).reviewReason }
-        .all { it == "unknown_layout" || it == "invalid_layout" },
+    assertEquals(
+      listOf(
+        "unknown_layout_payment_reason",
+        "unknown_layout_invoice_number",
+        "invalid_layout",
+        "unknown_layout_provider_identity",
+      ),
+      facts.map { (it as LivePilotReviewRequiredFacts).reviewReason },
     )
   }
 
@@ -143,6 +147,48 @@ class LivePrivatePilotReceiptParserTest {
     assertEquals("telebirr", facts.paymentMode)
     assertEquals("send_money_to_registered_customer", facts.paymentReason)
     assertEquals("api_app", facts.paymentChannel)
+  }
+
+  @Test
+  fun `accepts the same exact receipt facts in the official card container layout`() {
+    val facts =
+      parser.parse(livePilotProviderFound(currentOfficialCardLivePilotHtml()), assignment).facts
+        as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("recognized_layout_v1", facts.layoutAttestation)
+    assertEquals("telebirr", facts.paymentMode)
+    assertEquals("send_money_to_registered_customer", facts.paymentReason)
+    assertEquals("api_app", facts.paymentChannel)
+  }
+
+  @Test
+  fun `emits only fixed missing-field diagnostics for an unrecognized card layout`() {
+    val cases =
+      listOf(
+        "Invoice No.:" to "unknown_layout_invoice_number",
+        "Transaction Status:" to "unknown_layout_transaction_status",
+        "Settled Amount:" to "unknown_layout_settled_amount",
+        "Payment Date:" to "unknown_layout_payment_date",
+        "Credited Party Name:" to "unknown_layout_credited_party_name",
+        "Payment Mode:" to "unknown_layout_payment_mode",
+        "Payment Reason:" to "unknown_layout_payment_reason",
+        "Payment Channel:" to "unknown_layout_payment_channel",
+      )
+
+    for ((label, expectedReason) in cases) {
+      val html =
+        currentOfficialCardLivePilotHtml()
+          .replace(Regex("<div>[^<]*${Regex.escape(label)}</div><div>[^<]*</div>"), "")
+      val facts = parser.parse(livePilotProviderFound(html), assignment).facts
+        as LivePilotReviewRequiredFacts
+      assertEquals(expectedReason, facts.reviewReason)
+      assertFalse(facts.toString().contains(PILOT_REFERENCE))
+      assertFalse(facts.toString().contains(PILOT_RECEIVER_NAME))
+    }
   }
 
   @Test

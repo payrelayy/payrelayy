@@ -194,3 +194,21 @@ internal fun currentOfficialLivePilotHtml(
     <tr><td>የክፍያ ቻናል/Payment channel</td><td>API/App</td><td></td></tr>
   </table></body></html>
   """.trimIndent()
+
+internal fun currentOfficialCardLivePilotHtml(
+  reference: String = PILOT_REFERENCE,
+  receiverName: String = "PILOT RECEIVER",
+  status: String = "Completed",
+): String =
+  """
+  <html><body><h1>Ethio telecom Share Company</h1><section class="receipt-card">
+    <div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$reference</div>
+    <div>የክፍያ ቀን / Payment Date:</div><div>20-08-2026 21:01:45</div>
+    <div>የተከፈለው መጠን / Settled Amount:</div><div>25.00 ETB</div>
+    <div>የገንዘብ ተቀባይ / Credited Party Name:</div><div>$receiverName</div>
+    <div>የግብይት ሁኔታ / Transaction Status:</div><div>$status</div>
+    <div>የክፍያ ዘዴ / Payment Mode:</div><div>telebirr</div>
+    <div>የክፍያ ምክንያት / Payment Reason:</div><div>Send Money to Registered Customer</div>
+    <div>የክፍያ ቻናል / Payment Channel:</div><div>API/App</div>
+  </section></body></html>
+  """.trimIndent()

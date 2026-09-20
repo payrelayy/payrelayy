@@ -25,6 +25,7 @@ import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilo
 import { registerPrivateLiveExecutionActivationEpochSqlTests } from './private-live-execution-activation-epoch.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
+import { registerReviewedSourceBindingShadowWindowRetrySqlTests } from './reviewed-source-binding-shadow-window-retry.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerStagingTelebirrShadowVerifierLifecycleSqlTests } from './staging-telebirr-shadow-verifier-lifecycle.suite.js';
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
@@ -9719,6 +9720,7 @@ registerPrivateLiveTelebirrProofLineageSqlTests(
   () => client,
   () => ownerAdminId,
 );
+registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(
   () => client,
   () => ownerAdminId,

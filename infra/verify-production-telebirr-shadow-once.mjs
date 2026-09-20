@@ -49,7 +49,7 @@ assert.match(workflow, /confirm_shadow_proof_request_id:/u);
 assert.match(workflow, /TARGET_SHADOW_PROOF_REQUEST_ID/u);
 assert.match(workflow, /resolve-authority-deadline-child/u);
 assert.match(workflow, /resolve-reviewed-source-binding/u);
-assert.match(workflow, /not-applicable for direct shadow intake/u);
+assert.match(workflow, /not-applicable for direct\/child shadow intake/u);
 assert.match(workflow, /including an authority-deadline child-proof retry/u);
 assert.match(
   workflow,
@@ -71,6 +71,9 @@ assert.match(workflow, /private_telebirr_shadow_authority_deadline_retry_is_vali
 assert.match(workflow, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(workflow, /private_live_telebirr_source_binding_shadow_recoveries/u);
 assert.match(workflow, /private_live_telebirr_source_binding_shadow_recovery_is_valid/u);
+assert.match(workflow, /private_telebirr_shadow_source_binding_window_retries/u);
+assert.match(workflow, /private_telebirr_shadow_source_binding_window_retry_is_valid/u);
+assert.match(workflow, /'not-applicable'::text as source_live_verification_job_id/u);
 assert.match(workflow, /::add-mask::\$resolved_pilot/u);
 assert.match(workflow, /::add-mask::\$resolved_proof/u);
 assert.match(workflow, /::add-mask::\$resolved_source_job/u);
@@ -185,6 +188,9 @@ assert.match(provision, /private_telebirr_shadow_source_unavailable_retry_is_val
 assert.match(provision, /private_telebirr_shadow_authority_deadline_retry_is_valid/u);
 assert.match(provision, /private_telebirr_shadow_authority_deadline_retries/u);
 assert.match(provision, /private_live_telebirr_source_recovery_is_valid/u);
+assert.match(provision, /review_source_binding_window_retry/u);
+assert.match(provision, /private_telebirr_shadow_source_binding_window_retries/u);
+assert.match(provision, /private_telebirr_shadow_source_binding_window_retry_is_valid/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retries/u);
 assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);
 assert.match(provision, /\) >= recovery\.prior_attempt_count \+ 1/u);

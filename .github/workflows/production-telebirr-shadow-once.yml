@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       confirm_pilot_revision_id:
-        description: Type the exact armed dry-run replacement pilot UUID, or resolve-reviewed-source-binding
+        description: Type the exact armed dry-run replacement pilot UUID, or resolve-reviewed-source-binding (including its window child)
         required: true
         type: string
       confirm_shadow_proof_request_id:
@@ -24,7 +24,7 @@ on:
         required: true
         type: string
       confirm_source_live_verification_job_id:
-        description: Type the exact source live verification-job UUID, not-applicable for direct shadow intake, or resolve-reviewed-source-binding
+        description: Type the exact source live verification-job UUID, not-applicable for direct/child shadow intake, or resolve-reviewed-source-binding
         required: true
         type: string
       confirm_recovery_request_key:
@@ -288,34 +288,74 @@ jobs:
           if [[ "$TARGET_PILOT_REVISION_ID" == 'resolve-reviewed-source-binding' ]]; then
             resolved_source_binding_lineage="$(
               psql -X --quiet --tuples-only --no-align --set=ON_ERROR_STOP=1 --command "
+                with candidates as (
+                  select window_retry.target_pilot_revision_id,
+                         window_retry.replacement_shadow_proof_request_id,
+                         'not-applicable'::text as source_live_verification_job_id,
+                         window_retry.retry_request_key,
+                         1 as priority
+                    from app.private_telebirr_shadow_source_binding_window_retries window_retry
+                    join app.private_telebirr_shadow_proof_requests proof
+                      on proof.id = window_retry.replacement_shadow_proof_request_id
+                     and proof.verification_job_id =
+                         window_retry.replacement_shadow_verification_job_id
+                   where window_retry.reason_code =
+                         'reviewed_source_binding_shadow_window_retry_no_credit'
+                     and proof.proof_status = 'verification_queued'
+                     and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
+                     and app.private_telebirr_shadow_source_binding_window_retry_is_valid(
+                           proof.id,
+                           window_retry.retry_request_key
+                         )
+                     and not exists (
+                       select 1
+                         from app.private_telebirr_shadow_verification_outcomes outcome
+                        where outcome.shadow_proof_request_id = proof.id
+                     )
+                  union all
+                  select recovery.target_pilot_revision_id,
+                         recovery.replacement_shadow_proof_request_id,
+                         retry.current_verification_job_id::text,
+                         recovery.recovery_request_key,
+                         2 as priority
+                    from app.private_live_telebirr_source_binding_shadow_recoveries recovery
+                    join app.private_live_telebirr_source_binding_recovery_retries retry
+                      on retry.retry_request_key =
+                         recovery.source_binding_retry_request_key
+                    join app.private_telebirr_shadow_proof_requests proof
+                      on proof.id = recovery.replacement_shadow_proof_request_id
+                     and proof.verification_job_id =
+                         recovery.replacement_shadow_verification_job_id
+                   where recovery.reason_code =
+                         'reviewed_source_binding_source_unavailable_recovery_no_credit'
+                     and proof.proof_status = 'verification_queued'
+                     and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
+                     and app.private_live_telebirr_source_binding_shadow_recovery_is_valid(
+                           proof.id,
+                           recovery.recovery_request_key
+                         )
+                     and not exists (
+                       select 1
+                         from app.private_telebirr_shadow_source_binding_window_retries window_retry
+                        where window_retry.source_recovery_request_key =
+                              recovery.recovery_request_key
+                     )
+                     and not exists (
+                       select 1
+                         from app.private_telebirr_shadow_verification_outcomes outcome
+                        where outcome.shadow_proof_request_id = proof.id
+                     )
+                )
                 select pg_catalog.concat_ws(
                          '|',
-                         recovery.target_pilot_revision_id::text,
-                         recovery.replacement_shadow_proof_request_id::text,
-                         retry.current_verification_job_id::text,
-                         recovery.recovery_request_key::text
+                         candidate.target_pilot_revision_id::text,
+                         candidate.replacement_shadow_proof_request_id::text,
+                         candidate.source_live_verification_job_id,
+                         candidate.retry_request_key::text
                        )
-                  from app.private_live_telebirr_source_binding_shadow_recoveries recovery
-                  join app.private_live_telebirr_source_binding_recovery_retries retry
-                    on retry.retry_request_key =
-                       recovery.source_binding_retry_request_key
-                  join app.private_telebirr_shadow_proof_requests proof
-                    on proof.id = recovery.replacement_shadow_proof_request_id
-                   and proof.verification_job_id =
-                       recovery.replacement_shadow_verification_job_id
-                 where recovery.reason_code =
-                       'reviewed_source_binding_source_unavailable_recovery_no_credit'
-                   and proof.proof_status = 'verification_queued'
-                   and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
-                   and app.private_live_telebirr_source_binding_shadow_recovery_is_valid(
-                         proof.id,
-                         recovery.recovery_request_key
-                       )
-                   and not exists (
-                     select 1
-                       from app.private_telebirr_shadow_verification_outcomes outcome
-                      where outcome.shadow_proof_request_id = proof.id
-                   );
+                  from candidates candidate
+                 order by candidate.priority
+                 limit 1;
               "
             )"
             IFS='|' read -r resolved_pilot resolved_proof resolved_source_job resolved_request \
@@ -324,7 +364,7 @@ jobs:
             uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
             [[ "$resolved_pilot" =~ $uuid ]]
             [[ "$resolved_proof" =~ $uuid_v4 ]]
-            [[ "$resolved_source_job" =~ $uuid ]]
+            [[ "$resolved_source_job" == 'not-applicable' || "$resolved_source_job" =~ $uuid ]]
             [[ "$resolved_request" =~ $uuid_v4 ]]
             echo "::add-mask::$resolved_pilot"
             echo "::add-mask::$resolved_proof"
@@ -576,6 +616,10 @@ jobs:
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )
                           or app.private_telebirr_shadow_assessment_clock_retry_is_valid(
+                               proof.id,
+                               nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                             )
+                          or app.private_telebirr_shadow_source_binding_window_retry_is_valid(
                                proof.id,
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )

@@ -1,0 +1,162 @@
+name: Retry reviewed production TeleBirr provider origin
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type CREATE ONE REVIEWED TELEBIRR PROVIDER ORIGIN RETRY - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-live-telebirr-provider-origin-retry
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+
+jobs:
+  validate:
+    name: Validate the exact append-only no-money retry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main and the exact no-money phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'CREATE ONE REVIEWED TELEBIRR PROVIDER ORIGIN RETRY - NO MONEY' ]]
+
+  retry:
+    name: Create one paired twelve-hour provider-origin child
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production operation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Create and verify one redacted paired no-money retry
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECTTIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          REVIEWED_MAIN_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ "$REVIEWED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+
+          protected="$RUNNER_TEMP/production-provider-origin-retry"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/production-provider-origin-retry" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          retry_result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-provider-origin-retry.sql
+          )"
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "reviewed_receipt_provider_origin_retry" and
+            .deploymentTarget == "production" and
+            (.created | type == "boolean") and
+            .originRetryCount == 1 and
+            .shadowRequestCount == 1 and
+            (.sourceShadowAttemptCount | type == "number" and . >= 1 and . <= 100) and
+            .sourceStagedEvidenceCount == .sourceShadowAttemptCount and
+            .sourceProviderIdentityReviewCount == .sourceShadowAttemptCount and
+            .sourceShadowOutcomeCount == 1 and
+            .replacementShadowAttemptCount == 0 and
+            .replacementShadowOutcomeCount == 0 and
+            .readyEnrollmentCount == 1 and
+            .configuredWindowSeconds == 43200 and
+            (.remainingSeconds | type == "number" and . >= 42601 and . <= 43205) and
+            .disabledFinancialSwitches == 6 and
+            .dryRunPilotSwitches == 1 and
+            .activeTelebirrEpochs == 0 and
+            .disabledCompanionControls == 1 and
+            .executionLoginRoles == 0 and
+            .executionSessions == 0 and
+            .reservations == 0 and
+            .settlementReceipts == 0 and
+            .depositJobs == 0 and
+            .providerEvidence == 0 and
+            .moneyMoved == false and
+            .identifiersRedacted == true
+          ' <<<"$retry_result" >/dev/null
+
+          jq '{
+            created, originRetryCount, shadowRequestCount,
+            sourceShadowAttemptCount, sourceStagedEvidenceCount,
+            sourceProviderIdentityReviewCount, sourceShadowOutcomeCount,
+            replacementShadowAttemptCount, replacementShadowOutcomeCount,
+            readyEnrollmentCount, configuredWindowSeconds, remainingSeconds,
+            disabledFinancialSwitches, dryRunPilotSwitches, activeTelebirrEpochs,
+            disabledCompanionControls, executionLoginRoles, executionSessions,
+            reservations, settlementReceipts, depositJobs, providerEvidence,
+            moneyMoved, identifiersRedacted
+          }' <<<"$retry_result" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '::notice::One append-only provider-origin review child is queued; all execution remains disabled.'

@@ -10,6 +10,9 @@ const operation = read('./sql/production-live-telebirr-source-binding-receipt-la
 const migration = read(
   '../supabase/migrations/20260920170407_retry_reviewed_source_binding_receipt_layout.sql',
 );
+const historyBindingRepair = read(
+  '../supabase/migrations/20260921133000_fix_receipt_layout_history_binding.sql',
+);
 const verifierWorkflow = read('../.github/workflows/production-telebirr-shadow-once.yml');
 const verifierProvision = read('./sql/production-telebirr-shadow-verifier-once-provision.sql');
 const parser = read(
@@ -97,6 +100,19 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(migration, /update app\.feature_switches/iu);
 assert.doesNotMatch(migration, /grant execute/iu);
+
+assert.match(historyBindingRepair, /private_telebirr_shadow_layout_source_is_valid\(uuid,uuid\)/u);
+assert.match(historyBindingRepair, /attempt\.shadow_proof_request_id = proof\.id/u);
+assert.match(historyBindingRepair, /outcome\.source_document_digest/u);
+assert.match(historyBindingRepair, /lookupOutcome/u);
+assert.match(historyBindingRepair, /retrievedAt/u);
+assert.match(historyBindingRepair, /routine\.proacl is not distinct from original_acl/u);
+assert.match(historyBindingRepair, /routine\.prosecdef = original_security_definer/u);
+assert.doesNotMatch(
+  historyBindingRepair,
+  /\b(?:insert\s+into|update|delete\s+from|truncate)\s+app\./iu,
+);
+assert.doesNotMatch(historyBindingRepair, /grant execute/iu);
 
 for (const code of [
   'unknown_layout_provider_identity',

@@ -50,11 +50,17 @@ class OfficialReceiptRoute private constructor(private val uri: URI) {
   }
 }
 
+enum class ProviderDocumentOriginAttestation {
+  OFFICIAL_TLS_ORIGIN,
+  UNATTESTED,
+}
+
 sealed interface ProviderDocument {
   data class Found(
     val utf8Body: String,
     val sourceDocumentDigest: String,
     val retrievedAt: String,
+    val originAttestation: ProviderDocumentOriginAttestation,
   ) : ProviderDocument {
     override fun toString(): String =
       "ProviderDocument.Found(body=<redacted>,sourceDocumentDigest=<redacted>,retrievedAt=$retrievedAt)"
@@ -139,6 +145,7 @@ class SafeOfficialReceiptTransport(
             utf8Body = decoded,
             sourceDocumentDigest = CanonicalTranscripts.sha256(response.body),
             retrievedAt = canonicalTimestamp(clock.nowMillis()),
+            originAttestation = ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
           )
         }
       }

@@ -136,6 +136,10 @@ class OfficialReceiptTransportTest {
     val result = transport.retrieve(route()) as ProviderDocument.Found
 
     assertEquals(html, result.utf8Body)
+    assertEquals(
+      ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+      result.originAttestation,
+    )
   }
 
   private fun route(): OfficialReceiptRoute =

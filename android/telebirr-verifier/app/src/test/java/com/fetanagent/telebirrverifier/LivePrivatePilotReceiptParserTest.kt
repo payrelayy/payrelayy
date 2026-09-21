@@ -183,6 +183,40 @@ class LivePrivatePilotReceiptParserTest {
   }
 
   @Test
+  fun `accepts bounded bilingual one-cell rows and current transaction aliases`() {
+    val html =
+      """
+      <html><body><table>
+        <tr><td>የደረሰኝ ቁጥር / Transaction Number: $PILOT_REFERENCE</td></tr>
+        <tr><td>Transaction Time: 2026/08/20 21:01:45</td></tr>
+        <tr><td>Settled Amount: 25.00 ETB</td></tr>
+        <tr><td>Transaction To: PILOT RECEIVER</td></tr>
+        <tr><td>Status: Successful</td></tr>
+        <tr><td>Payment Mode: telebirr</td></tr>
+        <tr><td>Transaction Type: Transfer Money</td></tr>
+        <tr><td>Payment Channel: API/App</td></tr>
+      </table></body></html>
+      """.trimIndent()
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("send_money_to_registered_customer", facts.paymentReason)
+    assertEquals("2026-08-20T18:01:45.000Z", facts.occurredAt)
+  }
+
+  @Test
+  fun `normalizes literal unicode receipt spacing without exposing values`() {
+    val html = currentOfficialCardLivePilotHtml().replace("Invoice No.", "Invoice\u00a0No.")
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+  }
+
+  @Test
   fun `emits only fixed missing-field diagnostics for an unrecognized card layout`() {
     val cases =
       listOf(

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+// The parser-refinement retry extends this exact immutable provider-origin lineage, so keep both
+// contracts in the same infra test chain without duplicating the already-long package script.
+import './verify-production-live-telebirr-parser-refinement-retry.mjs';
+
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
 const workflow = read('../.github/workflows/production-live-telebirr-provider-origin-retry.yml');

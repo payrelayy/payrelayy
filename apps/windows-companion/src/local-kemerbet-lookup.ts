@@ -181,7 +181,7 @@ async function openSearchSurface(page: Page): Promise<void> {
     return;
   }
   await (
-    await requireEnabled(page.locator(selectors.financialActionsTrigger))
+    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.financialActionsTrigger))
   ).click({
     timeout: LOOKUP_TIMEOUT_MS,
   });

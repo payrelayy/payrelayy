@@ -23,11 +23,7 @@ const delayedDepositFixture = `<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>Delayed KemerBet fixture</title></head>
   <body>
-    <div class="rt--header-right">
-      <button class="rt--header-actions-content-icon" id="financial-actions">
-        <i class="icon-transfer"></i>
-      </button>
-    </div>
+    <div class="rt--header-right" id="header-right"></div>
     <main id="surface"></main>
     <script>
       const surface = document.getElementById('surface');
@@ -60,7 +56,7 @@ const delayedDepositFixture = `<!doctype html>
           \`;
         });
       };
-      document.getElementById('financial-actions').addEventListener('click', () => {
+      const openDepositMenu = () => {
         const deposit = document.createElement('button');
         deposit.setAttribute('role', 'menuitem');
         deposit.textContent = 'Deposit';
@@ -75,7 +71,15 @@ const delayedDepositFixture = `<!doctype html>
           }, 250);
         });
         surface.replaceChildren(deposit);
-      });
+      };
+      window.setTimeout(() => {
+        const financialActions = document.createElement('button');
+        financialActions.className = 'rt--header-actions-content-icon';
+        financialActions.id = 'financial-actions';
+        financialActions.innerHTML = '<i class="icon-transfer"></i>';
+        financialActions.addEventListener('click', openDepositMenu);
+        document.getElementById('header-right').replaceChildren(financialActions);
+      }, 250);
       document.addEventListener('onTransferEposPlayerFoundEvent', (event) => {
         if (event.detail && event.detail.info === null) renderSearch();
       });
@@ -102,7 +106,7 @@ describe.skipIf(process.platform !== 'win32')(
       await browser?.close();
     });
 
-    it('waits for the asynchronously rendered To Player tile before five Find-only lookups', async () => {
+    it('waits for the asynchronous entry control and To Player tile before five Find-only lookups', async () => {
       const requestedPlayerIds: string[] = [];
       context = await browser.newContext({ serviceWorkers: 'block' });
       await context.route('**/*', async (route) => {

@@ -5,38 +5,48 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
   getClient: () => Client,
 ): void {
   describe('reviewed source-binding shadow-window retry catalog', () => {
-    it('binds a signed layout witness across the same proof history and source document', async () => {
+    it('binds a signed layout witness across the same proof reference identity', async () => {
       const client = getClient();
       const result = await client.query<{
         readonly has_history_attempt_join: boolean;
         readonly has_layout_outcome_guard: boolean;
+        readonly has_layout_proof_reference_guard: boolean;
+        readonly has_layout_reference_binding_guard: boolean;
         readonly has_retrieval_guard: boolean;
-        readonly has_source_document_guard: boolean;
+        readonly has_terminal_body_guard: boolean;
+        readonly has_terminal_reference_binding_guard: boolean;
+        readonly has_terminal_source_document_guard: boolean;
         readonly owner_name: string;
-        readonly pins_terminal_attempt: boolean;
-        readonly pins_terminal_body: boolean;
         readonly safe_search_path: boolean;
         readonly service_role_execute: boolean;
       }>(`
         select validator.prosrc like
-                 '%join app.private_telebirr_shadow_verification_attempts attempt%'
+                 '%join app.private_telebirr_shadow_verification_attempts layout_attempt%'
                  and validator.prosrc like
-                   '%attempt.shadow_proof_request_id = proof.id%'
+                   '%layout_attempt.shadow_proof_request_id = proof.id%'
                  as has_history_attempt_join,
                validator.prosrc like
-                 '%sourceDocumentDigest%outcome.source_document_digest%'
-                 as has_source_document_guard,
+                 '%layout_staged.signed_observation%referenceFingerprint%hmac-sha256:%proof.candidate_reference_fingerprint%'
+                 as has_layout_proof_reference_guard,
+               validator.prosrc like
+                 '%layout_staged.signed_observation%referenceBindingDigest%layout_transcript.reference_binding_digest%'
+                 as has_layout_reference_binding_guard,
+               validator.prosrc like
+                 '%terminal_staged.verification_attempt_id = outcome.verification_attempt_id%'
+                 and validator.prosrc like
+                   '%terminal_staged.observation_body_digest = outcome.observation_body_digest%'
+                 as has_terminal_body_guard,
+               validator.prosrc like
+                 '%terminal_staged.signed_observation%sourceDocumentDigest%outcome.source_document_digest%'
+                 as has_terminal_source_document_guard,
+               validator.prosrc like
+                 '%terminal_staged.signed_observation%referenceBindingDigest%terminal_transcript.reference_binding_digest%'
+                 as has_terminal_reference_binding_guard,
                validator.prosrc like
                  '%lookupOutcome%review_required%'
                  as has_layout_outcome_guard,
                validator.prosrc like '%retrievedAt%is not null%'
                  as has_retrieval_guard,
-               validator.prosrc like
-                 '%staged.verification_attempt_id = outcome.verification_attempt_id%'
-                 as pins_terminal_attempt,
-               validator.prosrc like
-                 '%staged.observation_body_digest = outcome.observation_body_digest%'
-                 as pins_terminal_body,
                validator.proconfig = array['search_path=pg_catalog']::text[]
                  as safe_search_path,
                pg_catalog.pg_get_userbyid(validator.proowner) as owner_name,
@@ -52,11 +62,13 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
         {
           has_history_attempt_join: true,
           has_layout_outcome_guard: true,
+          has_layout_proof_reference_guard: true,
+          has_layout_reference_binding_guard: true,
           has_retrieval_guard: true,
-          has_source_document_guard: true,
+          has_terminal_body_guard: true,
+          has_terminal_reference_binding_guard: true,
+          has_terminal_source_document_guard: true,
           owner_name: 'postgres',
-          pins_terminal_attempt: false,
-          pins_terminal_body: false,
           safe_search_path: true,
           service_role_execute: false,
         },

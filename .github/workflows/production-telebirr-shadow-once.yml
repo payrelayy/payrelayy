@@ -289,6 +289,30 @@ jobs:
             resolved_source_binding_lineage="$(
               psql -X --quiet --tuples-only --no-align --set=ON_ERROR_STOP=1 --command "
                 with candidates as (
+                  select parser_retry.pilot_revision_id as target_pilot_revision_id,
+                         parser_retry.replacement_shadow_proof_request_id,
+                         'not-applicable'::text as source_live_verification_job_id,
+                         parser_retry.retry_request_key,
+                         -1 as priority
+                    from app.private_telebirr_shadow_parser_refinement_retries parser_retry
+                    join app.private_telebirr_shadow_proof_requests proof
+                      on proof.id = parser_retry.replacement_shadow_proof_request_id
+                     and proof.verification_job_id =
+                         parser_retry.replacement_shadow_verification_job_id
+                   where parser_retry.reason_code =
+                         'reviewed_receipt_parser_refinement_retry_no_credit'
+                     and proof.proof_status = 'verification_queued'
+                     and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
+                     and app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+                           proof.id,
+                           parser_retry.retry_request_key
+                         )
+                     and not exists (
+                       select 1
+                         from app.private_telebirr_shadow_verification_outcomes outcome
+                        where outcome.shadow_proof_request_id = proof.id
+                     )
+                  union all
                   select origin_retry.pilot_revision_id as target_pilot_revision_id,
                          origin_retry.replacement_shadow_proof_request_id,
                          'not-applicable'::text as source_live_verification_job_id,
@@ -671,10 +695,14 @@ jobs:
                                proof.id,
                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
                              )
-                          or app.private_telebirr_shadow_source_binding_layout_retry_is_valid(
-                               proof.id,
-                               nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
-                             )
+                           or app.private_telebirr_shadow_source_binding_layout_retry_is_valid(
+                                proof.id,
+                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                              )
+                           or app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+                                proof.id,
+                                nullif('$RECOVERY_REQUEST_KEY', 'not-applicable')::uuid
+                              )
                         )
                       )
                      or (

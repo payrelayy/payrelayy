@@ -231,28 +231,32 @@ class LivePrivatePilotReceiptParser {
 
   private fun canonicalLabel(raw: String): String? {
     val english = canonicalEnglish(raw)
-    return when (english.removeSuffix(":").removeSuffix(".")) {
-      "invoice no" -> "invoice no"
-      "payment date" -> "payment date"
-      "settled amount" -> "settled amount"
-      "credited party name" -> "credited party name"
-      "transaction status" -> "transaction status"
-      "payment mode" -> "payment mode"
-      "payment reason" -> "payment reason"
-      "payment channel" -> "payment channel"
-      else -> null
-    }
+    val label = english.removeSuffix(":").removeSuffix(".")
+    return labelAliases.singleOrNull { it.first == label }?.second
   }
 
   private fun canonicalInlinePair(raw: String): Pair<String, String>? {
-    val english = canonicalEnglish(raw)
-    val label = inlineCanonicalLabels.singleOrNull { english.startsWith("$it ") } ?: return null
-    val value = english.removePrefix(label).trim()
-    return label to value
+    val english = normalizedWhitespace(raw)
+    val candidates =
+      labelAliases.mapNotNull { (alias, canonical) ->
+        val match =
+          Regex(
+              "(?:^|/)\\s*${Regex.escape(alias)}\\s*[.:]?\\s+(.+)$",
+              RegexOption.IGNORE_CASE,
+            )
+            .find(english) ?: return@mapNotNull null
+        match.groupValues[1].trim().takeIf(String::isNotEmpty)?.let { canonical to it }
+      }
+    return candidates.distinct().singleOrNull()
   }
 
   private fun canonicalEnglish(raw: String): String =
-    raw.substringAfterLast('/').trim().lowercase(Locale.ROOT).replace(whitespace, " ")
+    canonicalWhitespace(raw).substringAfterLast('/').trim()
+
+  private fun canonicalWhitespace(raw: String): String =
+    normalizedWhitespace(raw).lowercase(Locale.ROOT)
+
+  private fun normalizedWhitespace(raw: String): String = raw.trim().replace(whitespace, " ")
 
   private fun visibleText(fragment: String): String =
     decodeEntities(
@@ -296,7 +300,7 @@ class LivePrivatePilotReceiptParser {
 
   private fun strictStatus(value: String): String =
     when (value.trim().lowercase(Locale.ROOT)) {
-      "completed" -> "completed"
+      "completed", "successful" -> "completed"
       "pending" -> "pending"
       "failed" -> "failed"
       "reversed" -> "reversed"
@@ -307,7 +311,10 @@ class LivePrivatePilotReceiptParser {
     if (value.trim().equals("telebirr", ignoreCase = true)) "telebirr" else "other"
 
   private fun strictPaymentReason(value: String): String =
-    if (value.trim().equals("Send Money to Registered Customer", ignoreCase = true)) {
+    if (
+      value.trim().equals("Send Money to Registered Customer", ignoreCase = true) ||
+        value.trim().equals("Transfer Money", ignoreCase = true)
+    ) {
       "send_money_to_registered_customer"
     } else {
       "other"
@@ -354,11 +361,29 @@ class LivePrivatePilotReceiptParser {
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
       )
     private val tagPattern = Regex("<[^>]*>")
-    private val whitespace = Regex("\\s+")
+    private val whitespace = Regex("[\\s\\p{Zs}\\u2007\\u202F]+")
     private val amountPattern =
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
     private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
-    private val inlineCanonicalLabels = listOf("transaction status")
+    private val labelAliases =
+      listOf(
+        "invoice no" to "invoice no",
+        "invoice number" to "invoice no",
+        "transaction no" to "invoice no",
+        "transaction number" to "invoice no",
+        "payment date" to "payment date",
+        "transaction time" to "payment date",
+        "settled amount" to "settled amount",
+        "credited party name" to "credited party name",
+        "credited party" to "credited party name",
+        "transaction to" to "credited party name",
+        "transaction status" to "transaction status",
+        "status" to "transaction status",
+        "payment mode" to "payment mode",
+        "payment reason" to "payment reason",
+        "transaction type" to "payment reason",
+        "payment channel" to "payment channel",
+      )
     private val requiredLabels =
       setOf(
         "invoice no",
@@ -371,7 +396,13 @@ class LivePrivatePilotReceiptParser {
         "payment channel",
       )
     private val dateFormatters =
-      listOf("dd-MM-uuuu HH:mm:ss", "dd/MM/uuuu HH:mm:ss").map {
+      listOf(
+          "dd-MM-uuuu HH:mm:ss",
+          "dd/MM/uuuu HH:mm:ss",
+          "uuuu-MM-dd HH:mm:ss",
+          "uuuu/MM/dd HH:mm:ss",
+        )
+        .map {
         DateTimeFormatter.ofPattern(it, Locale.ROOT).withResolverStyle(ResolverStyle.STRICT)
       }
   }

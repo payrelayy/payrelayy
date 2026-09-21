@@ -5,6 +5,64 @@ export function registerReviewedSourceBindingShadowWindowRetrySqlTests(
   getClient: () => Client,
 ): void {
   describe('reviewed source-binding shadow-window retry catalog', () => {
+    it('binds a signed layout witness across the same proof history and source document', async () => {
+      const client = getClient();
+      const result = await client.query<{
+        readonly has_history_attempt_join: boolean;
+        readonly has_layout_outcome_guard: boolean;
+        readonly has_retrieval_guard: boolean;
+        readonly has_source_document_guard: boolean;
+        readonly owner_name: string;
+        readonly pins_terminal_attempt: boolean;
+        readonly pins_terminal_body: boolean;
+        readonly safe_search_path: boolean;
+        readonly service_role_execute: boolean;
+      }>(`
+        select validator.prosrc like
+                 '%join app.private_telebirr_shadow_verification_attempts attempt%'
+                 and validator.prosrc like
+                   '%attempt.shadow_proof_request_id = proof.id%'
+                 as has_history_attempt_join,
+               validator.prosrc like
+                 '%sourceDocumentDigest%outcome.source_document_digest%'
+                 as has_source_document_guard,
+               validator.prosrc like
+                 '%lookupOutcome%review_required%'
+                 as has_layout_outcome_guard,
+               validator.prosrc like '%retrievedAt%is not null%'
+                 as has_retrieval_guard,
+               validator.prosrc like
+                 '%staged.verification_attempt_id = outcome.verification_attempt_id%'
+                 as pins_terminal_attempt,
+               validator.prosrc like
+                 '%staged.observation_body_digest = outcome.observation_body_digest%'
+                 as pins_terminal_body,
+               validator.proconfig = array['search_path=pg_catalog']::text[]
+                 as safe_search_path,
+               pg_catalog.pg_get_userbyid(validator.proowner) as owner_name,
+               pg_catalog.has_function_privilege(
+                 'service_role', validator.oid, 'EXECUTE'
+               ) as service_role_execute
+          from pg_catalog.pg_proc validator
+         where validator.oid =
+               'app.private_telebirr_shadow_layout_source_is_valid(uuid,uuid)'::regprocedure
+      `);
+
+      expect(result.rows).toEqual([
+        {
+          has_history_attempt_join: true,
+          has_layout_outcome_guard: true,
+          has_retrieval_guard: true,
+          has_source_document_guard: true,
+          owner_name: 'postgres',
+          pins_terminal_attempt: false,
+          pins_terminal_body: false,
+          safe_search_path: true,
+          service_role_execute: false,
+        },
+      ]);
+    });
+
     it('installs one forced-RLS immutable ledger with an exact twelve-hour window', async () => {
       const client = getClient();
       const result = await client.query<{

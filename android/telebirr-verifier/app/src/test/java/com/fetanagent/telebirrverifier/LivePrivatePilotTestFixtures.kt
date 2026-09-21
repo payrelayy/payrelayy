@@ -166,11 +166,16 @@ internal fun livePilotHtml(
   }
 }
 
-internal fun livePilotProviderFound(html: String = livePilotHtml()): ProviderDocument.Found =
+internal fun livePilotProviderFound(
+  html: String = livePilotHtml(),
+  originAttestation: ProviderDocumentOriginAttestation =
+    ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+): ProviderDocument.Found =
   ProviderDocument.Found(
     utf8Body = html,
     sourceDocumentDigest = LivePilotCanonicalTranscripts.sha256(html.toByteArray()),
     retrievedAt = "2026-08-20T18:03:00.000Z",
+    originAttestation = originAttestation,
   )
 
 internal fun currentOfficialLivePilotHtml(

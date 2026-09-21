@@ -34,7 +34,7 @@ class OfficialReceiptParser {
     expectedReference: CanonicalReference,
   ): ParsedProviderObservation {
     val rows = parseRows(document.utf8Body) ?: return unavailable(document.sourceDocumentDigest)
-    if (!visibleText(document.utf8Body).contains("Ethio telecom Share Company", ignoreCase = true)) {
+    if (document.originAttestation != ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN) {
       return unavailable(document.sourceDocumentDigest)
     }
     val invoiceNumber = unique(rows, "invoice no") ?: return unavailable(document.sourceDocumentDigest)

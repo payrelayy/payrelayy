@@ -190,5 +190,6 @@ internal fun providerFound(html: String = officialHtml()): ProviderDocument.Foun
     utf8Body = html,
     sourceDocumentDigest = CanonicalTranscripts.sha256(bytes),
     retrievedAt = "2026-08-20T18:03:00.000Z",
+    originAttestation = ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
   )
 }

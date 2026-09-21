@@ -55,7 +55,7 @@ class LivePrivatePilotReceiptParser {
   ): LivePilotParsedProviderObservation {
     val rows = parseRows(document.utf8Body)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
-    if (!visibleText(document.utf8Body).contains("Ethio telecom Share Company", ignoreCase = true)) {
+    if (document.originAttestation != ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN) {
       return review(
         document.sourceDocumentDigest,
         "unknown_layout_provider_identity",

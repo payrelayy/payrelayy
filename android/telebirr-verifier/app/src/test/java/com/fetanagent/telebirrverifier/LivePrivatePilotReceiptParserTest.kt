@@ -88,7 +88,10 @@ class LivePrivatePilotReceiptParserTest {
         livePilotProviderFound(livePilotHtml(includePaymentReason = false)),
         livePilotProviderFound(livePilotHtml(duplicateInvoice = true)),
         livePilotProviderFound(livePilotHtml().replace("25 Birr", "twenty five Birr")),
-        livePilotProviderFound(livePilotHtml().replace("Ethio telecom Share Company", "Unknown")),
+        livePilotProviderFound(
+          livePilotHtml(),
+          ProviderDocumentOriginAttestation.UNATTESTED,
+        ),
       )
     val facts = documents.map { parser.parse(it, assignment).facts }
     assertTrue(facts.all { it is LivePilotReviewRequiredFacts })
@@ -101,6 +104,20 @@ class LivePrivatePilotReceiptParserTest {
       ),
       facts.map { (it as LivePilotReviewRequiredFacts).reviewReason },
     )
+  }
+
+  @Test
+  fun `uses the authenticated transport origin instead of mutable receipt branding`() {
+    val withoutLegacyBranding =
+      livePilotHtml().replace("Ethio telecom Share Company", "Current TeleBirr Receipt")
+    val facts =
+      parser.parse(livePilotProviderFound(withoutLegacyBranding), assignment).facts
+        as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("recognized_layout_v1", facts.layoutAttestation)
   }
 
   @Test

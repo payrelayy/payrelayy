@@ -8,6 +8,9 @@ const operation = read('./sql/production-live-telebirr-provider-origin-retry.sql
 const migration = read(
   '../supabase/migrations/20260922003500_retry_reviewed_receipt_provider_origin.sql',
 );
+const digestHelperFix = read(
+  '../supabase/migrations/20260922023000_fix_provider_origin_retry_digest_helper.sql',
+);
 const verifierWorkflow = read('../.github/workflows/production-telebirr-shadow-once.yml');
 const verifierProvision = read('./sql/production-telebirr-shadow-verifier-once-provision.sql');
 
@@ -58,6 +61,15 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(migration, /update app\.feature_switches/iu);
 assert.doesNotMatch(migration, /grant execute/iu);
+
+assert.match(digestHelperFix, /expected_source_sha256 constant text/u);
+assert.match(digestHelperFix, /app\.private_live_deposit_pilot_digest\(/u);
+assert.match(digestHelperFix, /app\.private_live_deposit_pilot_sha256\(/u);
+assert.match(digestHelperFix, /routine\.prosrc = corrected_source/u);
+assert.match(digestHelperFix, /routine\.proacl is not distinct from original_acl/u);
+assert.match(digestHelperFix, /routine\.prosecdef = original_security_definer/u);
+assert.equal((digestHelperFix.match(/^commit;$/gmu) ?? []).length, 1);
+assert.doesNotMatch(digestHelperFix, /insert into|update app\.|delete from|grant execute/iu);
 
 assert.match(verifierWorkflow, /private_telebirr_shadow_provider_origin_retries/u);
 assert.match(verifierWorkflow, /private_telebirr_shadow_provider_origin_retry_is_valid/u);

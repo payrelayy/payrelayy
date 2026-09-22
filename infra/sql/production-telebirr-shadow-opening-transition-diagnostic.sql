@@ -40,9 +40,7 @@ with assessment_clock as materialized (
 ), lineage_context as materialized (
   select retry.*,
          source_retry.pilot_revision_id as source_pilot_revision_id,
-         source_retry.receiver_profile_id as source_receiver_profile_id,
-         source_proof.id as source_shadow_proof_request_id,
-         source_proof.verification_job_id as source_shadow_verification_job_id
+         source_retry.receiver_profile_id as source_receiver_profile_id
     from retry_context retry
     join app.private_telebirr_shadow_receipt_cell_binding_retries source_retry
       on source_retry.retry_request_key = retry.source_cell_binding_retry_request_key

@@ -32,6 +32,10 @@ assert.doesNotMatch(
   /\b(?:insert|update|delete|merge|truncate|copy|call|create|alter|drop|grant|revoke|comment|execute|perform)\b/iu,
 );
 assert.doesNotMatch(operation, /pg_(?:try_)?advisory|set_config|retry_reviewed_/iu);
+assert.doesNotMatch(
+  operation,
+  /source_proof\.(?:id|verification_job_id) as source_shadow_(?:proof_request|verification_job)_id/u,
+);
 
 for (const fragment of [
   'private_telebirr_shadow_receipt_cell_opening_retry_is_valid',

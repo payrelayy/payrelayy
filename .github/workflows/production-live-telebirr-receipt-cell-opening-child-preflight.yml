@@ -152,6 +152,37 @@ jobs:
             ' <<<"$preflight_result"
           )"
 
+          preflight_blockers="$(
+            jq -r '
+              [
+                if .callerIsPostgres then empty else "caller_identity" end,
+                if .retryCount == 1 then empty else "retry_count" end,
+                if .enrollmentCount == 1 then empty else "enrollment_count" end,
+                if .lineageReady then empty else "lineage" end,
+                if .childProofReady then empty else "child_proof" end,
+                if .pilotWindowReady then empty else "pilot_window" end,
+                if .profileWindowReady then empty else "profile_window" end,
+                if .enrollmentAuthorityReady then empty else "enrollment_authority" end,
+                if .switchRowCount == 7 then empty else "switch_inventory" end,
+                if .disabledFinancialSwitchCount == 6 then empty else "financial_switches" end,
+                if .dryRunPilotSwitchCount == 1 then empty else "pilot_switch" end,
+                if .activeActivationEpochCount == 0 then empty else "activation_epoch" end,
+                if .disabledCompanionControlCount == 1 then empty else "companion_control" end,
+                if .executionRoleCredentialCount == 0 then empty else "execution_credentials" end,
+                if .executionSessionCount == 0 then empty else "execution_sessions" end,
+                if .outcomeCount == 0 then empty else "existing_outcome" end,
+                if .receiptCount == 0 then empty else "existing_receipt" end,
+                if .reservationCount == 0 then empty else "reservations" end,
+                if .settlementReceiptCount == 0 then empty else "settlements" end,
+                if .depositJobCount == 0 then empty else "deposit_queue" end,
+                if .providerEvidenceCount == 0 then empty else "provider_evidence" end,
+                if .remainingSeconds > 3600 then empty else "pilot_freshness" end,
+                if .evidenceReady then empty else "staged_evidence" end,
+                if .noMoneyBoundaryReady then empty else "no_money_boundary" end
+              ] | if length == 0 then "none" else join(",") end
+            ' <<<"$preflight_result"
+          )"
+
           jq '{
             readOnly, identifiersRedacted, retryCount, enrollmentCount,
             attemptCount, stagedEvidenceCount, usableStagedEvidenceCount,
@@ -166,3 +197,4 @@ jobs:
             allReady, moneyMoved
           }' <<<"$preflight_result" >>"$GITHUB_STEP_SUMMARY"
           echo "::notice::Receipt-cell child preflight classification: $preflight_class."
+          echo "::notice::Receipt-cell child preflight blockers: $preflight_blockers."

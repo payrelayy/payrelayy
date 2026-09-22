@@ -471,7 +471,6 @@ with assessment_clock as materialized (
          and retry.proof_retry_request_key is null
          and retry.infrastructure_retry_request_key is null
          and retry.runtime_retry_request_key is null
-         and retry.submitted_at = retry.authorized_at
          and retry.not_before <= clock.assessed_at
          and retry.expires_at = retry.retry_expires_at
          and retry.expires_at > clock.assessed_at + interval '5 minutes'

@@ -36,6 +36,12 @@ assert.doesNotMatch(
   operation,
   /source_proof\.(?:id|verification_job_id) as source_shadow_(?:proof_request|verification_job)_id/u,
 );
+assert.match(operation, /as historical_pilot_revision_id/u);
+assert.match(operation, /as historical_receiver_profile_id/u);
+assert.doesNotMatch(
+  operation,
+  /source_retry\.(?:pilot_revision_id|receiver_profile_id) as source_(?:pilot_revision_id|receiver_profile_id)/u,
+);
 
 for (const fragment of [
   'private_telebirr_shadow_receipt_cell_opening_retry_is_valid',

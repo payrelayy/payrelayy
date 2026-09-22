@@ -39,8 +39,8 @@ with assessment_clock as materialized (
    limit 1
 ), lineage_context as materialized (
   select retry.*,
-         source_retry.pilot_revision_id as source_pilot_revision_id,
-         source_retry.receiver_profile_id as source_receiver_profile_id
+         source_retry.pilot_revision_id as historical_pilot_revision_id,
+         source_retry.receiver_profile_id as historical_receiver_profile_id
     from retry_context retry
     join app.private_telebirr_shadow_receipt_cell_binding_retries source_retry
       on source_retry.retry_request_key = retry.source_cell_binding_retry_request_key
@@ -84,14 +84,14 @@ with assessment_clock as materialized (
     ), false) as historical_lineage_ready,
     coalesce((
       select app.private_live_telebirr_shadow_pilot_contract_matches(
-               lineage.source_pilot_revision_id,
+               lineage.historical_pilot_revision_id,
                lineage.pilot_revision_id
              )
         from lineage_context lineage
     ), false) as pilot_contract_ready,
     coalesce((
       select app.private_live_telebirr_shadow_profile_contract_matches(
-               lineage.source_receiver_profile_id,
+               lineage.historical_receiver_profile_id,
                lineage.receiver_profile_id
              )
         from lineage_context lineage

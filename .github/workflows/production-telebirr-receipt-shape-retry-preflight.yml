@@ -118,7 +118,8 @@ jobs:
               if .diagnosticRetryCount == 0 then empty else "existing_diagnostic_retry" end,
               if .attemptCount >= 1 and .attemptCount <= 100 then empty else "attempt_count" end,
               if .stagedCount == .attemptCount then empty else "staged_count" end,
-              if .invoiceReviewCount == .attemptCount then empty else "invoice_review_count" end,
+              if .invoiceReviewCount >= 1 and
+                 .invoiceReviewCount <= .attemptCount then empty else "invoice_review_count" end,
               if .outcomeCount == 1 and .outcomeShapeReady then empty else "outcome_shape" end,
               if .terminalObservationBound then empty else "terminal_observation" end,
               if .openingLineageValid then empty else "opening_lineage" end,

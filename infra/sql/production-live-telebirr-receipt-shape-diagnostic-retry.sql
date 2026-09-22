@@ -23,8 +23,8 @@ begin
          and result.shadow_request_count = 1
          and result.source_shadow_attempt_count between 1 and 100
          and result.source_staged_evidence_count = result.source_shadow_attempt_count
-         and result.source_receipt_shape_diag_review_count =
-             result.source_shadow_attempt_count
+         and result.source_receipt_shape_diag_review_count between
+             1 and result.source_shadow_attempt_count
          and result.source_shadow_outcome_count = 1
          and result.replacement_shadow_attempt_count = 0
          and result.replacement_shadow_outcome_count = 0

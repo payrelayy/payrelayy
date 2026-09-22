@@ -209,6 +209,69 @@ with assessment_clock as materialized (
              ) ~ '^sha256:[0-9a-f]{64}$'
         from source_context source
     ), false) as evidence_history_digest_valid
+), active_activation_epoch_state as materialized (
+  select least(pg_catalog.count(*)::integer, 1) as active_epoch_count
+    from app.private_trusted_telebirr_activation_control activation_control
+    join app.private_trusted_telebirr_activation_epochs activation_epoch
+      on activation_epoch.epoch = activation_control.current_epoch
+    join app.private_live_deposit_pilot_revisions pilot
+      on pilot.id = activation_epoch.pilot_revision_id
+   cross join assessment_clock clock
+   where activation_control.control_key = 'trusted_telebirr_financial_authority'
+     and activation_epoch.authority_state = 'active'
+     and activation_epoch.revoked_at is null
+     and clock.assessed_at >= activation_epoch.active_from
+     and clock.assessed_at < activation_epoch.expires_at
+     and pilot.status = 'armed'
+     and pilot.configuration_digest is not distinct from
+         activation_epoch.configuration_digest
+     and pilot.active_from is not distinct from activation_epoch.active_from
+     and pilot.expires_at is not distinct from activation_epoch.expires_at
+     and not exists (
+       select 1
+         from app.private_trusted_telebirr_emergency_disable_intents emergency_intent
+        where emergency_intent.expected_epoch = activation_epoch.epoch
+     )
+     and (
+       select pg_catalog.count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'cbe_birr_authoritative_verification',
+          'deposit_execution',
+          'payment_verification',
+          'private_live_deposit_pilot',
+          'telebirr_authoritative_verification'
+        )
+     ) = 5
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'cbe_birr_authoritative_verification'
+          and feature_switch.mode = 'disabled'
+          and feature_switch.settings = '{}'::jsonb
+     )
+     and (
+       select pg_catalog.count(*)
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key in (
+          'deposit_execution',
+          'payment_verification',
+          'telebirr_authoritative_verification'
+        )
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = '{}'::jsonb
+     ) = 3
+     and exists (
+       select 1
+         from app.feature_switches feature_switch
+        where feature_switch.feature_key = 'private_live_deposit_pilot'
+          and feature_switch.mode = 'live'
+          and feature_switch.settings = pg_catalog.jsonb_build_object(
+            'contract_version', 1,
+            'pilot_revision_id', pilot.id,
+            'configuration_digest', pilot.configuration_digest
+          )
+     )
 ), boundary_state as materialized (
   select
     least((
@@ -250,8 +313,7 @@ with assessment_clock as materialized (
            'configuration_digest', pilot.configuration_digest
          )
     ), 2) as dry_run_pilot_switch_count,
-    case when app.current_private_trusted_telebirr_activation_epoch() is null
-      then 0 else 1 end as active_activation_epoch_count,
+    active_epoch.active_epoch_count as active_activation_epoch_count,
     least((
       select pg_catalog.count(*)::integer
         from app.agent_platform_companion_execution_control execution_control
@@ -300,6 +362,7 @@ with assessment_clock as materialized (
        )
          and activity.pid <> pg_catalog.pg_backend_pid()
     ), 7) as execution_session_count
+  from active_activation_epoch_state active_epoch
 ), money_state as materialized (
   select
     least((
@@ -405,10 +468,20 @@ with assessment_clock as materialized (
        cross join structural_enrollment enrollment
        cross join assessment_clock clock
     ), false) as enrollment_authority_ready,
-    coalesce((
-      select app.private_telebirr_shadow_source_binding_window_boundary_is_ready(pilot.id)
-        from target_pilot pilot
-    ), false) as no_money_boundary_ready,
+    boundary.disabled_financial_switch_count = 6
+      and boundary.dry_run_pilot_switch_count = 1
+      and boundary.active_activation_epoch_count = 0
+      and boundary.disabled_companion_control_count = 1
+      and boundary.execution_login_role_count = 0
+      and boundary.execution_session_count = 0
+      and coalesce((
+        select pilot.status = 'armed'
+           and pilot.configuration_digest is not null
+           and clock.assessed_at >= pilot.active_from
+           and clock.assessed_at < pilot.expires_at
+          from target_pilot pilot
+         cross join assessment_clock clock
+      ), false) as no_money_boundary_ready,
     coalesce((
       select greatest(
                0,

@@ -29,6 +29,10 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(operation, /\bfor\s+(?:update|share|key\s+share)\b/iu);
 assert.doesNotMatch(operation, /pg_advisory|set_config|retry_reviewed_/iu);
+assert.doesNotMatch(
+  operation,
+  /(?:current_private_trusted_telebirr_activation_epoch|private_telebirr_shadow_source_binding_window_boundary_is_ready)/u,
+);
 
 for (const fragment of [
   'private_tbirr_cell_binding_retry_history_is_valid',
@@ -40,7 +44,10 @@ for (const fragment of [
   "heartbeat.app_version = '0.5.9-evidence-only'",
   "enrollment.last_seen_at > clock.assessed_at - interval '5 minutes'",
   'private_telebirr_shadow_source_binding_window_enrollment_is_ready',
-  'private_telebirr_shadow_source_binding_window_boundary_is_ready',
+  'private_trusted_telebirr_activation_control',
+  'private_trusted_telebirr_activation_epochs',
+  'private_trusted_telebirr_emergency_disable_intents',
+  'agent_platform_companion_execution_control',
   'private_live_deposit_pilot_reservations',
   'private_live_telebirr_settlement_receipts',
   'app.deposit_jobs',

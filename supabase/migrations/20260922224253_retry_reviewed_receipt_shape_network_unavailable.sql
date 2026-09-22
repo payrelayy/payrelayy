@@ -144,11 +144,11 @@ declare
   routine_oid oid := pg_catalog.to_regprocedure('app.guard_private_telebirr_shadow_source_retry_insert()');
   expected_source_sha256 constant text := 'cfe0a37539c95f14c35bdb71bf0eed0031e8df2b7e56527f49cdd1d6b2a63045';
   old_fragment_1 constant text := $old_0_0$    or new.expires_at > source_proof.submitted_at + interval '12 hours'$old_0_0$;
-  new_fragment_1 constant text := $new_0_0$    or new.expires_at > case
+  new_fragment_1 constant text := $new_0_0$    or new.expires_at > (case
          when app.private_telebirr_receipt_shape_network_source_is_valid(source_proof.id)
            then source_proof.created_at + interval '12 hours'
          else source_proof.submitted_at + interval '12 hours'
-       end$new_0_0$;
+       end)$new_0_0$;
   original_definition text;
   original_source text;
   rewritten_source text;
@@ -309,11 +309,11 @@ declare
   routine_oid oid := pg_catalog.to_regprocedure('app.retry_private_telebirr_shadow_after_source_unavailable(uuid, uuid, uuid, text)');
   expected_source_sha256 constant text := '4c3bbab4decc86093fe9406be6d416138c199a2f964eaef00cd1e19c968552f8';
   old_fragment_1 constant text := $old_2_0$    or authorized_at >= source_proof.submitted_at + interval '12 hours'$old_2_0$;
-  new_fragment_1 constant text := $new_2_0$    or authorized_at >= case
+  new_fragment_1 constant text := $new_2_0$    or authorized_at >= (case
          when app.private_telebirr_receipt_shape_network_source_is_valid(source_proof.id)
            then source_proof.created_at + interval '12 hours'
          else source_proof.submitted_at + interval '12 hours'
-       end$new_2_0$;
+       end)$new_2_0$;
   old_fragment_2 constant text := $old_2_1$    or not exists (
       select 1
         from app.telegram_telebirr_shadow_proof_receipts receipt

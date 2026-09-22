@@ -23,6 +23,8 @@ assert.match(migration, /outcome\.reason_code = 'source_unavailable'/u);
 assert.match(migration, /outcome\.observation_body_digest/u);
 assert.match(migration, /observation\.staged_at desc/u);
 assert.match(migration, /source_proof\.created_at \+ interval '12 hours'/u);
+assert.match(migration, /new\.expires_at > \(case/u);
+assert.match(migration, /authorized_at >= \(case/u);
 assert.match(migration, /source_proof\.submitted_at \+ interval '12 hours'/u);
 assert.match(migration, /private_telebirr_receipt_shape_network_retry_deadline/u);
 assert.match(migration, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);

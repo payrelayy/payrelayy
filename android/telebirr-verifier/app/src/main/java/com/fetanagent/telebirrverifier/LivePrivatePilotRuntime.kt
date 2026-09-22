@@ -1,5 +1,7 @@
 package com.fetanagent.telebirrverifier
 
+import android.util.Log
+
 /**
  * Three independent gates must be open before the evidence-only runtime may contact the official
  * provider. There is intentionally no calendar stop date here: short-lived signed assignments,
@@ -371,6 +373,11 @@ class LivePrivatePilotRuntimeCoordinator(
               ),
           )
         }
+    // The parser never logs the receipt or assignment. This fixed-shape diagnostic is local to
+    // the operator phone and is emitted only when a unique invoice value could not be parsed.
+    parsed.invoiceShapeDiagnostic?.let { diagnostic ->
+      Log.i("FetanAgentReceiptShape", diagnostic.toString())
+    }
     val completedAt = now()
     if (completedAt == null) {
       release(assignmentBodyDigest)

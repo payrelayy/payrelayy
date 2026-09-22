@@ -57,6 +57,46 @@ class LivePrivatePilotReceiptParserTest {
   }
 
   @Test
+  fun `classifies only fixed invoice shape flags while retaining parser review`() {
+    val missingLabel =
+      parser.parse(
+        livePilotProviderFound(livePilotHtml().replace("Invoice No.", "Opaque field")),
+        assignment,
+      )
+    val missingDiagnostic = requireNotNull(missingLabel.invoiceShapeDiagnostic)
+    assertEquals("unknown_layout_invoice_number", (missingLabel.facts as LivePilotReviewRequiredFacts).reviewReason)
+    assertEquals("zero", missingDiagnostic.parsedValueCount)
+    assertFalse(missingDiagnostic.knownLabelPresent)
+    assertFalse(missingDiagnostic.officialClassPairPresent)
+    assertTrue(missingDiagnostic.assignedReferenceTokenPresent)
+
+    val duplicated =
+      parser.parse(livePilotProviderFound(livePilotHtml(duplicateInvoice = true)), assignment)
+    val duplicateDiagnostic = requireNotNull(duplicated.invoiceShapeDiagnostic)
+    assertEquals("multiple", duplicateDiagnostic.parsedValueCount)
+    assertTrue(duplicateDiagnostic.knownLabelPresent)
+    assertTrue(duplicateDiagnostic.assignedReferenceTokenPresent)
+    assertFalse(duplicateDiagnostic.toString().contains(PILOT_REFERENCE))
+    assertFalse(duplicated.toString().contains(PILOT_REFERENCE))
+    assertFalse(duplicateDiagnostic.toString().contains(PILOT_RECEIVER_NAME))
+  }
+
+  @Test
+  fun `reports an unusable official class pair without trusting it as a receipt`() {
+    val html =
+      currentOfficialCardLivePilotHtml().replace(
+        "<div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>",
+        "<td class=\"receipttableTd receipttableTd2\">NOT_A_RECEIPT</td>",
+      )
+    val parsed = parser.parse(livePilotProviderFound(html), assignment)
+    val diagnostic = requireNotNull(parsed.invoiceShapeDiagnostic)
+    assertEquals("unknown_layout_invoice_number", (parsed.facts as LivePilotReviewRequiredFacts).reviewReason)
+    assertEquals("zero", diagnostic.parsedValueCount)
+    assertTrue(diagnostic.officialClassPairPresent)
+    assertFalse(diagnostic.assignedReferenceTokenPresent)
+  }
+
+  @Test
   fun `routes bare not found and every unavailable category to review`() {
     val documents =
       listOf(

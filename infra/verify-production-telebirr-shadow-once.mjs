@@ -73,6 +73,9 @@ assert.match(workflow, /private_live_telebirr_source_binding_shadow_recoveries/u
 assert.match(workflow, /private_live_telebirr_source_binding_shadow_recovery_is_valid/u);
 assert.match(workflow, /private_telebirr_shadow_source_binding_window_retries/u);
 assert.match(workflow, /private_telebirr_shadow_source_binding_window_retry_is_valid/u);
+assert.match(workflow, /private_telebirr_shadow_receipt_shape_diag_retries/u);
+assert.match(workflow, /private_telebirr_shadow_receipt_shape_diag_retry_is_valid/u);
+assert.match(workflow, /-5 as priority/u);
 assert.match(workflow, /'not-applicable'::text as source_live_verification_job_id/u);
 assert.match(workflow, /::add-mask::\$resolved_pilot/u);
 assert.match(workflow, /::add-mask::\$resolved_proof/u);
@@ -191,6 +194,8 @@ assert.match(provision, /private_live_telebirr_source_recovery_is_valid/u);
 assert.match(provision, /review_source_binding_window_retry/u);
 assert.match(provision, /private_telebirr_shadow_source_binding_window_retries/u);
 assert.match(provision, /private_telebirr_shadow_source_binding_window_retry_is_valid/u);
+assert.match(provision, /private_telebirr_shadow_receipt_shape_diag_retries/u);
+assert.match(provision, /private_telebirr_shadow_receipt_shape_diag_retry_is_valid/u);
 assert.match(provision, /private_telebirr_shadow_source_unavailable_retries/u);
 assert.match(provision, /attempt\.attempt_number = recovery\.prior_attempt_count \+ 1/u);
 assert.match(provision, /\) >= recovery\.prior_attempt_count \+ 1/u);
@@ -230,6 +235,20 @@ for (const [index, start] of evidenceGuardStarts.slice(0, 2).entries()) {
       .length,
     1,
     `evidence guard ${index + 1} must have exactly one opening-retry association`,
+  );
+  const diagnosticAssociation = guard.match(
+    /or \(\s*app\.private_telebirr_shadow_receipt_shape_diag_retry_is_valid\([\s\S]*?and exists \(\s*select 1\s*from app\.private_telebirr_shadow_receipt_shape_diag_retries retry[\s\S]*?retry\.replacement_shadow_proof_request_id = shadow_proof\.id\s*and staged\.staged_at >= retry\.authorized_at\s*\)\s*\)/u,
+  );
+  assert.ok(diagnosticAssociation, `evidence guard ${index + 1} must bind the diagnostic retry`);
+  assert.match(
+    diagnosticAssociation[0],
+    /retry\.retry_request_key =\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid/u,
+  );
+  assert.equal(
+    [...guard.matchAll(/from app\.private_telebirr_shadow_receipt_shape_diag_retries retry/gu)]
+      .length,
+    1,
+    `evidence guard ${index + 1} must have exactly one diagnostic-retry association`,
   );
 }
 assert.match(provision, /from safe_reviewable_source_recovery reviewable/u);

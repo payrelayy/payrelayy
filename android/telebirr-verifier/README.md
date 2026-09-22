@@ -165,6 +165,15 @@ transaction-status cell cannot consume the receipt cell. Conflicting class-bound
 unattested documents, and ambiguous facts still fail closed; the evidence-only build retains no
 settlement, execution, or financial authority.
 
+When the current evidence-only parser cannot extract exactly one invoice value, the operator
+phone may emit a single local `FetanAgentReceiptShape` diagnostic with fixed flags: whether the
+parsed value count was zero or multiple, whether a known label or the official class pair was
+present, and whether the assigned reference token occurred somewhere in the raw HTML. That last
+flag is diagnostic only, **not** receipt proof. No HTML, reference, amount, recipient, digest,
+signature, or credential is logged or sent with this diagnostic, and the signed review outcome
+remains unchanged. A diagnostic cannot enable settlement, crediting, queue execution, or money
+movement.
+
 Operational builds also require an exact `staging` or `production` deployment target. The APK
 embeds and displays that target and accepts only the target-specific bridge and assignment signer
 identities. An omitted, mixed, unknown, or cross-target identity fails the release build before an

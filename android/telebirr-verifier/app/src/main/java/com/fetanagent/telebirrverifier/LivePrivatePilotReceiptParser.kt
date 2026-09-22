@@ -9,9 +9,25 @@ import java.util.Locale
 data class LivePilotParsedProviderObservation(
   val facts: LivePilotReceiptFacts,
   val sourceDocumentDigest: String,
+  val invoiceShapeDiagnostic: LivePilotInvoiceShapeDiagnostic? = null,
 ) {
   override fun toString(): String =
     "LivePilotParsedProviderObservation(lookupOutcome=${facts.lookupOutcome},sourceDocumentDigest=<redacted>)"
+}
+
+/** Fixed, local-only shape flags. No receipt text or assignment value is retained. */
+data class LivePilotInvoiceShapeDiagnostic(
+  val parsedValueCount: String,
+  val knownLabelPresent: Boolean,
+  val officialClassPairPresent: Boolean,
+  val assignedReferenceTokenPresent: Boolean,
+) {
+  init {
+    require(parsedValueCount == "zero" || parsedValueCount == "multiple")
+  }
+
+  override fun toString(): String =
+    "invoice_shape=$parsedValueCount,label=$knownLabelPresent,class_pair=$officialClassPairPresent,assigned_token=$assignedReferenceTokenPresent"
 }
 
 /**
@@ -67,6 +83,7 @@ class LivePrivatePilotReceiptParser {
         document.sourceDocumentDigest,
         "unknown_layout_invoice_number",
         document.retrievedAt,
+        invoiceShapeDiagnostic = invoiceShapeDiagnostic(document.utf8Body, rows, assignment.rawReference),
       )
     val status = unique(rows, "transaction status")
       ?: return review(
@@ -292,6 +309,27 @@ class LivePrivatePilotReceiptParser {
   private fun unique(rows: Map<String, List<String>>, label: String): String? =
     rows[label]?.singleOrNull()
 
+  private fun invoiceShapeDiagnostic(
+    html: String,
+    rows: Map<String, List<String>>,
+    assignedReference: String,
+  ): LivePilotInvoiceShapeDiagnostic {
+    val visible = visibleText(html).lowercase(Locale.ROOT)
+    val classPairPresent =
+      cellOpeningTagPattern.findAll(html).any { match ->
+        val classValue = classAttributePattern.find(match.groupValues[1])?.groupValues?.get(2)
+          ?: return@any false
+        val tokens = classValue.split(whitespace).map { it.lowercase(Locale.ROOT) }.toSet()
+        "receipttabletd" in tokens && "receipttabletd2" in tokens
+      }
+    return LivePilotInvoiceShapeDiagnostic(
+      parsedValueCount = if (rows["invoice no"].isNullOrEmpty()) "zero" else "multiple",
+      knownLabelPresent = invoiceLabelAliases.any { visible.contains(it) },
+      officialClassPairPresent = classPairPresent,
+      assignedReferenceTokenPresent = html.contains(assignedReference),
+    )
+  }
+
   private fun canonicalLabel(raw: String): String? {
     val english = canonicalEnglish(raw)
     val label = english.removeSuffix(":").removeSuffix(".")
@@ -398,10 +436,12 @@ class LivePrivatePilotReceiptParser {
     sourceDocumentDigest: String,
     reason: String,
     retrievedAt: String?,
+    invoiceShapeDiagnostic: LivePilotInvoiceShapeDiagnostic? = null,
   ): LivePilotParsedProviderObservation =
     LivePilotParsedProviderObservation(
       facts = LivePilotReviewRequiredFacts(reviewReason = reason, retrievedAt = retrievedAt),
       sourceDocumentDigest = sourceDocumentDigest,
+      invoiceShapeDiagnostic = invoiceShapeDiagnostic,
     )
 
   companion object {
@@ -435,6 +475,8 @@ class LivePrivatePilotReceiptParser {
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
     private val receiptReferencePattern = Regex("^[A-Z0-9]{8,64}$")
     private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
+    private val invoiceLabelAliases =
+      listOf("invoice no", "invoice number", "receipt no", "receipt number", "payment reference no", "payment reference number", "transaction no", "transaction number")
     private val labelAliases =
       listOf(
         "invoice no" to "invoice no",

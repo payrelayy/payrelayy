@@ -71,6 +71,7 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          node infra/verify-production-live-telebirr-receipt-shape-diagnostic-retry.mjs
           node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh

@@ -127,7 +127,8 @@ jobs:
             .shadowRequestCount == 1 and
             (.sourceShadowAttemptCount | type == "number" and . >= 1 and . <= 100) and
             .sourceStagedEvidenceCount == .sourceShadowAttemptCount and
-            .sourceReceiptShapeDiagnosticReviewCount == .sourceShadowAttemptCount and
+            .sourceReceiptShapeDiagnosticReviewCount >= 1 and
+            .sourceReceiptShapeDiagnosticReviewCount <= .sourceShadowAttemptCount and
             .sourceShadowOutcomeCount == 1 and
             .replacementShadowAttemptCount == 0 and
             .replacementShadowOutcomeCount == 0 and

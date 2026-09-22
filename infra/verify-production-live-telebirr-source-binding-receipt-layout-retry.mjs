@@ -18,6 +18,9 @@ const verifierProvision = read('./sql/production-telebirr-shadow-verifier-once-p
 const parser = read(
   '../android/telebirr-verifier/app/src/main/java/com/fetanagent/telebirrverifier/LivePrivatePilotReceiptParser.kt',
 );
+const parserTests = read(
+  '../android/telebirr-verifier/app/src/test/java/com/fetanagent/telebirrverifier/LivePrivatePilotReceiptParserTest.kt',
+);
 const androidProtocol = read(
   '../android/telebirr-verifier/app/src/main/java/com/fetanagent/telebirrverifier/LivePrivatePilotProtocol.kt',
 );
@@ -138,6 +141,9 @@ assert.match(parser, /receipttabletd/u);
 assert.match(parser, /receipttabletd2/u);
 assert.match(parser, /classBoundReferences\.size > 1/u);
 assert.match(parser, /receiptReferencePattern/u);
+assert.match(parser, /cellOpeningTagPattern/u);
+assert.match(parser, /html\.indexOf\("<\/td>"/u);
+assert.match(parserTests, /<td>Completed/u);
 assert.match(parser, /Raw labels,/u);
 assert.match(parser, /values, and HTML never leave the device/u);
 assert.doesNotMatch(parser, /review\(document\.sourceDocumentDigest, "unknown_layout",/u);

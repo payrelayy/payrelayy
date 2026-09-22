@@ -410,13 +410,13 @@ with assessment_clock as materialized (
     ), 7) as execution_login_role_count,
     least((
       select pg_catalog.count(*)::integer
-        from pg_catalog.pg_roles role
+        from pg_catalog.pg_authid role
        where role.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'
          and role.rolpassword is not null
     ), 2) as shadow_runtime_password_count,
     least((
       select pg_catalog.count(*)::integer
-        from pg_catalog.pg_roles role
+        from pg_catalog.pg_authid role
        where role.rolname in (
          'fetanagent_deposit_executor',
          'fetanagent_deposit_executor_runtime',

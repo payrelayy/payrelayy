@@ -38,6 +38,11 @@ assert.match(operation, /'shadowRuntimePasswordCount', predicates\.shadow_runtim
 assert.match(operation, /'dormantCredentialCount', predicates\.dormant_credential_count/u);
 assert.match(operation, /boundary\.execution_login_role_count = 0/u);
 assert.match(operation, /boundary\.shadow_runtime_password_count = 0/u);
+assert.equal((operation.match(/from pg_catalog\.pg_authid role/gu) ?? []).length, 2);
+assert.doesNotMatch(
+  operation,
+  /from pg_catalog\.pg_roles role\s+where role\.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'\s+and role\.rolpassword is not null/u,
+);
 assert.doesNotMatch(operation, /execution_role_credential_count/u);
 assert.match(operation, /'depositJobCount', predicates\.deposit_job_count/u);
 assert.match(operation, /'lineageReady', predicates\.lineage_ready/u);

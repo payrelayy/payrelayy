@@ -14,6 +14,7 @@ assert.match(workflow, /persist-credentials: false/u);
 assert.match(workflow, /node infra\/operations\/require-production-ci\.mjs/u);
 assert.match(workflow, /production-live-telebirr-receipt-cell-opening-child-preflight\.sql/u);
 assert.match(workflow, /Receipt-cell child preflight classification/u);
+assert.match(workflow, /Receipt-cell child preflight blockers/u);
 assert.doesNotMatch(workflow, /pull_request_target|schedule:|repository_dispatch:/u);
 
 assert.equal(
@@ -48,5 +49,6 @@ assert.doesNotMatch(
   /current_private_trusted_telebirr_activation_epoch|private_telebirr_shadow_source_binding_window_boundary_is_ready|private_telebirr_shadow_receipt_cell_opening_retry_is_valid/u,
 );
 assert.doesNotMatch(operation, /retry\.retry_expires_at <= pilot\.expires_at/u);
+assert.doesNotMatch(operation, /retry\.submitted_at = retry\.authorized_at/u);
 
 console.log('Production receipt-cell-opening child read-only preflight contract verified.');

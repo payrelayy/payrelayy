@@ -10,6 +10,9 @@ const operation = read('./sql/production-live-telebirr-receipt-cell-opening-retr
 const migration = read(
   '../supabase/migrations/20260922090000_retry_reviewed_receipt_cell_opening.sql',
 );
+const historicalSourceMigration = read(
+  '../supabase/migrations/20260922120000_fix_receipt_cell_opening_historical_source.sql',
+);
 const verifierWorkflow = read('../.github/workflows/production-telebirr-shadow-once.yml');
 const verifierProvision = read('./sql/production-telebirr-shadow-verifier-once-provision.sql');
 
@@ -70,6 +73,47 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(migration, /update app\.feature_switches/iu);
 assert.doesNotMatch(migration, /grant execute/iu);
+
+assert.match(historicalSourceMigration, /private_tbirr_cell_binding_retry_history_is_valid/u);
+assert.match(
+  historicalSourceMigration,
+  /private_telebirr_shadow_receipt_cell_binding_retry_digest/u,
+);
+assert.match(historicalSourceMigration, /source_alias_retry_request_digest/u);
+assert.match(
+  historicalSourceMigration,
+  /source_alias\.reason_code = 'reviewed_receipt_alias_retry_no_credit'/u,
+);
+assert.match(
+  historicalSourceMigration,
+  /source_outcome\.protocol_reason_code = 'receipt_requires_review'/u,
+);
+assert.match(historicalSourceMigration, /private_live_telebirr_shadow_pilot_contract_matches/u);
+assert.match(historicalSourceMigration, /private_live_telebirr_shadow_profile_contract_matches/u);
+assert.match(historicalSourceMigration, /target_pilot_count <> 1/u);
+assert.match(historicalSourceMigration, /target_profile_count <> 1/u);
+assert.match(
+  historicalSourceMigration,
+  /pilot\.expires_at > v_authorized_at \+ interval ''1 hour''/u,
+);
+assert.equal(
+  (
+    historicalSourceMigration.match(/expected_source_sha256 constant text := '[0-9a-f]{64}'/gmu) ??
+    []
+  ).length,
+  2,
+);
+assert.equal(
+  (historicalSourceMigration.match(/routine\.prosrc = rewritten_source/gmu) ?? []).length,
+  2,
+);
+assert.equal((historicalSourceMigration.match(/^commit;$/gmu) ?? []).length, 1);
+assert.doesNotMatch(
+  historicalSourceMigration,
+  /insert into app\.(?:deposit_jobs|private_live_deposit_pilot_reservations|private_live_telebirr_settlement_receipts|provider_payment_evidence)/iu,
+);
+assert.doesNotMatch(historicalSourceMigration, /update app\.feature_switches/iu);
+assert.doesNotMatch(historicalSourceMigration, /grant execute/iu);
 
 assert.match(verifierWorkflow, /private_telebirr_shadow_receipt_cell_opening_retries/u);
 assert.match(verifierWorkflow, /private_telebirr_shadow_receipt_cell_opening_retry_is_valid/u);

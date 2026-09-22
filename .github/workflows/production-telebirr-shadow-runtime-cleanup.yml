@@ -1,0 +1,174 @@
+name: Revoke stale production TeleBirr shadow runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_operation:
+        description: Type REVOKE STALE PRODUCTION TELEBIRR SHADOW RUNTIME - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-once
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DROPLET_ID: '593344964'
+  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  PRODUCTION_DATABASE_TUNNEL_PORT: '5432'
+
+jobs:
+  validate:
+    name: Validate exact cleanup-only production operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, exact targets, and cleanup-only phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'REVOKE STALE PRODUCTION TELEBIRR SHADOW RUNTIME - NO MONEY' ]]
+
+  cleanup:
+    name: Revoke only stale shadow runtime credentials and sessions
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact cleanup contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Revoke only shadow runtime credentials and sessions
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_DIRECT_HOST }}
+          PGHOSTADDR: 127.0.0.1
+          PGPORT: ${{ env.PRODUCTION_DATABASE_TUNNEL_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" &&
+             -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" && -n "$PRODUCTION_VM_KNOWN_HOSTS" ]]
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+
+          source infra/operations/fetanagent-production-direct-database-tunnel.sh
+          protected="$RUNNER_TEMP/production-shadow-runtime-cleanup"
+          install -d -m 0700 "$protected"
+          tunnel_open=0
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            set +e
+            if [[ "$tunnel_open" == '1' ]]; then
+              fetanagent_close_production_direct_database_tunnel || status=1
+            fi
+            if [[ "$protected" == "$RUNNER_TEMP/production-shadow-runtime-cleanup" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected" || status=1
+            else
+              echo '::error::The cleanup runner directory failed its exact boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          fetanagent_open_production_direct_database_tunnel \
+            "$protected" "$PRODUCTION_VM_HOST" "$PGHOST" "$PGPORT"
+          tunnel_open=1
+
+          admin_login_ready=false
+          for attempt in 1 2 3 4; do
+            admin_identity="$(
+              psql -X --quiet --tuples-only --no-align \
+                --command "select current_user = 'postgres' and session_user = current_user" \
+                2>/dev/null || true
+            )"
+            if [[ "$admin_identity" == 't' ]]; then
+              admin_login_ready=true
+              break
+            fi
+            [[ "$attempt" -lt 4 ]] || break
+            sleep "$((attempt * 2))"
+          done
+          [[ "$admin_login_ready" == 'true' ]]
+
+          disable_result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-shadow-verifier-once-disable.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "shadow_verifier_runtime_disable" and
+            .deploymentTarget == "production" and
+            .runtimeLogin == "disabled" and
+            .financialSwitchesChanged == false
+          ' <<<"$disable_result" >/dev/null
+          echo '::notice::Stale production TeleBirr shadow runtime credentials and sessions are revoked; financial switches were unchanged.'

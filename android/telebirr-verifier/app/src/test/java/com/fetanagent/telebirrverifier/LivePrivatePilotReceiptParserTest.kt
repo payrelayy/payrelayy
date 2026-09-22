@@ -208,6 +208,31 @@ class LivePrivatePilotReceiptParserTest {
   }
 
   @Test
+  fun `accepts the public receipt number vocabulary across tag independent text nodes`() {
+    val html =
+      """
+      <html><body>
+        <section><h6>የክፍያ ቁጥር / Receipt No.</h6><strong>$PILOT_REFERENCE</strong></section>
+        <section><h6>Payment date</h6><strong>20-08-2026 21:01:45</strong></section>
+        <section><h6>Settled Amount</h6><strong>25.00 Birr</strong></section>
+        <section><h6>Credited Party name</h6><strong>PILOT RECEIVER</strong></section>
+        <section><h6>transaction status</h6><strong>Completed</strong></section>
+        <section><h6>Payment Mode</h6><strong>telebirr</strong></section>
+        <section><h6>Payment Reason</h6><strong>Send Money to Registered Customer</strong></section>
+        <section><h6>Payment channel</h6><strong>APP</strong></section>
+      </body></html>
+      """.trimIndent()
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+    assertEquals("send_money_to_registered_customer", facts.paymentReason)
+    assertEquals("api_app", facts.paymentChannel)
+  }
+
+  @Test
   fun `normalizes literal unicode receipt spacing without exposing values`() {
     val html = currentOfficialCardLivePilotHtml().replace("Invoice No.", "Invoice\u00a0No.")
     val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts

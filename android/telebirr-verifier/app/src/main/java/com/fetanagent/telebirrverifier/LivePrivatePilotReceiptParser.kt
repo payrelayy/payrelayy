@@ -198,22 +198,38 @@ class LivePrivatePilotReceiptParser {
       }
     }
 
-    // The official receipt has used both table rows and card/definition-list containers. Keep the
-    // accepted vocabulary identical and only pair a canonical label with its immediately adjacent
-    // leaf value. Raw labels, values, and HTML never leave the device.
+    // The official receipt has used table rows plus several card/heading tag combinations. Keep
+    // the accepted vocabulary identical, but derive bounded text nodes independently of tag names
+    // and pair only an isolated canonical label with its immediately adjacent value. Raw labels,
+    // values, and HTML never leave the device.
     val cardRowsByLabel = linkedMapOf<String, MutableList<String>>()
-    val leafElements =
-      leafElementPattern.findAll(html).map { match -> visibleText(match.groupValues[2]) }.toList()
-    var elementIndex = 0
-    while (elementIndex < leafElements.size - 1) {
-      val label = canonicalLabel(leafElements[elementIndex])
-      if (label == null) {
-        elementIndex += 1
+    val textNodes =
+      html
+        .replace(commentPattern, " ")
+        .replace(scriptPattern, " ")
+        .replace(stylePattern, " ")
+        .split(tagPattern)
+        .map(::decodeEntities)
+        .map { value -> value.replace(whitespace, " ").trim() }
+        .filter(String::isNotEmpty)
+    for (index in textNodes.indices) {
+      val current = textNodes[index]
+      val inline = canonicalInlinePair(current)
+      if (inline != null) {
+        if (!add(cardRowsByLabel, inline.first, inline.second)) return null
         continue
       }
-      val value = leafElements[elementIndex + 1]
-      if (canonicalLabel(value) != null || !add(cardRowsByLabel, label, value)) return null
-      elementIndex += 2
+      val label = canonicalLabel(current) ?: continue
+      val value = textNodes.getOrNull(index + 1) ?: continue
+      // A run of labels is the official multi-column header, not an adjacent card pair. The table
+      // parser above binds that header to its following values row.
+      if (
+        (index > 0 && canonicalLabel(textNodes[index - 1]) != null) ||
+          canonicalLabel(value) != null
+      ) {
+        continue
+      }
+      if (!add(cardRowsByLabel, label, value)) return null
     }
 
     val candidates = listOf(tableRowsByLabel, cardRowsByLabel).filter { it.isNotEmpty() }
@@ -236,6 +252,7 @@ class LivePrivatePilotReceiptParser {
   }
 
   private fun canonicalInlinePair(raw: String): Pair<String, String>? {
+    if (canonicalLabel(raw) != null) return null
     val english = normalizedWhitespace(raw)
     val candidates =
       labelAliases.mapNotNull { (alias, canonical) ->
@@ -321,7 +338,14 @@ class LivePrivatePilotReceiptParser {
     }
 
   private fun strictPaymentChannel(value: String): String =
-    if (value.trim().equals("API/App", ignoreCase = true)) "api_app" else "other"
+    if (
+      value.trim().equals("API/App", ignoreCase = true) ||
+        value.trim().equals("APP", ignoreCase = true)
+    ) {
+      "api_app"
+    } else {
+      "other"
+    }
 
   private fun review(
     sourceDocumentDigest: String,
@@ -344,11 +368,6 @@ class LivePrivatePilotReceiptParser {
         "<(?:td|th)\\b[^>]*>(.*?)</(?:td|th)>",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
       )
-    private val leafElementPattern =
-      Regex(
-        "<(div|span|p|li|dt|dd)\\b[^>]*>((?:(?!<(?:div|span|p|li|dt|dd)\\b).)*)</\\1>",
-        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-      )
     private val commentPattern = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     private val scriptPattern =
       Regex(
@@ -369,6 +388,10 @@ class LivePrivatePilotReceiptParser {
       listOf(
         "invoice no" to "invoice no",
         "invoice number" to "invoice no",
+        "receipt no" to "invoice no",
+        "receipt number" to "invoice no",
+        "payment reference no" to "invoice no",
+        "payment reference number" to "invoice no",
         "transaction no" to "invoice no",
         "transaction number" to "invoice no",
         "payment date" to "payment date",

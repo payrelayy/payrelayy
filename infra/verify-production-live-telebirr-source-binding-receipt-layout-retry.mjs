@@ -129,8 +129,13 @@ for (const code of [
   assert.match(androidProtocol, new RegExp(code, 'u'));
   assert.match(protocol, new RegExp(code, 'u'));
 }
-assert.match(parser, /leafElementPattern/u);
-assert.match(parser, /Raw labels, values, and HTML never leave the device/u);
+assert.match(parser, /replace\(commentPattern, " "\)/u);
+assert.match(parser, /replace\(scriptPattern, " "\)/u);
+assert.match(parser, /replace\(stylePattern, " "\)/u);
+assert.match(parser, /\.split\(tagPattern\)/u);
+assert.match(parser, /canonicalInlinePair/u);
+assert.match(parser, /Raw labels,/u);
+assert.match(parser, /values, and HTML never leave the device/u);
 assert.doesNotMatch(parser, /review\(document\.sourceDocumentDigest, "unknown_layout",/u);
 
 assert.match(verifierWorkflow, /private_telebirr_shadow_source_binding_layout_retries/u);

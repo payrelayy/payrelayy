@@ -224,9 +224,9 @@ val operationalSigning =
 
 val verifierVersionName =
   when (requestedRuntimeMode) {
-    "pairing_only" -> "0.5.7-secure-pairing"
-    "evidence_only" -> "0.5.7-evidence-only"
-    else -> "0.5.7-secure-provisioning-inert"
+    "pairing_only" -> "0.5.8-secure-pairing"
+    "evidence_only" -> "0.5.8-evidence-only"
+    else -> "0.5.8-secure-provisioning-inert"
   }
 
 android {
@@ -237,7 +237,7 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = 12
+    versionCode = 13
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")

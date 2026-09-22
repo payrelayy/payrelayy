@@ -233,6 +233,65 @@ class LivePrivatePilotReceiptParserTest {
   }
 
   @Test
+  fun `accepts one exact official receipt class value when its label row is unavailable`() {
+    val html =
+      currentOfficialCardLivePilotHtml().replace(
+        "<div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>",
+        """
+        <table><tr>
+          <td class="receipttableTd2 receipttableTd">$PILOT_REFERENCE</td>
+        </tr></table>
+        """.trimIndent(),
+      )
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+  }
+
+  @Test
+  fun `accepts matching labeled and official receipt class values`() {
+    val html =
+      currentOfficialCardLivePilotHtml().replace(
+        "<div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>",
+        """
+        <div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>
+        <table><tr>
+          <td class="receipttableTd receipttableTd2">$PILOT_REFERENCE</td>
+        </tr></table>
+        """.trimIndent(),
+      )
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts
+
+    assertEquals("matched", facts.referenceMatch)
+    assertEquals("matched", facts.receiverMatch)
+    assertEquals(2_500L, facts.amountMinor)
+    assertEquals("completed", facts.providerFinalStatus)
+  }
+
+  @Test
+  fun `rejects conflicting official receipt class values without exposing them`() {
+    val html =
+      currentOfficialCardLivePilotHtml().replace(
+        "<div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>",
+        """
+        <table><tr>
+          <td class="receipttableTd receipttableTd2">$PILOT_REFERENCE</td>
+          <td class="receipttableTd receipttableTd2">PILOT9ABC9999</td>
+        </tr></table>
+        """.trimIndent(),
+      )
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts
+
+    assertTrue(facts is LivePilotReviewRequiredFacts)
+    assertEquals("invalid_layout", (facts as LivePilotReviewRequiredFacts).reviewReason)
+    assertFalse(facts.toString().contains(PILOT_REFERENCE))
+    assertFalse(facts.toString().contains("PILOT9ABC9999"))
+  }
+
+  @Test
   fun `normalizes literal unicode receipt spacing without exposing values`() {
     val html = currentOfficialCardLivePilotHtml().replace("Invoice No.", "Invoice\u00a0No.")
     val facts = parser.parse(livePilotProviderFound(html), assignment).facts as LivePilotFoundFacts

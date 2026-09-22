@@ -100,6 +100,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
        :'target_shadow_proof_request_id'::uuid,
        nullif(:'recovery_request_key', 'not-applicable')::uuid
      )
+     or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
+       :'target_shadow_proof_request_id'::uuid,
+       nullif(:'recovery_request_key', 'not-applicable')::uuid
+     )
    )
   as review_source_binding_layout_retry
 \gset
@@ -138,6 +142,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
+       or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
      and (
        exists (
@@ -170,6 +178,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
        or app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
+       or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
@@ -216,8 +228,8 @@ select :'source_live_verification_job_id' = 'not-applicable'
                    from app.private_telebirr_shadow_source_unavailable_retries retry
                   where retry.retry_request_key =
                         nullif(:'recovery_request_key', 'not-applicable')::uuid
-                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
-                    and staged.staged_at >= retry.authorized_at
+                      and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                      and staged.staged_at >= retry.authorized_at
                )
              )
              or (
@@ -308,6 +320,20 @@ select :'source_live_verification_job_id' = 'not-applicable'
                 and exists (
                   select 1
                     from app.private_telebirr_shadow_parser_refinement_retries retry
+                   where retry.retry_request_key =
+                         nullif(:'recovery_request_key', 'not-applicable')::uuid
+                     and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                      and staged.staged_at >= retry.authorized_at
+                )
+              )
+              or (
+                app.private_telebirr_shadow_receipt_alias_retry_is_valid(
+                  shadow_proof.id,
+                  nullif(:'recovery_request_key', 'not-applicable')::uuid
+                )
+                and exists (
+                  select 1
+                    from app.private_telebirr_shadow_receipt_alias_retries retry
                    where retry.retry_request_key =
                          nullif(:'recovery_request_key', 'not-applicable')::uuid
                      and retry.replacement_shadow_proof_request_id = shadow_proof.id
@@ -413,6 +439,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
         or app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
              shadow_proof.id,
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
@@ -679,6 +709,10 @@ with locked_feature_switches as materialized (
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
+       or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
      )
      and (
        exists (
@@ -711,6 +745,10 @@ with locked_feature_switches as materialized (
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
        or app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+            shadow_proof.id,
+            nullif(:'recovery_request_key', 'not-applicable')::uuid
+          )
+       or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
@@ -757,8 +795,8 @@ with locked_feature_switches as materialized (
                    from app.private_telebirr_shadow_source_unavailable_retries retry
                   where retry.retry_request_key =
                         nullif(:'recovery_request_key', 'not-applicable')::uuid
-                    and retry.replacement_shadow_proof_request_id = shadow_proof.id
-                    and staged.staged_at >= retry.authorized_at
+                      and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                      and staged.staged_at >= retry.authorized_at
                )
              )
              or (
@@ -849,6 +887,20 @@ with locked_feature_switches as materialized (
                 and exists (
                   select 1
                     from app.private_telebirr_shadow_parser_refinement_retries retry
+                   where retry.retry_request_key =
+                         nullif(:'recovery_request_key', 'not-applicable')::uuid
+                     and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                      and staged.staged_at >= retry.authorized_at
+                )
+              )
+              or (
+                app.private_telebirr_shadow_receipt_alias_retry_is_valid(
+                  shadow_proof.id,
+                  nullif(:'recovery_request_key', 'not-applicable')::uuid
+                )
+                and exists (
+                  select 1
+                    from app.private_telebirr_shadow_receipt_alias_retries retry
                    where retry.retry_request_key =
                          nullif(:'recovery_request_key', 'not-applicable')::uuid
                      and retry.replacement_shadow_proof_request_id = shadow_proof.id
@@ -954,6 +1006,10 @@ with locked_feature_switches as materialized (
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
         or app.private_telebirr_shadow_parser_refinement_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or app.private_telebirr_shadow_receipt_alias_retry_is_valid(
              shadow_proof.id,
              nullif(:'recovery_request_key', 'not-applicable')::uuid
            )
@@ -1181,6 +1237,12 @@ select (select count(*) from locked_feature_switches) = 7
        ) is not null
    and pg_catalog.to_regclass(
          'app.private_telebirr_shadow_parser_refinement_retries'
+       ) is not null
+   and pg_catalog.to_regprocedure(
+         'app.private_telebirr_shadow_receipt_alias_retry_is_valid(uuid,uuid)'
+       ) is not null
+   and pg_catalog.to_regclass(
+         'app.private_telebirr_shadow_receipt_alias_retries'
        ) is not null
    and (select count(*)
           from locked_feature_switches switch_state

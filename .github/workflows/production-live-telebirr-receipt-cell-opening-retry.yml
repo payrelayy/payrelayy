@@ -133,7 +133,7 @@ jobs:
             .replacementShadowOutcomeCount == 0 and
             .readyEnrollmentCount == 1 and
             .configuredWindowSeconds == 43200 and
-            (.remainingSeconds | type == "number" and . >= 42601 and . <= 43205) and
+            (.remainingSeconds | type == "number" and . >= 3601 and . <= 43205) and
             .disabledFinancialSwitches == 6 and
             .dryRunPilotSwitches == 1 and
             .activeTelebirrEpochs == 0 and

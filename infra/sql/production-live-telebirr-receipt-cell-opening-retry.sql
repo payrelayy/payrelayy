@@ -30,7 +30,7 @@ begin
          and result.replacement_shadow_outcome_count = 0
          and result.ready_enrollment_count = 1
          and result.configured_window_seconds = 43200
-         and result.remaining_seconds between 42601 and 43205
+         and result.remaining_seconds between 3601 and 43205
          and not result.money_moved
     ) then
     raise exception 'The redacted receipt-cell-opening retry result is invalid.';

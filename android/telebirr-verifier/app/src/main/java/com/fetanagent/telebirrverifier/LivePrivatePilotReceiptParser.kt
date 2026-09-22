@@ -111,7 +111,7 @@ class LivePrivatePilotReceiptParser {
         document.retrievedAt,
       )
 
-    if (!Regex("^[A-Z0-9]{8,64}$").matches(invoiceNumber)) {
+    if (!receiptReferencePattern.matches(invoiceNumber)) {
       return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
     }
     val normalizedReceiver = LivePilotNameNormalizer.normalize(receiverName)
@@ -230,6 +230,45 @@ class LivePrivatePilotReceiptParser {
         continue
       }
       if (!add(cardRowsByLabel, label, value)) return null
+    }
+
+    // TeleBirr's live transaction-details table also identifies its receipt-number value with the
+    // provider-specific receipttableTd + receipttableTd2 class pair. Some served documents omit a
+    // usable label/value row around that cell. Accept exactly one distinct bounded candidate from
+    // that provider cell and merge it only into maps that do not already carry a reference. The
+    // official TLS-origin check and exact authenticated-assignment comparison still happen below.
+    val classBoundReferences =
+      cellElementPattern
+        .findAll(html)
+        .mapNotNull { match ->
+          val classValue =
+            classAttributePattern.find(match.groupValues[1])?.groupValues?.get(2)
+              ?: return@mapNotNull null
+          val classTokens =
+            classValue
+              .split(whitespace)
+              .map { token -> token.lowercase(Locale.ROOT) }
+              .filter(String::isNotEmpty)
+              .toSet()
+          if (
+            "receipttabletd" !in classTokens || "receipttabletd2" !in classTokens
+          ) {
+            return@mapNotNull null
+          }
+          visibleText(match.groupValues[2]).takeIf(receiptReferencePattern::matches)
+        }
+        .distinct()
+        .toList()
+    if (classBoundReferences.size > 1) return null
+    classBoundReferences.singleOrNull()?.let { classBoundReference ->
+      val destinations = listOf(tableRowsByLabel, cardRowsByLabel)
+      val populated = destinations.filter { destination -> destination.isNotEmpty() }
+      val targets = populated.ifEmpty { listOf(tableRowsByLabel) }
+      for (destination in targets) {
+        val existing = destination["invoice no"].orEmpty()
+        if (existing.isNotEmpty() && existing.singleOrNull() != classBoundReference) return null
+        if (existing.isEmpty() && !add(destination, "invoice no", classBoundReference)) return null
+      }
     }
 
     val candidates = listOf(tableRowsByLabel, cardRowsByLabel).filter { it.isNotEmpty() }
@@ -368,6 +407,13 @@ class LivePrivatePilotReceiptParser {
         "<(?:td|th)\\b[^>]*>(.*?)</(?:td|th)>",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
       )
+    private val cellElementPattern =
+      Regex(
+        "<td\\b([^>]*)>(.*?)</td>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+      )
+    private val classAttributePattern =
+      Regex("\\bclass\\s*=\\s*([\"'])(.*?)\\1", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val commentPattern = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)
     private val scriptPattern =
       Regex(
@@ -383,6 +429,7 @@ class LivePrivatePilotReceiptParser {
     private val whitespace = Regex("[\\s\\p{Zs}\\u2007\\u202F]+")
     private val amountPattern =
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
+    private val receiptReferencePattern = Regex("^[A-Z0-9]{8,64}$")
     private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
     private val labelAliases =
       listOf(

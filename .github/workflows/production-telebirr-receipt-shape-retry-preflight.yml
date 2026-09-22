@@ -1,0 +1,143 @@
+name: Preflight production TeleBirr receipt-shape diagnostic retry
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RUN ONE NO WRITE TELEBIRR RECEIPT SHAPE RETRY PREFLIGHT
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-receipt-shape-retry-preflight
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact read-only target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main and no-write confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RUN ONE NO WRITE TELEBIRR RECEIPT SHAPE RETRY PREFLIGHT' ]]
+
+  preflight:
+    name: Classify only redacted retry predicates
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing production CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Run one no-write rollback-only preflight
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-0-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGDATABASE: postgres
+          PGSSLMODE: verify-full
+          PGCONNECTTIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          project_ref="$(sed -n 's/^  PRODUCTION_PROJECT_REF: //p' .github/workflows/supabase-production-release.yml)"
+          [[ "$project_ref" =~ ^[a-z0-9]{20}$ ]]
+          export PGUSER="postgres.$project_ref"
+
+          ca_file="$RUNNER_TEMP/fetanagent-receipt-shape-preflight-ca.crt"
+          [[ ! -e "$ca_file" && ! -L "$ca_file" ]]
+          trap 'rm -f -- "$ca_file"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$ca_file"
+          chmod 0600 "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$ca_file"
+
+          result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-receipt-shape-retry-preflight.sql
+          )"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "receipt_shape_retry_preflight" and
+            .noWrite == true and .rolledBack == true and
+            .identifiersRedacted == true and
+            ([.openingRetryCount, .diagnosticRetryCount, .sourceRowCount,
+              .attemptCount, .stagedCount, .invoiceReviewCount, .outcomeCount,
+              .pilotRemainingSeconds, .disabledFinancialSwitches,
+              .dryRunSwitches, .reservations, .settlements, .depositJobs,
+              .providerEvidence, .executionLoginRoles, .executionSessions,
+              .disabledCompanionControls, .activeActivationEpochs]
+              | all(type == "number" and . >= 0)) and
+            ([.outcomeShapeReady, .terminalObservationBound,
+              .openingLineageValid, .pilotFresh, .recentReadyHeartbeat]
+              | all(type == "boolean"))
+          ' <<<"$result" >/dev/null
+
+          blockers="$(jq -r '
+            [
+              if .openingRetryCount == 1 and .sourceRowCount == 1 then empty else "source_count" end,
+              if .diagnosticRetryCount == 0 then empty else "existing_diagnostic_retry" end,
+              if .attemptCount >= 1 and .attemptCount <= 100 then empty else "attempt_count" end,
+              if .stagedCount == .attemptCount then empty else "staged_count" end,
+              if .invoiceReviewCount == .attemptCount then empty else "invoice_review_count" end,
+              if .outcomeCount == 1 and .outcomeShapeReady then empty else "outcome_shape" end,
+              if .terminalObservationBound then empty else "terminal_observation" end,
+              if .openingLineageValid then empty else "opening_lineage" end,
+              if .pilotFresh then empty else "pilot_freshness" end,
+              if .recentReadyHeartbeat then empty else "heartbeat" end,
+              if .disabledFinancialSwitches == 6 and .dryRunSwitches == 1 and
+                 .reservations == 0 and .settlements == 0 and .depositJobs == 0 and
+                 .providerEvidence == 0 and .executionLoginRoles == 0 and
+                 .executionSessions == 0 and .disabledCompanionControls == 1 and
+                 .activeActivationEpochs == 0 then empty else "no_money_boundary" end
+            ] | if length == 0 then "none" else join(",") end
+          ' <<<"$result")"
+          jq '{noWrite, rolledBack, identifiersRedacted, openingRetryCount,
+            diagnosticRetryCount, sourceRowCount, attemptCount, stagedCount,
+            invoiceReviewCount, outcomeCount, outcomeShapeReady,
+            terminalObservationBound, openingLineageValid, pilotFresh,
+            pilotRemainingSeconds, recentReadyHeartbeat,
+            disabledFinancialSwitches, dryRunSwitches, reservations,
+            settlements, depositJobs, providerEvidence, executionLoginRoles,
+            executionSessions, disabledCompanionControls,
+            activeActivationEpochs}' <<<"$result" >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice::Receipt-shape retry preflight blockers: $blockers."

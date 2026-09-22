@@ -134,7 +134,8 @@ jobs:
               .quarantineCount] | all(type == "number" and . >= 0 and . <= 101)) and
             ([.switchRowCount, .disabledFinancialSwitchCount,
               .dryRunPilotSwitchCount, .activeActivationEpochCount,
-              .disabledCompanionControlCount, .executionRoleCredentialCount,
+              .disabledCompanionControlCount, .executionLoginRoleCount,
+              .shadowRuntimePasswordCount, .dormantCredentialCount,
               .executionSessionCount] | all(type == "number" and . >= 0 and . <= 8)) and
             ([.reservationCount, .settlementReceiptCount, .depositJobCount,
               .providerEvidenceCount] | all(type == "number" and . >= 0 and . <= 1)) and
@@ -168,7 +169,8 @@ jobs:
                 if .dryRunPilotSwitchCount == 1 then empty else "pilot_switch" end,
                 if .activeActivationEpochCount == 0 then empty else "activation_epoch" end,
                 if .disabledCompanionControlCount == 1 then empty else "companion_control" end,
-                if .executionRoleCredentialCount == 0 then empty else "execution_credentials" end,
+                if .executionLoginRoleCount == 0 then empty else "execution_login" end,
+                if .shadowRuntimePasswordCount == 0 then empty else "shadow_runtime_password" end,
                 if .executionSessionCount == 0 then empty else "execution_sessions" end,
                 if .outcomeCount == 0 then empty else "existing_outcome" end,
                 if .receiptCount == 0 then empty else "existing_receipt" end,
@@ -183,13 +185,22 @@ jobs:
             ' <<<"$preflight_result"
           )"
 
+          preflight_warnings="$(
+            jq -r '
+              if .dormantCredentialCount == 0 then "none"
+              else "dormant_non_login_credentials"
+              end
+            ' <<<"$preflight_result"
+          )"
+
           jq '{
             readOnly, identifiersRedacted, retryCount, enrollmentCount,
             attemptCount, stagedEvidenceCount, usableStagedEvidenceCount,
             quarantineCount, outcomeCount, receiptCount, activeAssignmentCount,
             switchRowCount, disabledFinancialSwitchCount, dryRunPilotSwitchCount,
             activeActivationEpochCount, disabledCompanionControlCount,
-            executionRoleCredentialCount, executionSessionCount,
+            executionLoginRoleCount, shadowRuntimePasswordCount,
+            dormantCredentialCount, executionSessionCount,
             reservationCount, settlementReceiptCount, depositJobCount,
             providerEvidenceCount, remainingSeconds, childProofReady,
             lineageReady, pilotWindowReady, profileWindowReady, enrollmentAuthorityReady,
@@ -198,3 +209,4 @@ jobs:
           }' <<<"$preflight_result" >>"$GITHUB_STEP_SUMMARY"
           echo "::notice::Receipt-cell child preflight classification: $preflight_class."
           echo "::notice::Receipt-cell child preflight blockers: $preflight_blockers."
+          echo "::notice::Receipt-cell child preflight warnings: $preflight_warnings."

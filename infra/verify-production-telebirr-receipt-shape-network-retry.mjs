@@ -42,6 +42,14 @@ assert.equal(
 );
 assert.equal((migration.match(/^do \$network_retry_rewrite_/gmu) ?? []).length, 4);
 assert.equal((migration.match(/^do \$network_retry_authority_rewrite_/gmu) ?? []).length, 2);
+assert.equal(
+  (
+    migration.match(
+      /pg_catalog\.replace\(rewritten_source, old_fragment_[123], ''\)\)\)\s*\/ pg_catalog\.length\(old_fragment_[123]\)/gmu,
+    ) ?? []
+  ).length,
+  6,
+);
 assert.equal((migration.match(/^commit;$/gmu) ?? []).length, 1);
 assert.doesNotMatch(
   migration,

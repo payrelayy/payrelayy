@@ -190,7 +190,7 @@ begin
 
   rewritten_source := original_source;
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, '')))
       / pg_catalog.length(old_fragment_1) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;
@@ -276,7 +276,7 @@ begin
 
   rewritten_source := original_source;
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, '')))
       / pg_catalog.length(old_fragment_1) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;
@@ -376,7 +376,7 @@ begin
 
   rewritten_source := original_source;
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, '')))
       / pg_catalog.length(old_fragment_1) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;
@@ -384,7 +384,7 @@ begin
     rewritten_source, old_fragment_1, new_fragment_1
   );
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_2, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_2, '')))
       / pg_catalog.length(old_fragment_2) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;
@@ -392,7 +392,7 @@ begin
     rewritten_source, old_fragment_2, new_fragment_2
   );
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_3, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_3, '')))
       / pg_catalog.length(old_fragment_3) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;
@@ -472,7 +472,7 @@ begin
 
   rewritten_source := original_source;
   if (pg_catalog.length(rewritten_source)
-      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, ''))
+      - pg_catalog.length(pg_catalog.replace(rewritten_source, old_fragment_1, '')))
       / pg_catalog.length(old_fragment_1) <> 1 then
     raise exception 'The reviewed retry function fragment is not unique.';
   end if;

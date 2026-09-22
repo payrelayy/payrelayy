@@ -1,0 +1,168 @@
+name: Preflight production TeleBirr receipt cell opening child
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type READ ONE EXISTING TELEBIRR RECEIPT CELL CHILD PREFLIGHT - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-live-telebirr-receipt-cell-opening-child-preflight
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+
+jobs:
+  validate:
+    name: Validate the exact read-only child preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main and the exact read-only phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'READ ONE EXISTING TELEBIRR RECEIPT CELL CHILD PREFLIGHT - NO MONEY' ]]
+
+  preflight:
+    name: Report only redacted child-readiness predicates
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production preflight
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Run one read-only redacted child preflight
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECTTIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-receipt-cell-opening-child-preflight"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/production-receipt-cell-opening-child-preflight" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          preflight_result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-live-telebirr-receipt-cell-opening-child-preflight.sql
+          )"
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "receipt_cell_opening_child_preflight" and
+            .deploymentTarget == "production" and
+            .readOnly == true and
+            .identifiersRedacted == true and
+            .moneyMoved == false and
+            ([
+              .callerIsPostgres, .lineageReady, .childProofReady, .pilotWindowReady,
+              .profileWindowReady, .enrollmentAuthorityReady, .evidenceReady,
+              .noMoneyBoundaryReady, .allNonEvidencePredicatesReady, .allReady
+            ] | all(type == "boolean")) and
+            ([.retryCount, .enrollmentCount, .outcomeCount, .receiptCount,
+              .activeAssignmentCount] | all(type == "number" and . >= 0 and . <= 2)) and
+            ([.attemptCount, .stagedEvidenceCount, .usableStagedEvidenceCount,
+              .quarantineCount] | all(type == "number" and . >= 0 and . <= 101)) and
+            ([.switchRowCount, .disabledFinancialSwitchCount,
+              .dryRunPilotSwitchCount, .activeActivationEpochCount,
+              .disabledCompanionControlCount, .executionRoleCredentialCount,
+              .executionSessionCount] | all(type == "number" and . >= 0 and . <= 8)) and
+            ([.reservationCount, .settlementReceiptCount, .depositJobCount,
+              .providerEvidenceCount] | all(type == "number" and . >= 0 and . <= 1)) and
+            (.remainingSeconds | type == "number" and . >= 0 and . <= 43205) and
+            (.allReady == (.allNonEvidencePredicatesReady and .evidenceReady))
+          ' <<<"$preflight_result" >/dev/null
+
+          preflight_class="$(
+            jq -r '
+              if .allReady then "ready"
+              elif .allNonEvidencePredicatesReady and (.evidenceReady | not)
+                then "evidence_pending"
+              else "other_safety_predicate"
+              end
+            ' <<<"$preflight_result"
+          )"
+
+          jq '{
+            readOnly, identifiersRedacted, retryCount, enrollmentCount,
+            attemptCount, stagedEvidenceCount, usableStagedEvidenceCount,
+            quarantineCount, outcomeCount, receiptCount, activeAssignmentCount,
+            switchRowCount, disabledFinancialSwitchCount, dryRunPilotSwitchCount,
+            activeActivationEpochCount, disabledCompanionControlCount,
+            executionRoleCredentialCount, executionSessionCount,
+            reservationCount, settlementReceiptCount, depositJobCount,
+            providerEvidenceCount, remainingSeconds, childProofReady,
+            lineageReady, pilotWindowReady, profileWindowReady, enrollmentAuthorityReady,
+            evidenceReady, noMoneyBoundaryReady, allNonEvidencePredicatesReady,
+            allReady, moneyMoved
+          }' <<<"$preflight_result" >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice::Receipt-cell child preflight classification: $preflight_class."

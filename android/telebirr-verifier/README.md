@@ -157,12 +157,13 @@ operator UI, so expiry, server rejection, unsupported app versions, and invalid 
 not collapse into an ambiguous provisioning status. Operational HTTP requests and claim leases
 remain short-lived.
 
-Version `0.5.8` retains the fixed-host, redirect-rejecting, hostname-verified HTTPS origin binding,
+Version `0.5.9` retains the fixed-host, redirect-rejecting, hostname-verified HTTPS origin binding,
 the provider's public `Receipt No.` / payment-reference vocabulary, and its documented `APP` channel
-variant. It also binds one exact receipt reference from TeleBirr's official `receipttableTd` plus
-`receipttableTd2` value cell when malformed or decorative table cells make the surrounding label row
-unusable. Conflicting class-bound candidates, unattested documents, and ambiguous facts still fail
-closed; the evidence-only build retains no settlement, execution, or financial authority.
+variant. It binds one exact receipt reference from TeleBirr's official `receipttableTd` plus
+`receipttableTd2` value cell by scanning the value cell's opening tag first, so an earlier malformed
+transaction-status cell cannot consume the receipt cell. Conflicting class-bound candidates,
+unattested documents, and ambiguous facts still fail closed; the evidence-only build retains no
+settlement, execution, or financial authority.
 
 Operational builds also require an exact `staging` or `production` deployment target. The APK
 embeds and displays that target and accepts only the target-specific bridge and assignment signer
@@ -195,7 +196,7 @@ later separately reviewed build decision after the no-money transport smoke pass
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.5.8-secure-provisioning-inert` remains compiled with
+versions. Version `0.5.9-secure-provisioning-inert` remains compiled with
 `VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
 enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
 enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,

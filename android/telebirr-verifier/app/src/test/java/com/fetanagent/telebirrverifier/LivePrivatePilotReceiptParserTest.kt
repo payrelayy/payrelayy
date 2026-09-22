@@ -239,6 +239,7 @@ class LivePrivatePilotReceiptParserTest {
         "<div>የደረሰኝ ቁጥር / Invoice No.:</div><div>$PILOT_REFERENCE</div>",
         """
         <table><tr>
+          <td>Completed
           <td class="receipttableTd2 receipttableTd">$PILOT_REFERENCE</td>
         </tr></table>
         """.trimIndent(),

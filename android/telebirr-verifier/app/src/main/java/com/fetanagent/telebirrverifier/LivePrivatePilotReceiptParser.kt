@@ -236,9 +236,11 @@ class LivePrivatePilotReceiptParser {
     // provider-specific receipttableTd + receipttableTd2 class pair. Some served documents omit a
     // usable label/value row around that cell. Accept exactly one distinct bounded candidate from
     // that provider cell and merge it only into maps that do not already carry a reference. The
+    // preceding status cell is also malformed in some official responses, so anchor on each classed
+    // opening tag before locating its own close instead of letting an earlier unclosed cell consume it.
     // official TLS-origin check and exact authenticated-assignment comparison still happen below.
     val classBoundReferences =
-      cellElementPattern
+      cellOpeningTagPattern
         .findAll(html)
         .mapNotNull { match ->
           val classValue =
@@ -255,7 +257,13 @@ class LivePrivatePilotReceiptParser {
           ) {
             return@mapNotNull null
           }
-          visibleText(match.groupValues[2]).takeIf(receiptReferencePattern::matches)
+          val contentStart = match.range.last + 1
+          val closingIndex = html.indexOf("</td>", contentStart, ignoreCase = true)
+          if (closingIndex < contentStart) return@mapNotNull null
+          val nestedCell = cellOpeningTagPattern.find(html, contentStart)
+          if (nestedCell != null && nestedCell.range.first < closingIndex) return@mapNotNull null
+          visibleText(html.substring(contentStart, closingIndex))
+            .takeIf(receiptReferencePattern::matches)
         }
         .distinct()
         .toList()
@@ -407,11 +415,7 @@ class LivePrivatePilotReceiptParser {
         "<(?:td|th)\\b[^>]*>(.*?)</(?:td|th)>",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
       )
-    private val cellElementPattern =
-      Regex(
-        "<td\\b([^>]*)>(.*?)</td>",
-        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-      )
+    private val cellOpeningTagPattern = Regex("<td\\b([^>]*)>", RegexOption.IGNORE_CASE)
     private val classAttributePattern =
       Regex("\\bclass\\s*=\\s*([\"'])(.*?)\\1", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val commentPattern = Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL)

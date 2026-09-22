@@ -205,6 +205,33 @@ assert.match(provision, /staged\.staged_at < shadow_proof\.expires_at/u);
 assert.match(provision, /staged\.staged_at < attempt\.expires_at/u);
 assert.match(provision, /staged\.observed_at >= attempt\.issued_at/u);
 assert.match(provision, /staged\.observed_at < attempt\.expires_at/u);
+const transitionGate = provision.indexOf('\\if :shadow_request_transition_ready');
+const evidenceGuardStarts = [
+  ...provision.matchAll(/from app\.private_telebirr_shadow_device_evidence_staging staged/gu),
+].map((match) => match.index);
+assert.ok(evidenceGuardStarts[0] < transitionGate && transitionGate < evidenceGuardStarts[1]);
+for (const [index, start] of evidenceGuardStarts.slice(0, 2).entries()) {
+  const end = provision.indexOf(
+    'from app.private_telebirr_shadow_verification_outcomes outcome',
+    start,
+  );
+  assert.ok(end > start && end < evidenceGuardStarts[index + 1]);
+  const guard = provision.slice(start, end);
+  const openingAssociation = guard.match(
+    /or \(\s*app\.private_telebirr_shadow_receipt_cell_opening_retry_is_valid\([\s\S]*?and exists \(\s*select 1\s*from app\.private_telebirr_shadow_receipt_cell_opening_retries retry[\s\S]*?retry\.replacement_shadow_proof_request_id = shadow_proof\.id\s*and staged\.staged_at >= retry\.authorized_at\s*\)\s*\)/u,
+  );
+  assert.ok(openingAssociation, `evidence guard ${index + 1} must bind the opening retry`);
+  assert.match(
+    openingAssociation[0],
+    /retry\.retry_request_key =\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid/u,
+  );
+  assert.equal(
+    [...guard.matchAll(/from app\.private_telebirr_shadow_receipt_cell_opening_retries retry/gu)]
+      .length,
+    1,
+    `evidence guard ${index + 1} must have exactly one opening-retry association`,
+  );
+}
 assert.match(provision, /from safe_reviewable_source_recovery reviewable/u);
 assert.match(provision, /source_live_verification_job_id = job\.id/u);
 assert.match(provision, /proof\.submitted_at \+ case/u);

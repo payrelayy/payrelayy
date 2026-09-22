@@ -15,6 +15,7 @@ assert.match(workflow, /node infra\/operations\/require-production-ci\.mjs/u);
 assert.match(workflow, /production-live-telebirr-receipt-cell-opening-child-preflight\.sql/u);
 assert.match(workflow, /Receipt-cell child preflight classification/u);
 assert.match(workflow, /Receipt-cell child preflight blockers/u);
+assert.match(workflow, /Receipt-cell child preflight warnings/u);
 assert.doesNotMatch(workflow, /pull_request_target|schedule:|repository_dispatch:/u);
 
 assert.equal(
@@ -32,7 +33,12 @@ assert.match(operation, /staged\.staged_at >= retry\.authorized_at/u);
 assert.match(operation, /heartbeat\.last_seen_at > retry\.authorized_at/u);
 assert.match(operation, /heartbeat\.status_code = 'no_assignment'/u);
 assert.match(operation, /pilot\.expires_at > clock\.assessed_at \+ interval '1 hour'/u);
-assert.match(operation, /role\.rolcanlogin or role\.rolpassword is not null/u);
+assert.match(operation, /'executionLoginRoleCount', predicates\.execution_login_role_count/u);
+assert.match(operation, /'shadowRuntimePasswordCount', predicates\.shadow_runtime_password_count/u);
+assert.match(operation, /'dormantCredentialCount', predicates\.dormant_credential_count/u);
+assert.match(operation, /boundary\.execution_login_role_count = 0/u);
+assert.match(operation, /boundary\.shadow_runtime_password_count = 0/u);
+assert.doesNotMatch(operation, /execution_role_credential_count/u);
 assert.match(operation, /'depositJobCount', predicates\.deposit_job_count/u);
 assert.match(operation, /'lineageReady', predicates\.lineage_ready/u);
 assert.match(

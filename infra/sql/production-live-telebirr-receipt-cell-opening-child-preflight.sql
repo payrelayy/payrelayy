@@ -406,8 +406,26 @@ with assessment_clock as materialized (
          'fetanagent_telebirr_shadow_verifier',
          'fetanagent_telebirr_shadow_verifier_runtime'
        )
-         and (role.rolcanlogin or role.rolpassword is not null)
-    ), 7) as execution_role_credential_count,
+         and role.rolcanlogin
+    ), 7) as execution_login_role_count,
+    least((
+      select pg_catalog.count(*)::integer
+        from pg_catalog.pg_roles role
+       where role.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'
+         and role.rolpassword is not null
+    ), 2) as shadow_runtime_password_count,
+    least((
+      select pg_catalog.count(*)::integer
+        from pg_catalog.pg_roles role
+       where role.rolname in (
+         'fetanagent_deposit_executor',
+         'fetanagent_deposit_executor_runtime',
+         'fetanagent_trusted_telebirr_verifier',
+         'fetanagent_trusted_telebirr_verifier_runtime',
+         'fetanagent_telebirr_shadow_verifier'
+       )
+         and role.rolpassword is not null
+    ), 6) as dormant_credential_count,
     least((
       select pg_catalog.count(*)::integer
         from pg_catalog.pg_stat_activity activity
@@ -455,7 +473,9 @@ with assessment_clock as materialized (
     boundary.dry_run_pilot_switch_count,
     boundary.active_activation_epoch_count,
     boundary.disabled_companion_control_count,
-    boundary.execution_role_credential_count,
+    boundary.execution_login_role_count,
+    boundary.shadow_runtime_password_count,
+    boundary.dormant_credential_count,
     boundary.execution_session_count,
     money.reservation_count,
     money.settlement_receipt_count,
@@ -510,7 +530,8 @@ with assessment_clock as materialized (
       and boundary.dry_run_pilot_switch_count = 1
       and boundary.active_activation_epoch_count = 0
       and boundary.disabled_companion_control_count = 1
-      and boundary.execution_role_credential_count = 0
+      and boundary.execution_login_role_count = 0
+      and boundary.shadow_runtime_password_count = 0
       and boundary.execution_session_count = 0 as no_money_boundary_ready,
     coalesce((
       select greatest(
@@ -544,7 +565,8 @@ with assessment_clock as materialized (
       and facts.dry_run_pilot_switch_count = 1
       and facts.active_activation_epoch_count = 0
       and facts.disabled_companion_control_count = 1
-      and facts.execution_role_credential_count = 0
+      and facts.execution_login_role_count = 0
+      and facts.shadow_runtime_password_count = 0
       and facts.execution_session_count = 0
       and facts.outcome_count = 0
       and facts.receipt_count = 0
@@ -577,7 +599,9 @@ select pg_catalog.jsonb_build_object(
   'dryRunPilotSwitchCount', predicates.dry_run_pilot_switch_count,
   'activeActivationEpochCount', predicates.active_activation_epoch_count,
   'disabledCompanionControlCount', predicates.disabled_companion_control_count,
-  'executionRoleCredentialCount', predicates.execution_role_credential_count,
+  'executionLoginRoleCount', predicates.execution_login_role_count,
+  'shadowRuntimePasswordCount', predicates.shadow_runtime_password_count,
+  'dormantCredentialCount', predicates.dormant_credential_count,
   'executionSessionCount', predicates.execution_session_count,
   'reservationCount', predicates.reservation_count,
   'settlementReceiptCount', predicates.settlement_receipt_count,

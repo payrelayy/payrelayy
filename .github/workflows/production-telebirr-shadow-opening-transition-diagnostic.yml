@@ -1,0 +1,197 @@
+name: Diagnose production TeleBirr shadow opening transition
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RUN ONE NO WRITE TELEBIRR SHADOW TRANSITION DIAGNOSTIC
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-shadow-once
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+
+jobs:
+  validate:
+    name: Validate exact no-write production diagnostic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main and exact no-write phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RUN ONE NO WRITE TELEBIRR SHADOW TRANSITION DIAGNOSTIC' ]]
+
+  diagnose:
+    name: Report only redacted transition predicates
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact diagnostic contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Run one no-write rollback-only redacted diagnostic
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECTTIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-shadow-opening-transition-diagnostic"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/production-shadow-opening-transition-diagnostic" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The runner-local protected directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          diagnostic_result="$(
+            timeout --signal=TERM --kill-after=5s 45s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-telebirr-shadow-opening-transition-diagnostic.sql
+          )"
+
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "shadow_opening_transition_diagnostic" and
+            .deploymentTarget == "production" and
+            .noWrite == true and .rolledBack == true and .shareLocksOnly == true and
+            .identifiersRedacted == true and .moneyMoved == false and
+            ([
+              .callerIsPostgres, .validatorShapeReady, .historicalLineageReady,
+              .pilotContractReady, .profileContractReady, .enrollmentAuthorityReady,
+              .shadowBoundaryReady, .runtimeValidatorReady,
+              .manualValidatorComponentsReady, .childShapeReady,
+              .transitionPredicateReady, .noMoneyStateReady, .allReady
+            ] | all(type == "boolean")) and
+            ([.retryCount, .outcomeCount] | all(type == "number" and . >= 0 and . <= 2)) and
+            ([.associatedEvidenceCount, .quarantineCount] |
+              all(type == "number" and . >= 0 and . <= 101)) and
+            ([.executionLoginRoleCount, .shadowRuntimePasswordCount,
+              .executionSessionCount] | all(type == "number" and . >= 0 and . <= 8)) and
+            ([.reservationCount, .settlementReceiptCount, .depositJobCount,
+              .providerEvidenceCount] | all(type == "number" and . >= 0 and . <= 1)) and
+            (.remainingSeconds | type == "number" and . >= 0 and . <= 43205)
+          ' <<<"$diagnostic_result" >/dev/null
+
+          diagnostic_class="$(
+            jq -r '
+              if .allReady then "ready"
+              elif (.runtimeValidatorReady | not) and
+                   .manualValidatorComponentsReady and .validatorShapeReady
+                then "runtime_validator_mismatch"
+              elif (.validatorShapeReady | not) then "validator_shape_mismatch"
+              elif (.associatedEvidenceCount == 0) then "evidence_association"
+              else "other_transition_predicate"
+              end
+            ' <<<"$diagnostic_result"
+          )"
+
+          diagnostic_blockers="$(
+            jq -r '
+              [
+                if .callerIsPostgres then empty else "caller_identity" end,
+                if .retryCount == 1 then empty else "retry_count" end,
+                if .validatorShapeReady then empty else "validator_shape" end,
+                if .historicalLineageReady then empty else "historical_lineage" end,
+                if .pilotContractReady then empty else "pilot_contract" end,
+                if .profileContractReady then empty else "profile_contract" end,
+                if .enrollmentAuthorityReady then empty else "enrollment_authority" end,
+                if .shadowBoundaryReady then empty else "shadow_boundary" end,
+                if .runtimeValidatorReady then empty else "runtime_validator" end,
+                if .childShapeReady then empty else "child_shape" end,
+                if .associatedEvidenceCount > 0 then empty else "staged_evidence" end,
+                if .outcomeCount == 0 then empty else "existing_outcome" end,
+                if .quarantineCount == 0 then empty else "quarantine" end,
+                if .executionLoginRoleCount == 0 then empty else "execution_login" end,
+                if .shadowRuntimePasswordCount == 0 then empty else "shadow_runtime_password" end,
+                if .executionSessionCount == 0 then empty else "execution_sessions" end,
+                if .reservationCount == 0 then empty else "reservations" end,
+                if .settlementReceiptCount == 0 then empty else "settlements" end,
+                if .depositJobCount == 0 then empty else "deposit_queue" end,
+                if .providerEvidenceCount == 0 then empty else "provider_evidence" end,
+                if .remainingSeconds > 3600 then empty else "pilot_freshness" end
+              ] | if length == 0 then "none" else join(",") end
+            ' <<<"$diagnostic_result"
+          )"
+
+          jq '{
+            noWrite, rolledBack, shareLocksOnly, identifiersRedacted,
+            retryCount, validatorShapeReady, historicalLineageReady,
+            pilotContractReady, profileContractReady, enrollmentAuthorityReady,
+            shadowBoundaryReady, runtimeValidatorReady,
+            manualValidatorComponentsReady, childShapeReady,
+            associatedEvidenceCount, outcomeCount, quarantineCount,
+            transitionPredicateReady, executionLoginRoleCount,
+            shadowRuntimePasswordCount, executionSessionCount,
+            reservationCount, settlementReceiptCount, depositJobCount,
+            providerEvidenceCount, remainingSeconds, noMoneyStateReady,
+            allReady, moneyMoved
+          }' <<<"$diagnostic_result" >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice::Shadow transition diagnostic classification: $diagnostic_class."
+          echo "::notice::Shadow transition diagnostic blockers: $diagnostic_blockers."

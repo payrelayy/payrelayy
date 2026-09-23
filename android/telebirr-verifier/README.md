@@ -165,11 +165,19 @@ transaction-status cell cannot consume the receipt cell. Conflicting class-bound
 unattested documents, and ambiguous facts still fail closed; the evidence-only build retains no
 settlement, execution, or financial authority.
 
+Version `0.5.10` extends only the bounded official-receipt network deadline from five to fifteen
+seconds after intermittent header-read timeouts. The fixed host, public-address policy, TLS
+hostname check, redirect rejection, strict UTF-8 HTML requirement, and 32 KiB response cap remain
+unchanged. It also adds two coarse local diagnostic fields for a receipt-shaped page that cannot
+be parsed: whether a script tag is present and whether visible text is empty, brief, or long.
+Those flags do not prove a receipt and do not change any signed review outcome or financial gate.
+
 When the current evidence-only parser cannot extract exactly one invoice value, the operator
 phone may emit a single local `FetanAgentReceiptShape` diagnostic with fixed flags: whether the
 parsed value count was zero or multiple, whether a known label or the official class pair was
-present, and whether the assigned reference token occurred somewhere in the raw HTML. That last
-flag is diagnostic only, **not** receipt proof. No HTML, reference, amount, recipient, digest,
+present, whether the assigned reference token occurred somewhere in the raw HTML, whether a
+script tag was present, and a coarse visible-text length band. The reference-token flag is
+diagnostic only, **not** receipt proof. No HTML, reference, amount, recipient, digest,
 signature, or credential is logged or sent with this diagnostic, and the signed review outcome
 remains unchanged. A diagnostic cannot enable settlement, crediting, queue execution, or money
 movement.
@@ -205,7 +213,7 @@ later separately reviewed build decision after the no-money transport smoke pass
 
 The UI model supports only non-sensitive lifecycle states: `Disabled`, `Enrollment required`,
 `Ready`, `Observing`, `Upload pending`, and `Attention required`, plus protocol/provider/parser
-versions. Version `0.5.9-secure-provisioning-inert` remains compiled with
+versions. Version `0.5.10-secure-provisioning-inert` remains compiled with
 `VERIFIER_ENABLED=false`, so its screen remains `Disabled` and exposes no activation button. An
 enabled, unenrolled operational build exposes one obscured one-use pairing-package field. After
 enrollment it exposes only `Start automatic verification` and `Stop`; it still has no URL, API key,

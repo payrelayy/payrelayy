@@ -240,7 +240,7 @@ class SafeOfficialReceiptTransport(
     )
 
   companion object {
-    const val TOTAL_TIMEOUT_MILLIS = 5_000
+    const val TOTAL_TIMEOUT_MILLIS = 15_000
     const val MAX_RESPONSE_BYTES = 32 * 1024
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 

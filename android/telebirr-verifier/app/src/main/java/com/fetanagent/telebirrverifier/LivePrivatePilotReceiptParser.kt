@@ -21,13 +21,16 @@ data class LivePilotInvoiceShapeDiagnostic(
   val knownLabelPresent: Boolean,
   val officialClassPairPresent: Boolean,
   val assignedReferenceTokenPresent: Boolean,
+  val scriptTagPresent: Boolean,
+  val visibleTextBand: String,
 ) {
   init {
     require(parsedValueCount == "zero" || parsedValueCount == "multiple")
+    require(visibleTextBand in setOf("empty", "brief", "long"))
   }
 
   override fun toString(): String =
-    "invoice_shape=$parsedValueCount,label=$knownLabelPresent,class_pair=$officialClassPairPresent,assigned_token=$assignedReferenceTokenPresent"
+    "invoice_shape=$parsedValueCount,label=$knownLabelPresent,class_pair=$officialClassPairPresent,assigned_token=$assignedReferenceTokenPresent,script_tag=$scriptTagPresent,text_band=$visibleTextBand"
 }
 
 /**
@@ -314,7 +317,8 @@ class LivePrivatePilotReceiptParser {
     rows: Map<String, List<String>>,
     assignedReference: String,
   ): LivePilotInvoiceShapeDiagnostic {
-    val visible = visibleText(html).lowercase(Locale.ROOT)
+    val visibleText = visibleText(html)
+    val visible = visibleText.lowercase(Locale.ROOT)
     val classPairPresent =
       cellOpeningTagPattern.findAll(html).any { match ->
         val classValue = classAttributePattern.find(match.groupValues[1])?.groupValues?.get(2)
@@ -327,6 +331,13 @@ class LivePrivatePilotReceiptParser {
       knownLabelPresent = invoiceLabelAliases.any { visible.contains(it) },
       officialClassPairPresent = classPairPresent,
       assignedReferenceTokenPresent = html.contains(assignedReference),
+      scriptTagPresent = scriptPattern.containsMatchIn(html),
+      visibleTextBand =
+        when {
+          visibleText.isBlank() -> "empty"
+          visibleText.length < 128 -> "brief"
+          else -> "long"
+        },
     )
   }
 

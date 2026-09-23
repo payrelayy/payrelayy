@@ -15,6 +15,7 @@ class DeviceBridgeClientTest {
     assertTrue(DeviceBridgeAppVersion.atLeast("0.5.0-secure-pairing", "0.5.0"))
     assertTrue(DeviceBridgeAppVersion.atLeast("0.5.0-secure-pairing", "0.5.0-secure-pairing"))
     assertTrue(DeviceBridgeAppVersion.atLeast("0.5.1-evidence-only", "0.5.0-secure-pairing"))
+    assertTrue(DeviceBridgeAppVersion.atLeast("0.5.10-evidence-only", "0.5.9-evidence-only"))
     assertFalse(DeviceBridgeAppVersion.atLeast("0.5.0-evidence-only", "0.5.0-secure-pairing"))
     assertFalse(DeviceBridgeAppVersion.atLeast("0.5.0", "0.5.0-secure-pairing"))
     assertFalse(DeviceBridgeAppVersion.atLeast("0.4.9-secure-pairing", "0.5.0"))

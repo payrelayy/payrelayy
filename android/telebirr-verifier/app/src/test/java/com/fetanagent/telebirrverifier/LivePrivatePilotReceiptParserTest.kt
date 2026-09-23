@@ -69,6 +69,7 @@ class LivePrivatePilotReceiptParserTest {
     assertFalse(missingDiagnostic.knownLabelPresent)
     assertFalse(missingDiagnostic.officialClassPairPresent)
     assertTrue(missingDiagnostic.assignedReferenceTokenPresent)
+    assertFalse(missingDiagnostic.scriptTagPresent)
 
     val duplicated =
       parser.parse(livePilotProviderFound(livePilotHtml(duplicateInvoice = true)), assignment)
@@ -79,6 +80,23 @@ class LivePrivatePilotReceiptParserTest {
     assertFalse(duplicateDiagnostic.toString().contains(PILOT_REFERENCE))
     assertFalse(duplicated.toString().contains(PILOT_REFERENCE))
     assertFalse(duplicateDiagnostic.toString().contains(PILOT_RECEIVER_NAME))
+  }
+
+  @Test
+  fun `classifies an empty scripted page without treating it as a receipt or logging content`() {
+    val html = "<html><body><div id=\"app\"></div><script src=\"/app.js\"></script></body></html>"
+    val parsed = parser.parse(livePilotProviderFound(html), assignment)
+    val diagnostic = requireNotNull(parsed.invoiceShapeDiagnostic)
+
+    assertEquals("unknown_layout_invoice_number", (parsed.facts as LivePilotReviewRequiredFacts).reviewReason)
+    assertEquals("zero", diagnostic.parsedValueCount)
+    assertFalse(diagnostic.knownLabelPresent)
+    assertFalse(diagnostic.officialClassPairPresent)
+    assertFalse(diagnostic.assignedReferenceTokenPresent)
+    assertTrue(diagnostic.scriptTagPresent)
+    assertEquals("empty", diagnostic.visibleTextBand)
+    assertFalse(diagnostic.toString().contains(PILOT_REFERENCE))
+    assertFalse(diagnostic.toString().contains("app.js"))
   }
 
   @Test

@@ -106,6 +106,7 @@ class OfficialReceiptTransportTest {
 
   @Test
   fun `fails closed when the total deadline elapses`() {
+    assertEquals(15_000, SafeOfficialReceiptTransport.TOTAL_TIMEOUT_MILLIS)
     var now = 1_000L
     val clock = MillisClock { now }
     val transport =

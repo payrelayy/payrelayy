@@ -127,6 +127,10 @@ select :'source_live_verification_job_id' = 'not-applicable'
 -- protected reference, live proof/job lineage, and shadow request/job identities. None can enable
 -- a switch, create a reservation, settle, enqueue execution, credit KemerBet, or move money.
 \if :review_direct_shadow_request
+  -- The exact direct-child review reads bounded signed attempt history. A read-only
+  -- production measurement exceeded the ordinary 15-second statement budget.
+  -- Extend only this review query; the later locked no-money guard has its own budget.
+  set local statement_timeout = '40s';
   select count(*) = 1 as shadow_request_transition_ready
     from app.private_telebirr_shadow_proof_requests shadow_proof
    where shadow_proof.id = :'target_shadow_proof_request_id'::uuid
@@ -566,6 +570,7 @@ select :'source_live_verification_job_id' = 'not-applicable'
             )
        )
   \gset
+  set local statement_timeout = '15s';
 \else
   select count(*) = 0 as create_first_shadow_request
     from app.private_telebirr_shadow_proof_requests shadow_proof

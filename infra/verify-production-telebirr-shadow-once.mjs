@@ -39,7 +39,31 @@ const productionTunnel = readFileSync(
   'utf8',
 );
 
-const extendedGuardBudget = provision.indexOf("set local statement_timeout = '40s';");
+const directReviewBranch = provision.indexOf('\\if :review_direct_shadow_request');
+const directReviewQuery = provision.indexOf(
+  'select count(*) = 1 as shadow_request_transition_ready',
+  directReviewBranch,
+);
+const directReviewBudget = provision.lastIndexOf(
+  "set local statement_timeout = '40s';",
+  directReviewQuery,
+);
+const directReviewResult = provision.indexOf('\\gset', directReviewQuery);
+const directReviewBudgetRestored = provision.indexOf(
+  "set local statement_timeout = '15s';",
+  directReviewResult,
+);
+const directReviewElse = provision.indexOf('\\else', directReviewResult);
+assert.ok(directReviewBranch > 0 && directReviewBranch < directReviewBudget);
+assert.ok(directReviewBudget < directReviewQuery && directReviewQuery < directReviewResult);
+assert.ok(directReviewResult < directReviewBudgetRestored);
+assert.ok(directReviewBudgetRestored < directReviewElse);
+assert.equal((provision.match(/set local statement_timeout = '40s';/gu) ?? []).length, 2);
+
+const extendedGuardBudget = provision.indexOf(
+  "set local statement_timeout = '40s';",
+  directReviewBudgetRestored,
+);
 const lockedNoMoneyGuard = provision.indexOf('with locked_feature_switches as materialized (');
 const guardResult = provision.indexOf('as shadow_no_money_boundary_ready', lockedNoMoneyGuard);
 const restoredBudget = provision.indexOf("set local statement_timeout = '15s';", guardResult);

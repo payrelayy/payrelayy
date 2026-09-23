@@ -1276,6 +1276,99 @@ export function registerTelebirrShadowVerificationSqlTests(
           { exact_cached_shape: true, unrelated_proof_rejected: true },
         ]);
 
+        const completionDeadline = await client.query<{
+          readonly equivalent_deadline: boolean;
+          readonly exact_guard_shape: boolean;
+        }>(
+          `with outer_gate as materialized (
+             select proof.id as proof_id,
+                    proof.source_unavailable_retry_source_id as source_id,
+                    proof.submitted_at,
+                    (
+                      app.private_telebirr_receipt_shape_network_source_is_valid(
+                        proof.source_unavailable_retry_source_id
+                      )
+                      or app.private_telebirr_receipt_transport_diagnostic_source_is_valid(
+                        proof.source_unavailable_retry_source_id
+                      )
+                    ) as source_valid
+               from app.private_telebirr_shadow_proof_requests proof
+              where proof.id = $1::uuid
+           )
+           select
+             (select count(*) = 1
+                and bool_and(
+                  routine.prosecdef
+                  and routine.proconfig = array['search_path=pg_catalog']::text[]
+                  and not pg_catalog.has_function_privilege(
+                    'anon', routine.oid, 'EXECUTE'
+                  )
+                  and not pg_catalog.has_function_privilege(
+                    'authenticated', routine.oid, 'EXECUTE'
+                  )
+                  and (
+                    length(routine.prosrc) - length(replace(
+                      routine.prosrc,
+                      'app.private_telebirr_receipt_shape_network_retry_deadline(proof.id)',
+                      ''
+                    ))
+                  ) = 0
+                  and (
+                    length(routine.prosrc) - length(replace(
+                      routine.prosrc,
+                      'replacement.source_unavailable_retry_source_id =',
+                      ''
+                    ))
+                  ) / length(
+                    'replacement.source_unavailable_retry_source_id ='
+                  ) = 2
+                  and (
+                    length(routine.prosrc) - length(replace(
+                      routine.prosrc,
+                      'authority_at := pg_catalog.clock_timestamp();',
+                      ''
+                    ))
+                  ) / length(
+                    'authority_at := pg_catalog.clock_timestamp();'
+                  ) = 2
+                )
+                from pg_catalog.pg_proc routine
+               where routine.pronamespace = 'app'::regnamespace
+                 and routine.proname =
+                     'complete_private_telebirr_shadow_verification'
+                 and routine.pronargs = 20) as exact_guard_shape,
+             (
+               (case when gate.source_id is not null and gate.source_valid
+                     then app.private_telebirr_receipt_shape_network_retry_deadline(
+                            gate.proof_id
+                          )
+                     else gate.submitted_at + interval '12 hours' end)
+               is not distinct from
+               (case when gate.source_id is not null and gate.source_valid
+                     then (
+                       select retry.retry_expires_at
+                         from app.private_telebirr_shadow_source_unavailable_retries retry
+                         join app.private_telebirr_shadow_proof_requests replacement
+                           on replacement.id =
+                              retry.replacement_shadow_proof_request_id
+                          and replacement.verification_job_id =
+                              retry.replacement_shadow_verification_job_id
+                        where replacement.id = gate.proof_id
+                          and replacement.source_unavailable_retry_source_id =
+                              retry.source_shadow_proof_request_id
+                          and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                                replacement.id, retry.retry_request_key
+                              )
+                     )
+                     else gate.submitted_at + interval '12 hours' end)
+             ) as equivalent_deadline
+             from outer_gate gate`,
+          [retry.rows[0]!.shadow_proof_request_id],
+        );
+        expect(completionDeadline.rows).toEqual([
+          { exact_guard_shape: true, equivalent_deadline: true },
+        ]);
+
         const assignment = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
              $1::uuid, 'sql-source-retry-verifier', $2::uuid, 120

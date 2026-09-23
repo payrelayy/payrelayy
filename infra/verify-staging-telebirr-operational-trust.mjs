@@ -160,10 +160,10 @@ assert.doesNotMatch(
 assert.match(androidWorkflow, /build-pairing-only-no-money/);
 assert.match(androidWorkflow, /fetanagentVerifierRuntimeMode=pairing_only/);
 assert.doesNotMatch(androidWorkflow, /fetanagentVerifierRuntimeMode=evidence_only/);
-assert.match(androidWorkflow, /VERSION_NAME = "0\.5\.10-secure-pairing"/);
+assert.match(androidWorkflow, /VERSION_NAME = "0\.5\.11-secure-pairing"/);
 assert.match(
   androidWorkflow,
-  /FetanAgent-TeleBirr-Verifier-0\.5\.10-\$DEPLOYMENT_TARGET-pairing-only\.apk/,
+  /FetanAgent-TeleBirr-Verifier-0\.5\.11-\$DEPLOYMENT_TARGET-pairing-only\.apk/,
 );
 assert.match(androidWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
 assert.match(androidWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
@@ -187,10 +187,10 @@ assert.match(androidEvidenceWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/
 assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
 assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
 assert.match(androidEvidenceWorkflow, /VERIFIER_RUNTIME_MODE = \"evidence_only\"/);
-assert.match(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.10-evidence-only\"/);
+assert.match(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.11-evidence-only\"/);
 assert.match(
   androidEvidenceWorkflow,
-  /FetanAgent-TeleBirr-Verifier-0\.5\.10-\$DEPLOYMENT_TARGET-evidence-only\.apk/,
+  /FetanAgent-TeleBirr-Verifier-0\.5\.11-\$DEPLOYMENT_TARGET-evidence-only\.apk/,
 );
 assert.match(androidEvidenceWorkflow, /apksigner verify --verbose --print-certs/);
 assert.match(androidEvidenceWorkflow, /Verified using v1 scheme \(JAR signing\): false/);
@@ -205,9 +205,9 @@ assert.match(androidEvidenceWorkflow, /retention-days: 14/);
 assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement remain disabled/);
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
-assert.match(androidBuild, /"pairing_only" -> "0\.5\.10-secure-pairing"/);
-assert.match(androidBuild, /"evidence_only" -> "0\.5\.10-evidence-only"/);
-assert.match(androidBuild, /versionCode = 15/);
+assert.match(androidBuild, /"pairing_only" -> "0\.5\.11-secure-pairing"/);
+assert.match(androidBuild, /"evidence_only" -> "0\.5\.11-evidence-only"/);
+assert.match(androidBuild, /versionCode = 16/);
 assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /requestedDeploymentTarget in setOf\("staging", "production"\)/);
 assert.match(androidBuild, /serverSignerKeyId == "telebirr-bridge-\$requestedDeploymentTarget-v1"/);

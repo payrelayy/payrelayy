@@ -18,6 +18,7 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
+import java.util.Locale
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -125,6 +126,29 @@ fun interface ReceiptTransportDiagnostics {
   fun record(phase: ReceiptTransportPhase, failure: ReceiptTransportFailure)
 }
 
+/** Fixed categories only. No provider header value, receipt text, or assignment is retained. */
+data class ReceiptResponseDiagnostic(
+  val bodyBytesBand: String,
+  val bodyWordHint: String,
+  val setCookieHeader: Boolean,
+  val varyCookieHeader: Boolean,
+  val varyUserAgentHeader: Boolean,
+  val authenticationHeader: Boolean,
+  val refreshHeader: Boolean,
+) {
+  init {
+    require(bodyBytesBand in setOf("empty", "brief", "small", "medium", "large"))
+    require(bodyWordHint in setOf("challenge_words", "session_words", "access_words", "error_words", "none"))
+  }
+
+  override fun toString(): String =
+    "body_bytes=$bodyBytesBand,word_hint=$bodyWordHint,set_cookie=$setCookieHeader,vary_cookie=$varyCookieHeader,vary_user_agent=$varyUserAgentHeader,authentication=$authenticationHeader,refresh=$refreshHeader"
+}
+
+fun interface ReceiptResponseDiagnostics {
+  fun record(diagnostic: ReceiptResponseDiagnostic)
+}
+
 class ReceiptTransportTrace(private val diagnostics: ReceiptTransportDiagnostics) {
   var phase: ReceiptTransportPhase = ReceiptTransportPhase.DNS
     private set
@@ -152,9 +176,14 @@ data class RawHttpsResponse(
   val contentType: String?,
   val contentEncoding: String?,
   val body: ByteArray,
+  val setCookieHeader: Boolean = false,
+  val varyCookieHeader: Boolean = false,
+  val varyUserAgentHeader: Boolean = false,
+  val authenticationHeader: Boolean = false,
+  val refreshHeader: Boolean = false,
 ) {
   override fun toString(): String =
-    "RawHttpsResponse(statusCode=$statusCode,contentType=$contentType,contentEncoding=$contentEncoding,body=<redacted>)"
+    "RawHttpsResponse(statusCode=$statusCode,contentType=<redacted>,contentEncoding=<redacted>,body=<redacted>)"
 }
 
 class SafeOfficialReceiptTransport(
@@ -162,6 +191,7 @@ class SafeOfficialReceiptTransport(
   private val exchange: HttpsExchange = PlatformHttpsExchange,
   private val clock: MillisClock = MillisClock(System::currentTimeMillis),
   private val diagnostics: ReceiptTransportDiagnostics = ReceiptTransportDiagnostics { _, _ -> },
+  private val responseDiagnostics: ReceiptResponseDiagnostics = ReceiptResponseDiagnostics { _ -> },
 ) : ProviderTransport {
   override fun retrieve(route: OfficialReceiptRoute): ProviderDocument {
     val startedAt = clock.nowMillis()
@@ -199,6 +229,7 @@ class SafeOfficialReceiptTransport(
         !isStrictUtf8Html(response.contentType) -> unavailable("provider")
         else -> {
           val decoded = decodeUtf8Strict(response.body) ?: return unavailable("parser")
+          recordResponse(response, decoded)
           ProviderDocument.Found(
             utf8Body = decoded,
             sourceDocumentDigest = CanonicalTranscripts.sha256(response.body),
@@ -238,6 +269,42 @@ class SafeOfficialReceiptTransport(
       uncertainty = uncertainty,
       sourceDocumentDigest = CanonicalTranscripts.sha256("telebirr-unavailable-$uncertainty-v1".toByteArray()),
     )
+
+  private fun recordResponse(response: RawHttpsResponse, decoded: String) {
+    val lower = decoded.lowercase(Locale.ROOT)
+    val hint =
+      when {
+        listOf("captcha", "verify you are human", "human verification").any(lower::contains) -> "challenge_words"
+        listOf("sign in", "log in", "login", "session", "cookie").any(lower::contains) -> "session_words"
+        listOf("access denied", "forbidden", "blocked").any(lower::contains) -> "access_words"
+        listOf("not found", "invalid", "error", "unavailable").any(lower::contains) -> "error_words"
+        else -> "none"
+      }
+    val bodyBand =
+      when (response.body.size) {
+        0 -> "empty"
+        in 1..255 -> "brief"
+        in 256..2047 -> "small"
+        in 2048..8191 -> "medium"
+        else -> "large"
+      }
+    // A diagnostic callback must never affect the attested provider observation.
+    try {
+      responseDiagnostics.record(
+        ReceiptResponseDiagnostic(
+          bodyBytesBand = bodyBand,
+          bodyWordHint = hint,
+          setCookieHeader = response.setCookieHeader,
+          varyCookieHeader = response.varyCookieHeader,
+          varyUserAgentHeader = response.varyUserAgentHeader,
+          authenticationHeader = response.authenticationHeader,
+          refreshHeader = response.refreshHeader,
+        ),
+      )
+    } catch (_: RuntimeException) {
+      // No exception text or provider-derived value may enter the operator log.
+    }
+  }
 
   companion object {
     const val TOTAL_TIMEOUT_MILLIS = 15_000
@@ -367,6 +434,11 @@ object PlatformHttpsExchange : HttpsExchange {
           contentType = headers.single("content-type"),
           contentEncoding = headers.single("content-encoding"),
           body = body,
+          setCookieHeader = headers.present("set-cookie"),
+          varyCookieHeader = headers.variesOn("cookie"),
+          varyUserAgentHeader = headers.variesOn("user-agent"),
+          authenticationHeader = headers.present("www-authenticate"),
+          refreshHeader = headers.present("refresh"),
         )
       }
     }
@@ -381,6 +453,11 @@ object PlatformHttpsExchange : HttpsExchange {
       require(candidates.size == 1) { "Duplicate security-relevant HTTP header" }
       return candidates.single()
     }
+
+    fun present(name: String): Boolean = values.containsKey(name)
+
+    fun variesOn(name: String): Boolean =
+      values["vary"]?.any { value -> value.split(',').any { it.trim().equals(name, ignoreCase = true) } } == true
   }
 
   private fun readHeaders(

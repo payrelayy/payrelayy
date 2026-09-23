@@ -125,6 +125,12 @@ object VerifierRuntimeComposition {
                 // response data, receipt content, or assignment material can enter this log.
                 Log.i("FetanAgentReceiptTransport", "phase=$phase failure=$failure")
               },
+            responseDiagnostics =
+              ReceiptResponseDiagnostics { diagnostic ->
+                // Only bounded booleans and fixed categories are logged. No response/header
+                // values, receipt text, reference, cookie, or assignment may enter this log.
+                Log.i("FetanAgentReceiptResponse", diagnostic.toString())
+              },
           ),
         parser = LivePrivatePilotReceiptParser(),
         uploader = client,

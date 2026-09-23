@@ -39,6 +39,16 @@ const productionTunnel = readFileSync(
   'utf8',
 );
 
+const extendedGuardBudget = provision.indexOf("set local statement_timeout = '40s';");
+const lockedNoMoneyGuard = provision.indexOf('with locked_feature_switches as materialized (');
+const guardResult = provision.indexOf('as shadow_no_money_boundary_ready', lockedNoMoneyGuard);
+const restoredBudget = provision.indexOf("set local statement_timeout = '15s';", guardResult);
+assert.ok(extendedGuardBudget > 0 && extendedGuardBudget < lockedNoMoneyGuard);
+assert.ok(lockedNoMoneyGuard < guardResult && guardResult < restoredBudget);
+assert.match(provision, /set local lock_timeout = '2s';/u);
+assert.match(workflow, /provision_result="\$\(timeout --signal=TERM --kill-after=5s 90s/u);
+assert.match(workflow, /disable_result="\$\(timeout --signal=TERM --kill-after=5s 45s/u);
+
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/u);

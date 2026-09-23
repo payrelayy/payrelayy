@@ -760,6 +760,11 @@ select :'source_live_verification_job_id' = 'not-applicable'
 
 -- Lock the complete seven-row boundary while provisioning. The runtime functions repeat this
 -- no-money proof for every write, so a later switch transition stops shadow work fail closed.
+-- The immutable diagnostic lineage adds a bounded signed-history read to this
+-- guard. Its measured read-only execution exceeds the ordinary 15-second
+-- statement budget; extend only this exact pre-provision guard, retaining the
+-- two-second lock limit and restoring the ordinary budget immediately below.
+set local statement_timeout = '40s';
 with locked_feature_switches as materialized (
   select feature_switch.feature_key,
          feature_switch.mode,
@@ -1489,6 +1494,8 @@ select (select count(*) from locked_feature_switches) = 7
   \warn 'The exact armed dry-run shadow pilot and disabled financial boundary are required.'
   select 1 / 0 as rejected;
 \endif
+
+set local statement_timeout = '15s';
 
 do $fetanagent$
 declare

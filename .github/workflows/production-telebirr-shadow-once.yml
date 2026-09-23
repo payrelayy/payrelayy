@@ -702,7 +702,7 @@ jobs:
           sudo chown root:root "$protected/pins.json" "$protected/supabase-ca.crt"
 
           export TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD="$runtime_password"
-          provision_result="$(timeout --signal=TERM --kill-after=5s 45s \
+          provision_result="$(timeout --signal=TERM --kill-after=5s 90s \
             psql -X --quiet --tuples-only --no-align \
               --file=infra/sql/production-telebirr-shadow-verifier-once-provision.sql)"
           unset TELEBIRR_SHADOW_VERIFIER_RUNTIME_PASSWORD runtime_password

@@ -301,9 +301,14 @@ jobs:
                           network_retry.replacement_shadow_verification_job_id
                     where network_retry.reason_code =
                           'source_unavailable_review_retry_no_credit'
-                      and app.private_telebirr_receipt_shape_network_source_is_valid(
-                            network_retry.source_shadow_proof_request_id
-                          )
+                      and (
+                        app.private_telebirr_receipt_shape_network_source_is_valid(
+                          network_retry.source_shadow_proof_request_id
+                        )
+                        or app.private_telebirr_receipt_transport_diagnostic_source_is_valid(
+                          network_retry.source_shadow_proof_request_id
+                        )
+                      )
                       and proof.proof_status = 'verification_queued'
                       and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
                       and app.private_telebirr_shadow_source_unavailable_retry_is_valid(

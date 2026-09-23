@@ -1243,6 +1243,39 @@ export function registerTelebirrShadowVerificationSqlTests(
           },
         ]);
 
+        const cachedLineage = await client.query<{
+          readonly exact_cached_shape: boolean;
+          readonly unrelated_proof_rejected: boolean;
+        }>(
+          `select
+             (select count(*) = 1
+                and bool_and(
+                  position('with source_validation as materialized' in routine.prosrc) > 0
+                  and (
+                    length(routine.prosrc) -
+                    length(replace(
+                      routine.prosrc,
+                      'app.private_telebirr_receipt_shape_network_source_is_valid(source.id)',
+                      ''
+                    ))
+                  ) / length(
+                    'app.private_telebirr_receipt_shape_network_source_is_valid(source.id)'
+                  ) = 1
+                )
+                from pg_catalog.pg_proc routine
+               where routine.pronamespace = 'app'::regnamespace
+                 and routine.proname =
+                     'private_telebirr_shadow_source_unavailable_retry_is_valid'
+                 and routine.pronargs = 2) as exact_cached_shape,
+             not app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+               $1::uuid, $2::uuid
+             ) as unrelated_proof_rejected`,
+          [randomUUID(), retryRequestKey],
+        );
+        expect(cachedLineage.rows).toEqual([
+          { exact_cached_shape: true, unrelated_proof_rejected: true },
+        ]);
+
         const assignment = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
              $1::uuid, 'sql-source-retry-verifier', $2::uuid, 120

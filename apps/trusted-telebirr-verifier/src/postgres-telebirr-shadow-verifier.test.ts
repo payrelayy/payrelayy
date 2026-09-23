@@ -254,8 +254,8 @@ describe('TeleBirr shadow PostgreSQL boundary', () => {
     expect(clientConfig).toMatchObject({
       application_name: 'fetanagent_telebirr_shadow_verifier',
       connectionTimeoutMillis: 5_000,
-      statement_timeout: 40_000,
-      query_timeout: 45_000,
+      statement_timeout: 90_000,
+      query_timeout: 95_000,
       ssl: { ca, rejectUnauthorized: true },
     });
     expect(clientConfig).not.toHaveProperty('ca');

@@ -833,6 +833,15 @@ with locked_feature_switches as materialized (
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
+       or (
+         app.private_telebirr_receipt_shape_network_source_is_valid(
+           shadow_proof.source_unavailable_retry_source_id
+         )
+         and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+               shadow_proof.id,
+               nullif(:'recovery_request_key', 'not-applicable')::uuid
+             )
+       )
      )
      and (
        exists (

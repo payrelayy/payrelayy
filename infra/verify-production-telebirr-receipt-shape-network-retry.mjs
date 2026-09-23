@@ -6,6 +6,9 @@ const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf
 const migration = read(
   '../supabase/migrations/20260922224253_retry_reviewed_receipt_shape_network_unavailable.sql',
 );
+const historicalCountCorrection = read(
+  '../supabase/migrations/20260923125057_receipt_shape_network_historical_review_count.sql',
+);
 const workflow = read('../.github/workflows/production-telebirr-receipt-shape-network-retry.yml');
 const operation = read('./sql/production-telebirr-receipt-shape-network-retry.sql');
 const shadowWorkflow = read('../.github/workflows/production-telebirr-shadow-once.yml');
@@ -70,6 +73,26 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(migration, /update app\.feature_switches/iu);
 assert.doesNotMatch(migration, /grant execute/iu);
+
+assert.match(
+  historicalCountCorrection,
+  /old_fragment constant text :=\s*'       and retry\.source_receipt_shape_diag_review_count = retry\.source_attempt_count'/u,
+);
+assert.match(
+  historicalCountCorrection,
+  /new_fragment constant text :=\s*'       and retry\.source_receipt_shape_diag_review_count between 1 and retry\.source_attempt_count'/u,
+);
+assert.match(historicalCountCorrection, /expected_source_sha256 constant text := '[0-9a-f]{64}'/u);
+assert.match(historicalCountCorrection, /routine\.proacl is not distinct from original_acl/u);
+assert.match(historicalCountCorrection, /routine\.prosecdef = original_security_definer/u);
+assert.match(historicalCountCorrection, /valid_count <> 1/u);
+assert.equal((historicalCountCorrection.match(/^do \$/gmu) ?? []).length, 1);
+assert.equal((historicalCountCorrection.match(/^commit;$/gmu) ?? []).length, 1);
+assert.doesNotMatch(
+  historicalCountCorrection,
+  /(?:insert|update|delete)\s+(?:into\s+|from\s+)?app\./iu,
+);
+assert.doesNotMatch(historicalCountCorrection, /grant execute|update app\.feature_switches/iu);
 
 assert.match(workflow, /GITHUB_REF" == 'refs\/heads\/main'/u);
 assert.match(workflow, /CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);

@@ -128,7 +128,7 @@ select pg_catalog.json_build_object(
   'replacementCount', (select pg_catalog.count(*) from reviewed_network_retry_result),
   'remainingSeconds', (
     select pg_catalog.floor(
-      pg_catalog.extract(epoch from result.retry_expires_at -
+      extract(epoch from result.retry_expires_at -
         pg_catalog.clock_timestamp())
     )::integer from reviewed_network_retry_result result
   ),

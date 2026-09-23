@@ -114,6 +114,8 @@ assert.match(operation, /private_live_telebirr_shadow_pilot_contract_matches/u);
 assert.match(operation, /private_live_telebirr_shadow_profile_contract_matches/u);
 assert.match(operation, /retry_private_telebirr_shadow_after_source_unavailable/u);
 assert.match(operation, /pg_catalog\.gen_random_uuid\(\)/u);
+assert.match(operation, /extract\(epoch from result\.retry_expires_at/u);
+assert.doesNotMatch(operation, /pg_catalog\.extract\s*\(/u);
 assert.match(operation, /not result\.already_retried/u);
 assert.match(operation, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
 assert.match(operation, /private_live_deposit_pilot_reservations/u);

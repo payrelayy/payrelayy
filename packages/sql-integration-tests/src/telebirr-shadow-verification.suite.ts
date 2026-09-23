@@ -97,9 +97,9 @@ function signature(byte: number): { readonly digest: string; readonly encoded: s
   }
 }
 
-async function enableBoundedShadowLeasing(client: Client): Promise<void> {
+async function enableBoundedShadowLeasing(client: Client, validForMinutes = 20): Promise<void> {
   const testOnlyPassword = randomUUID();
-  const validUntil = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const validUntil = new Date(Date.now() + validForMinutes * 60 * 1000).toISOString();
   await client.query(
     `alter role ${verifierRuntime} with login
        password '${testOnlyPassword}' valid until '${validUntil}'`,
@@ -829,6 +829,7 @@ export function registerTelebirrShadowVerificationSqlTests(
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(
         /role\.rolvaliduntil > pg_catalog\.clock_timestamp\(\)/u,
       );
+      expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/interval '25 hours'/u);
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/auth\.rolpassword is not null/u);
       const shadowLease = await client.query<{ readonly definition: string }>(`
         select lower(pg_get_functiondef(
@@ -1008,7 +1009,7 @@ export function registerTelebirrShadowVerificationSqlTests(
         );
         expect(idle.rows).toEqual([]);
 
-        await enableBoundedShadowLeasing(client);
+        await enableBoundedShadowLeasing(client, 24 * 60);
         const lease = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
              $1::uuid, 'sql-shadow-skip-exhausted', $2::uuid, 120

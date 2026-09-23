@@ -43,7 +43,7 @@ begin
        and auth.rolpassword is not null
        and role.rolvaliduntil > pg_catalog.clock_timestamp()
        and role.rolvaliduntil <=
-           pg_catalog.clock_timestamp() + interval '25 minutes'
+           pg_catalog.clock_timestamp() + interval '25 hours'
   ) then
     return;
   end if;

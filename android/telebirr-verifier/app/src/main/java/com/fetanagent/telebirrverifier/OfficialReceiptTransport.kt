@@ -10,6 +10,7 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import java.nio.ByteBuffer
@@ -23,6 +24,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -94,7 +96,51 @@ fun interface HttpsExchange {
     resolvedAddresses: List<InetAddress>,
     timeoutMillis: Int,
     maximumBytes: Int,
+    trace: ReceiptTransportTrace,
   ): RawHttpsResponse
+}
+
+enum class ReceiptTransportPhase {
+  DNS,
+  ADDRESS_POLICY,
+  TCP,
+  TLS,
+  HOSTNAME,
+  REQUEST,
+  HEADERS,
+  BODY,
+  DEADLINE,
+}
+
+enum class ReceiptTransportFailure {
+  NO_ADDRESS,
+  NON_PUBLIC_ADDRESS,
+  TIMEOUT,
+  TLS_ERROR,
+  IO_ERROR,
+  SECURITY_ERROR,
+}
+
+fun interface ReceiptTransportDiagnostics {
+  fun record(phase: ReceiptTransportPhase, failure: ReceiptTransportFailure)
+}
+
+class ReceiptTransportTrace(private val diagnostics: ReceiptTransportDiagnostics) {
+  var phase: ReceiptTransportPhase = ReceiptTransportPhase.DNS
+    private set
+
+  fun advance(next: ReceiptTransportPhase) {
+    phase = next
+  }
+
+  fun fail(failure: ReceiptTransportFailure) {
+    // Diagnostics must never change the signed observation or the fail-closed result.
+    try {
+      diagnostics.record(phase, failure)
+    } catch (_: RuntimeException) {
+      // No exception text or other mutable context may be sent to the operator log.
+    }
+  }
 }
 
 fun interface MillisClock {
@@ -115,21 +161,33 @@ class SafeOfficialReceiptTransport(
   private val resolver: HostResolver = BoundedSystemHostResolver,
   private val exchange: HttpsExchange = PlatformHttpsExchange,
   private val clock: MillisClock = MillisClock(System::currentTimeMillis),
+  private val diagnostics: ReceiptTransportDiagnostics = ReceiptTransportDiagnostics { _, _ -> },
 ) : ProviderTransport {
   override fun retrieve(route: OfficialReceiptRoute): ProviderDocument {
     val startedAt = clock.nowMillis()
     val deadline = startedAt + TOTAL_TIMEOUT_MILLIS
+    val trace = ReceiptTransportTrace(diagnostics)
     return try {
       require(route.host == OfficialReceiptRoute.OFFICIAL_HOST)
       val addresses = resolver.resolve(route.host, remaining(deadline))
-      if (addresses.isEmpty() || addresses.any { !PublicInternetAddressPolicy.isPublic(it) }) {
+      trace.advance(ReceiptTransportPhase.ADDRESS_POLICY)
+      if (addresses.isEmpty()) {
+        trace.fail(ReceiptTransportFailure.NO_ADDRESS)
+        return unavailable("network")
+      }
+      if (addresses.any { !PublicInternetAddressPolicy.isPublic(it) }) {
+        trace.fail(ReceiptTransportFailure.NON_PUBLIC_ADDRESS)
         return unavailable("network")
       }
       val response =
         route.useUrl { url ->
-          exchange.execute(url, addresses.toList(), remaining(deadline), MAX_RESPONSE_BYTES)
+          exchange.execute(url, addresses.toList(), remaining(deadline), MAX_RESPONSE_BYTES, trace)
         }
-      if (clock.nowMillis() > deadline) return unavailable("network")
+      if (clock.nowMillis() > deadline) {
+        trace.advance(ReceiptTransportPhase.DEADLINE)
+        trace.fail(ReceiptTransportFailure.TIMEOUT)
+        return unavailable("network")
+      }
       when {
         response.statusCode in 300..399 -> unavailable("provider")
         // A bare status code is not an attested provider negative-response contract. Treat every
@@ -150,10 +208,19 @@ class SafeOfficialReceiptTransport(
         }
       }
     } catch (_: TimeoutException) {
+      trace.fail(ReceiptTransportFailure.TIMEOUT)
+      unavailable("network")
+    } catch (_: SocketTimeoutException) {
+      trace.fail(ReceiptTransportFailure.TIMEOUT)
+      unavailable("network")
+    } catch (_: SSLException) {
+      trace.fail(ReceiptTransportFailure.TLS_ERROR)
       unavailable("network")
     } catch (_: IOException) {
+      trace.fail(ReceiptTransportFailure.IO_ERROR)
       unavailable("network")
     } catch (_: SecurityException) {
+      trace.fail(ReceiptTransportFailure.SECURITY_ERROR)
       unavailable("network")
     } catch (_: IllegalArgumentException) {
       unavailable("provider")
@@ -228,6 +295,7 @@ object PlatformHttpsExchange : HttpsExchange {
     resolvedAddresses: List<InetAddress>,
     timeoutMillis: Int,
     maximumBytes: Int,
+    trace: ReceiptTransportTrace,
   ): RawHttpsResponse {
     require(url.protocol == "https")
     require(url.host == OfficialReceiptRoute.OFFICIAL_HOST)
@@ -239,7 +307,7 @@ object PlatformHttpsExchange : HttpsExchange {
     var lastFailure: IOException? = null
     for (address in resolvedAddresses) {
       try {
-        return executePinned(url, address, deadlineNanos, maximumBytes)
+        return executePinned(url, address, deadlineNanos, maximumBytes, trace)
       } catch (failure: IOException) {
         lastFailure = failure
       }
@@ -252,10 +320,13 @@ object PlatformHttpsExchange : HttpsExchange {
     address: InetAddress,
     deadlineNanos: Long,
     maximumBytes: Int,
+    trace: ReceiptTransportTrace,
   ): RawHttpsResponse {
     Socket().use { plainSocket ->
+      trace.advance(ReceiptTransportPhase.TCP)
       plainSocket.connect(InetSocketAddress(address, HTTPS_PORT), remainingMillis(deadlineNanos))
       plainSocket.soTimeout = remainingMillis(deadlineNanos)
+      trace.advance(ReceiptTransportPhase.TLS)
       val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
       val tlsSocket =
         factory.createSocket(plainSocket, url.host, HTTPS_PORT, true) as? SSLSocket
@@ -267,10 +338,12 @@ object PlatformHttpsExchange : HttpsExchange {
         socket.sslParameters = parameters
         socket.soTimeout = remainingMillis(deadlineNanos)
         socket.startHandshake()
+        trace.advance(ReceiptTransportPhase.HOSTNAME)
         if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(url.host, socket.session)) {
           throw SSLHandshakeException("Official provider hostname verification failed")
         }
 
+        trace.advance(ReceiptTransportPhase.REQUEST)
         val request =
           buildString {
               append("GET ")
@@ -285,7 +358,9 @@ object PlatformHttpsExchange : HttpsExchange {
         socket.outputStream.flush()
 
         val input = BufferedInputStream(socket.inputStream)
+        trace.advance(ReceiptTransportPhase.HEADERS)
         val headers = readHeaders(input, socket, deadlineNanos)
+        trace.advance(ReceiptTransportPhase.BODY)
         val body = readBody(input, socket, deadlineNanos, headers, maximumBytes)
         return RawHttpsResponse(
           statusCode = headers.statusCode,

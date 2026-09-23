@@ -1,6 +1,7 @@
 package com.fetanagent.telebirrverifier
 
 import android.content.Context
+import android.util.Log
 import java.time.Instant
 
 fun interface VerifierRuntimeCycle {
@@ -116,7 +117,15 @@ object VerifierRuntimeComposition {
         signerPublicSpkiDer = profile.assignmentSignerPublicKeySpkiDer(),
         identity = identity,
         assignmentSource = client,
-        transport = SafeOfficialReceiptTransport(),
+        transport =
+          SafeOfficialReceiptTransport(
+            diagnostics =
+              ReceiptTransportDiagnostics { phase, failure ->
+                // Only fixed enum values are logged; no route, reference, address, exception,
+                // response data, receipt content, or assignment material can enter this log.
+                Log.i("FetanAgentReceiptTransport", "phase=$phase failure=$failure")
+              },
+          ),
         parser = LivePrivatePilotReceiptParser(),
         uploader = client,
         workStore = EncryptedFileLivePilotWorkStore.forApplication(context),

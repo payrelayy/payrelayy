@@ -97,6 +97,15 @@ function signature(byte: number): { readonly digest: string; readonly encoded: s
   }
 }
 
+async function enableBoundedShadowLeasing(client: Client, validForMinutes = 20): Promise<void> {
+  const testOnlyPassword = randomUUID();
+  const validUntil = new Date(Date.now() + validForMinutes * 60 * 1000).toISOString();
+  await client.query(
+    `alter role ${verifierRuntime} with login
+       password '${testOnlyPassword}' valid until '${validUntil}'`,
+  );
+}
+
 async function createTelegramShadowInbound(
   client: Client,
   customerId: string,
@@ -817,6 +826,20 @@ export function registerTelebirrShadowVerificationSqlTests(
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(
         /if not app\.private_telebirr_shadow_mode_is_ready\(enrollment\.pilot_revision_id\) then\s+return;\s+end if;/u,
       );
+      expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(
+        /role\.rolvaliduntil > pg_catalog\.clock_timestamp\(\)/u,
+      );
+      expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/interval '25 hours'/u);
+      expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/auth\.rolpassword is not null/u);
+      const shadowLease = await client.query<{ readonly definition: string }>(`
+        select lower(pg_get_functiondef(
+          'app.lease_private_telebirr_shadow_assignment(uuid,text,uuid,integer)'::regprocedure
+        )) as definition
+      `);
+      expect(shadowLease.rows[0]?.definition ?? '').toMatch(
+        /attempt\.verification_job_id = candidate\.verification_job_id\s+\) < 100/u,
+      );
+      expect(shadowLease.rows[0]?.definition ?? '').toMatch(/if attempt_count >= 100 then/u);
     });
 
     it('keeps disabled broker polling idle without creating a live or shadow attempt', async () => {
@@ -863,6 +886,151 @@ export function registerTelebirrShadowVerificationSqlTests(
                     from app.private_telebirr_shadow_verification_attempts) as shadow_attempts
         `);
         expect(after.rows).toEqual(before.rows);
+      });
+    });
+
+    it('keeps queued shadow work idle until bounded provisioning and skips an exhausted older proof', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareTelebirrPilot(client, getOwnerAdminId());
+        const gates = await client.query<{ readonly feature_key: string }>(
+          `update app.feature_switches
+              set mode = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then 'dry_run'::app.feature_mode
+                    else 'disabled'::app.feature_mode
+                  end,
+                  settings = case
+                    when feature_key = 'private_live_deposit_pilot'
+                      then jsonb_build_object(
+                        'contract_version', 1,
+                        'pilot_revision_id', $1::uuid,
+                        'configuration_digest', $2::text
+                      )
+                    else '{}'::jsonb
+                  end
+            where feature_key in (
+              'private_live_deposit_pilot', 'payment_verification',
+              'deposit_execution', 'withdrawal_validation', 'withdrawal_collection',
+              'cbe_birr_authoritative_verification', 'telebirr_authoritative_verification'
+            )
+            returning feature_key`,
+          [pilot.pilotRevisionId, pilot.configurationDigest],
+        );
+        expect(gates.rows).toHaveLength(7);
+        const shadowReady = await client.query<{ readonly ready: boolean }>(
+          'select app.private_telebirr_shadow_mode_is_ready($1::uuid) as ready',
+          [pilot.pilotRevisionId],
+        );
+        expect(shadowReady.rows).toEqual([{ ready: true }]);
+        const verifierDormant = await client.query<{ readonly dormant: boolean }>(`
+          select not role.rolcanlogin and auth.rolpassword is null as dormant
+            from pg_catalog.pg_roles role
+            join pg_catalog.pg_authid auth on auth.oid = role.oid
+           where role.rolname = '${verifierRuntime}'
+        `);
+        expect(verifierDormant.rows).toEqual([{ dormant: true }]);
+
+        const proofs: { readonly id: string; readonly verification_job_id: string }[] = [];
+        for (const ordinal of [1, 2]) {
+          const fingerprint = createHash('sha256')
+            .update(`idle-lease-proof:${ordinal}:${randomUUID()}`, 'utf8')
+            .digest('hex');
+          const submittedAt = new Date(Date.now() - (3 - ordinal) * 1000);
+          const inserted = await client.query<{
+            readonly id: string;
+            readonly verification_job_id: string;
+          }>(
+            `insert into app.private_telebirr_shadow_proof_requests (
+               pilot_revision_id, submitting_customer_id, player_account_id,
+               payment_provider_id, receiver_profile_id, pilot_configuration_digest,
+               candidate_reference_ciphertext, candidate_reference_fingerprint,
+               candidate_reference_masked, reference_encryption_key_version,
+               reference_profile_version, submitted_at, not_before, expires_at
+             ) values (
+               $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::text,
+               $7::text, $8::text, $9::text, 2, 2,
+               $10::timestamptz, $10::timestamptz,
+               least($10::timestamptz + interval '5 minutes', $11::timestamptz)
+             ) returning id, verification_job_id`,
+            [
+              pilot.pilotRevisionId,
+              pilot.submittingCustomerId,
+              pilot.playerAccountIds[0]!,
+              pilot.paymentProviderId,
+              pilot.receiverProfileId,
+              pilot.configurationDigest,
+              `v2.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${fingerprint.slice(0, 11)}`,
+              fingerprint,
+              `***${fingerprint.slice(0, 4).toUpperCase()}`,
+              submittedAt,
+              pilot.expiresAt,
+            ],
+          );
+          expect(inserted.rows).toHaveLength(1);
+          proofs.push(inserted.rows[0]!);
+        }
+
+        const exhausted = await client.query(
+          `insert into app.private_telebirr_shadow_verification_attempts (
+             shadow_proof_request_id, verification_job_id, attempt_number,
+             lease_request_key, lease_request_digest, lease_token, request_id,
+             assignment_id, requested_lease_seconds, leased_by,
+             device_enrollment_id, device_id_snapshot, device_key_id_snapshot,
+             device_public_key_spki_sha256_snapshot, lease_nonce_digest,
+             challenge_id, challenge_digest, issued_at, expires_at
+           )
+           select proof.id, proof.verification_job_id, ordinal,
+                  gen_random_uuid(),
+                  'sha256:' || repeat(md5('lease:' || ordinal::text), 2),
+                  gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+                  120, 'sql-exhaustion-fixture',
+                  enrollment.id, enrollment.device_id, enrollment.key_id,
+                  enrollment.public_key_spki_sha256,
+                  'sha256:' || repeat(md5('nonce:' || ordinal::text), 2),
+                  gen_random_uuid(),
+                  'sha256:' || repeat(md5('challenge:' || ordinal::text), 2),
+                  clock_timestamp() - interval '1 second',
+                  clock_timestamp() - interval '500 milliseconds'
+             from app.private_telebirr_shadow_proof_requests proof
+             join app.private_live_telebirr_device_enrollments enrollment
+               on enrollment.id = $2::uuid
+            cross join generate_series(1, 100) ordinal
+            where proof.id = $1::uuid`,
+          [proofs[0]!.id, pilot.deviceEnrollmentId],
+        );
+        expect(exhausted.rowCount).toBe(100);
+
+        const idle = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-shadow-idle-gate', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(idle.rows).toEqual([]);
+
+        await enableBoundedShadowLeasing(client, 24 * 60);
+        const lease = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-shadow-skip-exhausted', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(lease.rows).toHaveLength(1);
+        expect(lease.rows[0]!.job_id).toBe(proofs[1]!.verification_job_id);
+        expect(lease.rows[0]!.attempt_number).toBe(1);
+
+        const attempts = await client.query<{ readonly exhausted: string; readonly later: string }>(
+          `select
+             (select count(*)::text
+                from app.private_telebirr_shadow_verification_attempts
+               where shadow_proof_request_id = $1::uuid) as exhausted,
+             (select count(*)::text
+                from app.private_telebirr_shadow_verification_attempts
+               where shadow_proof_request_id = $2::uuid) as later`,
+          [proofs[0]!.id, proofs[1]!.id],
+        );
+        expect(attempts.rows).toEqual([{ exhausted: '100', later: '1' }]);
       });
     });
 
@@ -1369,6 +1537,7 @@ export function registerTelebirrShadowVerificationSqlTests(
           { exact_guard_shape: true, equivalent_deadline: true },
         ]);
 
+        await enableBoundedShadowLeasing(client);
         const assignment = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
              $1::uuid, 'sql-source-retry-verifier', $2::uuid, 120
@@ -1626,6 +1795,7 @@ export function registerTelebirrShadowVerificationSqlTests(
         );
         expect(proof.rows).toHaveLength(1);
 
+        await enableBoundedShadowLeasing(client);
         const leaseRequestKey = randomUUID();
         const lease = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(

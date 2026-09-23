@@ -7,18 +7,28 @@ set local statement_timeout = '45s';
 
 create temp table reviewed_network_source on commit drop as
 select proof.id as source_proof_id,
-       proof.pilot_revision_id,
+       target_pilot.id as pilot_revision_id,
        pg_catalog.gen_random_uuid() as retry_request_key
   from app.private_telebirr_shadow_receipt_shape_diag_retries shape_retry
   join app.private_telebirr_shadow_proof_requests proof
     on proof.id = shape_retry.replacement_shadow_proof_request_id
    and proof.verification_job_id =
        shape_retry.replacement_shadow_verification_job_id
-  join app.private_live_deposit_pilot_revisions pilot
-    on pilot.id = proof.pilot_revision_id
+  join app.private_live_deposit_pilot_revisions target_pilot
+    on target_pilot.status = 'armed'
+   and target_pilot.id <> proof.pilot_revision_id
+   and app.private_live_telebirr_shadow_pilot_contract_matches(
+         proof.pilot_revision_id, target_pilot.id
+       )
+  join app.private_live_telebirr_receiver_profiles target_profile
+    on target_profile.pilot_revision_id = target_pilot.id
+   and app.private_live_telebirr_shadow_profile_contract_matches(
+         proof.receiver_profile_id, target_profile.id
+       )
  where app.private_telebirr_receipt_shape_network_source_is_valid(proof.id)
-   and pilot.status = 'armed'
-   and pilot.expires_at > pg_catalog.clock_timestamp() + interval '1 hour'
+   and target_pilot.expires_at > pg_catalog.clock_timestamp() + interval '1 hour'
+   and target_profile.valid_from <= pg_catalog.clock_timestamp()
+   and target_profile.valid_until > pg_catalog.clock_timestamp() + interval '1 hour'
    and not exists (
      select 1 from app.private_telebirr_shadow_source_unavailable_retries retry
       where retry.source_shadow_proof_request_id = proof.id

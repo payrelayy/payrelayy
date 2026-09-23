@@ -11,7 +11,17 @@ const operation = read('./sql/production-telebirr-receipt-shape-network-retry.sq
 const shadowWorkflow = read('../.github/workflows/production-telebirr-shadow-once.yml');
 const shadowProvision = read('./sql/production-telebirr-shadow-verifier-once-provision.sql');
 
-assert.match(migration, /private_telebirr_shadow_receipt_shape_diag_retry_is_valid/u);
+assert.match(migration, /private_telebirr_shadow_receipt_shape_diag_retry_digest/u);
+assert.match(migration, /retry\.source_attempt_history_digest/u);
+assert.match(migration, /retry\.source_evidence_history_digest/u);
+assert.match(
+  migration,
+  /opening\.retry_request_digest = retry\.source_opening_retry_request_digest/u,
+);
+assert.doesNotMatch(
+  migration,
+  /and app\.private_telebirr_shadow_receipt_shape_diag_retry_is_valid\(/u,
+);
 assert.match(migration, /private_telebirr_receipt_shape_network_source_is_valid/u);
 assert.match(migration, /review_reason is distinct from 'network_unavailable'/u);
 assert.match(migration, /lookup_outcome is distinct from 'review_required'/u);
@@ -22,9 +32,15 @@ assert.match(migration, /private_telebirr_shadow_evidence_quarantine/u);
 assert.match(migration, /outcome\.reason_code = 'source_unavailable'/u);
 assert.match(migration, /outcome\.observation_body_digest/u);
 assert.match(migration, /observation\.staged_at desc/u);
-assert.match(migration, /source_proof\.created_at \+ interval '12 hours'/u);
+assert.match(migration, /source_proof\.pilot_revision_id = p_pilot_revision_id/u);
+assert.match(migration, /private_live_telebirr_shadow_pilot_contract_matches/u);
+assert.match(migration, /private_live_telebirr_shadow_profile_contract_matches/u);
+assert.match(migration, /then authorized_at \+ interval '12 hours'/u);
+assert.match(migration, /then new\.created_at \+ interval '12 hours'/u);
+assert.match(migration, /\$extend_network_retry_proof_window\$/u);
+assert.match(migration, /source_unavailable_retry_source_id is not null/u);
+assert.match(migration, /expires_at <= created_at \+ interval '12 hours'/u);
 assert.match(migration, /new\.expires_at > \(case/u);
-assert.match(migration, /authorized_at >= \(case/u);
 assert.match(migration, /source_proof\.submitted_at \+ interval '12 hours'/u);
 assert.match(migration, /private_telebirr_receipt_shape_network_retry_deadline/u);
 assert.match(migration, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
@@ -44,14 +60,9 @@ assert.equal(
 );
 assert.equal((migration.match(/^do \$network_retry_rewrite_/gmu) ?? []).length, 4);
 assert.equal((migration.match(/^do \$network_retry_authority_rewrite_/gmu) ?? []).length, 2);
-assert.equal(
-  (
-    migration.match(
-      /pg_catalog\.replace\(rewritten_source, old_fragment_[123], ''\)\)\)\s*\/ pg_catalog\.length\(old_fragment_[123]\)/gmu,
-    ) ?? []
-  ).length,
-  6,
-);
+assert.match(migration, /old_fragment_pilot/u);
+assert.match(migration, /old_fragment_profile_select/u);
+assert.match(migration, /old_fragment_insert_pilot/u);
 assert.equal((migration.match(/^commit;$/gmu) ?? []).length, 1);
 assert.doesNotMatch(
   migration,
@@ -75,6 +86,9 @@ assert.match(workflow, /\.identifiersRedacted == true/u);
 
 assert.match(operation, /begin isolation level read committed/u);
 assert.match(operation, /private_telebirr_receipt_shape_network_source_is_valid/u);
+assert.match(operation, /target_pilot\.id <> proof\.pilot_revision_id/u);
+assert.match(operation, /private_live_telebirr_shadow_pilot_contract_matches/u);
+assert.match(operation, /private_live_telebirr_shadow_profile_contract_matches/u);
 assert.match(operation, /retry_private_telebirr_shadow_after_source_unavailable/u);
 assert.match(operation, /pg_catalog\.gen_random_uuid\(\)/u);
 assert.match(operation, /not result\.already_retried/u);

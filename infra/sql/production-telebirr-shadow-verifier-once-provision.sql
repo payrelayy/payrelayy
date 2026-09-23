@@ -166,11 +166,20 @@ select :'source_live_verification_job_id' = 'not-applicable'
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
-       or app.private_telebirr_shadow_receipt_shape_diag_retry_is_valid(
-            shadow_proof.id,
-            nullif(:'recovery_request_key', 'not-applicable')::uuid
+        or app.private_telebirr_shadow_receipt_shape_diag_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or (
+          app.private_telebirr_receipt_shape_network_source_is_valid(
+            shadow_proof.source_unavailable_retry_source_id
           )
-     )
+          and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                shadow_proof.id,
+                nullif(:'recovery_request_key', 'not-applicable')::uuid
+              )
+        )
+      )
      and (
        exists (
          select 1
@@ -217,11 +226,20 @@ select :'source_live_verification_job_id' = 'not-applicable'
             shadow_proof.id,
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
-       or app.private_telebirr_shadow_receipt_shape_diag_retry_is_valid(
-            shadow_proof.id,
-            nullif(:'recovery_request_key', 'not-applicable')::uuid
+        or app.private_telebirr_shadow_receipt_shape_diag_retry_is_valid(
+             shadow_proof.id,
+             nullif(:'recovery_request_key', 'not-applicable')::uuid
+           )
+        or (
+          app.private_telebirr_receipt_shape_network_source_is_valid(
+            shadow_proof.source_unavailable_retry_source_id
           )
-     )
+          and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                shadow_proof.id,
+                nullif(:'recovery_request_key', 'not-applicable')::uuid
+              )
+        )
+      )
       and exists (
         select 1
           from app.private_telebirr_shadow_device_evidence_staging staged

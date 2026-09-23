@@ -288,8 +288,34 @@ jobs:
           if [[ "$TARGET_PILOT_REVISION_ID" == 'resolve-reviewed-source-binding' ]]; then
             resolved_source_binding_lineage="$(
               psql -X --quiet --tuples-only --no-align --set=ON_ERROR_STOP=1 --command "
-                with candidates as (
-                  select shape_retry.pilot_revision_id as target_pilot_revision_id,
+                 with candidates as (
+                   select network_retry.pilot_revision_id as target_pilot_revision_id,
+                          network_retry.replacement_shadow_proof_request_id,
+                          'not-applicable'::text as source_live_verification_job_id,
+                          network_retry.retry_request_key,
+                          -6 as priority
+                     from app.private_telebirr_shadow_source_unavailable_retries network_retry
+                     join app.private_telebirr_shadow_proof_requests proof
+                       on proof.id = network_retry.replacement_shadow_proof_request_id
+                      and proof.verification_job_id =
+                          network_retry.replacement_shadow_verification_job_id
+                    where network_retry.reason_code =
+                          'source_unavailable_review_retry_no_credit'
+                      and app.private_telebirr_receipt_shape_network_source_is_valid(
+                            network_retry.source_shadow_proof_request_id
+                          )
+                      and proof.proof_status = 'verification_queued'
+                      and proof.expires_at > pg_catalog.clock_timestamp() + interval '5 minutes'
+                      and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                            proof.id, network_retry.retry_request_key
+                          )
+                      and not exists (
+                        select 1
+                          from app.private_telebirr_shadow_verification_outcomes outcome
+                         where outcome.shadow_proof_request_id = proof.id
+                      )
+                   union all
+                   select shape_retry.pilot_revision_id as target_pilot_revision_id,
                          shape_retry.replacement_shadow_proof_request_id,
                          'not-applicable'::text as source_live_verification_job_id,
                          shape_retry.retry_request_key,

@@ -147,6 +147,65 @@ class OfficialReceiptTransportTest {
   }
 
   @Test
+  fun `reports only fixed response categories without provider text or header values`() {
+    val html = "<html><body>Access denied for a synthetic request</body></html>"
+    val observed = mutableListOf<ReceiptResponseDiagnostic>()
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange =
+          HttpsExchange { _, _, _, _, _ ->
+            RawHttpsResponse(
+              200,
+              "text/html; charset=utf-8",
+              null,
+              html.toByteArray(),
+              setCookieHeader = true,
+              varyCookieHeader = true,
+              varyUserAgentHeader = true,
+              authenticationHeader = false,
+              refreshHeader = false,
+            )
+          },
+        responseDiagnostics = ReceiptResponseDiagnostics { observed += it },
+      )
+
+    assertTrue(transport.retrieve(route()) is ProviderDocument.Found)
+    val diagnostic = observed.single()
+    assertEquals("brief", diagnostic.bodyBytesBand)
+    assertEquals("access_words", diagnostic.bodyWordHint)
+    assertTrue(diagnostic.setCookieHeader)
+    assertTrue(diagnostic.varyCookieHeader)
+    assertTrue(diagnostic.varyUserAgentHeader)
+    assertFalse(diagnostic.authenticationHeader)
+    assertFalse(diagnostic.refreshHeader)
+    assertFalse(diagnostic.toString().contains("Access denied"))
+    assertFalse(diagnostic.toString().contains(SYNTHETIC_REFERENCE))
+    assertFalse(
+      RawHttpsResponse(200, "secret-content-type", "secret-content-encoding", html.toByteArray())
+        .toString()
+        .contains("secret-content"),
+    )
+  }
+
+  @Test
+  fun `response diagnostic callback failure cannot change the attested observation`() {
+    val html = officialHtml()
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange =
+          HttpsExchange { _, _, _, _, _ ->
+            RawHttpsResponse(200, "text/html", null, html.toByteArray())
+          },
+        responseDiagnostics =
+          ReceiptResponseDiagnostics { _ -> throw IllegalStateException("sensitive diagnostic failure") },
+      )
+
+    assertEquals(html, (transport.retrieve(route()) as ProviderDocument.Found).utf8Body)
+  }
+
+  @Test
   fun `reports only fixed DNS and HTTPS failure classifications`() {
     val observed = mutableListOf<Pair<ReceiptTransportPhase, ReceiptTransportFailure>>()
     val diagnostic = ReceiptTransportDiagnostics { phase, failure -> observed += phase to failure }

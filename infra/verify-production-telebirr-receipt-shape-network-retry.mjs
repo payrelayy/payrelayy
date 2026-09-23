@@ -137,7 +137,7 @@ assert.match(shadowWorkflow, /private_telebirr_receipt_shape_network_source_is_v
 assert.match(shadowWorkflow, /private_telebirr_shadow_source_unavailable_retry_is_valid/u);
 assert.equal(
   (shadowProvision.match(/private_telebirr_receipt_shape_network_source_is_valid/gmu) ?? []).length,
-  2,
+  3,
 );
 assert.doesNotMatch(shadowProvision, /update app\.feature_switches/iu);
 assert.doesNotMatch(shadowProvision, /insert into app\./iu);

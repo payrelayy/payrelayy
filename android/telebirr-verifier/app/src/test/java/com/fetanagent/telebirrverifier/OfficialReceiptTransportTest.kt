@@ -1,6 +1,9 @@
 package com.fetanagent.telebirrverifier
 
 import java.net.InetAddress
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLHandshakeException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -32,7 +35,7 @@ class OfficialReceiptTransportTest {
     val transport =
       SafeOfficialReceiptTransport(
         resolver = publicResolver,
-        exchange = HttpsExchange { _, _, _, _ ->
+        exchange = HttpsExchange { _, _, _, _, _ ->
           calls += 1
           RawHttpsResponse(302, "text/html; charset=utf-8", null, ByteArray(0))
         },
@@ -48,7 +51,7 @@ class OfficialReceiptTransportTest {
     val transport =
       SafeOfficialReceiptTransport(
         resolver = publicResolver,
-        exchange = HttpsExchange { _, _, _, _ ->
+        exchange = HttpsExchange { _, _, _, _, _ ->
           RawHttpsResponse(404, "text/html; charset=utf-8", null, ByteArray(0))
         },
       )
@@ -67,7 +70,7 @@ class OfficialReceiptTransportTest {
           HostResolver { _, _ ->
             listOf(InetAddress.getByName("8.8.8.8"), InetAddress.getByName("10.0.0.1"))
           },
-        exchange = HttpsExchange { _, _, _, _ ->
+        exchange = HttpsExchange { _, _, _, _, _ ->
           called = true
           RawHttpsResponse(200, "text/html", null, "ok".toByteArray())
         },
@@ -95,7 +98,7 @@ class OfficialReceiptTransportTest {
       val transport =
         SafeOfficialReceiptTransport(
           resolver = publicResolver,
-          exchange = HttpsExchange { _, _, _, _ -> response },
+          exchange = HttpsExchange { _, _, _, _, _ -> response },
         )
       assertTrue(transport.retrieve(route()) is ProviderDocument.Unavailable)
     }
@@ -108,7 +111,7 @@ class OfficialReceiptTransportTest {
     val transport =
       SafeOfficialReceiptTransport(
         resolver = publicResolver,
-        exchange = HttpsExchange { _, _, _, _ ->
+        exchange = HttpsExchange { _, _, _, _, _ ->
           now += SafeOfficialReceiptTransport.TOTAL_TIMEOUT_MILLIS + 1
           RawHttpsResponse(200, "text/html; charset=utf-8", null, officialHtml().toByteArray())
         },
@@ -125,7 +128,7 @@ class OfficialReceiptTransportTest {
     val transport =
       SafeOfficialReceiptTransport(
         resolver = publicResolver,
-        exchange = HttpsExchange { _, addresses, timeout, maximumBytes ->
+        exchange = HttpsExchange { _, addresses, timeout, maximumBytes, _ ->
           assertEquals(listOf("8.8.8.8"), addresses.map(InetAddress::getHostAddress))
           assertTrue(timeout in 1..SafeOfficialReceiptTransport.TOTAL_TIMEOUT_MILLIS)
           assertEquals(SafeOfficialReceiptTransport.MAX_RESPONSE_BYTES, maximumBytes)
@@ -140,6 +143,61 @@ class OfficialReceiptTransportTest {
       ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
       result.originAttestation,
     )
+  }
+
+  @Test
+  fun `reports only fixed DNS and HTTPS failure classifications`() {
+    val observed = mutableListOf<Pair<ReceiptTransportPhase, ReceiptTransportFailure>>()
+    val diagnostic = ReceiptTransportDiagnostics { phase, failure -> observed += phase to failure }
+    val cases =
+      listOf(
+        Triple(
+          HostResolver { _, _ -> throw UnknownHostException() },
+          HttpsExchange { _, _, _, _, _ -> error("HTTPS must not run") },
+          ReceiptTransportPhase.DNS to ReceiptTransportFailure.IO_ERROR,
+        ),
+        Triple(
+          publicResolver,
+          HttpsExchange { _, _, _, _, trace ->
+            trace.advance(ReceiptTransportPhase.TLS)
+            throw SSLHandshakeException("sensitive exception detail")
+          },
+          ReceiptTransportPhase.TLS to ReceiptTransportFailure.TLS_ERROR,
+        ),
+        Triple(
+          publicResolver,
+          HttpsExchange { _, _, _, _, trace ->
+            trace.advance(ReceiptTransportPhase.BODY)
+            throw SocketTimeoutException("sensitive exception detail")
+          },
+          ReceiptTransportPhase.BODY to ReceiptTransportFailure.TIMEOUT,
+        ),
+      )
+    for ((resolver, exchange, expected) in cases) {
+      val transport =
+        SafeOfficialReceiptTransport(
+          resolver = resolver,
+          exchange = exchange,
+          diagnostics = diagnostic,
+        )
+      assertEquals("network", (transport.retrieve(route()) as ProviderDocument.Unavailable).uncertainty)
+      assertEquals(expected, observed.removeAt(0))
+      assertTrue(observed.isEmpty())
+    }
+  }
+
+  @Test
+  fun `diagnostic callback failure cannot change the fail closed observation`() {
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = HostResolver { _, _ -> throw UnknownHostException() },
+        diagnostics =
+          ReceiptTransportDiagnostics { _, _ ->
+            throw IllegalStateException("sensitive diagnostic failure")
+          },
+      )
+
+    assertEquals("network", (transport.retrieve(route()) as ProviderDocument.Unavailable).uncertainty)
   }
 
   private fun route(): OfficialReceiptRoute =

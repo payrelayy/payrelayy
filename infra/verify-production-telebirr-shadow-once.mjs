@@ -204,6 +204,26 @@ assert.match(provision, /recovery\.retry_expires_at = shadow_proof\.expires_at/u
 assert.match(provision, /verifier_policy_fix_retry_no_credit/u);
 assert.match(provision, /quarantine\.reason_code = 'trusted_evidence_invalid'/u);
 assert.match(provision, /shadow_proof\.submitted_at \+ interval '12 hours'/u);
+const directSubmissionWindows = [
+  ...provision.matchAll(
+    /pg_catalog\.clock_timestamp\(\) < shadow_proof\.submitted_at \+ interval '12 hours'/gu,
+  ),
+].map((match) => match.index);
+assert.equal(directSubmissionWindows.length, 2);
+for (const [index, start] of directSubmissionWindows.entries()) {
+  const receiptGuard = provision.indexOf(
+    'from app.telegram_telebirr_shadow_proof_receipts receipt',
+    start,
+  );
+  assert.ok(
+    receiptGuard > start && receiptGuard < (directSubmissionWindows[index + 1] ?? Infinity),
+  );
+  assert.match(
+    provision.slice(start, receiptGuard),
+    /or \(\s*app\.private_telebirr_receipt_shape_network_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*and app\.private_telebirr_shadow_source_unavailable_retry_is_valid\(\s*shadow_proof\.id,\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s*\)\s*\)/u,
+    `direct submission-window guard ${index + 1} must bind the valid network retry to its source`,
+  );
+}
 assert.match(provision, /shadow_proof\.recovered_at \+ interval '12 hours'/u);
 assert.match(provision, /reviewed_source_binding_source_unavailable_recovery_no_credit/u);
 assert.match(provision, /staged\.staged_at < shadow_proof\.expires_at/u);

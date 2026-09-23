@@ -308,8 +308,11 @@ export async function createTelebirrShadowPostgresRuntime(
     ...postgresConnection,
     application_name: 'fetanagent_telebirr_shadow_verifier',
     connectionTimeoutMillis: 5_000,
-    statement_timeout: 15_000,
-    query_timeout: 20_000,
+    // Shadow-only signed-history reads exceeded 15 seconds in production. Keep a
+    // finite database deadline and a slightly longer client deadline so the
+    // database can cancel first; the live trusted verifier retains its own limits.
+    statement_timeout: 40_000,
+    query_timeout: 45_000,
     ssl: { ca, rejectUnauthorized: true },
   });
   const client =

@@ -106,6 +106,38 @@ async function enableBoundedShadowLeasing(client: Client, validForMinutes = 20):
   );
 }
 
+async function authorizeOneShadowAssignment(
+  client: Client,
+  proofId: string,
+  deviceEnrollmentId: string,
+  assignmentAllowed = true,
+): Promise<void> {
+  const authorization = await client.query<{ readonly id: string }>(
+    `insert into app.private_telebirr_shadow_assignment_authorizations (
+       pilot_revision_id, shadow_proof_request_id, verification_job_id,
+       device_enrollment_id, prior_attempt_count, assignment_allowed,
+       authorized_at, expires_at
+     )
+     select proof.pilot_revision_id, proof.id, proof.verification_job_id,
+            enrollment.id,
+            (select count(*)::integer
+               from app.private_telebirr_shadow_verification_attempts attempt
+              where attempt.shadow_proof_request_id = proof.id),
+            $3::boolean, timing.authorized_at,
+            least(timing.authorized_at + interval '20 minutes',
+                  proof.expires_at, enrollment.valid_until)
+       from app.private_telebirr_shadow_proof_requests proof
+       join app.private_live_telebirr_device_enrollments enrollment
+         on enrollment.id = $2::uuid
+        and enrollment.pilot_revision_id = proof.pilot_revision_id
+      cross join lateral (select clock_timestamp() as authorized_at) timing
+      where proof.id = $1::uuid
+     returning id`,
+    [proofId, deviceEnrollmentId, assignmentAllowed],
+  );
+  expect(authorization.rows).toHaveLength(1);
+}
+
 async function createTelegramShadowInbound(
   client: Client,
   customerId: string,
@@ -831,6 +863,9 @@ export function registerTelebirrShadowVerificationSqlTests(
       );
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/interval '25 hours'/u);
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/auth\.rolpassword is not null/u);
+      expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(
+        /private_telebirr_shadow_assignment_authorizations assignment_auth/u,
+      );
       const shadowLease = await client.query<{ readonly definition: string }>(`
         select lower(pg_get_functiondef(
           'app.lease_private_telebirr_shadow_assignment(uuid,text,uuid,integer)'::regprocedure
@@ -840,6 +875,10 @@ export function registerTelebirrShadowVerificationSqlTests(
         /attempt\.verification_job_id = candidate\.verification_job_id\s+\) < 100/u,
       );
       expect(shadowLease.rows[0]?.definition ?? '').toMatch(/if attempt_count >= 100 then/u);
+      expect(shadowLease.rows[0]?.definition ?? '').toMatch(
+        /assignment_auth\.shadow_proof_request_id = candidate\.id/u,
+      );
+      expect(shadowLease.rows[0]?.definition ?? '').toMatch(/assignment_auth\.assignment_allowed/u);
     });
 
     it('keeps disabled broker polling idle without creating a live or shadow attempt', async () => {
@@ -1010,6 +1049,22 @@ export function registerTelebirrShadowVerificationSqlTests(
         expect(idle.rows).toEqual([]);
 
         await enableBoundedShadowLeasing(client, 24 * 60);
+        const loginWithoutAuthorization = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-shadow-no-authorization', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(loginWithoutAuthorization.rows).toEqual([]);
+        await authorizeOneShadowAssignment(client, proofs[1]!.id, pilot.deviceEnrollmentId, false);
+        const disabledAuthorization = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-shadow-disabled-authorization', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(disabledAuthorization.rows).toEqual([]);
+        await authorizeOneShadowAssignment(client, proofs[1]!.id, pilot.deviceEnrollmentId);
         const lease = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
              $1::uuid, 'sql-shadow-skip-exhausted', $2::uuid, 120
@@ -1019,6 +1074,13 @@ export function registerTelebirrShadowVerificationSqlTests(
         expect(lease.rows).toHaveLength(1);
         expect(lease.rows[0]!.job_id).toBe(proofs[1]!.verification_job_id);
         expect(lease.rows[0]!.attempt_number).toBe(1);
+        const secondAssignment = await client.query<ShadowLeaseRow>(
+          `select * from app.lease_private_live_telebirr_assignment_broker(
+             $1::uuid, 'sql-shadow-one-assignment-only', $2::uuid, 120
+           )`,
+          [pilot.deviceEnrollmentId, randomUUID()],
+        );
+        expect(secondAssignment.rows).toEqual([]);
 
         const attempts = await client.query<{ readonly exhausted: string; readonly later: string }>(
           `select
@@ -1537,6 +1599,11 @@ export function registerTelebirrShadowVerificationSqlTests(
           { exact_guard_shape: true, equivalent_deadline: true },
         ]);
 
+        await authorizeOneShadowAssignment(
+          client,
+          retry.rows[0]!.shadow_proof_request_id,
+          pilot.deviceEnrollmentId,
+        );
         await enableBoundedShadowLeasing(client);
         const assignment = await client.query<ShadowLeaseRow>(
           `select * from app.lease_private_live_telebirr_assignment_broker(
@@ -1795,6 +1862,7 @@ export function registerTelebirrShadowVerificationSqlTests(
         );
         expect(proof.rows).toHaveLength(1);
 
+        await authorizeOneShadowAssignment(client, proof.rows[0]!.id, pilot.deviceEnrollmentId);
         await enableBoundedShadowLeasing(client);
         const leaseRequestKey = randomUUID();
         const lease = await client.query<ShadowLeaseRow>(

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 const workflow = readFileSync(
   new URL('../.github/workflows/production-telebirr-shadow-once.yml', import.meta.url),
@@ -23,6 +24,13 @@ const reviewWindowMigration = readFileSync(
 const singleOutcomeLoaderMigration = readFileSync(
   new URL(
     '../supabase/migrations/20260916190000_stop_shadow_loader_after_proof_outcome.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const scopedAssignmentMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260924223813_scope_shadow_bootstrap_assignment.sql',
     import.meta.url,
   ),
   'utf8',
@@ -266,15 +274,29 @@ assert.match(provision, /staged\.observed_at >= attempt\.issued_at/u);
 assert.match(provision, /staged\.observed_at < attempt\.expires_at/u);
 const transitionGate = provision.indexOf('\\if :shadow_request_transition_ready');
 const evidenceGuardStarts = [
-  ...provision.matchAll(/from app\.private_telebirr_shadow_device_evidence_staging staged/gu),
+  ...provision.matchAll(
+    /or exists \(\s*select 1\s*from app\.private_telebirr_shadow_device_evidence_staging staged/gu,
+  ),
 ].map((match) => match.index);
 assert.ok(evidenceGuardStarts[0] < transitionGate && transitionGate < evidenceGuardStarts[1]);
+const freshBootstrapGuards = [
+  ...provision.matchAll(
+    /:'recovery_request_key' = 'not-applicable'\s+and not exists \(\s*select 1 from app\.private_telebirr_shadow_verification_attempts attempt\s+where attempt\.shadow_proof_request_id = shadow_proof\.id\s+\)\s+and not exists \(\s*select 1\s+from app\.private_telebirr_shadow_device_evidence_staging staged/gu,
+  ),
+].map((match) => match.index);
+assert.equal(freshBootstrapGuards.length, 2);
+assert.ok(
+  freshBootstrapGuards[0] < evidenceGuardStarts[0] &&
+    evidenceGuardStarts[0] < transitionGate &&
+    transitionGate < freshBootstrapGuards[1] &&
+    freshBootstrapGuards[1] < evidenceGuardStarts[1],
+);
 for (const [index, start] of evidenceGuardStarts.slice(0, 2).entries()) {
   const end = provision.indexOf(
     'from app.private_telebirr_shadow_verification_outcomes outcome',
     start,
   );
-  assert.ok(end > start && end < evidenceGuardStarts[index + 1]);
+  assert.ok(end > start && end < (evidenceGuardStarts[index + 1] ?? Infinity));
   const guard = provision.slice(start, end);
   const openingAssociation = guard.match(
     /or \(\s*app\.private_telebirr_shadow_receipt_cell_opening_retry_is_valid\([\s\S]*?and exists \(\s*select 1\s*from app\.private_telebirr_shadow_receipt_cell_opening_retries retry[\s\S]*?retry\.replacement_shadow_proof_request_id = shadow_proof\.id\s*and staged\.staged_at >= retry\.authorized_at\s*\)\s*\)/u,
@@ -384,6 +406,32 @@ assert.match(
   /refresh_private_telebirr_shadow_runtime_retry\([\s\S]+?'expired_shadow_runtime_startup_retry_no_credit'\s*\)\s*\\gset/u,
 );
 assert.match(provision, /begin transaction isolation level read committed/u);
+const assignmentAuthorization = provision.indexOf(
+  'insert into app.private_telebirr_shadow_assignment_authorizations',
+);
+const boundedVerifierLogin = provision.indexOf(
+  'alter role fetanagent_telebirr_shadow_verifier_runtime with',
+);
+assert.ok(
+  restoredBudget < assignmentAuthorization && assignmentAuthorization < boundedVerifierLogin,
+);
+assert.match(
+  provision.slice(assignmentAuthorization, boundedVerifierLogin),
+  /assignment_allowed[\s\S]*?expires_at > authorized_at \+ interval '5 minutes'/u,
+);
+assert.match(
+  scopedAssignmentMigration,
+  /create table app\.private_telebirr_shadow_assignment_authorizations \(/u,
+);
+assert.match(scopedAssignmentMigration, /force row level security/u);
+assert.match(scopedAssignmentMigration, /before update or delete/u);
+assert.match(scopedAssignmentMigration, /before truncate/u);
+assert.match(
+  scopedAssignmentMigration,
+  /assignment_auth\.shadow_proof_request_id = candidate\.id/u,
+);
+assert.match(scopedAssignmentMigration, /assignment_auth\.prior_attempt_count = \(/u);
+assert.match(scopedAssignmentMigration, /assignment_auth\.shadow_proof_request_id = proof\.id/u);
 assert.match(provision, /create_first_shadow_request/u);
 assert.match(provision, /expired_shadow_retry_no_credit/u);
 assert.match(provision, /safe_source_and_open_shadow/u);
@@ -417,7 +465,7 @@ assert.match(provision, /interval '20 minutes'/u);
 assert.match(provision, /bounded_20_minutes/u);
 assert.doesNotMatch(provision, /deploymentTarget', 'staging'/u);
 assert.doesNotMatch(provision, /update app\.feature_switches/u);
-assert.doesNotMatch(provision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(provision);
 
 assert.match(disable, /PRODUCTION_PROJECT_REF/u);
 assert.match(disable, /xzztugbgtulptnbpoelr/u);

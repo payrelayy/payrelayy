@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
@@ -155,6 +156,6 @@ assert.match(verifierProvision, /review_source_binding_layout_retry/u);
 assert.match(verifierProvision, /private_telebirr_shadow_source_binding_layout_retry_is_valid/u);
 assert.match(verifierProvision, /private_telebirr_shadow_source_binding_layout_retries/u);
 assert.doesNotMatch(verifierProvision, /update app\.feature_switches/u);
-assert.doesNotMatch(verifierProvision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(verifierProvision);
 
 console.log('Production reviewed source-binding receipt-layout retry contract verified.');

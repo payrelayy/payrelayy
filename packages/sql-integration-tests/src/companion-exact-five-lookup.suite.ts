@@ -423,6 +423,58 @@ function idlePollValues(paired: Awaited<ReturnType<typeof createPairedDevice>>):
   ];
 }
 
+async function installArmedDryRunPilot(client: Client, ownerAdminId: string): Promise<string> {
+  const configurationDigest = sha(`pilot-configuration:${randomUUID()}`);
+  const requestDigest = sha(`pilot-request:${randomUUID()}`);
+  // This disposable fixture bypasses the normal arming trigger only while
+  // constructing the exact already-armed state. The function under test runs
+  // with normal triggers and privileges restored.
+  await client.query("set local session_replication_role = 'replica'");
+  let pilotId: string;
+  try {
+    const inserted = await client.query<{ readonly id: string }>(
+      `insert into app.private_live_deposit_pilot_revisions (
+         prepare_request_key, prepare_request_digest, configuration_digest,
+         status, platform_id, platform_agent_account_id,
+         platform_agent_label_snapshot, platform_agent_updated_at_snapshot,
+         minimum_amount_minor, maximum_per_deposit_minor,
+         maximum_per_player_minor, maximum_aggregate_minor,
+         maximum_reservation_count, active_from, expires_at,
+         created_by_admin_id, armed_by_admin_id, armed_at
+       )
+       select $1::uuid, $2::text, $3::text,
+              'armed', platform.id, agent.id, agent.label, agent.updated_at,
+              2500, 2500, 2500, 12500, 5,
+              clock_timestamp() - interval '1 minute',
+              clock_timestamp() + interval '12 hours',
+              $4::uuid, $4::uuid, clock_timestamp()
+         from app.platforms platform
+         join app.platform_agent_accounts agent on agent.platform_id = platform.id
+        where platform.code = 'kemerbet'
+          and platform.status = 'active'
+          and agent.status = 'active'
+       returning id::text`,
+      [randomUUID(), requestDigest, configurationDigest, ownerAdminId],
+    );
+    expect(inserted.rows).toHaveLength(1);
+    pilotId = inserted.rows[0]!.id;
+  } finally {
+    await client.query("set local session_replication_role = 'origin'");
+  }
+  await client.query(
+    `update app.feature_switches
+        set mode = 'dry_run',
+            settings = jsonb_build_object(
+              'contract_version', 1,
+              'pilot_revision_id', $1::uuid,
+              'configuration_digest', $2::text
+            )
+      where feature_key = 'private_live_deposit_pilot'`,
+    [pilotId, configurationDigest],
+  );
+  return pilotId;
+}
+
 export async function createAcceptedExactFiveCompanionEvidence(
   client: Client,
   ownerAdminId: string,
@@ -684,7 +736,6 @@ export function registerCompanionExactFiveLookupSqlTests(
       'cbe_birr_authoritative_verification',
       'deposit_execution',
       'payment_verification',
-      'private_live_deposit_pilot',
       'telebirr_authoritative_verification',
     ])('still rejects an idle poll when %s is not disabled', async (featureKey) => {
       const client = getClient();
@@ -699,6 +750,108 @@ export function registerCompanionExactFiveLookupSqlTests(
         await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
           'The companion idle poll requires every money switch to be disabled.',
         );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('accepts only an empty authenticated check-in during one unreserved armed dry-run pilot', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        await installArmedDryRunPilot(client, getOwnerAdminId());
+        await retireLegacyProfiles(client);
+        const poll = idlePollValues(paired);
+        expect((await client.query<LookupClaimRow>(claimSql, poll)).rows).toEqual([
+          { claim_state: 'none', assignment_body: null, signed_assignment: null },
+        ]);
+        expect((await client.query(claimSql, poll)).rows).toEqual([]);
+        const counts = await client.query(
+          `select
+             (select count(*)::integer from app.agent_platform_companion_http_request_replays
+               where certificate_id = $1::uuid) as accepted_polls,
+             (select count(*)::integer from app.agent_platform_companion_lookup_assignments
+               where certificate_id = $1::uuid) as assignments,
+             (select count(*)::integer from app.private_live_deposit_pilot_reservations)
+               as reservations`,
+          [paired.certificateBody.certificateId],
+        );
+        expect(counts.rows).toEqual([{ accepted_polls: 1, assignments: 0, reservations: 0 }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('rejects a dry-run switch without its exact armed pilot or with drifted binding', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        await client.query(
+          "update app.feature_switches set mode = 'dry_run' where feature_key = 'private_live_deposit_pilot'",
+        );
+        await client.query('savepoint missing_pilot');
+        await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
+          'The companion idle poll requires one unreserved armed dry-run pilot.',
+        );
+        await client.query('rollback to savepoint missing_pilot');
+        await installArmedDryRunPilot(client, getOwnerAdminId());
+        await client.query(
+          "update app.feature_switches set settings = '{}'::jsonb where feature_key = 'private_live_deposit_pilot'",
+        );
+        await client.query('savepoint drifted_binding');
+        await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
+          'The companion idle poll requires one unreserved armed dry-run pilot.',
+        );
+        await client.query('rollback to savepoint drifted_binding');
+        const replays = await client.query(
+          `select count(*)::integer as count from app.agent_platform_companion_http_request_replays
+            where certificate_id = $1::uuid`,
+          [paired.certificateBody.certificateId],
+        );
+        expect(replays.rows).toEqual([{ count: 0 }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('never delivers a pre-existing Find-only assignment across the armed pilot boundary', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          'select auth_user_id::text from app.admin_users where id = $1::uuid',
+          [getOwnerAdminId()],
+        );
+        await createExactFivePlayers(client, owner.rows[0]!.auth_user_id);
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const issued = await queryAsOwnerControl<LookupIssueRow>(
+          client,
+          `select * from app.issue_agent_platform_companion_exact_five_lookup(
+             $1::uuid, $2::uuid, $3::text
+           )`,
+          [owner.rows[0]!.auth_user_id, randomUUID(), paired.signerKeyId],
+        );
+        expect(issued).toHaveLength(1);
+        await installArmedDryRunPilot(client, getOwnerAdminId());
+        await client.query('savepoint pending_assignment');
+        await expect(client.query(claimSql, idlePollValues(paired))).rejects.toThrow(
+          'The companion idle poll cannot deliver an assignment during a dry-run pilot.',
+        );
+        await client.query('rollback to savepoint pending_assignment');
+        const state = await client.query(
+          `select state, first_claimed_at from app.agent_platform_companion_lookup_assignments
+            where assignment_id = $1::uuid`,
+          [issued[0]!.assignment_id],
+        );
+        expect(state.rows).toEqual([{ state: 'pending', first_claimed_at: null }]);
+        const replays = await client.query(
+          `select count(*)::integer as count from app.agent_platform_companion_http_request_replays
+            where certificate_id = $1::uuid`,
+          [paired.certificateBody.certificateId],
+        );
+        expect(replays.rows).toEqual([{ count: 0 }]);
       } finally {
         await client.query('rollback');
       }

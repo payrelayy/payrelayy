@@ -462,6 +462,11 @@ assert.match(
 assert.match(provision, /login noinherit nocreatedb nocreaterole noreplication nobypassrls/u);
 assert.match(provision, /connection limit 1 password :'shadow_runtime_password'/u);
 assert.match(provision, /interval '20 minutes'/u);
+assert.match(
+  provision,
+  /least\(\s*clock\.authorized_at \+ interval '20 minutes',\s*proof\.expires_at,\s*enrollment\.valid_until,\s*pilot\.expires_at\s*\) as expires_at/u,
+);
+assert.doesNotMatch(provision, /\bpg_catalog\.(?:least|greatest)\s*\(/iu);
 assert.match(provision, /bounded_20_minutes/u);
 assert.doesNotMatch(provision, /deploymentTarget', 'staging'/u);
 assert.doesNotMatch(provision, /update app\.feature_switches/u);

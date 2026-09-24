@@ -1635,7 +1635,7 @@ with authorization_clock as materialized (
          proof.pilot_revision_id,
          enrollment.id as device_enrollment_id,
          clock.authorized_at,
-         pg_catalog.least(
+         least(
            clock.authorized_at + interval '20 minutes',
            proof.expires_at,
            enrollment.valid_until,

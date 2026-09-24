@@ -179,6 +179,27 @@ for (const invariant of [
 const owner = childBlock(services, 'owner-control');
 assert.match(owner, /OWNER_CONTROL_DEPLOYMENT_TARGET: production/u);
 assert.match(owner, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/u);
+assert.match(owner, /FINANCIAL_ACTIONS_MODE: dry_run/u);
+assert.match(owner, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
+assert.match(owner, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
+assert.match(
+  owner,
+  /source: kemerbet_readiness_control\s+target: \/run\/fetanagent-kemerbet-session-control/u,
+);
+assert.match(
+  owner,
+  /source: \/var\/lib\/fetanagent\/kemerbet-readiness-cohort-receipts\s+target: \/run\/fetanagent-kemerbet-readiness-cohort-receipts\s+read_only: true\s+bind:\s+create_host_path: false/u,
+);
+assert.equal(count(compose, /target: \/run\/fetanagent-kemerbet-session-control/gu), 1);
+assert.equal(count(compose, /target: \/run\/fetanagent-kemerbet-readiness-cohort-receipts/gu), 1);
+const readinessVolume = childBlock(
+  topLevelSection(compose, 'volumes'),
+  'kemerbet_readiness_control',
+);
+assert.match(
+  readinessVolume,
+  /^\s+external: true\r?\n    name: fetanagent-production-kemerbet-readiness-control-v1\r?\n?/u,
+);
 assert.match(
   owner,
   /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: \$\{FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:\?/u,

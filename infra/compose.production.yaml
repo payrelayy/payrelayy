@@ -94,6 +94,16 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0444
+    volumes:
+      - type: volume
+        source: kemerbet_readiness_control
+        target: /run/fetanagent-kemerbet-session-control
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-readiness-cohort-receipts
+        target: /run/fetanagent-kemerbet-readiness-cohort-receipts
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - public_application
     healthcheck:
@@ -816,5 +826,9 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/companion-bridge-server-signer.pkcs8.der
 
 volumes:
+  # Pre-provisioned empty for production; never reuse the historical staging control volume.
+  kemerbet_readiness_control:
+    external: true
+    name: fetanagent-production-kemerbet-readiness-control-v1
   telebirr_assignment_socket:
   telebirr_device_state_socket:

@@ -864,7 +864,7 @@ export function registerTelebirrShadowVerificationSqlTests(
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/interval '25 hours'/u);
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(/auth\.rolpassword is not null/u);
       expect(brokerWrapper.rows[0]?.definition ?? '').toMatch(
-        /private_telebirr_shadow_assignment_authorizations authorization/u,
+        /private_telebirr_shadow_assignment_authorizations assignment_auth/u,
       );
       const shadowLease = await client.query<{ readonly definition: string }>(`
         select lower(pg_get_functiondef(
@@ -876,9 +876,9 @@ export function registerTelebirrShadowVerificationSqlTests(
       );
       expect(shadowLease.rows[0]?.definition ?? '').toMatch(/if attempt_count >= 100 then/u);
       expect(shadowLease.rows[0]?.definition ?? '').toMatch(
-        /authorization\.shadow_proof_request_id = candidate\.id/u,
+        /assignment_auth\.shadow_proof_request_id = candidate\.id/u,
       );
-      expect(shadowLease.rows[0]?.definition ?? '').toMatch(/authorization\.assignment_allowed/u);
+      expect(shadowLease.rows[0]?.definition ?? '').toMatch(/assignment_auth\.assignment_allowed/u);
     });
 
     it('keeps disabled broker polling idle without creating a live or shadow attempt', async () => {

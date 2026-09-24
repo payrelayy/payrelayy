@@ -76,17 +76,17 @@ begin
   -- observation. A crashed run expires without leaving an idle assignment channel.
   if not exists (
     select 1
-      from app.private_telebirr_shadow_assignment_authorizations authorization
-     where authorization.id = (
+      from app.private_telebirr_shadow_assignment_authorizations assignment_auth
+     where assignment_auth.id = (
        select latest.id
          from app.private_telebirr_shadow_assignment_authorizations latest
         where latest.pilot_revision_id = enrollment.pilot_revision_id
         order by latest.authorized_at desc, latest.id desc
         limit 1
      )
-       and authorization.device_enrollment_id = enrollment.id
-       and authorization.authorized_at <= pg_catalog.clock_timestamp()
-       and pg_catalog.clock_timestamp() < authorization.expires_at
+       and assignment_auth.device_enrollment_id = enrollment.id
+       and assignment_auth.authorized_at <= pg_catalog.clock_timestamp()
+       and pg_catalog.clock_timestamp() < assignment_auth.expires_at
   ) then
     return;
   end if;
@@ -104,26 +104,26 @@ begin
      -- latest immutable one-use authorization and cannot pick a second proof.
      and exists (
        select 1
-         from app.private_telebirr_shadow_assignment_authorizations authorization
-        where authorization.id = (
+         from app.private_telebirr_shadow_assignment_authorizations assignment_auth
+        where assignment_auth.id = (
           select latest.id
             from app.private_telebirr_shadow_assignment_authorizations latest
            where latest.pilot_revision_id = pilot.id
            order by latest.authorized_at desc, latest.id desc
            limit 1
         )
-          and authorization.shadow_proof_request_id = candidate.id
-          and authorization.verification_job_id = candidate.verification_job_id
-          and authorization.device_enrollment_id = enrollment.id
-          and authorization.assignment_allowed
-          and authority_at >= authorization.authorized_at
-          and authority_at < authorization.expires_at
+          and assignment_auth.shadow_proof_request_id = candidate.id
+          and assignment_auth.verification_job_id = candidate.verification_job_id
+          and assignment_auth.device_enrollment_id = enrollment.id
+          and assignment_auth.assignment_allowed
+          and authority_at >= assignment_auth.authorized_at
+          and authority_at < assignment_auth.expires_at
           and (
             select pg_catalog.count(*)
               from app.private_telebirr_shadow_verification_attempts prior_attempt
              where prior_attempt.shadow_proof_request_id = candidate.id
                and prior_attempt.verification_job_id = candidate.verification_job_id
-          ) = authorization.prior_attempt_count
+          ) = assignment_auth.prior_attempt_count
      )
    order by candidate.submitted_at, candidate.id
    limit 1
@@ -206,20 +206,20 @@ begin
     -- this run; a previous proof cannot be replayed under a later authority.
     if proof.id is null or not exists (
       select 1
-        from app.private_telebirr_shadow_assignment_authorizations authorization
-       where authorization.id = (
+        from app.private_telebirr_shadow_assignment_authorizations assignment_auth
+       where assignment_auth.id = (
          select latest.id
            from app.private_telebirr_shadow_assignment_authorizations latest
           where latest.pilot_revision_id = pilot.id
           order by latest.authorized_at desc, latest.id desc
           limit 1
        )
-         and authorization.shadow_proof_request_id = proof.id
-         and authorization.verification_job_id = proof.verification_job_id
-         and authorization.device_enrollment_id = enrollment.id
-         and authorization.assignment_allowed
-         and authority_at >= authorization.authorized_at
-         and authority_at < authorization.expires_at
+         and assignment_auth.shadow_proof_request_id = proof.id
+         and assignment_auth.verification_job_id = proof.verification_job_id
+         and assignment_auth.device_enrollment_id = enrollment.id
+         and assignment_auth.assignment_allowed
+         and authority_at >= assignment_auth.authorized_at
+         and authority_at < assignment_auth.expires_at
     ) then
       raise exception 'The TeleBirr shadow assignment replay is unavailable.';
     end if;$new_replay$
@@ -230,26 +230,26 @@ begin
     or authority_at >= enrollment.valid_until$old_final$,
         $new_final$  if not exists (
       select 1
-        from app.private_telebirr_shadow_assignment_authorizations authorization
-       where authorization.id = (
+        from app.private_telebirr_shadow_assignment_authorizations assignment_auth
+       where assignment_auth.id = (
          select latest.id
            from app.private_telebirr_shadow_assignment_authorizations latest
           where latest.pilot_revision_id = pilot.id
           order by latest.authorized_at desc, latest.id desc
           limit 1
        )
-         and authorization.shadow_proof_request_id = proof.id
-         and authorization.verification_job_id = proof.verification_job_id
-         and authorization.device_enrollment_id = enrollment.id
-         and authorization.assignment_allowed
-         and authorization.prior_attempt_count = (
+         and assignment_auth.shadow_proof_request_id = proof.id
+         and assignment_auth.verification_job_id = proof.verification_job_id
+         and assignment_auth.device_enrollment_id = enrollment.id
+         and assignment_auth.assignment_allowed
+         and assignment_auth.prior_attempt_count = (
            select pg_catalog.count(*)
              from app.private_telebirr_shadow_verification_attempts prior_attempt
             where prior_attempt.shadow_proof_request_id = proof.id
               and prior_attempt.verification_job_id = proof.verification_job_id
          )
-         and authority_at >= authorization.authorized_at
-         and authority_at < authorization.expires_at
+         and authority_at >= assignment_auth.authorized_at
+         and authority_at < assignment_auth.expires_at
     )
     or authority_at < enrollment.valid_from
     or authority_at >= enrollment.valid_until$new_final$

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 
@@ -131,6 +132,6 @@ assert.equal(
   10,
 );
 assert.doesNotMatch(verifierProvision, /update app\.feature_switches/u);
-assert.doesNotMatch(verifierProvision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(verifierProvision);
 
 console.log('Production reviewed receipt-cell-opening retry contract verified.');

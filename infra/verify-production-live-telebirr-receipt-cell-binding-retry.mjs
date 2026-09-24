@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 await import('./verify-production-live-telebirr-receipt-cell-opening-retry.mjs');
 
@@ -71,6 +72,6 @@ assert.match(verifierWorkflow, /-3 as priority/u);
 assert.match(verifierProvision, /private_telebirr_shadow_receipt_cell_binding_retries/u);
 assert.match(verifierProvision, /private_telebirr_shadow_receipt_cell_binding_retry_is_valid/u);
 assert.doesNotMatch(verifierProvision, /update app\.feature_switches/u);
-assert.doesNotMatch(verifierProvision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(verifierProvision);
 
 console.log('Production reviewed receipt-cell-binding retry contract verified.');

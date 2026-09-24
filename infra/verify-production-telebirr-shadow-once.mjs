@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 const workflow = readFileSync(
   new URL('../.github/workflows/production-telebirr-shadow-once.yml', import.meta.url),
@@ -425,9 +426,12 @@ assert.match(
 assert.match(scopedAssignmentMigration, /force row level security/u);
 assert.match(scopedAssignmentMigration, /before update or delete/u);
 assert.match(scopedAssignmentMigration, /before truncate/u);
-assert.match(scopedAssignmentMigration, /authorization\.shadow_proof_request_id = candidate\.id/u);
-assert.match(scopedAssignmentMigration, /authorization\.prior_attempt_count = \(/u);
-assert.match(scopedAssignmentMigration, /authorization\.shadow_proof_request_id = proof\.id/u);
+assert.match(
+  scopedAssignmentMigration,
+  /assignment_auth\.shadow_proof_request_id = candidate\.id/u,
+);
+assert.match(scopedAssignmentMigration, /assignment_auth\.prior_attempt_count = \(/u);
+assert.match(scopedAssignmentMigration, /assignment_auth\.shadow_proof_request_id = proof\.id/u);
 assert.match(provision, /create_first_shadow_request/u);
 assert.match(provision, /expired_shadow_retry_no_credit/u);
 assert.match(provision, /safe_source_and_open_shadow/u);
@@ -461,11 +465,7 @@ assert.match(provision, /interval '20 minutes'/u);
 assert.match(provision, /bounded_20_minutes/u);
 assert.doesNotMatch(provision, /deploymentTarget', 'staging'/u);
 assert.doesNotMatch(provision, /update app\.feature_switches/u);
-assert.deepEqual(
-  [...provision.matchAll(/insert into app\.([a-z_]+)/gu)].map((match) => match[1]),
-  ['private_telebirr_shadow_assignment_authorizations'],
-  'provisioning may insert only the scoped assignment authorization',
-);
+assertOnlyScopedShadowAssignmentInsert(provision);
 
 assert.match(disable, /PRODUCTION_PROJECT_REF/u);
 assert.match(disable, /xzztugbgtulptnbpoelr/u);

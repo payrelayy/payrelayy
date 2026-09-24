@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 // The parser-refinement retry extends this exact immutable provider-origin lineage, so keep both
 // contracts in the same infra test chain without duplicating the already-long package script.
@@ -81,6 +82,6 @@ assert.match(verifierWorkflow, /0 as priority/u);
 assert.match(verifierProvision, /private_telebirr_shadow_provider_origin_retries/u);
 assert.match(verifierProvision, /private_telebirr_shadow_provider_origin_retry_is_valid/u);
 assert.doesNotMatch(verifierProvision, /update app\.feature_switches/u);
-assert.doesNotMatch(verifierProvision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(verifierProvision);
 
 console.log('Production reviewed provider-origin retry contract verified.');

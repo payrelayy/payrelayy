@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { assertOnlyScopedShadowAssignmentInsert } from './verify-shadow-provision-insert-boundary.mjs';
 
 // Keep the newest append-only receipt-alias child in the existing retry verification chain.
 import './verify-production-live-telebirr-receipt-alias-retry.mjs';
@@ -71,6 +72,6 @@ assert.match(verifierWorkflow, /-1 as priority/u);
 assert.match(verifierProvision, /private_telebirr_shadow_parser_refinement_retries/u);
 assert.match(verifierProvision, /private_telebirr_shadow_parser_refinement_retry_is_valid/u);
 assert.doesNotMatch(verifierProvision, /update app\.feature_switches/u);
-assert.doesNotMatch(verifierProvision, /insert into app\./u);
+assertOnlyScopedShadowAssignmentInsert(verifierProvision);
 
 console.log('Production reviewed parser-refinement retry contract verified.');

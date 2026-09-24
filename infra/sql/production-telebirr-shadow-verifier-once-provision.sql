@@ -254,7 +254,24 @@ select :'source_live_verification_job_id' = 'not-applicable'
               )
         )
       )
-      and exists (
+      and (
+        -- A new Telegram proof has no phone evidence yet. Provision the bounded verifier
+        -- and exact-proof assignment together; the phone may then stage one observation.
+        (
+          :'recovery_request_key' = 'not-applicable'
+          and not exists (
+            select 1 from app.private_telebirr_shadow_verification_attempts attempt
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_device_evidence_staging staged
+              join app.private_telebirr_shadow_verification_attempts attempt
+                on attempt.id = staged.verification_attempt_id
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+        )
+        or exists (
         select 1
           from app.private_telebirr_shadow_device_evidence_staging staged
           join app.private_telebirr_shadow_verification_attempts attempt
@@ -451,6 +468,7 @@ select :'source_live_verification_job_id' = 'not-applicable'
                 )
               )
            )
+        )
       )
      and not exists (
        select 1
@@ -919,7 +937,22 @@ with locked_feature_switches as materialized (
             nullif(:'recovery_request_key', 'not-applicable')::uuid
           )
      )
-      and exists (
+      and (
+        (
+          :'recovery_request_key' = 'not-applicable'
+          and not exists (
+            select 1 from app.private_telebirr_shadow_verification_attempts attempt
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+          and not exists (
+            select 1
+              from app.private_telebirr_shadow_device_evidence_staging staged
+              join app.private_telebirr_shadow_verification_attempts attempt
+                on attempt.id = staged.verification_attempt_id
+             where attempt.shadow_proof_request_id = shadow_proof.id
+          )
+        )
+        or exists (
         select 1
           from app.private_telebirr_shadow_device_evidence_staging staged
           join app.private_telebirr_shadow_verification_attempts attempt
@@ -1116,6 +1149,7 @@ with locked_feature_switches as materialized (
                 )
               )
            )
+        )
       )
      and not exists (
        select 1
@@ -1590,6 +1624,94 @@ begin
   end if;
 end
 $fetanagent$;
+
+-- Commit this exact-proof authorization atomically with the bounded verifier login.
+-- It cannot grant financial authority and cannot make an idle or second proof assignable.
+with authorization_clock as materialized (
+  select pg_catalog.clock_timestamp() as authorized_at
+), target as materialized (
+  select proof.id as shadow_proof_request_id,
+         proof.verification_job_id,
+         proof.pilot_revision_id,
+         enrollment.id as device_enrollment_id,
+         clock.authorized_at,
+         pg_catalog.least(
+           clock.authorized_at + interval '20 minutes',
+           proof.expires_at,
+           enrollment.valid_until,
+           pilot.expires_at
+         ) as expires_at,
+         (
+           select pg_catalog.count(*)::integer
+             from app.private_telebirr_shadow_verification_attempts attempt
+            where attempt.shadow_proof_request_id = proof.id
+              and attempt.verification_job_id = proof.verification_job_id
+         ) as prior_attempt_count,
+         (
+           :'source_live_verification_job_id' = 'not-applicable'
+           and :'recovery_request_key' = 'not-applicable'
+           and proof.source_live_verification_job_id is null
+           and proof.recovery_request_key is null
+           and proof.retry_request_key is null
+           and proof.infrastructure_retry_request_key is null
+           and proof.runtime_retry_request_key is null
+           and not exists (
+             select 1
+               from app.private_telebirr_shadow_verification_attempts attempt
+              where attempt.shadow_proof_request_id = proof.id
+           )
+           and not exists (
+             select 1
+               from app.private_telebirr_shadow_device_evidence_staging staged
+               join app.private_telebirr_shadow_verification_attempts attempt
+                 on attempt.id = staged.verification_attempt_id
+              where attempt.shadow_proof_request_id = proof.id
+           )
+         ) as assignment_allowed
+    from app.private_telebirr_shadow_proof_requests proof
+    join app.private_live_deposit_pilot_revisions pilot
+      on pilot.id = proof.pilot_revision_id
+    join app.private_live_telebirr_device_enrollments enrollment
+      on enrollment.pilot_revision_id = pilot.id
+     and enrollment.receiver_profile_id = proof.receiver_profile_id
+   cross join authorization_clock clock
+   where proof.id = :'target_shadow_proof_request_id'::uuid
+     and proof.pilot_revision_id = :'target_pilot_revision_id'::uuid
+     and proof.proof_status = 'verification_queued'
+     and pilot.status = 'armed'
+     and pilot.active_from <= clock.authorized_at
+     and enrollment.valid_from <= clock.authorized_at
+     and not exists (
+       select 1 from app.private_live_telebirr_device_revocations revocation
+        where revocation.device_enrollment_id = enrollment.id
+     )
+     and not exists (
+       select 1 from app.private_telebirr_shadow_verification_outcomes outcome
+        where outcome.shadow_proof_request_id = proof.id
+     )
+     and app.private_telebirr_shadow_mode_is_ready(pilot.id)
+), inserted as (
+  insert into app.private_telebirr_shadow_assignment_authorizations (
+    pilot_revision_id, shadow_proof_request_id, verification_job_id,
+    device_enrollment_id, prior_attempt_count, assignment_allowed,
+    authorized_at, expires_at
+  )
+  select pilot_revision_id, shadow_proof_request_id, verification_job_id,
+         device_enrollment_id, prior_attempt_count, assignment_allowed,
+         authorized_at, expires_at
+    from target
+   where expires_at > authorized_at + interval '5 minutes'
+     and prior_attempt_count between 0 and 100
+  returning id
+)
+select pg_catalog.count(*) = 1 as shadow_assignment_authorization_ready
+  from inserted
+\gset
+\if :shadow_assignment_authorization_ready
+\else
+  \warn 'The exact bounded no-money assignment authorization was unavailable.'
+  select 1 / 0 as rejected;
+\endif
 
 alter role fetanagent_telebirr_shadow_verifier_runtime with
   login noinherit nocreatedb nocreaterole noreplication nobypassrls

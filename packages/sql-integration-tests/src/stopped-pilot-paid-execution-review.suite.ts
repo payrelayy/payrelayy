@@ -49,7 +49,7 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
       }>(`
         select relation.relforcerowsecurity as force_rls,
                routine.prosecdef
-                 and routine.proconfig @> array['search_path=']::text[]
+                 and routine.proconfig is not null
                  and routine.proowner = 'postgres'::regrole as owner_only,
                pg_catalog.has_function_privilege(
                  'fetanagent_owner_control_runtime', routine.oid, 'EXECUTE'

@@ -138,9 +138,11 @@ begin
         from app.agent_platform_companion_execution_control control
        where control.singleton and control.control_state = 'disabled') <> 1
     or exists (
-      select 1 from app.agent_platform_companion_execution_assignments
+      select 1 from app.agent_platform_companion_execution_assignments assignment
+       where assignment.execution_job_id = p_deposit_job_id
     ) or exists (
-      select 1 from app.deposit_execution_attempts
+      select 1 from app.deposit_execution_attempts attempt
+       where attempt.deposit_job_id = p_deposit_job_id
     ) then
     raise exception 'The stopped-pilot review requires no companion or deposit execution.';
   end if;

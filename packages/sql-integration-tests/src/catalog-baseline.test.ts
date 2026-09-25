@@ -8749,6 +8749,12 @@ describe('disposable SQL migration baseline', () => {
         settlement_runtime: false,
         signature: 'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
       },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.review_stopped_pilot_paid_execution_job(uuid,uuid,uuid,uuid)',
+      },
     ]);
 
     const indexRows = await client.query<{

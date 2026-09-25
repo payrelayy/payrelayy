@@ -29,6 +29,7 @@ assert.doesNotMatch(
 for (const required of [
   'app.private_live_deposit_pilot_revisions',
   'app.private_live_deposit_pilot_reservations',
+  'app.deposit_payment_claims',
   'app.deposit_jobs',
   'app.feature_switches',
   'app.private_trusted_telebirr_activation_control',
@@ -40,6 +41,7 @@ for (const required of [
   'fetanagent_companion_execution_bridge',
   "job.status = 'queued'",
   "job.status in ('queued', 'leased', 'retry_wait')",
+  "claim.provider_payment_evidence_id = reservation.provider_payment_evidence_id",
   'job.attempt_count = 0',
   'job.lease_token is null',
   'job.leased_by is null',

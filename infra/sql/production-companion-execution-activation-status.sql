@@ -34,15 +34,23 @@ with latest_pilot as materialized (
     )::integer as latest_pilot_jobs,
     pg_catalog.count(*) filter (
       where reservation.pilot_revision_id = (select id from latest_pilot)
+        and reservation.amount_minor = 2500
+        and reservation.currency_code = 'ETB'
+        and claim.id is not null
+        and claim.provider_payment_evidence_id = reservation.provider_payment_evidence_id
+        and job.job_kind = 'execute_deposit'
         and job.status = 'queued'
         and job.attempt_count = 0
         and job.lease_token is null
         and job.leased_by is null
         and job.lease_expires_at is null
-    )::integer as latest_pilot_untouched_jobs
+    )::integer as latest_pilot_paid_untouched_jobs
   from app.deposit_jobs job
   left join app.private_live_deposit_pilot_reservations reservation
     on reservation.deposit_intent_id = job.deposit_intent_id
+  left join app.deposit_payment_claims claim
+    on claim.id = reservation.deposit_payment_claim_id
+   and claim.deposit_intent_id = job.deposit_intent_id
 ), reservation_state as materialized (
   select pg_catalog.count(*)::integer as total_reservations
   from app.private_live_deposit_pilot_reservations
@@ -157,7 +165,7 @@ select pg_catalog.jsonb_build_object(
     coalesce((select status from latest_pilot), 'none') = 'stopped'
       and queue_state.open_jobs = 1
       and queue_state.untouched_jobs = 1
-      and queue_state.latest_pilot_untouched_jobs = 1,
+      and queue_state.latest_pilot_paid_untouched_jobs = 1,
   'nextAction', case
     when switch_state.switch_count <> 7 or switch_state.disabled_count <> 7
       or execution_control.control_count <> 1 or execution_control.disabled_count <> 1
@@ -167,7 +175,7 @@ select pg_catalog.jsonb_build_object(
     when coalesce((select status from latest_pilot), 'none') = 'stopped'
       and queue_state.open_jobs = 1
       and queue_state.untouched_jobs = 1
-      and queue_state.latest_pilot_untouched_jobs = 1
+      and queue_state.latest_pilot_paid_untouched_jobs = 1
       then 'paid_stopped_pilot_review'
     when queue_state.open_jobs > 0 then 'queue_reconciliation'
     when coalesce((select status from latest_pilot), 'none') <> 'armed'

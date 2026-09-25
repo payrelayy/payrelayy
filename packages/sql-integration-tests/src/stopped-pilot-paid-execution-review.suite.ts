@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -10,6 +11,28 @@ import {
 } from './private-live-telebirr-proof-lineage.suite.js';
 
 type ReviewRow = { readonly review_state: string; readonly replayed: boolean };
+type ReadinessRow = {
+  readonly redacted_status: {
+    readonly cancelledUntouchedJobs: number;
+    readonly customerResolutionPending: boolean;
+    readonly nextAction: string;
+    readonly openExecutionReviewCases: number;
+    readonly openJobs: number;
+    readonly stoppedPilotUntouchedJob: boolean;
+  };
+};
+
+const readinessSource = readFileSync(
+  new URL(
+    '../../../infra/sql/production-companion-execution-activation-status.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const readinessSelect = readinessSource.slice(
+  readinessSource.indexOf('with latest_pilot as materialized ('),
+  readinessSource.lastIndexOf('\ncommit;'),
+);
 
 async function withRollback(client: Client, body: () => Promise<void>): Promise<void> {
   await client.query('begin');
@@ -112,13 +135,21 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
           [jobId],
         );
         expect(before.rows).toEqual([{ status: 'queued' }]);
-
         await client.query(
           `select app.stop_private_live_deposit_pilot(
             $1::uuid, $2::uuid, 'owner_stop'
           )`,
           [getOwnerAdminId(), pilot.pilotRevisionId],
         );
+        const beforeReview = await client.query<ReadinessRow>(readinessSelect);
+        expect(beforeReview.rows[0]?.redacted_status).toMatchObject({
+          cancelledUntouchedJobs: 0,
+          customerResolutionPending: false,
+          nextAction: 'paid_stopped_pilot_review',
+          openExecutionReviewCases: 0,
+          openJobs: 1,
+          stoppedPilotUntouchedJob: true,
+        });
         const first = await invoke(requestKey, jobId!);
         expect(first.rows).toEqual([{ review_state: 'review_required', replayed: false }]);
         const replay = await invoke(requestKey, jobId!);
@@ -170,6 +201,15 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
             reservation_count: 1,
           },
         ]);
+        const afterReview = await client.query<ReadinessRow>(readinessSelect);
+        expect(afterReview.rows[0]?.redacted_status).toMatchObject({
+          cancelledUntouchedJobs: 1,
+          customerResolutionPending: true,
+          nextAction: 'customer_resolution_pending',
+          openExecutionReviewCases: 1,
+          openJobs: 0,
+          stoppedPilotUntouchedJob: false,
+        });
         await expectRejected(client, () =>
           client.query(
             `update app.stopped_pilot_paid_execution_reviews

@@ -30,6 +30,10 @@ for (const required of [
   'app.private_live_deposit_pilot_revisions',
   'app.private_live_deposit_pilot_reservations',
   'app.deposit_payment_claims',
+  'app.deposit_review_cases',
+  'app.deposit_execution_attempts',
+  'app.deposit_intents',
+  'app.stopped_pilot_paid_execution_reviews',
   'app.deposit_jobs',
   'app.feature_switches',
   'app.private_trusted_telebirr_activation_control',
@@ -49,15 +53,20 @@ for (const required of [
   "pilot.status = 'armed'",
   'least(queue_state.total_jobs, 2)',
   'least(queue_state.open_jobs, 2)',
+  'least(queue_state.cancelled_untouched_jobs, 2)',
   'least(queue_state.total_jobs - queue_state.untouched_jobs, 2)',
   'least(reservation_state.total_reservations, 2)',
+  'least(customer_review_state.open_cases, 2)',
   "'readOnly', true",
   "'identifiersRedacted', true",
   "'readinessOnly', true",
   "'activationAvailable', false",
   "'stoppedPilotUntouchedJob'",
+  "'customerResolutionPending'",
+  "'cancelledUntouchedJobs'",
   "'nextAction'",
   "'paid_stopped_pilot_review'",
+  "'customer_resolution_pending'",
   "'safety_review'",
 ]) {
   assert.ok(statements.includes(required), `Missing status boundary: ${required}`);
@@ -90,6 +99,8 @@ for (const required of [
   '.companionExecutionControlDisabled',
   '.executionCapabilityDormant',
   '.companionExecutionRecords == 0',
+  '.customerResolutionPending',
+  'customer_resolution_pending',
 ]) {
   assert.ok(workflow.includes(required), `Missing read-only workflow boundary: ${required}`);
 }

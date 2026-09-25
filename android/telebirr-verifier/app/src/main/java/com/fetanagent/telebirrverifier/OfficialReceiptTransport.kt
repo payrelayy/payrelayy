@@ -209,35 +209,43 @@ class SafeOfficialReceiptTransport(
         trace.fail(ReceiptTransportFailure.NON_PUBLIC_ADDRESS)
         return unavailable("network")
       }
-      val response =
-        route.useUrl { url ->
-          exchange.execute(url, addresses.toList(), remaining(deadline), MAX_RESPONSE_BYTES, trace)
+      for (attempt in 1..MAX_PROVIDER_FETCHES) {
+        val response =
+          route.useUrl { url ->
+            exchange.execute(url, addresses.toList(), remaining(deadline), MAX_RESPONSE_BYTES, trace)
+          }
+        if (clock.nowMillis() > deadline) {
+          trace.advance(ReceiptTransportPhase.DEADLINE)
+          trace.fail(ReceiptTransportFailure.TIMEOUT)
+          return unavailable("network")
         }
-      if (clock.nowMillis() > deadline) {
-        trace.advance(ReceiptTransportPhase.DEADLINE)
-        trace.fail(ReceiptTransportFailure.TIMEOUT)
-        return unavailable("network")
-      }
-      when {
-        response.statusCode in 300..399 -> unavailable("provider")
-        // A bare status code is not an attested provider negative-response contract. Treat every
-        // 404 as uncertainty until a separately reviewed response profile can prove `not_found`.
-        response.statusCode == HttpURLConnection.HTTP_NOT_FOUND -> unavailable("provider")
-        response.statusCode != HttpURLConnection.HTTP_OK -> unavailable("provider")
-        response.body.size > MAX_RESPONSE_BYTES -> unavailable("provider")
-        !isIdentityEncoding(response.contentEncoding) -> unavailable("provider")
-        !isStrictUtf8Html(response.contentType) -> unavailable("provider")
-        else -> {
-          val decoded = decodeUtf8Strict(response.body) ?: return unavailable("parser")
-          recordResponse(response, decoded)
-          ProviderDocument.Found(
-            utf8Body = decoded,
-            sourceDocumentDigest = CanonicalTranscripts.sha256(response.body),
-            retrievedAt = canonicalTimestamp(clock.nowMillis()),
-            originAttestation = ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
-          )
+        when {
+          response.statusCode in 300..399 -> return unavailable("provider")
+          // A bare status code is not an attested provider negative-response contract. Treat every
+          // 404 as uncertainty until a separately reviewed response profile can prove `not_found`.
+          response.statusCode == HttpURLConnection.HTTP_NOT_FOUND -> return unavailable("provider")
+          response.statusCode != HttpURLConnection.HTTP_OK -> return unavailable("provider")
+          response.body.size > MAX_RESPONSE_BYTES -> return unavailable("provider")
+          !isIdentityEncoding(response.contentEncoding) -> return unavailable("provider")
+          !isStrictUtf8Html(response.contentType) -> return unavailable("provider")
         }
+        val decoded = decodeUtf8Strict(response.body) ?: return unavailable("parser")
+        recordResponse(response, decoded)
+        if (attempt == 1 && isBriefUnmarkedPage(response, decoded)) {
+          // The official origin sometimes serves a tiny 200 HTML page with no receipt fields,
+          // challenge text, or session signals. Repeat only this unmarked read once, within the
+          // original deadline and pinned-address policy. Never retry a provider denial, redirect,
+          // malformed response, full receipt, or an authenticated/session-dependent page.
+          continue
+        }
+        return ProviderDocument.Found(
+          utf8Body = decoded,
+          sourceDocumentDigest = CanonicalTranscripts.sha256(response.body),
+          retrievedAt = canonicalTimestamp(clock.nowMillis()),
+          originAttestation = ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+        )
       }
+      unavailable("provider")
     } catch (_: TimeoutException) {
       trace.fail(ReceiptTransportFailure.TIMEOUT)
       unavailable("network")
@@ -272,14 +280,7 @@ class SafeOfficialReceiptTransport(
 
   private fun recordResponse(response: RawHttpsResponse, decoded: String) {
     val lower = decoded.lowercase(Locale.ROOT)
-    val hint =
-      when {
-        listOf("captcha", "verify you are human", "human verification").any(lower::contains) -> "challenge_words"
-        listOf("sign in", "log in", "login", "session", "cookie").any(lower::contains) -> "session_words"
-        listOf("access denied", "forbidden", "blocked").any(lower::contains) -> "access_words"
-        listOf("not found", "invalid", "error", "unavailable").any(lower::contains) -> "error_words"
-        else -> "none"
-      }
+    val hint = responseWordHint(lower)
     val bodyBand =
       when (response.body.size) {
         0 -> "empty"
@@ -306,9 +307,31 @@ class SafeOfficialReceiptTransport(
     }
   }
 
+  private fun isBriefUnmarkedPage(response: RawHttpsResponse, decoded: String): Boolean {
+    if (response.body.size !in 1..255 ||
+      response.setCookieHeader || response.varyCookieHeader || response.varyUserAgentHeader ||
+      response.authenticationHeader || response.refreshHeader
+    ) return false
+    val lower = decoded.lowercase(Locale.ROOT)
+    return responseWordHint(lower) == "none" &&
+      listOf("invoice no", "transaction status", "settled amount", "payment date", "credited party")
+        .none(lower::contains) &&
+      !lower.contains("<script") && !lower.contains("http-equiv")
+  }
+
+  private fun responseWordHint(lower: String): String =
+    when {
+      listOf("captcha", "verify you are human", "human verification").any(lower::contains) -> "challenge_words"
+      listOf("sign in", "log in", "login", "session", "cookie").any(lower::contains) -> "session_words"
+      listOf("access denied", "forbidden", "blocked").any(lower::contains) -> "access_words"
+      listOf("not found", "invalid", "error", "unavailable").any(lower::contains) -> "error_words"
+      else -> "none"
+    }
+
   companion object {
     const val TOTAL_TIMEOUT_MILLIS = 15_000
     const val MAX_RESPONSE_BYTES = 32 * 1024
+    private const val MAX_PROVIDER_FETCHES = 2
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
     internal fun canonicalTimestamp(epochMillis: Long): String =

@@ -71,6 +71,7 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          node infra/verify-production-companion-execution-activation-status.mjs
           node infra/verify-production-live-telebirr-receipt-shape-diagnostic-retry.mjs
           node infra/verify-production-telebirr-receipt-shape-network-retry.mjs
           node infra/verify-production-telebirr-receipt-transport-diagnostic-retry.mjs

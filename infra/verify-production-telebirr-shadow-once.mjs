@@ -281,7 +281,7 @@ const evidenceGuardStarts = [
 assert.ok(evidenceGuardStarts[0] < transitionGate && transitionGate < evidenceGuardStarts[1]);
 const freshBootstrapGuards = [
   ...provision.matchAll(
-    /:'recovery_request_key' = 'not-applicable'\s+and not exists \(\s*select 1 from app\.private_telebirr_shadow_verification_attempts attempt\s+where attempt\.shadow_proof_request_id = shadow_proof\.id\s+\)\s+and not exists \(\s*select 1\s+from app\.private_telebirr_shadow_device_evidence_staging staged/gu,
+    /:'recovery_request_key' = 'not-applicable'\s+or \(\s*:'source_live_verification_job_id' = 'not-applicable'/gu,
   ),
 ].map((match) => match.index);
 assert.equal(freshBootstrapGuards.length, 2);
@@ -291,6 +291,21 @@ assert.ok(
     transitionGate < freshBootstrapGuards[1] &&
     freshBootstrapGuards[1] < evidenceGuardStarts[1],
 );
+for (const [index, start] of freshBootstrapGuards.entries()) {
+  const guard = provision.slice(start, evidenceGuardStarts[index]);
+  assert.match(
+    guard,
+    /app\.private_telebirr_direct_brief_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)/u,
+  );
+  assert.match(
+    guard,
+    /from app\.private_telebirr_shadow_source_unavailable_retries retry\s+where retry\.retry_request_key =\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s+and retry\.replacement_shadow_proof_request_id = shadow_proof\.id\s+and retry\.reason_code =\s*'reviewed_direct_brief_receipt_retry_no_credit'/u,
+  );
+  assert.match(
+    guard,
+    /and app\.private_telebirr_shadow_source_unavailable_retry_is_valid\(\s*shadow_proof\.id,\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s*\)\s*\)\s*\)\s*and not exists \(\s*select 1 from app\.private_telebirr_shadow_verification_attempts attempt\s+where attempt\.shadow_proof_request_id = shadow_proof\.id\s*\)\s*and not exists \(\s*select 1\s+from app\.private_telebirr_shadow_device_evidence_staging staged/u,
+  );
+}
 for (const [index, start] of evidenceGuardStarts.slice(0, 2).entries()) {
   const end = provision.indexOf(
     'from app.private_telebirr_shadow_verification_outcomes outcome',
@@ -411,6 +426,22 @@ const assignmentAuthorization = provision.indexOf(
 );
 const boundedVerifierLogin = provision.indexOf(
   'alter role fetanagent_telebirr_shadow_verifier_runtime with',
+);
+const assignmentTarget = provision.slice(
+  provision.indexOf('with authorization_clock as materialized ('),
+  assignmentAuthorization,
+);
+assert.match(
+  assignmentTarget,
+  /:'source_live_verification_job_id' = 'not-applicable'\s+and \(\s*:'recovery_request_key' = 'not-applicable'\s+or \(\s*app\.private_telebirr_direct_brief_source_is_valid\(\s*proof\.source_unavailable_retry_source_id\s*\)/u,
+);
+assert.match(
+  assignmentTarget,
+  /from app\.private_telebirr_shadow_source_unavailable_retries retry\s+where retry\.retry_request_key =\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s+and retry\.replacement_shadow_proof_request_id = proof\.id\s+and retry\.reason_code =\s*'reviewed_direct_brief_receipt_retry_no_credit'/u,
+);
+assert.match(
+  assignmentTarget,
+  /and app\.private_telebirr_shadow_source_unavailable_retry_is_valid\(\s*proof\.id,\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s*\)\s*\)\s*\)\s*and proof\.source_live_verification_job_id is null[\s\S]*?and not exists \(\s*select 1\s+from app\.private_telebirr_shadow_device_evidence_staging staged[\s\S]*?\) as assignment_allowed/u,
 );
 assert.ok(
   restoredBudget < assignmentAuthorization && assignmentAuthorization < boundedVerifierLogin,

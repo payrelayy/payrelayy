@@ -147,6 +147,124 @@ class OfficialReceiptTransportTest {
   }
 
   @Test
+  fun `rechecks one brief unmarked page within the same official route and deadline`() {
+    val brief = "<html><body>Temporarily empty</body></html>"
+    val full = officialHtml()
+    val diagnostics = mutableListOf<ReceiptResponseDiagnostic>()
+    var calls = 0
+    var now = 1_000L
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange = HttpsExchange { url, addresses, timeout, maximumBytes, _ ->
+          calls += 1
+          assertEquals("https://transactioninfo.ethiotelecom.et/receipt/$SYNTHETIC_REFERENCE", url.toString())
+          assertEquals(listOf("8.8.8.8"), addresses.map(InetAddress::getHostAddress))
+          assertEquals(SafeOfficialReceiptTransport.MAX_RESPONSE_BYTES, maximumBytes)
+          assertEquals(SafeOfficialReceiptTransport.TOTAL_TIMEOUT_MILLIS - (calls - 1) * 100, timeout)
+          now += 100
+          RawHttpsResponse(200, "text/html; charset=utf-8", null, (if (calls == 1) brief else full).toByteArray())
+        },
+        clock = MillisClock { now },
+        responseDiagnostics = ReceiptResponseDiagnostics { diagnostics += it },
+      )
+
+    val result = transport.retrieve(route()) as ProviderDocument.Found
+
+    assertEquals(2, calls)
+    assertEquals(full, result.utf8Body)
+    assertEquals(CanonicalTranscripts.sha256(full.toByteArray()), result.sourceDocumentDigest)
+    assertEquals(2, diagnostics.size)
+    assertEquals("brief", diagnostics[0].bodyBytesBand)
+    assertTrue(diagnostics[1].bodyBytesBand != "brief")
+    assertTrue(diagnostics.none { it.toString().contains(SYNTHETIC_REFERENCE) })
+  }
+
+  @Test
+  fun `a second brief response is terminal for this observation`() {
+    val brief = "<html><body>Temporarily empty</body></html>"
+    var calls = 0
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange = HttpsExchange { _, _, _, _, _ ->
+          calls += 1
+          RawHttpsResponse(200, "text/html", null, brief.toByteArray())
+        },
+      )
+
+    val result = transport.retrieve(route()) as ProviderDocument.Found
+
+    assertEquals(2, calls)
+    assertEquals(brief, result.utf8Body)
+  }
+
+  @Test
+  fun `the brief-page recheck cannot outlive the original total deadline`() {
+    var calls = 0
+    var now = 1_000L
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange = HttpsExchange { _, _, _, _, _ ->
+          calls += 1
+          now += SafeOfficialReceiptTransport.TOTAL_TIMEOUT_MILLIS
+          RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray())
+        },
+        clock = MillisClock { now },
+      )
+
+    assertEquals("network", (transport.retrieve(route()) as ProviderDocument.Unavailable).uncertainty)
+    assertEquals(1, calls)
+  }
+
+  @Test
+  fun `does not retry a short challenge session redirect or receipt marker`() {
+    val cases =
+      listOf(
+        RawHttpsResponse(200, "text/html", null, "<html>Access denied</html>".toByteArray()),
+        RawHttpsResponse(200, "text/html", null, "<html>Sign in</html>".toByteArray()),
+        RawHttpsResponse(200, "text/html", null, "<html><script></script></html>".toByteArray()),
+        RawHttpsResponse(200, "text/html", null, "<html>Invoice No</html>".toByteArray()),
+        RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray(), setCookieHeader = true),
+        RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray(), varyUserAgentHeader = true),
+        RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray(), authenticationHeader = true),
+        RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray(), refreshHeader = true),
+      )
+    for (response in cases) {
+      var calls = 0
+      val transport =
+        SafeOfficialReceiptTransport(
+          resolver = publicResolver,
+          exchange = HttpsExchange { _, _, _, _, _ ->
+            calls += 1
+            response
+          },
+        )
+
+      assertTrue(transport.retrieve(route()) is ProviderDocument.Found)
+      assertEquals(1, calls)
+    }
+  }
+
+  @Test
+  fun `a rejected second response cannot reuse the first page as evidence`() {
+    var calls = 0
+    val transport =
+      SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange = HttpsExchange { _, _, _, _, _ ->
+          calls += 1
+          if (calls == 1) RawHttpsResponse(200, "text/html", null, "<html></html>".toByteArray())
+          else RawHttpsResponse(302, "text/html", null, ByteArray(0))
+        },
+      )
+
+    assertEquals("provider", (transport.retrieve(route()) as ProviderDocument.Unavailable).uncertainty)
+    assertEquals(2, calls)
+  }
+
+  @Test
   fun `reports only fixed response categories without provider text or header values`() {
     val html = "<html><body>Access denied for a synthetic request</body></html>"
     val observed = mutableListOf<ReceiptResponseDiagnostic>()

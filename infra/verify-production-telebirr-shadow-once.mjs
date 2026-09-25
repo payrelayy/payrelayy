@@ -262,8 +262,8 @@ for (const [index, start] of directSubmissionWindows.entries()) {
   );
   assert.match(
     provision.slice(start, receiptGuard),
-    /or \(\s*\(\s*app\.private_telebirr_receipt_shape_network_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*or app\.private_telebirr_receipt_transport_diagnostic_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*\)\s*and app\.private_telebirr_shadow_source_unavailable_retry_is_valid\(\s*shadow_proof\.id,\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s*\)\s*\)/u,
-    `direct submission-window guard ${index + 1} must bind either reviewed network retry to its exact source`,
+    /or \(\s*\(\s*app\.private_telebirr_receipt_shape_network_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*or app\.private_telebirr_receipt_transport_diagnostic_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*or app\.private_telebirr_direct_brief_source_is_valid\(\s*shadow_proof\.source_unavailable_retry_source_id\s*\)\s*\)\s*and app\.private_telebirr_shadow_source_unavailable_retry_is_valid\(\s*shadow_proof\.id,\s*nullif\(:'recovery_request_key', 'not-applicable'\)::uuid\s*\)\s*\)/u,
+    `direct submission-window guard ${index + 1} must bind a reviewed retry to its exact source`,
   );
 }
 assert.match(provision, /shadow_proof\.recovered_at \+ interval '12 hours'/u);

@@ -885,6 +885,9 @@ with locked_feature_switches as materialized (
            or app.private_telebirr_receipt_transport_diagnostic_source_is_valid(
              shadow_proof.source_unavailable_retry_source_id
            )
+           or app.private_telebirr_direct_brief_source_is_valid(
+             shadow_proof.source_unavailable_retry_source_id
+           )
          )
          and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
                shadow_proof.id,

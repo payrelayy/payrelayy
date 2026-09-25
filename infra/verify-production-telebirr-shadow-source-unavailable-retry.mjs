@@ -145,5 +145,5 @@ assert.match(shadowWorkflow, /reviewed_direct_brief_receipt_retry_no_credit/u);
 assert.match(shadowWorkflow, /app\.private_telebirr_direct_brief_source_is_valid/u);
 assert.equal(
   (shadowProvision.match(/app\.private_telebirr_direct_brief_source_is_valid\(/gu) ?? []).length,
-  3,
+  6,
 );

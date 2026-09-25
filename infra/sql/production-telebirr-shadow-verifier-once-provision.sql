@@ -261,10 +261,31 @@ select :'source_live_verification_job_id' = 'not-applicable'
         )
       )
       and (
-        -- A new Telegram proof has no phone evidence yet. Provision the bounded verifier
-        -- and exact-proof assignment together; the phone may then stage one observation.
+        -- A new Telegram proof or the exact reviewed direct-brief child has no phone
+        -- evidence yet. Provision only its bounded, exact-proof assignment.
         (
-          :'recovery_request_key' = 'not-applicable'
+          (
+            :'recovery_request_key' = 'not-applicable'
+            or (
+              :'source_live_verification_job_id' = 'not-applicable'
+              and app.private_telebirr_direct_brief_source_is_valid(
+                shadow_proof.source_unavailable_retry_source_id
+              )
+              and exists (
+                select 1
+                  from app.private_telebirr_shadow_source_unavailable_retries retry
+                 where retry.retry_request_key =
+                       nullif(:'recovery_request_key', 'not-applicable')::uuid
+                   and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                   and retry.reason_code =
+                       'reviewed_direct_brief_receipt_retry_no_credit'
+              )
+              and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                shadow_proof.id,
+                nullif(:'recovery_request_key', 'not-applicable')::uuid
+              )
+            )
+          )
           and not exists (
             select 1 from app.private_telebirr_shadow_verification_attempts attempt
              where attempt.shadow_proof_request_id = shadow_proof.id
@@ -948,7 +969,29 @@ with locked_feature_switches as materialized (
      )
       and (
         (
-          :'recovery_request_key' = 'not-applicable'
+          -- Repeat the exact first-observation gate under the locked no-money boundary.
+          (
+            :'recovery_request_key' = 'not-applicable'
+            or (
+              :'source_live_verification_job_id' = 'not-applicable'
+              and app.private_telebirr_direct_brief_source_is_valid(
+                shadow_proof.source_unavailable_retry_source_id
+              )
+              and exists (
+                select 1
+                  from app.private_telebirr_shadow_source_unavailable_retries retry
+                 where retry.retry_request_key =
+                       nullif(:'recovery_request_key', 'not-applicable')::uuid
+                   and retry.replacement_shadow_proof_request_id = shadow_proof.id
+                   and retry.reason_code =
+                       'reviewed_direct_brief_receipt_retry_no_credit'
+              )
+              and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                shadow_proof.id,
+                nullif(:'recovery_request_key', 'not-applicable')::uuid
+              )
+            )
+          )
           and not exists (
             select 1 from app.private_telebirr_shadow_verification_attempts attempt
              where attempt.shadow_proof_request_id = shadow_proof.id
@@ -1657,8 +1700,30 @@ with authorization_clock as materialized (
               and attempt.verification_job_id = proof.verification_job_id
          ) as prior_attempt_count,
          (
+           -- Only an untouched direct proof or its reviewed direct-brief child may
+           -- authorize a first phone assignment under this one-use run.
            :'source_live_verification_job_id' = 'not-applicable'
-           and :'recovery_request_key' = 'not-applicable'
+           and (
+             :'recovery_request_key' = 'not-applicable'
+             or (
+               app.private_telebirr_direct_brief_source_is_valid(
+                 proof.source_unavailable_retry_source_id
+               )
+               and exists (
+                 select 1
+                   from app.private_telebirr_shadow_source_unavailable_retries retry
+                  where retry.retry_request_key =
+                        nullif(:'recovery_request_key', 'not-applicable')::uuid
+                    and retry.replacement_shadow_proof_request_id = proof.id
+                    and retry.reason_code =
+                        'reviewed_direct_brief_receipt_retry_no_credit'
+               )
+               and app.private_telebirr_shadow_source_unavailable_retry_is_valid(
+                 proof.id,
+                 nullif(:'recovery_request_key', 'not-applicable')::uuid
+               )
+             )
+           )
            and proof.source_live_verification_job_id is null
            and proof.recovery_request_key is null
            and proof.retry_request_key is null

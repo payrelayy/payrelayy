@@ -1,0 +1,118 @@
+name: Retry one reviewed direct brief TeleBirr receipt
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_operation:
+        description: Type RETRY ONE REVIEWED DIRECT BRIEF TELEBIRR RECEIPT - NO MONEY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-telebirr-direct-brief-retry
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Require exact main and no-money operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Check the one-use operation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'RETRY ONE REVIEWED DIRECT BRIEF TELEBIRR RECEIPT - NO MONEY' ]]
+
+  retry:
+    name: Create one immutable no-money child
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact production contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Create and verify the one-use no-money child
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$RUNNER_TEMP/production-direct-brief-retry"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/production-direct-brief-retry" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The protected runner directory failed cleanup.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          result="$(timeout --signal=TERM --kill-after=5s 45s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-telebirr-direct-brief-retry.sql)"
+          jq -e '
+            .schemaVersion == 1 and
+            .operation == "telebirr_direct_brief_retry" and
+            .childCreated == true and
+            .financialBoundary == "dry_run" and
+            .moneyMoved == false
+          ' <<<"$result" >/dev/null
+          jq '{childCreated, financialBoundary, moneyMoved}' \
+            <<<"$result" >>"$GITHUB_STEP_SUMMARY"

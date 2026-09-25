@@ -77,3 +77,73 @@ assert.doesNotMatch(migration, /grant .*fetanagent_/u);
 assert.doesNotMatch(migration, /update app\.feature_switches/u);
 assert.doesNotMatch(migration, /deposit_payment_claims/u);
 assert.doesNotMatch(migration, /deposit_jobs/u);
+
+// A direct, signed invoice-layout review may be retried once without changing
+// the original source-unavailable lineage or granting any money authority.
+const directBriefMigration = readFileSync(
+  new URL(
+    '../supabase/migrations/20260925155626_brief_receipt_direct_shadow_retry.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const directBriefWorkflow = readFileSync(
+  new URL('../.github/workflows/production-telebirr-direct-brief-retry.yml', import.meta.url),
+  'utf8',
+);
+const directBriefOperation = readFileSync(
+  new URL('./sql/production-telebirr-direct-brief-retry.sql', import.meta.url),
+  'utf8',
+);
+const shadowWorkflow = readFileSync(
+  new URL('../.github/workflows/production-telebirr-shadow-once.yml', import.meta.url),
+  'utf8',
+);
+const shadowProvision = readFileSync(
+  new URL('./sql/production-telebirr-shadow-verifier-once-provision.sql', import.meta.url),
+  'utf8',
+);
+
+assert.match(
+  directBriefMigration,
+  /create function app\.private_telebirr_direct_brief_source_is_valid/u,
+);
+assert.match(directBriefMigration, /unknown_layout_invoice_number/u);
+assert.match(directBriefMigration, /outcome\.observation_body_digest =/u);
+assert.match(directBriefMigration, /private_telebirr_shadow_evidence_quarantine/u);
+assert.match(directBriefMigration, /reviewed_direct_brief_receipt_retry_no_credit/u);
+assert.match(directBriefMigration, /app\.private_live_deposit_pilot_sha256\(routine\.prosrc\)/u);
+assert.match(directBriefMigration, /routine\.proacl is not distinct from original_acl/u);
+assert.match(
+  directBriefMigration,
+  /revoke all on function app\.private_telebirr_direct_brief_source_is_valid/u,
+);
+assert.doesNotMatch(
+  directBriefMigration,
+  /update app\.private_telebirr_shadow_verification_outcomes/iu,
+);
+assert.doesNotMatch(directBriefMigration, /update app\.feature_switches/iu);
+assert.doesNotMatch(directBriefMigration, /insert into app\.deposit_jobs/iu);
+
+assert.match(directBriefWorkflow, /environment: production/u);
+assert.match(directBriefWorkflow, /require-production-ci\.mjs/u);
+assert.match(directBriefWorkflow, /RETRY ONE REVIEWED DIRECT BRIEF TELEBIRR RECEIPT - NO MONEY/u);
+assert.match(directBriefWorkflow, /production-telebirr-direct-brief-retry\.sql/u);
+assert.doesNotMatch(directBriefWorkflow, /confirm_source_shadow_proof_request_id/u);
+assert.doesNotMatch(directBriefWorkflow, /confirm_pilot_revision_id/u);
+assert.match(directBriefOperation, /app\.private_telebirr_direct_brief_source_is_valid/u);
+assert.match(directBriefOperation, /0\.5\.11-evidence-only/u);
+assert.match(directBriefOperation, /app\.retry_private_telebirr_shadow_after_source_unavailable/u);
+assert.match(
+  directBriefOperation,
+  /app\.private_telebirr_shadow_source_unavailable_retry_is_valid/u,
+);
+assert.match(directBriefOperation, /'moneyMoved', false/u);
+assert.doesNotMatch(directBriefOperation, /update app\.feature_switches/iu);
+assert.doesNotMatch(directBriefOperation, /insert into app\.deposit_jobs/iu);
+assert.match(shadowWorkflow, /reviewed_direct_brief_receipt_retry_no_credit/u);
+assert.match(shadowWorkflow, /app\.private_telebirr_direct_brief_source_is_valid/u);
+assert.equal(
+  (shadowProvision.match(/app\.private_telebirr_direct_brief_source_is_valid\(/gu) ?? []).length,
+  2,
+);

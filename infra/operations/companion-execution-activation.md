@@ -1,0 +1,47 @@
+# Paired Windows execution activation: current boundary
+
+The production Windows companion has an opt-in one-use execution worker and a separate signed
+execution transport. Both are deliberately dormant. The database execution control is disabled,
+and the execution capability role has no runtime member. There is **no reviewed production arm
+operation**. Setting a local environment flag, granting a role, or updating the control row by
+hand is not an activation procedure.
+
+## Current paid-proof state
+
+The Owner stopped the last live TeleBirr pilot with `owner_stop`. Its existing reservation and
+queued deposit job are preserved; the job was not leased or executed. A stopped pilot cannot be
+re-armed or silently replaced for that job. The existing executor requires a current, matching
+pilot and trusted activation epoch before it can lease a TeleBirr job. The paid proof therefore
+needs a separately reviewed, append-only historical-job disposition or customer resolution. Do
+not submit the receipt again or copy the reservation into a new pilot.
+
+Run `infra/sql/production-companion-execution-activation-status.sql` with a read-only production
+administrator session to obtain one identifier-free status object. It reports bounded counts and
+categorical states only. It performs no activation or queue mutation. The contract verifier is
+`node infra/verify-production-companion-execution-activation-status.mjs`.
+
+## Missing activation implementation
+
+Before any money-capable release, one separately reviewed change must provide all of the
+following as one fail-closed operation, with disposable-PostgreSQL and end-to-end tests:
+
+1. An Owner-authorized, one-use activation request tied to the exact pilot, current trusted
+   TeleBirr epoch, paired certificate, platform agent account, execution signer, immutable release,
+   and a short non-sliding expiry. A stopped or expired pilot must be rejected.
+2. A database-owned activation transition that locks the epoch, sorted switch rows, pilot,
+   certificate, and execution control in the established order; rechecks every lineage and
+   financial invariant; and atomically arms only the exact companion control. No direct table
+   write, broad grant, or request-key replay may substitute for this transition.
+3. A dedicated execution-bridge runtime identity with exactly the seven execution procedures
+   and no base-table access. Its membership and login must be created only inside the bounded
+   activation, then revoked and sessions terminated at stop, expiry, failure, or uncertainty.
+4. A checksum-bound production transport release with the pinned execution signer and the
+   reviewed overlay. The default release must remain no-money. The paired Windows process must
+   receive its account-bound opt-in through a reviewed local handoff, not a manually set flag.
+5. A rehearsed independent emergency stop and reconciliation path. The final-action fence must
+   be one-use, and any ambiguous provider response must stop without an automatic retry. The
+   queue item must never be leased for a test of the activation plumbing.
+
+Until all five are implemented and reviewed together, the executable path stays disabled. This
+status query and runbook prepare that review; they do not make the Telegram bot able to credit
+KemerBet or resolve the already-paid queued proof.

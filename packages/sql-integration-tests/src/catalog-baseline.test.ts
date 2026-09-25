@@ -27,6 +27,7 @@ import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
 import { registerReviewedSourceBindingShadowWindowRetrySqlTests } from './reviewed-source-binding-shadow-window-retry.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
+import { registerStoppedPilotPaidExecutionReviewSqlTests } from './stopped-pilot-paid-execution-review.suite.js';
 import { registerStagingTelebirrShadowVerifierLifecycleSqlTests } from './staging-telebirr-shadow-verifier-lifecycle.suite.js';
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
@@ -8748,6 +8749,12 @@ describe('disposable SQL migration baseline', () => {
         settlement_runtime: false,
         signature: 'app.require_deposit_execution_reconciliation(uuid,uuid,boolean)',
       },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.review_stopped_pilot_paid_execution_job(uuid,uuid,uuid,uuid)',
+      },
     ]);
 
     const indexRows = await client.query<{
@@ -9717,6 +9724,10 @@ registerPrivateLivePilotOwnerControlSqlTests(
   () => ownerAdminId,
 );
 registerPrivateLiveTelebirrProofLineageSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerStoppedPilotPaidExecutionReviewSqlTests(
   () => client,
   () => ownerAdminId,
 );

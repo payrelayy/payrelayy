@@ -11,9 +11,18 @@ hand is not an activation procedure.
 The Owner stopped the last live TeleBirr pilot with `owner_stop`. Its existing reservation and
 queued deposit job are preserved; the job was not leased or executed. A stopped pilot cannot be
 re-armed or silently replaced for that job. The existing executor requires a current, matching
-pilot and trusted activation epoch before it can lease a TeleBirr job. The paid proof therefore
-needs a separately reviewed, append-only historical-job disposition or customer resolution. Do
-not submit the receipt again or copy the reservation into a new pilot.
+pilot and trusted activation epoch before it can lease a TeleBirr job. Do not submit the receipt
+again or copy the reservation into a new pilot.
+
+Migration `review_stopped_pilot_paid_execution_job` adds a **dormant, Postgres-only** disposition
+for this state. Merely installing it leaves the job queued and changes no production row. A
+separately authorized invocation requires an exact active Owner, stopped `owner_stop` pilot,
+singular verified payment claim and reservation, untouched zero-attempt execution job, no
+execution attempt, and every financial switch disabled. It atomically cancels only that job,
+changes the deposit to `execution_review`, opens an execution review case, and records an immutable
+one-use receipt. The claim, payment evidence, reservation, and deposit history remain retained.
+This is **not a credit or a refund**: customer resolution remains a separate, explicit obligation.
+The function has no application or runtime grant. Never invoke it as part of migration deployment.
 
 Run `infra/sql/production-companion-execution-activation-status.sql` with a read-only production
 administrator session to obtain one identifier-free status object. It reports bounded counts and
@@ -42,6 +51,6 @@ following as one fail-closed operation, with disposable-PostgreSQL and end-to-en
    be one-use, and any ambiguous provider response must stop without an automatic retry. The
    queue item must never be leased for a test of the activation plumbing.
 
-Until all five are implemented and reviewed together, the executable path stays disabled. This
-status query and runbook prepare that review; they do not make the Telegram bot able to credit
-KemerBet or resolve the already-paid queued proof.
+Until all five are implemented and reviewed together, the executable path stays disabled. The
+status query and dormant disposition do not make the Telegram bot able to credit KemerBet or
+automatically resolve the already-paid proof.

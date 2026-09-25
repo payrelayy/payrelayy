@@ -41,7 +41,7 @@ for (const required of [
   'fetanagent_companion_execution_bridge',
   "job.status = 'queued'",
   "job.status in ('queued', 'leased', 'retry_wait')",
-  "claim.provider_payment_evidence_id = reservation.provider_payment_evidence_id",
+  'claim.provider_payment_evidence_id = reservation.provider_payment_evidence_id',
   'job.attempt_count = 0',
   'job.lease_token is null',
   'job.leased_by is null',

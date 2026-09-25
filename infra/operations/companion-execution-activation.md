@@ -29,6 +29,23 @@ administrator session to obtain one identifier-free status object. It reports bo
 categorical states only. It performs no activation or queue mutation. The contract verifier is
 `node infra/verify-production-companion-execution-activation-status.mjs`.
 
+The **Inspect production companion execution readiness** workflow runs that same status query
+against exact passing main with a read-only database session. Its output is a redacted snapshot,
+not an activation authorization. `activationAvailable` deliberately stays `false` until a
+separately reviewed activation operation exists. `nextAction` is one of these diagnostic classes:
+
+- `safety_review`: a financial switch, execution control, capability role, or execution ledger
+  is outside the dormant boundary; stop before any activation work.
+- `paid_stopped_pilot_review`: one untouched queue item belongs to the stopped pilot and needs
+  separate customer-resolution review. The workflow never invokes that disposition.
+- `queue_reconciliation`: another queued or changed job requires independent review.
+- `pilot_review`: there is no armed pilot available for a future activation.
+- `trusted_activation_review`: the trusted TeleBirr epoch is not active for the armed pilot.
+- `release_and_owner_review`: the database snapshot alone is insufficient; release, Owner,
+  credential, and local Windows checks still must pass before activation can be considered.
+
+No `nextAction` value is permission to arm a switch, lease a queue item, or move money.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the

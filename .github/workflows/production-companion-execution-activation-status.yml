@@ -1,0 +1,162 @@
+name: Inspect production companion execution readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type INSPECT COMPANION EXECUTION READINESS - READ ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-companion-execution-readiness
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate the exact read-only request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require main, production, and the read-only phrase
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'INSPECT COMPANION EXECUTION READINESS - READ ONLY' ]]
+
+  inspect:
+    name: Read redacted production readiness
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out the exact main contract
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Inspect readiness without changing production
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PGOPTIONS: '-c default_transaction_read_only=on'
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-companion-execution-readiness"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == \
+                    "$RUNNER_TEMP/production-companion-execution-readiness" && \
+                  -d "$protected" && ! -L "$protected" && \
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The protected runner directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          status="$(timeout --signal=TERM --kill-after=5s 30s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-companion-execution-activation-status.sql)"
+
+          jq -e '
+            .readOnly == true and .identifiersRedacted == true and
+            .readinessOnly == true and .activationAvailable == false and
+            (.pilotState | IN("none", "draft", "armed", "stopped")) and
+            (.pilotStopReason == null or (.pilotStopReason | type == "string")) and
+            ([.totalJobs, .openJobs, .untouchedQueuedJobs, .changedJobs,
+              .totalReservations, .reservationBoundJobs, .latestPilotJobs,
+              .companionExecutionRecords] |
+              all(type == "number" and . >= 0 and . <= 2)) and
+            ([.allFinancialSwitchesDisabled, .effectiveTrustedEpochAvailable,
+              .companionExecutionControlDisabled, .executionCapabilityDormant,
+              .stoppedPilotUntouchedJob] | all(type == "boolean")) and
+            (.nextAction | IN(
+              "safety_review", "paid_stopped_pilot_review", "queue_reconciliation",
+              "pilot_review", "trusted_activation_review", "release_and_owner_review"
+            ))
+          ' <<<"$status" >/dev/null
+
+          jq -c '{
+            readOnly, identifiersRedacted, readinessOnly, activationAvailable,
+            pilotState, pilotStopReason, totalJobs, openJobs, untouchedQueuedJobs, changedJobs,
+            totalReservations, reservationBoundJobs, latestPilotJobs,
+            allFinancialSwitchesDisabled, effectiveTrustedEpochAvailable,
+            companionExecutionControlDisabled, executionCapabilityDormant,
+            companionExecutionRecords, stoppedPilotUntouchedJob, nextAction
+          }' <<<"$status" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          if ! jq -e '
+            .allFinancialSwitchesDisabled and
+            .companionExecutionControlDisabled and
+            .executionCapabilityDormant and
+            .companionExecutionRecords == 0
+          ' <<<"$status" >/dev/null; then
+            echo '::error::The companion execution no-money boundary needs review.' >&2
+            exit 1
+          fi
+
+          echo '::notice::Read-only companion execution readiness inspected; no activation or queue action was performed.'

@@ -17,6 +17,9 @@ with latest_pilot as materialized (
   select
     pg_catalog.count(*)::integer as total_jobs,
     pg_catalog.count(*) filter (
+      where job.status in ('queued', 'leased', 'retry_wait')
+    )::integer as open_jobs,
+    pg_catalog.count(*) filter (
       where job.status = 'queued'
         and job.attempt_count = 0
         and job.lease_token is null
@@ -28,7 +31,15 @@ with latest_pilot as materialized (
     )::integer as reservation_bound_jobs,
     pg_catalog.count(*) filter (
       where reservation.pilot_revision_id = (select id from latest_pilot)
-    )::integer as latest_pilot_jobs
+    )::integer as latest_pilot_jobs,
+    pg_catalog.count(*) filter (
+      where reservation.pilot_revision_id = (select id from latest_pilot)
+        and job.status = 'queued'
+        and job.attempt_count = 0
+        and job.lease_token is null
+        and job.leased_by is null
+        and job.lease_expires_at is null
+    )::integer as latest_pilot_untouched_jobs
   from app.deposit_jobs job
   left join app.private_live_deposit_pilot_reservations reservation
     on reservation.deposit_intent_id = job.deposit_intent_id
@@ -122,9 +133,12 @@ with latest_pilot as materialized (
 select pg_catalog.jsonb_build_object(
   'readOnly', true,
   'identifiersRedacted', true,
+  'readinessOnly', true,
+  'activationAvailable', false,
   'pilotState', coalesce((select status from latest_pilot), 'none'),
   'pilotStopReason', (select stop_reason_code from latest_pilot),
   'totalJobs', least(queue_state.total_jobs, 2),
+  'openJobs', least(queue_state.open_jobs, 2),
   'untouchedQueuedJobs', least(queue_state.untouched_jobs, 2),
   'changedJobs', least(queue_state.total_jobs - queue_state.untouched_jobs, 2),
   'totalReservations', least(reservation_state.total_reservations, 2),
@@ -138,7 +152,29 @@ select pg_catalog.jsonb_build_object(
   'executionCapabilityDormant',
     capability.role_count = 1 and capability.dormant_role_count = 1
       and capability.non_admin_members = 0,
-  'companionExecutionRecords', least(execution_records.total_records, 2)
+  'companionExecutionRecords', least(execution_records.total_records, 2),
+  'stoppedPilotUntouchedJob',
+    coalesce((select status from latest_pilot), 'none') = 'stopped'
+      and queue_state.open_jobs = 1
+      and queue_state.untouched_jobs = 1
+      and queue_state.latest_pilot_untouched_jobs = 1,
+  'nextAction', case
+    when switch_state.switch_count <> 7 or switch_state.disabled_count <> 7
+      or execution_control.control_count <> 1 or execution_control.disabled_count <> 1
+      or capability.role_count <> 1 or capability.dormant_role_count <> 1
+      or capability.non_admin_members <> 0 or execution_records.total_records <> 0
+      then 'safety_review'
+    when coalesce((select status from latest_pilot), 'none') = 'stopped'
+      and queue_state.open_jobs = 1
+      and queue_state.untouched_jobs = 1
+      and queue_state.latest_pilot_untouched_jobs = 1
+      then 'paid_stopped_pilot_review'
+    when queue_state.open_jobs > 0 then 'queue_reconciliation'
+    when coalesce((select status from latest_pilot), 'none') <> 'armed'
+      then 'pilot_review'
+    when not effective_epoch.available then 'trusted_activation_review'
+    else 'release_and_owner_review'
+  end
 ) as redacted_status
 from queue_state
 cross join reservation_state

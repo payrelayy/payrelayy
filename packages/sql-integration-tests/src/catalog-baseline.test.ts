@@ -28,6 +28,7 @@ import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegra
 import { registerReviewedSourceBindingShadowWindowRetrySqlTests } from './reviewed-source-binding-shadow-window-retry.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerStoppedPilotPaidExecutionReviewSqlTests } from './stopped-pilot-paid-execution-review.suite.js';
+import { registerOwnerCompanionExecutionReadinessSqlTests } from './owner-companion-execution-readiness.suite.js';
 import { registerStagingTelebirrShadowVerifierLifecycleSqlTests } from './staging-telebirr-shadow-verifier-lifecycle.suite.js';
 import { registerTelebirrAssignmentBrokerRuntimeSqlTests } from './telebirr-assignment-broker-runtime.suite.js';
 import { registerTelebirrDeviceStateRuntimeSqlTests } from './telebirr-device-state-runtime.suite.js';
@@ -8722,6 +8723,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.get_owner_companion_execution_readiness(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature: 'app.lease_next_deposit_execution(uuid,integer)',
       },
       {
@@ -9730,6 +9737,10 @@ registerPrivateLiveTelebirrProofLineageSqlTests(
 registerStoppedPilotPaidExecutionReviewSqlTests(
   () => client,
   () => ownerAdminId,
+);
+registerOwnerCompanionExecutionReadinessSqlTests(
+  () => client,
+  () => ownerAuthUserId,
 );
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(

@@ -12,6 +12,7 @@ import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
+import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
@@ -21,6 +22,8 @@ export interface OwnerControlPostgresRuntime {
   readonly assessments: Pick<PostgresOwnerDryRunFixtureAssessments, 'assess' | 'list' | 'review'>;
   readonly companionDevicePairing?: Pick<PostgresOwnerCompanionDevicePairing, 'issue'> | undefined;
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
+  readonly companionExecutionReadiness?:
+    Pick<PostgresOwnerCompanionExecutionReadiness, 'status'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
@@ -164,6 +167,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)', 'execute') as companion_lookup_issue_allowed,
     has_function_privilege(current_user, 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)', 'execute') as companion_lookup_status_allowed,
     has_function_privilege(current_user, 'app.get_owner_companion_connection_status(uuid)', 'execute') as companion_connection_status_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 'execute'), true) as companion_execution_readiness_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
@@ -213,6 +217,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
       select count(*) = 35
+        + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -254,6 +259,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)'::regprocedure
           ,'app.get_agent_platform_companion_exact_five_lookup_status(uuid)'::regprocedure
           ,'app.get_owner_companion_connection_status(uuid)'::regprocedure
+          ,coalesce(to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
@@ -321,6 +327,9 @@ export async function createOwnerControlPostgresRuntime(
         )
       : undefined,
     companionConnection: new PostgresOwnerCompanionConnection({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    companionExecutionReadiness: new PostgresOwnerCompanionExecutionReadiness({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     supportContact: new PostgresOwnerSupportContact({

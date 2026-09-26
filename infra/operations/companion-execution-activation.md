@@ -53,6 +53,20 @@ separately reviewed activation operation exists. `nextAction` is one of these di
 
 No `nextAction` value is permission to arm a switch, lease a queue item, or move money.
 
+The Owner page's **Deposit execution readiness** panel is a smaller, authenticated projection of
+this diagnosis. It shows bounded counts and a plain-language next step without job, Player,
+receipt, or account identifiers. It has only a refresh control; `activationAvailable` is always
+false. Its database function grants execute only to the Owner-control role and performs no
+mutation. The current paid stopped-pilot case should display `customer_resolution_pending`,
+not an executable job.
+
+Roll out this additive preview in order: deploy the reviewed Owner image with its optional
+function preflight first, then apply the reviewed append-only migration that grants the function.
+The old Owner image's strict exact-grant preflight does not accept the new grant if it is applied
+first. Confirm the Owner service remains healthy and the preview returns a redacted result after
+the migration. Do not use a migration-only release before updating the Owner image, and do not
+conflate either deployment with execution activation.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the

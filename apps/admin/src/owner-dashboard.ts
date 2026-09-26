@@ -445,6 +445,26 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
         </section>
 
+        <section class="review-section" aria-labelledby="execution-readiness-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Read-only diagnosis</p>
+              <h2 id="execution-readiness-title">Deposit execution readiness</h2>
+            </div>
+            <button class="secondary" id="execution-readiness-refresh" type="button">
+              Refresh status
+            </button>
+          </div>
+          <p class="receipt-label">
+            This preview explains the next review step. It cannot activate the companion,
+            release a deposit, credit a Player, or move money.
+          </p>
+          <p class="request-meta" id="execution-readiness-status" role="status">
+            Sign in to check execution readiness.
+          </p>
+          <dl id="execution-readiness-facts"></dl>
+        </section>
+
         <section class="review-section pilot-section" aria-labelledby="pilot-title">
           <div class="panel-heading">
             <div>
@@ -667,6 +687,9 @@ const kemerbetSessionStartButton = document.querySelector('#kemerbet-session-sta
 const kemerbetSessionStopButton = document.querySelector('#kemerbet-session-stop-button');
 const kemerbetSessionCanvas = document.querySelector('#kemerbet-session-canvas');
 const pilotCandidateList = document.querySelector('#pilot-candidate-list');
+const executionReadinessRefresh = document.querySelector('#execution-readiness-refresh');
+const executionReadinessStatus = document.querySelector('#execution-readiness-status');
+const executionReadinessFacts = document.querySelector('#execution-readiness-facts');
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
 const pilotConfirmation = document.querySelector('#pilot-confirmation');
@@ -1510,6 +1533,85 @@ function clearPilot() {
   telebirrDevicePairingButton.disabled = true;
 }
 
+function clearExecutionReadiness() {
+  executionReadinessFacts.replaceChildren();
+  executionReadinessStatus.textContent = 'Sign in to check execution readiness.';
+}
+
+function validExecutionReadiness(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'activationAvailable,cancelledUntouchedJobs,companionExecutionDisabled,customerResolutionPending,effectiveTrustedEpochAvailable,executionCapabilityDormant,financialSwitchesDisabled,identifiersRedacted,nextAction,openExecutionReviews,openJobs,pilotState,readOnly,untouchedQueuedJobs') return false;
+  const actions = [
+    'safety_review', 'queue_reconciliation', 'customer_resolution_pending',
+    'pilot_review', 'trusted_activation_review', 'release_and_owner_review',
+  ];
+  const counts = [
+    value.openJobs, value.untouchedQueuedJobs, value.cancelledUntouchedJobs,
+    value.openExecutionReviews,
+  ];
+  return value.readOnly === true && value.identifiersRedacted === true &&
+    value.activationAvailable === false &&
+    ['none', 'draft', 'armed', 'stopped'].includes(value.pilotState) &&
+    actions.includes(value.nextAction) &&
+    counts.every((count) => Number.isSafeInteger(count) && count >= 0 && count <= 2) &&
+    typeof value.customerResolutionPending === 'boolean' &&
+    typeof value.financialSwitchesDisabled === 'boolean' &&
+    typeof value.companionExecutionDisabled === 'boolean' &&
+    typeof value.executionCapabilityDormant === 'boolean' &&
+    typeof value.effectiveTrustedEpochAvailable === 'boolean';
+}
+
+async function loadExecutionReadiness() {
+  executionReadinessRefresh.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/companion-execution/readiness', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('execution_readiness');
+    const payload = await response.json();
+    if (!payload || !validExecutionReadiness(payload.readiness)) {
+      throw new Error('execution_readiness');
+    }
+    const status = payload.readiness;
+    const guidance = {
+      safety_review: 'Execution boundary needs operator safety review.',
+      queue_reconciliation: 'A queued or leased job needs operator reconciliation.',
+      customer_resolution_pending: 'A paid stopped-pilot case needs customer resolution before a new activation.',
+      pilot_review: 'No armed pilot is ready for execution review.',
+      trusted_activation_review: 'Trusted activation authority needs a separate review.',
+      release_and_owner_review: 'Release and Owner authorization are still required. This page cannot activate execution.',
+    };
+    executionReadinessStatus.textContent = guidance[status.nextAction];
+    executionReadinessFacts.replaceChildren();
+    for (const [label, value] of [
+      ['Pilot', status.pilotState],
+      ['Open jobs', String(status.openJobs)],
+      ['Untouched queued jobs', String(status.untouchedQueuedJobs)],
+      ['Cancelled untouched jobs', String(status.cancelledUntouchedJobs)],
+      ['Open execution reviews', String(status.openExecutionReviews)],
+      ['Financial switches', status.financialSwitchesDisabled ? 'Disabled' : 'Needs review'],
+      ['Companion execution', status.companionExecutionDisabled ? 'Disabled' : 'Needs review'],
+      ['Execution capability', status.executionCapabilityDormant ? 'Dormant' : 'Needs review'],
+      ['Trusted activation', status.effectiveTrustedEpochAvailable ? 'Present' : 'Unavailable'],
+      ['Activation on this page', 'Unavailable'],
+    ]) {
+      const term = document.createElement('dt');
+      const detail = document.createElement('dd');
+      term.textContent = label;
+      detail.textContent = value;
+      executionReadinessFacts.append(term, detail);
+    }
+  } catch (error) {
+    executionReadinessFacts.replaceChildren();
+    if (!isSignedOutError(error)) {
+      executionReadinessStatus.textContent = 'Execution readiness is unavailable. No activation is possible here.';
+    }
+  } finally {
+    executionReadinessRefresh.disabled = false;
+  }
+}
+
 function clearTelebirrDevicePairingPackage() {
   if (telebirrDevicePairingExpiryTimer !== undefined) {
     window.clearTimeout(telebirrDevicePairingExpiryTimer);
@@ -1857,6 +1959,7 @@ function signOut(message = 'Signed out.') {
   companionLookupStatus.textContent = 'Sign in to check lookup readiness.';
   companionLookupButton.disabled = true;
   clearPilot();
+  clearExecutionReadiness();
   clearDepositIntake();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
@@ -4711,6 +4814,7 @@ async function loadOwnerPlayerQueues() {
       loadReceivers(),
       loadDepositIntake(),
       loadCurrentPilot(),
+      loadExecutionReadiness(),
       loadCompanionLookupStatus(),
       loadCompanionConnection(),
     ]);
@@ -4990,6 +5094,7 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
   await prepareFixedPilot();
 });
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
+executionReadinessRefresh.addEventListener('click', loadExecutionReadiness);
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
 companionDevicePairingConfirmation.addEventListener(

@@ -201,6 +201,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_owner_companion_connection_status(uuid)' },
+        { signature: 'app.get_owner_companion_execution_readiness(uuid)' },
         { signature: 'app.get_owner_support_contact(uuid)' },
         { signature: 'app.get_owner_telebirr_shadow_verification_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },

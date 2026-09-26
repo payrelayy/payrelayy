@@ -498,6 +498,69 @@ async function nextEventLoopTurn(): Promise<void> {
 }
 
 describe('Owner-control HTTP boundary', () => {
+  it('serves only authenticated read-only companion execution readiness without identifiers', async () => {
+    const readiness = {
+      activationAvailable: false,
+      cancelledUntouchedJobs: 1,
+      companionExecutionDisabled: true,
+      customerResolutionPending: true,
+      effectiveTrustedEpochAvailable: false,
+      executionCapabilityDormant: true,
+      financialSwitchesDisabled: true,
+      identifiersRedacted: true,
+      nextAction: 'customer_resolution_pending',
+      openExecutionReviews: 1,
+      openJobs: 0,
+      pilotState: 'stopped',
+      readOnly: true,
+      untouchedQueuedJobs: 0,
+    } as const;
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        companionExecutionReadiness: {
+          status: async (actor) => {
+            calls.push(actor);
+            return readiness;
+          },
+        },
+      }),
+    });
+    try {
+      const path = '/v1/owner/companion-execution/readiness';
+      expect((await app.inject(path)).statusCode).toBe(403);
+      expect(calls).toEqual([]);
+      expect(
+        (
+          await app.inject({
+            url: `${path}?extra=1`,
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const response = await app.inject({
+        url: path,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store, max-age=0');
+      expect(response.json()).toEqual({ readiness });
+      expect(calls).toEqual([authUserId]);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: path,
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

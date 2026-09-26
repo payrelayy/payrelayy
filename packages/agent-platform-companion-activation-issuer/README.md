@@ -61,3 +61,13 @@ verify the proof, handoff, certificate, and operating-system process before any
 future transition can be considered. Neither adapter issues the handoff, consumes the
 request, arms execution, or replaces the atomic financial-state preflight. The v1
 no-money launch diagnostic cannot satisfy the required v2 proof.
+
+The `./guarded-process-launch-rehearsal` subpath composes that receiver with the
+independent observer around a caller-supplied, synchronous protected child-process
+starter. It always closes the no-permit channel and attempts a bounded stop of the
+exact returned child. It reports success only after the signed proof and OS process
+are observed and child exit is confirmed. Its fixed, identifier-free result is not
+an activation attestation and cannot arm execution. This package still supplies no
+protected process starter, production invocation, permit sender, database transition,
+or host-wide stop/reconciliation mechanism. A caller must not treat rehearsal success
+as authority to run a deposit job or perform a provider action.

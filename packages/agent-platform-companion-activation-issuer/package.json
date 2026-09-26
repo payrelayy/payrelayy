@@ -15,6 +15,10 @@
     "./guarded-local-launch-channel": {
       "types": "./dist/guarded-local-launch-channel.d.ts",
       "default": "./dist/guarded-local-launch-channel.js"
+    },
+    "./guarded-process-launch-rehearsal": {
+      "types": "./dist/guarded-process-launch-rehearsal.d.ts",
+      "default": "./dist/guarded-process-launch-rehearsal.js"
     }
   },
   "dependencies": {

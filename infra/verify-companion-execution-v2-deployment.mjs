@@ -37,6 +37,7 @@ const [
   operatorClaimBindingTest,
   operatorLocalLaunchChannel,
   operatorIssuerPackage,
+  operatorLaunchRehearsal,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -71,6 +72,9 @@ const [
   read('scripts/test-companion-activation-claim-binding.ps1'),
   read('packages/agent-platform-companion-activation-issuer/src/guarded-local-launch-channel.ts'),
   read('packages/agent-platform-companion-activation-issuer/package.json'),
+  read(
+    'packages/agent-platform-companion-activation-issuer/src/guarded-process-launch-rehearsal.ts',
+  ),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -114,6 +118,14 @@ assert.match(operatorLocalLaunchChannel, /MAX_PROOF_WAIT_MS = 90_000/u);
 assert.match(operatorLocalLaunchChannel, /server\.once\('error', fail\)/u);
 assert.match(operatorLocalLaunchChannel, /socket\?\.destroy\(\)/u);
 assert.doesNotMatch(operatorLocalLaunchChannel, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
+assert.match(operatorIssuerPackage, /\.\/guarded-process-launch-rehearsal/u);
+assert.match(operatorLaunchRehearsal, /await adapters\.observe\(/u);
+assert.match(operatorLaunchRehearsal, /process\.processId !== child\.processId/u);
+assert.match(operatorLaunchRehearsal, /await bounded\(channel\.close\(\)\)/u);
+assert.match(operatorLaunchRehearsal, /await bounded\(child\.stop\(\)\)/u);
+assert.match(operatorLaunchRehearsal, /await bounded\(child\.stopped\)/u);
+assert.match(operatorLaunchRehearsal, /permitSent: false/u);
+assert.doesNotMatch(operatorLaunchRehearsal, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
 assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
 assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);
 assert.match(windowsEntry, /stage === 'execution_handoff' \|\| stage === 'launch_proof'/u);

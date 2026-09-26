@@ -212,7 +212,11 @@ source-pinned Windows inspection. A separate local Windows pipe receiver accepts
 bounded v2 proof for a fresh operator challenge and never sends an execution permit.
 Its caller must close it after observation. It does not start a process or validate that proof. The protected
 process starter, attested transition invocation, and permit/stop lifecycle are still
-absent.
+absent. A no-permit rehearsal coordinator now composes this receiver with the
+independent observer around a caller-supplied exact child lifecycle. It reports only
+an inert fixed result after confirmed child exit; no production starter or invocation
+is wired to it. If the supplied stop cannot confirm exit, the rehearsal fails closed
+and requires operator reconciliation.
 Neither this adapter nor its migration is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production

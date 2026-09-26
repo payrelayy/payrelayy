@@ -72,6 +72,18 @@ This was **not a credit or a refund**: customer resolution remains a separate, e
 The function has no application or runtime grant. Never invoke it as part of migration deployment,
 and never invoke it again for the reviewed job.
 
+Migration `owner_self_funded_stopped_pilot_resolution` provides a separate, private disposition
+for an Owner-funded test only. Installation is inert. Its Postgres-only, one-use operation requires
+an active Owner to attest that both TeleBirr wallets are theirs and that no KemerBet credit or
+refund is owed. It rechecks the exact stopped-pilot review, the cancelled never-leased job,
+retained verified payment claim and reservation, an unassigned open review case, no execution
+attempt, and the disabled financial boundary. It then records an immutable resolution, closes
+the review case, and marks the deposit rejected with the explicit self-funded-test reason. It
+preserves the original payment and queue history and never sends a refund or credit. A mere
+chat statement, migration deployment, or read-only status check is **not** invocation authority;
+the Owner must separately authorize application to the specific production test after a fresh
+preflight. Do not use this disposition for a customer-funded payment or an uncertain attempt.
+
 Run `infra/sql/production-companion-execution-activation-status.sql` with a read-only production
 administrator session to obtain one identifier-free status object. It reports bounded counts and
 categorical states only. It performs no activation or queue mutation. The contract verifier is

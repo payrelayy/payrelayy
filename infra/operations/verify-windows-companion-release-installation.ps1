@@ -15,7 +15,15 @@ param(
   [string] $ChecksumPath,
 
   [Parameter(Mandatory = $true)]
-  [string] $InstallationRoot
+  [string] $InstallationRoot,
+
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^sha256:[0-9a-f]{64}$')]
+  [string] $ExpectedArchiveSha256,
+
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^sha256:[0-9a-f]{64}$')]
+  [string] $ExpectedInstallationTreeSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,6 +81,9 @@ try {
     throw 'The immutable companion filenames are invalid.'
   }
   $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ("sha256:$archiveHash" -cne $ExpectedArchiveSha256) {
+    throw 'The archive differs from the prepared activation request.'
+  }
   $checksumText = [System.IO.File]::ReadAllText($checksum).Trim()
   if ($checksumText -cne "$archiveHash  $archiveName") {
     throw 'The immutable companion checksum does not match.'
@@ -182,6 +193,9 @@ try {
     if ($releaseMarker -cne $ReleaseSha -or
         $treeMarker -cnotmatch '^sha256:[0-9a-f]{64}$') {
       throw 'The archive release markers are invalid.'
+    }
+    if ($treeMarker -cne $ExpectedInstallationTreeSha256) {
+      throw 'The installation tree differs from the prepared activation request.'
     }
   } finally {
     $zip.Dispose()

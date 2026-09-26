@@ -34,6 +34,7 @@ const [
   windowsPackageWorkflow,
   operatorReleasePreflight,
   operatorLaunchPreflight,
+  operatorClaimBindingTest,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -65,6 +66,7 @@ const [
   read('.github/workflows/windows-companion-package.yml'),
   read('infra/operations/verify-windows-companion-release-installation.ps1'),
   read('infra/operations/observe-windows-companion-verified-launch.ps1'),
+  read('scripts/test-companion-activation-claim-binding.ps1'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -119,6 +121,9 @@ assert.match(windowsPackageWorkflow, /uses: actions\/attest@[0-9a-f]{40}/u);
 assert.match(windowsPackageWorkflow, /needs: \[package, attest\]/u);
 assert.match(windowsPackageWorkflow, /gh attestation verify "\$immutableZip"/u);
 assert.match(windowsPackageWorkflow, /name: Parse read-only companion launch preflights/u);
+assert.match(windowsPackageWorkflow, /name: Test activation archive claim binding/u);
+assert.match(operatorClaimBindingTest, /ExpectedArchiveSha256 "sha256:\$\('0' \* 64\)"/u);
+assert.match(operatorClaimBindingTest, /failed at input; no activation was performed/u);
 assert.match(windowsPackageWorkflow, /--signer-workflow/u);
 assert.match(windowsPackageWorkflow, /--source-ref \$env:GITHUB_REF/u);
 assert.match(windowsPackageWorkflow, /--source-digest \$releaseSha/u);
@@ -126,6 +131,16 @@ assert.match(operatorReleasePreflight, /gh attestation verify "\$archive"/u);
 assert.match(operatorReleasePreflight, /--signer-workflow \$workflow/u);
 assert.match(operatorReleasePreflight, /--source-ref "refs\/tags\/\$ReleaseTag"/u);
 assert.match(operatorReleasePreflight, /--source-digest \$ReleaseSha/u);
+assert.match(
+  operatorReleasePreflight,
+  /\[ValidatePattern\('\^sha256:\[0-9a-f\]\{64\}\$'\)\]\s+\[string\] \$ExpectedArchiveSha256/u,
+);
+assert.match(
+  operatorReleasePreflight,
+  /\[ValidatePattern\('\^sha256:\[0-9a-f\]\{64\}\$'\)\]\s+\[string\] \$ExpectedInstallationTreeSha256/u,
+);
+assert.match(operatorReleasePreflight, /"sha256:\$archiveHash" -cne \$ExpectedArchiveSha256/u);
+assert.match(operatorReleasePreflight, /\$treeMarker -cne \$ExpectedInstallationTreeSha256/u);
 assert.match(operatorReleasePreflight, /gh release download \$ReleaseTag --repo \$repository/u);
 assert.match(operatorReleasePreflight, /\$stableChecksumAsset\.digest -cne/u);
 assert.match(operatorReleasePreflight, /\$tagObject\.sha -cne \$ReleaseSha/u);
@@ -134,6 +149,18 @@ assert.match(operatorReleasePreflight, /\$measuredInstalledTree -cne \$treeMarke
 assert.match(operatorReleasePreflight, /COMPANION_RELEASE_INSTALLATION_VERIFIED/u);
 assert.doesNotMatch(operatorReleasePreflight, /KEMERBET|execution-authorities:consume/iu);
 assert.match(operatorLaunchPreflight, /verify-windows-companion-release-installation\.ps1/u);
+assert.match(operatorLaunchPreflight, /\[string\] \$ExpectedArchiveSha256/u);
+assert.match(operatorLaunchPreflight, /\[string\] \$ExpectedInstallationTreeSha256/u);
+assert.match(operatorLaunchPreflight, /-ExpectedArchiveSha256 \$ExpectedArchiveSha256/u);
+assert.match(
+  operatorLaunchPreflight,
+  /-ExpectedInstallationTreeSha256 \$ExpectedInstallationTreeSha256/u,
+);
+assert.match(
+  operatorLaunchPreflight,
+  /\[IO\.File\]::ReadAllText\(\$treeMarker\) -cne \$ExpectedInstallationTreeSha256/u,
+);
+assert.match(operatorLaunchPreflight, /\$expectedTree = \$ExpectedInstallationTreeSha256/u);
 assert.match(operatorLaunchPreflight, /Start-Process -FilePath \$node/u);
 assert.match(operatorLaunchPreflight, /-WindowStyle Hidden/u);
 assert.match(

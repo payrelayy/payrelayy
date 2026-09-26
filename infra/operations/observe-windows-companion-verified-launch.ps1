@@ -5,7 +5,13 @@ param(
   [Parameter(Mandatory = $true)][string] $ArchivePath,
   [Parameter(Mandatory = $true)][string] $ChecksumPath,
   [Parameter(Mandatory = $true)][string] $InstallationRoot,
-  [Parameter(Mandatory = $true)][string] $DataRoot
+  [Parameter(Mandatory = $true)][string] $DataRoot,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^sha256:[0-9a-f]{64}$')]
+  [string] $ExpectedArchiveSha256,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^sha256:[0-9a-f]{64}$')]
+  [string] $ExpectedInstallationTreeSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,12 +78,14 @@ try {
   & (Join-Path $PSScriptRoot 'verify-windows-companion-release-installation.ps1') `
     -ReleaseTag $ReleaseTag -ReleaseSha $ReleaseSha `
     -ArchivePath $ArchivePath -ChecksumPath $ChecksumPath `
-    -InstallationRoot $installation *> $null
+    -InstallationRoot $installation `
+    -ExpectedArchiveSha256 $ExpectedArchiveSha256 `
+    -ExpectedInstallationTreeSha256 $ExpectedInstallationTreeSha256 *> $null
   if ($LASTEXITCODE -ne 0) { throw 'The independent archive and installation proof failed.' }
-  $expectedTree = [IO.File]::ReadAllText($treeMarker)
-  if ($expectedTree -cnotmatch '^sha256:[0-9a-f]{64}$') {
-    throw 'The installed tree marker is invalid.'
+  if ([IO.File]::ReadAllText($treeMarker) -cne $ExpectedInstallationTreeSha256) {
+    throw 'The installed tree marker differs from the prepared activation request.'
   }
+  $expectedTree = $ExpectedInstallationTreeSha256
 
   # Do not start a second copy over an existing companion session. This operation
   # neither stops that session nor signs an execution handoff.

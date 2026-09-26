@@ -13,6 +13,7 @@ on:
       - 'packages/agent-platform-contracts/**'
       - 'packages/agent-platform-kemerbet/**'
       - 'scripts/build-windows-companion-package.ps1'
+      - 'scripts/test-companion-activation-claim-binding.ps1'
       - 'scripts/test-windows-companion-pairing-dialog.ps1'
       - 'infra/operations/verify-windows-companion-release-installation.ps1'
       - 'infra/operations/observe-windows-companion-verified-launch.ps1'
@@ -62,6 +63,10 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count -ne 0) { throw 'A companion launch preflight does not parse.' }
           }
+
+      - name: Test activation archive claim binding without external access
+        shell: pwsh
+        run: ./scripts/test-companion-activation-claim-binding.ps1
 
       - name: Build, test, and package
         shell: pwsh

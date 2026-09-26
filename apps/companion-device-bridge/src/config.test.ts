@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
   COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
   COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
   COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
@@ -19,6 +20,14 @@ const directDatabaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime:synthetic-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const databaseUrl =
   'postgresql://fetanagent_companion_device_bridge_runtime.spzpiyxheappsfyswewl:synthetic-password-123456@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full';
+const executionDatabaseUrl =
+  'postgresql://fetanagent_companion_execution_bridge_runtime:synthetic-execution-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
+const executionPoolerDatabaseUrl = executionDatabaseUrl
+  .replace(
+    'fetanagent_companion_execution_bridge_runtime:',
+    'fetanagent_companion_execution_bridge_runtime.spzpiyxheappsfyswewl:',
+  )
+  .replace('db.spzpiyxheappsfyswewl.supabase.co', 'aws-1-eu-west-1.pooler.supabase.com');
 const productionDatabaseUrl = databaseUrl
   .replace('spzpiyxheappsfyswewl', 'xzztugbgtulptnbpoelr')
   .replace('aws-1-', 'aws-0-');
@@ -90,6 +99,7 @@ const executionEnvironment: NodeJS.ProcessEnv = {
   ...enabledEnvironment,
   INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
   COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
 };
 
 function executionFiles(runtimeManifest = executionManifest, key = executionPrivateKey) {
@@ -98,6 +108,7 @@ function executionFiles(runtimeManifest = executionManifest, key = executionPriv
     [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: runtimeManifest,
     [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
     [COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE]: key,
+    [COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE]: executionDatabaseUrl,
     [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
   };
 }
@@ -266,6 +277,11 @@ describe('companion device bridge configuration', () => {
     if (!config.enabled || !config.execution.enabled) throw new Error('expected execution config');
     expect(config.signer.keyId).toBe('companion_server_signer_2026_01');
     expect(config.execution.signer.keyId).toBe('companion_execution_staging_v1');
+    expect(config.execution.connection).toMatchObject({
+      host: 'db.spzpiyxheappsfyswewl.supabase.co',
+      user: 'fetanagent_companion_execution_bridge_runtime',
+      ca,
+    });
     expect(Buffer.from(config.execution.signer.publicKeySpkiDer)).toEqual(executionPublicKey);
     expect(Buffer.from(config.execution.signer.publicKeySpkiDer)).not.toEqual(publicKey);
     const transcript = Buffer.from('execution-trust-root-check', 'utf8');
@@ -278,13 +294,91 @@ describe('companion device bridge configuration', () => {
         Buffer.from(signature, 'base64url'),
       ),
     ).toBe(true);
-    expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(5);
+    expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(6);
     expect(redactedCompanionDeviceBridgeConfigForLog(config)).toMatchObject({
       executionTransportConfigured: true,
       executionSignerConfigured: true,
       financialActionAllowed: false,
       moneyMovementAllowed: false,
     });
+  });
+
+  it('accepts only the exact session-pooler route for the dedicated execution login', () => {
+    const config = loadCompanionDeviceBridgeConfig(
+      executionEnvironment,
+      guardedDependencies({
+        ...executionFiles(),
+        [COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE]: executionPoolerDatabaseUrl,
+      }),
+    );
+    if (!config.enabled || !config.execution.enabled) throw new Error('expected execution config');
+    expect(config.execution.connection).toMatchObject({
+      host: 'aws-1-eu-west-1.pooler.supabase.com',
+      user: 'fetanagent_companion_execution_bridge_runtime.spzpiyxheappsfyswewl',
+    });
+  });
+
+  it.each([
+    ['baseline runtime identity', databaseUrl],
+    ['baseline direct identity', directDatabaseUrl],
+    [
+      'execution identity on a session pooler',
+      executionDatabaseUrl.replace(
+        'db.spzpiyxheappsfyswewl.supabase.co',
+        'aws-1-eu-west-1.pooler.supabase.com',
+      ),
+    ],
+    ['wrong TLS', executionDatabaseUrl.replace('verify-full', 'require')],
+    ['extra connection parameter', `${executionDatabaseUrl}&application_name=other`],
+    [
+      'reused baseline password',
+      executionDatabaseUrl.replace(
+        'synthetic-execution-password-123456',
+        'synthetic-password-123456',
+      ),
+    ],
+  ])('rejects execution database URL with %s', (_name, url) => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        executionEnvironment,
+        guardedDependencies({
+          ...executionFiles(),
+          [COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE]: url,
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it('requires the dedicated guarded execution database file only behind the execution gate', () => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        executionEnvironment,
+        guardedDependencies({
+          ...executionFiles(),
+          [COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE]: '',
+        }),
+      ),
+    ).toThrow('configuration is unavailable');
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        {
+          ...enabledEnvironment,
+          COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
+        },
+        guardedDependencies(),
+      ),
+    ).toThrow('configuration is unavailable');
+  });
+
+  it('rejects a writable execution database secret without reporting its contents', () => {
+    const dependencies = guardedDependencies(
+      executionFiles(),
+      COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
+      { before: { mode: 0o100600 } },
+    );
+    expect(() => loadCompanionDeviceBridgeConfig(executionEnvironment, dependencies)).toThrow(
+      'configuration is unavailable',
+    );
   });
 
   it.each([

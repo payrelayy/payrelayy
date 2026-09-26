@@ -15,6 +15,12 @@ last. Each phase commits independently so a later failure cannot roll an earlier
 leases or executes a queue job. A provider action already past its one-use fence cannot be
 undone by disabling a session; its outcome must be reconciled before any later activation.
 This stop path is a prerequisite for review, **not** an authorization to arm or deploy execution.
+The optional bridge overlay now requires a distinct guarded execution-database URL and connects
+through a separate one-connection pool. The always-on pairing/Find pool is checked against only
+its seven no-money procedures; the execution pool is checked against only its seven execution
+procedures. The overlay is not loaded by the default deployment, and its dedicated login remains
+`NOLOGIN`, passwordless, and memberless until a separately reviewed activation implements its
+bounded lifecycle. This code boundary alone cannot arm execution or lease a job.
 
 The Windows execution worker also requires a canonical local handoff signed by the pinned
 production execution signer. The handoff binds the short-lived request, paired certificate,
@@ -176,9 +182,10 @@ following as one fail-closed operation, with disposable-PostgreSQL and end-to-en
    certificate, and execution control in the established order; rechecks every lineage and
    financial invariant; and atomically arms only the exact companion control. No direct table
    write, broad grant, or request-key replay may substitute for this transition.
-3. A dedicated execution-bridge runtime identity with exactly the seven execution procedures
-   and no base-table access. Its membership and login must be created only inside the bounded
-   activation, then revoked and sessions terminated at stop, expiry, failure, or uncertainty.
+3. Complete the lifecycle for the dedicated execution-bridge identity now isolated by the
+   optional transport: membership and login must be created only inside the bounded activation,
+   then revoked and sessions terminated at stop, expiry, failure, or uncertainty. The connection
+   must have exactly the seven execution procedures and no base-table access.
 4. A checksum-bound production transport release with the pinned execution signer and the
    reviewed overlay. The default release must remain no-money. The paired Windows process must
    receive its account-bound opt-in through a reviewed local handoff, not a manually set flag.

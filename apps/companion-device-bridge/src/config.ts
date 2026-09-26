@@ -19,6 +19,8 @@ export const COMPANION_DEVICE_BRIDGE_DATABASE_ROLE =
 export const COMPANION_DEVICE_BRIDGE_GROUP_ROLE = 'fetanagent_companion_device_bridge' as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE =
   'fetanagent_companion_execution_bridge' as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE =
+  'fetanagent_companion_execution_bridge_runtime' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;
@@ -33,6 +35,10 @@ export const COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST =
   'aws-0-eu-west-1.pooler.supabase.com' as const;
 export const COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER =
   `${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE}` as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_STAGING_SESSION_POOLER_USER =
+  `${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE}` as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER =
+  `${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE}` as const;
 type DeploymentTarget = 'staging' | 'production';
 const databaseTargets = {
   staging: {
@@ -40,16 +46,20 @@ const databaseTargets = {
     directHost: COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST,
     poolerHost: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST,
     poolerUser: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER,
+    executionPoolerUser: COMPANION_DEVICE_BRIDGE_EXECUTION_STAGING_SESSION_POOLER_USER,
   },
   production: {
     projectReference: COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE,
     directHost: COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST,
     poolerHost: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST,
     poolerUser: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER,
+    executionPoolerUser: COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER,
   },
 } as const;
 export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
   '/run/secrets/companion_device_bridge_database_url' as const;
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE =
+  '/run/secrets/companion_execution_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
   '/run/secrets/companion_device_bridge_server_signer.pkcs8.der' as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE =
@@ -80,6 +90,22 @@ export interface CompanionDeviceBridgeConnectionConfig {
     | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER;
 }
 
+export interface CompanionExecutionBridgeConnectionConfig {
+  readonly ca: string;
+  readonly database: 'postgres';
+  readonly host:
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST;
+  readonly password: string;
+  readonly port: 5432;
+  readonly user:
+    | typeof COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE
+    | typeof COMPANION_DEVICE_BRIDGE_EXECUTION_STAGING_SESSION_POOLER_USER
+    | typeof COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER;
+}
+
 export type CompanionDeviceBridgeConfig =
   | { readonly enabled: false }
   | {
@@ -95,6 +121,7 @@ export type CompanionDeviceBridgeConfig =
         | { readonly enabled: false }
         | {
             readonly enabled: true;
+            readonly connection: CompanionExecutionBridgeConnectionConfig;
             readonly signer: CompanionBridgeSigner;
           };
     };
@@ -503,6 +530,48 @@ function connectionFromUrl(
   });
 }
 
+function executionConnectionFromUrl(
+  value: string,
+  deploymentTarget: DeploymentTarget,
+): Omit<CompanionExecutionBridgeConnectionConfig, 'ca'> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return unavailable();
+  }
+  const entries = [...url.searchParams.entries()];
+  const user = decodeUrlComponent(url.username);
+  const password = decodeUrlComponent(url.password);
+  const target = databaseTargets[deploymentTarget];
+  const directRoute =
+    url.hostname === target.directHost && user === COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE;
+  const sessionPoolerRoute =
+    url.hostname === target.poolerHost && user === target.executionPoolerUser;
+  if (
+    (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
+    (!directRoute && !sessionPoolerRoute) ||
+    (url.port !== '' && url.port !== '5432') ||
+    password.length < 16 ||
+    decodeUrlComponent(url.pathname.slice(1)) !== 'postgres' ||
+    url.hash !== '' ||
+    entries.length !== 1 ||
+    entries[0]?.[0] !== 'sslmode' ||
+    entries[0]?.[1] !== 'verify-full'
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({
+    database: 'postgres' as const,
+    host: directRoute ? target.directHost : target.poolerHost,
+    password,
+    port: 5432 as const,
+    user: directRoute
+      ? COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE
+      : target.executionPoolerUser,
+  });
+}
+
 function guardedCa(value: unknown): string {
   if (
     typeof value !== 'string' ||
@@ -599,14 +668,20 @@ function requireFixedFiles(environment: NodeJS.ProcessEnv, executionEnabled: boo
     COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
     COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
-    ...(executionEnabled ? { COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE } : {}),
+    ...(executionEnabled
+      ? {
+          COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+          COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
+        }
+      : {}),
   } as const;
   for (const [name, value] of Object.entries(expected)) {
     if (environment[name] !== value) unavailable();
   }
   if (
     !executionEnabled &&
-    environment.COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE !== undefined
+    (environment.COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE !== undefined ||
+      environment.COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE !== undefined)
   ) {
     unavailable();
   }
@@ -619,6 +694,7 @@ function rejectInlineOrBroaderSecrets(environment: NodeJS.ProcessEnv): void {
     'SUPABASE_SERVICE_ROLE_KEY',
     'SUPABASE_SECRET_KEY',
     'COMPANION_DEVICE_BRIDGE_DATABASE_URL',
+    'COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL',
     'COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY',
     'COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY',
     'OWNER_CONTROL_DATABASE_URL',
@@ -673,6 +749,9 @@ export function loadCompanionDeviceBridgeConfig(
   } finally {
     privateKeyBytes.fill(0);
   }
+  const ca = guardedCa(
+    readGuardedText(COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE, dependencies, 'public_config'),
+  );
   let execution: Extract<CompanionDeviceBridgeConfig, { readonly enabled: true }>['execution'];
   if (manifest.contractVersion === 3) {
     const executionPrivateKeyBytes = readGuardedBytes(
@@ -698,7 +777,21 @@ export function loadCompanionDeviceBridgeConfig(
     ) {
       return unavailable();
     }
-    execution = Object.freeze({ enabled: true, signer: executionSigner });
+    const executionConnection = executionConnectionFromUrl(
+      guardedSingleLine(
+        readGuardedText(
+          COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
+          dependencies,
+          'secret',
+        ),
+      ),
+      deploymentTarget,
+    );
+    execution = Object.freeze({
+      enabled: true,
+      signer: executionSigner,
+      connection: Object.freeze({ ...executionConnection, ca }),
+    });
   } else {
     execution = Object.freeze({ enabled: false });
   }
@@ -708,9 +801,9 @@ export function loadCompanionDeviceBridgeConfig(
     ),
     deploymentTarget,
   );
-  const ca = guardedCa(
-    readGuardedText(COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE, dependencies, 'public_config'),
-  );
+  if (execution.enabled && execution.connection.password === connectionWithoutCa.password) {
+    return unavailable();
+  }
   return Object.freeze({
     enabled: true,
     deploymentTarget,

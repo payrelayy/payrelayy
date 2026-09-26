@@ -3,9 +3,11 @@ import { types as nodeUtilTypes } from 'node:util';
 
 import {
   COMPANION_DEVICE_BRIDGE_DATABASE_ROLE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE,
   COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE,
   COMPANION_DEVICE_BRIDGE_GROUP_ROLE,
   type CompanionDeviceBridgeConnectionConfig,
+  type CompanionExecutionBridgeConnectionConfig,
 } from './config.js';
 import {
   PostgresCompanionDeviceState,
@@ -48,7 +50,6 @@ const BASELINE_ALLOWED_FUNCTIONS = [
   ACCEPT_LOOKUP_RESULT_FUNCTION,
 ] as const;
 const EXECUTION_ALLOWED_FUNCTIONS = [
-  ...BASELINE_ALLOWED_FUNCTIONS,
   CLAIM_EXECUTION_ASSIGNMENT_FUNCTION,
   COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION,
   CLAIM_EXECUTION_AUTHORITY_FUNCTION,
@@ -89,9 +90,52 @@ export const COMPANION_DEVICE_BRIDGE_PREFLIGHT_KEYS = [
   'default_function_execution_private',
 ] as const;
 
-export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
+const BASELINE_CONTRACT_ROWS_SQL = `
+        (pg_catalog.to_regprocedure('${CLAIM_PAIRING_FUNCTION}'), 12, true,
+          'pg_catalog.record',
+          'table(claim_state text, certificate_body jsonb, signed_certificate jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_PAIRING_FUNCTION}'), 5, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${RELEASE_PAIRING_FUNCTION}'), 1, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${CLAIM_LOOKUP_FUNCTION}'), 10, true,
+          'pg_catalog.record',
+          'table(claim_state text, assignment_body jsonb, signed_assignment jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_LOOKUP_FUNCTION}'), 4, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${RELEASE_LOOKUP_FUNCTION}'), 1, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,
+          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')`;
+
+const EXECUTION_CONTRACT_ROWS_SQL = `
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_ASSIGNMENT_FUNCTION}'), 13, true,
+          'pg_catalog.record',
+          'table(claim_state text, claim_material jsonb, signed_enrollment jsonb, signed_assignment jsonb, player_id text, signed_authority jsonb, signed_result jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION}'), 4, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_AUTHORITY_FUNCTION}'), 12, true,
+          'pg_catalog.record',
+          'table(claim_state text, authority_body jsonb, signed_authority jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_AUTHORITY_FUNCTION}'), 2, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${ACCEPT_EXECUTION_RESULT_FUNCTION}'), 13, true,
+          'pg_catalog.record', 'table(accepted boolean, replayed boolean)'),
+        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_STATUS_FUNCTION}'), 14, true,
+          'pg_catalog.record',
+          'table(claim_state text, status_body jsonb, signed_status jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_STATUS_FUNCTION}'), 2, false,
+          'pg_catalog.bool', 'boolean')`;
+
+function catalogPreflightSql(
+  runtimeRole: string,
+  capabilityGroup: string,
+  allowedFunctionsSql: string,
+  contractRowsSql: string,
+): string {
+  return `
   select
-    current_user = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}' and session_user = current_user
+    current_user = '${runtimeRole}' and session_user = current_user
       as runtime_login_identity_allowed,
     exists (
       select 1 from pg_catalog.pg_roles role
@@ -103,24 +147,15 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and role.rolvaliduntil = 'infinity'::timestamptz
     ) as runtime_login_is_safe,
     (
-      select count(*) between 1 and 2
+      select count(*) = 1
         and count(*) filter (
-          where granted.rolname = '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}'
+          where granted.rolname = '${capabilityGroup}'
             and membership.inherit_option
             and not membership.set_option
             and not membership.admin_option
         ) = 1
-        and count(*) filter (
-          where granted.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
-            and membership.inherit_option
-            and not membership.set_option
-            and not membership.admin_option
-        ) <= 1
         and pg_catalog.bool_and(
-          granted.rolname in (
-            '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}',
-            '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
-          )
+          granted.rolname = '${capabilityGroup}'
           and membership.inherit_option
           and not membership.set_option
           and not membership.admin_option
@@ -140,7 +175,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       from pg_catalog.pg_auth_members membership
       join pg_catalog.pg_roles granted on granted.oid = membership.roleid
       join pg_catalog.pg_roles member on member.oid = membership.member
-      where granted.rolname = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}'
+      where granted.rolname = '${runtimeRole}'
     ) as runtime_only_trusted_members,
     exists (
       select 1 from pg_catalog.pg_roles role
@@ -159,8 +194,8 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and role.rolconnlimit = 1
         and role.rolvaliduntil = 'infinity'::timestamptz
     ) as execution_group_role_is_safe,
-    pg_catalog.pg_has_role(current_user, '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}', 'USAGE')
-      and not pg_catalog.pg_has_role(current_user, '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}', 'SET')
+    pg_catalog.pg_has_role(current_user, '${capabilityGroup}', 'USAGE')
+      and not pg_catalog.pg_has_role(current_user, '${capabilityGroup}', 'SET')
       as group_usage_allowed_set_denied,
     (
       select
@@ -192,7 +227,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
     (
       select count(*) <= 2
         and count(*) filter (
-          where member.rolname = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}'
+          where member.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}'
             and membership.inherit_option
             and not membership.set_option
             and not membership.admin_option
@@ -200,7 +235,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and count(*) filter (where member.rolname = 'postgres') <= 1
         and coalesce(pg_catalog.bool_and(
           (
-            member.rolname = '${COMPANION_DEVICE_BRIDGE_DATABASE_ROLE}'
+            member.rolname = '${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}'
             and membership.inherit_option
             and not membership.set_option
             and not membership.admin_option
@@ -280,7 +315,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and namespace.nspname !~ '^pg_(toast|temp)'
         and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'USAGE')
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-        and routine.oid in (${ALLOWED_FUNCTIONS_SQL})
+        and routine.oid in (${allowedFunctionsSql})
     ) and not exists (
       select 1 from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
@@ -288,7 +323,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and namespace.nspname !~ '^pg_(toast|temp)'
         and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'USAGE')
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-        and routine.oid not in (${ALLOWED_FUNCTIONS_SQL})
+        and routine.oid not in (${allowedFunctionsSql})
     ) as exact_reachable_function_surface_allowed,
     not exists (
       select 1 from pg_catalog.pg_proc routine
@@ -297,7 +332,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and namespace.nspname !~ '^pg_(toast|temp)'
         and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'USAGE')
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-        and routine.prosecdef and routine.oid not in (${ALLOWED_FUNCTIONS_SQL})
+        and routine.prosecdef and routine.oid not in (${allowedFunctionsSql})
     ) as no_reachable_unallowlisted_security_definer,
     (
       select count(*) = 7 and pg_catalog.bool_and(
@@ -307,7 +342,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       )
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_roles owner on owner.oid = routine.proowner
-      where routine.oid in (${ALLOWED_FUNCTIONS_SQL})
+      where routine.oid in (${allowedFunctionsSql})
     ) as allowed_functions_hardened,
     (
       select count(*) = 7 and pg_catalog.bool_and(
@@ -317,23 +352,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         and routine.prorettype = pg_catalog.to_regtype(expected.return_type)::pg_catalog.oid
         and pg_catalog.lower(pg_catalog.pg_get_function_result(routine.oid)) = expected.result
       )
-      from (values
-        (pg_catalog.to_regprocedure('${CLAIM_PAIRING_FUNCTION}'), 12, true,
-          'pg_catalog.record',
-          'table(claim_state text, certificate_body jsonb, signed_certificate jsonb)'),
-        (pg_catalog.to_regprocedure('${COMPLETE_PAIRING_FUNCTION}'), 5, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${RELEASE_PAIRING_FUNCTION}'), 1, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${CLAIM_LOOKUP_FUNCTION}'), 10, true,
-          'pg_catalog.record',
-          'table(claim_state text, assignment_body jsonb, signed_assignment jsonb)'),
-        (pg_catalog.to_regprocedure('${COMPLETE_LOOKUP_FUNCTION}'), 4, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${RELEASE_LOOKUP_FUNCTION}'), 1, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,
-          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')
+      from (values${contractRowsSql}
       ) expected(oid, argument_count, returns_set, return_type, result)
       join pg_catalog.pg_proc routine on routine.oid = expected.oid
     ) as allowed_function_contracts_exact,
@@ -342,15 +361,12 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
       cross join lateral pg_catalog.aclexplode(
         coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
       ) privilege
-      where routine.oid in (${ALLOWED_FUNCTIONS_SQL})
+      where routine.oid in (${allowedFunctionsSql})
         and privilege.privilege_type = 'EXECUTE'
         and privilege.grantee <> routine.proowner
         and privilege.grantee not in (
           select oid from pg_catalog.pg_roles
-          where rolname in (
-            '${COMPANION_DEVICE_BRIDGE_GROUP_ROLE}',
-            '${COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE}'
-          )
+          where rolname = '${capabilityGroup}'
         )
     ) as allowed_functions_execution_private,
     exists (
@@ -364,36 +380,21 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = `
         )
     ) as default_function_execution_private
 `;
+}
 
-const EXECUTION_CONTRACT_ROWS_SQL = `,
-        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_ASSIGNMENT_FUNCTION}'), 13, true,
-          'pg_catalog.record',
-          'table(claim_state text, claim_material jsonb, signed_enrollment jsonb, signed_assignment jsonb, player_id text, signed_authority jsonb, signed_result jsonb)'),
-        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION}'), 4, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_AUTHORITY_FUNCTION}'), 12, true,
-          'pg_catalog.record',
-          'table(claim_state text, authority_body jsonb, signed_authority jsonb)'),
-        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_AUTHORITY_FUNCTION}'), 2, false,
-          'pg_catalog.bool', 'boolean'),
-        (pg_catalog.to_regprocedure('${ACCEPT_EXECUTION_RESULT_FUNCTION}'), 13, true,
-          'pg_catalog.record', 'table(accepted boolean, replayed boolean)'),
-        (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_STATUS_FUNCTION}'), 14, true,
-          'pg_catalog.record',
-          'table(claim_state text, status_body jsonb, signed_status jsonb)'),
-        (pg_catalog.to_regprocedure('${COMPLETE_EXECUTION_STATUS_FUNCTION}'), 2, false,
-          'pg_catalog.bool', 'boolean')`;
+export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql(
+  COMPANION_DEVICE_BRIDGE_DATABASE_ROLE,
+  COMPANION_DEVICE_BRIDGE_GROUP_ROLE,
+  ALLOWED_FUNCTIONS_SQL,
+  BASELINE_CONTRACT_ROWS_SQL,
+);
 
-export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL =
-  COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL.replaceAll(
-    ALLOWED_FUNCTIONS_SQL,
-    EXECUTION_ALLOWED_FUNCTIONS_SQL,
-  )
-    .replaceAll('count(*) = 7', 'count(*) = 14')
-    .replace(
-      `        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,\n          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')\n      ) expected`,
-      `        (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,\n          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')${EXECUTION_CONTRACT_ROWS_SQL}\n      ) expected`,
-    );
+export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL = catalogPreflightSql(
+  COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE,
+  COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE,
+  EXECUTION_ALLOWED_FUNCTIONS_SQL,
+  EXECUTION_CONTRACT_ROWS_SQL,
+);
 
 interface CompanionDeviceBridgePostgresQuery {
   query(sql: string, values?: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
@@ -495,7 +496,6 @@ interface PgModule {
 
 export interface CompanionDeviceBridgePostgresRuntimeDependencies {
   readonly createPool?: (config: Readonly<Record<string, unknown>>) => CompanionDeviceBridgePool;
-  readonly executionSignerKeyId?: string;
   readonly onInitialPreflightFailure?: (
     failure: CompanionDeviceBridgeInitialPreflightFailure,
   ) => void;
@@ -513,11 +513,31 @@ export async function createCompanionDeviceBridgePostgresRuntime(
   signerKeyId: string,
   dependencies: CompanionDeviceBridgePostgresRuntimeDependencies = {},
 ): Promise<CompanionDeviceBridgePostgresRuntime> {
+  return createPostgresRuntime(connection, signerKeyId, undefined, false, dependencies);
+}
+
+export async function createCompanionExecutionPostgresRuntime(
+  connection: CompanionExecutionBridgeConnectionConfig,
+  signerKeyId: string,
+  executionSignerKeyId: string,
+  dependencies: CompanionDeviceBridgePostgresRuntimeDependencies = {},
+): Promise<CompanionDeviceBridgePostgresRuntime> {
+  return createPostgresRuntime(connection, signerKeyId, executionSignerKeyId, true, dependencies);
+}
+
+async function createPostgresRuntime(
+  connection: CompanionDeviceBridgeConnectionConfig | CompanionExecutionBridgeConnectionConfig,
+  signerKeyId: string,
+  executionSignerKeyId: string | undefined,
+  executionEnabled: boolean,
+  dependencies: CompanionDeviceBridgePostgresRuntimeDependencies,
+): Promise<CompanionDeviceBridgePostgresRuntime> {
   const { ca, ...postgresConnection } = connection;
-  const executionEnabled = dependencies.executionSignerKeyId !== undefined;
   const poolConfig = Object.freeze({
     ...postgresConnection,
-    application_name: 'fetanagent_companion_device_bridge',
+    application_name: executionEnabled
+      ? 'fetanagent_companion_execution_bridge'
+      : 'fetanagent_companion_device_bridge',
     allowExitOnIdle: false,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
@@ -586,11 +606,7 @@ export async function createCompanionDeviceBridgePostgresRuntime(
     throw new CompanionDeviceBridgePostgresUnavailableError();
   }
 
-  const state = new PostgresCompanionDeviceState(
-    guarded,
-    signerKeyId,
-    dependencies.executionSignerKeyId,
-  );
+  const state = new PostgresCompanionDeviceState(guarded, signerKeyId, executionSignerKeyId);
   return Object.freeze({
     state,
     database: guarded,

@@ -21,6 +21,7 @@ import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
 import {
   createCompanionDeviceBridgePostgresRuntime,
+  createCompanionExecutionPostgresRuntime,
   type CompanionDeviceBridgePostgresRuntime,
 } from './postgres-runtime.js';
 import {
@@ -43,7 +44,11 @@ export interface CompanionDeviceBridgeApplicationDependencies {
   readonly createPostgresRuntime?: (
     config: EnabledConfig['connection'],
     signerKeyId: string,
-    executionSignerKeyId?: string,
+  ) => Promise<CompanionDeviceBridgePostgresRuntime>;
+  readonly createExecutionPostgresRuntime?: (
+    config: Extract<EnabledConfig['execution'], { readonly enabled: true }>['connection'],
+    signerKeyId: string,
+    executionSignerKeyId: string,
   ) => Promise<CompanionDeviceBridgePostgresRuntime>;
   readonly createServer?: (
     handler: CompanionDeviceBridgeHandler,
@@ -66,10 +71,16 @@ export class CompanionDeviceBridgeApplicationError extends Error {
 async function closeRuntimes(
   server: CompanionDeviceBridgeServerRuntime | undefined,
   postgres: CompanionDeviceBridgePostgresRuntime | undefined,
+  executionPostgres: CompanionDeviceBridgePostgresRuntime | undefined,
 ): Promise<void> {
   let failed = false;
   try {
     await server?.close();
+  } catch {
+    failed = true;
+  }
+  try {
+    await executionPostgres?.close();
   } catch {
     failed = true;
   }
@@ -87,13 +98,9 @@ export async function startCompanionDeviceBridgeApplication(
 ): Promise<CompanionDeviceBridgeApplication> {
   if (!config.enabled) throw new CompanionDeviceBridgeApplicationError();
   const createPostgresRuntime =
-    dependencies.createPostgresRuntime ??
-    ((connection, signerKeyId, executionSignerKeyId) =>
-      createCompanionDeviceBridgePostgresRuntime(
-        connection,
-        signerKeyId,
-        executionSignerKeyId === undefined ? {} : { executionSignerKeyId },
-      ));
+    dependencies.createPostgresRuntime ?? createCompanionDeviceBridgePostgresRuntime;
+  const createExecutionPostgresRuntime =
+    dependencies.createExecutionPostgresRuntime ?? createCompanionExecutionPostgresRuntime;
   const createServer =
     dependencies.createServer ??
     ((handler: CompanionDeviceBridgeHandler) =>
@@ -102,14 +109,19 @@ export async function startCompanionDeviceBridgeApplication(
         port: COMPANION_DEVICE_BRIDGE_LISTEN_PORT,
       }));
   let postgres: CompanionDeviceBridgePostgresRuntime | undefined;
+  let executionPostgres: CompanionDeviceBridgePostgresRuntime | undefined;
   let server: CompanionDeviceBridgeServerRuntime | undefined;
   try {
-    postgres = await createPostgresRuntime(
-      config.connection,
-      config.signer.keyId,
-      config.execution.enabled ? config.execution.signer.keyId : undefined,
-    );
+    postgres = await createPostgresRuntime(config.connection, config.signer.keyId);
     if (!(await postgres.ready())) throw new Error();
+    if (config.execution.enabled) {
+      executionPostgres = await createExecutionPostgresRuntime(
+        config.execution.connection,
+        config.signer.keyId,
+        config.execution.signer.keyId,
+      );
+      if (!(await executionPostgres.ready())) throw new Error();
+    }
     const state = postgres.state;
     const pairingHandler = createCompanionPairingHandler({
       signer: config.signer,
@@ -146,44 +158,38 @@ export async function startCompanionDeviceBridgeApplication(
         ),
     });
     const executionConfig = config.execution;
-    const executionHandler = executionConfig.enabled
-      ? createCompanionExecutionHandler({
-          noMoneySigner: config.signer,
-          executionSigner: executionConfig.signer,
-          now: dependencies.now ?? (() => new Date().toISOString()),
-          claimAssignment: (certificate, request, httpReplayIdentity, assessedAt) =>
-            state.claimExecutionAssignment(
-              certificate,
-              request,
-              httpReplayIdentity,
-              assessedAt,
-              Buffer.from(executionConfig.signer.publicKeySpkiDer).toString('base64url'),
-              `sha256:${createHash('sha256')
-                .update(executionConfig.signer.publicKeySpkiDer)
-                .digest('hex')}`,
-            ),
-          completeAssignment: (
-            enrollmentBodyDigest,
-            enrollment,
-            assignmentBodyDigest,
-            assignment,
-          ) =>
-            state.completeExecutionAssignment(
+    const executionState = executionPostgres?.state;
+    if (executionConfig.enabled && executionState === undefined) throw new Error();
+    const executionHandler =
+      executionConfig.enabled && executionState !== undefined
+        ? createCompanionExecutionHandler({
+            noMoneySigner: config.signer,
+            executionSigner: executionConfig.signer,
+            now: dependencies.now ?? (() => new Date().toISOString()),
+            claimAssignment: (certificate, request, httpReplayIdentity, assessedAt) =>
+              executionState.claimExecutionAssignment(
+                certificate,
+                request,
+                httpReplayIdentity,
+                assessedAt,
+                Buffer.from(executionConfig.signer.publicKeySpkiDer).toString('base64url'),
+                `sha256:${createHash('sha256')
+                  .update(executionConfig.signer.publicKeySpkiDer)
+                  .digest('hex')}`,
+              ),
+            completeAssignment: (
               enrollmentBodyDigest,
               enrollment,
               assignmentBodyDigest,
               assignment,
-            ),
-          claimAuthority: (
-            certificate,
-            request,
-            httpReplayIdentity,
-            enrollment,
-            assignment,
-            requestNonceDigest,
-            assessedAt,
-          ) =>
-            state.claimExecutionAuthority(
+            ) =>
+              executionState.completeExecutionAssignment(
+                enrollmentBodyDigest,
+                enrollment,
+                assignmentBodyDigest,
+                assignment,
+              ),
+            claimAuthority: (
               certificate,
               request,
               httpReplayIdentity,
@@ -191,20 +197,19 @@ export async function startCompanionDeviceBridgeApplication(
               assignment,
               requestNonceDigest,
               assessedAt,
-            ),
-          completeAuthority: (authorityBodyDigest, authority) =>
-            state.completeExecutionAuthority(authorityBodyDigest, authority),
-          acceptResult: (
-            certificate,
-            request,
-            httpReplayIdentity,
-            enrollment,
-            assignment,
-            authority,
-            result,
-            assessedAt,
-          ) =>
-            state.acceptExecutionResult(
+            ) =>
+              executionState.claimExecutionAuthority(
+                certificate,
+                request,
+                httpReplayIdentity,
+                enrollment,
+                assignment,
+                requestNonceDigest,
+                assessedAt,
+              ),
+            completeAuthority: (authorityBodyDigest, authority) =>
+              executionState.completeExecutionAuthority(authorityBodyDigest, authority),
+            acceptResult: (
               certificate,
               request,
               httpReplayIdentity,
@@ -213,19 +218,18 @@ export async function startCompanionDeviceBridgeApplication(
               authority,
               result,
               assessedAt,
-            ),
-          claimStatus: (
-            certificate,
-            request,
-            httpReplayIdentity,
-            enrollment,
-            assignment,
-            authority,
-            result,
-            queryNonceDigest,
-            assessedAt,
-          ) =>
-            state.claimExecutionStatus(
+            ) =>
+              executionState.acceptExecutionResult(
+                certificate,
+                request,
+                httpReplayIdentity,
+                enrollment,
+                assignment,
+                authority,
+                result,
+                assessedAt,
+              ),
+            claimStatus: (
               certificate,
               request,
               httpReplayIdentity,
@@ -235,11 +239,22 @@ export async function startCompanionDeviceBridgeApplication(
               result,
               queryNonceDigest,
               assessedAt,
-            ),
-          completeStatus: (statusBodyDigest, status) =>
-            state.completeExecutionStatus(statusBodyDigest, status),
-        })
-      : createDormantCompanionExecutionHandler();
+            ) =>
+              executionState.claimExecutionStatus(
+                certificate,
+                request,
+                httpReplayIdentity,
+                enrollment,
+                assignment,
+                authority,
+                result,
+                queryNonceDigest,
+                assessedAt,
+              ),
+            completeStatus: (statusBodyDigest, status) =>
+              executionState.completeExecutionStatus(statusBodyDigest, status),
+          })
+        : createDormantCompanionExecutionHandler();
     const handler: CompanionDeviceBridgeHandler = (request) =>
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
@@ -252,23 +267,32 @@ export async function startCompanionDeviceBridgeApplication(
           : pairingHandler(request);
     server = createServer(handler);
     await server.listen();
-    if (!server.ready() || !server.server.listening || !(await postgres.ready())) {
+    if (
+      !server.ready() ||
+      !server.server.listening ||
+      !(await postgres.ready()) ||
+      (executionPostgres !== undefined && !(await executionPostgres.ready()))
+    ) {
       throw new Error();
     }
   } catch {
-    await closeRuntimes(server, postgres).catch(() => undefined);
+    await closeRuntimes(server, postgres, executionPostgres).catch(() => undefined);
     throw new CompanionDeviceBridgeApplicationError();
   }
 
   const activeServer = server;
   const activePostgres = postgres;
+  const activeExecutionPostgres = executionPostgres;
   let closed = false;
   let closePromise: Promise<void> | undefined;
   return Object.freeze({
     async ready() {
       if (closed || !activeServer.ready() || !activeServer.server.listening) return false;
       try {
-        return await activePostgres.ready();
+        return (
+          (await activePostgres.ready()) &&
+          (activeExecutionPostgres === undefined || (await activeExecutionPostgres.ready()))
+        );
       } catch {
         return false;
       }
@@ -276,7 +300,7 @@ export async function startCompanionDeviceBridgeApplication(
     close() {
       closePromise ??= (async () => {
         closed = true;
-        await closeRuntimes(activeServer, activePostgres);
+        await closeRuntimes(activeServer, activePostgres, activeExecutionPostgres);
       })();
       return closePromise;
     },

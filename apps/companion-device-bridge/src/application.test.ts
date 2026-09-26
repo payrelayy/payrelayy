@@ -90,7 +90,6 @@ describe('companion device bridge application lifecycle', () => {
     expect(createPostgresRuntime).toHaveBeenCalledWith(
       enabledConfig.connection,
       enabledConfig.signer.keyId,
-      undefined,
     );
     expect(createServer).toHaveBeenCalledTimes(1);
     await expect(application.ready()).resolves.toBe(true);
@@ -162,5 +161,84 @@ describe('companion device bridge application lifecycle', () => {
     ).rejects.toThrow('application is unavailable');
     expect(server.close).toHaveBeenCalledTimes(1);
     expect(postgres.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires an independent execution database runtime and closes both identities', async () => {
+    if (!enabledConfig.enabled) throw new Error('expected enabled config');
+    const executionConfig: CompanionDeviceBridgeConfig = {
+      ...enabledConfig,
+      execution: {
+        enabled: true,
+        signer: {
+          keyId: 'companion-execution-staging-v1',
+          publicKeySpkiDer: Uint8Array.of(2),
+          signP1363: async () => 'synthetic-execution-signature',
+        },
+        connection: {
+          ...enabledConfig.connection,
+          host: 'db.spzpiyxheappsfyswewl.supabase.co',
+          user: 'fetanagent_companion_execution_bridge_runtime',
+        },
+      },
+    };
+    if (!executionConfig.enabled || !executionConfig.execution.enabled) {
+      throw new Error('expected execution config');
+    }
+    const baseline = postgresRuntime();
+    const execution = postgresRuntime();
+    const server = serverRuntime();
+    const createPostgresRuntime = vi.fn(async () => baseline.runtime);
+    const createExecutionPostgresRuntime = vi.fn(async () => execution.runtime);
+    const application = await startCompanionDeviceBridgeApplication(executionConfig, {
+      createPostgresRuntime,
+      createExecutionPostgresRuntime,
+      createServer: () => server.runtime,
+    });
+    expect(createPostgresRuntime).toHaveBeenCalledWith(
+      executionConfig.connection,
+      executionConfig.signer.keyId,
+    );
+    expect(createExecutionPostgresRuntime).toHaveBeenCalledWith(
+      executionConfig.execution.connection,
+      executionConfig.signer.keyId,
+      executionConfig.execution.signer.keyId,
+    );
+    await expect(application.ready()).resolves.toBe(true);
+    await application.close();
+    expect(baseline.close).toHaveBeenCalledTimes(1);
+    expect(execution.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the independent execution database cannot start', async () => {
+    if (!enabledConfig.enabled) throw new Error('expected enabled config');
+    const baseline = postgresRuntime();
+    const server = serverRuntime();
+    const config: CompanionDeviceBridgeConfig = {
+      ...enabledConfig,
+      execution: {
+        enabled: true,
+        signer: {
+          keyId: 'companion-execution-staging-v1',
+          publicKeySpkiDer: Uint8Array.of(2),
+          signP1363: async () => 'synthetic-execution-signature',
+        },
+        connection: {
+          ...enabledConfig.connection,
+          host: 'db.spzpiyxheappsfyswewl.supabase.co',
+          user: 'fetanagent_companion_execution_bridge_runtime',
+        },
+      },
+    };
+    await expect(
+      startCompanionDeviceBridgeApplication(config, {
+        createPostgresRuntime: async () => baseline.runtime,
+        createExecutionPostgresRuntime: async () => {
+          throw new Error('synthetic execution database unavailable');
+        },
+        createServer: () => server.runtime,
+      }),
+    ).rejects.toThrow('application is unavailable');
+    expect(baseline.close).toHaveBeenCalledTimes(1);
+    expect(server.close).not.toHaveBeenCalled();
   });
 });

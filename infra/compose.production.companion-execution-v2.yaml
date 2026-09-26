@@ -7,9 +7,15 @@ services:
     environment:
       INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true'
       COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE: /run/secrets/companion_execution_signer.pkcs8.der
+      COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE: /run/secrets/companion_execution_database_url
     secrets:
       - source: companion_device_bridge_execution_signer
         target: companion_execution_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: companion_device_bridge_execution_database_url
+        target: companion_execution_database_url
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -27,3 +33,5 @@ configs:
 secrets:
   companion_device_bridge_execution_signer:
     file: /etc/fetanagent/companion-execution-secrets/production-execution-signer.pkcs8.der
+  companion_device_bridge_execution_database_url:
+    file: /etc/fetanagent/companion-execution-secrets/production-execution-database-url

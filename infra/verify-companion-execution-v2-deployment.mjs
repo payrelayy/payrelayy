@@ -16,6 +16,8 @@ const [
   localDeposit,
   providerRoute,
   bridgeConfig,
+  bridgeApplication,
+  bridgePostgresRuntime,
   bridgeServer,
   caddyfile,
   productionCompose,
@@ -45,6 +47,8 @@ const [
   read('apps/windows-companion/src/local-kemerbet-deposit.ts'),
   read('apps/windows-companion/src/provider-route.ts'),
   read('apps/companion-device-bridge/src/config.ts'),
+  read('apps/companion-device-bridge/src/application.ts'),
+  read('apps/companion-device-bridge/src/postgres-runtime.ts'),
   read('apps/companion-device-bridge/src/server.ts'),
   read('infra/gateway/Caddyfile'),
   read('infra/compose.production.yaml'),
@@ -158,6 +162,21 @@ assert.match(bridgeConfig, /INTERNAL_COMPANION_EXECUTION_V2_ENABLED/u);
 assert.match(bridgeConfig, /serverProviderActionAllowed !== false/u);
 assert.match(bridgeConfig, /serverMoneyMovementAllowed !== false/u);
 assert.match(bridgeConfig, /record\.executionSignerKeyId !== 'companion-execution-production-v1'/u);
+assert.match(bridgeConfig, /COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE/u);
+assert.match(bridgeConfig, /COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE/u);
+assert.match(bridgeConfig, /executionConnectionFromUrl\(/u);
+assert.match(bridgeConfig, /execution\.connection\.password === connectionWithoutCa\.password/u);
+assert.match(bridgeApplication, /createCompanionExecutionPostgresRuntime/u);
+assert.match(bridgeApplication, /executionState\.claimExecutionAssignment/u);
+assert.doesNotMatch(bridgeApplication, /state\.claimExecutionAssignment/u);
+assert.match(
+  bridgePostgresRuntime,
+  /const EXECUTION_ALLOWED_FUNCTIONS = \[\s*CLAIM_EXECUTION_ASSIGNMENT_FUNCTION/u,
+);
+assert.doesNotMatch(
+  bridgePostgresRuntime,
+  /const EXECUTION_ALLOWED_FUNCTIONS = \[\s*\.\.\.BASELINE_ALLOWED_FUNCTIONS/u,
+);
 for (const path of [
   '/v2/companion/device/execution-assignments:poll',
   '/v2/companion/device/execution-authorities:consume',
@@ -182,12 +201,18 @@ const baseBridge = /  production-companion-device-bridge:([\s\S]*?)\n  gateway:/
 assert.ok(baseBridge);
 assert.doesNotMatch(baseBridge, /INTERNAL_COMPANION_EXECUTION_V2_ENABLED/u);
 assert.doesNotMatch(baseBridge, /companion_execution_signer/u);
+assert.doesNotMatch(baseBridge, /companion_execution_database_url/u);
 assert.match(executionOverlay, /INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true'/u);
 assert.match(
   executionOverlay,
   /file: \/etc\/fetanagent\/companion-execution-secrets\/production-execution-signer\.pkcs8\.der/u,
 );
 assert.match(executionOverlay, /companion-bridge-runtime-manifest\.v3\.json/u);
+assert.match(
+  executionOverlay,
+  /COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE: \/run\/secrets\/companion_execution_database_url/u,
+);
+assert.match(executionOverlay, /production-execution-database-url/u);
 assert.doesNotMatch(
   executionOverlay.replace(/^#.*$/gmu, ''),
   /KEMERBET|credential|service_role|SUPABASE_SERVICE_ROLE/iu,

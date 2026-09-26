@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -9,10 +11,60 @@ function digest(): string {
   return `sha256:${createHash('sha256').update(randomUUID()).digest('hex')}`;
 }
 
+const emergencyStopScript = fileURLToPath(
+  new URL(
+    '../../../infra/sql/production-companion-execution-emergency-disable.sql',
+    import.meta.url,
+  ),
+);
+
+function runDisposableStop(administratorPassword: string, projectRef: string): Promise<string> {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of Object.keys(environment)) {
+    if (/^PG[A-Z0-9_]*$/iu.test(name) || name === 'DATABASE_URL') {
+      delete environment[name];
+    }
+  }
+  Object.assign(environment, {
+    PGAPPNAME: 'fetanagent_companion_execution_disposable_stop',
+    PGPASSFILE: '/dev/null',
+    PGPASSWORD: administratorPassword,
+    PGSERVICEFILE: '/dev/null',
+    PGSSLMODE: 'disable',
+    PRODUCTION_PROJECT_REF: projectRef,
+  });
+  return new Promise((resolve, reject) => {
+    execFile(
+      'psql',
+      [
+        '-X',
+        '--host=postgres',
+        '--port=5432',
+        '--username=postgres',
+        '--dbname=postgres',
+        '--quiet',
+        '--tuples-only',
+        '--no-align',
+        '--file',
+        emergencyStopScript,
+      ],
+      { encoding: 'utf8', env: environment, maxBuffer: 64 * 1024, timeout: 30_000 },
+      (error, stdout) => {
+        if (error !== null) {
+          reject(new Error('The disposable companion stop failed closed.', { cause: error }));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
 export function registerCompanionExecutionActivationRequestSqlTests(
   getClient: () => Client,
   getOwnerAuthUserId: () => string,
   getOwnerAdminId: () => string,
+  getAdministratorPassword: () => string,
 ): void {
   describe('dormant companion execution activation request', () => {
     it('is immutable, empty, and inaccessible to application and execution roles', async () => {
@@ -132,6 +184,46 @@ export function registerCompanionExecutionActivationRequestSqlTests(
       } finally {
         await client.query('rollback');
       }
+    });
+
+    it('keeps the execution runtime memberless, passwordless, and without a stop grant', async () => {
+      const result = await getClient().query<{
+        readonly runtime_roles: string;
+        readonly non_admin_members: string;
+        readonly public_execute: boolean;
+        readonly runtime_execute: boolean;
+      }>(`
+        select
+          (select count(*) from pg_authid role
+            where role.rolname in (
+              'fetanagent_companion_execution_bridge',
+              'fetanagent_companion_execution_bridge_runtime'
+            )
+              and not role.rolcanlogin and not role.rolinherit
+              and not role.rolsuper and not role.rolcreatedb
+              and not role.rolcreaterole and not role.rolreplication
+              and not role.rolbypassrls and role.rolpassword is null)
+            as runtime_roles,
+          (select count(*) from pg_auth_members membership
+            join pg_roles granted on granted.oid = membership.roleid
+            join pg_roles member on member.oid = membership.member
+            where granted.rolname = 'fetanagent_companion_execution_bridge'
+              and member.rolname <> 'postgres') as non_admin_members,
+          has_function_privilege('public',
+            'app.disable_agent_platform_companion_execution_transport()',
+            'EXECUTE') as public_execute,
+          has_function_privilege('fetanagent_companion_execution_bridge_runtime',
+            'app.disable_agent_platform_companion_execution_transport()',
+            'EXECUTE') as runtime_execute
+      `);
+      expect(result.rows).toEqual([
+        {
+          runtime_roles: '2',
+          non_admin_members: '0',
+          public_execute: false,
+          runtime_execute: false,
+        },
+      ]);
     });
 
     it('binds one current request, replays exactly, and refuses an overlapping request', async () => {
@@ -294,9 +386,133 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           'select control_state from app.agent_platform_companion_execution_control where singleton',
         );
         expect(dormant.rows).toEqual([{ control_state: 'disabled' }]);
+
+        // Disposable fixture only: simulate an active control and a wrongly enabled login.
+        // The independent stop must remove both even before a real arm workflow exists.
+        const livePilot = await client.query<{
+          readonly revision: number;
+          readonly configuration_digest: string;
+          readonly platform_agent_account_id: string;
+          readonly active_from: Date;
+          readonly expires_at: Date;
+        }>(
+          `
+          select revision, configuration_digest, platform_agent_account_id,
+                 active_from, expires_at
+            from app.private_live_deposit_pilot_revisions
+           where id = $1::uuid
+        `,
+          [pilot.pilotRevisionId],
+        );
+        expect(livePilot.rows).toHaveLength(1);
+        const live = livePilot.rows[0]!;
+        await client.query(`
+          alter role fetanagent_companion_execution_bridge_runtime
+          with login password 'TEST-ONLY-NOT-A-SECRET-execution-v1'
+        `);
+        await client.query(`
+          grant fetanagent_companion_execution_bridge
+          to fetanagent_companion_execution_bridge_runtime
+          with inherit true, set false, admin false
+        `);
+        await client.query(
+          `update app.agent_platform_companion_execution_control set
+            control_state = 'active', certificate_id = $1::uuid,
+            device_id = $2::text, device_key_id = $3::text,
+            no_money_signer_key_id = $4::text,
+            execution_signer_key_id = 'companion-execution-production-v1',
+            execution_signer_public_key_spki = 'MFkwSyntheticExecutionKey',
+            execution_signer_public_key_spki_sha256 =
+              'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2',
+            platform_agent_account_id = $5::uuid,
+            pilot_revision_id = $6::uuid, pilot_revision = $7::integer,
+            pilot_configuration_digest = $8::text,
+            activation_epoch = $9::bigint, active_from = $10::timestamptz,
+            expires_at = $11::timestamptz,
+            activated_by_admin_id = $12::uuid, activated_at = clock_timestamp()
+           where singleton`,
+          [
+            certificateId,
+            deviceId,
+            deviceKeyId,
+            signerKeyId,
+            live.platform_agent_account_id,
+            pilot.pilotRevisionId,
+            live.revision,
+            live.configuration_digest,
+            activationEpoch,
+            live.active_from,
+            live.expires_at,
+            ownerAdminId,
+          ],
+        );
+        const stopped = await client.query<{ readonly was_active: boolean }>(
+          'select app.disable_agent_platform_companion_execution_transport() as was_active',
+        );
+        expect(stopped.rows).toEqual([{ was_active: true }]);
+        const stoppedAgain = await client.query<{ readonly was_active: boolean }>(
+          'select app.disable_agent_platform_companion_execution_transport() as was_active',
+        );
+        expect(stoppedAgain.rows).toEqual([{ was_active: false }]);
+        const fenced = await client.query<{
+          readonly control_state: string;
+          readonly has_runtime_member: boolean;
+          readonly runtime_login_disabled: boolean;
+        }>(`
+          select
+            (select control_state from app.agent_platform_companion_execution_control
+              where singleton) as control_state,
+            pg_has_role('fetanagent_companion_execution_bridge_runtime',
+              'fetanagent_companion_execution_bridge', 'member')
+              as has_runtime_member,
+            (select not role.rolcanlogin and role.rolpassword is null
+               from pg_authid role
+              where role.rolname = 'fetanagent_companion_execution_bridge_runtime')
+              as runtime_login_disabled
+        `);
+        expect(fenced.rows).toEqual([
+          {
+            control_state: 'disabled',
+            has_runtime_member: false,
+            runtime_login_disabled: true,
+          },
+        ]);
       } finally {
         await client.query('rollback');
       }
+    });
+
+    it('rejects the wrong target and rehearses the dormant independent stop twice', async () => {
+      await expect(runDisposableStop(getAdministratorPassword(), 'wrong-project')).rejects.toThrow(
+        'The disposable companion stop failed closed.',
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const output = await runDisposableStop(getAdministratorPassword(), 'xzztugbgtulptnbpoelr');
+        const finalLine = output.trim().split('\n').at(-1);
+        expect(JSON.parse(finalLine ?? '')).toEqual({
+          schemaVersion: 1,
+          operation: 'companion_execution_emergency_disable',
+          deploymentTarget: 'production',
+          runtimeLogin: 'disabled',
+          companionExecution: 'disabled',
+          financialAuthority: 'disabled',
+          providerOutcomeRequiresReconciliation: true,
+        });
+      }
+      const result = await getClient().query<{
+        readonly control_state: string;
+        readonly runtime_sessions: string;
+      }>(`
+        select
+          (select control_state from app.agent_platform_companion_execution_control
+            where singleton) as control_state,
+          (select count(*) from pg_stat_activity activity
+            where activity.usename in (
+              'fetanagent_companion_execution_bridge',
+              'fetanagent_companion_execution_bridge_runtime'
+            )) as runtime_sessions
+      `);
+      expect(result.rows).toEqual([{ control_state: 'disabled', runtime_sessions: '0' }]);
     });
   });
 }

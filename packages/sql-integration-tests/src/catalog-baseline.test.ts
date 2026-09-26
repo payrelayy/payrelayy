@@ -8692,6 +8692,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.disable_agent_platform_companion_execution_transport()',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature: 'app.enqueue_verified_deposit_execution(uuid)',
       },
       {
@@ -9754,6 +9760,7 @@ registerCompanionExecutionActivationRequestSqlTests(
   () => client,
   () => ownerAuthUserId,
   () => ownerAdminId,
+  () => environment.administratorPassword,
 );
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(

@@ -6,6 +6,16 @@ and the execution capability role has no runtime member. There is **no reviewed 
 operation**. Setting a local environment flag, granting a role, or updating the control row by
 hand is not an activation procedure.
 
+Migration `companion_execution_emergency_stop` adds a passwordless, memberless `NOLOGIN`
+execution-bridge runtime scaffold and a Postgres-only transport fence. It grants no execution
+capability. The independent `production-companion-execution-emergency-disable.sql` operation is
+designed to commit credential and membership revocation first, drain active sessions second,
+stop any still-live trusted TeleBirr financial epoch third, and fence the companion control
+last. Each phase commits independently so a later failure cannot roll an earlier stop back. It never
+leases or executes a queue job. A provider action already past its one-use fence cannot be
+undone by disabling a session; its outcome must be reconciled before any later activation.
+This stop path is a prerequisite for review, **not** an authorization to arm or deploy execution.
+
 ## Current paid-proof state
 
 The Owner stopped the last live TeleBirr pilot with `owner_stop`. A separately authorized,
@@ -104,9 +114,11 @@ following as one fail-closed operation, with disposable-PostgreSQL and end-to-en
 4. A checksum-bound production transport release with the pinned execution signer and the
    reviewed overlay. The default release must remain no-money. The paired Windows process must
    receive its account-bound opt-in through a reviewed local handoff, not a manually set flag.
-5. A rehearsed independent emergency stop and reconciliation path. The final-action fence must
-   be one-use, and any ambiguous provider response must stop without an automatic retry. The
-   queue item must never be leased for a test of the activation plumbing.
+5. A rehearsed independent emergency stop and reconciliation path. The credential/transport
+   stop is only a foundation; the host runtime stop and in-flight provider reconciliation still
+   need an integrated rehearsal. The final-action fence must be one-use, and any ambiguous
+   provider response must stop without an automatic retry. The queue item must never be leased
+   for a test of the activation plumbing.
 
 Until all five are implemented and reviewed together, the executable path stays disabled. The
 status query and dormant disposition do not make the Telegram bot able to credit KemerBet or

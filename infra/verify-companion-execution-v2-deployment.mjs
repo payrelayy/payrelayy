@@ -18,6 +18,8 @@ const [
   productionWorkflow,
   migration,
   privilegeGateMigration,
+  emergencyStopMigration,
+  emergencyStopOperation,
   packageBuilder,
 ] = await Promise.all([
   read('apps/windows-companion/src/config.ts'),
@@ -34,6 +36,8 @@ const [
   read('.github/workflows/production-runtime.yml'),
   read('supabase/migrations/20260914030000_agent_platform_companion_execution_bridge.sql'),
   read('supabase/migrations/20260914123000_companion_execution_privilege_gate.sql'),
+  read('supabase/migrations/20260926132338_companion_execution_emergency_stop.sql'),
+  read('infra/sql/production-companion-execution-emergency-disable.sql'),
   read('scripts/build-windows-companion-package.ps1'),
 ]);
 
@@ -139,6 +143,34 @@ assert.doesNotMatch(
   privilegeGateMigration,
   /grant fetanagent_companion_execution_bridge\s+to\s+fetanagent_companion_device_bridge_runtime/iu,
 );
+assert.match(
+  emergencyStopMigration,
+  /create role fetanagent_companion_execution_bridge_runtime\s+nologin/iu,
+);
+assert.match(
+  emergencyStopMigration,
+  /create function app\.disable_agent_platform_companion_execution_transport\(\)/u,
+);
+assert.match(emergencyStopMigration, /session_user <> 'postgres'/u);
+assert.match(emergencyStopMigration, /control_state = 'disabled'/u);
+assert.doesNotMatch(emergencyStopMigration, /\bgrant execute\b/iu);
+assert.doesNotMatch(emergencyStopMigration, /\bgrant fetanagent_companion_execution_bridge\b/iu);
+const roleRevocation = emergencyStopOperation.indexOf(
+  'alter role fetanagent_companion_execution_bridge_runtime',
+);
+const sessionTermination = emergencyStopOperation.indexOf('pg_catalog.pg_terminate_backend');
+const financialStop = emergencyStopOperation.indexOf(
+  'app.request_private_trusted_telebirr_emergency_disable',
+);
+assert.ok(roleRevocation >= 0 && roleRevocation < sessionTermination);
+assert.ok(sessionTermination < financialStop);
+assert.match(
+  emergencyStopOperation,
+  /app\.disable_agent_platform_companion_execution_transport\(\)/u,
+);
+assert.match(emergencyStopOperation, /pg_catalog\.pg_advisory_unlock/u);
+assert.match(emergencyStopOperation, /providerOutcomeRequiresReconciliation', true/u);
+assert.doesNotMatch(emergencyStopOperation, /\b(?:insert|update)\s+app\.deposit_jobs\b/iu);
 assert.match(packageBuilder, /packages\/agent-platform-companion-execution-contracts/u);
 
 console.log(

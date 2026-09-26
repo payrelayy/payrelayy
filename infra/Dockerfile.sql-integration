@@ -64,6 +64,8 @@ COPY infra/sql/production-live-telebirr-source-document-status.sql \
   ./infra/sql/production-live-telebirr-source-document-status.sql
 COPY infra/sql/production-companion-execution-activation-status.sql \
   ./infra/sql/production-companion-execution-activation-status.sql
+COPY infra/sql/production-companion-execution-emergency-disable.sql \
+  ./infra/sql/production-companion-execution-emergency-disable.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
 COPY supabase/migrations ./supabase/migrations

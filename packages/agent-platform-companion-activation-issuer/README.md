@@ -49,7 +49,15 @@ proof against a fresh operator challenge. A source-pinned PowerShell inspection
 checks the live Windows PID, executable, command line, and OS creation time
 without emitting the command line. The adapter returns only the fields needed
 by the issuer core. It does **not** launch a process or receive a proof itself:
-a separately reviewed protected local challenge-pipe launcher must supply the
-fresh proof and operator paths. It also does not issue the handoff, consume the
-request, arm execution, or replace the atomic financial-state preflight. The v1
+a separately reviewed protected process launcher must supply the fresh proof
+and operator paths. The new, separate `./guarded-local-launch-channel` subpath
+provides only the operator-side Windows named-pipe receiver for that v2 proof.
+It accepts one size- and time-bounded proof for a caller-supplied fresh challenge
+and never writes an execution permit. The caller must close it in `finally`;
+closing the channel makes the companion's guarded launch fail before workers start. The receiver
+does not authenticate the proof, attest the release, start a process, or provide
+an activation entry point. The independent guarded-process observer must still
+verify the proof, handoff, certificate, and operating-system process before any
+future transition can be considered. Neither adapter issues the handoff, consumes the
+request, arms execution, or replaces the atomic financial-state preflight. The v1
 no-money launch diagnostic cannot satisfy the required v2 proof.

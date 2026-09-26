@@ -208,8 +208,11 @@ through a short-lived `postgres` session. Its append-only schema addition record
 handoff digest and deliberately refuses retrofit if an older witness already exists. A
 read-only guarded-process observer now validates the canonical local signed handoff,
 paired v2 proof, and an OS-reported PID/image/command line/start time through a
-source-pinned Windows inspection. It cannot receive a proof or start a process:
-the protected v2 challenge-pipe launcher and production invocation are still absent.
+source-pinned Windows inspection. A separate local Windows pipe receiver accepts one
+bounded v2 proof for a fresh operator challenge and never sends an execution permit.
+Its caller must close it after observation. It does not start a process or validate that proof. The protected
+process starter, attested transition invocation, and permit/stop lifecycle are still
+absent.
 Neither this adapter nor its migration is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production

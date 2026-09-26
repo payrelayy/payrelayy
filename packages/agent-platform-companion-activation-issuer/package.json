@@ -11,6 +11,10 @@
     "./guarded-process-observation": {
       "types": "./dist/guarded-process-observation.d.ts",
       "default": "./dist/guarded-process-observation.js"
+    },
+    "./guarded-local-launch-channel": {
+      "types": "./dist/guarded-local-launch-channel.d.ts",
+      "default": "./dist/guarded-local-launch-channel.js"
     }
   },
   "dependencies": {

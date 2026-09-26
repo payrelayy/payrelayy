@@ -127,23 +127,28 @@ jobs:
             .readinessOnly == true and .activationAvailable == false and
             (.pilotState | IN("none", "draft", "armed", "stopped")) and
             (.pilotStopReason == null or (.pilotStopReason | type == "string")) and
-            ([.totalJobs, .openJobs, .untouchedQueuedJobs, .changedJobs,
-              .totalReservations, .reservationBoundJobs, .latestPilotJobs,
+            ([.totalJobs, .openJobs, .untouchedQueuedJobs, .cancelledUntouchedJobs, .changedJobs,
+              .totalReservations, .openExecutionReviewCases,
+              .reservationBoundJobs, .latestPilotJobs,
               .companionExecutionRecords] |
               all(type == "number" and . >= 0 and . <= 2)) and
             ([.allFinancialSwitchesDisabled, .effectiveTrustedEpochAvailable,
               .companionExecutionControlDisabled, .executionCapabilityDormant,
-              .stoppedPilotUntouchedJob] | all(type == "boolean")) and
+              .stoppedPilotUntouchedJob, .customerResolutionPending] |
+              all(type == "boolean")) and
             (.nextAction | IN(
               "safety_review", "paid_stopped_pilot_review", "queue_reconciliation",
-              "pilot_review", "trusted_activation_review", "release_and_owner_review"
+              "customer_resolution_pending", "pilot_review",
+              "trusted_activation_review", "release_and_owner_review"
             ))
           ' <<<"$status" >/dev/null
 
           jq -c '{
             readOnly, identifiersRedacted, readinessOnly, activationAvailable,
-            pilotState, pilotStopReason, totalJobs, openJobs, untouchedQueuedJobs, changedJobs,
-            totalReservations, reservationBoundJobs, latestPilotJobs,
+            pilotState, pilotStopReason, totalJobs, openJobs, untouchedQueuedJobs,
+            cancelledUntouchedJobs, changedJobs,
+            totalReservations, openExecutionReviewCases,
+            customerResolutionPending, reservationBoundJobs, latestPilotJobs,
             allFinancialSwitchesDisabled, effectiveTrustedEpochAvailable,
             companionExecutionControlDisabled, executionCapabilityDormant,
             companionExecutionRecords, stoppedPilotUntouchedJob, nextAction

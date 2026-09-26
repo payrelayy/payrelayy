@@ -8,26 +8,30 @@ hand is not an activation procedure.
 
 ## Current paid-proof state
 
-The Owner stopped the last live TeleBirr pilot with `owner_stop`. Its existing reservation and
-queued deposit job are preserved; the job was not leased or executed. A stopped pilot cannot be
-re-armed or silently replaced for that job. The existing executor requires a current, matching
-pilot and trusted activation epoch before it can lease a TeleBirr job. Do not submit the receipt
-again or copy the reservation into a new pilot.
+The Owner stopped the last live TeleBirr pilot with `owner_stop`. A separately authorized,
+one-use customer-resolution review then cancelled its untouched queued job and opened one
+execution review case. The payment claim, evidence, reservation, and history remain preserved;
+the job was never leased or executed. A stopped pilot cannot be re-armed or silently replaced for
+that payment. Do not submit the receipt again or copy the reservation into a new pilot.
 
-Migration `review_stopped_pilot_paid_execution_job` adds a **dormant, Postgres-only** disposition
-for this state. Merely installing it leaves the job queued and changes no production row. A
-separately authorized invocation requires an exact active Owner, stopped `owner_stop` pilot,
+Migration `review_stopped_pilot_paid_execution_job` added a **Postgres-only** disposition
+for this state. Merely installing it changed no production row. Its separately authorized,
+completed invocation required an exact active Owner, stopped `owner_stop` pilot,
 singular verified payment claim and reservation, untouched zero-attempt execution job, no
 execution attempt, and every financial switch disabled. It atomically cancels only that job,
 changes the deposit to `execution_review`, opens an execution review case, and records an immutable
 one-use receipt. The claim, payment evidence, reservation, and deposit history remain retained.
-This is **not a credit or a refund**: customer resolution remains a separate, explicit obligation.
-The function has no application or runtime grant. Never invoke it as part of migration deployment.
+This was **not a credit or a refund**: customer resolution remains a separate, explicit obligation.
+The function has no application or runtime grant. Never invoke it as part of migration deployment,
+and never invoke it again for the reviewed job.
 
 Run `infra/sql/production-companion-execution-activation-status.sql` with a read-only production
 administrator session to obtain one identifier-free status object. It reports bounded counts and
 categorical states only. It performs no activation or queue mutation. The contract verifier is
 `node infra/verify-production-companion-execution-activation-status.mjs`.
+`cancelledUntouchedJobs` distinguishes the protected, never-leased paid job from a queued job;
+`customerResolutionPending` requires the open case, immutable review receipt, retained payment
+lineage, and no execution attempt. Neither field means the customer has been credited or refunded.
 
 The **Inspect production companion execution readiness** workflow runs that same status query
 against exact passing main with a read-only database session. Its output is a redacted snapshot,
@@ -39,6 +43,9 @@ separately reviewed activation operation exists. `nextAction` is one of these di
 - `paid_stopped_pilot_review`: one untouched queue item belongs to the stopped pilot and needs
   separate customer-resolution review. The workflow never invokes that disposition.
 - `queue_reconciliation`: another queued or changed job requires independent review.
+- `customer_resolution_pending`: the stopped-pilot paid job has one protected review receipt,
+  its queue item is cancelled without an execution attempt, and one execution review case remains
+  open. Do not infer a credit or refund.
 - `pilot_review`: there is no armed pilot available for a future activation.
 - `trusted_activation_review`: the trusted TeleBirr epoch is not active for the armed pilot.
 - `release_and_owner_review`: the database snapshot alone is insufficient; release, Owner,

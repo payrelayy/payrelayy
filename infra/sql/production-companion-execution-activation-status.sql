@@ -27,6 +27,13 @@ with latest_pilot as materialized (
         and job.lease_expires_at is null
     )::integer as untouched_jobs,
     pg_catalog.count(*) filter (
+      where job.status = 'cancelled'
+        and job.attempt_count = 0
+        and job.lease_token is null
+        and job.leased_by is null
+        and job.lease_expires_at is null
+    )::integer as cancelled_untouched_jobs,
+    pg_catalog.count(*) filter (
       where reservation.id is not null
     )::integer as reservation_bound_jobs,
     pg_catalog.count(*) filter (
@@ -54,6 +61,47 @@ with latest_pilot as materialized (
 ), reservation_state as materialized (
   select pg_catalog.count(*)::integer as total_reservations
   from app.private_live_deposit_pilot_reservations
+), customer_review_state as materialized (
+  select
+    (
+      select pg_catalog.count(*)::integer
+      from app.deposit_review_cases review_case
+      where review_case.review_kind = 'execution'
+        and review_case.status in ('open', 'assigned')
+    ) as open_cases,
+    (
+      select pg_catalog.count(*)::integer
+      from app.stopped_pilot_paid_execution_reviews review_receipt
+      join app.deposit_review_cases review_case
+        on review_case.deposit_intent_id = review_receipt.deposit_intent_id
+       and review_case.review_kind = 'execution'
+       and review_case.reason_code = 'stopped_pilot_paid_proof_review'
+       and review_case.status in ('open', 'assigned')
+      join app.deposit_jobs job
+        on job.id = review_receipt.deposit_job_id
+       and job.deposit_intent_id = review_receipt.deposit_intent_id
+       and job.status = 'cancelled'
+       and job.attempt_count = 0
+       and job.lease_token is null
+       and job.leased_by is null
+       and job.lease_expires_at is null
+      join app.deposit_intents intent
+        on intent.id = review_receipt.deposit_intent_id
+       and intent.status = 'execution_review'
+      join app.private_live_deposit_pilot_reservations reservation
+        on reservation.id = review_receipt.reservation_id
+       and reservation.deposit_intent_id = intent.id
+       and reservation.pilot_revision_id = review_receipt.pilot_revision_id
+      join app.deposit_payment_claims claim
+        on claim.id = review_receipt.payment_claim_id
+       and claim.id = reservation.deposit_payment_claim_id
+       and claim.deposit_intent_id = intent.id
+       and claim.provider_payment_evidence_id = reservation.provider_payment_evidence_id
+      where not exists (
+        select 1 from app.deposit_execution_attempts attempt
+        where attempt.deposit_job_id = job.id
+      )
+    ) as protected_open_cases
 ), switch_state as materialized (
   select
     pg_catalog.count(*)::integer as switch_count,
@@ -148,8 +196,14 @@ select pg_catalog.jsonb_build_object(
   'totalJobs', least(queue_state.total_jobs, 2),
   'openJobs', least(queue_state.open_jobs, 2),
   'untouchedQueuedJobs', least(queue_state.untouched_jobs, 2),
+  'cancelledUntouchedJobs', least(queue_state.cancelled_untouched_jobs, 2),
   'changedJobs', least(queue_state.total_jobs - queue_state.untouched_jobs, 2),
   'totalReservations', least(reservation_state.total_reservations, 2),
+  'openExecutionReviewCases', least(customer_review_state.open_cases, 2),
+  'customerResolutionPending',
+    customer_review_state.open_cases = 1
+      and customer_review_state.protected_open_cases = 1
+      and queue_state.open_jobs = 0,
   'reservationBoundJobs', least(queue_state.reservation_bound_jobs, 2),
   'latestPilotJobs', least(queue_state.latest_pilot_jobs, 2),
   'allFinancialSwitchesDisabled',
@@ -178,6 +232,12 @@ select pg_catalog.jsonb_build_object(
       and queue_state.latest_pilot_paid_untouched_jobs = 1
       then 'paid_stopped_pilot_review'
     when queue_state.open_jobs > 0 then 'queue_reconciliation'
+    when customer_review_state.open_cases > 0
+      and (
+        customer_review_state.open_cases <> 1
+        or customer_review_state.protected_open_cases <> 1
+      ) then 'safety_review'
+    when customer_review_state.open_cases = 1 then 'customer_resolution_pending'
     when coalesce((select status from latest_pilot), 'none') <> 'armed'
       then 'pilot_review'
     when not effective_epoch.available then 'trusted_activation_review'
@@ -186,6 +246,7 @@ select pg_catalog.jsonb_build_object(
 ) as redacted_status
 from queue_state
 cross join reservation_state
+cross join customer_review_state
 cross join switch_state
 cross join execution_control
 cross join capability

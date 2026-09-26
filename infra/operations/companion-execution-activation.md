@@ -44,6 +44,10 @@ attested, bundled tree verifier. Its only successful result is a pass marker; it
 the companion nor grants any execution authority. An old, unattested release cannot pass this
 preflight, and a passing disk check does not attest the currently running process or authorize
 an activation request. Those are separate prerequisites.
+A PID or executable path alone cannot close that gap: it does not prove the bytes already loaded
+into memory or the process's inherited execution settings. A future launch-and-handshake proof
+must bind the live paired process to the independently verified installation before handoff
+issuance; a disk-only pass must never be treated as that proof.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release

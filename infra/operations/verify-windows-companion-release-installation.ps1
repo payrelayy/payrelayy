@@ -213,7 +213,7 @@ try {
     throw 'The installed companion differs from the attested archive.'
   }
 
-  'COMPANION_RELEASE_INSTALLATION_VERIFIED; execution remains disabled.'
+  'COMPANION_RELEASE_INSTALLATION_VERIFIED; no activation was performed.'
 } catch {
   throw "Companion release preflight failed at $stage; no activation was performed."
 } finally {

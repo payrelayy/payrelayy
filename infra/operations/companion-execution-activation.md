@@ -34,6 +34,16 @@ against the repository, signer workflow, exact tag, and source revision before u
 This does not retroactively attest an older release or attest a currently installed package;
 an activation preflight must still verify the chosen published asset and measured installation
 independently before signing a handoff.
+`verify-windows-companion-release-installation.ps1` is the read-only, non-activating operator
+preflight for a future attested tag. Given the reviewed exact tag and source revision, the
+immutable ZIP and checksum downloaded from that release, and the local installation root, it
+requires the four exact published assets, matching release hashes, the tag's current source
+revision, and a GitHub build attestation from the pinned package workflow. It then verifies
+the ZIP's own installation-tree marker and measures the local installation using the same
+attested, bundled tree verifier. Its only successful result is a pass marker; it neither starts
+the companion nor grants any execution authority. An old, unattested release cannot pass this
+preflight, and a passing disk check does not attest the currently running process or authorize
+an activation request. Those are separate prerequisites.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release

@@ -14,6 +14,7 @@ on:
       - 'packages/agent-platform-kemerbet/**'
       - 'scripts/build-windows-companion-package.ps1'
       - 'scripts/test-windows-companion-pairing-dialog.ps1'
+      - 'infra/operations/verify-windows-companion-release-installation.ps1'
       - 'pnpm-lock.yaml'
   push:
     tags:
@@ -46,6 +47,15 @@ jobs:
 
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Parse read-only release-installation preflight
+        shell: pwsh
+        run: |
+          $scriptPath = (Resolve-Path -LiteralPath 'infra/operations/verify-windows-companion-release-installation.ps1').Path
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw 'The release-installation preflight does not parse.' }
 
       - name: Build, test, and package
         shell: pwsh

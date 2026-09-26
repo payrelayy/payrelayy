@@ -27,6 +27,7 @@ const [
   emergencyStopOperation,
   packageBuilder,
   windowsPackageWorkflow,
+  operatorReleasePreflight,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -51,6 +52,7 @@ const [
   read('infra/sql/production-companion-execution-emergency-disable.sql'),
   read('scripts/build-windows-companion-package.ps1'),
   read('.github/workflows/windows-companion-package.yml'),
+  read('infra/operations/verify-windows-companion-release-installation.ps1'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -95,9 +97,21 @@ assert.match(windowsPackageWorkflow, /name: Attest immutable companion archive/u
 assert.match(windowsPackageWorkflow, /uses: actions\/attest@[0-9a-f]{40}/u);
 assert.match(windowsPackageWorkflow, /needs: \[package, attest\]/u);
 assert.match(windowsPackageWorkflow, /gh attestation verify "\$immutableZip"/u);
+assert.match(windowsPackageWorkflow, /name: Parse read-only release-installation preflight/u);
 assert.match(windowsPackageWorkflow, /--signer-workflow/u);
 assert.match(windowsPackageWorkflow, /--source-ref \$env:GITHUB_REF/u);
 assert.match(windowsPackageWorkflow, /--source-digest \$releaseSha/u);
+assert.match(operatorReleasePreflight, /gh attestation verify "\$archive"/u);
+assert.match(operatorReleasePreflight, /--signer-workflow \$workflow/u);
+assert.match(operatorReleasePreflight, /--source-ref "refs\/tags\/\$ReleaseTag"/u);
+assert.match(operatorReleasePreflight, /--source-digest \$ReleaseSha/u);
+assert.match(operatorReleasePreflight, /gh release download \$ReleaseTag --repo \$repository/u);
+assert.match(operatorReleasePreflight, /\$stableChecksumAsset\.digest -cne/u);
+assert.match(operatorReleasePreflight, /\$tagObject\.sha -cne \$ReleaseSha/u);
+assert.match(operatorReleasePreflight, /\$measuredArchiveTree -cne \$treeMarker/u);
+assert.match(operatorReleasePreflight, /\$measuredInstalledTree -cne \$treeMarker/u);
+assert.match(operatorReleasePreflight, /COMPANION_RELEASE_INSTALLATION_VERIFIED/u);
+assert.doesNotMatch(operatorReleasePreflight, /KEMERBET|execution-authorities:consume/iu);
 assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
 assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);

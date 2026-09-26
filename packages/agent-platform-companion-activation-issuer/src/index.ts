@@ -8,3 +8,8 @@ export {
   CompanionActivationReleaseUnavailableError,
   type CompanionActivationReleaseInputs,
 } from './release-measurement.js';
+export {
+  retainCompanionActivationAttestationRow,
+  CompanionActivationAttestationRetentionUnavailableError,
+  type CompanionActivationAttestationQuery,
+} from './attestation-retention.js';

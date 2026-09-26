@@ -195,9 +195,11 @@ source-pinned Windows preflight for published archive and independently measured
 evidence, with a trusted operator-side observation time. It requires a protected Windows
 operator workflow, an exact release archive, and a reviewed source checkout; none are supplied
 by the package. The guarded-execution proof contract is now distinct from the no-money
-diagnostic proof; the OS-observed execution-process and attestation-retention adapters are still
-absent.
-Neither package can arm the companion,
+diagnostic proof. A separate operator-only adapter can retain one verified digest witness
+through a short-lived `postgres` session. Its append-only schema addition records the signed
+handoff digest and deliberately refuses retrofit if an older witness already exists. Neither
+the adapter nor its migration is a production invocation or execution grant. The OS-observed
+execution-process adapter is still absent. Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production
 consumer must supply the remaining authenticated sources and complete the atomic credential
 lifecycle below.

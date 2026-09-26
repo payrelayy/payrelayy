@@ -67,14 +67,33 @@ first. Confirm the Owner service remains healthy and the preview returns a redac
 the migration. Do not use a migration-only release before updating the Owner image, and do not
 conflate either deployment with execution activation.
 
+## Inert one-use request foundation
+
+Migration `companion_execution_one_use_request` adds an immutable preparation record and an
+administrator-only preparation routine. It binds one request to the current trusted epoch,
+armed pilot, active Owner, Owner-paired Windows certificate, KemerBet agent account, pinned
+execution signer, and claimed immutable companion release/archive digests. The routine refuses
+preparation unless the financial epoch is already current and the companion control is still
+disabled. At most one unexpired request can cover the same pilot/epoch; an exact replay changes
+nothing. A later, separately authorized fresh request may replace an expired one without
+requiring a new twelve-hour pilot.
+
+This is **not** the activation transition. Release digests in a request are claims and must be
+independently attested against the installed bundle and running runtime. The request expires in
+at most ten minutes (separate from a twelve-hour pilot); expiry never slides on replay. There
+is no application EXECUTE grant, no request consumer, no companion-control write, no runtime
+credential, no local Windows opt-in, and no job lease in this migration. Do not invoke the
+preparation routine in production until the remaining activation operation, transport, local
+handoff, and emergency-stop pieces are reviewed together.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the
 following as one fail-closed operation, with disposable-PostgreSQL and end-to-end tests:
 
-1. An Owner-authorized, one-use activation request tied to the exact pilot, current trusted
-   TeleBirr epoch, paired certificate, platform agent account, execution signer, immutable release,
-   and a short non-sliding expiry. A stopped or expired pilot must be rejected.
+1. Connect the inert one-use request to an authenticated Owner action and independently attest
+   the exact installed release/archive. Recheck the pilot, epoch, certificate, and short
+   non-sliding expiry at consumption; a stopped or expired pilot must be rejected.
 2. A database-owned activation transition that locks the epoch, sorted switch rows, pilot,
    certificate, and execution control in the established order; rechecks every lineage and
    financial invariant; and atomically arms only the exact companion control. No direct table

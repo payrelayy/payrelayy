@@ -10,6 +10,7 @@ import { isProxy } from 'node:util/types';
 export * from './launch-proof.js';
 export * from './activation-evidence.js';
 export * from './activation-attestation.js';
+export * from './execution-signer.js';
 
 import {
   decodeSignedCompanionEnrollmentCertificate,

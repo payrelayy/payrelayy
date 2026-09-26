@@ -134,6 +134,12 @@ describe('companion device bridge PostgreSQL runtime', () => {
     );
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 7');
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
+      "role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '2 hours'",
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      "role.rolvaliduntil = 'infinity'::timestamptz",
+    );
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
       "current_user = 'fetanagent_companion_execution_bridge_runtime'",
     );
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).not.toContain(

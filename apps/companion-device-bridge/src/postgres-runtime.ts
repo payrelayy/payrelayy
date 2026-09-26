@@ -133,6 +133,11 @@ function catalogPreflightSql(
   allowedFunctionsSql: string,
   contractRowsSql: string,
 ): string {
+  const runtimeExpiryPredicate =
+    runtimeRole === COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE
+      ? `role.rolvaliduntil > pg_catalog.clock_timestamp()
+        and role.rolvaliduntil <= pg_catalog.clock_timestamp() + interval '2 hours'`
+      : `role.rolvaliduntil = 'infinity'::timestamptz`;
   return `
   select
     current_user = '${runtimeRole}' and session_user = current_user
@@ -144,7 +149,7 @@ function catalogPreflightSql(
         and not role.rolcreatedb and not role.rolcreaterole
         and not role.rolreplication and not role.rolbypassrls
         and role.rolconnlimit = 1
-        and role.rolvaliduntil = 'infinity'::timestamptz
+        and ${runtimeExpiryPredicate}
     ) as runtime_login_is_safe,
     (
       select count(*) = 1

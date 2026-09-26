@@ -181,6 +181,18 @@ request, or check financial state. A future production consumer must supply thos
 inputs and complete the atomic database and credential lifecycle below; a true result alone is
 never an activation decision.
 
+The `companion_execution_atomic_activation` migration adds a Postgres-only, one-use consuming
+transition and an append-only attestation digest record. In a disposable database the transition
+locks and rechecks the current financial epoch, switches, pilot, certificate, and companion
+control; it consumes the request, grants only the dedicated execution capability to a bounded
+SCRAM runtime login, and arms only the matching companion control in one transaction. The
+independent stop removes that login and control. No application role can insert an attestation
+or execute the transition. The attestation is **not** a self-authenticating signature: a trusted
+production issuer must first independently verify the release measurement and paired-process
+proof against the database certificate. No such issuer, production invocation workflow, signed
+local handoff, host stop/reconciliation rehearsal, or deployment of this migration exists yet.
+Do not apply or invoke it in production as a shortcut around those missing pieces.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the

@@ -8620,6 +8620,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.activate_agent_platform_companion_execution_once(uuid,uuid,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature:
           'app.agent_platform_companion_execution_certificate_is_active(uuid,text,text,text,timestamp with time zone)',
       },

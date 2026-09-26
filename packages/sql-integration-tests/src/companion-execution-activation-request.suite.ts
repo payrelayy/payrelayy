@@ -79,6 +79,13 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         readonly owner_insert: boolean;
         readonly immutable_triggers: string;
         readonly control_state: string;
+        readonly attestation_rows: string;
+        readonly consumption_rows: string;
+        readonly attestation_rls: boolean;
+        readonly consumption_rls: boolean;
+        readonly public_arm_execute: boolean;
+        readonly owner_arm_execute: boolean;
+        readonly runtime_arm_execute: boolean;
       }>(`
         select
           (select count(*) from app.agent_platform_companion_execution_activation_requests)
@@ -107,7 +114,26 @@ export function registerCompanionExecutionActivationRequestSqlTests(
               and not trigger.tgisinternal) as immutable_triggers,
           (select control_state
              from app.agent_platform_companion_execution_control
-            where singleton) as control_state
+            where singleton) as control_state,
+          (select count(*) from app.agent_platform_companion_execution_activation_attestations)
+            as attestation_rows,
+          (select count(*) from app.agent_platform_companion_execution_activation_consumptions)
+            as consumption_rows,
+          (select relrowsecurity and relforcerowsecurity from pg_class
+            where oid = 'app.agent_platform_companion_execution_activation_attestations'::regclass)
+            as attestation_rls,
+          (select relrowsecurity and relforcerowsecurity from pg_class
+            where oid = 'app.agent_platform_companion_execution_activation_consumptions'::regclass)
+            as consumption_rls,
+          has_function_privilege('public',
+            'app.activate_agent_platform_companion_execution_once(uuid,uuid,text)',
+            'execute') as public_arm_execute,
+          has_function_privilege('fetanagent_owner_control',
+            'app.activate_agent_platform_companion_execution_once(uuid,uuid,text)',
+            'execute') as owner_arm_execute,
+          has_function_privilege('fetanagent_companion_execution_bridge_runtime',
+            'app.activate_agent_platform_companion_execution_once(uuid,uuid,text)',
+            'execute') as runtime_arm_execute
         from pg_class relation
         where relation.oid =
           'app.agent_platform_companion_execution_activation_requests'::regclass
@@ -124,6 +150,13 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           owner_insert: false,
           immutable_triggers: '2',
           control_state: 'disabled',
+          attestation_rows: '0',
+          consumption_rows: '0',
+          attestation_rls: true,
+          consumption_rls: true,
+          public_arm_execute: false,
+          owner_arm_execute: false,
+          runtime_arm_execute: false,
         },
       ]);
     });
@@ -409,65 +442,142 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         );
         expect(dormant.rows).toEqual([{ control_state: 'disabled' }]);
 
-        // Disposable fixture only: simulate an active control and a wrongly enabled login.
-        // The independent stop must remove both even before a real arm workflow exists.
-        const livePilot = await client.query<{
-          readonly revision: number;
-          readonly configuration_digest: string;
-          readonly platform_agent_account_id: string;
-          readonly active_from: Date;
-          readonly expires_at: Date;
+        const activate = (password: string) =>
+          client.query<{ readonly valid_until: Date }>(
+            `select app.activate_agent_platform_companion_execution_once(
+              $1::uuid, $2::uuid, $3::text
+            ) as valid_until`,
+            [getOwnerAuthUserId(), requestKey, password],
+          );
+        await client.query('savepoint missing_attestation');
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'The one-use companion execution request is unavailable.',
+        );
+        await client.query('rollback to savepoint missing_attestation');
+
+        const certificateDigest = await client.query<{
+          readonly certificate_body_digest: string;
         }>(
-          `
-          select revision, configuration_digest, platform_agent_account_id,
-                 active_from, expires_at
-            from app.private_live_deposit_pilot_revisions
-           where id = $1::uuid
-        `,
-          [pilot.pilotRevisionId],
+          `select certificate_body_digest
+             from app.agent_platform_companion_enrollment_certificates
+            where certificate_id = $1::uuid`,
+          [certificateId],
         );
-        expect(livePilot.rows).toHaveLength(1);
-        const live = livePilot.rows[0]!;
-        await client.query(`
-          alter role fetanagent_companion_execution_bridge_runtime
-          with login password 'TEST-ONLY-NOT-A-SECRET-execution-v1'
-        `);
-        await client.query(`
-          grant fetanagent_companion_execution_bridge
-          to fetanagent_companion_execution_bridge_runtime
-          with inherit true, set false, admin false
-        `);
+        expect(certificateDigest.rows).toHaveLength(1);
+        const attest = (archive: string) =>
+          client.query(
+            `insert into app.agent_platform_companion_execution_activation_attestations (
+            request_key, certificate_body_digest, companion_release_sha,
+            companion_archive_sha256, companion_installation_tree_sha256,
+            challenge_digest, launch_proof_digest, process_id, process_started_at,
+            challenge_issued_at, release_observed_at, process_observed_at, verified_at
+          ) values (
+            $1::uuid, $2::text, $3::text, $4::text, $5::text,
+            $6::text, $7::text, 4242,
+            clock_timestamp() - interval '10 minutes',
+            clock_timestamp(), clock_timestamp(), clock_timestamp(), clock_timestamp()
+          )`,
+            [
+              requestKey,
+              certificateDigest.rows[0]!.certificate_body_digest,
+              releaseSha,
+              archive,
+              treeDigest,
+              digest(),
+              digest(),
+            ],
+          );
+
+        await client.query('savepoint mismatched_attestation');
+        await attest(digest());
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'The companion execution activation lineage is not current.',
+        );
+        await client.query('rollback to savepoint mismatched_attestation');
+
+        await attest(archiveDigest);
+
+        await client.query('savepoint invalid_password');
+        await expect(activate('not-a-runtime-password')).rejects.toThrow(
+          'The companion execution activation input is invalid.',
+        );
+        await client.query('rollback to savepoint invalid_password');
+
+        await client.query('savepoint revoked_certificate');
         await client.query(
-          `update app.agent_platform_companion_execution_control set
-            control_state = 'active', certificate_id = $1::uuid,
-            device_id = $2::text, device_key_id = $3::text,
-            no_money_signer_key_id = $4::text,
-            execution_signer_key_id = 'companion-execution-production-v1',
-            execution_signer_public_key_spki = 'MFkwSyntheticExecutionKey',
-            execution_signer_public_key_spki_sha256 =
-              'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2',
-            platform_agent_account_id = $5::uuid,
-            pilot_revision_id = $6::uuid, pilot_revision = $7::integer,
-            pilot_configuration_digest = $8::text,
-            activation_epoch = $9::bigint, active_from = $10::timestamptz,
-            expires_at = $11::timestamptz,
-            activated_by_admin_id = $12::uuid, activated_at = clock_timestamp()
-           where singleton`,
-          [
-            certificateId,
-            deviceId,
-            deviceKeyId,
-            signerKeyId,
-            live.platform_agent_account_id,
-            pilot.pilotRevisionId,
-            live.revision,
-            live.configuration_digest,
-            activationEpoch,
-            live.active_from,
-            live.expires_at,
-            ownerAdminId,
-          ],
+          `insert into app.agent_platform_companion_device_revocations (
+            certificate_id, revocation_request_key, revoked_by_admin_id,
+            revoked_at, reason
+          ) values ($1::uuid, $2::uuid, $3::uuid, clock_timestamp(), 'owner_requested')`,
+          [certificateId, randomUUID(), ownerAdminId],
         );
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'The companion execution activation lineage is not current.',
+        );
+        await client.query('rollback to savepoint revoked_certificate');
+
+        const activated = await activate('e'.repeat(64));
+        expect(activated.rows).toHaveLength(1);
+        expect(activated.rows[0]!.valid_until.getTime()).toBeGreaterThan(Date.now() + 5 * 60_000);
+        const armed = await client.query<{
+          readonly control_state: string;
+          readonly consumed: string;
+          readonly runtime_login: boolean;
+          readonly runtime_passworded: boolean;
+          readonly has_runtime_member: boolean;
+          readonly valid_until_matches: boolean;
+          readonly open_jobs: string;
+        }>(`
+          select
+            (select control_state from app.agent_platform_companion_execution_control
+              where singleton) as control_state,
+            (select count(*) from app.agent_platform_companion_execution_activation_consumptions)
+              as consumed,
+            (select role.rolcanlogin from pg_authid role
+              where role.rolname = 'fetanagent_companion_execution_bridge_runtime')
+              as runtime_login,
+            (select role.rolpassword like 'SCRAM-SHA-256$%' from pg_authid role
+              where role.rolname = 'fetanagent_companion_execution_bridge_runtime')
+              as runtime_passworded,
+            pg_has_role('fetanagent_companion_execution_bridge_runtime',
+              'fetanagent_companion_execution_bridge', 'member')
+              as has_runtime_member,
+            (select role.rolvaliduntil = control.expires_at
+              from pg_authid role
+              cross join app.agent_platform_companion_execution_control control
+              where role.rolname = 'fetanagent_companion_execution_bridge_runtime'
+                and control.singleton) as valid_until_matches,
+            (select count(*) from app.deposit_jobs job
+              where job.status in ('queued', 'leased', 'retry_wait')) as open_jobs
+        `);
+        expect(armed.rows).toEqual([
+          {
+            control_state: 'active',
+            consumed: '1',
+            runtime_login: true,
+            runtime_passworded: true,
+            has_runtime_member: true,
+            valid_until_matches: true,
+            open_jobs: '0',
+          },
+        ]);
+
+        await client.query('savepoint immutable_consumption');
+        await expect(
+          client.query(
+            `update app.agent_platform_companion_execution_activation_consumptions
+                set valid_until = valid_until + interval '1 minute'`,
+          ),
+        ).rejects.toThrow('Trusted TeleBirr activation history is append-only.');
+        await client.query('rollback to savepoint immutable_consumption');
+
+        await client.query('savepoint used_request');
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'The one-use companion execution request is unavailable.',
+        );
+        await client.query('rollback to savepoint used_request');
+
+        // The independent stop fences the real disposable activation, not a direct table update.
         const stopped = await client.query<{ readonly was_active: boolean }>(
           'select app.disable_agent_platform_companion_execution_transport() as was_active',
         );
@@ -499,6 +609,11 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             runtime_login_disabled: true,
           },
         ]);
+        await client.query('savepoint stopped_request');
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'The one-use companion execution request is unavailable.',
+        );
+        await client.query('rollback to savepoint stopped_request');
       } finally {
         await client.query('rollback');
       }

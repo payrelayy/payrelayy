@@ -8,6 +8,7 @@
     "test": "node -e \"process.stderr.write('Use pnpm test:sql for disposable SQL integration tests.\\n'); process.exit(1)\""
   },
   "dependencies": {
+    "@fetanagent/agent-platform-companion-activation-issuer": "workspace:*",
     "pg": "8.22.0"
   },
   "devDependencies": {

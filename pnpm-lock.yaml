@@ -260,6 +260,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/contracts
 
+  packages/agent-platform-companion-activation-issuer:
+    dependencies:
+      '@fetanagent/agent-platform-companion-execution-contracts':
+        specifier: workspace:*
+        version: link:../agent-platform-companion-execution-contracts
+
   packages/agent-platform-companion-contracts: {}
 
   packages/agent-platform-companion-execution-contracts:
@@ -367,6 +373,9 @@ importers:
 
   packages/sql-integration-tests:
     dependencies:
+      '@fetanagent/agent-platform-companion-activation-issuer':
+        specifier: workspace:*
+        version: link:../agent-platform-companion-activation-issuer
       pg:
         specifier: 8.22.0
         version: 8.22.0

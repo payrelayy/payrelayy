@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
+
+import { loadCompanionActivationDatabaseSnapshot } from '@fetanagent/agent-platform-companion-activation-issuer';
 
 import { prepareTelebirrPilot } from './private-live-telebirr-proof-lineage.suite.js';
 
@@ -301,7 +303,16 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         const certificateId = randomUUID();
         const deviceId = `sql-device-${randomUUID().slice(0, 8)}`;
         const deviceKeyId = `sql-key-${randomUUID().slice(0, 8)}`;
-        const deviceKeyDigest = digest();
+        const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+        const publicKeyBytes = publicKey.export({ type: 'spki', format: 'der' });
+        const devicePublicKeySpki = publicKeyBytes.toString('base64url');
+        const deviceKeyDigest = `sha256:${createHash('sha256').update(publicKeyBytes).digest('hex')}`;
+        const certificateBody = {
+          certificateId,
+          deviceKeyId,
+          devicePublicKeySpki,
+          devicePublicKeySpkiSha256: deviceKeyDigest,
+        };
         const pairingRequestDigest = digest();
         await client.query(
           `insert into app.agent_platform_companion_pairing_challenges (
@@ -317,12 +328,12 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             $1::uuid, $2::uuid, $3::text, $4::uuid, $5::text, '0.1.10',
             clock_timestamp() - interval '2 minutes',
             clock_timestamp() + interval '8 minutes', $6::uuid, 'completed',
-            $7::text, $8::uuid, $9::text, $10::text, 'MFkwSyntheticDeviceKey',
-            $11::text, '0.1.10', clock_timestamp() - interval '90 seconds',
+            $7::text, $8::uuid, $9::text, $10::text, $11::text,
+            $12::text, '0.1.10', clock_timestamp() - interval '90 seconds',
             clock_timestamp() + interval '3 minutes',
             clock_timestamp() - interval '1 minute',
             clock_timestamp() - interval '1 minute',
-            clock_timestamp() + interval '1 hour', '{}'::jsonb,
+            clock_timestamp() + interval '1 hour', $13::jsonb,
             clock_timestamp() - interval '90 seconds',
             clock_timestamp() - interval '1 minute',
             clock_timestamp() - interval '1 minute'
@@ -338,7 +349,9 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             certificateId,
             deviceId,
             deviceKeyId,
+            devicePublicKeySpki,
             deviceKeyDigest,
+            JSON.stringify(certificateBody),
           ],
         );
         await client.query(
@@ -352,7 +365,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           ) values (
             $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text,
             $7::text, $8::text, $9::text, $10::text,
-            '{}'::jsonb, '{}'::jsonb,
+            $11::jsonb, '{}'::jsonb,
             clock_timestamp() - interval '1 minute',
             clock_timestamp() - interval '1 minute',
             clock_timestamp() + interval '1 hour',
@@ -369,6 +382,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             deviceId,
             deviceKeyId,
             deviceKeyDigest,
+            JSON.stringify(certificateBody),
           ],
         );
 
@@ -399,6 +413,35 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         const created = await prepare(requestKey, releaseSha);
         expect(created.rows).toHaveLength(1);
         expect(created.rows[0]!.replayed).toBe(false);
+        const snapshot = await loadCompanionActivationDatabaseSnapshot(requestKey, client);
+        expect(snapshot.request.requestKey).toBe(requestKey);
+        expect(snapshot.request.pilotRevisionId).toBe(pilot.pilotRevisionId);
+        expect(snapshot.request.activationEpoch).toBe(activationEpoch);
+        expect(snapshot.currentIdentity).toEqual({
+          pilotRevisionId: pilot.pilotRevisionId,
+          activationEpoch,
+          certificateId,
+          platformAgentAccountId: snapshot.request.platformAgentAccountId,
+        });
+        expect(snapshot.certificate.devicePublicKeySpki).toBe(devicePublicKeySpki);
+        await expect(loadCompanionActivationDatabaseSnapshot(randomUUID(), client)).rejects.toThrow(
+          'The companion activation database snapshot is unavailable.',
+        );
+        await client.query('savepoint revoked_snapshot');
+        await client.query(
+          `insert into app.agent_platform_companion_device_revocations (
+            certificate_id, revocation_request_key, revoked_by_admin_id,
+            revoked_at, reason
+          ) values ($1::uuid, $2::uuid, $3::uuid, clock_timestamp(), 'owner_requested')`,
+          [certificateId, randomUUID(), ownerAdminId],
+        );
+        await expect(loadCompanionActivationDatabaseSnapshot(requestKey, client)).rejects.toThrow(
+          'The companion activation database snapshot is unavailable.',
+        );
+        await client.query('rollback to savepoint revoked_snapshot');
+        expect(
+          (await loadCompanionActivationDatabaseSnapshot(requestKey, client)).request.requestKey,
+        ).toBe(requestKey);
         expect(created.rows[0]!.valid_until.getTime()).toBeGreaterThan(Date.now() + 5 * 60_000);
         expect(created.rows[0]!.valid_until.getTime()).toBeLessThanOrEqual(
           Date.now() + 10 * 60_000,

@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./guarded-process-observation": {
+      "types": "./dist/guarded-process-observation.d.ts",
+      "default": "./dist/guarded-process-observation.js"
     }
   },
   "dependencies": {

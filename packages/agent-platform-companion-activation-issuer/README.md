@@ -38,7 +38,18 @@ successful run returns the verified digests with a trusted operator-side time;
 it does not trust a companion-supplied release version, file digest, or clock.
 The workflow must provide a reviewed source checkout and protected local
 archive/installation paths. No archive download, credential, or production
-invocation workflow is provided here. The OS-observed process proof adapter
-remains separate work. In particular, the v1
-no-money local launch diagnostic cannot satisfy the required v2 guarded-execution
-process proof; no process adapter is exported here.
+invocation workflow is provided here.
+
+The package now also exports a read-only guarded-process observation adapter on
+the separate `./guarded-process-observation` subpath. The root SQL-only adapter
+entry point does not eagerly load this Windows runtime dependency.
+It reads the canonical local execution handoff, validates its production signer
+and exact request/certificate/release binding, and checks a paired v2 launch
+proof against a fresh operator challenge. A source-pinned PowerShell inspection
+checks the live Windows PID, executable, command line, and OS creation time
+without emitting the command line. The adapter returns only the fields needed
+by the issuer core. It does **not** launch a process or receive a proof itself:
+a separately reviewed protected local challenge-pipe launcher must supply the
+fresh proof and operator paths. It also does not issue the handoff, consume the
+request, arm execution, or replace the atomic financial-state preflight. The v1
+no-money launch diagnostic cannot satisfy the required v2 proof.

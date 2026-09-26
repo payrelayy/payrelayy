@@ -1,8 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadWindowsCompanionConfig, redactedWindowsCompanionConfig } from './config.js';
+import {
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID as ISSUER_SIGNER_KEY_ID,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI as ISSUER_SIGNER_SPKI,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256 as ISSUER_SIGNER_SPKI_SHA256,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
+
+import {
+  loadWindowsCompanionConfig,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+  redactedWindowsCompanionConfig,
+} from './config.js';
 
 describe('Windows companion configuration', () => {
+  it('pins the same public execution signer as the independent operator observer', () => {
+    expect(PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID).toBe(ISSUER_SIGNER_KEY_ID);
+    expect(PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI).toBe(ISSUER_SIGNER_SPKI);
+    expect(PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256).toBe(
+      ISSUER_SIGNER_SPKI_SHA256,
+    );
+  });
+
   it('accepts an explicit absolute data directory and redacts it from logs', () => {
     const config = loadWindowsCompanionConfig({
       NODE_ENV: 'test',

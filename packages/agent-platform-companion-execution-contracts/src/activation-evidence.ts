@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { verifyCompanionLaunchProof, type SignedCompanionLaunchProof } from './launch-proof.js';
+import {
+  verifyCompanionExecutionLaunchProof,
+  type SignedCompanionExecutionLaunchProof,
+} from './launch-proof.js';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -60,7 +63,8 @@ export interface CompanionActivationProcessObservation {
   readonly processId: number;
   readonly startedAt: string;
   readonly observedAt: string;
-  readonly proof: SignedCompanionLaunchProof;
+  readonly executionHandoffSha256: string;
+  readonly proof: SignedCompanionExecutionLaunchProof;
 }
 
 export interface CompanionActivationEvidenceContext {
@@ -104,7 +108,8 @@ function publicKeyMatchesDigest(encoded: string, expectedDigest: string): boolea
 /**
  * Checks identity, time, attestation, and signed launch-proof consistency only.
  * The caller must independently authenticate the database snapshots, challenge issuer,
- * release measurement, OS process observation, and trusted clock. This does not check
+ * release measurement, signed handoff, OS process observation, and trusted clock.
+ * The v2 execution-mode field alone is a signed claim, not OS or handoff proof. This does not check
  * pilot/switch/role/queue state, consume the request, create a credential, or arm execution.
  */
 export function matchesCompanionActivationEvidence(
@@ -119,6 +124,7 @@ export function matchesCompanionActivationEvidence(
     const certificateValidUntil = timestamp(certificate.validUntil);
     const releaseObservedAt = timestamp(release.observedAt);
     const challengeIssuedAt = timestamp(process.challengeIssuedAt);
+    const processStartedAt = timestamp(process.startedAt);
     const processObservedAt = timestamp(process.observedAt);
     if (
       !UUID_V4.test(request.requestKey) ||
@@ -164,19 +170,28 @@ export function matchesCompanionActivationEvidence(
       challengeIssuedAt > assessedAt ||
       assessedAt - challengeIssuedAt > MAX_EVIDENCE_AGE_MS ||
       processObservedAt === undefined ||
+      processStartedAt === undefined ||
+      processStartedAt < requestedAt ||
+      processStartedAt < challengeIssuedAt - 5_000 ||
+      processStartedAt > processObservedAt ||
       processObservedAt < challengeIssuedAt ||
       processObservedAt > assessedAt ||
-      assessedAt - processObservedAt > MAX_EVIDENCE_AGE_MS
+      assessedAt - processObservedAt > MAX_EVIDENCE_AGE_MS ||
+      !SHA256.test(process.executionHandoffSha256)
     ) {
       return false;
     }
-    return verifyCompanionLaunchProof(process.proof, {
+    return verifyCompanionExecutionLaunchProof(process.proof, {
       challenge: process.challenge,
       certificateBodyDigest: certificate.certificateBodyDigest,
       deviceKeyId: certificate.deviceKeyId,
       devicePublicKeySpki: certificate.devicePublicKeySpki,
       releaseSha: release.releaseSha,
       installationTreeSha256: release.installationTreeSha256,
+      requestKey: request.requestKey,
+      activationEpoch: request.activationEpoch,
+      platformAgentAccountId: request.platformAgentAccountId,
+      executionHandoffSha256: process.executionHandoffSha256,
       processId: process.processId,
       startedAt: process.startedAt,
       observedAt: process.observedAt,

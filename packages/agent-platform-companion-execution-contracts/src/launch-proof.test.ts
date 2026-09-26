@@ -4,9 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   COMPANION_LAUNCH_PROOF_PURPOSE,
+  COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
   signCompanionLaunchProof,
+  signCompanionExecutionLaunchProof,
   verifyCompanionLaunchProof,
+  verifyCompanionExecutionLaunchProof,
   type CompanionLaunchProofContext,
+  type CompanionExecutionLaunchProofContext,
 } from './launch-proof.js';
 
 const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -98,5 +102,81 @@ describe('shared paired Windows companion launch proof', () => {
         device.privateKey,
       ),
     ).toBeUndefined();
+  });
+});
+
+describe('guarded execution launch proof', () => {
+  const executionContext: CompanionExecutionLaunchProofContext = {
+    ...context,
+    requestKey: '11111111-1111-4111-8111-111111111111',
+    activationEpoch: '123',
+    platformAgentAccountId: '22222222-2222-4222-8222-222222222222',
+    executionHandoffSha256: `sha256:${'e'.repeat(64)}`,
+  };
+
+  it('separates the execution transcript from a no-money diagnostic proof', () => {
+    const diagnostic = signCompanionLaunchProof(context, device.privateKey);
+    const execution = signCompanionExecutionLaunchProof(executionContext, device.privateKey);
+    expect(execution?.body.purpose).toBe(COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE);
+    expect(execution?.body.executionMode).toBe('guarded');
+    expect(verifyCompanionExecutionLaunchProof(execution, executionContext)).toBe(true);
+    expect(verifyCompanionExecutionLaunchProof(diagnostic, executionContext)).toBe(false);
+    expect(verifyCompanionLaunchProof(execution, context)).toBe(false);
+  });
+
+  it('binds request, epoch, account, and signed-handoff digest exactly', () => {
+    const proof = signCompanionExecutionLaunchProof(executionContext, device.privateKey);
+    expect(proof).toBeDefined();
+    for (const changed of [
+      { requestKey: '33333333-3333-4333-8333-333333333333' },
+      { activationEpoch: '124' },
+      { platformAgentAccountId: '44444444-4444-4444-8444-444444444444' },
+      { executionHandoffSha256: `sha256:${'f'.repeat(64)}` },
+      { processId: 4243 },
+    ]) {
+      expect(verifyCompanionExecutionLaunchProof(proof, { ...executionContext, ...changed })).toBe(
+        false,
+      );
+    }
+    expect(
+      verifyCompanionExecutionLaunchProof(
+        { ...proof, body: { ...proof!.body, executionMode: 'diagnostic' } },
+        executionContext,
+      ),
+    ).toBe(false);
+    expect(
+      signCompanionExecutionLaunchProof(
+        { ...executionContext, activationEpoch: '0' },
+        device.privateKey,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('rejects extra fields, altered signatures, and a different paired key', () => {
+    const proof = signCompanionExecutionLaunchProof(executionContext, device.privateKey)!;
+    expect(verifyCompanionExecutionLaunchProof({ ...proof, extra: true }, executionContext)).toBe(
+      false,
+    );
+    expect(
+      verifyCompanionExecutionLaunchProof(
+        { ...proof, body: { ...proof.body, extra: true } },
+        executionContext,
+      ),
+    ).toBe(false);
+    expect(
+      verifyCompanionExecutionLaunchProof(
+        { ...proof, signature: 'a'.repeat(86) },
+        executionContext,
+      ),
+    ).toBe(false);
+    const other = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    expect(
+      verifyCompanionExecutionLaunchProof(proof, {
+        ...executionContext,
+        devicePublicKeySpki: Buffer.from(
+          other.publicKey.export({ format: 'der', type: 'spki' }),
+        ).toString('base64url'),
+      }),
+    ).toBe(false);
   });
 });

@@ -6,7 +6,7 @@ import {
   matchesCompanionActivationEvidence,
   type CompanionActivationEvidenceContext,
 } from './activation-evidence.js';
-import { signCompanionLaunchProof } from './launch-proof.js';
+import { signCompanionExecutionLaunchProof, signCompanionLaunchProof } from './launch-proof.js';
 
 const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const otherDevice = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -16,6 +16,7 @@ const certificateBodyDigest = `sha256:${'a'.repeat(64)}`;
 const releaseSha = 'b'.repeat(40);
 const archiveSha256 = `sha256:${'c'.repeat(64)}`;
 const installationTreeSha256 = `sha256:${'d'.repeat(64)}`;
+const executionHandoffSha256 = `sha256:${'e'.repeat(64)}`;
 const requestKey = '11111111-1111-4111-8111-111111111111';
 const pilotRevisionId = '22222222-2222-4222-8222-222222222222';
 const certificateId = '33333333-3333-4333-8333-333333333333';
@@ -27,10 +28,11 @@ function fixture(): CompanionActivationEvidenceContext {
     challenge,
     challengeIssuedAt: '2026-09-26T12:00:15.000Z',
     processId: 4242,
-    startedAt: '2026-09-26T11:50:00.000Z',
+    startedAt: '2026-09-26T12:00:16.000Z',
     observedAt: '2026-09-26T12:01:00.000Z',
+    executionHandoffSha256,
   };
-  const proof = signCompanionLaunchProof(
+  const proof = signCompanionExecutionLaunchProof(
     {
       challenge,
       certificateBodyDigest,
@@ -38,6 +40,10 @@ function fixture(): CompanionActivationEvidenceContext {
       devicePublicKeySpki: publicKey.toString('base64url'),
       releaseSha,
       installationTreeSha256,
+      requestKey,
+      activationEpoch: '123',
+      platformAgentAccountId,
+      executionHandoffSha256,
       processId: process.processId,
       startedAt: process.startedAt,
       observedAt: process.observedAt,
@@ -150,6 +156,31 @@ describe('dormant companion activation evidence consistency', () => {
     ).toBe(false);
   });
 
+  it('never treats a signed no-money diagnostic proof as activation evidence', () => {
+    const base = fixture();
+    const diagnostic = signCompanionLaunchProof(
+      {
+        challenge: base.process.challenge,
+        certificateBodyDigest,
+        deviceKeyId: base.certificate.deviceKeyId,
+        devicePublicKeySpki: base.certificate.devicePublicKeySpki,
+        releaseSha,
+        installationTreeSha256,
+        processId: base.process.processId,
+        startedAt: base.process.startedAt,
+        observedAt: base.process.observedAt,
+      },
+      device.privateKey,
+    );
+    expect(diagnostic).toBeDefined();
+    expect(
+      matchesCompanionActivationEvidence({
+        ...base,
+        process: { ...base.process, proof: diagnostic as never },
+      }),
+    ).toBe(false);
+  });
+
   it('rejects expiry, future evidence, stale evidence, and a challenge before the request', () => {
     const base = fixture();
     for (const changed of [
@@ -181,6 +212,14 @@ describe('dormant companion activation evidence consistency', () => {
       },
       {
         ...base,
+        process: { ...base.process, startedAt: '2026-09-26T11:59:59.000Z' },
+      },
+      {
+        ...base,
+        process: { ...base.process, startedAt: '2026-09-26T12:00:08.000Z' },
+      },
+      {
+        ...base,
         assessedAt: '2026-09-26T12:02:16.000Z',
       },
     ]) {
@@ -206,6 +245,12 @@ describe('dormant companion activation evidence consistency', () => {
       matchesCompanionActivationEvidence({
         ...base,
         process: { ...base.process, challenge: Buffer.alloc(32, 0x3e).toString('base64url') },
+      }),
+    ).toBe(false);
+    expect(
+      matchesCompanionActivationEvidence({
+        ...base,
+        process: { ...base.process, executionHandoffSha256: `sha256:${'f'.repeat(64)}` },
       }),
     ).toBe(false);
   });

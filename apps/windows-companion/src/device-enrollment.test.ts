@@ -40,6 +40,7 @@ import {
   signExecutionEnrollment,
   signOneUseActionAuthority,
   verifyCompanionLaunchProof,
+  verifyCompanionExecutionLaunchProof,
   type AuthoritativeExecutionStatusBody,
   type ExecutionAssignmentBody,
   type ExecutionEnrollmentBody,
@@ -561,6 +562,30 @@ describe('Windows companion device enrollment', () => {
         devicePublicKeySpki: runtime.certificate.body.devicePublicKeySpki,
       }),
     ).toBe(true);
+    const executionContext = {
+      ...launchContext,
+      requestKey: '11111111-1111-4111-8111-111111111111',
+      activationEpoch: '1',
+      platformAgentAccountId: '22222222-2222-4222-8222-222222222222',
+      executionHandoffSha256: `sha256:${'e'.repeat(64)}`,
+    };
+    const executionProof = runtime.createSignedExecutionLaunchProof(executionContext);
+    expect(
+      verifyCompanionExecutionLaunchProof(executionProof, {
+        ...executionContext,
+        certificateBodyDigest: runtime.certificate.bodyDigest,
+        deviceKeyId: runtime.certificate.body.deviceKeyId,
+        devicePublicKeySpki: runtime.certificate.body.devicePublicKeySpki,
+      }),
+    ).toBe(true);
+    expect(
+      verifyCompanionLaunchProof(executionProof, {
+        ...launchContext,
+        certificateBodyDigest: runtime.certificate.bodyDigest,
+        deviceKeyId: runtime.certificate.body.deviceKeyId,
+        devicePublicKeySpki: runtime.certificate.body.devicePublicKeySpki,
+      }),
+    ).toBe(false);
     const assignment = signedLookupAssignment(
       runtime.certificate,
       server.privateKey,

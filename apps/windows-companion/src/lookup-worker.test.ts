@@ -209,6 +209,9 @@ function runtimeFixture() {
     createSignedLaunchProof: () => {
       throw new Error('The lookup test cannot create a launch proof.');
     },
+    createSignedExecutionLaunchProof: () => {
+      throw new Error('The lookup test cannot create an execution launch proof.');
+    },
     createSignedHttpRequest: (path, contentDigest) =>
       ({ path, contentDigest }) as unknown as SignedCompanionHttpRequest,
     decodeAndVerifyAssignment: (candidate, assessedAt = now) => {

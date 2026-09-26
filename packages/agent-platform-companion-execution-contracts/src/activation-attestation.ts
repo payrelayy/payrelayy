@@ -8,7 +8,7 @@ import {
   type CompanionActivationReleaseAttestation,
   type CompanionActivationRequestSnapshot,
 } from './activation-evidence.js';
-import type { SignedCompanionLaunchProof } from './launch-proof.js';
+import type { SignedCompanionExecutionLaunchProof } from './launch-proof.js';
 
 export interface CompanionActivationDatabaseSnapshot {
   readonly request: CompanionActivationRequestSnapshot;
@@ -20,10 +20,11 @@ export interface CompanionActivationObservedProcess {
   readonly processId: number;
   readonly startedAt: string;
   readonly observedAt: string;
-  readonly proof: SignedCompanionLaunchProof;
+  readonly executionHandoffSha256: string;
+  readonly proof: SignedCompanionExecutionLaunchProof;
 }
 
-/** Exact digest-only witness accepted by the dormant Postgres activation transition. */
+/** Digest-only witness for a future reviewed retention adapter; not a database grant. */
 export interface CompanionActivationAttestation {
   readonly requestKey: string;
   readonly certificateBodyDigest: string;
@@ -32,6 +33,7 @@ export interface CompanionActivationAttestation {
   readonly companionInstallationTreeSha256: string;
   readonly challengeDigest: string;
   readonly launchProofDigest: string;
+  readonly executionHandoffSha256: string;
   readonly processId: number;
   readonly processStartedAt: string;
   readonly challengeIssuedAt: string;
@@ -43,7 +45,8 @@ export interface CompanionActivationAttestation {
 /**
  * These capabilities must be implemented by distinct trusted sources. In particular,
  * the release result may not be copied from an Owner claim, and the process result
- * must come from an OS-observed paired launch, not from the companion's own PID claim.
+ * must come from an OS-observed execution-enabled launch with an independently
+ * validated signed handoff, not from the companion's own PID or mode claim.
  */
 export interface CompanionActivationAttestationSources {
   loadDatabaseSnapshot(requestKey: string): Promise<CompanionActivationDatabaseSnapshot>;
@@ -135,6 +138,7 @@ export async function retainCompanionActivationAttestation(
       processId: observed.processId,
       startedAt: observed.startedAt,
       observedAt: observed.observedAt,
+      executionHandoffSha256: observed.executionHandoffSha256,
       proof: observed.proof,
     };
     const second = await sources.loadDatabaseSnapshot(requestKey);
@@ -159,6 +163,7 @@ export async function retainCompanionActivationAttestation(
       companionInstallationTreeSha256: release.installationTreeSha256,
       challengeDigest,
       launchProofDigest: sha256(Buffer.from(JSON.stringify(observed.proof), 'utf8')),
+      executionHandoffSha256: observed.executionHandoffSha256,
       processId: observed.processId,
       processStartedAt: observed.startedAt,
       challengeIssuedAt,

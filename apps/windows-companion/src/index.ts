@@ -189,14 +189,23 @@ export async function runWindowsCompanion(): Promise<void> {
           config.releaseSha,
           installationTreeSha256,
         );
-        const proof = baseDevice.createSignedLaunchProof({
+        const processContext = {
           challenge: launchProofRequest.challenge,
           releaseSha: config.releaseSha,
           installationTreeSha256,
           processId: process.pid,
           startedAt: new Date(performance.timeOrigin).toISOString(),
           observedAt: new Date().toISOString(),
-        });
+        };
+        const proof = handoff
+          ? baseDevice.createSignedExecutionLaunchProof({
+              ...processContext,
+              requestKey: handoff.requestKey,
+              activationEpoch: handoff.activationEpoch,
+              platformAgentAccountId: handoff.accountId,
+              executionHandoffSha256: handoff.handoffSha256,
+            })
+          : baseDevice.createSignedLaunchProof(processContext);
         await deliverCompanionLaunchProof(launchProofRequest, proof);
       }
       const device = handoff

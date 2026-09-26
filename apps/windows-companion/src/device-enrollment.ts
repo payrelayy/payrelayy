@@ -87,8 +87,11 @@ import {
   type SignedExecutionResult,
   type SignedOneUseActionAuthority,
   signCompanionLaunchProof,
+  signCompanionExecutionLaunchProof,
   type CompanionLaunchProofContext,
+  type CompanionExecutionLaunchProofContext,
   type SignedCompanionLaunchProof,
+  type SignedCompanionExecutionLaunchProof,
   type TrustedRoundTripContext,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -948,6 +951,12 @@ export interface CompanionDeviceSigningRuntime {
       'certificateBodyDigest' | 'deviceKeyId' | 'devicePublicKeySpki'
     >,
   ): SignedCompanionLaunchProof;
+  createSignedExecutionLaunchProof(
+    context: Omit<
+      CompanionExecutionLaunchProofContext,
+      'certificateBodyDigest' | 'deviceKeyId' | 'devicePublicKeySpki'
+    >,
+  ): SignedCompanionExecutionLaunchProof;
   createSignedHttpRequest(
     path: CompanionDeviceRequestPath,
     contentDigest: string,
@@ -1428,6 +1437,24 @@ export async function loadCompanionDeviceSigningRuntime(
       >,
     ) {
       const proof = signCompanionLaunchProof(
+        {
+          ...context,
+          certificateBodyDigest: certificate.bodyDigest,
+          deviceKeyId: certificate.body.deviceKeyId,
+          devicePublicKeySpki: certificate.body.devicePublicKeySpki,
+        },
+        privateKey,
+      );
+      if (!proof) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+      return proof;
+    },
+    createSignedExecutionLaunchProof(
+      context: Omit<
+        CompanionExecutionLaunchProofContext,
+        'certificateBodyDigest' | 'deviceKeyId' | 'devicePublicKeySpki'
+      >,
+    ) {
+      const proof = signCompanionExecutionLaunchProof(
         {
           ...context,
           certificateBodyDigest: certificate.bodyDigest,

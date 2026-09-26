@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -14,6 +15,11 @@ import {
   type CompanionDeviceEnrollmentResult,
 } from './device-enrollment.js';
 import { loadWindowsCompanionExecutionHandoff } from './execution-activation-handoff.js';
+import {
+  deliverCompanionLaunchProof,
+  takeCompanionLaunchProofRequest,
+} from './launch-proof-channel.js';
+import { verifyWindowsCompanionInstallationTree } from './installation-tree.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
@@ -133,6 +139,7 @@ function reportExecution(event: CompanionExecutionWorkerEvent): void {
 
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
+  const launchProofRequest = takeCompanionLaunchProofRequest();
   console.info(
     JSON.stringify({
       component: 'fetanagent_windows_companion',
@@ -146,7 +153,8 @@ export async function runWindowsCompanion(): Promise<void> {
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   const enrollmentPromise = session.verified.then(async (verified) => {
     if (!verified) return;
-    let stage: 'pairing' | 'device_runtime' | 'execution_handoff' | 'workers' = 'pairing';
+    let stage: 'pairing' | 'device_runtime' | 'execution_handoff' | 'launch_proof' | 'workers' =
+      'pairing';
     try {
       const enrollment = await ensureCompanionDeviceEnrollment({
         dataRoot: config.dataRoot,
@@ -169,6 +177,28 @@ export async function runWindowsCompanion(): Promise<void> {
             resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
           )
         : undefined;
+      if (launchProofRequest) {
+        stage = 'launch_proof';
+        const installationRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+        const installationTreeSha256 = await readFile(
+          resolve(installationRoot, 'INSTALLATION_TREE_SHA256'),
+          'utf8',
+        );
+        await verifyWindowsCompanionInstallationTree(
+          installationRoot,
+          config.releaseSha,
+          installationTreeSha256,
+        );
+        const proof = baseDevice.createSignedLaunchProof({
+          challenge: launchProofRequest.challenge,
+          releaseSha: config.releaseSha,
+          installationTreeSha256,
+          processId: process.pid,
+          startedAt: new Date(performance.timeOrigin).toISOString(),
+          observedAt: new Date().toISOString(),
+        });
+        await deliverCompanionLaunchProof(launchProofRequest, proof);
+      }
       const device = handoff
         ? await loadCompanionDeviceSigningRuntime({
             dataRoot: config.dataRoot,
@@ -228,15 +258,22 @@ export async function runWindowsCompanion(): Promise<void> {
             event:
               stage === 'execution_handoff'
                 ? 'execution_startup_failed_closed'
-                : 'companion_worker_failed_closed',
+                : stage === 'launch_proof'
+                  ? 'launch_proof_failed_closed'
+                  : 'companion_worker_failed_closed',
             reason:
               stage === 'execution_handoff'
                 ? 'signed_handoff_or_installation_unavailable'
-                : 'companion_worker_unavailable',
+                : stage === 'launch_proof'
+                  ? 'local_launch_proof_unavailable'
+                  : 'companion_worker_unavailable',
             detailsRedacted: true,
-            ...(stage === 'execution_handoff' ? { moneyMoved: false } : {}),
+            ...(stage === 'execution_handoff' || stage === 'launch_proof'
+              ? { moneyMoved: false }
+              : {}),
           }),
         );
+        if (stage === 'launch_proof') await session.stop();
       }
     }
   });

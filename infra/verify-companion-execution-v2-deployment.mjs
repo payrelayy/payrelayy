@@ -7,6 +7,9 @@ const [
   executionContracts,
   windowsConfig,
   windowsEntry,
+  windowsLaunchProof,
+  windowsLaunchChannel,
+  windowsLaunchVerifier,
   windowsHandoff,
   windowsInstallationTree,
   windowsWorker,
@@ -28,10 +31,14 @@ const [
   packageBuilder,
   windowsPackageWorkflow,
   operatorReleasePreflight,
+  operatorLaunchPreflight,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
   read('apps/windows-companion/src/index.ts'),
+  read('apps/windows-companion/src/launch-proof.ts'),
+  read('apps/windows-companion/src/launch-proof-channel.ts'),
+  read('apps/windows-companion/src/launch-proof-verify-cli.ts'),
   read('apps/windows-companion/src/execution-activation-handoff.ts'),
   read('apps/windows-companion/src/installation-tree.ts'),
   read('apps/windows-companion/src/execution-worker.ts'),
@@ -53,6 +60,7 @@ const [
   read('scripts/build-windows-companion-package.ps1'),
   read('.github/workflows/windows-companion-package.yml'),
   read('infra/operations/verify-windows-companion-release-installation.ps1'),
+  read('infra/operations/observe-windows-companion-verified-launch.ps1'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -71,7 +79,16 @@ assert.match(windowsEntry, /certificateBodyDigest: baseDevice\.certificate\.body
 assert.match(windowsEntry, /if \(handoff\) \{/u);
 assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainingHandoffMs\)/u);
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
-assert.match(windowsEntry, /stage === 'execution_handoff' \? \{ moneyMoved: false \} : \{\}/u);
+assert.match(windowsEntry, /baseDevice\.createSignedLaunchProof/u);
+assert.match(windowsEntry, /deliverCompanionLaunchProof/u);
+assert.match(windowsEntry, /verifyWindowsCompanionInstallationTree/u);
+assert.match(windowsLaunchProof, /paired-process-launch-proof:v1/u);
+assert.match(windowsLaunchProof, /verify\(\s*'sha256',\s*transcript\(/u);
+assert.match(windowsLaunchChannel, /fetanagent-companion-launch-/u);
+assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
+assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);
+assert.match(windowsEntry, /stage === 'execution_handoff' \|\| stage === 'launch_proof'/u);
+assert.match(windowsEntry, /\? \{ moneyMoved: false \}/u);
 assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
 assert.match(executionContracts, /export function signCompanionExecutionActivationHandoff\(/u);
 assert.match(executionContracts, /signer\.publicKey\.digest !== signerDigest/u);
@@ -97,7 +114,7 @@ assert.match(windowsPackageWorkflow, /name: Attest immutable companion archive/u
 assert.match(windowsPackageWorkflow, /uses: actions\/attest@[0-9a-f]{40}/u);
 assert.match(windowsPackageWorkflow, /needs: \[package, attest\]/u);
 assert.match(windowsPackageWorkflow, /gh attestation verify "\$immutableZip"/u);
-assert.match(windowsPackageWorkflow, /name: Parse read-only release-installation preflight/u);
+assert.match(windowsPackageWorkflow, /name: Parse read-only companion launch preflights/u);
 assert.match(windowsPackageWorkflow, /--signer-workflow/u);
 assert.match(windowsPackageWorkflow, /--source-ref \$env:GITHUB_REF/u);
 assert.match(windowsPackageWorkflow, /--source-digest \$releaseSha/u);
@@ -112,6 +129,18 @@ assert.match(operatorReleasePreflight, /\$measuredArchiveTree -cne \$treeMarker/
 assert.match(operatorReleasePreflight, /\$measuredInstalledTree -cne \$treeMarker/u);
 assert.match(operatorReleasePreflight, /COMPANION_RELEASE_INSTALLATION_VERIFIED/u);
 assert.doesNotMatch(operatorReleasePreflight, /KEMERBET|execution-authorities:consume/iu);
+assert.match(operatorLaunchPreflight, /verify-windows-companion-release-installation\.ps1/u);
+assert.match(operatorLaunchPreflight, /Start-Process -FilePath \$node/u);
+assert.match(operatorLaunchPreflight, /-WindowStyle Hidden/u);
+assert.match(
+  operatorLaunchPreflight,
+  /COMPANION_VERIFIED_LAUNCH_OBSERVED; this launch did not activate execution/u,
+);
+assert.doesNotMatch(
+  operatorLaunchPreflight,
+  /Set-ManagedEnvironment 'INTERNAL_COMPANION_EXECUTION_V2_ENABLED'/u,
+);
+assert.doesNotMatch(operatorLaunchPreflight, /execution-authorities:consume|execute_deposit/iu);
 assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
 assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);

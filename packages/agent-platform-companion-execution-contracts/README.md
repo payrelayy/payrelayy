@@ -20,6 +20,12 @@ New assignments and action-authority authentication require a currently valid ce
 
 `playerIdDigest` is a deterministic integrity binding, not a confidentiality or pseudonymization mechanism. Low-entropy Player IDs are dictionary-enumerable from this value. It must stay inside a strict trusted boundary and out of logs, telemetry, support exports, and analytics; any wider exposure requires a separately versioned keyed digest such as HMAC.
 
+## Dormant activation evidence check
+
+`matchesCompanionActivationEvidence` compares one immutable, at-most-ten-minute database request with current database identities, the database-trusted paired certificate, an independently measured release archive and installation tree, and a fresh challenge-bound launch proof from the observed Windows process. It checks the paired public-key digest and verifies the process signature against that **database** key rather than a local certificate supplied by the companion. The challenge, release measurement, and process observation must be fresh at a trusted server time.
+
+This pure check does not establish the provenance of its inputs. Its eventual caller must authenticate the database reads, independently issue a unique request-bound challenge, attest the release and OS process, and recheck pilot, epoch, switches, roles, and queue state in the same bounded activation operation. A matching result does not consume the request, arm the companion, grant a credential, or authorize a financial action. No issuer or activation consumer is provided here.
+
 ## Intentionally absent
 
 This package contains no application import, runtime bridge, provider client, network call, database role or migration, raw lease/authorization token, route, secret, manifest, feature switch, activation writer, or money-action implementation. No execution enrollment or signing key is provisioned. Before any enabled lane could exist, a separate security-reviewed change would need an online transactional database fence, atomic reconciliation ingestion, key enrollment/rotation/revocation, secure Windows key/storage handling, provider-specific execution safeguards, deployment controls, and explicit operator activation. Until all of that exists and is separately approved, these contracts authorize nothing.

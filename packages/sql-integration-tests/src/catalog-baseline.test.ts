@@ -10,6 +10,7 @@ import {
 } from './environment.js';
 import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
 import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
+import { registerCompanionExecutionActivationRequestSqlTests } from './companion-execution-activation-request.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
@@ -8691,6 +8692,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.disable_agent_platform_companion_execution_transport()',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature: 'app.enqueue_verified_deposit_execution(uuid)',
       },
       {
@@ -8742,6 +8749,13 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.lease_next_private_live_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
       },
       {
         deposit_executor_runtime: true,
@@ -9741,6 +9755,12 @@ registerStoppedPilotPaidExecutionReviewSqlTests(
 registerOwnerCompanionExecutionReadinessSqlTests(
   () => client,
   () => ownerAuthUserId,
+);
+registerCompanionExecutionActivationRequestSqlTests(
+  () => client,
+  () => ownerAuthUserId,
+  () => ownerAdminId,
+  () => environment.administratorPassword,
 );
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(

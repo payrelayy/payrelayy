@@ -23,8 +23,12 @@ FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable relea
 10. Close the companion Chrome window to stop it.
 
 Automatic Deposit remains off unless FetanAgent has installed an exact production account binding
-and enabled the execution-v2 pilot for this Windows account. Do not set that internal switch or
-account ID yourself. When the pilot is enabled, one fresh server-signed assignment may prepare one
+and enabled the execution-v2 pilot for this Windows account. A current signed local activation
+handoff must also match the paired certificate, exact companion release, and account; setting the
+internal switch or account ID yourself cannot replace it. The signed handoff must also match a
+fresh measurement of every installed package file. Do not set the switch or account yourself.
+No production handoff issuer or automatic-deposit activation is available in this release. When a
+later reviewed pilot is enabled, one fresh server-signed assignment may prepare one
 specific Player, verify the receiver name/number and ETB currency, enter exactly 25.00 ETB with an
 empty Notes field, obtain a one-use database fence, and issue exactly one Transfer request. A
 duplicate, expired authority, changed page, redirect, malformed request, timeout, crash, or

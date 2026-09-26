@@ -1,4 +1,5 @@
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
@@ -12,6 +13,7 @@ import {
   loadCompanionDeviceSigningRuntime,
   type CompanionDeviceEnrollmentResult,
 } from './device-enrollment.js';
+import { loadWindowsCompanionExecutionHandoff } from './execution-activation-handoff.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
@@ -144,6 +146,7 @@ export async function runWindowsCompanion(): Promise<void> {
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   const enrollmentPromise = session.verified.then(async (verified) => {
     if (!verified) return;
+    let stage: 'pairing' | 'device_runtime' | 'execution_handoff' | 'workers' = 'pairing';
     try {
       const enrollment = await ensureCompanionDeviceEnrollment({
         dataRoot: config.dataRoot,
@@ -152,44 +155,89 @@ export async function runWindowsCompanion(): Promise<void> {
       });
       reportEnrollment(enrollment);
       if (!enrollment.devicePaired) return;
-      const device = await loadCompanionDeviceSigningRuntime({
-        dataRoot: config.dataRoot,
-        ...(config.executionV2Enabled
-          ? {
-              execution: {
-                expectedPlatformAgentAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
-                trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
-                trustedExecutionSignerPublicKeySpki:
-                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
-                trustedExecutionSignerPublicKeySpkiSha256:
-                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
-              },
-            }
-          : {}),
-      });
-      const workers: Promise<void>[] = [
-        runCompanionLookupWorker({
-          dataRoot: config.dataRoot,
-          device,
-          session,
-          signal: lookupAbort.signal,
-          report: reportLookup,
-        }),
-      ];
-      if (config.executionV2Enabled) {
-        workers.push(
-          runCompanionExecutionWorker({
+      stage = 'device_runtime';
+      const baseDevice = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+      if (config.executionV2Enabled) stage = 'execution_handoff';
+      const handoff = config.executionV2Enabled
+        ? await loadWindowsCompanionExecutionHandoff(
+            config.dataRoot,
+            {
+              certificateBodyDigest: baseDevice.certificate.bodyDigest,
+              expectedAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
+              releaseSha: config.releaseSha,
+            },
+            resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
+          )
+        : undefined;
+      const device = handoff
+        ? await loadCompanionDeviceSigningRuntime({
+            dataRoot: config.dataRoot,
+            execution: {
+              expectedPlatformAgentAccountId: handoff.accountId,
+              trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+              trustedExecutionSignerPublicKeySpki:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+              trustedExecutionSignerPublicKeySpkiSha256:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+            },
+          })
+        : baseDevice;
+      const remainingHandoffMs = handoff ? handoff.expiresAtMs - Date.now() : undefined;
+      if (remainingHandoffMs !== undefined && remainingHandoffMs <= 0) {
+        throw new Error('The signed Windows companion execution handoff expired.');
+      }
+      const handoffExpiryTimer =
+        remainingHandoffMs === undefined
+          ? undefined
+          : setTimeout(() => lookupAbort.abort(), remainingHandoffMs);
+      stage = 'workers';
+      try {
+        const workers: Promise<void>[] = [
+          runCompanionLookupWorker({
             dataRoot: config.dataRoot,
             device,
             session,
             signal: lookupAbort.signal,
-            report: reportExecution,
+            report: reportLookup,
+          }),
+        ];
+        if (handoff) {
+          workers.push(
+            runCompanionExecutionWorker({
+              dataRoot: config.dataRoot,
+              device,
+              expectedActivationEpoch: handoff.activationEpoch,
+              handoffExpiresAtMs: handoff.expiresAtMs,
+              session,
+              signal: lookupAbort.signal,
+              report: reportExecution,
+            }),
+          );
+        }
+        await Promise.all(workers);
+      } finally {
+        if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
+      }
+    } catch {
+      if (stage === 'pairing' || stage === 'device_runtime') {
+        reportEnrollment(undefined);
+      } else {
+        console.info(
+          JSON.stringify({
+            component: 'fetanagent_windows_companion',
+            event:
+              stage === 'execution_handoff'
+                ? 'execution_startup_failed_closed'
+                : 'companion_worker_failed_closed',
+            reason:
+              stage === 'execution_handoff'
+                ? 'signed_handoff_or_installation_unavailable'
+                : 'companion_worker_unavailable',
+            detailsRedacted: true,
+            ...(stage === 'execution_handoff' ? { moneyMoved: false } : {}),
           }),
         );
       }
-      await Promise.all(workers);
-    } catch {
-      reportEnrollment(undefined);
     }
   });
   let stopping = false;

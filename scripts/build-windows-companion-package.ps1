@@ -79,6 +79,13 @@ Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseS
 if (@(Get-ChildItem -LiteralPath $packageRoot -Recurse -Force -Attributes ReparsePoint).Count -ne 0) {
   throw 'The portable package must not contain filesystem links or junctions.'
 }
+$treeDigest = (& (Join-Path $packageRoot 'runtime\node.exe') `
+  (Join-Path $packageRoot 'app\dist\installation-tree-cli.js') $packageRoot).Trim()
+if ($LASTEXITCODE -ne 0 -or $treeDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+  throw 'Could not measure the complete Windows companion installation tree.'
+}
+Set-Content -LiteralPath (Join-Path $packageRoot 'INSTALLATION_TREE_SHA256') `
+  -Value $treeDigest -Encoding ascii -NoNewline
 
 Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 
@@ -101,8 +108,16 @@ if ($LASTEXITCODE -ne 0) { throw 'The extracted Windows companion pairing dialog
 if ((Get-Content -LiteralPath (Join-Path $extractedPackage 'RELEASE_SHA') -Raw).Trim() -ne $ReleaseSha) {
   throw 'The extracted archive release identity is invalid.'
 }
+if ((Get-Content -LiteralPath (Join-Path $extractedPackage 'INSTALLATION_TREE_SHA256') -Raw) -ne $treeDigest) {
+  throw 'The extracted archive installation tree marker is invalid.'
+}
 if (@(Get-ChildItem -LiteralPath $extractedPackage -Recurse -Force -Attributes ReparsePoint).Count -ne 0) {
   throw 'The extracted archive must contain only self-contained runtime files.'
+}
+$extractedTreeDigest = (& (Join-Path $extractedPackage 'runtime\node.exe') `
+  (Join-Path $extractedPackage 'app\dist\installation-tree-cli.js') $extractedPackage).Trim()
+if ($LASTEXITCODE -ne 0 -or $extractedTreeDigest -ne $treeDigest) {
+  throw 'The extracted archive installation tree does not match the package.'
 }
 Push-Location -LiteralPath (Join-Path $extractedPackage 'app')
 try {
@@ -112,7 +127,7 @@ import { realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = realpathSync(process.cwd()) + sep;
-for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
   const url = import.meta.resolve(name);
   assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
   await import(url);

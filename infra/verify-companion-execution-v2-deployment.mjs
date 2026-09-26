@@ -4,7 +4,11 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 const [
+  executionContracts,
   windowsConfig,
+  windowsEntry,
+  windowsHandoff,
+  windowsInstallationTree,
   windowsWorker,
   localDeposit,
   providerRoute,
@@ -18,9 +22,18 @@ const [
   productionWorkflow,
   migration,
   privilegeGateMigration,
+  emergencyStopMigration,
+  oneUseRequestMigration,
+  emergencyStopOperation,
   packageBuilder,
+  windowsPackageWorkflow,
+  operatorReleasePreflight,
 ] = await Promise.all([
+  read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
+  read('apps/windows-companion/src/index.ts'),
+  read('apps/windows-companion/src/execution-activation-handoff.ts'),
+  read('apps/windows-companion/src/installation-tree.ts'),
   read('apps/windows-companion/src/execution-worker.ts'),
   read('apps/windows-companion/src/local-kemerbet-deposit.ts'),
   read('apps/windows-companion/src/provider-route.ts'),
@@ -34,7 +47,12 @@ const [
   read('.github/workflows/production-runtime.yml'),
   read('supabase/migrations/20260914030000_agent_platform_companion_execution_bridge.sql'),
   read('supabase/migrations/20260914123000_companion_execution_privilege_gate.sql'),
+  read('supabase/migrations/20260926132338_companion_execution_emergency_stop.sql'),
+  read('supabase/migrations/20260926124051_companion_execution_one_use_request.sql'),
+  read('infra/sql/production-companion-execution-emergency-disable.sql'),
   read('scripts/build-windows-companion-package.ps1'),
+  read('.github/workflows/windows-companion-package.yml'),
+  read('infra/operations/verify-windows-companion-release-installation.ps1'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -48,7 +66,55 @@ for (const value of [executionKeyId, executionPublicKey, executionDigest]) {
 }
 assert.match(windowsConfig, /executionFlag !== undefined && executionFlag !== 'true'/u);
 assert.match(windowsConfig, /FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID/u);
+assert.match(windowsEntry, /loadWindowsCompanionExecutionHandoff/u);
+assert.match(windowsEntry, /certificateBodyDigest: baseDevice\.certificate\.bodyDigest/u);
+assert.match(windowsEntry, /if \(handoff\) \{/u);
+assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainingHandoffMs\)/u);
+assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
+assert.match(windowsEntry, /stage === 'execution_handoff' \? \{ moneyMoved: false \} : \{\}/u);
+assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
+assert.match(executionContracts, /export function signCompanionExecutionActivationHandoff\(/u);
+assert.match(executionContracts, /signer\.publicKey\.digest !== signerDigest/u);
+assert.match(executionContracts, /COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS/u);
+assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
+assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);
+assert.match(windowsHandoff, /body\.companionInstallationTreeSha256/u);
+assert.match(oneUseRequestMigration, /companion_installation_tree_sha256 text not null/u);
+assert.match(oneUseRequestMigration, /existing_request\.companion_installation_tree_sha256/u);
+assert.match(windowsHandoff, /verifyWindowsCompanionInstallationTree\(/u);
+assert.match(windowsInstallationTree, /measureWindowsCompanionInstallationTree/u);
+assert.match(windowsInstallationTree, /INSTALLATION_TREE_SHA256/u);
+assert.match(packageBuilder, /installation-tree-cli\.js/u);
+assert.match(packageBuilder, /extractedTreeDigest -ne \$treeDigest/u);
+const packageJob = windowsPackageWorkflow.split(/^  attest:/mu)[0];
+const attestJob = windowsPackageWorkflow.split(/^  attest:/mu)[1]?.split(/^  publish:/mu)[0];
+assert.ok(attestJob, 'The tag-only companion attestation job is missing.');
+assert.doesNotMatch(packageJob, /id-token: write/u);
+assert.match(attestJob, /if: startsWith\(github\.ref, 'refs\/tags\/windows-companion-v'\)/u);
+assert.match(attestJob, /id-token: write/u);
+assert.match(attestJob, /attestations: write/u);
+assert.match(windowsPackageWorkflow, /name: Attest immutable companion archive/u);
+assert.match(windowsPackageWorkflow, /uses: actions\/attest@[0-9a-f]{40}/u);
+assert.match(windowsPackageWorkflow, /needs: \[package, attest\]/u);
+assert.match(windowsPackageWorkflow, /gh attestation verify "\$immutableZip"/u);
+assert.match(windowsPackageWorkflow, /name: Parse read-only release-installation preflight/u);
+assert.match(windowsPackageWorkflow, /--signer-workflow/u);
+assert.match(windowsPackageWorkflow, /--source-ref \$env:GITHUB_REF/u);
+assert.match(windowsPackageWorkflow, /--source-digest \$releaseSha/u);
+assert.match(operatorReleasePreflight, /gh attestation verify "\$archive"/u);
+assert.match(operatorReleasePreflight, /--signer-workflow \$workflow/u);
+assert.match(operatorReleasePreflight, /--source-ref "refs\/tags\/\$ReleaseTag"/u);
+assert.match(operatorReleasePreflight, /--source-digest \$ReleaseSha/u);
+assert.match(operatorReleasePreflight, /gh release download \$ReleaseTag --repo \$repository/u);
+assert.match(operatorReleasePreflight, /\$stableChecksumAsset\.digest -cne/u);
+assert.match(operatorReleasePreflight, /\$tagObject\.sha -cne \$ReleaseSha/u);
+assert.match(operatorReleasePreflight, /\$measuredArchiveTree -cne \$treeMarker/u);
+assert.match(operatorReleasePreflight, /\$measuredInstalledTree -cne \$treeMarker/u);
+assert.match(operatorReleasePreflight, /COMPANION_RELEASE_INSTALLATION_VERIFIED/u);
+assert.doesNotMatch(operatorReleasePreflight, /KEMERBET|execution-authorities:consume/iu);
+assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
+assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);
 assert.match(windowsWorker, /recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption/u);
 assert.match(windowsWorker, /signed_result_recorded_reconciliation_required/u);
 assert.match(windowsWorker, /authorityRequestStarted = true;[\s\S]*?postTimed/u);
@@ -139,6 +205,34 @@ assert.doesNotMatch(
   privilegeGateMigration,
   /grant fetanagent_companion_execution_bridge\s+to\s+fetanagent_companion_device_bridge_runtime/iu,
 );
+assert.match(
+  emergencyStopMigration,
+  /create role fetanagent_companion_execution_bridge_runtime\s+nologin/iu,
+);
+assert.match(
+  emergencyStopMigration,
+  /create function app\.disable_agent_platform_companion_execution_transport\(\)/u,
+);
+assert.match(emergencyStopMigration, /session_user <> 'postgres'/u);
+assert.match(emergencyStopMigration, /control_state = 'disabled'/u);
+assert.doesNotMatch(emergencyStopMigration, /\bgrant execute\b/iu);
+assert.doesNotMatch(emergencyStopMigration, /\bgrant fetanagent_companion_execution_bridge\b/iu);
+const roleRevocation = emergencyStopOperation.indexOf(
+  'alter role fetanagent_companion_execution_bridge_runtime',
+);
+const sessionTermination = emergencyStopOperation.indexOf('pg_catalog.pg_terminate_backend');
+const financialStop = emergencyStopOperation.indexOf(
+  'app.request_private_trusted_telebirr_emergency_disable',
+);
+assert.ok(roleRevocation >= 0 && roleRevocation < sessionTermination);
+assert.ok(sessionTermination < financialStop);
+assert.match(
+  emergencyStopOperation,
+  /app\.disable_agent_platform_companion_execution_transport\(\)/u,
+);
+assert.match(emergencyStopOperation, /pg_catalog\.pg_advisory_unlock/u);
+assert.match(emergencyStopOperation, /providerOutcomeRequiresReconciliation', true/u);
+assert.doesNotMatch(emergencyStopOperation, /\b(?:insert|update)\s+app\.deposit_jobs\b/iu);
 assert.match(packageBuilder, /packages\/agent-platform-companion-execution-contracts/u);
 
 console.log(

@@ -6,6 +6,53 @@ and the execution capability role has no runtime member. There is **no reviewed 
 operation**. Setting a local environment flag, granting a role, or updating the control row by
 hand is not an activation procedure.
 
+Migration `companion_execution_emergency_stop` adds a passwordless, memberless `NOLOGIN`
+execution-bridge runtime scaffold and a Postgres-only transport fence. It grants no execution
+capability. The independent `production-companion-execution-emergency-disable.sql` operation is
+designed to commit credential and membership revocation first, drain active sessions second,
+stop any still-live trusted TeleBirr financial epoch third, and fence the companion control
+last. Each phase commits independently so a later failure cannot roll an earlier stop back. It never
+leases or executes a queue job. A provider action already past its one-use fence cannot be
+undone by disabling a session; its outcome must be reconciled before any later activation.
+This stop path is a prerequisite for review, **not** an authorization to arm or deploy execution.
+
+The Windows execution worker also requires a canonical local handoff signed by the pinned
+production execution signer. The handoff binds the short-lived request, paired certificate,
+agent account, release, claimed archive digest, and a non-sliding window of at most twelve hours.
+An environment flag and account ID alone cannot start the worker. The handoff expires locally and
+the worker stops polling then; the server's one-use database fences remain separately mandatory.
+The portable package now includes a deterministic installation-tree digest. Before accepting a
+signed handoff, the companion measures all installed package files, including its runtime and
+release marker, and requires the measured digest to match both the package marker and the signed
+handoff. The handoff's archive digest remains a signed claim: only an independent release
+attestation can bind it to the published ZIP. The local handoff is **not yet issued by production**;
+independent archive attestation, authorized issuance, and a reviewed local delivery path remain
+prerequisites before activation.
+For future tagged companion releases, the packaging workflow now generates a provenance
+attestation for the immutable ZIP in a tag-only job. The publish job verifies that same archive
+against the repository, signer workflow, exact tag, and source revision before uploading assets.
+This does not retroactively attest an older release or attest a currently installed package;
+an activation preflight must still verify the chosen published asset and measured installation
+independently before signing a handoff.
+`verify-windows-companion-release-installation.ps1` is the read-only, non-activating operator
+preflight for a future attested tag. Given the reviewed exact tag and source revision, the
+immutable ZIP and checksum downloaded from that release, and the local installation root, it
+requires the four exact published assets, matching release hashes, the tag's current source
+revision, and a GitHub build attestation from the pinned package workflow. It then verifies
+the ZIP's own installation-tree marker and measures the local installation using the same
+attested, bundled tree verifier. Its only successful result is a pass marker; it neither starts
+the companion nor grants any execution authority. An old, unattested release cannot pass this
+preflight, and a passing disk check does not attest the currently running process or authorize
+an activation request. Those are separate prerequisites.
+A PID or executable path alone cannot close that gap: it does not prove the bytes already loaded
+into memory or the process's inherited execution settings. A future launch-and-handshake proof
+must bind the live paired process to the independently verified installation before handoff
+issuance; a disk-only pass must never be treated as that proof.
+The shared contract now has a pure, key-bound handoff signer that emits the canonical form
+accepted by the Windows verifier. It has no endpoint, production key access, database transition,
+or delivery mechanism. A signature over claimed release digests is not independent release
+attestation and does not itself arm execution.
+
 ## Current paid-proof state
 
 The Owner stopped the last live TeleBirr pilot with `owner_stop`. A separately authorized,
@@ -67,14 +114,34 @@ first. Confirm the Owner service remains healthy and the preview returns a redac
 the migration. Do not use a migration-only release before updating the Owner image, and do not
 conflate either deployment with execution activation.
 
+## Inert one-use request foundation
+
+Migration `companion_execution_one_use_request` adds an immutable preparation record and an
+administrator-only preparation routine. It binds one request to the current trusted epoch,
+armed pilot, active Owner, Owner-paired Windows certificate, KemerBet agent account, pinned
+execution signer, and claimed companion release, archive, and installation-tree digests. The
+routine refuses preparation unless the financial epoch is already current and the companion
+control is still disabled. At most one unexpired request can cover the same pilot/epoch; an exact replay changes
+nothing. A later, separately authorized fresh request may replace an expired one without
+requiring a new twelve-hour pilot.
+
+This is **not** the activation transition. Release digests in a request are claims and must be
+independently attested against the installed bundle and running runtime. The request expires in
+at most ten minutes (separate from a twelve-hour pilot); expiry never slides on replay. There
+is no application EXECUTE grant, no request consumer, no companion-control write, no runtime
+credential, no local Windows opt-in, and no job lease in this migration. Do not invoke the
+preparation routine in production until the remaining activation operation, transport, local
+handoff, and emergency-stop pieces are reviewed together.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the
 following as one fail-closed operation, with disposable-PostgreSQL and end-to-end tests:
 
-1. An Owner-authorized, one-use activation request tied to the exact pilot, current trusted
-   TeleBirr epoch, paired certificate, platform agent account, execution signer, immutable release,
-   and a short non-sliding expiry. A stopped or expired pilot must be rejected.
+1. Connect the inert one-use request to an authenticated Owner action and independently attest
+   the exact published archive and installed measured release tree. Recheck the pilot, epoch,
+   certificate, and short
+   non-sliding expiry at consumption; a stopped or expired pilot must be rejected.
 2. A database-owned activation transition that locks the epoch, sorted switch rows, pilot,
    certificate, and execution control in the established order; rechecks every lineage and
    financial invariant; and atomically arms only the exact companion control. No direct table
@@ -85,9 +152,11 @@ following as one fail-closed operation, with disposable-PostgreSQL and end-to-en
 4. A checksum-bound production transport release with the pinned execution signer and the
    reviewed overlay. The default release must remain no-money. The paired Windows process must
    receive its account-bound opt-in through a reviewed local handoff, not a manually set flag.
-5. A rehearsed independent emergency stop and reconciliation path. The final-action fence must
-   be one-use, and any ambiguous provider response must stop without an automatic retry. The
-   queue item must never be leased for a test of the activation plumbing.
+5. A rehearsed independent emergency stop and reconciliation path. The credential/transport
+   stop is only a foundation; the host runtime stop and in-flight provider reconciliation still
+   need an integrated rehearsal. The final-action fence must be one-use, and any ambiguous
+   provider response must stop without an automatic retry. The queue item must never be leased
+   for a test of the activation plumbing.
 
 Until all five are implemented and reviewed together, the executable path stays disabled. The
 status query and dormant disposition do not make the Telegram bot able to credit KemerBet or

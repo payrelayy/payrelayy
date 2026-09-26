@@ -44,8 +44,11 @@ Returning to the actual login page resets the state and starts a new non-sliding
 window within the overall session cap. A separately signed exact-five Player-ID lookup can run
 after pairing; it remains read-only.
 
-The opt-in execution-v2 worker requires the literal `INTERNAL_COMPANION_EXECUTION_V2_ENABLED=true`
-and one exact UUID account binding. It independently pins the production execution signer, verifies
+The opt-in execution-v2 worker requires the literal `INTERNAL_COMPANION_EXECUTION_V2_ENABLED=true`,
+one exact UUID account binding, and a current signed local activation handoff that matches the
+paired certificate and companion release. The internal flag alone cannot start the worker. The
+handoff is not issued by production yet and does not, by itself, attest the installed archive.
+The worker independently pins the production execution signer, verifies
 the signed enrollment/assignment/Player chain, prepares and rechecks the receiver identity and ETB
 currency, keeps Notes empty, fixes Amount at 25.00 ETB, consumes a durable one-use replay barrier,
 and persists crash evidence before the one allowed Transfer request. Provider redirects are never

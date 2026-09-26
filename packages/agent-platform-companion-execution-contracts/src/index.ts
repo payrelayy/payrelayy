@@ -68,6 +68,31 @@ export const COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS = 2_000;
 export const COMPANION_EXECUTION_MAX_RESULT_REPORTING_DELAY_MS = 5 * 60 * 1_000;
 export const COMPANION_EXECUTION_POSTGRES_BIGINT_MAX = '9223372036854775807' as const;
 export const COMPANION_EXECUTION_POSTGRES_INTEGER_MAX = '2147483647' as const;
+export const COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE =
+  'fetanagent:windows-companion:execution-activation-handoff:v1' as const;
+export const COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+
+export interface CompanionExecutionActivationHandoffBody {
+  readonly contractVersion: 1;
+  readonly purpose: typeof COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE;
+  readonly deploymentTarget: 'production';
+  readonly requestKey: string;
+  readonly activationEpoch: string;
+  readonly platformAgentAccountId: string;
+  readonly noMoneyCertificateBodyDigest: string;
+  readonly companionReleaseSha: string;
+  readonly companionArchiveSha256: string;
+  readonly companionInstallationTreeSha256: string;
+  readonly issuedAt: string;
+  readonly notBefore: string;
+  readonly expiresAt: string;
+}
+
+export interface SignedCompanionExecutionActivationHandoff {
+  readonly body: CompanionExecutionActivationHandoffBody;
+  readonly signerKeyId: string;
+  readonly signature: string;
+}
 
 export interface ExecutionEnrollmentBody {
   readonly contractVersion: typeof COMPANION_EXECUTION_CONTRACT_VERSION;
@@ -441,6 +466,25 @@ const P256_ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b
 const P256_HALF_ORDER = P256_ORDER / 2n;
 const POSTGRES_BIGINT_MAX = BigInt(COMPANION_EXECUTION_POSTGRES_BIGINT_MAX);
 const POSTGRES_INTEGER_MAX = BigInt(COMPANION_EXECUTION_POSTGRES_INTEGER_MAX);
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
+
+const activationHandoffBodyKeys = [
+  'contractVersion',
+  'purpose',
+  'deploymentTarget',
+  'requestKey',
+  'activationEpoch',
+  'platformAgentAccountId',
+  'noMoneyCertificateBodyDigest',
+  'companionReleaseSha',
+  'companionArchiveSha256',
+  'companionInstallationTreeSha256',
+  'issuedAt',
+  'notBefore',
+  'expiresAt',
+] as const;
 
 const enrollmentBodyKeys = [
   'contractVersion',
@@ -923,6 +967,89 @@ function signP1363Transcript(
     const normalized = normalizedLowSP1363Bytes(raw);
     const encoded = normalized?.toString('base64url');
     return parseSignature(encoded);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pure serializer for a future, separately authorized activation issuer. This does not
+ * authorize a database transition, publish a handoff, or enable the companion.
+ */
+export function signCompanionExecutionActivationHandoff(
+  bodyCandidate: unknown,
+  signerPrivateKey: unknown,
+  signerKeyIdCandidate: unknown,
+  expectedSignerPublicKeySpkiSha256: unknown,
+): SignedCompanionExecutionActivationHandoff | undefined {
+  try {
+    if (
+      !isPlainNonProxyRecord(bodyCandidate) ||
+      !hasExactEnumerableDataKeys(bodyCandidate, activationHandoffBodyKeys)
+    ) {
+      return undefined;
+    }
+    const requestKey = own(bodyCandidate, 'requestKey');
+    const accountId = own(bodyCandidate, 'platformAgentAccountId');
+    const epoch = decimal(own(bodyCandidate, 'activationEpoch'));
+    const certificateDigest = digest(own(bodyCandidate, 'noMoneyCertificateBodyDigest'));
+    const releaseSha = own(bodyCandidate, 'companionReleaseSha');
+    const archiveDigest = digest(own(bodyCandidate, 'companionArchiveSha256'));
+    const installationTreeDigest = digest(own(bodyCandidate, 'companionInstallationTreeSha256'));
+    const issuedAt = timestamp(own(bodyCandidate, 'issuedAt'));
+    const notBefore = timestamp(own(bodyCandidate, 'notBefore'));
+    const expiresAt = timestamp(own(bodyCandidate, 'expiresAt'));
+    const signerKeyId = opaque(signerKeyIdCandidate);
+    const signerDigest = digest(expectedSignerPublicKeySpkiSha256);
+    const signer = parseP256PrivateKey(signerPrivateKey);
+    if (
+      own(bodyCandidate, 'contractVersion') !== 1 ||
+      own(bodyCandidate, 'purpose') !== COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE ||
+      own(bodyCandidate, 'deploymentTarget') !== 'production' ||
+      typeof requestKey !== 'string' ||
+      !UUID_V4_PATTERN.test(requestKey) ||
+      !epoch ||
+      typeof accountId !== 'string' ||
+      !UUID_PATTERN.test(accountId) ||
+      !certificateDigest ||
+      typeof releaseSha !== 'string' ||
+      !RELEASE_SHA_PATTERN.test(releaseSha) ||
+      !archiveDigest ||
+      !installationTreeDigest ||
+      !issuedAt ||
+      !notBefore ||
+      !expiresAt ||
+      Date.parse(notBefore) < Date.parse(issuedAt) ||
+      !validLifetime(issuedAt, expiresAt, COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS) ||
+      Date.parse(expiresAt) <= Date.parse(notBefore) ||
+      !signerKeyId ||
+      !signerDigest ||
+      !signer ||
+      signer.publicKey.digest !== signerDigest
+    ) {
+      return undefined;
+    }
+    const body: CompanionExecutionActivationHandoffBody = Object.freeze({
+      contractVersion: 1,
+      purpose: COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
+      deploymentTarget: 'production',
+      requestKey,
+      activationEpoch: epoch,
+      platformAgentAccountId: accountId,
+      noMoneyCertificateBodyDigest: certificateDigest,
+      companionReleaseSha: releaseSha,
+      companionArchiveSha256: archiveDigest,
+      companionInstallationTreeSha256: installationTreeDigest,
+      issuedAt,
+      notBefore,
+      expiresAt,
+    });
+    const transcript = Buffer.from(
+      `${COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE}\0${JSON.stringify(body)}`,
+      'utf8',
+    );
+    const signature = signP1363Transcript(transcript, signer.key);
+    return signature ? Object.freeze({ body, signerKeyId, signature }) : undefined;
   } catch {
     return undefined;
   }

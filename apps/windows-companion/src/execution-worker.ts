@@ -87,6 +87,8 @@ export interface CompanionExecutionWorkerEvent {
 export interface CompanionExecutionWorkerOptions {
   readonly dataRoot: string;
   readonly device: CompanionDeviceSigningRuntime;
+  readonly expectedActivationEpoch: string;
+  readonly handoffExpiresAtMs: number;
   readonly session: Pick<LocalKemerBetSession, 'executeExactOneUseDeposit'>;
   readonly signal: AbortSignal;
   readonly report: (event: CompanionExecutionWorkerEvent) => void;
@@ -496,6 +498,13 @@ async function reconcileRecordedAttempt(
 export async function runCompanionExecutionWorker(
   options: CompanionExecutionWorkerOptions,
 ): Promise<void> {
+  if (
+    !/^[1-9][0-9]*$/u.test(options.expectedActivationEpoch) ||
+    BigInt(options.expectedActivationEpoch) > 9_223_372_036_854_775_807n ||
+    !Number.isSafeInteger(options.handoffExpiresAtMs)
+  ) {
+    return unavailable();
+  }
   const runtime = options.device.execution;
   if (!runtime) return unavailable();
   const fetchImplementation = options.fetch ?? fetch;
@@ -574,6 +583,10 @@ export async function runCompanionExecutionWorker(
         options.signal,
         monotonicNow,
       );
+      if (polled.trustedResponseTime.getTime() >= options.handoffExpiresAtMs) {
+        options.report(event('failed_closed'));
+        return;
+      }
       if (polled.response.status === 204) {
         if (polled.response.body !== null || polled.response.headers.get('content-type') !== null) {
           unavailable();
@@ -600,6 +613,10 @@ export async function runCompanionExecutionWorker(
           polled.trustedResponseTime,
           polled.roundTrip,
         ) ?? unavailable();
+      if (chain.assignment.body.activationEpoch !== options.expectedActivationEpoch) {
+        options.report(event('failed_closed'));
+        return;
+      }
       attemptChain = await persistWindowsCompanionExecutionV2InitialAttemptChain(
         chain.enrollment,
         chain.assignment,
@@ -718,6 +735,7 @@ export async function runCompanionExecutionWorker(
                 const currentTrusted = estimatedTrustedNow(authorityTimed!, monotonicNow);
                 return (
                   currentMonotonic < verified.verification.monotonicActionDeadlineMs &&
+                  currentTrusted.getTime() < options.handoffExpiresAtMs &&
                   currentTrusted.getTime() + COMPANION_EXECUTION_MAX_FORWARD_CLOCK_SKEW_MS <
                     Date.parse(verified.verification.signedServerActionDeadline)
                 );

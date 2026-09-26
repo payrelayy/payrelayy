@@ -182,8 +182,12 @@ production workflow, authenticated proof transport, or entry point exists yet. A
 operator-only package now provides one parameterized, read-only database snapshot adapter for
 the request, current identity, and paired certificate. It requires an injected short-lived
 `postgres` session; it does not provide a credential or connection and must never run inside
-the always-on companion or an application role. The published-release, observed-process, and
-attestation-retention adapters are still absent. Neither package can arm the companion,
+the always-on companion or an application role. That package now also adapts the existing
+source-pinned Windows preflight for published archive and independently measured installed-tree
+evidence, with a trusted operator-side observation time. It requires a protected Windows
+operator workflow, an exact release archive, and a reviewed source checkout; none are supplied
+by the package. The OS-observed process and attestation-retention adapters are still absent.
+Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production
 consumer must supply the remaining authenticated sources and complete the atomic credential
 lifecycle below.

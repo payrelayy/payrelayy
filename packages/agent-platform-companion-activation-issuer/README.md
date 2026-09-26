@@ -32,4 +32,6 @@ it does not trust a companion-supplied release version, file digest, or clock.
 The workflow must provide a reviewed source checkout and protected local
 archive/installation paths. No archive download, credential, or production
 invocation workflow is provided here. The OS-observed process proof and
-attestation-retention adapters remain separate work.
+attestation-retention adapters remain separate work. In particular, the v1
+no-money local launch diagnostic cannot satisfy the required v2 guarded-execution
+process proof; no process adapter is exported here.

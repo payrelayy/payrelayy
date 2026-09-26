@@ -1,6 +1,9 @@
 import { createConnection } from 'node:net';
 
-import type { SignedCompanionLaunchProof } from '@fetanagent/agent-platform-companion-execution-contracts';
+import type {
+  SignedCompanionExecutionLaunchProof,
+  SignedCompanionLaunchProof,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 
 const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/u;
@@ -37,7 +40,7 @@ export function takeCompanionLaunchProofRequest(
 /** Never writes this proof to stdout, a file, a remote endpoint, or a process argument. */
 export async function deliverCompanionLaunchProof(
   request: CompanionLaunchProofRequest,
-  proof: SignedCompanionLaunchProof,
+  proof: SignedCompanionLaunchProof | SignedCompanionExecutionLaunchProof,
 ): Promise<void> {
   const payload = `${JSON.stringify(proof)}\n`;
   if (Buffer.byteLength(payload, 'utf8') > 2_048) {

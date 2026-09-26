@@ -192,6 +192,7 @@ describe('signed Windows companion execution activation handoff', () => {
       installationTreeSha256: treeDigest,
       expiresAtMs: Date.parse('2026-09-26T23:59:00.000Z'),
       requestKey: handoff.body.requestKey,
+      handoffSha256: `sha256:${createHash('sha256').update(JSON.stringify(handoff), 'utf8').digest('hex')}`,
     });
     await writeFile(resolve(installationRoot, 'app.js'), 'modified release');
     await expect(

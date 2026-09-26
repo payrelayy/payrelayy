@@ -9,7 +9,7 @@ import {
   type CompanionActivationAttestationSources,
   type CompanionActivationDatabaseSnapshot,
 } from './activation-attestation.js';
-import { signCompanionLaunchProof } from './launch-proof.js';
+import { signCompanionExecutionLaunchProof } from './launch-proof.js';
 
 const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const publicKey = Buffer.from(device.publicKey.export({ format: 'der', type: 'spki' }));
@@ -18,6 +18,7 @@ const certificateBodyDigest = `sha256:${'a'.repeat(64)}`;
 const releaseSha = 'b'.repeat(40);
 const archiveSha256 = `sha256:${'c'.repeat(64)}`;
 const installationTreeSha256 = `sha256:${'d'.repeat(64)}`;
+const executionHandoffSha256 = `sha256:${'e'.repeat(64)}`;
 
 function databaseSnapshot(): CompanionActivationDatabaseSnapshot {
   return {
@@ -76,9 +77,9 @@ function sources(): {
       challenge,
     }: Parameters<CompanionActivationAttestationSources['observePairedProcess']>[0]) => {
       const processId = 4242;
-      const startedAt = '2026-09-26T11:55:00.000Z';
+      const startedAt = '2026-09-26T12:00:35.000Z';
       const observedAt = '2026-09-26T12:00:40.000Z';
-      const proof = signCompanionLaunchProof(
+      const proof = signCompanionExecutionLaunchProof(
         {
           challenge,
           certificateBodyDigest,
@@ -86,6 +87,10 @@ function sources(): {
           devicePublicKeySpki: publicKey.toString('base64url'),
           releaseSha,
           installationTreeSha256,
+          requestKey,
+          activationEpoch: '123',
+          platformAgentAccountId: '44444444-4444-4444-8444-444444444444',
+          executionHandoffSha256,
           processId,
           startedAt,
           observedAt,
@@ -93,7 +98,7 @@ function sources(): {
         device.privateKey,
       );
       if (!proof) throw new Error('Test proof could not be signed');
-      return { processId, startedAt, observedAt, proof };
+      return { processId, startedAt, observedAt, executionHandoffSha256, proof };
     },
   );
   const retain = vi.fn(async (_row: CompanionActivationAttestation) => undefined);
@@ -127,6 +132,7 @@ describe('non-activating companion activation attestation issuer core', () => {
       companionReleaseSha: releaseSha,
       companionArchiveSha256: archiveSha256,
       companionInstallationTreeSha256: installationTreeSha256,
+      executionHandoffSha256,
       challengeDigest: `sha256:${createHash('sha256').update(Buffer.from(challenge, 'base64url')).digest('hex')}`,
       processId: 4242,
       verifiedAt: '2026-09-26T12:00:50.000Z',

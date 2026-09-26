@@ -76,6 +76,14 @@ before any server-side activation.
 Its signature verifier now lives in the shared execution contracts so a future production issuer
 can evaluate the same transcript against a database-trusted certificate. No production service
 currently accepts this proof or turns it into financial authority.
+The activation issuer now requires a distinct v2 guarded-execution transcript. The companion
+constructs that transcript only after loading its signed handoff, binding the request, epoch,
+agent account, and canonical handoff digest to its paired-device signature. The v1 no-money
+diagnostic transcript is rejected by the activation consistency check. This is domain
+separation, **not** independent proof that the OS child loaded the handoff or runs in execution
+mode: a future protected process adapter must inspect that state and validate the handoff
+against the production signer. The current no-money launch diagnostic cannot be reused as that
+adapter, and no activation or deployment occurred from this change.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release
@@ -186,7 +194,9 @@ the always-on companion or an application role. That package now also adapts the
 source-pinned Windows preflight for published archive and independently measured installed-tree
 evidence, with a trusted operator-side observation time. It requires a protected Windows
 operator workflow, an exact release archive, and a reviewed source checkout; none are supplied
-by the package. The OS-observed process and attestation-retention adapters are still absent.
+by the package. The guarded-execution proof contract is now distinct from the no-money
+diagnostic proof; the OS-observed execution-process and attestation-retention adapters are still
+absent.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production
 consumer must supply the remaining authenticated sources and complete the atomic credential

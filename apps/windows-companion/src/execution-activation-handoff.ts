@@ -46,6 +46,10 @@ export interface WindowsCompanionExecutionHandoff {
   readonly requestKey: string;
 }
 
+export interface LoadedWindowsCompanionExecutionHandoff extends WindowsCompanionExecutionHandoff {
+  readonly handoffSha256: string;
+}
+
 export interface WindowsCompanionExecutionHandoffContext {
   readonly certificateBodyDigest: string;
   readonly expectedAccountId: string;
@@ -178,7 +182,7 @@ export async function loadWindowsCompanionExecutionHandoff(
   dataRoot: string,
   context: WindowsCompanionExecutionHandoffContext,
   installationRoot: string,
-): Promise<WindowsCompanionExecutionHandoff> {
+): Promise<LoadedWindowsCompanionExecutionHandoff> {
   try {
     const root = await realpath(dataRoot);
     const directory = resolve(root, 'execution-v2');
@@ -214,7 +218,10 @@ export async function loadWindowsCompanionExecutionHandoff(
       context.releaseSha,
       handoff.installationTreeSha256,
     );
-    return handoff;
+    return Object.freeze({
+      ...handoff,
+      handoffSha256: `sha256:${createHash('sha256').update(raw, 'utf8').digest('hex')}`,
+    });
   } catch {
     return unavailable();
   }

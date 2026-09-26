@@ -2,6 +2,8 @@ import { createHash, createPublicKey, sign, verify, type KeyObject } from 'node:
 
 export const COMPANION_LAUNCH_PROOF_PURPOSE =
   'fetanagent:windows-companion:paired-process-launch-proof:v1' as const;
+export const COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE =
+  'fetanagent:windows-companion:guarded-execution-launch-proof:v2' as const;
 
 const ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
@@ -21,7 +23,26 @@ const BODY_KEYS = [
   'startedAt',
   'observedAt',
 ] as const;
+const EXECUTION_BODY_KEYS = [
+  'contractVersion',
+  'purpose',
+  'challengeDigest',
+  'certificateBodyDigest',
+  'deviceKeyId',
+  'releaseSha',
+  'installationTreeSha256',
+  'executionMode',
+  'requestKey',
+  'activationEpoch',
+  'platformAgentAccountId',
+  'executionHandoffSha256',
+  'processId',
+  'startedAt',
+  'observedAt',
+] as const;
 const ENVELOPE_KEYS = ['body', 'signature'] as const;
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 
 export interface CompanionLaunchProofBody {
   readonly contractVersion: 1;
@@ -41,6 +62,29 @@ export interface SignedCompanionLaunchProof {
   readonly signature: string;
 }
 
+export interface CompanionExecutionLaunchProofBody {
+  readonly contractVersion: 2;
+  readonly purpose: typeof COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE;
+  readonly challengeDigest: string;
+  readonly certificateBodyDigest: string;
+  readonly deviceKeyId: string;
+  readonly releaseSha: string;
+  readonly installationTreeSha256: string;
+  readonly executionMode: 'guarded';
+  readonly requestKey: string;
+  readonly activationEpoch: string;
+  readonly platformAgentAccountId: string;
+  readonly executionHandoffSha256: string;
+  readonly processId: number;
+  readonly startedAt: string;
+  readonly observedAt: string;
+}
+
+export interface SignedCompanionExecutionLaunchProof {
+  readonly body: CompanionExecutionLaunchProofBody;
+  readonly signature: string;
+}
+
 export interface CompanionLaunchProofContext {
   readonly challenge: string;
   readonly certificateBodyDigest: string;
@@ -51,6 +95,13 @@ export interface CompanionLaunchProofContext {
   readonly processId: number;
   readonly startedAt: string;
   readonly observedAt: string;
+}
+
+export interface CompanionExecutionLaunchProofContext extends CompanionLaunchProofContext {
+  readonly requestKey: string;
+  readonly activationEpoch: string;
+  readonly platformAgentAccountId: string;
+  readonly executionHandoffSha256: string;
 }
 
 function exactKeys(
@@ -92,6 +143,23 @@ function validContext(context: CompanionLaunchProofContext): Buffer | undefined 
   return canonicalBytes(context.challenge, 32);
 }
 
+function validExecutionContext(context: CompanionExecutionLaunchProofContext): Buffer | undefined {
+  try {
+    if (
+      !UUID_V4.test(context.requestKey) ||
+      !/^[1-9][0-9]*$/u.test(context.activationEpoch) ||
+      BigInt(context.activationEpoch) > POSTGRES_BIGINT_MAX ||
+      !UUID_V4.test(context.platformAgentAccountId) ||
+      !SHA256.test(context.executionHandoffSha256)
+    ) {
+      return undefined;
+    }
+    return validContext(context);
+  } catch {
+    return undefined;
+  }
+}
+
 function canonicalSignature(raw: Buffer): Buffer {
   const scalar = BigInt(`0x${raw.subarray(32).toString('hex')}`);
   if (scalar > ORDER / 2n) {
@@ -100,8 +168,8 @@ function canonicalSignature(raw: Buffer): Buffer {
   return raw;
 }
 
-function transcript(body: CompanionLaunchProofBody): Buffer {
-  return Buffer.from(`${COMPANION_LAUNCH_PROOF_PURPOSE}\0${JSON.stringify(body)}`, 'utf8');
+function transcript(body: CompanionLaunchProofBody | CompanionExecutionLaunchProofBody): Buffer {
+  return Buffer.from(`${body.purpose}\0${JSON.stringify(body)}`, 'utf8');
 }
 
 /** Shared process evidence only. This never arms execution or replaces archive attestation. */
@@ -187,6 +255,108 @@ export function verifyCompanionLaunchProof(
       verify(
         'sha256',
         transcript(body as unknown as CompanionLaunchProofBody),
+        { key, dsaEncoding: 'ieee-p1363' },
+        signature,
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Distinct transcript; the observer must independently verify the loaded handoff and OS mode. */
+export function signCompanionExecutionLaunchProof(
+  context: CompanionExecutionLaunchProofContext,
+  devicePrivateKey: KeyObject,
+): SignedCompanionExecutionLaunchProof | undefined {
+  try {
+    const challenge = validExecutionContext(context);
+    if (!challenge || devicePrivateKey.asymmetricKeyType !== 'ec') return undefined;
+    const publicKey = createPublicKey(devicePrivateKey);
+    if (publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') return undefined;
+    const expectedSpki = canonicalBytes(context.devicePublicKeySpki, 91);
+    const actualSpki = publicKey.export({ format: 'der', type: 'spki' });
+    if (!expectedSpki || !Buffer.isBuffer(actualSpki) || !actualSpki.equals(expectedSpki)) {
+      return undefined;
+    }
+    const body: CompanionExecutionLaunchProofBody = Object.freeze({
+      contractVersion: 2,
+      purpose: COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
+      challengeDigest: `sha256:${createHash('sha256').update(challenge).digest('hex')}`,
+      certificateBodyDigest: context.certificateBodyDigest,
+      deviceKeyId: context.deviceKeyId,
+      releaseSha: context.releaseSha,
+      installationTreeSha256: context.installationTreeSha256,
+      executionMode: 'guarded',
+      requestKey: context.requestKey,
+      activationEpoch: context.activationEpoch,
+      platformAgentAccountId: context.platformAgentAccountId,
+      executionHandoffSha256: context.executionHandoffSha256,
+      processId: context.processId,
+      startedAt: context.startedAt,
+      observedAt: context.observedAt,
+    });
+    const signature = canonicalSignature(
+      sign('sha256', transcript(body), { key: devicePrivateKey, dsaEncoding: 'ieee-p1363' }),
+    );
+    return Object.freeze({ body, signature: signature.toString('base64url') });
+  } catch {
+    return undefined;
+  }
+}
+
+/** A v1 no-money launch proof is never accepted as guarded execution evidence. */
+export function verifyCompanionExecutionLaunchProof(
+  candidate: unknown,
+  context: CompanionExecutionLaunchProofContext,
+): boolean {
+  try {
+    const challenge = validExecutionContext(context);
+    if (
+      !challenge ||
+      !exactKeys(candidate, ENVELOPE_KEYS) ||
+      !exactKeys(candidate.body, EXECUTION_BODY_KEYS) ||
+      typeof candidate.signature !== 'string' ||
+      !SIGNATURE.test(candidate.signature)
+    ) {
+      return false;
+    }
+    const body = candidate.body;
+    if (
+      body.contractVersion !== 2 ||
+      body.purpose !== COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE ||
+      body.challengeDigest !== `sha256:${createHash('sha256').update(challenge).digest('hex')}` ||
+      body.certificateBodyDigest !== context.certificateBodyDigest ||
+      body.deviceKeyId !== context.deviceKeyId ||
+      body.releaseSha !== context.releaseSha ||
+      body.installationTreeSha256 !== context.installationTreeSha256 ||
+      body.executionMode !== 'guarded' ||
+      body.requestKey !== context.requestKey ||
+      body.activationEpoch !== context.activationEpoch ||
+      body.platformAgentAccountId !== context.platformAgentAccountId ||
+      body.executionHandoffSha256 !== context.executionHandoffSha256 ||
+      body.processId !== context.processId ||
+      body.startedAt !== context.startedAt ||
+      body.observedAt !== context.observedAt
+    ) {
+      return false;
+    }
+    const signature = canonicalBytes(candidate.signature, 64);
+    const spki = canonicalBytes(context.devicePublicKeySpki, 91);
+    if (!signature || !spki) return false;
+    const scalarR = BigInt(`0x${signature.subarray(0, 32).toString('hex')}`);
+    const scalarS = BigInt(`0x${signature.subarray(32).toString('hex')}`);
+    if (scalarR <= 0n || scalarR >= ORDER || scalarS <= 0n || scalarS > ORDER / 2n) return false;
+    const key = createPublicKey({ key: spki, format: 'der', type: 'spki' });
+    const canonicalSpki = key.export({ format: 'der', type: 'spki' });
+    return (
+      key.asymmetricKeyType === 'ec' &&
+      key.asymmetricKeyDetails?.namedCurve === 'prime256v1' &&
+      Buffer.isBuffer(canonicalSpki) &&
+      canonicalSpki.equals(spki) &&
+      verify(
+        'sha256',
+        transcript(body as unknown as CompanionExecutionLaunchProofBody),
         { key, dsaEncoding: 'ieee-p1363' },
         signature,
       )

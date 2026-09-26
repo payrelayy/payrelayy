@@ -268,14 +268,30 @@ export function registerCompanionDevicePairingSqlTests(
       ]);
 
       const armingRoutines = await client.query(`
-        select routine.oid::regprocedure::text as signature
+        select routine.oid::regprocedure::text as signature,
+               has_function_privilege('public', routine.oid, 'execute')
+                 as public_execute,
+               has_function_privilege('${groupRole}', routine.oid, 'execute')
+                 as pairing_execute,
+               has_function_privilege('fetanagent_companion_device_bridge_runtime',
+                 routine.oid, 'execute') as device_runtime_execute,
+               has_function_privilege('fetanagent_companion_execution_bridge_runtime',
+                 routine.oid, 'execute') as execution_runtime_execute
           from pg_proc routine
           join pg_namespace namespace on namespace.oid = routine.pronamespace
          where namespace.nspname = 'app'
            and routine.proname ~ '(arm|activate|enable).*companion.*execution|companion.*execution.*(arm|activate|enable)'
          order by signature
       `);
-      expect(armingRoutines.rows).toEqual([]);
+      expect(armingRoutines.rows).toEqual([
+        {
+          signature: 'app.activate_agent_platform_companion_execution_once(uuid,uuid,text)',
+          public_execute: false,
+          pairing_execute: false,
+          device_runtime_execute: false,
+          execution_runtime_execute: false,
+        },
+      ]);
     });
 
     it('issues once, permanently binds one device key, recovers a lost response, and revokes it', async () => {

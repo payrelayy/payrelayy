@@ -57,6 +57,7 @@ import {
   loadCompanionDeviceSigningRuntime,
   restoreCompanionDeviceEnrollment,
 } from './device-enrollment.js';
+import { verifyCompanionLaunchProof } from './launch-proof.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
 const roots: string[] = [];
@@ -543,6 +544,23 @@ describe('Windows companion device enrollment', () => {
       now: () => new Date(now.getTime() + 30_000),
       protector: selectedProtector,
     });
+    const launchContext = {
+      challenge: Buffer.alloc(32, 0x53).toString('base64url'),
+      releaseSha,
+      installationTreeSha256: `sha256:${'f'.repeat(64)}`,
+      processId: 4242,
+      startedAt: '2026-09-04T12:00:00.000Z',
+      observedAt: '2026-09-04T12:00:30.000Z',
+    };
+    const launchProof = runtime.createSignedLaunchProof(launchContext);
+    expect(
+      verifyCompanionLaunchProof(launchProof, {
+        ...launchContext,
+        certificateBodyDigest: runtime.certificate.bodyDigest,
+        deviceKeyId: runtime.certificate.body.deviceKeyId,
+        devicePublicKeySpki: runtime.certificate.body.devicePublicKeySpki,
+      }),
+    ).toBe(true);
     const assignment = signedLookupAssignment(
       runtime.certificate,
       server.privateKey,

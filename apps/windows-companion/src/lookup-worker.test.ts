@@ -206,6 +206,9 @@ function runtimeFixture() {
     certificate: { bodyDigest: sha('c') } as SignedCompanionEnrollmentCertificate,
     pollEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH}`,
     resultEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH}`,
+    createSignedLaunchProof: () => {
+      throw new Error('The lookup test cannot create a launch proof.');
+    },
     createSignedHttpRequest: (path, contentDigest) =>
       ({ path, contentDigest }) as unknown as SignedCompanionHttpRequest,
     decodeAndVerifyAssignment: (candidate, assessedAt = now) => {

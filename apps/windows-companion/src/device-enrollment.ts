@@ -93,6 +93,11 @@ import {
   createWindowsCurrentUserDataProtector,
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
+import {
+  signCompanionLaunchProof,
+  type CompanionLaunchProofContext,
+  type SignedCompanionLaunchProof,
+} from './launch-proof.js';
 
 export const WINDOWS_COMPANION_VERSION = '0.1.10' as const;
 export const COMPANION_PAIRING_PACKAGE_PREFIX = AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX;
@@ -939,6 +944,12 @@ export interface CompanionDeviceSigningRuntime {
   readonly pollEndpoint: string;
   readonly resultEndpoint: string;
   readonly execution?: CompanionExecutionSigningRuntime;
+  createSignedLaunchProof(
+    context: Omit<
+      CompanionLaunchProofContext,
+      'certificateBodyDigest' | 'deviceKeyId' | 'devicePublicKeySpki'
+    >,
+  ): SignedCompanionLaunchProof;
   createSignedHttpRequest(
     path: CompanionDeviceRequestPath,
     contentDigest: string,
@@ -1412,6 +1423,24 @@ export async function loadCompanionDeviceSigningRuntime(
     pollEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH),
     resultEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH),
     ...(execution === undefined ? {} : { execution }),
+    createSignedLaunchProof(
+      context: Omit<
+        CompanionLaunchProofContext,
+        'certificateBodyDigest' | 'deviceKeyId' | 'devicePublicKeySpki'
+      >,
+    ) {
+      const proof = signCompanionLaunchProof(
+        {
+          ...context,
+          certificateBodyDigest: certificate.bodyDigest,
+          deviceKeyId: certificate.body.deviceKeyId,
+          devicePublicKeySpki: certificate.body.devicePublicKeySpki,
+        },
+        privateKey,
+      );
+      if (!proof) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+      return proof;
+    },
     createSignedHttpRequest,
     decodeAndVerifyAssignment,
     verifyLookupExchange,

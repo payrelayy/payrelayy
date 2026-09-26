@@ -48,6 +48,19 @@ A PID or executable path alone cannot close that gap: it does not prove the byte
 into memory or the process's inherited execution settings. A future launch-and-handshake proof
 must bind the live paired process to the independently verified installation before handoff
 issuance; a disk-only pass must never be treated as that proof.
+The new `observe-windows-companion-verified-launch.ps1` is a no-money operator diagnostic for a
+future attested companion release. It first runs the independent archive/installation preflight,
+refuses an already-running companion, launches only the verified Node and entrypoint, and waits
+for a fresh challenge response through a random local named pipe. After the Owner signs in to
+KemerBet manually, the paired process remeasures its installation tree and signs a transcript
+binding the challenge, certificate, release, tree, process identity, and times. The operator
+checks the OS child process, remeasures the tree again, and verifies the signature against the
+locally validated paired certificate. The proof and signature never go to a command line, log,
+chat, or remote endpoint. A failure stops only the new no-money child. This is useful process
+evidence, **not** memory attestation, production handoff issuance, database activation, or
+permission to execute a queued job. The current installed companion predates this contract, so
+the operator diagnostic must not be run against it; a separately reviewed attested release and
+the remaining activation operation are still necessary.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release

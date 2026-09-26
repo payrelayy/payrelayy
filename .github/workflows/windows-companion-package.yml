@@ -10,6 +10,7 @@ on:
       - 'apps/windows-companion/**'
       - 'packages/agent-platform-companion-contracts/**'
       - 'packages/agent-platform-companion-execution-contracts/**'
+      - 'packages/agent-platform-companion-activation-issuer/**'
       - 'packages/agent-platform-contracts/**'
       - 'packages/agent-platform-kemerbet/**'
       - 'scripts/build-windows-companion-package.ps1'

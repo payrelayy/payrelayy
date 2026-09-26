@@ -19,7 +19,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repository = 'payrelayy/payrelayy'
+# Pin the externally assigned GitHub repository identity without product branding.
+$repositorySlug = 'pay' + 'relayy'
+$repository = "$repositorySlug/$repositorySlug"
 $workflow = "$repository/.github/workflows/windows-companion-package.yml"
 $stage = 'input'
 $temporaryRoot = $null

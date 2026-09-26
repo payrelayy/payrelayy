@@ -79,8 +79,8 @@ End If
 If executionMode Then
   MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
     "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
-    "Automatic Deposit pilot mode is enabled for this exact paired account." & vbCrLf & _
-    "Each approved assignment is fixed at 25.00 ETB, requires a freshly verified receiver, keeps Notes empty, and permits only one Transfer request." & vbCrLf & _
+    "Automatic Deposit was requested for this paired account, but the internal switch alone cannot enable it." & vbCrLf & _
+    "A current signed local handoff, matching release and pairing, and separate server authority are required before any execution worker starts." & vbCrLf & _
     "A timeout, duplicate, changed page, or uncertain response stops the action and requires server reconciliation; it is never retried blindly.", 64, "FetanAgent Companion"
 Else
   MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _

@@ -281,6 +281,8 @@ describe('companion execution worker orchestration', () => {
     await runCompanionExecutionWorker({
       dataRoot: 'D:\\FetanAgent Companion Test',
       device: selected.device as never,
+      expectedActivationEpoch: '11',
+      handoffExpiresAtMs: Date.parse('2026-09-15T00:00:00.000Z'),
       session,
       signal: abort.signal,
       fetch: fetchImplementation as unknown as typeof fetch,
@@ -353,6 +355,8 @@ describe('companion execution worker orchestration', () => {
     await runCompanionExecutionWorker({
       dataRoot: 'D:\\FetanAgent Companion Test',
       device: selected.device as never,
+      expectedActivationEpoch: '11',
+      handoffExpiresAtMs: Date.parse('2026-09-15T00:00:00.000Z'),
       session,
       signal: abort.signal,
       fetch: fetchImplementation as unknown as typeof fetch,
@@ -408,6 +412,8 @@ describe('companion execution worker orchestration', () => {
     await runCompanionExecutionWorker({
       dataRoot: 'D:\\FetanAgent Companion Test',
       device: selected.device as never,
+      expectedActivationEpoch: '11',
+      handoffExpiresAtMs: Date.parse('2026-09-15T00:00:00.000Z'),
       session: session as never,
       signal: abort.signal,
       fetch: fetchImplementation as unknown as typeof fetch,
@@ -453,6 +459,8 @@ describe('companion execution worker orchestration', () => {
     await runCompanionExecutionWorker({
       dataRoot: 'D:\\FetanAgent Companion Test',
       device: selected.device as never,
+      expectedActivationEpoch: '11',
+      handoffExpiresAtMs: Date.parse('2026-09-15T00:00:00.000Z'),
       session: session as never,
       signal: abort.signal,
       fetch: fetchImplementation as unknown as typeof fetch,
@@ -465,5 +473,68 @@ describe('companion execution worker orchestration', () => {
     expect(events).toEqual(['failed_closed']);
     expect(fetchImplementation).not.toHaveBeenCalled();
     expect(session.executeExactOneUseDeposit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a signed assignment from another activation epoch before durable evidence or provider action', async () => {
+    const selected = fixture();
+    const abort = new AbortController();
+    const fetchImplementation = vi.fn(async () =>
+      response(201, {
+        enrollment: selected.chain.enrollment,
+        assignment: selected.chain.assignment,
+        playerId: selected.chain.playerId,
+        authority: null,
+        result: null,
+      }),
+    );
+    const session = { executeExactOneUseDeposit: vi.fn() };
+    const events: string[] = [];
+    await runCompanionExecutionWorker({
+      dataRoot: 'D:\\FetanAgent Companion Test',
+      device: selected.device as never,
+      expectedActivationEpoch: '12',
+      handoffExpiresAtMs: Date.parse('2026-09-15T00:00:00.000Z'),
+      session: session as never,
+      signal: abort.signal,
+      fetch: fetchImplementation as unknown as typeof fetch,
+      pollIntervalMs: 250,
+      report: (entry) => events.push(entry.state),
+    });
+    expect(events).toEqual(['waiting_for_assignment', 'failed_closed']);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(session.executeExactOneUseDeposit).not.toHaveBeenCalled();
+    expect(dependency.persistInitialAttempt).not.toHaveBeenCalled();
+    expect(dependency.persist).not.toHaveBeenCalled();
+  });
+
+  it('refuses a fresh assignment once the signed local handoff has expired', async () => {
+    const selected = fixture();
+    const abort = new AbortController();
+    const fetchImplementation = vi.fn(async () =>
+      response(201, {
+        enrollment: selected.chain.enrollment,
+        assignment: selected.chain.assignment,
+        playerId: selected.chain.playerId,
+        authority: null,
+        result: null,
+      }),
+    );
+    const session = { executeExactOneUseDeposit: vi.fn() };
+    const events: string[] = [];
+    await runCompanionExecutionWorker({
+      dataRoot: 'D:\\FetanAgent Companion Test',
+      device: selected.device as never,
+      expectedActivationEpoch: '11',
+      handoffExpiresAtMs: Date.parse('2026-09-14T00:00:05.000Z'),
+      session: session as never,
+      signal: abort.signal,
+      fetch: fetchImplementation as unknown as typeof fetch,
+      pollIntervalMs: 250,
+      report: (entry) => events.push(entry.state),
+    });
+    expect(events).toEqual(['waiting_for_assignment', 'failed_closed']);
+    expect(fetchImplementation).toHaveBeenCalledTimes(1);
+    expect(session.executeExactOneUseDeposit).not.toHaveBeenCalled();
+    expect(dependency.persistInitialAttempt).not.toHaveBeenCalled();
   });
 });

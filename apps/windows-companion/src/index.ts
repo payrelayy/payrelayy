@@ -12,6 +12,7 @@ import {
   loadCompanionDeviceSigningRuntime,
   type CompanionDeviceEnrollmentResult,
 } from './device-enrollment.js';
+import { loadWindowsCompanionExecutionHandoff } from './execution-activation-handoff.js';
 import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
@@ -152,21 +153,35 @@ export async function runWindowsCompanion(): Promise<void> {
       });
       reportEnrollment(enrollment);
       if (!enrollment.devicePaired) return;
-      const device = await loadCompanionDeviceSigningRuntime({
-        dataRoot: config.dataRoot,
-        ...(config.executionV2Enabled
-          ? {
-              execution: {
-                expectedPlatformAgentAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
-                trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
-                trustedExecutionSignerPublicKeySpki:
-                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
-                trustedExecutionSignerPublicKeySpkiSha256:
-                  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
-              },
-            }
-          : {}),
-      });
+      const baseDevice = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+      const handoff = config.executionV2Enabled
+        ? await loadWindowsCompanionExecutionHandoff(config.dataRoot, {
+            certificateBodyDigest: baseDevice.certificate.bodyDigest,
+            expectedAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
+            releaseSha: config.releaseSha,
+          })
+        : undefined;
+      const device = handoff
+        ? await loadCompanionDeviceSigningRuntime({
+            dataRoot: config.dataRoot,
+            execution: {
+              expectedPlatformAgentAccountId: handoff.accountId,
+              trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+              trustedExecutionSignerPublicKeySpki:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+              trustedExecutionSignerPublicKeySpkiSha256:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+            },
+          })
+        : baseDevice;
+      const remainingHandoffMs = handoff ? handoff.expiresAtMs - Date.now() : undefined;
+      if (remainingHandoffMs !== undefined && remainingHandoffMs <= 0) {
+        throw new Error('The signed Windows companion execution handoff expired.');
+      }
+      const handoffExpiryTimer =
+        remainingHandoffMs === undefined
+          ? undefined
+          : setTimeout(() => lookupAbort.abort(), remainingHandoffMs);
       const workers: Promise<void>[] = [
         runCompanionLookupWorker({
           dataRoot: config.dataRoot,
@@ -176,18 +191,24 @@ export async function runWindowsCompanion(): Promise<void> {
           report: reportLookup,
         }),
       ];
-      if (config.executionV2Enabled) {
+      if (handoff) {
         workers.push(
           runCompanionExecutionWorker({
             dataRoot: config.dataRoot,
             device,
+            expectedActivationEpoch: handoff.activationEpoch,
+            handoffExpiresAtMs: handoff.expiresAtMs,
             session,
             signal: lookupAbort.signal,
             report: reportExecution,
           }),
         );
       }
-      await Promise.all(workers);
+      try {
+        await Promise.all(workers);
+      } finally {
+        if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
+      }
     } catch {
       reportEnrollment(undefined);
     }

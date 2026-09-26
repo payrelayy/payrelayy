@@ -16,6 +16,15 @@ leases or executes a queue job. A provider action already past its one-use fence
 undone by disabling a session; its outcome must be reconciled before any later activation.
 This stop path is a prerequisite for review, **not** an authorization to arm or deploy execution.
 
+The Windows execution worker also requires a canonical local handoff signed by the pinned
+production execution signer. The handoff binds the short-lived request, paired certificate,
+agent account, release, claimed archive digest, and a non-sliding window of at most twelve hours.
+An environment flag and account ID alone cannot start the worker. The handoff expires locally and
+the worker stops polling then; the server's one-use database fences remain separately mandatory.
+The local handoff is **not yet issued by production** and is not independent proof that the
+installed archive matches its claimed digest. Release measurement, authorized issuance, and a
+reviewed local delivery path remain prerequisites before activation.
+
 ## Current paid-proof state
 
 The Owner stopped the last live TeleBirr pilot with `owner_stop`. A separately authorized,

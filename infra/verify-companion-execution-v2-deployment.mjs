@@ -5,6 +5,8 @@ const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 const [
   windowsConfig,
+  windowsEntry,
+  windowsHandoff,
   windowsWorker,
   localDeposit,
   providerRoute,
@@ -23,6 +25,8 @@ const [
   packageBuilder,
 ] = await Promise.all([
   read('apps/windows-companion/src/config.ts'),
+  read('apps/windows-companion/src/index.ts'),
+  read('apps/windows-companion/src/execution-activation-handoff.ts'),
   read('apps/windows-companion/src/execution-worker.ts'),
   read('apps/windows-companion/src/local-kemerbet-deposit.ts'),
   read('apps/windows-companion/src/provider-route.ts'),
@@ -52,7 +56,16 @@ for (const value of [executionKeyId, executionPublicKey, executionDigest]) {
 }
 assert.match(windowsConfig, /executionFlag !== undefined && executionFlag !== 'true'/u);
 assert.match(windowsConfig, /FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID/u);
+assert.match(windowsEntry, /loadWindowsCompanionExecutionHandoff/u);
+assert.match(windowsEntry, /certificateBodyDigest: baseDevice\.certificate\.bodyDigest/u);
+assert.match(windowsEntry, /if \(handoff\) \{/u);
+assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainingHandoffMs\)/u);
+assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
+assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
+assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);
+assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
+assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);
 assert.match(windowsWorker, /recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption/u);
 assert.match(windowsWorker, /signed_result_recorded_reconciliation_required/u);
 assert.match(windowsWorker, /authorityRequestStarted = true;[\s\S]*?postTimed/u);

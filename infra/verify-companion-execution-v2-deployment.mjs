@@ -35,6 +35,8 @@ const [
   operatorReleasePreflight,
   operatorLaunchPreflight,
   operatorClaimBindingTest,
+  operatorLocalLaunchChannel,
+  operatorIssuerPackage,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -67,6 +69,8 @@ const [
   read('infra/operations/verify-windows-companion-release-installation.ps1'),
   read('infra/operations/observe-windows-companion-verified-launch.ps1'),
   read('scripts/test-companion-activation-claim-binding.ps1'),
+  read('packages/agent-platform-companion-activation-issuer/src/guarded-local-launch-channel.ts'),
+  read('packages/agent-platform-companion-activation-issuer/package.json'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -103,6 +107,13 @@ assert.match(
 assert.match(windowsLaunchChannel, /FETANAGENT_GUARDED_LAUNCH_PERMIT_V1\|/u);
 assert.match(windowsLaunchChannel, /received === expectedPermit/u);
 assert.match(windowsLaunchChannel, /proof\.body\.challengeDigest !==/u);
+assert.match(operatorIssuerPackage, /\.\/guarded-local-launch-channel/u);
+assert.match(operatorLocalLaunchChannel, /createServer\(/u);
+assert.match(operatorLocalLaunchChannel, /MAX_PROOF_BYTES = 2_048/u);
+assert.match(operatorLocalLaunchChannel, /MAX_PROOF_WAIT_MS = 90_000/u);
+assert.match(operatorLocalLaunchChannel, /server\.once\('error', fail\)/u);
+assert.match(operatorLocalLaunchChannel, /socket\?\.destroy\(\)/u);
+assert.doesNotMatch(operatorLocalLaunchChannel, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
 assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
 assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);
 assert.match(windowsEntry, /stage === 'execution_handoff' \|\| stage === 'launch_proof'/u);

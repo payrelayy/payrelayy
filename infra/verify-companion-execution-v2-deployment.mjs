@@ -134,7 +134,7 @@ assert.match(operatorLaunchPreflight, /Start-Process -FilePath \$node/u);
 assert.match(operatorLaunchPreflight, /-WindowStyle Hidden/u);
 assert.match(
   operatorLaunchPreflight,
-  /COMPANION_VERIFIED_LAUNCH_OBSERVED; execution remains disabled/u,
+  /COMPANION_VERIFIED_LAUNCH_OBSERVED; this launch did not activate execution/u,
 );
 assert.doesNotMatch(
   operatorLaunchPreflight,

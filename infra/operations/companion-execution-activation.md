@@ -60,7 +60,9 @@ chat, or remote endpoint. A failure stops only the new no-money child. This is u
 evidence, **not** memory attestation, production handoff issuance, database activation, or
 permission to execute a queued job. The current installed companion predates this contract, so
 the operator diagnostic must not be run against it; a separately reviewed attested release and
-the remaining activation operation are still necessary.
+the remaining activation operation are still necessary. This no-money process proof cannot be
+reused after a restart into an execution-enabled process; that process needs its own fresh proof
+before any server-side activation.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release

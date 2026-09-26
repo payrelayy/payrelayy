@@ -158,7 +158,7 @@ try {
   }
   if ($child.HasExited) { throw 'The proved companion process already stopped.' }
   $proved = $true
-  'COMPANION_VERIFIED_LAUNCH_OBSERVED; execution remains disabled.'
+  'COMPANION_VERIFIED_LAUNCH_OBSERVED; this launch did not activate execution.'
 } catch {
   throw "Verified companion launch failed at $stage; no execution was activated."
 } finally {

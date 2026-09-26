@@ -16,6 +16,7 @@ import {
 } from './device-enrollment.js';
 import { loadWindowsCompanionExecutionHandoff } from './execution-activation-handoff.js';
 import {
+  deliverCompanionExecutionLaunchProofAndAwaitPermit,
   deliverCompanionLaunchProof,
   takeCompanionLaunchProofRequest,
 } from './launch-proof-channel.js';
@@ -139,7 +140,10 @@ function reportExecution(event: CompanionExecutionWorkerEvent): void {
 
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
-  const launchProofRequest = takeCompanionLaunchProofRequest();
+  const launchProofRequest = takeCompanionLaunchProofRequest(
+    process.env,
+    config.executionV2Enabled,
+  );
   console.info(
     JSON.stringify({
       component: 'fetanagent_windows_companion',
@@ -197,16 +201,23 @@ export async function runWindowsCompanion(): Promise<void> {
           startedAt: new Date(performance.timeOrigin).toISOString(),
           observedAt: new Date().toISOString(),
         };
-        const proof = handoff
-          ? baseDevice.createSignedExecutionLaunchProof({
-              ...processContext,
-              requestKey: handoff.requestKey,
-              activationEpoch: handoff.activationEpoch,
-              platformAgentAccountId: handoff.accountId,
-              executionHandoffSha256: handoff.handoffSha256,
-            })
-          : baseDevice.createSignedLaunchProof(processContext);
-        await deliverCompanionLaunchProof(launchProofRequest, proof);
+        if (handoff) {
+          const proof = baseDevice.createSignedExecutionLaunchProof({
+            ...processContext,
+            requestKey: handoff.requestKey,
+            activationEpoch: handoff.activationEpoch,
+            platformAgentAccountId: handoff.accountId,
+            executionHandoffSha256: handoff.handoffSha256,
+          });
+          await deliverCompanionExecutionLaunchProofAndAwaitPermit(
+            launchProofRequest,
+            proof,
+            lookupAbort.signal,
+          );
+        } else {
+          const proof = baseDevice.createSignedLaunchProof(processContext);
+          await deliverCompanionLaunchProof(launchProofRequest, proof);
+        }
       }
       const device = handoff
         ? await loadCompanionDeviceSigningRuntime({

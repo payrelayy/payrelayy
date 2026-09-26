@@ -84,6 +84,14 @@ separation, **not** independent proof that the OS child loaded the handoff or ru
 mode: a future protected process adapter must inspect that state and validate the handoff
 against the production signer. The current no-money launch diagnostic cannot be reused as that
 adapter, and no activation or deployment occurred from this change.
+An execution-enabled companion now requires a fresh local launch challenge and pipe before it
+opens the KemerBet session. After signing its v2 process proof, it waits for a permit bound to
+the exact proof bytes; a missing, malformed, closed, aborted, or timed-out response prevents the
+lookup and execution workers from starting. The v1 no-money diagnostic still sends its proof
+without a permit. This is a companion-side stop gate only: the protected v2 pipe launcher must
+still independently verify the installed release, live OS process, signed handoff, and paired
+certificate, then consume the one-use database request before returning a permit. No existing
+operator script sends that permit, and the permit itself grants no database or provider authority.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release
@@ -201,7 +209,7 @@ handoff digest and deliberately refuses retrofit if an older witness already exi
 read-only guarded-process observer now validates the canonical local signed handoff,
 paired v2 proof, and an OS-reported PID/image/command line/start time through a
 source-pinned Windows inspection. It cannot receive a proof or start a process:
-the protected challenge-pipe launcher and production invocation are still absent.
+the protected v2 challenge-pipe launcher and production invocation are still absent.
 Neither this adapter nor its migration is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production

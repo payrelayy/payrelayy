@@ -104,7 +104,7 @@ function transcript(body: CompanionLaunchProofBody): Buffer {
   return Buffer.from(`${COMPANION_LAUNCH_PROOF_PURPOSE}\0${JSON.stringify(body)}`, 'utf8');
 }
 
-/** Local process evidence only. This never arms execution or replaces archive attestation. */
+/** Shared process evidence only. This never arms execution or replaces archive attestation. */
 export function signCompanionLaunchProof(
   context: CompanionLaunchProofContext,
   devicePrivateKey: KeyObject,

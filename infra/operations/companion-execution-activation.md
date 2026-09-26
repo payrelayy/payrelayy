@@ -63,6 +63,9 @@ the operator diagnostic must not be run against it; a separately reviewed attest
 the remaining activation operation are still necessary. This no-money process proof cannot be
 reused after a restart into an execution-enabled process; that process needs its own fresh proof
 before any server-side activation.
+Its signature verifier now lives in the shared execution contracts so a future production issuer
+can evaluate the same transcript against a database-trusted certificate. No production service
+currently accepts this proof or turns it into financial authority.
 The shared contract now has a pure, key-bound handoff signer that emits the canonical form
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release

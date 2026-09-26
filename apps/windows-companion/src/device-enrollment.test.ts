@@ -39,6 +39,7 @@ import {
   signExecutionAssignment,
   signExecutionEnrollment,
   signOneUseActionAuthority,
+  verifyCompanionLaunchProof,
   type AuthoritativeExecutionStatusBody,
   type ExecutionAssignmentBody,
   type ExecutionEnrollmentBody,
@@ -57,7 +58,6 @@ import {
   loadCompanionDeviceSigningRuntime,
   restoreCompanionDeviceEnrollment,
 } from './device-enrollment.js';
-import { verifyCompanionLaunchProof } from './launch-proof.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
 const roots: string[] = [];

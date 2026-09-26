@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 const [
+  executionContracts,
   windowsConfig,
   windowsEntry,
   windowsHandoff,
@@ -26,6 +27,7 @@ const [
   emergencyStopOperation,
   packageBuilder,
 ] = await Promise.all([
+  read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
   read('apps/windows-companion/src/index.ts'),
   read('apps/windows-companion/src/execution-activation-handoff.ts'),
@@ -67,6 +69,9 @@ assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainin
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
 assert.match(windowsEntry, /stage === 'execution_handoff' \? \{ moneyMoved: false \} : \{\}/u);
 assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
+assert.match(executionContracts, /export function signCompanionExecutionActivationHandoff\(/u);
+assert.match(executionContracts, /signer\.publicKey\.digest !== signerDigest/u);
+assert.match(executionContracts, /COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS/u);
 assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
 assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);
 assert.match(windowsHandoff, /body\.companionInstallationTreeSha256/u);

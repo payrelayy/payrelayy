@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { signCompanionExecutionActivationHandoff } from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import {
   COMPANION_EXECUTION_HANDOFF_PURPOSE,
   loadWindowsCompanionExecutionHandoff,
@@ -77,6 +79,45 @@ afterEach(async () => {
 });
 
 describe('signed Windows companion execution activation handoff', () => {
+  it('accepts only a canonical, key-bound handoff signed by the shared contract', () => {
+    const body = signedHandoff().body;
+    const handoff = signCompanionExecutionActivationHandoff(
+      body,
+      signer.privateKey,
+      signerContext.trustedSignerKeyId,
+      signerContext.trustedSignerPublicKeySpkiSha256,
+    );
+    expect(handoff).toBeDefined();
+    expect(Object.keys(handoff?.body ?? {})).toEqual(Object.keys(body));
+    expect(verifyWindowsCompanionExecutionHandoff(handoff, signerContext).requestKey).toBe(
+      body.requestKey,
+    );
+    expect(
+      signCompanionExecutionActivationHandoff(
+        { ...body, expiresAt: '2026-09-27T00:00:00.001Z' },
+        signer.privateKey,
+        signerContext.trustedSignerKeyId,
+        signerContext.trustedSignerPublicKeySpkiSha256,
+      ),
+    ).toBeUndefined();
+    expect(
+      signCompanionExecutionActivationHandoff(
+        { ...body, extraAuthority: true },
+        signer.privateKey,
+        signerContext.trustedSignerKeyId,
+        signerContext.trustedSignerPublicKeySpkiSha256,
+      ),
+    ).toBeUndefined();
+    expect(
+      signCompanionExecutionActivationHandoff(
+        body,
+        signer.privateKey,
+        signerContext.trustedSignerKeyId,
+        `sha256:${'0'.repeat(64)}`,
+      ),
+    ).toBeUndefined();
+  });
+
   it('requires the exact signer, paired certificate, account, release, and twelve-hour window', () => {
     const valid = signedHandoff();
     expect(verifyWindowsCompanionExecutionHandoff(valid, signerContext)).toEqual({

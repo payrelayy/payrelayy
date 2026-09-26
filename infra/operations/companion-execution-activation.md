@@ -28,6 +28,10 @@ handoff. The handoff's archive digest remains a signed claim: only an independen
 attestation can bind it to the published ZIP. The local handoff is **not yet issued by production**;
 independent archive attestation, authorized issuance, and a reviewed local delivery path remain
 prerequisites before activation.
+The shared contract now has a pure, key-bound handoff signer that emits the canonical form
+accepted by the Windows verifier. It has no endpoint, production key access, database transition,
+or delivery mechanism. A signature over claimed release digests is not independent release
+attestation and does not itself arm execution.
 
 ## Current paid-proof state
 

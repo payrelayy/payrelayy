@@ -10,8 +10,34 @@ RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/sql-integration-tests/package.json ./packages/sql-integration-tests/package.json
+COPY packages/agent-platform-companion-contracts/package.json \
+  ./packages/agent-platform-companion-contracts/package.json
+COPY packages/agent-platform-companion-execution-contracts/package.json \
+  ./packages/agent-platform-companion-execution-contracts/package.json
+COPY packages/agent-platform-companion-activation-issuer/package.json \
+  ./packages/agent-platform-companion-activation-issuer/package.json
 
 RUN pnpm install --frozen-lockfile --filter @fetanagent/sql-integration-tests...
+
+# Build only the new operator-only adapter and its pure type dependencies for
+# the disposable test image. None of these packages supplies a credential.
+FROM dependencies AS issuer-build
+
+COPY tsconfig.base.json ./
+COPY packages/agent-platform-companion-contracts/tsconfig.json \
+  ./packages/agent-platform-companion-contracts/tsconfig.json
+COPY packages/agent-platform-companion-contracts/src \
+  ./packages/agent-platform-companion-contracts/src
+COPY packages/agent-platform-companion-execution-contracts/tsconfig.json \
+  ./packages/agent-platform-companion-execution-contracts/tsconfig.json
+COPY packages/agent-platform-companion-execution-contracts/src \
+  ./packages/agent-platform-companion-execution-contracts/src
+COPY packages/agent-platform-companion-activation-issuer/tsconfig.json \
+  ./packages/agent-platform-companion-activation-issuer/tsconfig.json
+COPY packages/agent-platform-companion-activation-issuer/src \
+  ./packages/agent-platform-companion-activation-issuer/src
+
+RUN pnpm --filter @fetanagent/agent-platform-companion-activation-issuer... run build
 
 # This content-addressed stage supplies the exact psql 17.4 client. Its server entrypoint is
 # replaced below; no PostgreSQL daemon or data directory is used by the test runner.
@@ -40,6 +66,10 @@ RUN test "$(node --version)" = 'v22.17.1' \
 COPY --from=dependencies /workspace/node_modules ./node_modules
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/sql-integration-tests ./packages/sql-integration-tests
+COPY --from=issuer-build /workspace/packages/agent-platform-companion-activation-issuer/package.json \
+  ./packages/agent-platform-companion-activation-issuer/package.json
+COPY --from=issuer-build /workspace/packages/agent-platform-companion-activation-issuer/dist \
+  ./packages/agent-platform-companion-activation-issuer/dist
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY infra/sql/staging-runtimes-enable-continuous.sql ./infra/sql/staging-runtimes-enable-continuous.sql
 COPY infra/sql/staging-telebirr-shadow-verifier-provision.sql \

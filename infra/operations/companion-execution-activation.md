@@ -178,9 +178,15 @@ and a non-activating attestation issuer core. The core generates a fresh challen
 separate database, published-release, and OS-observed paired-process adapters, re-reads the
 database identity, verifies the signed proof against the database key, and sends only digest
 witness fields to a retention adapter. This does not make caller-provided inputs trusted: no
-production adapters, authenticated proof transport, or entry point exist yet. It cannot arm the
-companion, consume the request, or check financial state. A future production consumer must
-supply those authenticated sources and complete the atomic credential lifecycle below.
+production workflow, authenticated proof transport, or entry point exists yet. A separate
+operator-only package now provides one parameterized, read-only database snapshot adapter for
+the request, current identity, and paired certificate. It requires an injected short-lived
+`postgres` session; it does not provide a credential or connection and must never run inside
+the always-on companion or an application role. The published-release, observed-process, and
+attestation-retention adapters are still absent. Neither package can arm the companion,
+consume the request, or establish the complete financial preflight. A future production
+consumer must supply the remaining authenticated sources and complete the atomic credential
+lifecycle below.
 
 The `companion_execution_atomic_activation` migration adds a Postgres-only, one-use consuming
 transition and an append-only attestation digest record. In a disposable database the transition

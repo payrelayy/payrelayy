@@ -1,4 +1,5 @@
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
@@ -155,11 +156,15 @@ export async function runWindowsCompanion(): Promise<void> {
       if (!enrollment.devicePaired) return;
       const baseDevice = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
       const handoff = config.executionV2Enabled
-        ? await loadWindowsCompanionExecutionHandoff(config.dataRoot, {
-            certificateBodyDigest: baseDevice.certificate.bodyDigest,
-            expectedAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
-            releaseSha: config.releaseSha,
-          })
+        ? await loadWindowsCompanionExecutionHandoff(
+            config.dataRoot,
+            {
+              certificateBodyDigest: baseDevice.certificate.bodyDigest,
+              expectedAccountId: config.executionV2ExpectedPlatformAgentAccountId!,
+              releaseSha: config.releaseSha,
+            },
+            resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
+          )
         : undefined;
       const device = handoff
         ? await loadCompanionDeviceSigningRuntime({

@@ -7,6 +7,7 @@ const [
   windowsConfig,
   windowsEntry,
   windowsHandoff,
+  windowsInstallationTree,
   windowsWorker,
   localDeposit,
   providerRoute,
@@ -27,6 +28,7 @@ const [
   read('apps/windows-companion/src/config.ts'),
   read('apps/windows-companion/src/index.ts'),
   read('apps/windows-companion/src/execution-activation-handoff.ts'),
+  read('apps/windows-companion/src/installation-tree.ts'),
   read('apps/windows-companion/src/execution-worker.ts'),
   read('apps/windows-companion/src/local-kemerbet-deposit.ts'),
   read('apps/windows-companion/src/provider-route.ts'),
@@ -63,6 +65,12 @@ assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainin
 assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
 assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
 assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);
+assert.match(windowsHandoff, /body\.companionInstallationTreeSha256/u);
+assert.match(windowsHandoff, /verifyWindowsCompanionInstallationTree\(/u);
+assert.match(windowsInstallationTree, /measureWindowsCompanionInstallationTree/u);
+assert.match(windowsInstallationTree, /INSTALLATION_TREE_SHA256/u);
+assert.match(packageBuilder, /installation-tree-cli\.js/u);
+assert.match(packageBuilder, /extractedTreeDigest -ne \$treeDigest/u);
 assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
 assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);

@@ -21,9 +21,13 @@ production execution signer. The handoff binds the short-lived request, paired c
 agent account, release, claimed archive digest, and a non-sliding window of at most twelve hours.
 An environment flag and account ID alone cannot start the worker. The handoff expires locally and
 the worker stops polling then; the server's one-use database fences remain separately mandatory.
-The local handoff is **not yet issued by production** and is not independent proof that the
-installed archive matches its claimed digest. Release measurement, authorized issuance, and a
-reviewed local delivery path remain prerequisites before activation.
+The portable package now includes a deterministic installation-tree digest. Before accepting a
+signed handoff, the companion measures all installed package files, including its runtime and
+release marker, and requires the measured digest to match both the package marker and the signed
+handoff. The handoff's archive digest remains a signed claim: only an independent release
+attestation can bind it to the published ZIP. The local handoff is **not yet issued by production**;
+independent archive attestation, authorized issuance, and a reviewed local delivery path remain
+prerequisites before activation.
 
 ## Current paid-proof state
 
@@ -111,7 +115,8 @@ Before any money-capable release, one separately reviewed change must provide al
 following as one fail-closed operation, with disposable-PostgreSQL and end-to-end tests:
 
 1. Connect the inert one-use request to an authenticated Owner action and independently attest
-   the exact installed release/archive. Recheck the pilot, epoch, certificate, and short
+   the exact published archive and installed measured release tree. Recheck the pilot, epoch,
+   certificate, and short
    non-sliding expiry at consumption; a stopped or expired pilot must be rejected.
 2. A database-owned activation transition that locks the epoch, sorted switch rows, pilot,
    certificate, and execution control in the established order; rechecks every lineage and

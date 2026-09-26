@@ -10,12 +10,14 @@ import {
   loadWindowsCompanionExecutionHandoff,
   verifyWindowsCompanionExecutionHandoff,
 } from './execution-activation-handoff.js';
+import { measureWindowsCompanionInstallationTree } from './installation-tree.js';
 
 const ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
 const ACCOUNT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const CERTIFICATE_DIGEST = `sha256:${'b'.repeat(64)}`;
 const RELEASE = 'c'.repeat(40);
 const ARCHIVE_DIGEST = `sha256:${'d'.repeat(64)}`;
+const TREE_DIGEST = `sha256:${'e'.repeat(64)}`;
 const now = new Date('2026-09-26T12:00:00.000Z');
 
 const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -41,6 +43,7 @@ function signedHandoff(overrides: Record<string, unknown> = {}) {
     noMoneyCertificateBodyDigest: CERTIFICATE_DIGEST,
     companionReleaseSha: RELEASE,
     companionArchiveSha256: ARCHIVE_DIGEST,
+    companionInstallationTreeSha256: TREE_DIGEST,
     issuedAt: '2026-09-26T11:59:00.000Z',
     notBefore: '2026-09-26T11:59:00.000Z',
     expiresAt: '2026-09-26T23:59:00.000Z',
@@ -80,6 +83,7 @@ describe('signed Windows companion execution activation handoff', () => {
       accountId: ACCOUNT,
       activationEpoch: '1',
       archiveSha256: ARCHIVE_DIGEST,
+      installationTreeSha256: TREE_DIGEST,
       expiresAtMs: Date.parse('2026-09-26T23:59:00.000Z'),
       requestKey: valid.body.requestKey,
     });
@@ -126,18 +130,41 @@ describe('signed Windows companion execution activation handoff', () => {
     temporaryRoots.push(root);
     const directory = resolve(root, 'execution-v2');
     const file = resolve(directory, 'activation-handoff.v1.json');
+    const installationRoot = resolve(root, 'installation');
     await mkdir(directory);
-    await expect(loadWindowsCompanionExecutionHandoff(root, signerContext)).rejects.toThrow();
-    const handoff = signedHandoff();
+    await mkdir(installationRoot);
+    await writeFile(resolve(installationRoot, 'RELEASE_SHA'), RELEASE);
+    await writeFile(resolve(installationRoot, 'app.js'), 'reviewed release');
+    const treeDigest = await measureWindowsCompanionInstallationTree(installationRoot);
+    await writeFile(resolve(installationRoot, 'INSTALLATION_TREE_SHA256'), treeDigest);
+    await expect(
+      loadWindowsCompanionExecutionHandoff(root, signerContext, installationRoot),
+    ).rejects.toThrow();
+    const handoff = signedHandoff({ companionInstallationTreeSha256: treeDigest });
     await writeFile(file, JSON.stringify(handoff), { flag: 'wx' });
-    await expect(loadWindowsCompanionExecutionHandoff(root, signerContext)).resolves.toEqual({
+    await expect(
+      loadWindowsCompanionExecutionHandoff(root, signerContext, installationRoot),
+    ).resolves.toEqual({
       accountId: ACCOUNT,
       activationEpoch: '1',
       archiveSha256: ARCHIVE_DIGEST,
+      installationTreeSha256: treeDigest,
       expiresAtMs: Date.parse('2026-09-26T23:59:00.000Z'),
       requestKey: handoff.body.requestKey,
     });
+    await writeFile(resolve(installationRoot, 'app.js'), 'modified release');
+    await expect(
+      loadWindowsCompanionExecutionHandoff(root, signerContext, installationRoot),
+    ).rejects.toThrow();
+    await writeFile(resolve(installationRoot, 'app.js'), 'reviewed release');
+    await writeFile(resolve(installationRoot, 'INSTALLATION_TREE_SHA256'), TREE_DIGEST);
+    await expect(
+      loadWindowsCompanionExecutionHandoff(root, signerContext, installationRoot),
+    ).rejects.toThrow();
+    await writeFile(resolve(installationRoot, 'INSTALLATION_TREE_SHA256'), treeDigest);
     await writeFile(file, `${JSON.stringify(handoff)}\n`);
-    await expect(loadWindowsCompanionExecutionHandoff(root, signerContext)).rejects.toThrow();
+    await expect(
+      loadWindowsCompanionExecutionHandoff(root, signerContext, installationRoot),
+    ).rejects.toThrow();
   });
 });

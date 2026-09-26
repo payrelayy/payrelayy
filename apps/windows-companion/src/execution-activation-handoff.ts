@@ -7,6 +7,7 @@ import {
   PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
   PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
 } from './config.js';
+import { verifyWindowsCompanionInstallationTree } from './installation-tree.js';
 
 const HANDOFF_FILE = 'activation-handoff.v1.json';
 export const COMPANION_EXECUTION_HANDOFF_PURPOSE =
@@ -24,6 +25,7 @@ const BODY_KEYS = [
   'noMoneyCertificateBodyDigest',
   'companionReleaseSha',
   'companionArchiveSha256',
+  'companionInstallationTreeSha256',
   'issuedAt',
   'notBefore',
   'expiresAt',
@@ -39,6 +41,7 @@ export interface WindowsCompanionExecutionHandoff {
   readonly accountId: string;
   readonly activationEpoch: string;
   readonly archiveSha256: string;
+  readonly installationTreeSha256: string;
   readonly expiresAtMs: number;
   readonly requestKey: string;
 }
@@ -114,6 +117,8 @@ export function verifyWindowsCompanionExecutionHandoff(
       body.companionReleaseSha !== context.releaseSha ||
       typeof body.companionArchiveSha256 !== 'string' ||
       !DIGEST.test(body.companionArchiveSha256) ||
+      typeof body.companionInstallationTreeSha256 !== 'string' ||
+      !DIGEST.test(body.companionInstallationTreeSha256) ||
       issuedAtMs === undefined ||
       notBeforeMs === undefined ||
       expiresAtMs === undefined ||
@@ -160,6 +165,7 @@ export function verifyWindowsCompanionExecutionHandoff(
       accountId: body.platformAgentAccountId,
       activationEpoch: body.activationEpoch,
       archiveSha256: body.companionArchiveSha256,
+      installationTreeSha256: body.companionInstallationTreeSha256,
       expiresAtMs,
       requestKey: body.requestKey,
     });
@@ -171,6 +177,7 @@ export function verifyWindowsCompanionExecutionHandoff(
 export async function loadWindowsCompanionExecutionHandoff(
   dataRoot: string,
   context: WindowsCompanionExecutionHandoffContext,
+  installationRoot: string,
 ): Promise<WindowsCompanionExecutionHandoff> {
   try {
     const root = await realpath(dataRoot);
@@ -201,7 +208,13 @@ export async function loadWindowsCompanionExecutionHandoff(
     ) {
       return unavailable();
     }
-    return verifyWindowsCompanionExecutionHandoff(JSON.parse(raw), context);
+    const handoff = verifyWindowsCompanionExecutionHandoff(JSON.parse(raw), context);
+    await verifyWindowsCompanionInstallationTree(
+      installationRoot,
+      context.releaseSha,
+      handoff.installationTreeSha256,
+    );
+    return handoff;
   } catch {
     return unavailable();
   }

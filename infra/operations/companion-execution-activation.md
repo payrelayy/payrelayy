@@ -173,6 +173,14 @@ credential, no local Windows opt-in, and no job lease in this migration. Do not 
 preparation routine in production until the remaining activation operation, transport, local
 handoff, and emergency-stop pieces are reviewed together.
 
+The shared execution-contracts package also has a pure, non-activating evidence consistency
+check. It binds the immutable request and current database identity to the database-trusted
+paired public key, independently measured release, and a fresh signed OS-process observation.
+It cannot prove that its inputs came from those trusted sources, issue a challenge, consume the
+request, or check financial state. A future production consumer must supply those authenticated
+inputs and complete the atomic database and credential lifecycle below; a true result alone is
+never an activation decision.
+
 ## Missing activation implementation
 
 Before any money-capable release, one separately reviewed change must provide all of the

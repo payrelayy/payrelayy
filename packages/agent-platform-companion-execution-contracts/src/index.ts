@@ -8,6 +8,7 @@ import {
 import { isProxy } from 'node:util/types';
 
 export * from './launch-proof.js';
+export * from './activation-evidence.js';
 
 import {
   decodeSignedCompanionEnrollmentCertificate,

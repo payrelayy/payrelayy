@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CompanionDeviceBridgeConnectionConfig } from './config.js';
+import type {
+  CompanionDeviceBridgeConnectionConfig,
+  CompanionExecutionBridgeConnectionConfig,
+} from './config.js';
 import { RELEASE_COMPANION_PAIRING_SQL } from './postgres-state.js';
 import {
   COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL,
@@ -9,6 +12,7 @@ import {
   CompanionDeviceBridgePostgresUnavailableError,
   assertCompanionDeviceBridgeCatalogPreflight,
   createCompanionDeviceBridgePostgresRuntime,
+  createCompanionExecutionPostgresRuntime,
 } from './postgres-runtime.js';
 
 const connection: CompanionDeviceBridgeConnectionConfig = {
@@ -18,6 +22,11 @@ const connection: CompanionDeviceBridgeConnectionConfig = {
   password: 'synthetic-password-123456',
   port: 5432,
   user: 'fetanagent_companion_device_bridge_runtime',
+};
+const executionConnection: CompanionExecutionBridgeConnectionConfig = {
+  ...connection,
+  host: 'db.spzpiyxheappsfyswewl.supabase.co',
+  user: 'fetanagent_companion_execution_bridge_runtime',
 };
 
 function passingPreflight() {
@@ -113,7 +122,7 @@ describe('companion device bridge PostgreSQL runtime', () => {
     await expect(runtime.ready()).resolves.toBe(false);
   });
 
-  it('requires the expanded exact catalog only when the separate execution signer is enabled', async () => {
+  it('requires exactly seven execution procedures on the separate execution login', async () => {
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
       'fetanagent_companion_execution_bridge',
     );
@@ -123,7 +132,32 @@ describe('companion device bridge PostgreSQL runtime', () => {
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
       'execution_group_has_no_upstream_membership',
     );
-    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 14');
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 7');
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
+      "current_user = 'fetanagent_companion_execution_bridge_runtime'",
+    );
+    expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).not.toContain(
+      "pg_catalog.to_regprocedure('app.claim_agent_platform_companion_pairing",
+    );
+    for (const functionName of [
+      'claim_agent_platform_companion_pairing',
+      'complete_agent_platform_companion_pairing',
+      'release_agent_platform_companion_pairing',
+      'claim_agent_platform_companion_lookup_assignment',
+      'complete_agent_platform_companion_lookup_assignment',
+      'release_agent_platform_companion_lookup_assignment',
+      'accept_agent_platform_companion_lookup_result',
+    ]) {
+      expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).not.toContain(
+        `pg_catalog.to_regprocedure('app.${functionName}`,
+      );
+    }
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+      "where member.rolname = 'fetanagent_companion_execution_bridge_runtime'",
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      "where member.rolname = 'fetanagent_companion_device_bridge_runtime'\n            and membership.inherit_option\n            and not membership.set_option\n            and not membership.admin_option\n        ) <= 1",
+    );
     expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.claim_agent_platform_companion_execution_assignment',
     );
@@ -135,14 +169,23 @@ describe('companion device bridge PostgreSQL runtime', () => {
     );
 
     const fake = fakePool();
-    const runtime = await createCompanionDeviceBridgePostgresRuntime(
-      connection,
+    let observedConfig: Readonly<Record<string, unknown>> | undefined;
+    const runtime = await createCompanionExecutionPostgresRuntime(
+      executionConnection,
       'companion_server_signer_2026_01',
+      'companion_execution_signer_2026_01',
       {
-        createPool: () => fake.pool,
-        executionSignerKeyId: 'companion_execution_signer_2026_01',
+        createPool: (config) => {
+          observedConfig = config;
+          return fake.pool;
+        },
       },
     );
+    expect(observedConfig).toMatchObject({
+      application_name: 'fetanagent_companion_execution_bridge',
+      max: 1,
+      user: 'fetanagent_companion_execution_bridge_runtime',
+    });
     expect(fake.query.mock.calls.map(([sql]) => sql)).toEqual([
       COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL,
     ]);

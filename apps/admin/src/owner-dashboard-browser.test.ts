@@ -372,6 +372,56 @@ function ownerBrowserHarness(
   };
 }
 
+describe('Owner execution readiness preview', () => {
+  const readiness = {
+    activationAvailable: false,
+    cancelledUntouchedJobs: 1,
+    companionExecutionDisabled: true,
+    customerResolutionPending: true,
+    effectiveTrustedEpochAvailable: false,
+    executionCapabilityDormant: true,
+    financialSwitchesDisabled: true,
+    identifiersRedacted: true,
+    nextAction: 'customer_resolution_pending',
+    openExecutionReviews: 1,
+    openJobs: 0,
+    pilotState: 'stopped',
+    readOnly: true,
+    untouchedQueuedJobs: 0,
+  } as const;
+
+  it('shows customer resolution and disabled execution, with no mutation request', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/companion-execution/readiness'
+          ? response(200, { readiness })
+          : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#execution-readiness-status').textContent).toContain(
+      'customer resolution',
+    );
+    const facts = browser.element('#execution-readiness-facts').children as FakeElement[];
+    expect(facts.map((fact) => fact.textContent)).toContain('Disabled');
+    expect(facts.map((fact) => fact.textContent)).toContain('Unavailable');
+    expect(
+      browser.fetchCalls.filter(({ url }) => url === '/v1/owner/companion-execution/readiness'),
+    ).toMatchObject([{ init: { method: 'GET' } }]);
+  });
+
+  it('hides inconsistent or identifier-bearing responses', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/companion-execution/readiness'
+          ? response(200, { readiness: { ...readiness, activationAvailable: true } })
+          : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#execution-readiness-facts').children).toHaveLength(0);
+    expect(browser.element('#execution-readiness-status').textContent).toContain('unavailable');
+  });
+});
+
 describe('Owner customer support contact', () => {
   const contact = (telegramUsername: string | null = null, revision = 0) => ({
     supportContact: {

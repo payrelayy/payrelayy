@@ -5,6 +5,10 @@ import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
+import {
+  OwnerCompanionExecutionReadinessRejectedError,
+  OwnerCompanionExecutionReadinessUnavailableError,
+} from './owner-companion-execution-readiness.js';
 
 import {
   OwnerDepositIntakeRejectedError,
@@ -1998,6 +2002,31 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner current private live-deposit pilot status is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/companion-execution/readiness',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).length !== 0) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const readiness =
+          await dependencies.runtime.companionExecutionReadiness?.status(authUserId);
+        if (!readiness) throw new OwnerCompanionExecutionReadinessUnavailableError();
+        return reply.code(200).send({ readiness });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerCompanionExecutionReadinessRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner companion execution readiness is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

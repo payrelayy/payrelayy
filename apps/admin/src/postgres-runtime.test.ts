@@ -79,6 +79,19 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     }
   });
 
+  it('accepts the display-only readiness function before and after its migration, but no extra grants', () => {
+    const signature = 'app.get_owner_companion_execution_readiness(uuid)';
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      `to_regprocedure('${signature}')::oid, 'execute'), true)`,
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      `+ (to_regprocedure('${signature}') is not null)::integer`,
+    );
+  });
+
   it('allows only the reviewed Owner procedures including read-only connection status and support configuration', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.list_owner_player_registration_requests(uuid,integer)',

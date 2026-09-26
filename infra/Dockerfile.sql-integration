@@ -37,7 +37,7 @@ COPY packages/agent-platform-companion-activation-issuer/tsconfig.json \
 COPY packages/agent-platform-companion-activation-issuer/src \
   ./packages/agent-platform-companion-activation-issuer/src
 
-RUN pnpm --filter @fetanagent/agent-platform-companion-activation-issuer^... run build
+RUN pnpm --filter @fetanagent/agent-platform-companion-activation-issuer... run build
 
 # This content-addressed stage supplies the exact psql 17.4 client. Its server entrypoint is
 # replaced below; no PostgreSQL daemon or data directory is used by the test runner.

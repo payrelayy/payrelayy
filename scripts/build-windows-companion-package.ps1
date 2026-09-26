@@ -127,7 +127,7 @@ import { realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = realpathSync(process.cwd()) + sep;
-for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
   const url = import.meta.resolve(name);
   assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
   await import(url);

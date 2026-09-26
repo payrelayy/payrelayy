@@ -26,6 +26,7 @@ const [
   oneUseRequestMigration,
   emergencyStopOperation,
   packageBuilder,
+  windowsPackageWorkflow,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -49,6 +50,7 @@ const [
   read('supabase/migrations/20260926124051_companion_execution_one_use_request.sql'),
   read('infra/sql/production-companion-execution-emergency-disable.sql'),
   read('scripts/build-windows-companion-package.ps1'),
+  read('.github/workflows/windows-companion-package.yml'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -82,6 +84,20 @@ assert.match(windowsInstallationTree, /measureWindowsCompanionInstallationTree/u
 assert.match(windowsInstallationTree, /INSTALLATION_TREE_SHA256/u);
 assert.match(packageBuilder, /installation-tree-cli\.js/u);
 assert.match(packageBuilder, /extractedTreeDigest -ne \$treeDigest/u);
+const packageJob = windowsPackageWorkflow.split(/^  attest:/mu)[0];
+const attestJob = windowsPackageWorkflow.split(/^  attest:/mu)[1]?.split(/^  publish:/mu)[0];
+assert.ok(attestJob, 'The tag-only companion attestation job is missing.');
+assert.doesNotMatch(packageJob, /id-token: write/u);
+assert.match(attestJob, /if: startsWith\(github\.ref, 'refs\/tags\/windows-companion-v'\)/u);
+assert.match(attestJob, /id-token: write/u);
+assert.match(attestJob, /attestations: write/u);
+assert.match(windowsPackageWorkflow, /name: Attest immutable companion archive/u);
+assert.match(windowsPackageWorkflow, /uses: actions\/attest@[0-9a-f]{40}/u);
+assert.match(windowsPackageWorkflow, /needs: \[package, attest\]/u);
+assert.match(windowsPackageWorkflow, /gh attestation verify "\$immutableZip"/u);
+assert.match(windowsPackageWorkflow, /--signer-workflow/u);
+assert.match(windowsPackageWorkflow, /--source-ref \$env:GITHUB_REF/u);
+assert.match(windowsPackageWorkflow, /--source-digest \$releaseSha/u);
 assert.match(windowsHandoff, /verify\('sha256', transcript/u);
 assert.match(windowsWorker, /consumeWindowsCompanionExecutionV2AuthorityOnce/u);
 assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpiresAtMs/u);

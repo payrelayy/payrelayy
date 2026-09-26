@@ -64,10 +64,62 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  attest:
+    name: Attest immutable companion archive
+    if: startsWith(github.ref, 'refs/tags/windows-companion-v')
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the verified package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: FetanAgent-Windows-Companion-${{ github.sha }}
+          path: ${{ runner.temp }}/fetanagent-companion-attest
+
+      - name: Require one immutable archive and matching checksum
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd '${{ runner.temp }}/fetanagent-companion-attest'
+          shopt -s nullglob
+          archives=(FetanAgent-Windows-Companion-????????????.zip)
+          checksums=(FetanAgent-Windows-Companion-????????????.zip.sha256)
+          files=(* .[^.]*)
+          if [[ ${#archives[@]} -ne 1 || ${#checksums[@]} -ne 1 || ${#files[@]} -ne 2 ]]; then
+            echo 'The companion attestation input is not one immutable archive and checksum.' >&2
+            exit 1
+          fi
+          expected_name="FetanAgent-Windows-Companion-${RELEASE_SHA:0:12}.zip"
+          if [[ "${archives[0]}" != "$expected_name" ||
+                "${archives[0]}.sha256" != "${checksums[0]}" ||
+                ! -f "${archives[0]}" || -L "${archives[0]}" ||
+                ! -f "${checksums[0]}" || -L "${checksums[0]}" ]]; then
+            echo 'The companion attestation checksum names another archive.' >&2
+            exit 1
+          fi
+          actual_line="$(tr -d '\r' < "${checksums[0]}")"
+          expected_line="$(sha256sum -- "${archives[0]}")"
+          if [[ "$actual_line" != "$expected_line" ]]; then
+            echo 'The companion attestation checksum is invalid.' >&2
+            exit 1
+          fi
+
+      - name: Attest the immutable archive on the exact release tag
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: ${{ runner.temp }}/fetanagent-companion-attest/FetanAgent-Windows-Companion-????????????.zip
+
   publish:
     name: Publish immutable and stable download assets
     if: startsWith(github.ref, 'refs/tags/windows-companion-v')
-    needs: package
+    needs: [package, attest]
     runs-on: windows-2025
     timeout-minutes: 10
     permissions:
@@ -82,6 +134,7 @@ jobs:
       - name: Verify and prepare stable download aliases
         shell: pwsh
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -115,6 +168,19 @@ jobs:
           $actualHash = (Get-FileHash -LiteralPath $immutableZip -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualHash -ne $Matches[1]) {
             throw 'The immutable companion archive failed SHA-256 verification.'
+          }
+
+          # The checksum in the artifact is not an independent build identity.
+          # Require GitHub attestation of these exact bytes from this tag and workflow.
+          gh attestation verify "$immutableZip" `
+            --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/windows-companion-package.yml" `
+            --source-ref $env:GITHUB_REF `
+            --source-digest $releaseSha `
+            --deny-self-hosted-runners `
+            --format json *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The immutable companion archive has no matching verified build attestation.'
           }
 
           $stableName = 'FetanAgent-Windows-Companion.zip'

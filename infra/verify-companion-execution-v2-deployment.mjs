@@ -22,6 +22,7 @@ const [
   migration,
   privilegeGateMigration,
   emergencyStopMigration,
+  oneUseRequestMigration,
   emergencyStopOperation,
   packageBuilder,
 ] = await Promise.all([
@@ -43,6 +44,7 @@ const [
   read('supabase/migrations/20260914030000_agent_platform_companion_execution_bridge.sql'),
   read('supabase/migrations/20260914123000_companion_execution_privilege_gate.sql'),
   read('supabase/migrations/20260926132338_companion_execution_emergency_stop.sql'),
+  read('supabase/migrations/20260926124051_companion_execution_one_use_request.sql'),
   read('infra/sql/production-companion-execution-emergency-disable.sql'),
   read('scripts/build-windows-companion-package.ps1'),
 ]);
@@ -68,6 +70,8 @@ assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
 assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
 assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);
 assert.match(windowsHandoff, /body\.companionInstallationTreeSha256/u);
+assert.match(oneUseRequestMigration, /companion_installation_tree_sha256 text not null/u);
+assert.match(oneUseRequestMigration, /existing_request\.companion_installation_tree_sha256/u);
 assert.match(windowsHandoff, /verifyWindowsCompanionInstallationTree\(/u);
 assert.match(windowsInstallationTree, /measureWindowsCompanionInstallationTree/u);
 assert.match(windowsInstallationTree, /INSTALLATION_TREE_SHA256/u);

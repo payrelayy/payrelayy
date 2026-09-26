@@ -86,16 +86,16 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           relation.relrowsecurity as rls_enabled,
           relation.relforcerowsecurity as rls_forced,
           has_function_privilege('fetanagent_owner_control',
-            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
             'execute') as owner_execute,
           has_function_privilege('public',
-            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
             'execute') as public_execute,
           has_function_privilege('fetanagent_companion_execution_bridge',
-            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
             'execute') as bridge_execute,
           has_function_privilege('fetanagent_deposit_executor_runtime',
-            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+            'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
             'execute') as executor_execute,
           has_table_privilege('fetanagent_owner_control',
             'app.agent_platform_companion_execution_activation_requests', 'insert')
@@ -132,10 +132,11 @@ export function registerCompanionExecutionActivationRequestSqlTests(
       const client = getClient();
       await client.query('begin');
       try {
-        const call = async (release: string) =>
+        const call = async (release: string, tree = `sha256:${'c'.repeat(64)}`) =>
           client.query(
             `select * from app.prepare_agent_platform_companion_execution_activation_request(
-            $1::uuid, $2::uuid, 1::bigint, $3::uuid, $4::text, $5::text, $6::uuid
+            $1::uuid, $2::uuid, 1::bigint, $3::uuid, $4::text, $5::text,
+            $6::text, $7::uuid
           )`,
             [
               getOwnerAuthUserId(),
@@ -143,6 +144,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
               randomUUID(),
               release,
               `sha256:${'b'.repeat(64)}`,
+              tree,
               randomUUID(),
             ],
           );
@@ -151,6 +153,12 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           'The companion execution activation request is invalid.',
         );
         await client.query('rollback to savepoint invalid_release');
+
+        await client.query('savepoint invalid_tree');
+        await expect(call('a'.repeat(40), 'not-a-digest')).rejects.toThrow(
+          'The companion execution activation request is invalid.',
+        );
+        await client.query('rollback to savepoint invalid_tree');
 
         await client.query('savepoint no_epoch');
         await expect(call('a'.repeat(40))).rejects.toThrow(
@@ -334,13 +342,15 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         const requestKey = randomUUID();
         const releaseSha = 'a'.repeat(40);
         const archiveDigest = digest();
-        const prepare = (key: string, release: string) =>
+        const treeDigest = digest();
+        const prepare = (key: string, release: string, tree = treeDigest) =>
           client.query<{
             readonly valid_until: Date;
             readonly replayed: boolean;
           }>(
             `select * from app.prepare_agent_platform_companion_execution_activation_request(
-            $1::uuid, $2::uuid, $3::bigint, $4::uuid, $5::text, $6::text, $7::uuid
+            $1::uuid, $2::uuid, $3::bigint, $4::uuid, $5::text, $6::text,
+            $7::text, $8::uuid
           )`,
             [
               getOwnerAuthUserId(),
@@ -349,6 +359,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
               certificateId,
               release,
               archiveDigest,
+              tree,
               key,
             ],
           );
@@ -377,11 +388,22 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           'The companion execution activation request replay conflicts.',
         );
         await client.query('rollback to savepoint changed_replay');
-
-        const retained = await client.query<{ readonly count: string }>(
-          'select count(*) from app.agent_platform_companion_execution_activation_requests',
+        await client.query('savepoint changed_tree_replay');
+        await expect(prepare(requestKey, releaseSha, digest())).rejects.toThrow(
+          'The companion execution activation request replay conflicts.',
         );
-        expect(retained.rows).toEqual([{ count: '1' }]);
+        await client.query('rollback to savepoint changed_tree_replay');
+
+        const retained = await client.query<{
+          readonly count: string;
+          readonly tree_digest_matches: boolean;
+        }>(
+          `select count(*), bool_and(companion_installation_tree_sha256 = $1::text)
+             as tree_digest_matches
+             from app.agent_platform_companion_execution_activation_requests`,
+          [treeDigest],
+        );
+        expect(retained.rows).toEqual([{ count: '1', tree_digest_matches: true }]);
         const dormant = await client.query<{ readonly control_state: string }>(
           'select control_state from app.agent_platform_companion_execution_control where singleton',
         );

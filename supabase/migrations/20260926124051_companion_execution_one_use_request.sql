@@ -27,10 +27,12 @@ create table app.agent_platform_companion_execution_activation_requests (
         'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2'
     ),
   -- These digests are Owner/operator claims, not proof that the release was installed.
-  -- A future transition must independently attest both the archive and the running image.
+  -- A future transition must independently attest the archive and installed/running image.
   companion_release_sha text not null check (companion_release_sha ~ '^[0-9a-f]{40}$'),
   companion_archive_sha256 text not null
     check (companion_archive_sha256 ~ '^sha256:[0-9a-f]{64}$'),
+  companion_installation_tree_sha256 text not null
+    check (companion_installation_tree_sha256 ~ '^sha256:[0-9a-f]{64}$'),
   requested_by_admin_id uuid not null references app.admin_users (id) on delete restrict,
   requested_at timestamptz not null,
   expires_at timestamptz not null,
@@ -68,6 +70,7 @@ create function app.prepare_agent_platform_companion_execution_activation_reques
   p_certificate_id uuid,
   p_companion_release_sha text,
   p_companion_archive_sha256 text,
+  p_companion_installation_tree_sha256 text,
   p_request_key uuid
 )
 returns table (
@@ -103,6 +106,8 @@ begin
     or p_companion_release_sha !~ '^[0-9a-f]{40}$'
     or p_companion_archive_sha256 is null
     or p_companion_archive_sha256 !~ '^sha256:[0-9a-f]{64}$'
+    or p_companion_installation_tree_sha256 is null
+    or p_companion_installation_tree_sha256 !~ '^sha256:[0-9a-f]{64}$'
     or p_request_key is null
     or p_request_key::text
       !~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
@@ -132,6 +137,8 @@ begin
       and existing_request.certificate_id = p_certificate_id
       and existing_request.companion_release_sha = p_companion_release_sha
       and existing_request.companion_archive_sha256 = p_companion_archive_sha256
+      and existing_request.companion_installation_tree_sha256 =
+        p_companion_installation_tree_sha256
       and existing_request.requested_by_admin_id = actor_admin_id then
       return query select existing_request.expires_at, true;
       return;
@@ -258,12 +265,14 @@ begin
     request_key, pilot_revision_id, activation_epoch, certificate_id,
     platform_agent_account_id, execution_signer_key_id,
     execution_signer_public_key_spki_sha256, companion_release_sha,
-    companion_archive_sha256, requested_by_admin_id, requested_at, expires_at
+    companion_archive_sha256, companion_installation_tree_sha256,
+    requested_by_admin_id, requested_at, expires_at
   ) values (
     p_request_key, pilot.id, authority.epoch, certificate.certificate_id,
     pilot.platform_agent_account_id, 'companion-execution-production-v1',
     'sha256:c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2',
     p_companion_release_sha, p_companion_archive_sha256,
+    p_companion_installation_tree_sha256,
     actor_admin_id, requested_time, request_expiry
   );
 
@@ -278,7 +287,7 @@ alter table app.agent_platform_companion_execution_activation_requests
 alter table app.agent_platform_companion_execution_activation_requests
   owner to postgres;
 alter function app.prepare_agent_platform_companion_execution_activation_request(
-  uuid, uuid, bigint, uuid, text, text, uuid
+  uuid, uuid, bigint, uuid, text, text, text, uuid
 ) owner to postgres;
 
 revoke all on table app.agent_platform_companion_execution_activation_requests
@@ -288,7 +297,7 @@ revoke all on table app.agent_platform_companion_execution_activation_requests
   fetanagent_companion_execution_bridge,
   fetanagent_deposit_executor, fetanagent_deposit_executor_runtime;
 revoke all on function app.prepare_agent_platform_companion_execution_activation_request(
-  uuid, uuid, bigint, uuid, text, text, uuid
+  uuid, uuid, bigint, uuid, text, text, text, uuid
 ) from public, anon, authenticated, service_role,
   fetanagent_owner_control, fetanagent_owner_control_runtime,
   fetanagent_companion_device_bridge, fetanagent_companion_device_bridge_runtime,

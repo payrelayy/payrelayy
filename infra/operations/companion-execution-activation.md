@@ -95,9 +95,9 @@ conflate either deployment with execution activation.
 Migration `companion_execution_one_use_request` adds an immutable preparation record and an
 administrator-only preparation routine. It binds one request to the current trusted epoch,
 armed pilot, active Owner, Owner-paired Windows certificate, KemerBet agent account, pinned
-execution signer, and claimed immutable companion release/archive digests. The routine refuses
-preparation unless the financial epoch is already current and the companion control is still
-disabled. At most one unexpired request can cover the same pilot/epoch; an exact replay changes
+execution signer, and claimed companion release, archive, and installation-tree digests. The
+routine refuses preparation unless the financial epoch is already current and the companion
+control is still disabled. At most one unexpired request can cover the same pilot/epoch; an exact replay changes
 nothing. A later, separately authorized fresh request may replace an expired one without
 requiring a new twelve-hour pilot.
 

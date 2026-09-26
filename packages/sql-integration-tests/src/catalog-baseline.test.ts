@@ -8755,7 +8755,7 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature:
-          'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+          'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,text,uuid)',
       },
       {
         deposit_executor_runtime: true,

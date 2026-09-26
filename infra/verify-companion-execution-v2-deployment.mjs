@@ -87,10 +87,22 @@ assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainin
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
 assert.match(windowsEntry, /baseDevice\.createSignedLaunchProof/u);
 assert.match(windowsEntry, /deliverCompanionLaunchProof/u);
+assert.match(
+  windowsEntry,
+  /takeCompanionLaunchProofRequest\(\s*process\.env,\s*config\.executionV2Enabled,?\s*\)/u,
+);
+assert.match(windowsEntry, /await deliverCompanionExecutionLaunchProofAndAwaitPermit\(/u);
 assert.match(windowsEntry, /verifyWindowsCompanionInstallationTree/u);
 assert.match(windowsLaunchProof, /paired-process-launch-proof:v1/u);
 assert.match(windowsLaunchProof, /verify\(\s*'sha256',\s*transcript\(/u);
 assert.match(windowsLaunchChannel, /fetanagent-companion-launch-/u);
+assert.match(
+  windowsLaunchChannel,
+  /A protected local launch channel is required for guarded execution/u,
+);
+assert.match(windowsLaunchChannel, /FETANAGENT_GUARDED_LAUNCH_PERMIT_V1\|/u);
+assert.match(windowsLaunchChannel, /received === expectedPermit/u);
+assert.match(windowsLaunchChannel, /proof\.body\.challengeDigest !==/u);
 assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
 assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);
 assert.match(windowsEntry, /stage === 'execution_handoff' \|\| stage === 'launch_proof'/u);

@@ -36,7 +36,7 @@ const [
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
   read('apps/windows-companion/src/index.ts'),
-  read('apps/windows-companion/src/launch-proof.ts'),
+  read('packages/agent-platform-companion-execution-contracts/src/launch-proof.ts'),
   read('apps/windows-companion/src/launch-proof-channel.ts'),
   read('apps/windows-companion/src/launch-proof-verify-cli.ts'),
   read('apps/windows-companion/src/execution-activation-handoff.ts'),

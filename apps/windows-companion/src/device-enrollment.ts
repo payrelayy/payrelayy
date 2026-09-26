@@ -86,6 +86,9 @@ import {
   type SignedExecutionEnrollment,
   type SignedExecutionResult,
   type SignedOneUseActionAuthority,
+  signCompanionLaunchProof,
+  type CompanionLaunchProofContext,
+  type SignedCompanionLaunchProof,
   type TrustedRoundTripContext,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -93,11 +96,6 @@ import {
   createWindowsCurrentUserDataProtector,
   type WindowsCurrentUserDataProtector,
 } from './windows-data-protection.js';
-import {
-  signCompanionLaunchProof,
-  type CompanionLaunchProofContext,
-  type SignedCompanionLaunchProof,
-} from './launch-proof.js';
 
 export const WINDOWS_COMPANION_VERSION = '0.1.10' as const;
 export const COMPANION_PAIRING_PACKAGE_PREFIX = AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX;

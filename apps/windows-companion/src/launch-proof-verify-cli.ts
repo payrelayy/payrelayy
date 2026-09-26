@@ -1,7 +1,8 @@
 import { pathToFileURL } from 'node:url';
 
+import { verifyCompanionLaunchProof } from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import { loadCompanionDeviceSigningRuntime } from './device-enrollment.js';
-import { verifyCompanionLaunchProof } from './launch-proof.js';
 
 const MAX_INPUT_BYTES = 2_048;
 

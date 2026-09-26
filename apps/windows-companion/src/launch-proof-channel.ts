@@ -1,6 +1,6 @@
 import { createConnection } from 'node:net';
 
-import type { SignedCompanionLaunchProof } from './launch-proof.js';
+import type { SignedCompanionLaunchProof } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/u;

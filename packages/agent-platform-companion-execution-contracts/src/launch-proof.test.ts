@@ -24,7 +24,7 @@ const context: CompanionLaunchProofContext = {
   observedAt: '2026-09-26T12:01:00.000Z',
 };
 
-describe('paired Windows companion launch proof', () => {
+describe('shared paired Windows companion launch proof', () => {
   it('signs only a canonical process-and-installation-bound transcript', () => {
     const proof = signCompanionLaunchProof(context, device.privateKey);
     expect(proof).toBeDefined();

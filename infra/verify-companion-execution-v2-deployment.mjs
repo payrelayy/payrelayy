@@ -62,6 +62,8 @@ assert.match(windowsEntry, /loadWindowsCompanionExecutionHandoff/u);
 assert.match(windowsEntry, /certificateBodyDigest: baseDevice\.certificate\.bodyDigest/u);
 assert.match(windowsEntry, /if \(handoff\) \{/u);
 assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainingHandoffMs\)/u);
+assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
+assert.match(windowsEntry, /stage === 'execution_handoff' \? \{ moneyMoved: false \} : \{\}/u);
 assert.match(windowsHandoff, /COMPANION_EXECUTION_HANDOFF_PURPOSE/u);
 assert.match(windowsHandoff, /body\.platformAgentAccountId !== context\.expectedAccountId/u);
 assert.match(windowsHandoff, /body\.companionReleaseSha !== context\.releaseSha/u);

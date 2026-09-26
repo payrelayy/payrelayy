@@ -146,6 +146,7 @@ export async function runWindowsCompanion(): Promise<void> {
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   const enrollmentPromise = session.verified.then(async (verified) => {
     if (!verified) return;
+    let stage: 'pairing' | 'device_runtime' | 'execution_handoff' | 'workers' = 'pairing';
     try {
       const enrollment = await ensureCompanionDeviceEnrollment({
         dataRoot: config.dataRoot,
@@ -154,7 +155,9 @@ export async function runWindowsCompanion(): Promise<void> {
       });
       reportEnrollment(enrollment);
       if (!enrollment.devicePaired) return;
+      stage = 'device_runtime';
       const baseDevice = await loadCompanionDeviceSigningRuntime({ dataRoot: config.dataRoot });
+      if (config.executionV2Enabled) stage = 'execution_handoff';
       const handoff = config.executionV2Enabled
         ? await loadWindowsCompanionExecutionHandoff(
             config.dataRoot,
@@ -187,35 +190,54 @@ export async function runWindowsCompanion(): Promise<void> {
         remainingHandoffMs === undefined
           ? undefined
           : setTimeout(() => lookupAbort.abort(), remainingHandoffMs);
-      const workers: Promise<void>[] = [
-        runCompanionLookupWorker({
-          dataRoot: config.dataRoot,
-          device,
-          session,
-          signal: lookupAbort.signal,
-          report: reportLookup,
-        }),
-      ];
-      if (handoff) {
-        workers.push(
-          runCompanionExecutionWorker({
+      stage = 'workers';
+      try {
+        const workers: Promise<void>[] = [
+          runCompanionLookupWorker({
             dataRoot: config.dataRoot,
             device,
-            expectedActivationEpoch: handoff.activationEpoch,
-            handoffExpiresAtMs: handoff.expiresAtMs,
             session,
             signal: lookupAbort.signal,
-            report: reportExecution,
+            report: reportLookup,
           }),
-        );
-      }
-      try {
+        ];
+        if (handoff) {
+          workers.push(
+            runCompanionExecutionWorker({
+              dataRoot: config.dataRoot,
+              device,
+              expectedActivationEpoch: handoff.activationEpoch,
+              handoffExpiresAtMs: handoff.expiresAtMs,
+              session,
+              signal: lookupAbort.signal,
+              report: reportExecution,
+            }),
+          );
+        }
         await Promise.all(workers);
       } finally {
         if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
       }
     } catch {
-      reportEnrollment(undefined);
+      if (stage === 'pairing' || stage === 'device_runtime') {
+        reportEnrollment(undefined);
+      } else {
+        console.info(
+          JSON.stringify({
+            component: 'fetanagent_windows_companion',
+            event:
+              stage === 'execution_handoff'
+                ? 'execution_startup_failed_closed'
+                : 'companion_worker_failed_closed',
+            reason:
+              stage === 'execution_handoff'
+                ? 'signed_handoff_or_installation_unavailable'
+                : 'companion_worker_unavailable',
+            detailsRedacted: true,
+            ...(stage === 'execution_handoff' ? { moneyMoved: false } : {}),
+          }),
+        );
+      }
     }
   });
   let stopping = false;

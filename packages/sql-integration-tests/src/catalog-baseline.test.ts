@@ -8745,6 +8745,13 @@ describe('disposable SQL migration baseline', () => {
         signature: 'app.lease_next_private_live_deposit_execution(uuid,integer)',
       },
       {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature:
+          'app.prepare_agent_platform_companion_execution_activation_request(uuid,uuid,bigint,uuid,text,text,uuid)',
+      },
+      {
         deposit_executor_runtime: true,
         public_execute: false,
         settlement_runtime: false,

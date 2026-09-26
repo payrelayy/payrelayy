@@ -16,10 +16,17 @@ without lock-bearing helpers, so it can run in a read-only transaction. The
 issuer core calls it twice, before and after independent release and process
 observation, and compares both results.
 
-This adapter does **not** establish complete financial readiness. It does not
-retain an attestation, consume a request, arm execution, issue credentials,
-lease a deposit job, or move money. The atomic database transition still
-rechecks every money-capable state at consumption.
+This snapshot adapter does **not** establish complete financial readiness. The
+separate `retainCompanionActivationAttestationRow` adapter accepts only the
+issuer core's digest-only witness and one injected short-lived `postgres`
+administrator connection. Its single parameterized `INSERT ... SELECT`
+rechecks current request, pilot, epoch, certificate, signer, Owner, and disabled
+companion control before inserting one immutable row. It refuses extra fields,
+including raw proof or handoff material, and preserves the handoff digest in
+the append-only witness. It does not consume a request, arm execution, issue
+credentials, lease a deposit job, or move money. The atomic database transition
+still rechecks every money-capable state at consumption. No production caller
+or credential is supplied by this package.
 
 The package also implements `verifyPublishedCompanionReleaseAndInstalledTree` for a
 protected Windows operator workflow. It invokes the repository's pinned,
@@ -31,7 +38,7 @@ successful run returns the verified digests with a trusted operator-side time;
 it does not trust a companion-supplied release version, file digest, or clock.
 The workflow must provide a reviewed source checkout and protected local
 archive/installation paths. No archive download, credential, or production
-invocation workflow is provided here. The OS-observed process proof and
-attestation-retention adapters remain separate work. In particular, the v1
+invocation workflow is provided here. The OS-observed process proof adapter
+remains separate work. In particular, the v1
 no-money local launch diagnostic cannot satisfy the required v2 guarded-execution
 process proof; no process adapter is exported here.

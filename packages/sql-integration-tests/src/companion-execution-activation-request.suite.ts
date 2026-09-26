@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { loadCompanionActivationDatabaseSnapshot } from '@fetanagent/agent-platform-companion-activation-issuer';
+import {
+  loadCompanionActivationDatabaseSnapshot,
+  retainCompanionActivationAttestationRow,
+} from '@fetanagent/agent-platform-companion-activation-issuer';
 
 import { prepareTelebirrPilot } from './private-live-telebirr-proof-lineage.suite.js';
 
@@ -84,6 +87,9 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         readonly attestation_rows: string;
         readonly consumption_rows: string;
         readonly attestation_rls: boolean;
+        readonly attestation_handoff_not_null: boolean;
+        readonly attestation_owner_insert: boolean;
+        readonly attestation_bridge_insert: boolean;
         readonly consumption_rls: boolean;
         readonly public_arm_execute: boolean;
         readonly owner_arm_execute: boolean;
@@ -124,6 +130,16 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           (select relrowsecurity and relforcerowsecurity from pg_class
             where oid = 'app.agent_platform_companion_execution_activation_attestations'::regclass)
             as attestation_rls,
+          (select attnotnull from pg_attribute
+            where attrelid =
+              'app.agent_platform_companion_execution_activation_attestations'::regclass
+              and attname = 'execution_handoff_sha256') as attestation_handoff_not_null,
+          has_table_privilege('fetanagent_owner_control',
+            'app.agent_platform_companion_execution_activation_attestations', 'insert')
+            as attestation_owner_insert,
+          has_table_privilege('fetanagent_companion_execution_bridge_runtime',
+            'app.agent_platform_companion_execution_activation_attestations', 'insert')
+            as attestation_bridge_insert,
           (select relrowsecurity and relforcerowsecurity from pg_class
             where oid = 'app.agent_platform_companion_execution_activation_consumptions'::regclass)
             as consumption_rls,
@@ -155,6 +171,9 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           attestation_rows: '0',
           consumption_rows: '0',
           attestation_rls: true,
+          attestation_handoff_not_null: true,
+          attestation_owner_insert: false,
+          attestation_bridge_insert: false,
           consumption_rls: true,
           public_arm_execute: false,
           owner_arm_execute: false,
@@ -512,11 +531,12 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             `insert into app.agent_platform_companion_execution_activation_attestations (
             request_key, certificate_body_digest, companion_release_sha,
             companion_archive_sha256, companion_installation_tree_sha256,
-            challenge_digest, launch_proof_digest, process_id, process_started_at,
+            challenge_digest, launch_proof_digest, execution_handoff_sha256,
+            process_id, process_started_at,
             challenge_issued_at, release_observed_at, process_observed_at, verified_at
           ) values (
             $1::uuid, $2::text, $3::text, $4::text, $5::text,
-            $6::text, $7::text, 4242,
+            $6::text, $7::text, $8::text, 4242,
             clock_timestamp() - interval '10 minutes',
             clock_timestamp(), clock_timestamp(), clock_timestamp(), clock_timestamp()
           )`,
@@ -526,6 +546,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
               releaseSha,
               archive,
               treeDigest,
+              digest(),
               digest(),
               digest(),
             ],
@@ -538,7 +559,49 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         );
         await client.query('rollback to savepoint mismatched_attestation');
 
-        await attest(archiveDigest);
+        const witnessTime = await client.query<{ readonly now: Date }>(
+          'select clock_timestamp() as now',
+        );
+        const observedAt = witnessTime.rows[0]!.now.toISOString();
+        const handoffDigest = digest();
+        const witness = {
+          requestKey,
+          certificateBodyDigest: certificateDigest.rows[0]!.certificate_body_digest,
+          companionReleaseSha: releaseSha,
+          companionArchiveSha256: archiveDigest,
+          companionInstallationTreeSha256: treeDigest,
+          challengeDigest: digest(),
+          launchProofDigest: digest(),
+          executionHandoffSha256: handoffDigest,
+          processId: 4242,
+          processStartedAt: new Date(witnessTime.rows[0]!.now.getTime() - 600_000).toISOString(),
+          challengeIssuedAt: observedAt,
+          releaseObservedAt: observedAt,
+          processObservedAt: observedAt,
+          verifiedAt: observedAt,
+        };
+        await expect(
+          retainCompanionActivationAttestationRow(
+            { ...witness, companionArchiveSha256: digest() },
+            client,
+          ),
+        ).rejects.toThrow('The companion activation attestation could not be retained.');
+        await retainCompanionActivationAttestationRow(witness, client);
+        const attestationRow = await client.query<{
+          readonly handoff_matches: boolean;
+          readonly retained_rows: string;
+        }>(
+          `
+          select
+            (select count(*) from app.agent_platform_companion_execution_activation_attestations)
+              as retained_rows,
+            (select execution_handoff_sha256 = $1::text
+               from app.agent_platform_companion_execution_activation_attestations
+              where request_key = $2::uuid) as handoff_matches
+        `,
+          [handoffDigest, requestKey],
+        );
+        expect(attestationRow.rows).toEqual([{ handoff_matches: true, retained_rows: '1' }]);
 
         await client.query('savepoint invalid_password');
         await expect(activate('not-a-runtime-password')).rejects.toThrow(

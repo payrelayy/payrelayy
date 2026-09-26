@@ -162,11 +162,11 @@ begin
     'readOnly', true,
     'identifiersRedacted', true,
     'activationAvailable', false,
-    'pilotState', pg_catalog.coalesce((select status from latest_pilot), 'none'),
-    'openJobs', pg_catalog.least(jobs.open_count, 2),
-    'untouchedQueuedJobs', pg_catalog.least(jobs.untouched_count, 2),
-    'cancelledUntouchedJobs', pg_catalog.least(jobs.cancelled_untouched_count, 2),
-    'openExecutionReviews', pg_catalog.least(reviews.open_count, 2),
+    'pilotState', coalesce((select status from latest_pilot), 'none'),
+    'openJobs', least(jobs.open_count, 2),
+    'untouchedQueuedJobs', least(jobs.untouched_count, 2),
+    'cancelledUntouchedJobs', least(jobs.cancelled_untouched_count, 2),
+    'openExecutionReviews', least(reviews.open_count, 2),
     'customerResolutionPending',
       reviews.open_count = 1 and reviews.protected_count = 1
         and jobs.open_count = 0,
@@ -189,7 +189,7 @@ begin
         reviews.open_count <> 1 or reviews.protected_count <> 1
       ) then 'safety_review'
       when reviews.open_count = 1 then 'customer_resolution_pending'
-      when pg_catalog.coalesce((select status from latest_pilot), 'none') <> 'armed'
+      when coalesce((select status from latest_pilot), 'none') <> 'armed'
         then 'pilot_review'
       when not trusted_epoch.available then 'trusted_activation_review'
       else 'release_and_owner_review'

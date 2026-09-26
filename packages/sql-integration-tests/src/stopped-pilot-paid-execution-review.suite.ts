@@ -11,6 +11,7 @@ import {
 } from './private-live-telebirr-proof-lineage.suite.js';
 
 type ReviewRow = { readonly review_state: string; readonly replayed: boolean };
+type ResolutionRow = { readonly resolution_state: string; readonly replayed: boolean };
 type ReadinessRow = {
   readonly redacted_status: {
     readonly cancelledUntouchedJobs: number;
@@ -99,6 +100,58 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
           owner_only: true,
           runtime_execute: false,
           runtime_table_access: false,
+        },
+      ]);
+
+      const resolutionBoundary = await client.query<{
+        readonly force_rls: boolean;
+        readonly owner_only: boolean;
+        readonly public_execute: boolean;
+        readonly owner_execute: boolean;
+        readonly runtime_execute: boolean;
+        readonly runtime_table_access: boolean;
+        readonly immutable_triggers: string;
+      }>(`
+        select relation.relforcerowsecurity as force_rls,
+               routine.prosecdef
+                 and routine.proowner = 'postgres'::regrole as owner_only,
+               pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                 as public_execute,
+               pg_catalog.has_function_privilege(
+                 'fetanagent_owner_control', routine.oid, 'EXECUTE'
+               ) as owner_execute,
+               pg_catalog.has_function_privilege(
+                 'fetanagent_owner_control_runtime', routine.oid, 'EXECUTE'
+               ) or pg_catalog.has_function_privilege(
+                 'fetanagent_deposit_executor_runtime', routine.oid, 'EXECUTE'
+               ) as runtime_execute,
+               pg_catalog.has_table_privilege(
+                 'fetanagent_owner_control_runtime', relation.oid, 'INSERT'
+               ) or pg_catalog.has_table_privilege(
+                 'fetanagent_deposit_executor_runtime', relation.oid, 'SELECT'
+               ) as runtime_table_access,
+               (select count(*)
+                  from pg_catalog.pg_trigger trigger
+                 where trigger.tgrelid = relation.oid
+                   and not trigger.tgisinternal) as immutable_triggers
+          from pg_catalog.pg_class relation
+          join pg_catalog.pg_namespace namespace
+            on namespace.oid = relation.relnamespace
+          cross join pg_catalog.pg_proc routine
+         where namespace.nspname = 'app'
+           and relation.relname = 'stopped_pilot_owner_test_resolutions'
+           and routine.oid =
+             'app.resolve_stopped_pilot_owner_test_payment(uuid,uuid,uuid,boolean,boolean)'::regprocedure
+      `);
+      expect(resolutionBoundary.rows).toEqual([
+        {
+          force_rls: true,
+          owner_only: true,
+          public_execute: false,
+          owner_execute: false,
+          runtime_execute: false,
+          runtime_table_access: false,
+          immutable_triggers: '2',
         },
       ]);
     });
@@ -216,6 +269,98 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
                 set reason_code = reason_code
               where request_key = $1::uuid`,
             [requestKey],
+          ),
+        );
+
+        const resolutionKey = randomUUID();
+        const resolve = (
+          key: string,
+          paidReviewKey = requestKey,
+          bothWallets = true,
+          acceptsNoCreditOrRefund = true,
+        ) =>
+          client.query<ResolutionRow>(
+            `select * from app.resolve_stopped_pilot_owner_test_payment(
+              $1::uuid, $2::uuid, $3::uuid, $4::boolean, $5::boolean
+            )`,
+            [getOwnerAdminId(), paidReviewKey, key, bothWallets, acceptsNoCreditOrRefund],
+          );
+        await expectRejected(client, () => resolve(resolutionKey, requestKey, false));
+        await expectRejected(client, () => resolve(resolutionKey, requestKey, true, false));
+        await expectRejected(client, () => resolve(resolutionKey, randomUUID()));
+
+        const resolution = await resolve(resolutionKey);
+        expect(resolution.rows).toEqual([
+          { resolution_state: 'owner_test_closed', replayed: false },
+        ]);
+        const resolutionReplay = await resolve(resolutionKey);
+        expect(resolutionReplay.rows).toEqual([
+          { resolution_state: 'owner_test_closed', replayed: true },
+        ]);
+        await expectRejected(client, () => resolve(randomUUID()));
+        await expectRejected(client, () => resolve(resolutionKey, randomUUID()));
+
+        const closed = await client.query<{
+          readonly attempt_count: number;
+          readonly claim_count: number;
+          readonly intent_status: string;
+          readonly job_status: string;
+          readonly open_review_count: number;
+          readonly rejection_reason_code: string;
+          readonly reservation_count: number;
+          readonly resolution_code: string;
+          readonly resolution_count: number;
+        }>(
+          `select job.status::text as job_status,
+                  intent.status::text as intent_status,
+                  intent.rejection_reason_code,
+                  review_case.resolution_code,
+                  (select count(*)::integer from app.deposit_payment_claims
+                    where deposit_intent_id = intent.id) as claim_count,
+                  (select count(*)::integer from app.private_live_deposit_pilot_reservations
+                    where deposit_intent_id = intent.id) as reservation_count,
+                  (select count(*)::integer from app.deposit_execution_attempts
+                    where deposit_intent_id = intent.id) as attempt_count,
+                  (select count(*)::integer from app.deposit_review_cases
+                    where deposit_intent_id = intent.id and review_kind = 'execution'
+                      and status in ('open', 'assigned')) as open_review_count,
+                  (select count(*)::integer from app.stopped_pilot_owner_test_resolutions
+                    where deposit_intent_id = intent.id) as resolution_count
+             from app.deposit_jobs job
+             join app.deposit_intents intent on intent.id = job.deposit_intent_id
+             join app.deposit_review_cases review_case
+               on review_case.deposit_intent_id = intent.id
+              and review_case.review_kind = 'execution'
+            where job.id = $1::uuid`,
+          [jobId],
+        );
+        expect(closed.rows).toEqual([
+          {
+            attempt_count: 0,
+            claim_count: 1,
+            intent_status: 'rejected',
+            job_status: 'cancelled',
+            open_review_count: 0,
+            rejection_reason_code: 'owner_self_funded_test_no_credit_or_refund',
+            reservation_count: 1,
+            resolution_code: 'owner_self_funded_test_no_credit_or_refund',
+            resolution_count: 1,
+          },
+        ]);
+        const afterResolution = await client.query<ReadinessRow>(readinessSelect);
+        expect(afterResolution.rows[0]?.redacted_status).toMatchObject({
+          cancelledUntouchedJobs: 1,
+          customerResolutionPending: false,
+          nextAction: 'pilot_review',
+          openExecutionReviewCases: 0,
+          openJobs: 0,
+        });
+        await expectRejected(client, () =>
+          client.query(
+            `update app.stopped_pilot_owner_test_resolutions
+                set resolution_code = resolution_code
+              where resolution_request_key = $1::uuid`,
+            [resolutionKey],
           ),
         );
       });

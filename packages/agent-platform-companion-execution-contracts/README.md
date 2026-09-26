@@ -24,7 +24,9 @@ New assignments and action-authority authentication require a currently valid ce
 
 `matchesCompanionActivationEvidence` compares one immutable, at-most-ten-minute database request with current database identities, the database-trusted paired certificate, an independently measured release archive and installation tree, and a fresh challenge-bound launch proof from the observed Windows process. It checks the paired public-key digest and verifies the process signature against that **database** key rather than a local certificate supplied by the companion. The challenge, release measurement, and process observation must be fresh at a trusted server time.
 
-This pure check does not establish the provenance of its inputs. Its eventual caller must authenticate the database reads, independently issue a unique request-bound challenge, attest the release and OS process, and recheck pilot, epoch, switches, roles, and queue state in the same bounded activation operation. A matching result does not consume the request, arm the companion, grant a credential, or authorize a financial action. No issuer or activation consumer is provided here.
+This pure check does not establish the provenance of its inputs. `retainCompanionActivationAttestation` is the non-activating issuer core: it reads the database request and paired certificate through a trusted adapter, independently requests the release measurement, generates a fresh challenge, requests an OS-observed paired-process proof, re-reads database identity, verifies the complete evidence, and passes only digest witness fields to a retention adapter. It returns no raw proof or challenge. The adapter implementations must authenticate their sources; a companion-supplied PID, release claim, or local certificate is not sufficient. No production adapters, endpoint, credential, or executable workflow are provided by this package.
+
+The database activation transition must still recheck pilot, epoch, switches, roles, and queue state at consumption. Retaining a witness alone does not consume the request, arm the companion, grant a credential, or authorize a financial action.
 
 ## Intentionally absent
 

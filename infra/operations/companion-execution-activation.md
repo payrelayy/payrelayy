@@ -173,13 +173,14 @@ credential, no local Windows opt-in, and no job lease in this migration. Do not 
 preparation routine in production until the remaining activation operation, transport, local
 handoff, and emergency-stop pieces are reviewed together.
 
-The shared execution-contracts package also has a pure, non-activating evidence consistency
-check. It binds the immutable request and current database identity to the database-trusted
-paired public key, independently measured release, and a fresh signed OS-process observation.
-It cannot prove that its inputs came from those trusted sources, issue a challenge, consume the
-request, or check financial state. A future production consumer must supply those authenticated
-inputs and complete the atomic database and credential lifecycle below; a true result alone is
-never an activation decision.
+The shared execution-contracts package has a pure, non-activating evidence consistency check
+and a non-activating attestation issuer core. The core generates a fresh challenge, requires
+separate database, published-release, and OS-observed paired-process adapters, re-reads the
+database identity, verifies the signed proof against the database key, and sends only digest
+witness fields to a retention adapter. This does not make caller-provided inputs trusted: no
+production adapters, authenticated proof transport, or entry point exist yet. It cannot arm the
+companion, consume the request, or check financial state. A future production consumer must
+supply those authenticated sources and complete the atomic credential lifecycle below.
 
 The `companion_execution_atomic_activation` migration adds a Postgres-only, one-use consuming
 transition and an append-only attestation digest record. In a disposable database the transition
@@ -187,10 +188,11 @@ locks and rechecks the current financial epoch, switches, pilot, certificate, an
 control; it consumes the request, grants only the dedicated execution capability to a bounded
 SCRAM runtime login, and arms only the matching companion control in one transaction. The
 independent stop removes that login and control. No application role can insert an attestation
-or execute the transition. The attestation is **not** a self-authenticating signature: a trusted
-production issuer must first independently verify the release measurement and paired-process
-proof against the database certificate. No such issuer, production invocation workflow, signed
-local handoff, host stop/reconciliation rehearsal, or deployment of this migration exists yet.
+or execute the transition. The attestation is **not** a self-authenticating signature: trusted
+production adapters must first independently verify the release measurement and paired-process
+proof against the database certificate. The issuer core alone does not provide those adapters.
+No production invocation workflow, signed local handoff, host stop/reconciliation rehearsal, or
+deployment of this migration exists yet.
 Do not apply or invoke it in production as a shortcut around those missing pieces.
 
 ## Missing activation implementation

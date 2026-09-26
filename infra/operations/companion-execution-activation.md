@@ -46,7 +46,10 @@ immutable ZIP and checksum downloaded from that release, and the local installat
 requires the four exact published assets, matching release hashes, the tag's current source
 revision, and a GitHub build attestation from the pinned package workflow. It then verifies
 the ZIP's own installation-tree marker and measures the local installation using the same
-attested, bundled tree verifier. Its only successful result is a pass marker; it neither starts
+attested, bundled tree verifier. The expected archive and installation-tree digests are required
+inputs from the exact immutable one-use request; a mismatch fails before any launch proof. The
+caller must retrieve those inputs through an authenticated request read, not invent them from
+the archive being checked. Its only successful result is a pass marker; it neither starts
 the companion nor grants any execution authority. An old, unattested release cannot pass this
 preflight, and a passing disk check does not attest the currently running process or authorize
 an activation request. Those are separate prerequisites.
@@ -61,7 +64,8 @@ for a fresh challenge response through a random local named pipe. After the Owne
 KemerBet manually, the paired process remeasures its installation tree and signs a transcript
 binding the challenge, certificate, release, tree, process identity, and times. The operator
 checks the OS child process, remeasures the tree again, and verifies the signature against the
-locally validated paired certificate. The proof and signature never go to a command line, log,
+locally validated paired certificate. The same request-bound archive and tree digests must be
+passed through to the release preflight. The proof and signature never go to a command line, log,
 chat, or remote endpoint. A failure stops only the new no-money child. This is useful process
 evidence, **not** memory attestation, production handoff issuance, database activation, or
 permission to execute a queued job. The current installed companion predates this contract, so

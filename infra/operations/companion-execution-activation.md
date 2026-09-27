@@ -114,7 +114,13 @@ sends a Windows-constructed body or receives the production private key. The ser
 independently reads the current database request and release before deriving and signing its
 body. The Windows publisher verifies the returned signature, exact binding, server-derived
 issue time, and expiry before writing once. Both pieces are source-only: no authenticated
-transport, production caller, or administrator credential source is provided. In particular,
+production caller or administrator credential source is provided. A one-shot transport now
+requires the paired Windows certificate and a fresh signed HTTP request bound to the exact
+database request; its server checks the live certificate before signing and consumes its
+handler instance even if an authenticated signing attempt fails. The Windows client connects
+only to loopback, and the protected HTTP listener binds only to loopback. Neither component
+installs a service, opens a public route, provisions an authenticated operator tunnel, or
+loads the server credential or signing key. In particular,
 the guarded Windows operator still requires a privileged database session; placing a broad
 administrator credential on the PC is not an acceptable shortcut. The publisher also requires
 an already-existing operator-protected data directory. The request must still be live when the

@@ -43,9 +43,18 @@
     "./guarded-server-handoff-signer": {
       "types": "./dist/guarded-server-handoff-signer.d.ts",
       "default": "./dist/guarded-server-handoff-signer.js"
+    },
+    "./protected-handoff-request": {
+      "types": "./dist/protected-handoff-request.d.ts",
+      "default": "./dist/protected-handoff-request.js"
+    },
+    "./protected-handoff-loopback-server": {
+      "types": "./dist/protected-handoff-loopback-server.d.ts",
+      "default": "./dist/protected-handoff-loopback-server.js"
     }
   },
   "dependencies": {
+    "@fetanagent/agent-platform-companion-contracts": "workspace:*",
     "@fetanagent/agent-platform-companion-execution-contracts": "workspace:*"
   },
   "scripts": {

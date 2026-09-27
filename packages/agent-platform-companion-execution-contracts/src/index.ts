@@ -58,6 +58,9 @@ export const COMPANION_EXECUTION_RESULT_PATH =
   '/v2/companion/device/execution-results:submit' as const;
 export const COMPANION_EXECUTION_STATUS_PATH =
   '/v2/companion/device/execution-status:query' as const;
+/** Protected, loopback-only operator transport; not a public device-bridge route. */
+export const COMPANION_EXECUTION_HANDOFF_SIGN_PATH =
+  '/v2/companion/operator/activation-handoff:sign' as const;
 export type CompanionExecutionRequestPath =
   | typeof COMPANION_EXECUTION_POLL_PATH
   | typeof COMPANION_EXECUTION_AUTHORITY_PATH
@@ -2378,6 +2381,24 @@ export function digestCompanionExecutionPollContent(
   return certificateBodyDigest
     ? sha256(
         encodeFields('fetanagent:agent-platform-companion:execution-poll-content:v2', [
+          ['certificateBodyDigest', certificateBodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+/** Bind one paired HTTP request to an existing database request and certificate. */
+export function digestCompanionExecutionHandoffSigningContent(
+  requestKeyCandidate: unknown,
+  certificateBodyDigestCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  return typeof requestKeyCandidate === 'string' &&
+    UUID_V4_PATTERN.test(requestKeyCandidate) &&
+    certificateBodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:protected-handoff-signing-content:v1', [
+          ['requestKey', requestKeyCandidate],
           ['certificateBodyDigest', certificateBodyDigest],
         ]),
       )

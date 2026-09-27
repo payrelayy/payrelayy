@@ -60,6 +60,7 @@ import {
   deriveOneUseActionAuthorityReplayIdentity,
   digestAuthoritativeExecutionStatusBody,
   digestCompanionExecutionAuthorityRequestContent,
+  digestCompanionExecutionHandoffSigningContent,
   digestCompanionExecutionNonce,
   digestCompanionExecutionPollContent,
   digestCompanionExecutionPlayerId,
@@ -1968,5 +1969,23 @@ describe('dormant companion execution v2 contracts', () => {
     ]) {
       expect(source, forbidden).not.toContain(forbidden);
     }
+  });
+
+  it('binds the protected handoff request to both the one-use request and paired certificate', () => {
+    const key = '12345678-1234-4123-8123-123456789abc';
+    const first = digestCompanionExecutionHandoffSigningContent(key, `sha256:${'a'.repeat(64)}`);
+    expect(first).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(first).not.toBe(
+      digestCompanionExecutionHandoffSigningContent(key, `sha256:${'b'.repeat(64)}`),
+    );
+    expect(first).not.toBe(
+      digestCompanionExecutionHandoffSigningContent(
+        '12345678-1234-4123-8123-123456789abd',
+        `sha256:${'a'.repeat(64)}`,
+      ),
+    );
+    expect(
+      digestCompanionExecutionHandoffSigningContent('invalid', `sha256:${'a'.repeat(64)}`),
+    ).toBeUndefined();
   });
 });

@@ -262,6 +262,9 @@ importers:
 
   packages/agent-platform-companion-activation-issuer:
     dependencies:
+      '@fetanagent/agent-platform-companion-contracts':
+        specifier: workspace:*
+        version: link:../agent-platform-companion-contracts
       '@fetanagent/agent-platform-companion-execution-contracts':
         specifier: workspace:*
         version: link:../agent-platform-companion-execution-contracts

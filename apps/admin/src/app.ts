@@ -9,6 +9,10 @@ import {
   OwnerCompanionExecutionReadinessRejectedError,
   OwnerCompanionExecutionReadinessUnavailableError,
 } from './owner-companion-execution-readiness.js';
+import {
+  OwnerExecutionApprovalConflictError,
+  OwnerExecutionApprovalRejectedError,
+} from './owner-telebirr-execution-approvals.js';
 
 import {
   OwnerDepositIntakeRejectedError,
@@ -159,6 +163,7 @@ const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
 const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
+const OWNER_EXECUTION_APPROVAL_CSRF_HEADER_VALUE = 'owner-telebirr-execution-approval-v1';
 const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
   'agent_rotation',
   'initial_configuration',
@@ -485,6 +490,21 @@ export function buildOwnerControlApp(
       exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_PILOT_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validExecutionApprovalMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_EXECUTION_APPROVAL_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -2027,6 +2047,73 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner companion execution readiness is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/telebirr-execution/approvals',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.executionApprovals) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const jobs = await dependencies.runtime.executionApprovals.list(authUserId, limit);
+        return reply.code(200).send({ jobs });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerExecutionApprovalRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner TeleBirr execution approval list is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { executionJobId: string } }>(
+    '/v1/owner/telebirr-execution/approvals/:executionJobId',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['requestId']);
+        if (
+          !body ||
+          !validExecutionApprovalMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.executionApprovals) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const approval = await dependencies.runtime.executionApprovals.approve(
+          authUserId,
+          request.params.executionJobId,
+          body.requestId as string,
+        );
+        return reply.code(200).send({ approval });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerExecutionApprovalRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerExecutionApprovalConflictError) {
+          return reply.code(409).send({ error: 'deposit_not_ready' });
+        }
+        request.log.warn('Owner TeleBirr execution approval is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

@@ -13,6 +13,7 @@ import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
 import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
+import { PostgresOwnerTelebirrExecutionApprovals } from './owner-telebirr-execution-approvals.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
@@ -24,6 +25,8 @@ export interface OwnerControlPostgresRuntime {
   readonly companionConnection?: Pick<PostgresOwnerCompanionConnection, 'status'> | undefined;
   readonly companionExecutionReadiness?:
     Pick<PostgresOwnerCompanionExecutionReadiness, 'status'> | undefined;
+  readonly executionApprovals?:
+    Pick<PostgresOwnerTelebirrExecutionApprovals, 'list' | 'approve'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
@@ -168,6 +171,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)', 'execute') as companion_lookup_status_allowed,
     has_function_privilege(current_user, 'app.get_owner_companion_connection_status(uuid)', 'execute') as companion_connection_status_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 'execute'), true) as companion_execution_readiness_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 'execute'), true) as execution_approval_list_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 'execute'), true) as execution_approval_write_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
@@ -218,6 +223,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     (
       select count(*) = 35
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
+        + (to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)') is not null)::integer
+        + (to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -260,6 +267,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.get_agent_platform_companion_exact_five_lookup_status(uuid)'::regprocedure
           ,'app.get_owner_companion_connection_status(uuid)'::regprocedure
           ,coalesce(to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
@@ -330,6 +339,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     companionExecutionReadiness: new PostgresOwnerCompanionExecutionReadiness({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    executionApprovals: new PostgresOwnerTelebirrExecutionApprovals({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     supportContact: new PostgresOwnerSupportContact({

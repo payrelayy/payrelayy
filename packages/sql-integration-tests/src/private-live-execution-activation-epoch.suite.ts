@@ -95,6 +95,7 @@ async function failureAtSavepoint(
 async function prepareQueuedExecution(
   client: Client,
   ownerAdminId: string,
+  approved = true,
 ): Promise<ExecutionFixture> {
   const pilot = await prepareTelebirrPilot(client, ownerAdminId);
   const prepared = await prepareVerification(client, pilot);
@@ -109,6 +110,25 @@ async function prepareQueuedExecution(
      where control_key = 'trusted_telebirr_financial_authority'
   `);
   expect(authority.rows).toHaveLength(1);
+  if (approved)
+    await client.query(
+      `insert into app.deposit_execution_owner_approvals (
+       execution_job_id, request_key, deposit_intent_id, pilot_revision_id,
+       activation_epoch, approved_by_admin_id, approved_at, expires_at
+     )
+     select job.id, $2::uuid, job.deposit_intent_id, pilot.id,
+            epoch.epoch, $3::uuid, clock_timestamp(),
+            least(epoch.expires_at, pilot.expires_at)
+       from app.deposit_jobs job
+       join app.private_live_deposit_pilot_reservations reservation
+         on reservation.deposit_intent_id = job.deposit_intent_id
+       join app.private_live_deposit_pilot_revisions pilot
+         on pilot.id = reservation.pilot_revision_id
+       join app.private_trusted_telebirr_activation_epochs epoch
+         on epoch.pilot_revision_id = pilot.id
+      where job.id = $1::uuid`,
+      [completion.row.execution_job_id, randomUUID(), ownerAdminId],
+    );
   return {
     epoch: authority.rows[0]!.current_epoch,
     executionJobId: completion.row.execution_job_id!,
@@ -162,6 +182,90 @@ export function registerPrivateLiveExecutionActivationEpochSqlTests(
   createSession: () => Client,
 ): void {
   describe('private-live execution activation epoch interlock', () => {
+    it('keeps Owner approvals immutable and grants no direct table or execution-role access', async () => {
+      const client = getClient();
+      const result = await client.query<{
+        readonly forced_rls: boolean;
+        readonly owner_can_approve: boolean;
+        readonly executor_can_approve: boolean;
+        readonly executor_can_write_table: boolean;
+        readonly public_can_approve: boolean;
+        readonly update_triggers: number;
+        readonly truncate_triggers: number;
+      }>(`
+        select approval_table.relrowsecurity and approval_table.relforcerowsecurity as forced_rls,
+               has_function_privilege(
+                 'fetanagent_owner_control',
+                 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)', 'EXECUTE'
+               ) as owner_can_approve,
+               has_function_privilege(
+                 'fetanagent_deposit_executor',
+                 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)', 'EXECUTE'
+               ) as executor_can_approve,
+               has_table_privilege(
+                 'fetanagent_deposit_executor', approval_table.oid, 'INSERT,UPDATE,DELETE'
+               ) as executor_can_write_table,
+               exists (
+                 select 1 from pg_proc approval_routine,
+                   lateral aclexplode(coalesce(
+                     approval_routine.proacl,
+                     acldefault('f', approval_routine.proowner)
+                   )) privilege
+                  where approval_routine.oid =
+                    'app.approve_owner_telebirr_execution(uuid,uuid,uuid)'::regprocedure
+                    and privilege.grantee = 0
+                    and privilege.privilege_type = 'EXECUTE'
+               ) as public_can_approve,
+               (select count(*)::integer from pg_trigger trigger_row
+                 where trigger_row.tgrelid = approval_table.oid
+                   and trigger_row.tgname = 'deposit_execution_owner_approvals_immutable'
+                   and not trigger_row.tgisinternal) as update_triggers,
+               (select count(*)::integer from pg_trigger trigger_row
+                 where trigger_row.tgrelid = approval_table.oid
+                   and trigger_row.tgname = 'deposit_execution_owner_approvals_no_truncate'
+                   and not trigger_row.tgisinternal) as truncate_triggers
+          from pg_class approval_table
+         where approval_table.oid = 'app.deposit_execution_owner_approvals'::regclass
+      `);
+      expect(result.rows).toEqual([
+        {
+          forced_rls: true,
+          owner_can_approve: true,
+          executor_can_approve: false,
+          executor_can_write_table: false,
+          public_can_approve: false,
+          update_triggers: 1,
+          truncate_triggers: 1,
+        },
+      ]);
+    });
+
+    it('keeps an unapproved verified TeleBirr job queued and unleased', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await prepareQueuedExecution(client, getOwnerAdminId(), false);
+        const lease = await queryAsExecutor<LeaseRow>(
+          client,
+          'select * from app.lease_next_private_live_deposit_execution($1::uuid, 120)',
+          [randomUUID()],
+        );
+        expect(lease).toEqual([]);
+        const job = await client.query<{
+          readonly attempt_count: number;
+          readonly status: string;
+        }>(`select status::text, attempt_count from app.deposit_jobs where id = $1::uuid`, [
+          fixture.executionJobId,
+        ]);
+        expect(job.rows).toEqual([{ status: 'queued', attempt_count: 0 }]);
+        const attempts = await client.query<{ readonly total: number }>(
+          `select count(*)::integer as total from app.deposit_execution_attempts
+            where deposit_job_id = $1::uuid`,
+          [fixture.executionJobId],
+        );
+        expect(attempts.rows).toEqual([{ total: 0 }]);
+      });
+    });
+
     it('preserves the public contracts while sealing the private binding and pre-epoch OIDs', async () => {
       const client = getClient();
       const relation = await client.query<{

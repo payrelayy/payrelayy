@@ -10,6 +10,12 @@ export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
 
 export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Make a deposit';
 
+const TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
+const LEGACY_TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
+const TELEBIRR_PRESENTATION_WINDOW_TEXT =
+  'This payment instruction is valid for at most 10 minutes; submit the reference promptly.';
+const LEGACY_TELEBIRR_WINDOW_TEXT = 'These payment details are valid for 12 hours.';
+
 export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = [
   'Welcome to FetanAgent 👋',
   '',
@@ -110,8 +116,8 @@ export function buildTelegramTelebirrPaymentPrompt(
     `📱 Number: ${input.receiverAccountReference}`,
     '',
     `🎮 KemerBet Player ID: ${input.playerId}`,
-    'Amount: choose 25–25,000 ETB in TeleBirr.',
-    'These payment details are valid for 12 hours.',
+    TELEBIRR_PILOT_AMOUNT_TEXT,
+    TELEBIRR_PRESENTATION_WINDOW_TEXT,
     '',
     'After paying, reply to this message with the TeleBirr transaction number.',
     'You can also paste the receipt link or full SMS.',
@@ -132,13 +138,15 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
     const holder = /(?:^|\n)👤 Name: ([^\r\n]+)(?:\n|$)/u.exec(message.text)?.[1];
     const reference = /(?:^|\n)📱 Number: ([0-9]{9,24})(?:\n|$)/u.exec(message.text)?.[1];
     if (!holder || !reference) return undefined;
-    return buildTelegramTelebirrPaymentPrompt({
+    const currentPrompt = buildTelegramTelebirrPaymentPrompt({
       playerId,
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
-    }) === message.text
-      ? playerId
-      : undefined;
+    });
+    const previousPrompt = currentPrompt
+      .replace(TELEBIRR_PILOT_AMOUNT_TEXT, LEGACY_TELEBIRR_AMOUNT_TEXT)
+      .replace(TELEBIRR_PRESENTATION_WINDOW_TEXT, LEGACY_TELEBIRR_WINDOW_TEXT);
+    return message.text === currentPrompt || message.text === previousPrompt ? playerId : undefined;
   } catch {
     return undefined;
   }

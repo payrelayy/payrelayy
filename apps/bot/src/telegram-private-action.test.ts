@@ -177,6 +177,27 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('accepts an already-open payment reply from the previous pilot card during rollout', () => {
+    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    }).replace(
+      'Amount: send exactly 25 ETB in TeleBirr.',
+      'Amount: choose 25–25,000 ETB in TeleBirr.',
+    );
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'SYNTB00000001',
+        replyToMessage: { text: previousPrompt, from: { is_bot: true } },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: { playerId: 'PLAYER-DEMO-42', transactionReference: 'SYNTB00000001' },
+    });
+  });
+
   it('keeps the previous two-line prompt safe during a rolling deployment', () => {
     expect(
       reduceTelegramGuidedDepositProofSubmission({

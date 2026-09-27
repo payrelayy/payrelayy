@@ -64,6 +64,10 @@
       "types": "./dist/protected-operator-query-http-client.d.ts",
       "default": "./dist/protected-operator-query-http-client.js"
     },
+    "./protected-operator-query-host": {
+      "types": "./dist/protected-operator-query-host.d.ts",
+      "default": "./dist/protected-operator-query-host.js"
+    },
     "./guarded-operator-query-client": {
       "types": "./dist/guarded-operator-query-client.d.ts",
       "default": "./dist/guarded-operator-query-client.js"

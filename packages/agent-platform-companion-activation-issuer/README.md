@@ -174,6 +174,17 @@ sessions, and financial authority. This adapter is not exported or invoked by
 production, does not start a job, and is not a substitute for provider-outcome
 reconciliation.
 
+The internal `guarded-execution-supervisor` composes that lease with the exact
+owned-child lifecycle fence and the reviewed database-and-host emergency stop.
+The local activation channel can bind its readiness, post-transition renewal,
+loss signal, and stop callback to this one supervisor. All expiry, child-exit,
+operator-abort, renewal-failure, and permit-failure paths share one memoized
+stop, so a race cannot repeat the emergency SQL or the host stop. Its tests
+exercise the real local permit gate with a failed renewal and require no permit
+and exactly one stop. The supervisor remains internal source-only code; it
+does not authorize an Owner request, launch a child, activate production, or
+decide the outcome of an in-flight KemerBet action.
+
 An internal source-only lifecycle monitor can now bind the exact owned child,
 the database transition expiry, and the reviewed database-and-host emergency
 stop constructed from the protected administrator callback. It invokes that

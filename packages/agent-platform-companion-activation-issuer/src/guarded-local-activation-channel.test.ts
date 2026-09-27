@@ -10,6 +10,7 @@ import {
   openGuardedLocalActivationChannel,
   type GuardedLocalActivationChannel,
 } from './guarded-local-activation-channel.js';
+import { prepareGuardedCompanionExecutionSupervisor } from './guarded-execution-supervisor.js';
 
 const channels: GuardedLocalActivationChannel[] = [];
 const sockets: Socket[] = [];
@@ -252,6 +253,73 @@ describe('internal guarded local activation channel', () => {
       expect(supervisor.onActivated).toHaveBeenCalledTimes(1);
       expect(query).toHaveBeenCalledTimes(2);
       expect(stopOnUncertainty).toHaveBeenCalledTimes(1);
+      expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'shares one emergency stop across the real supervisor and local permit gate',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      let exit!: () => void;
+      const stopped = new Promise<void>((resolve) => {
+        exit = resolve;
+      });
+      const hostStop = vi.fn(async () => {
+        exit();
+        return { processStopped: true, providerOutcomeRequiresReconciliation: true };
+      });
+      const disableDatabase = vi.fn(async () => ({
+        schemaVersion: 1,
+        operation: 'companion_execution_emergency_disable',
+        deploymentTarget: 'production',
+        runtimeLogin: 'disabled',
+        companionExecution: 'disabled',
+        financialAuthority: 'disabled',
+        providerOutcomeRequiresReconciliation: true,
+      }));
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('cron.job_run_details')) return { rows: [{ ready: true }] };
+        if (sql.includes('launch_proof_digest::text')) {
+          return { rows: [{ proof_digest: f.proofDigest }] };
+        }
+        if (sql.includes('activate_agent_platform_companion_execution_once')) {
+          return { rows: [{ valid_until: new Date(Date.now() + 30 * 60_000) }] };
+        }
+        throw new Error('private lease-renewal detail');
+      });
+      const supervisor = prepareGuardedCompanionExecutionSupervisor({
+        child: {
+          processId: 411,
+          stopped,
+          stop: vi.fn(async () => undefined),
+          stopAfterPermit: hostStop,
+        },
+        administrator: { query },
+        activationEpoch: '1',
+        disableDatabase,
+        trustedNow: () => new Date(),
+      });
+      await expect(
+        channel.commitAndPermit({
+          actorAuthUserId: f.actorAuthUserId,
+          requestKey: f.requestKey,
+          verifiedProofDigest: f.proofDigest,
+          runtimePassword: 'e'.repeat(64),
+          administrator: { query },
+          trustedNow: () => new Date(),
+          stopOnUncertainty: supervisor.stopOnUncertainty,
+          independentStop: supervisor,
+        }),
+      ).rejects.toBeInstanceOf(GuardedLocalActivationUncertainError);
+      expect(query).toHaveBeenCalledTimes(4);
+      expect(disableDatabase).toHaveBeenCalledTimes(1);
+      expect(hostStop).toHaveBeenCalledTimes(1);
       expect(peer.getPermit()).toBe('');
     },
   );

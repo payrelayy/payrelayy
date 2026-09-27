@@ -27,6 +27,7 @@ const MAX_ACK_BYTES = 192;
 const PROOF_WAIT_MS = 90_000;
 const COMMIT_WAIT_MS = 60_000;
 const ACK_WAIT_MS = 15_000;
+const WATCHDOG_READY_WAIT_MS = 15_000;
 
 const ATTESTATION_SQL = `select launch_proof_digest::text as proof_digest
   from app.agent_platform_companion_execution_activation_attestations
@@ -58,6 +59,16 @@ export interface GuardedLocalActivationCommitInput {
   readonly trustedNow: () => Date;
   /** One-use, independent database-and-exact-host stop, bound before the transition. */
   readonly stopOnUncertainty: () => Promise<GuardedCompanionEmergencyStopRehearsalResult>;
+  /**
+   * A separately owned stop supervisor. The future protected operator must attest
+   * this process and its database/host stop authority independently; this callback
+   * is not itself such an attestation or a production activation entry point.
+   */
+  readonly independentStop: Readonly<{
+    confirmReady(): Promise<void>;
+    /** Resolving or rejecting means the supervisor is no longer reliable. */
+    readonly lost: Promise<unknown>;
+  }>;
   readonly signal?: AbortSignal;
 }
 
@@ -70,6 +81,8 @@ export interface GuardedLocalActivationChannel {
       validUntil: string;
       permitAcknowledged: true;
       runtimeConfirmationRequired: true;
+      /** Rejects on later supervisor loss after invoking the one-use bound stop. */
+      independentStopLoss: Promise<never>;
     }>
   >;
   close(): Promise<void>;
@@ -317,6 +330,38 @@ export async function openGuardedLocalActivationChannel(
       if (spent) throw new GuardedLocalActivationUnavailableError();
       spent = true;
       let transitionDispatched = false;
+      let watchdogLost = false;
+      let stopPromise: Promise<GuardedCompanionEmergencyStopRehearsalResult> | undefined;
+      const stopOnce = () => {
+        stopPromise ??= bounded(() => input.stopOnUncertainty(), 105_000);
+        return stopPromise;
+      };
+      const lost = Promise.resolve(input?.independentStop?.lost).then(
+        () => {
+          watchdogLost = true;
+          throw new Error();
+        },
+        () => {
+          watchdogLost = true;
+          throw new Error();
+        },
+      );
+      // A supervisor loss after a successful permit still invokes the bound
+      // database-and-host stop and reports uncertainty to the future operator.
+      // Provider outcome remains a separate reconciliation obligation.
+      const independentStopLoss: Promise<never> = lost.catch(async (): Promise<never> => {
+        if (transitionDispatched) {
+          try {
+            await stopOnce();
+          } catch {
+            // Both stop failure and a confirmed stop require external review.
+          }
+        }
+        throw transitionDispatched
+          ? new GuardedLocalActivationUncertainError()
+          : new GuardedLocalActivationUnavailableError();
+      });
+      void independentStopLoss.catch(() => undefined);
       const abort = () => {
         void close();
       };
@@ -340,13 +385,23 @@ export async function openGuardedLocalActivationChannel(
           !input.administrator ||
           typeof input.administrator.query !== 'function' ||
           typeof input.trustedNow !== 'function' ||
-          typeof input.stopOnUncertainty !== 'function'
+          typeof input.stopOnUncertainty !== 'function' ||
+          typeof input.independentStop?.confirmReady !== 'function' ||
+          typeof input.independentStop?.lost?.then !== 'function'
         )
           throw new Error();
+        await bounded(
+          () => Promise.race([input.independentStop.confirmReady(), lost]),
+          WATCHDOG_READY_WAIT_MS,
+        );
+        if (watchdogLost || closed || input.signal?.aborted) throw new Error();
         const beforeDispatch = input.trustedNow();
         if (!(beforeDispatch instanceof Date) || !Number.isFinite(beforeDispatch.getTime()))
           throw new Error();
-        const result = await input.administrator.query(ATTESTATION_SQL, [input.requestKey]);
+        const result = await Promise.race([
+          input.administrator.query(ATTESTATION_SQL, [input.requestKey]),
+          lost,
+        ]);
         if (
           result.rows.length !== 1 ||
           !result.rows[0] ||
@@ -356,17 +411,21 @@ export async function openGuardedLocalActivationChannel(
           input.signal?.aborted
         )
           throw new Error();
+        if (watchdogLost) throw new Error();
         transitionDispatched = true;
         const validUntil = await bounded(
           () =>
-            invokeCompanionActivationTransitionInternal(
-              {
-                actorAuthUserId: input.actorAuthUserId,
-                requestKey: input.requestKey,
-                runtimePassword: input.runtimePassword,
-              },
-              input.administrator,
-            ),
+            Promise.race([
+              invokeCompanionActivationTransitionInternal(
+                {
+                  actorAuthUserId: input.actorAuthUserId,
+                  requestKey: input.requestKey,
+                  runtimePassword: input.runtimePassword,
+                },
+                input.administrator,
+              ),
+              lost,
+            ]),
           COMMIT_WAIT_MS,
         );
         const now = input.trustedNow();
@@ -379,6 +438,7 @@ export async function openGuardedLocalActivationChannel(
             now.getTime() + COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS + 30_000 ||
           closed ||
           input.signal?.aborted ||
+          watchdogLost ||
           socket.destroyed
         )
           throw new Error();
@@ -391,20 +451,22 @@ export async function openGuardedLocalActivationChannel(
         const write = new Promise<void>((resolve, reject) => {
           socket!.write(permit, (error) => (error ? reject(new Error()) : resolve()));
         });
-        await bounded(() => Promise.all([write, acknowledged]).then(() => undefined), ACK_WAIT_MS);
+        await bounded(
+          () => Promise.race([Promise.all([write, acknowledged]).then(() => undefined), lost]),
+          ACK_WAIT_MS,
+        );
+        if (watchdogLost) throw new Error();
         await close();
         return Object.freeze({
           validUntil,
           permitAcknowledged: true as const,
           runtimeConfirmationRequired: true as const,
+          independentStopLoss,
         });
       } catch {
         // A query timeout or lost response can conceal a committed transition.
         // Start the independent database/host stop even if closing IPC fails.
-        await Promise.allSettled([
-          close(),
-          ...(transitionDispatched ? [bounded(() => input.stopOnUncertainty(), 105_000)] : []),
-        ]);
+        await Promise.allSettled([close(), ...(transitionDispatched ? [stopOnce()] : [])]);
         throw transitionDispatched
           ? new GuardedLocalActivationUncertainError()
           : new GuardedLocalActivationUnavailableError();

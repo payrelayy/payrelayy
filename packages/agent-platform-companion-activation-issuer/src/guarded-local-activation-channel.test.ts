@@ -22,6 +22,10 @@ const stopOnUncertainty = vi.fn(async () =>
     providerOutcomeRequiresReconciliation: true as const,
   }),
 );
+const independentStop = () => ({
+  confirmReady: vi.fn(async () => undefined),
+  lost: new Promise<never>(() => undefined),
+});
 afterEach(async () => {
   for (const socket of sockets.splice(0)) socket.destroy();
   await Promise.all(channels.splice(0).map((channel) => channel.close()));
@@ -123,6 +127,7 @@ describe('internal guarded local activation channel', () => {
         administrator: { query },
         trustedNow: () => new Date(),
         stopOnUncertainty,
+        independentStop: independentStop(),
       });
       await started;
       expect(peer.getPermit()).toBe('');
@@ -161,6 +166,7 @@ describe('internal guarded local activation channel', () => {
           administrator: { query },
           trustedNow: () => new Date(),
           stopOnUncertainty,
+          independentStop: independentStop(),
         }),
       ).rejects.toBeInstanceOf(GuardedLocalActivationUnavailableError);
       expect(query).toHaveBeenCalledTimes(1);
@@ -193,6 +199,7 @@ describe('internal guarded local activation channel', () => {
           administrator: { query },
           trustedNow: () => new Date(),
           stopOnUncertainty,
+          independentStop: independentStop(),
         }),
       ).rejects.toMatchObject({
         name: 'GuardedLocalActivationUncertainError',
@@ -226,6 +233,7 @@ describe('internal guarded local activation channel', () => {
         administrator: { query },
         trustedNow: () => new Date(),
         stopOnUncertainty,
+        independentStop: independentStop(),
       });
       await peer.receivedPermit;
       await expect(pending).rejects.toBeInstanceOf(GuardedLocalActivationUncertainError);
@@ -253,10 +261,153 @@ describe('internal guarded local activation channel', () => {
           administrator: { query },
           trustedNow: () => new Date(),
           stopOnUncertainty: undefined as never,
+          independentStop: independentStop(),
         }),
       ).rejects.toBeInstanceOf(GuardedLocalActivationUnavailableError);
       expect(query).not.toHaveBeenCalled();
       expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'refuses the transition when no separately owned stop supervisor is bound',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      const query = vi.fn(async () => ({ rows: [{ proof_digest: f.proofDigest }] }));
+      await expect(
+        channel.commitAndPermit({
+          actorAuthUserId: f.actorAuthUserId,
+          requestKey: f.requestKey,
+          verifiedProofDigest: f.proofDigest,
+          runtimePassword: 'e'.repeat(64),
+          administrator: { query },
+          trustedNow: () => new Date(),
+          stopOnUncertainty,
+          independentStop: undefined as never,
+        }),
+      ).rejects.toBeInstanceOf(GuardedLocalActivationUnavailableError);
+      expect(query).not.toHaveBeenCalled();
+      expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'does not read attestation or transition when the separate supervisor is not ready',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      const query = vi.fn(async () => ({ rows: [{ proof_digest: f.proofDigest }] }));
+      await expect(
+        channel.commitAndPermit({
+          actorAuthUserId: f.actorAuthUserId,
+          requestKey: f.requestKey,
+          verifiedProofDigest: f.proofDigest,
+          runtimePassword: 'e'.repeat(64),
+          administrator: { query },
+          trustedNow: () => new Date(),
+          stopOnUncertainty,
+          independentStop: {
+            confirmReady: async () => {
+              throw new Error('private supervisor detail');
+            },
+            lost: new Promise<never>(() => undefined),
+          },
+        }),
+      ).rejects.toBeInstanceOf(GuardedLocalActivationUnavailableError);
+      expect(query).not.toHaveBeenCalled();
+      expect(stopOnUncertainty).not.toHaveBeenCalled();
+      expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'stops once without a permit if the separate supervisor is lost during transition',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      let lose!: () => void;
+      const lost = new Promise<void>((resolve) => {
+        lose = resolve;
+      });
+      let transitionStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        transitionStarted = resolve;
+      });
+      const query = vi.fn(async (sql: string) => {
+        if (sql.includes('launch_proof_digest::text')) {
+          return { rows: [{ proof_digest: f.proofDigest }] };
+        }
+        transitionStarted();
+        return new Promise<{ rows: { valid_until: Date }[] }>(() => undefined);
+      });
+      const pending = channel.commitAndPermit({
+        actorAuthUserId: f.actorAuthUserId,
+        requestKey: f.requestKey,
+        verifiedProofDigest: f.proofDigest,
+        runtimePassword: 'e'.repeat(64),
+        administrator: { query },
+        trustedNow: () => new Date(),
+        stopOnUncertainty,
+        independentStop: { confirmReady: async () => undefined, lost },
+      });
+      await started;
+      lose();
+      await expect(pending).rejects.toBeInstanceOf(GuardedLocalActivationUncertainError);
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(stopOnUncertainty).toHaveBeenCalledTimes(1);
+      expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'invokes the bound stop if the separate supervisor is lost after permit acknowledgement',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      let lose!: () => void;
+      const lost = new Promise<void>((resolve) => {
+        lose = resolve;
+      });
+      const query = vi.fn(async (sql: string) =>
+        sql.includes('launch_proof_digest::text')
+          ? { rows: [{ proof_digest: f.proofDigest }] }
+          : { rows: [{ valid_until: new Date(Date.now() + 30 * 60_000) }] },
+      );
+      const result = await channel.commitAndPermit({
+        actorAuthUserId: f.actorAuthUserId,
+        requestKey: f.requestKey,
+        verifiedProofDigest: f.proofDigest,
+        runtimePassword: 'e'.repeat(64),
+        administrator: { query },
+        trustedNow: () => new Date(),
+        stopOnUncertainty,
+        independentStop: { confirmReady: async () => undefined, lost },
+      });
+      expect(result.permitAcknowledged).toBe(true);
+      expect(peer.getPermit()).toContain('FETANAGENT_GUARDED_LAUNCH_PERMIT_V2');
+      expect(stopOnUncertainty).not.toHaveBeenCalled();
+      lose();
+      await expect(result.independentStopLoss).rejects.toBeInstanceOf(
+        GuardedLocalActivationUncertainError,
+      );
+      await vi.waitFor(() => expect(stopOnUncertainty).toHaveBeenCalledTimes(1));
     },
   );
 
@@ -287,6 +438,7 @@ describe('internal guarded local activation channel', () => {
           administrator: { query },
           trustedNow: () => new Date(),
           stopOnUncertainty: failedStop,
+          independentStop: independentStop(),
         }),
       ).rejects.toBeInstanceOf(GuardedLocalActivationUncertainError);
       expect(query).toHaveBeenCalledTimes(2);

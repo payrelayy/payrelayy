@@ -215,6 +215,15 @@ Owner approval, and post-crash provider reconciliation are still required
 before a one-job pilot can run. The caller must close the dedicated database
 session on every outcome, including a failed lock acquisition.
 
+The source-only server handoff signer now derives the handoff from an exact,
+unconsumed database request rather than accepting body fields from the PC. It
+requires a server-owned protected key and an independent published-release
+verification callback, re-reads the request around signing, and refuses a
+changed or expired binding. The local publisher uses the same validation when
+checking the server reply. There is still no authenticated network endpoint,
+production secret loader, or activation caller; installing this package alone
+cannot sign a production handoff or enable money movement.
+
 An internal source-only lifecycle monitor can now bind the exact owned child,
 the database transition expiry, and the reviewed database-and-host emergency
 stop constructed from the protected administrator callback. It invokes that

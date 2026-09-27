@@ -93,6 +93,11 @@ const SNAPSHOT_SQL = `
     and certificate.certificate_body ->> 'deviceKeyId' = certificate.device_key_id
     and certificate.certificate_body ->> 'devicePublicKeySpkiSha256' =
       certificate.device_public_key_spki_sha256
+    and not exists (
+      select 1 from app.agent_platform_companion_execution_activation_consumptions consumed
+       where consumed.request_key = request.request_key
+          or consumed.activation_epoch = request.activation_epoch
+    )
 `;
 
 function stringField(row: Record<string, unknown>, name: string): string {

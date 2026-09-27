@@ -39,6 +39,10 @@
     "./guarded-activation-preflight": {
       "types": "./dist/guarded-activation-preflight.d.ts",
       "default": "./dist/guarded-activation-preflight.js"
+    },
+    "./guarded-server-handoff-signer": {
+      "types": "./dist/guarded-server-handoff-signer.d.ts",
+      "default": "./dist/guarded-server-handoff-signer.js"
     }
   },
   "dependencies": {

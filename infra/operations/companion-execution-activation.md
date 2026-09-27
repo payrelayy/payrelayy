@@ -210,19 +210,23 @@ read-only guarded-process observer now validates the canonical local signed hand
 paired v2 proof, and an OS-reported PID/image/command line/start time through a
 source-pinned Windows inspection. A separate local Windows pipe receiver accepts one
 bounded v2 proof for a fresh operator challenge and never sends an execution permit.
-Its caller must close it after observation. It does not start a process or validate that proof. The protected
-process starter, attested transition invocation, and permit/stop lifecycle are still
-absent. A no-permit rehearsal coordinator now composes this receiver with the
+Its caller must close it after observation. It does not start a process or validate that proof.
+A no-permit rehearsal coordinator composes this receiver with the
 independent observer around a caller-supplied exact child lifecycle. It reports only
-an inert fixed result after confirmed child exit; no production starter or invocation
-is wired to it. A new Node IPC pre-permit stop contract lets an already-spawned
+an inert fixed result after confirmed child exit. A protected, one-use local starter
+can now supply that child lifecycle only after a fresh independent release-tree
+attestation. It launches the exact reviewed bundled Node and entry point through
+an explicit environment allowlist and private IPC stop channel; it does not
+independently attest loaded memory or remove the disk-to-spawn race. There is no
+production invocation or permit sender wired to it. A Node IPC pre-permit stop
+contract lets an already-spawned
 guarded companion abort its permit wait, close the protected browser and profile lock,
 and acknowledge clean shutdown. The operator-side adapter requires that acknowledgement
 and exit code zero from the exact child; Windows force-kill is not clean-shutdown proof.
 This contract is disarmed before workers start and is not a live-execution host stop.
 If the supplied stop cannot confirm exit, the rehearsal fails closed
 and requires operator reconciliation.
-Neither this adapter nor its migration is a production invocation or execution grant.
+Neither this starter nor its rehearsal is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production
 consumer must supply the remaining authenticated sources and complete the atomic credential

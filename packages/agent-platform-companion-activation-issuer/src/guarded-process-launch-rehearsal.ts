@@ -77,7 +77,7 @@ async function bounded(pending: Promise<void>): Promise<void> {
  * Success requires confirmed child exit. On failure it attempts a bounded stop
  * and reports only a redacted error, including when exit cannot be confirmed.
  * The fixed result cannot be used as an activation attestation or execution grant.
- * No production process starter or invocation is provided by this package.
+ * The separate protected starter is not wired to a production invocation.
  */
 export async function rehearseGuardedWindowsCompanionLaunch(
   input: GuardedProcessLaunchRehearsalInputs,

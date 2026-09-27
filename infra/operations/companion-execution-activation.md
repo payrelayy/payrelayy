@@ -228,7 +228,11 @@ proves host shutdown, not whether a provider action already crossed the
 final-action fence. Parent IPC loss requests shutdown without an acknowledgement.
 If the supplied stop cannot confirm exit, the rehearsal fails closed and requires
 operator reconciliation. This host stop is not yet an integrated credential-
-revocation and in-flight provider-reconciliation operation.
+revocation and in-flight provider-reconciliation operation. A source-only,
+one-use rehearsal now composes the exact-child host stop with the independent
+administrator-only emergency SQL and tests both in a disposable database. Its
+strict result requires credential/session revocation, financial/control fencing,
+and confirmed child exit, but still marks the provider outcome unresolved.
 Neither this starter nor its rehearsal is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production
@@ -244,7 +248,7 @@ independent stop removes that login and control. No application role can insert 
 or execute the transition. The attestation is **not** a self-authenticating signature: trusted
 production adapters must first independently verify the release measurement and paired-process
 proof against the database certificate. The issuer core alone does not provide those adapters.
-No production invocation workflow, signed local handoff, host stop/reconciliation rehearsal, or
+No production invocation workflow, signed local handoff, provider-outcome reconciliation, or
 deployment of this migration exists yet.
 An internal source-only adapter specifies the exact parameterized call and redacted,
 fail-closed result handling. It is deliberately absent from package exports and
@@ -271,9 +275,9 @@ following as one fail-closed operation, with disposable-PostgreSQL and end-to-en
 4. A checksum-bound production transport release with the pinned execution signer and the
    reviewed overlay. The default release must remain no-money. The paired Windows process must
    receive its account-bound opt-in through a reviewed local handoff, not a manually set flag.
-5. A rehearsed independent emergency stop and reconciliation path. The credential/transport
-   stop is only a foundation; the host runtime stop and in-flight provider reconciliation still
-   need an integrated rehearsal. The final-action fence must be one-use, and any ambiguous
+5. A rehearsed independent emergency stop and reconciliation path. A source-only
+   credential/host stop rehearsal exists, but a production binding and in-flight
+   provider reconciliation are still missing. The final-action fence must be one-use, and any ambiguous
    provider response must stop without an automatic retry. The queue item must never be leased
    for a test of the activation plumbing.
 

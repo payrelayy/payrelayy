@@ -41,6 +41,7 @@ const [
   prePermitContract,
   prePermitChild,
   prePermitRuntime,
+  operatorEmergencyStopRehearsal,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -81,6 +82,9 @@ const [
   read('packages/agent-platform-companion-execution-contracts/src/guarded-pre-permit-stop.ts'),
   read('packages/agent-platform-companion-activation-issuer/src/guarded-pre-permit-child.ts'),
   read('apps/windows-companion/src/guarded-pre-permit-shutdown.ts'),
+  read(
+    'packages/agent-platform-companion-activation-issuer/src/guarded-emergency-stop-rehearsal.ts',
+  ),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -151,6 +155,16 @@ assert.match(prePermitChild, /guardedRuntimeStopRequest\(challenge\)/u);
 assert.match(prePermitChild, /acknowledged && code === 0 && signal === null/u);
 assert.match(prePermitChild, /providerOutcomeRequiresReconciliation: true/u);
 assert.doesNotMatch(prePermitChild, /^\s*child\.kill\(/mu);
+assert.match(operatorEmergencyStopRehearsal, /Promise\.allSettled\(\[database, host\]\)/u);
+assert.match(
+  operatorEmergencyStopRehearsal,
+  /bounded\(input\.disableDatabase, DATABASE_STOP_WAIT_MS\)/u,
+);
+assert.match(operatorEmergencyStopRehearsal, /input\.child\.stopAfterPermit\(\)/u);
+assert.match(operatorEmergencyStopRehearsal, /await input\.child\.stopped/u);
+assert.match(operatorEmergencyStopRehearsal, /providerOutcomeRequiresReconciliation: true/u);
+assert.match(operatorEmergencyStopRehearsal, /if \(spent\)/u);
+assert.match(operatorIssuerPackage, /\.\/guarded-emergency-stop-rehearsal/u);
 assert.match(windowsEntry, /guardedShutdown\?\.markPermitReceived\(\)/u);
 assert.match(windowsEntry, /guardedShutdown\?\.disarm\(\)/u);
 assert.ok(

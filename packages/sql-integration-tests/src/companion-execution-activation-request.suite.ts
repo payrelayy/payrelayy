@@ -9,6 +9,7 @@ import {
   loadCompanionActivationDatabaseSnapshot,
   retainCompanionActivationAttestationRow,
 } from '@fetanagent/agent-platform-companion-activation-issuer';
+import { prepareGuardedCompanionEmergencyStopRehearsal } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-emergency-stop-rehearsal';
 
 import { prepareTelebirrPilot } from './private-live-telebirr-proof-lineage.suite.js';
 
@@ -756,6 +757,68 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             )) as runtime_sessions
       `);
       expect(result.rows).toEqual([{ control_state: 'disabled', runtime_sessions: '0' }]);
+    });
+
+    it('rehearses the independent database and exact-host stops together without resolving provider outcome', async () => {
+      let hostStops = 0;
+      let databaseStops = 0;
+      const stop = prepareGuardedCompanionEmergencyStopRehearsal({
+        child: {
+          processId: 411,
+          stopped: Promise.resolve(),
+          stop: async () => undefined,
+          stopAfterPermit: async () => {
+            hostStops += 1;
+            return { processStopped: true, providerOutcomeRequiresReconciliation: true };
+          },
+        },
+        disableDatabase: async () => {
+          databaseStops += 1;
+          const output = await runDisposableStop(
+            getAdministratorPassword(),
+            'xzztugbgtulptnbpoelr',
+          );
+          return JSON.parse(output.trim().split('\n').at(-1) ?? '');
+        },
+      });
+
+      await expect(stop()).resolves.toEqual({
+        databaseCredentialsAndSessionsRevoked: true,
+        financialAuthorityDisabled: true,
+        companionExecutionDisabled: true,
+        exactHostStopped: true,
+        providerOutcomeRequiresReconciliation: true,
+      });
+      expect(hostStops).toBe(1);
+      expect(databaseStops).toBe(1);
+      await expect(stop()).rejects.toMatchObject({
+        requiresIndependentStopAndReconciliation: true,
+      });
+      expect(hostStops).toBe(1);
+      expect(databaseStops).toBe(1);
+
+      const state = await getClient().query<{
+        readonly control_state: string;
+        readonly runtime_sessions: string;
+        readonly disabled_roles: string;
+      }>(`
+        select
+          (select control_state from app.agent_platform_companion_execution_control
+            where singleton) as control_state,
+          (select count(*) from pg_stat_activity activity
+            where activity.usename in (
+              'fetanagent_companion_execution_bridge',
+              'fetanagent_companion_execution_bridge_runtime'
+            )) as runtime_sessions,
+          (select count(*) from pg_authid role
+            where role.rolname in (
+              'fetanagent_companion_execution_bridge',
+              'fetanagent_companion_execution_bridge_runtime'
+            ) and not role.rolcanlogin and role.rolpassword is null) as disabled_roles
+      `);
+      expect(state.rows).toEqual([
+        { control_state: 'disabled', runtime_sessions: '0', disabled_roles: '2' },
+      ]);
     });
   });
 }

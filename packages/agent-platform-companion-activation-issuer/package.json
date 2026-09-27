@@ -24,6 +24,10 @@
       "types": "./dist/guarded-pre-permit-child.d.ts",
       "default": "./dist/guarded-pre-permit-child.js"
     },
+    "./guarded-emergency-stop-rehearsal": {
+      "types": "./dist/guarded-emergency-stop-rehearsal.d.ts",
+      "default": "./dist/guarded-emergency-stop-rehearsal.js"
+    },
     "./guarded-process-starter": {
       "types": "./dist/guarded-process-starter.d.ts",
       "default": "./dist/guarded-process-starter.js"

@@ -162,3 +162,12 @@ database expiry (with a fixed safety margin) and the signed handoff expiry;
 the protected browser is stopped when that local deadline fires. This is an
 additional local fence, not database session revocation or an independent
 watchdog. The production execution path remains disabled.
+
+An internal source-only lifecycle monitor can now bind the exact owned child,
+the database transition expiry, and the reviewed database-and-host emergency
+stop constructed from the protected administrator callback. It invokes that
+stop once on expiry, child exit, operator abort, or an
+explicit stop request, and accepts only the complete redacted stop proof. It
+does not survive its own process failure, is not exported as a production
+activation API, and cannot resolve an in-flight provider outcome. A separately
+owned production watchdog and provider reconciliation remain prerequisites.

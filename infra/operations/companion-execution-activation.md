@@ -123,6 +123,13 @@ from the earlier of the database expiry (minus a clock-skew safety margin) and
 the signed handoff expiry. It aborts workers and closes the protected browser
 at that deadline. This does not revoke a database session or replace an
 independent operator watchdog; no production permit has been issued.
+An internal source-only lifecycle monitor now invokes the reviewed
+database-and-exact-host stop on the database-safe deadline, exact-child exit,
+operator abort, or explicit stop request. Its triggers deduplicate to one stop
+and require the complete credential/session, financial-fence, and host-exit
+proof. It is in-process and cannot stop anything if its own host fails; a
+separately owned production watchdog and provider reconciliation remain
+mandatory before a money-capable release.
 
 ## Current paid-proof state
 

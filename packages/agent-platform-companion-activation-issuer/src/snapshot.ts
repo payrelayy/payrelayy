@@ -20,7 +20,7 @@ export class CompanionActivationSnapshotUnavailableError extends Error {
 // One MVCC statement gives both issuer reads the same internally consistent database
 // snapshot. No lock-bearing helper, security-definer function, or mutable companion
 // claim is used. The consuming transition still rechecks every money boundary.
-const SNAPSHOT_SQL = `
+export const SNAPSHOT_SQL = `
   select
     request.request_key::text as request_key,
     request.pilot_revision_id::text as request_pilot_revision_id,

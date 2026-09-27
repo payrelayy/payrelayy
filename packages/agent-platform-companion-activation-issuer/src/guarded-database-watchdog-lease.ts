@@ -11,7 +11,7 @@ const MAX_REMAINING_MS = 50_000;
 // The database activation trigger independently checks the same named jobs.
 // This operator check additionally requires recent successful runs before any
 // one-use transition is dispatched. A missing cron schema fails closed.
-const READY_SQL = `select (
+export const READY_SQL = `select (
   session_user = 'postgres' and current_user = 'postgres'
   and exists (select 1 from pg_catalog.pg_extension where extname = 'pg_cron')
   and (
@@ -47,7 +47,7 @@ const READY_SQL = `select (
   ) = 3
 ) as ready`;
 
-const RENEW_SQL = `select app.renew_agent_platform_companion_execution_watchdog(
+export const RENEW_SQL = `select app.renew_agent_platform_companion_execution_watchdog(
   $1::bigint
 ) as lease_expires_at`;
 

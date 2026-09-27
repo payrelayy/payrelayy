@@ -31,6 +31,10 @@
     "./guarded-process-starter": {
       "types": "./dist/guarded-process-starter.d.ts",
       "default": "./dist/guarded-process-starter.js"
+    },
+    "./guarded-handoff-publication": {
+      "types": "./dist/guarded-handoff-publication.d.ts",
+      "default": "./dist/guarded-handoff-publication.js"
     }
   },
   "dependencies": {

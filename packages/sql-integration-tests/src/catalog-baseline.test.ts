@@ -8783,6 +8783,12 @@ describe('disposable SQL migration baseline', () => {
           'app.record_deposit_execution_reconciliation(uuid,uuid,text,text,smallint,text,timestamp with time zone,boolean,boolean,boolean,boolean)',
       },
       {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.renew_agent_platform_companion_execution_watchdog(bigint)',
+      },
+      {
         deposit_executor_runtime: true,
         public_execute: false,
         settlement_runtime: false,
@@ -8793,6 +8799,24 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.review_stopped_pilot_paid_execution_job(uuid,uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.watchdog_drain_companion_execution_sessions()',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.watchdog_fence_companion_execution_credentials()',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.watchdog_fence_companion_execution_financial_authority()',
       },
     ]);
 

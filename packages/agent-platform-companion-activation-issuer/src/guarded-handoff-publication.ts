@@ -4,6 +4,7 @@ import { isAbsolute, resolve } from 'node:path';
 
 import {
   COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
+  COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS,
   PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
   PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
   signCompanionExecutionActivationHandoff,
@@ -101,7 +102,13 @@ function validateBinding(input: GuardedCompanionHandoffPublicationInputs, now: n
   const certificateValidFrom = timestamp(certificate.validFrom);
   const certificateValidUntil = timestamp(certificate.validUntil);
   const releaseObservedAt = timestamp(release.observedAt);
-  const handoffExpiresAt = Math.min(requestExpiresAt, certificateValidUntil);
+  // The request is an issuance/consumption deadline, not the runtime lifetime.
+  // The database can grant up to two hours when it consumes the request, so the
+  // local handoff must not stop a legitimate session at the ten-minute deadline.
+  const handoffExpiresAt = Math.min(
+    requestExpiresAt + COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS,
+    certificateValidUntil,
+  );
   if (
     !UUID_V4.test(request.requestKey) ||
     !UUID_V4.test(request.pilotRevisionId) ||
@@ -115,6 +122,7 @@ function validateBinding(input: GuardedCompanionHandoffPublicationInputs, now: n
     requestExpiresAt <= requestedAt ||
     requestExpiresAt - requestedAt > MAX_REQUEST_MS ||
     now < requestedAt ||
+    now >= requestExpiresAt ||
     now >= handoffExpiresAt ||
     currentIdentity.pilotRevisionId !== request.pilotRevisionId ||
     currentIdentity.activationEpoch !== request.activationEpoch ||
@@ -197,7 +205,12 @@ export async function publishGuardedCompanionHandoffWithSigner(
     if (Buffer.byteLength(raw, 'utf8') < 2 || Buffer.byteLength(raw, 'utf8') > MAX_HANDOFF_BYTES)
       throw new Error();
     const beforeWrite = trustedTime(input.trustedNow);
-    if (beforeWrite < now || beforeWrite >= expiresAtMs) throw new Error();
+    if (
+      beforeWrite < now ||
+      beforeWrite >= timestamp(input.request.expiresAt) ||
+      beforeWrite >= expiresAtMs
+    )
+      throw new Error();
     const file = resolve(directory, HANDOFF_FILE);
     const handle = await open(file, 'wx', 0o600);
     try {
@@ -212,6 +225,7 @@ export async function publishGuardedCompanionHandoffWithSigner(
       realpath(directory),
       readFile(file, 'utf8'),
     ]);
+    const afterWrite = trustedTime(input.trustedNow);
     if (
       !fileStat.isFile() ||
       fileStat.isSymbolicLink() ||
@@ -219,7 +233,9 @@ export async function publishGuardedCompanionHandoffWithSigner(
       realFile !== file ||
       realDirectory !== directory ||
       stored !== raw ||
-      trustedTime(input.trustedNow) >= expiresAtMs
+      afterWrite < beforeWrite ||
+      afterWrite >= timestamp(input.request.expiresAt) ||
+      afterWrite >= expiresAtMs
     )
       throw new Error();
     return Object.freeze({

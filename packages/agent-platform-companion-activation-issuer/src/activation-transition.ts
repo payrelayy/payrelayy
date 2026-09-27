@@ -1,3 +1,5 @@
+import { COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS } from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import type { CompanionActivationSnapshotQuery } from './snapshot.js';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -89,7 +91,7 @@ export async function invokeCompanionActivationTransitionInternal(
     if (
       !Number.isFinite(expiry) ||
       expiry <= Date.now() ||
-      expiry > dispatchedAt + 2 * 60 * 60_000 + 30_000
+      expiry > dispatchedAt + COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS + 30_000
     ) {
       throw new Error();
     }

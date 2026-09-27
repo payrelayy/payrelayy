@@ -233,3 +233,14 @@ does not survive its own process failure, is not exported as a production
 activation API, and cannot resolve an in-flight provider outcome. The installed
 independent database watchdog addresses process-loss fencing, while the
 protected operator and provider reconciliation remain prerequisites.
+
+The source-only protected operator host composes the pinned database session,
+paired-certificate command handler, and loopback listener into one on-demand
+lifecycle. A malformed request, lost administrator session, caller abort, or
+bounded host lifetime closes the exact listener and session; a possibly
+committed activation invokes the separately supplied database stop. It does
+not load a credential, install a production service, open a public route, or
+create an authenticated private tunnel. In particular, an SSH port forward
+alone must not be treated as authority to activate: exact Owner approval,
+server-side credential and signer ownership, the independent stop, and
+post-crash provider reconciliation remain mandatory.

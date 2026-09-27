@@ -5,6 +5,7 @@ import {
   COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
   COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX,
   COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX,
+  COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS,
   COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS,
   type SignedCompanionExecutionLaunchProof,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
@@ -22,7 +23,7 @@ const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const RUNTIME_PASSWORD = /^[0-9a-f]{64}$/u;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
 const MAX_PROOF_BYTES = 2_048;
-const MAX_ACK_BYTES = 128;
+const MAX_ACK_BYTES = 192;
 const PROOF_WAIT_MS = 90_000;
 const COMMIT_WAIT_MS = 60_000;
 const ACK_WAIT_MS = 15_000;
@@ -372,7 +373,8 @@ export async function openGuardedLocalActivationChannel(
         if (
           !(now instanceof Date) ||
           !Number.isFinite(now.getTime()) ||
-          Date.parse(validUntil) <= now.getTime() ||
+          Date.parse(validUntil) <=
+            now.getTime() + 2 * COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS ||
           Date.parse(validUntil) >
             now.getTime() + COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS + 30_000 ||
           closed ||
@@ -380,8 +382,8 @@ export async function openGuardedLocalActivationChannel(
           socket.destroyed
         )
           throw new Error();
-        const permit = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${input.verifiedProofDigest}\n`;
-        ackExpected = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${input.verifiedProofDigest}\n`;
+        const permit = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${input.verifiedProofDigest}|${validUntil}\n`;
+        ackExpected = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${input.verifiedProofDigest}|${validUntil}\n`;
         const acknowledged = new Promise<void>((resolve, reject) => {
           ackResolve = resolve;
           ackReject = () => reject(new Error());

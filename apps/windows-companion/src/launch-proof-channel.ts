@@ -5,6 +5,8 @@ import {
   COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
   COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX,
   COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX,
+  COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS,
+  COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS,
   COMPANION_LAUNCH_PROOF_PURPOSE,
   type SignedCompanionExecutionLaunchProof,
   type SignedCompanionLaunchProof,
@@ -14,8 +16,9 @@ const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/u;
 const PIPE_SUFFIX = /^[0-9a-f]{32}$/u;
 const MAX_PROOF_BYTES = 2_048;
-const MAX_PERMIT_BYTES = 128;
+const MAX_PERMIT_BYTES = 192;
 const MAX_PERMIT_WAIT_MS = 2 * 60_000;
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 export interface CompanionLaunchProofRequest {
   readonly challenge: string;
@@ -100,7 +103,7 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
   request: CompanionLaunchProofRequest,
   proof: SignedCompanionExecutionLaunchProof,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<number> {
   if (
     !validRequest(request) ||
     proof?.body?.contractVersion !== 2 ||
@@ -117,12 +120,13 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
     throw new Error('The guarded local launch proof is too large.');
   }
   const proofDigest = `sha256:${createHash('sha256').update(serialized, 'utf8').digest('hex')}`;
-  const expectedPermit = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${proofDigest}\n`;
-  const acknowledgement = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${proofDigest}\n`;
-  await new Promise<void>((resolve, reject) => {
+  const permitPrefix = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${proofDigest}|`;
+  const acknowledgementPrefix = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${proofDigest}|`;
+  return new Promise<number>((resolve, reject) => {
     const socket = createConnection(request.pipePath);
     let settled = false;
     let received = '';
+    let safeDeadlineMs: number | undefined;
     const abort = () => finish(new Error('aborted'));
     const finish = (error?: Error) => {
       if (settled) return;
@@ -130,8 +134,9 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
       clearTimeout(timer);
       signal?.removeEventListener('abort', abort);
       socket.destroy();
-      if (error) reject(new Error('The guarded local launch permit is unavailable.'));
-      else resolve();
+      if (error || safeDeadlineMs === undefined)
+        reject(new Error('The guarded local launch permit is unavailable.'));
+      else resolve(safeDeadlineMs);
     };
     const timer = setTimeout(() => finish(new Error('timeout')), MAX_PERMIT_WAIT_MS);
     if (signal?.aborted) {
@@ -155,13 +160,29 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
       if (Buffer.byteLength(received, 'utf8') > MAX_PERMIT_BYTES) {
         finish(new Error('oversized response'));
       } else if (received.includes('\n')) {
-        if (received !== expectedPermit) {
+        const validUntil = received.slice(permitPrefix.length, -1);
+        const expiresAtMs = Date.parse(validUntil);
+        const remainingMs = expiresAtMs - Date.now();
+        if (
+          !received.startsWith(permitPrefix) ||
+          received !== `${permitPrefix}${validUntil}\n` ||
+          !UTC_TIMESTAMP.test(validUntil) ||
+          !Number.isFinite(expiresAtMs) ||
+          new Date(expiresAtMs).toISOString() !== validUntil ||
+          remainingMs <= 2 * COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS ||
+          remainingMs >
+            COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS +
+              COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS
+        ) {
           finish(new Error('invalid permit'));
           return;
         }
+        safeDeadlineMs = expiresAtMs - COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS;
         // A valid permit is not a worker-start acknowledgement. Confirm only
         // receipt of these exact proof-bound bytes before releasing the gate.
-        socket.write(acknowledgement, (error) => finish(error ?? undefined));
+        socket.write(`${acknowledgementPrefix}${validUntil}\n`, (error) =>
+          finish(error ?? undefined),
+        );
       }
     });
   });

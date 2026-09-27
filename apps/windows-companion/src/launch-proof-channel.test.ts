@@ -7,6 +7,7 @@ import {
   COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
   COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX,
   COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX,
+  COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS,
   COMPANION_LAUNCH_PROOF_PURPOSE,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -118,6 +119,7 @@ describe('local companion launch-proof channel', () => {
       const acknowledgement = new Promise<string>((resolve) => {
         acknowledge = resolve;
       });
+      const validUntil = new Date(Date.now() + 30 * 60_000).toISOString();
       const server = createServer((socket) => {
         let received = '';
         let proofReceived = false;
@@ -131,7 +133,9 @@ describe('local companion launch-proof channel', () => {
             proofReceived = true;
             const digest = createHash('sha256').update(received.slice(0, -1), 'utf8').digest('hex');
             received = '';
-            socket.write(`${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}sha256:${digest}\n`);
+            socket.write(
+              `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}sha256:${digest}|${validUntil}\n`,
+            );
           }
         });
       });
@@ -142,10 +146,10 @@ describe('local companion launch-proof channel', () => {
       try {
         await expect(
           deliverCompanionExecutionLaunchProofAndAwaitPermit({ challenge, pipePath }, guardedProof),
-        ).resolves.toBeUndefined();
+        ).resolves.toBe(Date.parse(validUntil) - COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS);
         const digest = createHash('sha256').update(JSON.stringify(guardedProof)).digest('hex');
         await expect(acknowledgement).resolves.toBe(
-          `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}sha256:${digest}\n`,
+          `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}sha256:${digest}|${validUntil}\n`,
         );
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -157,7 +161,7 @@ describe('local companion launch-proof channel', () => {
     'rejects an incorrect permit without releasing guarded execution',
     async () => {
       const server = createServer((socket) => {
-        socket.once('data', () => socket.end('FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|wrong\n'));
+        socket.once('data', () => socket.end('FETANAGENT_GUARDED_LAUNCH_PERMIT_V2|wrong\n'));
       });
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject);
@@ -169,6 +173,39 @@ describe('local companion launch-proof channel', () => {
         ).rejects.toThrow('The guarded local launch permit is unavailable.');
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'rejects old, expired, and overlong permits without acknowledging them',
+    async () => {
+      const digest = createHash('sha256').update(JSON.stringify(guardedProof)).digest('hex');
+      const prefix = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}sha256:${digest}|`;
+      const invalidPermits = [
+        `FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|sha256:${digest}\n`,
+        `${prefix}${new Date(Date.now() - 60_000).toISOString()}\n`,
+        `${prefix}${new Date(Date.now() + 3 * 60 * 60_000).toISOString()}\n`,
+        `${prefix}not-a-timestamp\n`,
+      ];
+      for (const invalidPermit of invalidPermits) {
+        const server = createServer((socket) => {
+          socket.once('data', () => socket.end(invalidPermit));
+        });
+        await new Promise<void>((resolve, reject) => {
+          server.once('error', reject);
+          server.listen(pipePath, resolve);
+        });
+        try {
+          await expect(
+            deliverCompanionExecutionLaunchProofAndAwaitPermit(
+              { challenge, pipePath },
+              guardedProof,
+            ),
+          ).rejects.toThrow('The guarded local launch permit is unavailable.');
+        } finally {
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
       }
     },
   );

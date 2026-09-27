@@ -155,3 +155,10 @@ provider outcome. This source-only channel has no production caller, lifecycle
 watchdog, credential-expiry handler, or provider reconciliation. It must not be
 used for a production activation until those pieces and the protected operator
 workflow are reviewed together; it changes no current financial state.
+The local permit now binds the database's exact expiry alongside the proof
+digest. The companion rejects the older permit version, an expired or overlong
+expiry, and any malformed frame. Its worker deadline is the earlier of that
+database expiry (with a fixed safety margin) and the signed handoff expiry;
+the protected browser is stopped when that local deadline fires. This is an
+additional local fence, not database session revocation or an independent
+watchdog. The production execution path remains disabled.

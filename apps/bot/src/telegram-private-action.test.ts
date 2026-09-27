@@ -182,10 +182,15 @@ describe('private Telegram action reducers', () => {
       playerId: 'PLAYER-DEMO-42',
       receiverAccountHolderName: 'Demo Receiver',
       receiverAccountReference: '0000000042',
-    }).replace(
-      'Amount: send exactly 25 ETB in TeleBirr.',
-      'Amount: choose 25–25,000 ETB in TeleBirr.',
-    );
+    })
+      .replace(
+        'Amount: send exactly 25 ETB in TeleBirr.',
+        'Amount: choose 25–25,000 ETB in TeleBirr.',
+      )
+      .replace(
+        'This payment instruction is valid for at most 10 minutes; submit the reference promptly.',
+        'These payment details are valid for 12 hours.',
+      );
     expect(
       reduceTelegramGuidedDepositProofSubmission({
         ...privateMetadata,

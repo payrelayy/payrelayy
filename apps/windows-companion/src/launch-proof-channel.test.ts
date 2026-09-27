@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
+  COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX,
+  COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX,
   COMPANION_LAUNCH_PROOF_PURPOSE,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -110,16 +112,26 @@ describe('local companion launch-proof channel', () => {
   );
 
   it.skipIf(process.platform !== 'win32')(
-    'holds guarded execution until the local pipe returns a proof-bound permit',
+    'holds guarded execution until the local pipe returns a proof-bound permit and acknowledges it',
     async () => {
+      let acknowledge!: (value: string) => void;
+      const acknowledgement = new Promise<string>((resolve) => {
+        acknowledge = resolve;
+      });
       const server = createServer((socket) => {
         let received = '';
+        let proofReceived = false;
         socket.on('data', (chunk) => {
           received += chunk.toString('utf8');
           if (received.endsWith('\n')) {
-            const proofBytes = received.slice(0, -1);
-            const digest = createHash('sha256').update(proofBytes, 'utf8').digest('hex');
-            socket.write(`FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|sha256:${digest}\n`);
+            if (proofReceived) {
+              acknowledge(received);
+              return;
+            }
+            proofReceived = true;
+            const digest = createHash('sha256').update(received.slice(0, -1), 'utf8').digest('hex');
+            received = '';
+            socket.write(`${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}sha256:${digest}\n`);
           }
         });
       });
@@ -131,6 +143,10 @@ describe('local companion launch-proof channel', () => {
         await expect(
           deliverCompanionExecutionLaunchProofAndAwaitPermit({ challenge, pipePath }, guardedProof),
         ).resolves.toBeUndefined();
+        const digest = createHash('sha256').update(JSON.stringify(guardedProof)).digest('hex');
+        await expect(acknowledgement).resolves.toBe(
+          `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}sha256:${digest}\n`,
+        );
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

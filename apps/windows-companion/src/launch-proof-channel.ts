@@ -3,6 +3,8 @@ import { createConnection } from 'node:net';
 
 import {
   COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
+  COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX,
+  COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX,
   COMPANION_LAUNCH_PROOF_PURPOSE,
   type SignedCompanionExecutionLaunchProof,
   type SignedCompanionLaunchProof,
@@ -11,7 +13,6 @@ import {
 const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/u;
 const PIPE_SUFFIX = /^[0-9a-f]{32}$/u;
-const GUARDED_PERMIT_PREFIX = 'FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|';
 const MAX_PROOF_BYTES = 2_048;
 const MAX_PERMIT_BYTES = 128;
 const MAX_PERMIT_WAIT_MS = 2 * 60_000;
@@ -115,7 +116,9 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
   if (Buffer.byteLength(payload, 'utf8') > MAX_PROOF_BYTES) {
     throw new Error('The guarded local launch proof is too large.');
   }
-  const expectedPermit = `${GUARDED_PERMIT_PREFIX}sha256:${createHash('sha256').update(serialized, 'utf8').digest('hex')}\n`;
+  const proofDigest = `sha256:${createHash('sha256').update(serialized, 'utf8').digest('hex')}`;
+  const expectedPermit = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${proofDigest}\n`;
+  const acknowledgement = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${proofDigest}\n`;
   await new Promise<void>((resolve, reject) => {
     const socket = createConnection(request.pipePath);
     let settled = false;
@@ -152,7 +155,13 @@ export async function deliverCompanionExecutionLaunchProofAndAwaitPermit(
       if (Buffer.byteLength(received, 'utf8') > MAX_PERMIT_BYTES) {
         finish(new Error('oversized response'));
       } else if (received.includes('\n')) {
-        finish(received === expectedPermit ? undefined : new Error('invalid permit'));
+        if (received !== expectedPermit) {
+          finish(new Error('invalid permit'));
+          return;
+        }
+        // A valid permit is not a worker-start acknowledgement. Confirm only
+        // receipt of these exact proof-bound bytes before releasing the gate.
+        socket.write(acknowledgement, (error) => finish(error ?? undefined));
       }
     });
   });

@@ -92,9 +92,20 @@ is bound to the challenge-specific, stage-aware stop contract. The operator must
 run the independent live-process observer and confirm clean child exit. This starter
 does not inspect loaded memory or close the disk-to-spawn race by itself, and it is
 not a production invocation. The starter supplies no permit sender, database transition,
-or integrated credential/host stop and provider reconciliation mechanism. A caller
+or production credential/host stop and provider reconciliation mechanism. A caller
 must not treat rehearsal success as authority to run a deposit job or perform a
 provider action.
+
+An operator-only `./guarded-emergency-stop-rehearsal` subpath now composes that exact
+post-permit child stop with the already-reviewed administrator-only database
+emergency operation. It starts both independent stops once, waits for the
+database operation's exact committed, session-drained result and the child's
+clean-exit proof, and fails closed if either is missing or late. A disposable
+PostgreSQL test runs the real emergency SQL through this composition and checks
+that the execution roles are passwordless, logged out, and disabled. Even a
+successful result explicitly requires separate provider-outcome reconciliation;
+it is not a settlement result, a production entry point, or permission to
+activate execution.
 
 An internal, unexported `activation-transition` adapter now fixes the exact
 parameterized invocation of the existing Postgres-only one-use function. It

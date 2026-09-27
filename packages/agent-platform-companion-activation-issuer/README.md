@@ -151,10 +151,10 @@ database transition, and a proof-bound permit acknowledgement. Before a
 transition it requires an independently bound database-and-exact-child stop;
 any post-dispatch error invokes that stop once and still reports uncertainty.
 The companion acknowledges only receipt of the permit, not worker startup or
-provider outcome. This source-only channel has no production caller, lifecycle
-watchdog, credential-expiry handler, or provider reconciliation. It must not be
-used for a production activation until those pieces and the protected operator
-workflow are reviewed together; it changes no current financial state.
+provider outcome. This source-only channel has no production caller or provider
+reconciliation. It must not be used for a production activation until those
+pieces and the protected operator workflow are reviewed together; it changes
+no current financial state.
 The local permit now binds the database's exact expiry alongside the proof
 digest. The companion rejects the older permit version, an expired or overlong
 expiry, and any malformed frame. Its worker deadline is the earlier of that
@@ -163,11 +163,23 @@ the protected browser is stopped when that local deadline fires. This is an
 additional local fence, not database session revocation or an independent
 watchdog. The production execution path remains disabled.
 
+The internal `guarded-database-watchdog-lease` adapter checks the exact three
+scheduled database stop jobs and their recent success before a transition. It
+renews the exact activated epoch's short lease before the local channel sends
+any permit, then renews periodically while the operator remains alive. A lost,
+late, or malformed renewal fails closed and invokes the channel's separately
+bound emergency stop. The database Cron jobs remain independent: if the
+operator process dies, the lease expires and those jobs fence the credentials,
+sessions, and financial authority. This adapter is not exported or invoked by
+production, does not start a job, and is not a substitute for provider-outcome
+reconciliation.
+
 An internal source-only lifecycle monitor can now bind the exact owned child,
 the database transition expiry, and the reviewed database-and-host emergency
 stop constructed from the protected administrator callback. It invokes that
 stop once on expiry, child exit, operator abort, or an
 explicit stop request, and accepts only the complete redacted stop proof. It
 does not survive its own process failure, is not exported as a production
-activation API, and cannot resolve an in-flight provider outcome. A separately
-owned production watchdog and provider reconciliation remain prerequisites.
+activation API, and cannot resolve an in-flight provider outcome. The installed
+independent database watchdog addresses process-loss fencing, while the
+protected operator and provider reconciliation remain prerequisites.

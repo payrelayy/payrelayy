@@ -24,6 +24,7 @@ const stopOnUncertainty = vi.fn(async () =>
 );
 const independentStop = () => ({
   confirmReady: vi.fn(async () => undefined),
+  onActivated: vi.fn(async () => undefined),
   lost: new Promise<never>(() => undefined),
 });
 afterEach(async () => {
@@ -119,6 +120,7 @@ describe('internal guarded local activation channel', () => {
         transitionStarted();
         return { rows: [{ valid_until: await transition }] };
       });
+      const supervisor = independentStop();
       const pending = channel.commitAndPermit({
         actorAuthUserId: f.actorAuthUserId,
         requestKey: f.requestKey,
@@ -127,13 +129,15 @@ describe('internal guarded local activation channel', () => {
         administrator: { query },
         trustedNow: () => new Date(),
         stopOnUncertainty,
-        independentStop: independentStop(),
+        independentStop: supervisor,
       });
       await started;
       expect(peer.getPermit()).toBe('');
       const validUntil = new Date(Date.now() + 30 * 60_000).toISOString();
       releaseTransition(new Date(validUntil));
       const permit = await peer.receivedPermit;
+      expect(supervisor.confirmReady).toHaveBeenCalledTimes(1);
+      expect(supervisor.onActivated).toHaveBeenCalledExactlyOnceWith(validUntil);
       expect(permit).toBe(`FETANAGENT_GUARDED_LAUNCH_PERMIT_V2|${f.proofDigest}|${validUntil}\n`);
       await expect(pending).resolves.toMatchObject({
         permitAcknowledged: true,
@@ -205,6 +209,47 @@ describe('internal guarded local activation channel', () => {
         name: 'GuardedLocalActivationUncertainError',
         requiresIndependentStopAndReconciliation: true,
       });
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(stopOnUncertainty).toHaveBeenCalledTimes(1);
+      expect(peer.getPermit()).toBe('');
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'stops once without a permit when the committed database lease cannot be renewed',
+    async () => {
+      const challenge = randomBytes(32).toString('base64url');
+      const channel = await openGuardedLocalActivationChannel(challenge);
+      channels.push(channel);
+      const f = fixture(challenge);
+      const peer = client(channel.pipePath, f.proof);
+      await channel.receiveProof();
+      const query = vi.fn(async (sql: string) =>
+        sql.includes('launch_proof_digest::text')
+          ? { rows: [{ proof_digest: f.proofDigest }] }
+          : { rows: [{ valid_until: new Date(Date.now() + 30 * 60_000) }] },
+      );
+      const supervisor = {
+        confirmReady: vi.fn(async () => undefined),
+        onActivated: vi.fn(async () => {
+          throw new Error('private database detail');
+        }),
+        lost: new Promise<never>(() => undefined),
+      };
+      await expect(
+        channel.commitAndPermit({
+          actorAuthUserId: f.actorAuthUserId,
+          requestKey: f.requestKey,
+          verifiedProofDigest: f.proofDigest,
+          runtimePassword: 'e'.repeat(64),
+          administrator: { query },
+          trustedNow: () => new Date(),
+          stopOnUncertainty,
+          independentStop: supervisor,
+        }),
+      ).rejects.toBeInstanceOf(GuardedLocalActivationUncertainError);
+      expect(supervisor.confirmReady).toHaveBeenCalledTimes(1);
+      expect(supervisor.onActivated).toHaveBeenCalledTimes(1);
       expect(query).toHaveBeenCalledTimes(2);
       expect(stopOnUncertainty).toHaveBeenCalledTimes(1);
       expect(peer.getPermit()).toBe('');
@@ -319,6 +364,7 @@ describe('internal guarded local activation channel', () => {
             confirmReady: async () => {
               throw new Error('private supervisor detail');
             },
+            onActivated: async () => undefined,
             lost: new Promise<never>(() => undefined),
           },
         }),
@@ -361,7 +407,11 @@ describe('internal guarded local activation channel', () => {
         administrator: { query },
         trustedNow: () => new Date(),
         stopOnUncertainty,
-        independentStop: { confirmReady: async () => undefined, lost },
+        independentStop: {
+          confirmReady: async () => undefined,
+          onActivated: async () => undefined,
+          lost,
+        },
       });
       await started;
       lose();
@@ -398,7 +448,11 @@ describe('internal guarded local activation channel', () => {
         administrator: { query },
         trustedNow: () => new Date(),
         stopOnUncertainty,
-        independentStop: { confirmReady: async () => undefined, lost },
+        independentStop: {
+          confirmReady: async () => undefined,
+          onActivated: async () => undefined,
+          lost,
+        },
       });
       expect(result.permitAcknowledged).toBe(true);
       expect(peer.getPermit()).toContain('FETANAGENT_GUARDED_LAUNCH_PERMIT_V2');

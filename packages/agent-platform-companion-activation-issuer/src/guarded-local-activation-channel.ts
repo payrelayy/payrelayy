@@ -66,6 +66,8 @@ export interface GuardedLocalActivationCommitInput {
    */
   readonly independentStop: Readonly<{
     confirmReady(): Promise<void>;
+    /** Establish the database heartbeat before any execution permit is sent. */
+    onActivated(validUntil: string): Promise<void>;
     /** Resolving or rejecting means the supervisor is no longer reliable. */
     readonly lost: Promise<unknown>;
   }>;
@@ -387,6 +389,7 @@ export async function openGuardedLocalActivationChannel(
           typeof input.trustedNow !== 'function' ||
           typeof input.stopOnUncertainty !== 'function' ||
           typeof input.independentStop?.confirmReady !== 'function' ||
+          typeof input.independentStop?.onActivated !== 'function' ||
           typeof input.independentStop?.lost?.then !== 'function'
         )
           throw new Error();
@@ -442,6 +445,11 @@ export async function openGuardedLocalActivationChannel(
           socket.destroyed
         )
           throw new Error();
+        await bounded(
+          () => Promise.race([input.independentStop.onActivated(validUntil), lost]),
+          WATCHDOG_READY_WAIT_MS,
+        );
+        if (watchdogLost || closed || input.signal?.aborted || socket.destroyed) throw new Error();
         const permit = `${COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX}${input.verifiedProofDigest}|${validUntil}\n`;
         ackExpected = `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}${input.verifiedProofDigest}|${validUntil}\n`;
         const acknowledged = new Promise<void>((resolve, reject) => {

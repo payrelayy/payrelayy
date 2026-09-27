@@ -44,6 +44,7 @@ const [
   prePermitChild,
   prePermitRuntime,
   operatorEmergencyStopRehearsal,
+  operatorLifecycleStopMonitor,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -91,6 +92,7 @@ const [
   read(
     'packages/agent-platform-companion-activation-issuer/src/guarded-emergency-stop-rehearsal.ts',
   ),
+  read('packages/agent-platform-companion-activation-issuer/src/guarded-lifecycle-stop-monitor.ts'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -211,6 +213,14 @@ assert.match(operatorEmergencyStopRehearsal, /await input\.child\.stopped/u);
 assert.match(operatorEmergencyStopRehearsal, /providerOutcomeRequiresReconciliation: true/u);
 assert.match(operatorEmergencyStopRehearsal, /if \(spent\)/u);
 assert.match(operatorIssuerPackage, /\.\/guarded-emergency-stop-rehearsal/u);
+assert.match(operatorLifecycleStopMonitor, /input\.child\.stopped\.then\(onAbort, onAbort\)/u);
+assert.match(operatorLifecycleStopMonitor, /input\.signal\?\.addEventListener\('abort', onAbort/u);
+assert.match(operatorLifecycleStopMonitor, /stopPromise = Promise\.race\(\[/u);
+assert.match(operatorLifecycleStopMonitor, /STOP_WAIT_MS = 105_000/u);
+assert.match(operatorLifecycleStopMonitor, /prepareGuardedCompanionEmergencyStopRehearsal\(\{/u);
+assert.match(operatorLifecycleStopMonitor, /disableDatabase: input\.disableDatabase/u);
+assert.match(operatorLifecycleStopMonitor, /validStopProof\(proof\)/u);
+assert.doesNotMatch(operatorIssuerPackage, /guarded-lifecycle-stop-monitor/u);
 assert.match(windowsEntry, /guardedShutdown\?\.markPermitReceived\(\)/u);
 assert.match(windowsEntry, /guardedShutdown\?\.disarm\(\)/u);
 assert.ok(

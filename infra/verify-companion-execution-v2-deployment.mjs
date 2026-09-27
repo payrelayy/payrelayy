@@ -36,6 +36,7 @@ const [
   operatorLaunchPreflight,
   operatorClaimBindingTest,
   operatorLocalLaunchChannel,
+  operatorActivationChannel,
   operatorIssuerPackage,
   operatorLaunchRehearsal,
   prePermitContract,
@@ -75,6 +76,9 @@ const [
   read('infra/operations/observe-windows-companion-verified-launch.ps1'),
   read('scripts/test-companion-activation-claim-binding.ps1'),
   read('packages/agent-platform-companion-activation-issuer/src/guarded-local-launch-channel.ts'),
+  read(
+    'packages/agent-platform-companion-activation-issuer/src/guarded-local-activation-channel.ts',
+  ),
   read('packages/agent-platform-companion-activation-issuer/package.json'),
   read(
     'packages/agent-platform-companion-activation-issuer/src/guarded-process-launch-rehearsal.ts',
@@ -118,8 +122,18 @@ assert.match(
   windowsLaunchChannel,
   /A protected local launch channel is required for guarded execution/u,
 );
-assert.match(windowsLaunchChannel, /FETANAGENT_GUARDED_LAUNCH_PERMIT_V1\|/u);
-assert.match(windowsLaunchChannel, /received === expectedPermit/u);
+assert.match(
+  executionContracts,
+  /COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_PERMIT_V1\|'/u,
+);
+assert.match(
+  executionContracts,
+  /COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_ACK_V1\|'/u,
+);
+assert.match(windowsLaunchChannel, /COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX/u);
+assert.match(windowsLaunchChannel, /COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX/u);
+assert.match(windowsLaunchChannel, /received !== expectedPermit/u);
+assert.match(windowsLaunchChannel, /socket\.write\(acknowledgement/u);
 assert.match(windowsLaunchChannel, /proof\.body\.challengeDigest !==/u);
 assert.match(operatorIssuerPackage, /\.\/guarded-local-launch-channel/u);
 assert.match(operatorLocalLaunchChannel, /createServer\(/u);
@@ -128,6 +142,10 @@ assert.match(operatorLocalLaunchChannel, /MAX_PROOF_WAIT_MS = 90_000/u);
 assert.match(operatorLocalLaunchChannel, /server\.once\('error', fail\)/u);
 assert.match(operatorLocalLaunchChannel, /socket\?\.destroy\(\)/u);
 assert.doesNotMatch(operatorLocalLaunchChannel, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
+assert.match(operatorActivationChannel, /invokeCompanionActivationTransitionInternal/u);
+assert.match(operatorActivationChannel, /input\.stopOnUncertainty\(\)/u);
+assert.match(operatorActivationChannel, /Promise\.allSettled\(/u);
+assert.doesNotMatch(operatorIssuerPackage, /guarded-local-activation-channel/u);
 assert.match(operatorIssuerPackage, /\.\/guarded-process-launch-rehearsal/u);
 assert.match(operatorLaunchRehearsal, /await adapters\.observe\(/u);
 assert.match(operatorLaunchRehearsal, /process\.processId !== child\.processId/u);

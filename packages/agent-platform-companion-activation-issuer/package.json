@@ -64,6 +64,10 @@
       "types": "./dist/protected-operator-query-http-client.d.ts",
       "default": "./dist/protected-operator-query-http-client.js"
     },
+    "./protected-operator-query-ssh-client": {
+      "types": "./dist/protected-operator-query-ssh-client.d.ts",
+      "default": "./dist/protected-operator-query-ssh-client.js"
+    },
     "./protected-operator-query-host": {
       "types": "./dist/protected-operator-query-host.d.ts",
       "default": "./dist/protected-operator-query-host.js"

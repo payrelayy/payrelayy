@@ -21,6 +21,8 @@ const MAX_BODY_BYTES = 16 * 1_024;
 const ROUND_TRIP_TIMEOUT_MS = 10_000;
 const NONCE = /^[A-Za-z0-9_-]{43}$/u;
 
+export type ProtectedOperatorPost = (body: Buffer) => Promise<unknown>;
+
 export interface ProtectedOperatorDeviceSigner {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   createSignedHttpRequest(
@@ -98,7 +100,7 @@ async function postOnce(port: number, body: Buffer): Promise<unknown> {
 
 async function signedPost(
   device: ProtectedOperatorDeviceSigner,
-  port: number,
+  post: ProtectedOperatorPost,
   command: ProtectedOperatorWireCommand,
 ): Promise<unknown> {
   const digest = digestProtectedOperatorWireCommand(command);
@@ -112,7 +114,7 @@ async function signedPost(
     throw new Error();
   }
   try {
-    return await postOnce(port, body);
+    return await post(body);
   } finally {
     body.fill(0);
   }
@@ -128,13 +130,24 @@ export async function createProtectedOperatorHttpRemoteSession(
   requestKey: string,
   loopbackPort: number,
 ): Promise<GuardedOperatorRemoteSession> {
+  if (!Number.isInteger(loopbackPort) || loopbackPort < 1 || loopbackPort > 65535)
+    throw new ProtectedOperatorQueryHttpClientUnavailableError();
+  return createProtectedOperatorRemoteSessionWithPost(device, requestKey, (body) =>
+    postOnce(loopbackPort, body),
+  );
+}
+
+/** Shared signed, ordered session for a caller-owned authenticated byte transport. */
+export async function createProtectedOperatorRemoteSessionWithPost(
+  device: ProtectedOperatorDeviceSigner,
+  requestKey: string,
+  post: ProtectedOperatorPost,
+): Promise<GuardedOperatorRemoteSession> {
   try {
     if (
       !device ||
       typeof device.createSignedHttpRequest !== 'function' ||
-      !Number.isInteger(loopbackPort) ||
-      loopbackPort < 1 ||
-      loopbackPort > 65535
+      typeof post !== 'function'
     )
       throw new Error();
     const openCommand = {
@@ -144,7 +157,7 @@ export async function createProtectedOperatorHttpRemoteSession(
       values: [],
       sessionNonce: null,
     } as const satisfies ProtectedOperatorWireCommand;
-    const opened = await signedPost(device, loopbackPort, openCommand);
+    const opened = await signedPost(device, post, openCommand);
     if (
       !exactRecord(opened, ['sequence', 'backendPid', 'sessionNonce']) ||
       opened.sequence !== 0 ||
@@ -186,7 +199,7 @@ export async function createProtectedOperatorHttpRemoteSession(
             values,
             sessionNonce,
           };
-          const response = await signedPost(device, loopbackPort, command);
+          const response = await signedPost(device, post, command);
           if (!response || typeof response !== 'object' || Array.isArray(response))
             throw new Error();
           if ((response as Record<string, unknown>)['sequence'] !== currentSequence)

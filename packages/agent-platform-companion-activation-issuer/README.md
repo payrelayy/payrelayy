@@ -62,6 +62,19 @@ future transition can be considered. Neither adapter issues the handoff, consume
 request, arms execution, or replaces the atomic financial-state preflight. The v1
 no-money launch diagnostic cannot satisfy the required v2 proof.
 
+The separate operator-only `./guarded-handoff-publication` subpath can publish
+one canonical signed local handoff into an **already existing, operator-protected**
+companion data directory. It binds an authenticated database request and paired
+certificate to a fresh independent release measurement, pins the production
+signer, caps the local handoff at the earlier of request or certificate expiry,
+and uses exclusive creation so an existing handoff is never overwritten. It
+returns only a digest and expiry; it does not log or return the signed document.
+The protected operator workflow must supply the signer key as an in-memory key
+object, verify the directory's Windows ACL and exclusive ownership, and handle
+any failed or ambiguous publication as a stop requiring review. This module does
+not provision that key, create the directory, consume the request, launch a
+process, grant a permit, arm execution, or provide a production entry point.
+
 The `./guarded-process-launch-rehearsal` subpath composes that receiver with the
 independent observer around a caller-supplied, synchronous protected child-process
 starter. It always closes the no-permit channel and attempts a bounded stop of the

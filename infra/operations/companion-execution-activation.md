@@ -96,6 +96,14 @@ The shared contract now has a pure, key-bound handoff signer that emits the cano
 accepted by the Windows verifier. It has no endpoint, production key access, database transition,
 or delivery mechanism. A signature over claimed release digests is not independent release
 attestation and does not itself arm execution.
+An operator-only publisher now binds the immutable database request, current identity,
+paired certificate, and fresh independently measured release before signing and exclusively
+writing the canonical local handoff. It requires an already-existing, operator-protected data
+directory and an in-memory production signer key supplied by a future protected workflow; it
+does not create either. The file expires no later than the request or certificate, and a
+pre-existing file is never replaced. This source-only component has no production caller,
+permit sender, database transition, credential lifecycle, or provider reconciliation. It has
+not published a production handoff or changed the disabled execution state.
 
 ## Current paid-proof state
 

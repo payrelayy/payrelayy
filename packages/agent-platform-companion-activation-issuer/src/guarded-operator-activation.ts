@@ -187,6 +187,15 @@ export async function runGuardedOperatorActivationWithAdapters(
           },
           { challenge, pipePath: channel.pipePath },
         );
+        if (
+          !Number.isInteger(child?.processId) ||
+          child.processId < 1 ||
+          child.processId > 2_147_483_647 ||
+          typeof child.stop !== 'function' ||
+          typeof child.stopAfterPermit !== 'function' ||
+          typeof child.stopped?.then !== 'function'
+        )
+          throw new Error();
         const ownedChild = child;
         const proof = await Promise.race([
           channel.receiveProof(signal),

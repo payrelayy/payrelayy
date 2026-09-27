@@ -189,6 +189,22 @@ describe('internal protected operator composition', () => {
     expect(state.runLifecycle).not.toHaveBeenCalled();
   });
 
+  it('rejects an invalid owned child before reading a launch proof or permit', async () => {
+    const state = fixture();
+    vi.mocked(state.adapters.start).mockImplementationOnce(() => ({
+      processId: 0,
+      stopped: Promise.resolve(),
+      stop: state.child.stop,
+      stopAfterPermit: state.child.stopAfterPermit,
+    }));
+    await expect(
+      runGuardedOperatorActivationWithAdapters(state.input, state.adapters),
+    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    expect(state.channel.receiveProof).not.toHaveBeenCalled();
+    expect(state.child.stop).toHaveBeenCalledTimes(1);
+    expect(state.runLifecycle).not.toHaveBeenCalled();
+  });
+
   it('does not create a child or start a transition if the lock is unavailable', async () => {
     const state = fixture();
     vi.mocked(state.adapters.acquireLock).mockRejectedValueOnce(new Error('held'));

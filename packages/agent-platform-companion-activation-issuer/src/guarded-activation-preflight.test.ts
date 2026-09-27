@@ -14,7 +14,6 @@ import {
 } from './guarded-activation-preflight.js';
 
 const device = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
 const deviceSpki = Buffer.from(device.publicKey.export({ format: 'der', type: 'spki' }));
 const handoffSha256 = `sha256:${'e'.repeat(64)}`;
 const requestKey = randomUUID();
@@ -78,7 +77,9 @@ function fixture() {
     dataRoot: 'C:\\protected\\companion-data',
     processVerifierScriptPath: 'C:\\reviewed\\inspect-guarded-windows-companion-process.ps1',
     windowsEnvironment: {},
-    signerPrivateKey: signer.privateKey,
+    signHandoff: async () => {
+      throw new Error('test adapter owns publication');
+    },
     trustedNow: () => new Date('2026-09-26T12:00:00.000Z'),
   };
   let secondSnapshot: CompanionActivationDatabaseSnapshot = snapshot;

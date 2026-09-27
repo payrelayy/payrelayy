@@ -1,13 +1,16 @@
-import { createHash, createPublicKey, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, verify } from 'node:crypto';
 import { lstat, open, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import { isProxy } from 'node:util/types';
 
 import {
   COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
   COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS,
   PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+  PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
   PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
-  signCompanionExecutionActivationHandoff,
+  type CompanionExecutionActivationHandoffBody,
+  type SignedCompanionExecutionActivationHandoff,
   type CompanionActivationCertificateSnapshot,
   type CompanionActivationCurrentIdentity,
   type CompanionActivationReleaseAttestation,
@@ -33,20 +36,40 @@ export interface GuardedCompanionHandoffPublicationInputs {
   readonly release: CompanionActivationReleaseAttestation;
   /** Existing, operator-protected Windows companion data root. */
   readonly dataRoot: string;
-  /** Protected signer key object; never a string, path, environment variable, or process argument. */
-  readonly signerPrivateKey: KeyObject;
+  /** A protected server-side signer, never its key or a generic signing oracle on Windows. */
+  readonly signHandoff: (
+    body: CompanionExecutionActivationHandoffBody,
+  ) => Promise<SignedCompanionExecutionActivationHandoff>;
   readonly trustedNow: () => Date;
 }
 
 interface TrustedSigner {
   readonly keyId: string;
+  readonly publicKeySpki: string;
   readonly publicKeySpkiSha256: string;
 }
 
 const PRODUCTION_SIGNER: TrustedSigner = {
   keyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+  publicKeySpki: PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
   publicKeySpkiSha256: PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
 };
+const P256_ORDER = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+const HANDOFF_BODY_KEYS = [
+  'contractVersion',
+  'purpose',
+  'deploymentTarget',
+  'requestKey',
+  'activationEpoch',
+  'platformAgentAccountId',
+  'noMoneyCertificateBodyDigest',
+  'companionReleaseSha',
+  'companionArchiveSha256',
+  'companionInstallationTreeSha256',
+  'issuedAt',
+  'notBefore',
+  'expiresAt',
+] as const;
 
 export class GuardedCompanionHandoffPublicationUnavailableError extends Error {
   constructor() {
@@ -90,6 +113,75 @@ function validPairedPublicKey(certificate: CompanionActivationCertificateSnapsho
       `sha256:${createHash('sha256').update(bytes).digest('hex')}` ===
         certificate.devicePublicKeySpkiSha256
     );
+  } catch {
+    return false;
+  }
+}
+
+function exactDataRecord(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    isProxy(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    return false;
+  const actual = Reflect.ownKeys(value);
+  if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index]))
+    return false;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return actual.every(
+    (key) =>
+      typeof key === 'string' &&
+      descriptors[key]?.enumerable === true &&
+      'value' in descriptors[key],
+  );
+}
+
+/** Reject a mismatched or malleable remote reply before any local handoff file is created. */
+function validSignedReply(
+  candidate: unknown,
+  expectedBody: CompanionExecutionActivationHandoffBody,
+  signer: TrustedSigner,
+): candidate is SignedCompanionExecutionActivationHandoff {
+  try {
+    if (
+      !exactDataRecord(candidate, ['body', 'signerKeyId', 'signature']) ||
+      !exactDataRecord(candidate.body, HANDOFF_BODY_KEYS) ||
+      candidate.signerKeyId !== signer.keyId ||
+      JSON.stringify(candidate.body) !== JSON.stringify(expectedBody) ||
+      typeof candidate.signature !== 'string' ||
+      !/^[A-Za-z0-9_-]{86}$/u.test(candidate.signature)
+    )
+      return false;
+    const signature = Buffer.from(candidate.signature, 'base64url');
+    if (signature.length !== 64 || signature.toString('base64url') !== candidate.signature)
+      return false;
+    const r = BigInt(`0x${signature.subarray(0, 32).toString('hex')}`);
+    const s = BigInt(`0x${signature.subarray(32).toString('hex')}`);
+    if (r <= 0n || r >= P256_ORDER || s <= 0n || s > P256_ORDER / 2n) return false;
+    const spki = Buffer.from(signer.publicKeySpki, 'base64url');
+    const key = createPublicKey({ key: spki, format: 'der', type: 'spki' });
+    const canonical = key.export({ format: 'der', type: 'spki' });
+    if (
+      spki.length !== 91 ||
+      spki.toString('base64url') !== signer.publicKeySpki ||
+      !Buffer.isBuffer(canonical) ||
+      !canonical.equals(spki) ||
+      key.asymmetricKeyType !== 'ec' ||
+      key.asymmetricKeyDetails?.namedCurve !== 'prime256v1' ||
+      `sha256:${createHash('sha256').update(spki).digest('hex')}` !== signer.publicKeySpkiSha256
+    )
+      return false;
+    const transcript = Buffer.from(
+      `${COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE}\0${JSON.stringify(expectedBody)}`,
+      'utf8',
+    );
+    return verify('sha256', transcript, { key, dsaEncoding: 'ieee-p1363' }, signature);
   } catch {
     return false;
   }
@@ -180,27 +272,23 @@ export async function publishGuardedCompanionHandoffWithSigner(
     const directory = await canonicalPublicationDirectory(input.dataRoot);
     const issuedAt = new Date(now).toISOString();
     const expiresAt = new Date(expiresAtMs).toISOString();
-    const signed = signCompanionExecutionActivationHandoff(
-      {
-        contractVersion: 1,
-        purpose: COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
-        deploymentTarget: 'production',
-        requestKey: input.request.requestKey,
-        activationEpoch: input.request.activationEpoch,
-        platformAgentAccountId: input.request.platformAgentAccountId,
-        noMoneyCertificateBodyDigest: input.certificate.certificateBodyDigest,
-        companionReleaseSha: input.release.releaseSha,
-        companionArchiveSha256: input.release.archiveSha256,
-        companionInstallationTreeSha256: input.release.installationTreeSha256,
-        issuedAt,
-        notBefore: issuedAt,
-        expiresAt,
-      },
-      input.signerPrivateKey,
-      signer.keyId,
-      signer.publicKeySpkiSha256,
-    );
-    if (!signed) throw new Error();
+    const body: CompanionExecutionActivationHandoffBody = Object.freeze({
+      contractVersion: 1,
+      purpose: COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
+      deploymentTarget: 'production',
+      requestKey: input.request.requestKey,
+      activationEpoch: input.request.activationEpoch,
+      platformAgentAccountId: input.request.platformAgentAccountId,
+      noMoneyCertificateBodyDigest: input.certificate.certificateBodyDigest,
+      companionReleaseSha: input.release.releaseSha,
+      companionArchiveSha256: input.release.archiveSha256,
+      companionInstallationTreeSha256: input.release.installationTreeSha256,
+      issuedAt,
+      notBefore: issuedAt,
+      expiresAt,
+    });
+    const signed = await input.signHandoff(body);
+    if (!validSignedReply(signed, body, signer)) throw new Error();
     const raw = JSON.stringify(signed);
     if (Buffer.byteLength(raw, 'utf8') < 2 || Buffer.byteLength(raw, 'utf8') > MAX_HANDOFF_BYTES)
       throw new Error();

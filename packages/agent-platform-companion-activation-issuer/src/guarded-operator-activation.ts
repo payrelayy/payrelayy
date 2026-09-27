@@ -6,6 +6,8 @@ import {
   type CompanionActivationDatabaseSnapshot,
   type CompanionActivationObservedProcess,
   type CompanionActivationReleaseAttestation,
+  type CompanionExecutionActivationHandoffBody,
+  type SignedCompanionExecutionActivationHandoff,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import { retainCompanionActivationAttestationRow } from './attestation-retention.js';
@@ -42,8 +44,6 @@ import {
 } from './release-measurement.js';
 import { loadCompanionActivationDatabaseSnapshot } from './snapshot.js';
 
-import type { KeyObject } from 'node:crypto';
-
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const PRE_PERMIT_STOP_MS = 12_000;
 
@@ -56,7 +56,10 @@ export interface GuardedOperatorActivationInput {
   readonly dataRoot: string;
   readonly processVerifierScriptPath: string;
   readonly windowsEnvironment: NodeJS.ProcessEnv;
-  readonly signerPrivateKey: KeyObject;
+  /** Authenticated server operation; the production signing key never enters this process. */
+  readonly signHandoff: (
+    body: CompanionExecutionActivationHandoffBody,
+  ) => Promise<SignedCompanionExecutionActivationHandoff>;
   /** Runs the reviewed database emergency-disable operation on its own connection. */
   readonly disableDatabase: () => Promise<unknown>;
   readonly trustedNow: () => Date;
@@ -170,7 +173,7 @@ export async function runGuardedOperatorActivationWithAdapters(
           ...first,
           release,
           dataRoot: input.dataRoot,
-          signerPrivateKey: input.signerPrivateKey,
+          signHandoff: input.signHandoff,
           trustedNow: input.trustedNow,
         } satisfies GuardedCompanionHandoffPublicationInputs);
         if (!SHA256.test(handoff.handoffSha256) || signal.aborted) throw new Error();

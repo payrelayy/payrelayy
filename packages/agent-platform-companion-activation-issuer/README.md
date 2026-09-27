@@ -204,8 +204,13 @@ lifecycle while holding one nonblocking session-level advisory lock on a
 dedicated administrator connection. It stops the exact pre-permit child and
 closes the local channel if attestation fails, and never reports completion
 if the lifecycle or lock release is uncertain. It is deliberately absent
-from package exports and production workflows. A protected production entry
-point, administrator and signer provisioning, host ownership checks, exact
+from package exports and production workflows. Its local handoff publisher now
+accepts a protected signing callback instead of a private key on Windows and
+verifies the exact returned body, pinned signer, canonical signature, and
+request deadline before create-once publication. This is only an interface:
+there is no authenticated server signing endpoint or transport yet. A protected production entry
+point, dedicated session-mode administrator connection, server-side signer,
+host ownership checks, exact
 Owner approval, and post-crash provider reconciliation are still required
 before a one-job pilot can run. The caller must close the dedicated database
 session on every outcome, including a failed lock acquisition.

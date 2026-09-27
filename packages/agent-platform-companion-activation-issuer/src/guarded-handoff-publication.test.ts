@@ -5,6 +5,7 @@ import { resolve, sep } from 'node:path';
 
 import {
   COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
+  signCompanionExecutionActivationHandoff,
   type CompanionActivationCertificateSnapshot,
   type CompanionActivationReleaseAttestation,
   type CompanionActivationRequestSnapshot,
@@ -23,8 +24,19 @@ const signerSpki = Buffer.from(signer.publicKey.export({ format: 'der', type: 's
 const deviceSpki = Buffer.from(device.publicKey.export({ format: 'der', type: 'spki' }));
 const trustedSigner = {
   keyId: 'test-execution-signer-v1',
+  publicKeySpki: signerSpki.toString('base64url'),
   publicKeySpkiSha256: `sha256:${createHash('sha256').update(signerSpki).digest('hex')}`,
 };
+function signHandoff(body: Parameters<GuardedCompanionHandoffPublicationInputs['signHandoff']>[0]) {
+  const signed = signCompanionExecutionActivationHandoff(
+    body,
+    signer.privateKey,
+    trustedSigner.keyId,
+    trustedSigner.publicKeySpkiSha256,
+  );
+  if (!signed) throw new Error('test fixture signer failed');
+  return Promise.resolve(signed);
+}
 const request: CompanionActivationRequestSnapshot = {
   requestKey: randomUUID(),
   pilotRevisionId: randomUUID(),
@@ -73,7 +85,7 @@ async function fixture(): Promise<GuardedCompanionHandoffPublicationInputs> {
     certificate,
     release,
     dataRoot,
-    signerPrivateKey: signer.privateKey,
+    signHandoff,
     trustedNow: () => new Date('2026-09-26T12:00:00.000Z'),
   };
 }
@@ -182,13 +194,58 @@ describe('guarded companion handoff publication', () => {
     await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('requires an existing canonical directory and the expected signing key', async () => {
+  it('requires an existing canonical directory and the expected server signer', async () => {
     const input = await fixture();
     await unavailable({ ...input, dataRoot: `${input.dataRoot}${sep}..${sep}data` });
     await unavailable({ ...input, dataRoot: resolve(input.dataRoot, 'absent') });
     await unavailable({
       ...input,
-      signerPrivateKey: generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey,
+      signHandoff: async (body) => {
+        const foreign = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+        const signed = signCompanionExecutionActivationHandoff(
+          body,
+          foreign.privateKey,
+          trustedSigner.keyId,
+          `sha256:${createHash('sha256')
+            .update(foreign.publicKey.export({ format: 'der', type: 'spki' }))
+            .digest('hex')}`,
+        );
+        if (!signed) throw new Error();
+        return signed;
+      },
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a remote reply bound to a different request, even with the trusted key', async () => {
+    const input = await fixture();
+    await unavailable({
+      ...input,
+      signHandoff: async (body) => signHandoff({ ...body, requestKey: randomUUID() }),
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a malformed remote reply without creating a handoff', async () => {
+    const input = await fixture();
+    await unavailable({
+      ...input,
+      signHandoff: async (body) => ({ ...(await signHandoff(body)), signature: 'not-a-signature' }),
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects a reply with hidden serialization behavior', async () => {
+    const input = await fixture();
+    await unavailable({
+      ...input,
+      signHandoff: async (body) => {
+        const signed = { ...(await signHandoff(body)) };
+        Object.defineProperty(signed, 'toJSON', {
+          value: () => ({ ...signed, signature: 'altered' }),
+        });
+        return signed;
+      },
     });
     await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });

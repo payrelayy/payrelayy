@@ -188,6 +188,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)',
         },
+        { signature: 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)' },
         {
           signature: 'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',
         },
@@ -218,6 +219,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.list_owner_dry_run_deposit_intake(uuid,integer)' },
         { signature: 'app.list_owner_dry_run_fixture_assessments(uuid,integer)' },
         { signature: 'app.list_owner_kemerbet_agent_profiles(uuid)' },
+        { signature: 'app.list_owner_pending_telebirr_executions(uuid,integer)' },
         { signature: 'app.list_owner_player_deposit_eligibility(uuid,integer)' },
         {
           signature: 'app.list_owner_player_registration_association_candidates(uuid,integer)',

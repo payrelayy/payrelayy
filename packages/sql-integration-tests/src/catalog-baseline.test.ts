@@ -8649,6 +8649,12 @@ describe('disposable SQL migration baseline', () => {
           'app.agent_platform_companion_execution_valid_http_request(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)',
       },
       {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)',
+      },
+      {
         deposit_executor_runtime: true,
         public_execute: false,
         settlement_runtime: false,
@@ -8755,6 +8761,12 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.lease_next_private_live_deposit_execution(uuid,integer)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.list_owner_pending_telebirr_executions(uuid,integer)',
       },
       {
         deposit_executor_runtime: false,

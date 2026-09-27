@@ -19,6 +19,10 @@
     "./guarded-process-launch-rehearsal": {
       "types": "./dist/guarded-process-launch-rehearsal.d.ts",
       "default": "./dist/guarded-process-launch-rehearsal.js"
+    },
+    "./guarded-pre-permit-child": {
+      "types": "./dist/guarded-pre-permit-child.d.ts",
+      "default": "./dist/guarded-pre-permit-child.js"
     }
   },
   "dependencies": {

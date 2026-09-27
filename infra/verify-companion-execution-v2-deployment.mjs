@@ -38,6 +38,9 @@ const [
   operatorLocalLaunchChannel,
   operatorIssuerPackage,
   operatorLaunchRehearsal,
+  prePermitContract,
+  prePermitChild,
+  prePermitRuntime,
 ] = await Promise.all([
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
@@ -75,6 +78,9 @@ const [
   read(
     'packages/agent-platform-companion-activation-issuer/src/guarded-process-launch-rehearsal.ts',
   ),
+  read('packages/agent-platform-companion-execution-contracts/src/guarded-pre-permit-stop.ts'),
+  read('packages/agent-platform-companion-activation-issuer/src/guarded-pre-permit-child.ts'),
+  read('apps/windows-companion/src/guarded-pre-permit-shutdown.ts'),
 ]);
 
 const executionKeyId = 'companion-execution-production-v1';
@@ -124,8 +130,21 @@ assert.match(operatorLaunchRehearsal, /process\.processId !== child\.processId/u
 assert.match(operatorLaunchRehearsal, /await bounded\(channel\.close\(\)\)/u);
 assert.match(operatorLaunchRehearsal, /await bounded\(child\.stop\(\)\)/u);
 assert.match(operatorLaunchRehearsal, /await bounded\(child\.stopped\)/u);
+assert.ok(
+  operatorLaunchRehearsal.indexOf('await bounded(child.stop())') <
+    operatorLaunchRehearsal.indexOf('await bounded(channel.close())'),
+);
 assert.match(operatorLaunchRehearsal, /permitSent: false/u);
 assert.doesNotMatch(operatorLaunchRehearsal, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
+assert.match(prePermitContract, /guarded-pre-permit-stop:v1/u);
+assert.match(prePermitContract, /guarded-pre-permit-stopped:v1/u);
+assert.match(prePermitRuntime, /await stopAndConfirm\(\)/u);
+assert.match(prePermitRuntime, /guardedPrePermitStopped\(challenge\)/u);
+assert.match(prePermitChild, /isGuardedPrePermitStopped\(message, challenge\)/u);
+assert.match(prePermitChild, /closeCode !== 0 \|\| closeSignal !== null/u);
+assert.doesNotMatch(prePermitChild, /^\s*child\.kill\(/mu);
+assert.match(windowsEntry, /guardedShutdown\?\.disarm\(\)/u);
+assert.match(windowsEntry, /A protected parent stop channel is required for guarded execution/u);
 assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
 assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);
 assert.match(windowsEntry, /stage === 'execution_handoff' \|\| stage === 'launch_proof'/u);

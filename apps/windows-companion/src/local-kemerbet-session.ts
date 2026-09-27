@@ -189,6 +189,7 @@ export async function startLocalKemerBetSession(
     disarmCandidateDeadline();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
+    let lockReleased = lock === undefined;
     try {
       await context?.close();
       browserClosed = true;
@@ -199,12 +200,14 @@ export async function startLocalKemerBetSession(
       try {
         await releaseSessionLock(lock);
         lock = undefined;
+        lockReleased = true;
       } catch {
         // A subsequent start still verifies the lock owner before recovering a stale lock.
       }
     }
-    const finalState = browserClosed ? state : 'failed';
-    const finalReason = browserClosed ? reason : 'shutdown_unconfirmed';
+    const shutdownConfirmed = browserClosed && lockReleased;
+    const finalState = shutdownConfirmed ? state : 'failed';
+    const finalReason = shutdownConfirmed ? reason : 'shutdown_unconfirmed';
     report({
       state: finalState,
       transferDisabled: true,
@@ -409,12 +412,12 @@ export async function startLocalKemerBetSession(
         terminal = true;
         settleVerified(false);
         lookupAuthorization.clear();
+        depositAuthorization.clear();
         disarmLoginDeadline();
         disarmCandidateDeadline();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
-          .catch(() => undefined)
-          .finally(() => {
+          .then(() => {
             lock = undefined;
             report({
               state: 'stopped',
@@ -423,6 +426,15 @@ export async function startLocalKemerBetSession(
               reason: 'browser_closed',
             });
             resolveDone();
+          })
+          .catch(() => {
+            report({
+              state: 'failed',
+              transferDisabled: true,
+              detailsRedacted: true,
+              reason: 'shutdown_unconfirmed',
+            });
+            rejectDone(new Error('The local KemerBet session failed closed.'));
           });
       }
     });

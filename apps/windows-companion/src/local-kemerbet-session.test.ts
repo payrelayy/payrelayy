@@ -748,4 +748,26 @@ describe('local KemerBet enrollment session', () => {
     expect(route.abort).toHaveBeenCalledTimes(1);
     expect(route.fetch).not.toHaveBeenCalled();
   });
+
+  it('does not confirm clean stop when the profile lock cannot be released', async () => {
+    const { events, session } = await start();
+    dependencies.releaseSessionLock.mockRejectedValueOnce(new Error('Synthetic lock failure'));
+
+    await session.stop();
+
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.state).toBe('failed');
+    expect(events.at(-1)?.reason).toBe('shutdown_unconfirmed');
+  });
+
+  it('fails closed when spontaneous browser closure cannot release its profile lock', async () => {
+    const { context, events, session } = await start();
+    dependencies.releaseSessionLock.mockRejectedValueOnce(new Error('Synthetic lock failure'));
+
+    context.emit('close');
+
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.state).toBe('failed');
+    expect(events.at(-1)?.reason).toBe('shutdown_unconfirmed');
+  });
 });

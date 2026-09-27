@@ -74,6 +74,14 @@ function fixture() {
 describe('guarded process launch rehearsal', () => {
   it('receives and independently observes one proof, then stops without a permit', async () => {
     const f = fixture();
+    const order: string[] = [];
+    f.stop.mockImplementationOnce(async () => {
+      order.push('stop');
+      f.exit.resolve();
+    });
+    f.close.mockImplementationOnce(async () => {
+      order.push('close');
+    });
     const result = await rehearseGuardedWindowsCompanionLaunch(f.input, f);
     expect(result).toEqual({
       proofObserved: true,
@@ -96,6 +104,7 @@ describe('guarded process launch rehearsal', () => {
     );
     expect(f.stop).toHaveBeenCalledOnce();
     expect(f.close).toHaveBeenCalledOnce();
+    expect(order).toEqual(['stop', 'close']);
   });
 
   it('fails closed and stops the child when independent observation rejects', async () => {

@@ -137,13 +137,6 @@ export async function rehearseGuardedWindowsCompanionLaunch(
   } catch {
     observed = false;
   } finally {
-    if (channel) {
-      try {
-        await bounded(channel.close());
-      } catch {
-        cleanupFailed = true;
-      }
-    }
     if (child) {
       try {
         await bounded(child.stop());
@@ -152,6 +145,16 @@ export async function rehearseGuardedWindowsCompanionLaunch(
       }
       try {
         await bounded(child.stopped);
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    // Keep the no-permit pipe open until the exact child has acknowledged its
+    // pre-permit stop. Closing it first would race the child's permit wait and
+    // mask an unconfirmed browser/profile shutdown as a normal child exit.
+    if (channel) {
+      try {
+        await bounded(channel.close());
       } catch {
         cleanupFailed = true;
       }

@@ -3,7 +3,7 @@ import type { CompanionActivationSnapshotQuery } from './snapshot.js';
 const LOCK_NAMESPACE = 1178682452;
 const LOCK_OPERATION = 1329885472;
 
-const ACQUIRE_SQL = `
+export const ACQUIRE_SQL = `
   select case when session_user = 'postgres'
                    and pg_catalog.pg_backend_pid() = $3::integer
                    and not exists (
@@ -18,7 +18,7 @@ const ACQUIRE_SQL = `
               then pg_catalog.pg_try_advisory_lock($1::integer, $2::integer)
               else false end as acquired
 `;
-const RELEASE_SQL = `
+export const RELEASE_SQL = `
   select case when session_user = 'postgres' and pg_catalog.pg_backend_pid() = $3::integer
               then pg_catalog.pg_advisory_unlock($1::integer, $2::integer)
               else false end as released

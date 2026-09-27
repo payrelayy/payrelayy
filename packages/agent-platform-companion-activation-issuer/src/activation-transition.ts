@@ -5,7 +5,7 @@ import type { CompanionActivationSnapshotQuery } from './snapshot.js';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const RUNTIME_PASSWORD = /^[0-9a-f]{64}$/u;
 
-const ACTIVATE_SQL = `select app.activate_agent_platform_companion_execution_once(
+export const ACTIVATE_SQL = `select app.activate_agent_platform_companion_execution_once(
   $1::uuid, $2::uuid, $3::text
 ) as valid_until`;
 

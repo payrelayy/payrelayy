@@ -29,7 +29,7 @@ const COMMIT_WAIT_MS = 60_000;
 const ACK_WAIT_MS = 15_000;
 const WATCHDOG_READY_WAIT_MS = 15_000;
 
-const ATTESTATION_SQL = `select launch_proof_digest::text as proof_digest
+export const ATTESTATION_SQL = `select launch_proof_digest::text as proof_digest
   from app.agent_platform_companion_execution_activation_attestations
  where request_key = $1::uuid and session_user = 'postgres'`;
 

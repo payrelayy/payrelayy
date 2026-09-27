@@ -33,7 +33,7 @@ export class CompanionActivationAttestationRetentionUnavailableError extends Err
   }
 }
 
-const RETAIN_SQL = `
+export const RETAIN_SQL = `
   insert into app.agent_platform_companion_execution_activation_attestations (
     request_key, certificate_body_digest, companion_release_sha,
     companion_archive_sha256, companion_installation_tree_sha256,

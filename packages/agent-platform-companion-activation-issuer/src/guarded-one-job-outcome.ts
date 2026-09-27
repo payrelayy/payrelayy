@@ -2,7 +2,7 @@ import type { CompanionActivationSnapshotQuery } from './snapshot.js';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
-const APPROVED_JOB_SQL = `
+export const APPROVED_JOB_SQL = `
   select approval.execution_job_id::text as job_id,
          (approval.expires_at > pg_catalog.clock_timestamp()) as approval_current,
          job.status::text as job_status
@@ -23,7 +23,7 @@ const APPROVED_JOB_SQL = `
 // This query is deliberately anchored to both the consumed activation request and
 // the exact Owner-approved execution job. A companion status or browser response
 // cannot be substituted for the database's terminal reconciliation evidence.
-const OUTCOME_SQL = `
+export const OUTCOME_SQL = `
   select
     job.status::text as job_status,
     intent.status::text as intent_status,

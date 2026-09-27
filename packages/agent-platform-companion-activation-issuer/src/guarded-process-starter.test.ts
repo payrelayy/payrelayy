@@ -5,7 +5,9 @@ import { win32 } from 'node:path';
 
 import {
   guardedPrePermitStopped,
+  guardedRuntimeStopped,
   isGuardedPrePermitStopRequest,
+  isGuardedRuntimeStopRequest,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -176,6 +178,26 @@ describe('protected one-use Windows companion starter', () => {
       ),
     ).toThrow(GuardedCompanionProcessStarterUnavailableError);
     expect(f.spawn).not.toHaveBeenCalled();
+  });
+
+  it('retains the exact child post-permit stop without reporting provider resolution', async () => {
+    const f = fixture();
+    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(
+      f.input,
+      f.spawn,
+      f.fileReader,
+    );
+    const owned = start({ challenge: f.challenge, pipePath: f.pipePath });
+    const pending = owned.stopAfterPermit();
+    expect(isGuardedRuntimeStopRequest(f.child.send.mock.calls[0]?.[0], f.challenge)).toBe(true);
+    f.child.emit('message', guardedRuntimeStopped(f.challenge));
+    f.child.exitCode = 0;
+    f.child.connected = false;
+    f.child.emit('close', 0, null);
+    await expect(pending).resolves.toEqual({
+      processStopped: true,
+      providerOutcomeRequiresReconciliation: true,
+    });
   });
 
   it('rejects a changed installed marker and invalid channel before spawn', () => {

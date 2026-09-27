@@ -219,13 +219,16 @@ attestation. It launches the exact reviewed bundled Node and entry point through
 an explicit environment allowlist and private IPC stop channel; it does not
 independently attest loaded memory or remove the disk-to-spawn race. There is no
 production invocation or permit sender wired to it. A Node IPC pre-permit stop
-contract lets an already-spawned
-guarded companion abort its permit wait, close the protected browser and profile lock,
-and acknowledge clean shutdown. The operator-side adapter requires that acknowledgement
-and exit code zero from the exact child; Windows force-kill is not clean-shutdown proof.
-This contract is disarmed before workers start and is not a live-execution host stop.
-If the supplied stop cannot confirm exit, the rehearsal fails closed
-and requires operator reconciliation.
+contract lets an already-spawned guarded companion abort its permit wait, close the
+protected browser and profile lock, and acknowledge clean shutdown. The listener
+stays armed after permit for a distinct challenge-bound runtime stop. The
+operator-side adapter requires its acknowledgement and exit code zero from the
+exact child; Windows force-kill is not clean-shutdown proof. An acknowledgement
+proves host shutdown, not whether a provider action already crossed the
+final-action fence. Parent IPC loss requests shutdown without an acknowledgement.
+If the supplied stop cannot confirm exit, the rehearsal fails closed and requires
+operator reconciliation. This host stop is not yet an integrated credential-
+revocation and in-flight provider-reconciliation operation.
 Neither this starter nor its rehearsal is a production invocation or execution grant.
 Neither package can arm the companion,
 consume the request, or establish the complete financial preflight. A future production

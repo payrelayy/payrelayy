@@ -223,7 +223,7 @@ export async function runWindowsCompanion(): Promise<void> {
             lookupAbort.signal,
           );
           if (guardedShutdown?.requested()) throw new Error();
-          guardedShutdown?.disarm();
+          guardedShutdown?.markPermitReceived();
         } else {
           const proof = baseDevice.createSignedLaunchProof(processContext);
           await deliverCompanionLaunchProof(launchProofRequest, proof);

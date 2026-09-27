@@ -138,12 +138,25 @@ assert.match(operatorLaunchRehearsal, /permitSent: false/u);
 assert.doesNotMatch(operatorLaunchRehearsal, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
 assert.match(prePermitContract, /guarded-pre-permit-stop:v1/u);
 assert.match(prePermitContract, /guarded-pre-permit-stopped:v1/u);
+assert.match(prePermitContract, /guarded-runtime-stop:v1/u);
+assert.match(prePermitContract, /guarded-runtime-stopped:v1/u);
 assert.match(prePermitRuntime, /await stopAndConfirm\(\)/u);
 assert.match(prePermitRuntime, /guardedPrePermitStopped\(challenge\)/u);
+assert.match(prePermitRuntime, /guardedRuntimeStopped\(challenge\)/u);
+assert.match(prePermitRuntime, /isGuardedRuntimeStopRequest\(message, challenge\)/u);
+assert.match(prePermitRuntime, /const onDisconnect = \(\): void => requestStop\(null\)/u);
 assert.match(prePermitChild, /isGuardedPrePermitStopped\(message, challenge\)/u);
-assert.match(prePermitChild, /closeCode !== 0 \|\| closeSignal !== null/u);
+assert.match(prePermitChild, /isGuardedRuntimeStopped\(message, challenge\)/u);
+assert.match(prePermitChild, /guardedRuntimeStopRequest\(challenge\)/u);
+assert.match(prePermitChild, /acknowledged && code === 0 && signal === null/u);
+assert.match(prePermitChild, /providerOutcomeRequiresReconciliation: true/u);
 assert.doesNotMatch(prePermitChild, /^\s*child\.kill\(/mu);
+assert.match(windowsEntry, /guardedShutdown\?\.markPermitReceived\(\)/u);
 assert.match(windowsEntry, /guardedShutdown\?\.disarm\(\)/u);
+assert.ok(
+  windowsEntry.indexOf('guardedShutdown?.markPermitReceived()') <
+    windowsEntry.indexOf('guardedShutdown?.disarm()'),
+);
 assert.match(windowsEntry, /A protected parent stop channel is required for guarded execution/u);
 assert.match(windowsLaunchVerifier, /verifyCompanionLaunchProof\(proof/u);
 assert.doesNotMatch(windowsLaunchVerifier, /execution-authorities:consume|execute_deposit/iu);

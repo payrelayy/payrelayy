@@ -1,18 +1,25 @@
 import {
   guardedPrePermitChallengeDigest,
   guardedPrePermitStopped,
+  guardedRuntimeStopped,
   isGuardedPrePermitStopRequest,
+  isGuardedRuntimeStopRequest,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 export interface GuardedPrePermitShutdown {
   requested(): boolean;
+  /** Keep the parent stop channel armed after permit; only the pre-permit frame is retired. */
+  markPermitReceived(): void;
   disarm(): void;
 }
 
 /**
  * Only the parent that launched this process with an IPC channel can request this stop.
- * It is armed only before a guarded execution permit is received. No acknowledgement is
- * sent unless the protected browser, its lock, and startup work have stopped cleanly.
+ * The listener stays armed through the execution worker lifetime. A pre-permit
+ * request is accepted only before a permit; a runtime request is accepted both
+ * before and after, avoiding a permit/stop race. Neither acknowledgement claims
+ * that a provider action is settled. No acknowledgement is sent unless the
+ * protected browser, profile lock, and worker have stopped cleanly.
  */
 export function installGuardedPrePermitShutdown(
   endpoint: NodeJS.Process,
@@ -26,12 +33,13 @@ export function installGuardedPrePermitShutdown(
   }
   let active = true;
   let stopRequested = false;
+  let permitReceived = false;
   const remove = (): void => {
     active = false;
     endpoint.off('message', onMessage);
     endpoint.off('disconnect', onDisconnect);
   };
-  const requestStop = (acknowledge: boolean): void => {
+  const requestStop = (acknowledgement: 'pre_permit' | 'runtime' | null): void => {
     if (!active) return;
     stopRequested = true;
     remove();
@@ -39,13 +47,17 @@ export function installGuardedPrePermitShutdown(
     void (async () => {
       try {
         await stopAndConfirm();
-        if (acknowledge) {
+        if (acknowledgement) {
           await new Promise<void>((resolve, reject) => {
             if (!endpoint.connected || typeof endpoint.send !== 'function') {
               reject(new Error());
               return;
             }
-            endpoint.send(guardedPrePermitStopped(challenge), (error) => {
+            const response =
+              acknowledgement === 'pre_permit'
+                ? guardedPrePermitStopped(challenge)
+                : guardedRuntimeStopped(challenge);
+            endpoint.send(response, (error) => {
               if (error) reject(new Error());
               else resolve();
             });
@@ -63,13 +75,21 @@ export function installGuardedPrePermitShutdown(
     })();
   };
   const onMessage = (message: unknown): void => {
-    if (active && isGuardedPrePermitStopRequest(message, challenge)) requestStop(true);
+    if (!active) return;
+    if (isGuardedRuntimeStopRequest(message, challenge)) requestStop('runtime');
+    else if (!permitReceived && isGuardedPrePermitStopRequest(message, challenge)) {
+      requestStop('pre_permit');
+    }
   };
-  const onDisconnect = (): void => requestStop(false);
+  const onDisconnect = (): void => requestStop(null);
   endpoint.on('message', onMessage);
   endpoint.on('disconnect', onDisconnect);
   return Object.freeze({
     requested: () => stopRequested,
+    markPermitReceived: () => {
+      if (!active || stopRequested) throw new Error('The guarded companion stop channel closed.');
+      permitReceived = true;
+    },
     disarm: remove,
   });
 }

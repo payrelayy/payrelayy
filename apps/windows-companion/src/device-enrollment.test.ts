@@ -32,6 +32,7 @@ import {
   COMPANION_EXECUTION_CURRENCY_CODE,
   COMPANION_EXECUTION_PLATFORM_CODE,
   COMPANION_EXECUTION_POLL_PATH,
+  COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
   COMPANION_EXECUTION_PROTOCOL_MODE,
   digestCompanionExecutionNonce,
   digestCompanionExecutionPlayerId,
@@ -654,6 +655,13 @@ describe('Windows companion device enrollment', () => {
         new Date(now.getTime() + 40_000),
       ).body.canonicalPath,
     ).toBe(COMPANION_EXECUTION_POLL_PATH);
+    expect(
+      runtime.createSignedHttpRequest(
+        COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+        `sha256:${'e'.repeat(64)}`,
+        new Date(now.getTime() + 40_000),
+      ).body.canonicalPath,
+    ).toBe(COMPANION_EXECUTION_OPERATOR_QUERY_PATH);
 
     const enrollmentBody: ExecutionEnrollmentBody = Object.freeze({
       contractVersion: COMPANION_EXECUTION_CONTRACT_VERSION,

@@ -132,15 +132,18 @@ paired proof, independent OS observation, and confirmed exact-child shutdown. It
 retains an attestation nor invokes the database transition. These source-only components
 have no production caller, permit sender, credential lifecycle, or provider reconciliation.
 No production handoff has been published and the disabled execution state is unchanged.
-The operator database boundary now has a source-only exact-query catalog and a
-server-owned session core. The Windows-side adapter maps only those exact reviewed
-statements to named operations; it cannot forward arbitrary SQL or receive the
-Postgres credential. The server core pins the one-use request, backend identity,
-lock, activation sequence, watchdog epoch, and single approved job; an ambiguous
-activation or lost session requests the independent database stop. This is **not**
-an installed transport or credential loader. A private paired-device-authenticated
-session transport, exact-backend termination proof, and independent host/provider
-reconciliation remain necessary before using it for production activation.
+The operator database boundary now has an exact-query catalog and a server-owned
+session core. The Windows-side adapter maps only those reviewed statements to
+named operations; it cannot forward arbitrary SQL or receive the Postgres
+credential. The server core pins the one-use request, backend identity, lock,
+activation sequence, watchdog epoch, and single approved job; an ambiguous
+activation or lost session requests the independent database stop. A source-only
+loopback transport authenticates each command with the live paired certificate,
+an exact request binding, a one-time session nonce, and a strictly increasing
+sequence. It is **not installed** in the production bridge and has no public
+route, operator tunnel, credential loader, or production entry point. An
+authenticated private tunnel, exact-backend termination proof, and independent
+host/provider reconciliation remain necessary before production activation.
 The guarded companion now acknowledges receipt of an exact proof-bound permit.
 An unexported operator-side local channel can pair a retained attestation with
 the existing one-use transition and requires an independent database-and-host

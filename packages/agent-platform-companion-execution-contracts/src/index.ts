@@ -61,6 +61,9 @@ export const COMPANION_EXECUTION_STATUS_PATH =
 /** Protected, loopback-only operator transport; not a public device-bridge route. */
 export const COMPANION_EXECUTION_HANDOFF_SIGN_PATH =
   '/v2/companion/operator/activation-handoff:sign' as const;
+/** Protected, loopback-only operator session; never a public bridge route. */
+export const COMPANION_EXECUTION_OPERATOR_QUERY_PATH =
+  '/v2/companion/operator/activation-session:query' as const;
 export type CompanionExecutionRequestPath =
   | typeof COMPANION_EXECUTION_POLL_PATH
   | typeof COMPANION_EXECUTION_AUTHORITY_PATH

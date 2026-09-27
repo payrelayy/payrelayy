@@ -65,6 +65,7 @@ import {
 import {
   COMPANION_EXECUTION_AUTHORITY_PATH,
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
   COMPANION_EXECUTION_POLL_PATH,
   COMPANION_EXECUTION_RESULT_PATH,
   COMPANION_EXECUTION_STATUS_PATH,
@@ -934,7 +935,8 @@ export type CompanionLookupRequestPath =
 export type CompanionDeviceRequestPath =
   | CompanionLookupRequestPath
   | CompanionExecutionRequestPath
-  | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH;
+  | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
+  | typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH;
 
 export type ExactFiveCompanionLookupOutcomes = readonly [
   CompanionPlayerLookupOutcome,
@@ -1134,7 +1136,8 @@ export async function loadCompanionDeviceSigningRuntime(
         path !== COMPANION_EXECUTION_AUTHORITY_PATH &&
         path !== COMPANION_EXECUTION_RESULT_PATH &&
         path !== COMPANION_EXECUTION_STATUS_PATH &&
-        path !== COMPANION_EXECUTION_HANDOFF_SIGN_PATH) ||
+        path !== COMPANION_EXECUTION_HANDOFF_SIGN_PATH &&
+        path !== COMPANION_EXECUTION_OPERATOR_QUERY_PATH) ||
       !DIGEST_PATTERN.test(contentDigest)
     ) {
       fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');

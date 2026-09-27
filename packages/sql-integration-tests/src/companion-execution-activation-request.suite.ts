@@ -669,6 +669,83 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           },
         ]);
 
+        const watchdog = await client.query<{
+          readonly lease_count: string;
+          readonly initial_deadline_bounded: boolean;
+        }>(`
+          select count(*) as lease_count,
+                 bool_and(lease_expires_at <= heartbeat_at + interval '45 seconds'
+                   and lease_expires_at <= hard_expires_at)
+                   as initial_deadline_bounded
+            from app.agent_platform_companion_execution_watchdog_leases
+        `);
+        expect(watchdog.rows).toEqual([{ lease_count: '1', initial_deadline_bounded: true }]);
+        const renewed = await client.query<{ readonly deadline: Date }>(
+          `select app.renew_agent_platform_companion_execution_watchdog($1::bigint)
+             as deadline`,
+          [activationEpoch],
+        );
+        expect(renewed.rows[0]!.deadline.getTime()).toBeGreaterThan(Date.now() + 30_000);
+
+        await client.query('savepoint expired_watchdog');
+        await client.query(
+          `update app.agent_platform_companion_execution_watchdog_leases
+              set heartbeat_at = activated_at,
+                  lease_expires_at = activated_at + interval '1 millisecond'
+            where activation_epoch = $1::bigint`,
+          [activationEpoch],
+        );
+        await expect(
+          client.query(`select app.renew_agent_platform_companion_execution_watchdog($1::bigint)`, [
+            activationEpoch,
+          ]),
+        ).rejects.toThrow('The execution watchdog lease is not renewable.');
+        await client.query('rollback to savepoint expired_watchdog');
+        await client.query('savepoint tripped_watchdog');
+        await client.query(
+          `update app.agent_platform_companion_execution_watchdog_leases
+              set heartbeat_at = activated_at,
+                  lease_expires_at = activated_at + interval '1 millisecond'
+            where activation_epoch = $1::bigint`,
+          [activationEpoch],
+        );
+        const credentialFence = await client.query<{ readonly fenced: boolean }>(
+          'select app.watchdog_fence_companion_execution_credentials() as fenced',
+        );
+        expect(credentialFence.rows).toEqual([{ fenced: true }]);
+        const financialFence = await client.query<{ readonly fenced: boolean }>(
+          'select app.watchdog_fence_companion_execution_financial_authority() as fenced',
+        );
+        expect(financialFence.rows).toEqual([{ fenced: true }]);
+        const sessionFence = await client.query<{ readonly drained: number }>(
+          'select app.watchdog_drain_companion_execution_sessions() as drained',
+        );
+        expect(sessionFence.rows).toEqual([{ drained: 0 }]);
+        const watchdogStopped = await client.query<{
+          readonly control_disabled: boolean;
+          readonly financial_disabled: boolean;
+          readonly runtime_password_cleared: boolean;
+        }>(`
+          select
+            (select control_state = 'disabled'
+               from app.agent_platform_companion_execution_control
+              where singleton) as control_disabled,
+            app.current_private_trusted_telebirr_activation_epoch() is null
+              as financial_disabled,
+            (select not rolcanlogin and rolpassword is null
+               from pg_authid
+              where rolname = 'fetanagent_companion_execution_bridge_runtime')
+              as runtime_password_cleared
+        `);
+        expect(watchdogStopped.rows).toEqual([
+          {
+            control_disabled: true,
+            financial_disabled: true,
+            runtime_password_cleared: true,
+          },
+        ]);
+        await client.query('rollback to savepoint tripped_watchdog');
+
         await client.query('savepoint immutable_consumption');
         await expect(
           client.query(

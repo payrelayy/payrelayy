@@ -15,6 +15,17 @@ last. Each phase commits independently so a later failure cannot roll an earlier
 leases or executes a queue job. A provider action already past its one-use fence cannot be
 undone by disabling a session; its outcome must be reconciled before any later activation.
 This stop path is a prerequisite for review, **not** an authorization to arm or deploy execution.
+The `companion_execution_database_watchdog` migration adds a short, non-sliding lease for each
+future activation and three independent Supabase Cron stop jobs. An activation seeds only a
+45-second lease; a separately supervised production operator must renew it before expiry. Once
+expired, it cannot be revived for that epoch. The jobs independently revoke execution logins and
+capability membership, drain only execution-role sessions, and request financial emergency
+disable. The activation trigger requires all three exact jobs to be active and recently
+successful on managed production PostgreSQL. A migration install must be followed by the
+`Inspect production companion execution watchdog` read-only workflow; a successful migration
+alone is not evidence that Cron is running. This migration does not grant a renewal identity to
+the companion or authorize an execution request. A future operator must prove its independent
+heartbeat and exact-host emergency stop before any execution activation.
 The optional bridge overlay now requires a distinct guarded execution-database URL and connects
 through a separate one-connection pool. The always-on pairing/Find pool is checked against only
 its seven no-money procedures; the execution pool is checked against only its seven execution

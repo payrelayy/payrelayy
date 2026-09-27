@@ -118,7 +118,10 @@ assert.match(
   /setTimeout\(\(\) => \{\s*lookupAbort\.abort\(\);\s*void session\.stop\(\);\s*\}, remainingExecutionMs\)/u,
 );
 assert.match(windowsEntry, /handoffExpiresAtMs: executionDeadlineMs!/u);
-assert.match(windowsEntry, /if \(handoff\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u);
+assert.match(
+  windowsEntry,
+  /if \(handoff\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u,
+);
 assert.match(windowsEntry, /if \(config\.executionV2Enabled\) await session\.stop\(\)/u);
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
 assert.match(windowsEntry, /baseDevice\.createSignedLaunchProof/u);

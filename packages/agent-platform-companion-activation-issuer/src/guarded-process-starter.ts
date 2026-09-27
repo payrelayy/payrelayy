@@ -39,6 +39,22 @@ export interface GuardedCompanionProcessStarterInputs {
 
 type SpawnChild = (file: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
+export interface GuardedCompanionStarterFileReader {
+  lstat(path: string): {
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+  };
+  realpath(path: string): string;
+  readFile(path: string): string;
+}
+
+const nativeFiles: GuardedCompanionStarterFileReader = {
+  lstat: lstatSync,
+  realpath: realpathSync.native,
+  readFile: (path) => readFileSync(path, 'utf8'),
+};
+
 function timestamp(value: string): number {
   if (typeof value !== 'string' || !TIMESTAMP.test(value)) throw new Error();
   const parsed = Date.parse(value);
@@ -46,7 +62,7 @@ function timestamp(value: string): number {
   return parsed;
 }
 
-function canonicalDirectory(path: string): string {
+function canonicalDirectory(path: string, files: GuardedCompanionStarterFileReader): string {
   if (
     typeof path !== 'string' ||
     !win32.isAbsolute(path) ||
@@ -56,17 +72,17 @@ function canonicalDirectory(path: string): string {
   ) {
     throw new Error();
   }
-  const stat = lstatSync(path);
+  const stat = files.lstat(path);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error();
-  const actual = realpathSync.native(path);
+  const actual = files.realpath(path);
   if (actual.toLowerCase() !== path.toLowerCase()) throw new Error();
   return path;
 }
 
-function ordinaryFile(path: string): void {
-  const stat = lstatSync(path);
+function ordinaryFile(path: string, files: GuardedCompanionStarterFileReader): void {
+  const stat = files.lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error();
-  if (realpathSync.native(path).toLowerCase() !== path.toLowerCase()) throw new Error();
+  if (files.realpath(path).toLowerCase() !== path.toLowerCase()) throw new Error();
 }
 
 function runtimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -104,24 +120,27 @@ function runtimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return result;
 }
 
-function launchPaths(input: GuardedCompanionProcessStarterInputs): {
+function launchPaths(
+  input: GuardedCompanionProcessStarterInputs,
+  files: GuardedCompanionStarterFileReader,
+): {
   readonly node: string;
   readonly entry: string;
   readonly dataRoot: string;
 } {
-  const installationRoot = canonicalDirectory(input.installationRoot);
-  const dataRoot = canonicalDirectory(input.dataRoot);
-  const runtimeRoot = canonicalDirectory(win32.join(installationRoot, 'runtime'));
-  const appRoot = canonicalDirectory(win32.join(installationRoot, 'app'));
-  const distRoot = canonicalDirectory(win32.join(appRoot, 'dist'));
+  const installationRoot = canonicalDirectory(input.installationRoot, files);
+  const dataRoot = canonicalDirectory(input.dataRoot, files);
+  const runtimeRoot = canonicalDirectory(win32.join(installationRoot, 'runtime'), files);
+  const appRoot = canonicalDirectory(win32.join(installationRoot, 'app'), files);
+  const distRoot = canonicalDirectory(win32.join(appRoot, 'dist'), files);
   const node = win32.join(runtimeRoot, 'node.exe');
   const entry = win32.join(distRoot, 'index.js');
   const releaseMarker = win32.join(installationRoot, 'RELEASE_SHA');
   const treeMarker = win32.join(installationRoot, 'INSTALLATION_TREE_SHA256');
-  for (const path of [node, entry, releaseMarker, treeMarker]) ordinaryFile(path);
+  for (const path of [node, entry, releaseMarker, treeMarker]) ordinaryFile(path, files);
   if (
-    readFileSync(releaseMarker, 'utf8') !== input.release.releaseSha ||
-    readFileSync(treeMarker, 'utf8') !== input.release.installationTreeSha256
+    files.readFile(releaseMarker) !== input.release.releaseSha ||
+    files.readFile(treeMarker) !== input.release.installationTreeSha256
   ) {
     throw new Error();
   }
@@ -151,6 +170,7 @@ function validPipe(path: string): boolean {
 export function prepareGuardedWindowsCompanionProcessStarterWithSpawn(
   input: GuardedCompanionProcessStarterInputs,
   spawnChild: SpawnChild,
+  files: GuardedCompanionStarterFileReader = nativeFiles,
 ): (request: Readonly<{ challenge: string; pipePath: string }>) => GuardedProcessRehearsalChild {
   try {
     // Keep launch inputs stable even if the caller mutates its own objects later.
@@ -183,7 +203,7 @@ export function prepareGuardedWindowsCompanionProcessStarterWithSpawn(
       throw new Error();
     }
     const ambient = runtimeEnvironment(launchInput.windowsEnvironment);
-    launchPaths(launchInput);
+    launchPaths(launchInput, files);
     let started = false;
     return (request) => {
       try {
@@ -199,7 +219,7 @@ export function prepareGuardedWindowsCompanionProcessStarterWithSpawn(
         ) {
           throw new Error();
         }
-        const { node, entry, dataRoot } = launchPaths(launchInput);
+        const { node, entry, dataRoot } = launchPaths(launchInput, files);
         started = true;
         const child = spawnChild(node, [entry], {
           cwd: win32.join(launchInput.installationRoot, 'app'),

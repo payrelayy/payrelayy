@@ -1,40 +1,56 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { win32 } from 'node:path';
 
 import {
   guardedPrePermitStopped,
   isGuardedPrePermitStopRequest,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   GuardedCompanionProcessStarterUnavailableError,
   prepareGuardedWindowsCompanionProcessStarterWithSpawn,
   type GuardedCompanionProcessStarterInputs,
+  type GuardedCompanionStarterFileReader,
 } from './guarded-process-starter.js';
 
-const created: string[] = [];
-afterEach(() => {
-  for (const path of created.splice(0)) rmSync(path, { recursive: true, force: true });
-});
-
 function fixture() {
-  const installationRoot = mkdtempSync(win32.join(tmpdir(), 'guarded-companion-starter-'));
-  const dataRoot = mkdtempSync(win32.join(tmpdir(), 'guarded-companion-data-'));
-  created.push(installationRoot, dataRoot);
-  mkdirSync(win32.join(installationRoot, 'runtime'));
-  mkdirSync(win32.join(installationRoot, 'app', 'dist'), { recursive: true });
+  const installationRoot = 'C:\\reviewed\\installed';
+  const dataRoot = 'C:\\protected\\data';
   const releaseSha = 'a'.repeat(40);
   const installationTreeSha256 = `sha256:${'b'.repeat(64)}`;
   const archiveSha256 = `sha256:${'c'.repeat(64)}`;
-  writeFileSync(win32.join(installationRoot, 'runtime', 'node.exe'), 'synthetic');
-  writeFileSync(win32.join(installationRoot, 'app', 'dist', 'index.js'), 'synthetic');
-  writeFileSync(win32.join(installationRoot, 'RELEASE_SHA'), releaseSha);
-  writeFileSync(win32.join(installationRoot, 'INSTALLATION_TREE_SHA256'), installationTreeSha256);
+  const directories = new Set([
+    installationRoot,
+    dataRoot,
+    win32.join(installationRoot, 'runtime'),
+    win32.join(installationRoot, 'app'),
+    win32.join(installationRoot, 'app', 'dist'),
+  ]);
+  const files = new Map([
+    [win32.join(installationRoot, 'runtime', 'node.exe'), 'synthetic'],
+    [win32.join(installationRoot, 'app', 'dist', 'index.js'), 'synthetic'],
+    [win32.join(installationRoot, 'RELEASE_SHA'), releaseSha],
+    [win32.join(installationRoot, 'INSTALLATION_TREE_SHA256'), installationTreeSha256],
+  ]);
+  const fileReader: GuardedCompanionStarterFileReader = {
+    lstat: (path) => {
+      if (!directories.has(path) && !files.has(path)) throw new Error('not found');
+      return {
+        isDirectory: () => directories.has(path),
+        isFile: () => files.has(path),
+        isSymbolicLink: () => false,
+      };
+    },
+    realpath: (path) => path,
+    readFile: (path) => {
+      const value = files.get(path);
+      if (value === undefined) throw new Error('not found');
+      return value;
+    },
+  };
   const input: GuardedCompanionProcessStarterInputs = {
     request: {
       requestKey: randomUUID(),
@@ -82,13 +98,27 @@ function fixture() {
   const spawn = vi.fn((_node: string, _args: readonly string[], _options: SpawnOptions) => {
     return child as unknown as ChildProcess;
   });
-  return { input, installationRoot, dataRoot, challenge, pipePath, child, spawn };
+  return {
+    input,
+    installationRoot,
+    dataRoot,
+    challenge,
+    pipePath,
+    child,
+    spawn,
+    files,
+    fileReader,
+  };
 }
 
 describe('protected one-use Windows companion starter', () => {
   it('spawns only the attested release files with private IPC and an allowlisted environment', async () => {
     const f = fixture();
-    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(f.input, f.spawn);
+    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(
+      f.input,
+      f.spawn,
+      f.fileReader,
+    );
     const owned = start({ challenge: f.challenge, pipePath: f.pipePath });
     expect(owned.processId).toBe(4321);
     expect(f.spawn).toHaveBeenCalledOnce();
@@ -135,12 +165,14 @@ describe('protected one-use Windows companion starter', () => {
       prepareGuardedWindowsCompanionProcessStarterWithSpawn(
         { ...f.input, release: { ...f.input.release, releaseSha: 'd'.repeat(40) } },
         f.spawn,
+        f.fileReader,
       ),
     ).toThrow(GuardedCompanionProcessStarterUnavailableError);
     expect(() =>
       prepareGuardedWindowsCompanionProcessStarterWithSpawn(
         { ...f.input, release: { ...f.input.release, observedAt: '2026-09-26T23:57:00.000Z' } },
         f.spawn,
+        f.fileReader,
       ),
     ).toThrow(GuardedCompanionProcessStarterUnavailableError);
     expect(f.spawn).not.toHaveBeenCalled();
@@ -148,14 +180,15 @@ describe('protected one-use Windows companion starter', () => {
 
   it('rejects a changed installed marker and invalid channel before spawn', () => {
     const f = fixture();
-    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(f.input, f.spawn);
+    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(
+      f.input,
+      f.spawn,
+      f.fileReader,
+    );
     expect(() =>
       start({ challenge: f.challenge, pipePath: 'https://example.invalid/proof' }),
     ).toThrow(GuardedCompanionProcessStarterUnavailableError);
-    writeFileSync(win32.join(f.installationRoot, 'INSTALLATION_TREE_SHA256'), 'changed');
-    expect(readFileSync(win32.join(f.installationRoot, 'INSTALLATION_TREE_SHA256'), 'utf8')).toBe(
-      'changed',
-    );
+    f.files.set(win32.join(f.installationRoot, 'INSTALLATION_TREE_SHA256'), 'changed');
     expect(() => start({ challenge: f.challenge, pipePath: f.pipePath })).toThrow(
       GuardedCompanionProcessStarterUnavailableError,
     );
@@ -165,7 +198,11 @@ describe('protected one-use Windows companion starter', () => {
   it('uses the preflight account snapshot rather than later caller mutations', () => {
     const f = fixture();
     const account = f.input.request.platformAgentAccountId;
-    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(f.input, f.spawn);
+    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(
+      f.input,
+      f.spawn,
+      f.fileReader,
+    );
     (f.input.request as { platformAgentAccountId: string }).platformAgentAccountId = randomUUID();
     start({ challenge: f.challenge, pipePath: f.pipePath });
     expect(
@@ -176,7 +213,11 @@ describe('protected one-use Windows companion starter', () => {
   it('fails closed if the OS spawn reports no child PID', () => {
     const f = fixture();
     f.child.pid = undefined;
-    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(f.input, f.spawn);
+    const start = prepareGuardedWindowsCompanionProcessStarterWithSpawn(
+      f.input,
+      f.spawn,
+      f.fileReader,
+    );
     expect(() => start({ challenge: f.challenge, pipePath: f.pipePath })).toThrow(
       GuardedCompanionProcessStarterUnavailableError,
     );

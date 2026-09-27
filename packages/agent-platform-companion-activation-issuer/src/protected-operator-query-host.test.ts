@@ -6,7 +6,7 @@ import { COMPANION_EXECUTION_OPERATOR_QUERY_PATH } from '@fetanagent/agent-platf
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  openProtectedOperatorQueryHost,
+  openProtectedOperatorQueryHostWithPort,
   ProtectedOperatorQueryHostUnavailableError,
 } from './protected-operator-query-host.js';
 
@@ -70,7 +70,7 @@ async function malformedRequest(port: number): Promise<number> {
 describe('on-demand protected operator host', () => {
   it('opens only loopback and closes the exact idle session on caller abort', async () => {
     const { input, controller, closeAdministrator, disableDatabase, query } = fixture();
-    const host = await openProtectedOperatorQueryHost(input);
+    const host = await openProtectedOperatorQueryHostWithPort(input, 0);
     expect(host.port).toBeGreaterThan(0);
     controller.abort();
     await host.stopped;
@@ -83,7 +83,7 @@ describe('on-demand protected operator host', () => {
 
   it('consumes a malformed command fail-closed and retires its listener', async () => {
     const { input, closeAdministrator, disableDatabase, query } = fixture();
-    const host = await openProtectedOperatorQueryHost(input);
+    const host = await openProtectedOperatorQueryHostWithPort(input, 0);
     expect(await malformedRequest(host.port)).toBe(503);
     await host.stopped;
     expect(closeAdministrator).toHaveBeenCalledTimes(1);
@@ -94,7 +94,7 @@ describe('on-demand protected operator host', () => {
 
   it('retires the listener after the dedicated administrator connection is lost', async () => {
     const { input, closeAdministrator, disableDatabase, events } = fixture();
-    const host = await openProtectedOperatorQueryHost(input);
+    const host = await openProtectedOperatorQueryHostWithPort(input, 0);
     events.emit('end');
     await host.stopped;
     expect(closeAdministrator).toHaveBeenCalledTimes(1);
@@ -105,7 +105,7 @@ describe('on-demand protected operator host', () => {
   it('refuses an already-aborted caller before opening a listener', async () => {
     const { input, controller, closeAdministrator } = fixture();
     controller.abort();
-    await expect(openProtectedOperatorQueryHost(input)).rejects.toBeInstanceOf(
+    await expect(openProtectedOperatorQueryHostWithPort(input, 0)).rejects.toBeInstanceOf(
       ProtectedOperatorQueryHostUnavailableError,
     );
     expect(closeAdministrator).toHaveBeenCalledTimes(1);

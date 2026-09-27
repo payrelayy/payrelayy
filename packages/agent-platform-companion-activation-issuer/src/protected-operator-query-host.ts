@@ -4,6 +4,7 @@ import {
   createProtectedOperatorQuerySession,
   type ProtectedOperatorQuerySessionInput,
 } from './protected-operator-query-session.js';
+import { PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT } from './protected-operator-query-port.js';
 
 const MAX_HOST_LIFETIME_MS = 2 * 60 * 60_000;
 const RESPONSE_DRAIN_MS = 100;
@@ -40,8 +41,9 @@ export class ProtectedOperatorQueryHostUnavailableError extends Error {
  * production CLI, or Windows-side administrator connection. Its caller must
  * own the independent database stop and the authenticated private tunnel.
  */
-export async function openProtectedOperatorQueryHost(
+export async function openProtectedOperatorQueryHostWithPort(
   input: ProtectedOperatorQueryHostInput,
+  port: number,
 ): Promise<ProtectedOperatorQueryHost> {
   let session: ReturnType<typeof createProtectedOperatorQuerySession> | undefined;
   let server: ReturnType<typeof createProtectedHandoffLoopbackServer> | undefined;
@@ -115,13 +117,13 @@ export async function openProtectedOperatorQueryHost(
         responseTimer = setTimeout(() => void stop().catch(() => undefined), RESPONSE_DRAIN_MS);
       }
       return response;
-    }, 0);
-    const port = await server.listen();
+    }, port);
+    const listeningPort = await server.listen();
     input.signal?.addEventListener('abort', onAbort, { once: true });
     timer = setTimeout(onAbort, MAX_HOST_LIFETIME_MS);
     void session.lost.then(onAbort, onAbort);
     if (input.signal?.aborted) throw new Error();
-    return Object.freeze({ port, stopped, stop });
+    return Object.freeze({ port: listeningPort, stopped, stop });
   } catch {
     try {
       await stop();
@@ -130,4 +132,11 @@ export async function openProtectedOperatorQueryHost(
     }
     throw new ProtectedOperatorQueryHostUnavailableError();
   }
+}
+
+/** Production accepts only the loopback port allowlisted by the operator's SSH key. */
+export function openProtectedOperatorQueryHost(
+  input: ProtectedOperatorQueryHostInput,
+): Promise<ProtectedOperatorQueryHost> {
+  return openProtectedOperatorQueryHostWithPort(input, PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT);
 }

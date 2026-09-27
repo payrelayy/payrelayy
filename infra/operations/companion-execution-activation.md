@@ -243,6 +243,9 @@ production adapters must first independently verify the release measurement and 
 proof against the database certificate. The issuer core alone does not provide those adapters.
 No production invocation workflow, signed local handoff, host stop/reconciliation rehearsal, or
 deployment of this migration exists yet.
+An internal source-only adapter specifies the exact parameterized call and redacted,
+fail-closed result handling. It is deliberately absent from package exports and
+production entry points; it does not change that deployment or invocation status.
 Do not apply or invoke it in production as a shortcut around those missing pieces.
 
 ## Missing activation implementation

@@ -190,6 +190,27 @@ separately reviewed activation operation exists. `nextAction` is one of these di
 
 No `nextAction` value is permission to arm a switch, lease a queue item, or move money.
 
+## Owner-approved first, sequential execution
+
+The first money-capable operating mode is per-deposit Owner approval. Verification may retain
+multiple paid deposits as queued commands, but the provider-aware lease skips every TeleBirr
+command without an immutable Owner approval for the same job, pilot, and trusted activation
+epoch. A second database guard rejects a direct queued-to-leased transition without that
+approval. The Owner page displays only verified queued jobs, Player ID, amount, and times; it
+does not display or require a raw payment reference. The Owner can approve one job at a time.
+The paired Windows companion, not the Owner browser, performs the eventual KemerBet action
+under the existing single-agent attempt fence, final-action fence, and reconciliation ledger.
+An ambiguous result blocks the lane; it is never retried automatically.
+
+Installing the approval migration does not activate a pilot, a trusted epoch, a financial
+switch, the companion, or a queued job. Deploy the compatible Owner image before granting its
+two new database functions, then apply the append-only migration only while there is no open
+TeleBirr execution work. Do not activate live execution merely because the approval button is
+visible. A separate reviewed production operator, current companion release, watchdog, and
+end-to-end live test remain prerequisites. The later fully automatic mode should remove only
+the per-job Owner approval requirement; it must reuse this same ordered queue, one-agent
+execution fence, and reconciliation path, and needs its own review and authorization.
+
 The Owner page's **Deposit execution readiness** panel is a smaller, authenticated projection of
 this diagnosis. It shows bounded counts and a plain-language next step without job, Player,
 receipt, or account identifiers. It has only a refresh control; `activationAvailable` is always

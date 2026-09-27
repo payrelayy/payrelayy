@@ -456,13 +456,34 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </button>
           </div>
           <p class="receipt-label">
-            This preview explains the next review step. It cannot activate the companion,
-            release a deposit, credit a Player, or move money.
+            This status preview cannot activate the companion or move money. After separate
+            live activation, use the one-deposit approval control below.
           </p>
           <p class="request-meta" id="execution-readiness-status" role="status">
             Sign in to check execution readiness.
           </p>
           <dl id="execution-readiness-facts"></dl>
+        </section>
+
+        <section class="review-section" aria-labelledby="execution-approvals-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">One deposit at a time</p>
+              <h2 id="execution-approvals-title">Verified deposits awaiting approval</h2>
+            </div>
+            <button class="secondary" id="execution-approvals-refresh" type="button">
+              Refresh queue
+            </button>
+          </div>
+          <p class="receipt-label">
+            Approving one verified 25 ETB payment lets the paired Windows companion execute
+            that deposit only. A second approval waits until the first finishes or is reconciled.
+            This does not activate execution by itself.
+          </p>
+          <p class="request-meta" id="execution-approvals-status" role="status">
+            Sign in to check the approval queue.
+          </p>
+          <div id="execution-approvals-list"></div>
         </section>
 
         <section class="review-section pilot-section" aria-labelledby="pilot-title">
@@ -690,6 +711,9 @@ const pilotCandidateList = document.querySelector('#pilot-candidate-list');
 const executionReadinessRefresh = document.querySelector('#execution-readiness-refresh');
 const executionReadinessStatus = document.querySelector('#execution-readiness-status');
 const executionReadinessFacts = document.querySelector('#execution-readiness-facts');
+const executionApprovalsRefresh = document.querySelector('#execution-approvals-refresh');
+const executionApprovalsStatus = document.querySelector('#execution-approvals-status');
+const executionApprovalsList = document.querySelector('#execution-approvals-list');
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
 const pilotConfirmation = document.querySelector('#pilot-confirmation');
@@ -1538,6 +1562,11 @@ function clearExecutionReadiness() {
   executionReadinessStatus.textContent = 'Sign in to check execution readiness.';
 }
 
+function clearExecutionApprovals() {
+  executionApprovalsList.replaceChildren();
+  executionApprovalsStatus.textContent = 'Sign in to check the approval queue.';
+}
+
 function validExecutionReadiness(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !==
@@ -1609,6 +1638,123 @@ async function loadExecutionReadiness() {
     }
   } finally {
     executionReadinessRefresh.disabled = false;
+  }
+}
+
+function validPendingExecution(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort().join(',');
+  if (keys !== 'amountMinor,currencyCode,executionJobId,playerId,queuedAt,verifiedAt' &&
+      keys !== 'amountMinor,approvalExpiresAt,approvedAt,currencyCode,executionJobId,playerId,queuedAt,verifiedAt') {
+    return false;
+  }
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.executionJobId) &&
+    typeof value.playerId === 'string' && value.playerId.length > 0 &&
+    value.amountMinor === '2500' && value.currencyCode === 'ETB' &&
+    Number.isFinite(Date.parse(value.queuedAt)) &&
+    Number.isFinite(Date.parse(value.verifiedAt)) &&
+    (value.approvedAt === undefined ||
+      (Number.isFinite(Date.parse(value.approvedAt)) &&
+       Number.isFinite(Date.parse(value.approvalExpiresAt))));
+}
+
+async function approvePendingExecution(job) {
+  if (!window.confirm(
+    'Approve one verified 25 ETB deposit to Player ' + job.playerId +
+    '? The paired Windows companion may perform the KemerBet Transfer once. ' +
+    'Do not approve unless the displayed Player and amount are correct.'
+  )) return;
+  executionApprovalsStatus.textContent = 'Recording one-deposit approval…';
+  try {
+    const requestId = window.crypto.randomUUID();
+    const response = await ownerRequest(
+      '/v1/owner/telebirr-execution/approvals/' + encodeURIComponent(job.executionJobId),
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-fetanagent-owner-csrf': 'owner-telebirr-execution-approval-v1',
+          'x-idempotency-key': requestId,
+        },
+        body: JSON.stringify({ requestId }),
+      },
+    );
+    if (response.status === 409) {
+      executionApprovalsStatus.textContent =
+        'This deposit is not ready. Refresh the queue and execution status.';
+      return;
+    }
+    if (!response.ok) throw new Error('execution_approval');
+    const payload = await response.json();
+    if (!payload || !payload.approval ||
+        typeof payload.approval.approvedAt !== 'string' ||
+        typeof payload.approval.expiresAt !== 'string' ||
+        typeof payload.approval.alreadyApproved !== 'boolean') {
+      throw new Error('execution_approval');
+    }
+    executionApprovalsStatus.textContent =
+      'One deposit approved. The companion will process it only while live authority remains valid.';
+    await loadExecutionApprovals();
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      executionApprovalsStatus.textContent =
+        'Approval could not be confirmed. Refresh before trying again.';
+    }
+  }
+}
+
+async function loadExecutionApprovals() {
+  executionApprovalsRefresh.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/telebirr-execution/approvals?limit=25', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('execution_approvals');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.jobs) || payload.jobs.length > 25 ||
+        !payload.jobs.every(validPendingExecution)) {
+      throw new Error('execution_approvals');
+    }
+    executionApprovalsList.replaceChildren();
+    if (payload.jobs.length === 0) {
+      executionApprovalsStatus.textContent = 'No verified deposits are waiting for approval.';
+      return;
+    }
+    executionApprovalsStatus.textContent =
+      payload.jobs.length === 1 ? 'One verified deposit is queued.' :
+      String(payload.jobs.length) + ' verified deposits are queued. Approve only one at a time.';
+    for (const job of payload.jobs) {
+      const card = document.createElement('article');
+      card.className = 'request-card';
+      const title = document.createElement('h3');
+      title.textContent = 'Player ' + job.playerId + ' · 25 ETB';
+      const detail = document.createElement('p');
+      detail.className = 'request-meta';
+      detail.textContent = 'Verified ' + new Date(job.verifiedAt).toLocaleString();
+      card.append(title, detail);
+      if (job.approvedAt) {
+        const status = document.createElement('p');
+        status.className = 'request-meta';
+        status.textContent = 'Approved · valid until ' +
+          new Date(job.approvalExpiresAt).toLocaleString();
+        card.append(status);
+      } else {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = 'Approve this one deposit';
+        button.addEventListener('click', () => approvePendingExecution(job));
+        card.append(button);
+      }
+      executionApprovalsList.append(card);
+    }
+  } catch (error) {
+    executionApprovalsList.replaceChildren();
+    if (!isSignedOutError(error)) {
+      executionApprovalsStatus.textContent =
+        'Approval queue is unavailable. No approval was issued.';
+    }
+  } finally {
+    executionApprovalsRefresh.disabled = false;
   }
 }
 
@@ -1960,6 +2106,7 @@ function signOut(message = 'Signed out.') {
   companionLookupButton.disabled = true;
   clearPilot();
   clearExecutionReadiness();
+  clearExecutionApprovals();
   clearDepositIntake();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
@@ -4815,6 +4962,7 @@ async function loadOwnerPlayerQueues() {
       loadDepositIntake(),
       loadCurrentPilot(),
       loadExecutionReadiness(),
+      loadExecutionApprovals(),
       loadCompanionLookupStatus(),
       loadCompanionConnection(),
     ]);
@@ -5095,6 +5243,7 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
 });
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 executionReadinessRefresh.addEventListener('click', loadExecutionReadiness);
+executionApprovalsRefresh.addEventListener('click', loadExecutionApprovals);
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
 companionDevicePairingConfirmation.addEventListener(

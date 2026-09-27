@@ -561,6 +561,82 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('lists verified jobs and requires an interactive one-use Owner approval request', async () => {
+    const jobId = '88888888-8888-4888-8888-888888888888';
+    const requestId = '99999999-9999-4999-8999-999999999999';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        executionApprovals: {
+          list: async (actor, limit) => {
+            calls.push(['list', actor, limit]);
+            return [
+              {
+                executionJobId: jobId,
+                playerId: 'test-player',
+                amountMinor: '2500',
+                currencyCode: 'ETB',
+                queuedAt: '2026-09-27T12:00:00.000Z',
+                verifiedAt: '2026-09-27T11:59:00.000Z',
+              },
+            ];
+          },
+          approve: async (actor, selectedJob, selectedRequest) => {
+            calls.push(['approve', actor, selectedJob, selectedRequest]);
+            return {
+              approvedAt: '2026-09-27T12:01:00.000Z',
+              expiresAt: '2026-09-27T13:00:00.000Z',
+              alreadyApproved: false,
+            };
+          },
+        },
+      }),
+    });
+    try {
+      const listUrl = '/v1/owner/telebirr-execution/approvals';
+      const approveUrl = `${listUrl}/${jobId}`;
+      expect((await app.inject(listUrl)).statusCode).toBe(403);
+      const listed = await app.inject({
+        url: listUrl,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().jobs).toHaveLength(1);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: approveUrl,
+            payload: { requestId },
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(calls).toEqual([['list', authUserId, 25]]);
+      const approved = await app.inject({
+        method: 'POST',
+        url: approveUrl,
+        payload: { requestId },
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:3002',
+          'x-fetanagent-owner-csrf': 'owner-telebirr-execution-approval-v1',
+          'x-idempotency-key': requestId,
+        },
+      });
+      expect(approved.statusCode).toBe(200);
+      expect(approved.json().approval.alreadyApproved).toBe(false);
+      expect(calls).toEqual([
+        ['list', authUserId, 25],
+        ['approve', authUserId, jobId, requestId],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

@@ -23,6 +23,14 @@ export interface GuardedCompanionLifecycleStopMonitorInput {
   readonly signal?: AbortSignal;
 }
 
+export interface GuardedCompanionLifecycleBoundStopMonitorInput extends Omit<
+  GuardedCompanionLifecycleStopMonitorInput,
+  'disableDatabase'
+> {
+  /** The same memoized, exact-child/database stop bound before the transition. */
+  readonly stopOnUncertainty: () => Promise<GuardedCompanionEmergencyStopRehearsalResult>;
+}
+
 export interface GuardedCompanionLifecycleStopMonitor {
   /** Resolves only after credential/session revocation and exact host exit are proved. */
   readonly done: Promise<GuardedCompanionEmergencyStopRehearsalResult>;
@@ -56,25 +64,25 @@ function validStopProof(value: unknown): value is GuardedCompanionEmergencyStopR
 }
 
 /**
- * Internal, source-only lifecycle fence. A future protected coordinator must
- * arm it immediately after the database transition and before permitting local
- * work; that production coordinator does not exist yet. A malformed or nearly expired
+ * Internal, source-only lifecycle fence. The internal supervisor arms it after
+ * the database transition and before permitting local work; a protected
+ * production coordinator does not exist yet. A malformed or nearly expired
  * transition expiry stops immediately. Child exit, operator abort, deadline,
  * and manual stop all share one emergency-stop invocation. A confirmed stop
  * still leaves any in-flight provider outcome for independent reconciliation.
  * This in-process monitor does not survive its own host's failure and is not
  * an independent production watchdog or activation entry point.
  */
-export function armGuardedCompanionLifecycleStopMonitor(
-  input: GuardedCompanionLifecycleStopMonitorInput,
+function armWithBoundStop(
+  input: Pick<GuardedCompanionLifecycleStopMonitorInput, 'child' | 'validUntil' | 'signal'>,
+  stop: () => Promise<GuardedCompanionEmergencyStopRehearsalResult>,
 ): GuardedCompanionLifecycleStopMonitor {
-  let stop: () => Promise<GuardedCompanionEmergencyStopRehearsalResult>;
-  try {
-    stop = prepareGuardedCompanionEmergencyStopRehearsal({
-      child: input.child,
-      disableDatabase: input.disableDatabase,
-    });
-  } catch {
+  if (
+    !input ||
+    !input.child ||
+    typeof input.child.stopped?.then !== 'function' ||
+    typeof stop !== 'function'
+  ) {
     throw new GuardedCompanionLifecycleStopUnavailableError();
   }
 
@@ -138,4 +146,25 @@ export function armGuardedCompanionLifecycleStopMonitor(
     timer = setTimeout(onAbort, remainingMs - COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS);
   }
   return Object.freeze({ done, stopNow });
+}
+
+export function armGuardedCompanionLifecycleStopMonitor(
+  input: GuardedCompanionLifecycleStopMonitorInput,
+): GuardedCompanionLifecycleStopMonitor {
+  try {
+    const stop = prepareGuardedCompanionEmergencyStopRehearsal({
+      child: input.child,
+      disableDatabase: input.disableDatabase,
+    });
+    return armWithBoundStop(input, stop);
+  } catch {
+    throw new GuardedCompanionLifecycleStopUnavailableError();
+  }
+}
+
+/** Internal composition seam: reuses the channel's exact one-use stop. */
+export function armGuardedCompanionLifecycleStopMonitorWithBoundStop(
+  input: GuardedCompanionLifecycleBoundStopMonitorInput,
+): GuardedCompanionLifecycleStopMonitor {
+  return armWithBoundStop(input, input?.stopOnUncertainty);
 }

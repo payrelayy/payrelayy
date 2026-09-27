@@ -8,8 +8,10 @@ import {
   type CompanionActivationRequestSnapshot,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
-import { bindGuardedPrePermitChild } from './guarded-pre-permit-child.js';
-import type { GuardedProcessRehearsalChild } from './guarded-process-launch-rehearsal.js';
+import {
+  bindGuardedPrePermitChild,
+  type GuardedCompanionOwnedChild,
+} from './guarded-pre-permit-child.js';
 
 const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
 const PIPE_SUFFIX = /^[0-9a-f]{32}$/u;
@@ -166,12 +168,15 @@ function validPipe(path: string): boolean {
  * pre-permit stop. No shell, detached child, command-line proof, inherited
  * credentials, or stdout/stderr capture is used. The caller owns the exact
  * returned child and must confirm its stop even when the rehearsal fails.
+ * After any permit may have been sent, the caller must instead use the
+ * separate post-permit stop and independently revoke database credentials and
+ * reconcile provider outcome. Host exit alone is never a settlement result.
  */
 export function prepareGuardedWindowsCompanionProcessStarterWithSpawn(
   input: GuardedCompanionProcessStarterInputs,
   spawnChild: SpawnChild,
   files: GuardedCompanionStarterFileReader = nativeFiles,
-): (request: Readonly<{ challenge: string; pipePath: string }>) => GuardedProcessRehearsalChild {
+): (request: Readonly<{ challenge: string; pipePath: string }>) => GuardedCompanionOwnedChild {
   try {
     // Keep launch inputs stable even if the caller mutates its own objects later.
     const launchInput: GuardedCompanionProcessStarterInputs = {
@@ -257,7 +262,7 @@ export function prepareGuardedWindowsCompanionProcessStarterWithSpawn(
 /** Production wrapper; tests inject only a synthetic spawn adapter. */
 export function prepareGuardedWindowsCompanionProcessStarter(
   input: GuardedCompanionProcessStarterInputs,
-): (request: Readonly<{ challenge: string; pipePath: string }>) => GuardedProcessRehearsalChild {
+): (request: Readonly<{ challenge: string; pipePath: string }>) => GuardedCompanionOwnedChild {
   if (process.platform !== 'win32') throw new GuardedCompanionProcessStarterUnavailableError();
   return prepareGuardedWindowsCompanionProcessStarterWithSpawn(input, spawn);
 }

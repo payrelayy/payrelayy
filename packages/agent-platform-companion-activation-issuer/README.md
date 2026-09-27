@@ -73,8 +73,12 @@ requires a clean browser-shutdown acknowledgement followed by exit code zero.
 It never substitutes a Windows `child.kill()` for clean shutdown. The companion
 accepts this request only while it is still waiting for a guarded permit, aborts
 that wait, closes its protected browser and profile lock, then acknowledges. A
-parent IPC disconnect before the permit also closes the session without an
-acknowledgement.
+parent IPC disconnect also closes the session without an acknowledgement. The
+listener remains armed after a permit for a distinct challenge-bound runtime
+stop. Its acknowledgement requires the browser, profile lock, and workers to
+stop, and the operator adapter also requires exact child exit code zero. This
+confirms host shutdown only; any in-flight provider action still requires
+independent reconciliation.
 The rehearsal requests this stop before closing its no-permit proof pipe.
 Its fixed, identifier-free result is not an activation attestation and cannot arm execution.
 The separate `./guarded-process-starter` subpath prepares a one-use synchronous starter
@@ -84,12 +88,13 @@ bundled Node executable and entry point without a shell, and gives the exact chi
 IPC clean-stop channel. Its child environment is an explicit Windows runtime allowlist
 plus the guarded account and local proof challenge; ambient credentials, pairing
 packages, `NODE_OPTIONS`, and provider settings are not inherited. The returned child
-is bound to the challenge-specific pre-permit stop contract. The operator must still
+is bound to the challenge-specific, stage-aware stop contract. The operator must still
 run the independent live-process observer and confirm clean child exit. This starter
 does not inspect loaded memory or close the disk-to-spawn race by itself, and it is
 not a production invocation. The starter supplies no permit sender, database transition,
-or host-wide stop/reconciliation mechanism. A caller must not treat rehearsal success
-as authority to run a deposit job or perform a provider action.
+or integrated credential/host stop and provider reconciliation mechanism. A caller
+must not treat rehearsal success as authority to run a deposit job or perform a
+provider action.
 
 An internal, unexported `activation-transition` adapter now fixes the exact
 parameterized invocation of the existing Postgres-only one-use function. It

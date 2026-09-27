@@ -5,6 +5,10 @@ export const GUARDED_PRE_PERMIT_STOP_REQUEST =
   'fetanagent:windows-companion:guarded-pre-permit-stop:v1' as const;
 export const GUARDED_PRE_PERMIT_STOPPED =
   'fetanagent:windows-companion:guarded-pre-permit-stopped:v1' as const;
+export const GUARDED_RUNTIME_STOP_REQUEST =
+  'fetanagent:windows-companion:guarded-runtime-stop:v1' as const;
+export const GUARDED_RUNTIME_STOPPED =
+  'fetanagent:windows-companion:guarded-runtime-stopped:v1' as const;
 
 const CHALLENGE = /^[A-Za-z0-9_-]{43}$/u;
 
@@ -68,4 +72,32 @@ export function isGuardedPrePermitStopRequest(value: unknown, challenge: string)
 
 export function isGuardedPrePermitStopped(value: unknown, challenge: string): boolean {
   return exactFrame(value, GUARDED_PRE_PERMIT_STOPPED, guardedPrePermitChallengeDigest(challenge));
+}
+
+/** Stop the exact guarded child even if a permit may already have been received. */
+export function guardedRuntimeStopRequest(challenge: string) {
+  return Object.freeze({
+    type: GUARDED_RUNTIME_STOP_REQUEST,
+    challengeDigest: guardedPrePermitChallengeDigest(challenge),
+  });
+}
+
+/** Confirms host shutdown only; it says nothing about the provider outcome. */
+export function guardedRuntimeStopped(challenge: string) {
+  return Object.freeze({
+    type: GUARDED_RUNTIME_STOPPED,
+    challengeDigest: guardedPrePermitChallengeDigest(challenge),
+  });
+}
+
+export function isGuardedRuntimeStopRequest(value: unknown, challenge: string): boolean {
+  return exactFrame(
+    value,
+    GUARDED_RUNTIME_STOP_REQUEST,
+    guardedPrePermitChallengeDigest(challenge),
+  );
+}
+
+export function isGuardedRuntimeStopped(value: unknown, challenge: string): boolean {
+  return exactFrame(value, GUARDED_RUNTIME_STOPPED, guardedPrePermitChallengeDigest(challenge));
 }

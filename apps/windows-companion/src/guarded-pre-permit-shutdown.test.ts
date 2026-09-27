@@ -3,7 +3,9 @@ import { EventEmitter } from 'node:events';
 
 import {
   guardedPrePermitStopRequest,
+  guardedRuntimeStopRequest,
   isGuardedPrePermitStopped,
+  isGuardedRuntimeStopped,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -62,7 +64,7 @@ describe('guarded pre-permit child shutdown', () => {
     expect(f.endpoint.disconnect).toHaveBeenCalledOnce();
   });
 
-  it('ignores unrelated messages and a stop after permit disarms the listener', () => {
+  it('ignores unrelated messages and keeps pre-permit stop disarmed after permit', () => {
     const f = fixture();
     const gate = installGuardedPrePermitShutdown(
       f.processEndpoint,
@@ -72,10 +74,47 @@ describe('guarded pre-permit child shutdown', () => {
     );
     f.endpoint.emit('message', { type: 'other' });
     expect(gate.requested()).toBe(false);
-    gate.disarm();
+    gate.markPermitReceived();
     f.endpoint.emit('message', guardedPrePermitStopRequest(f.challenge));
     expect(f.stopAndConfirm).not.toHaveBeenCalled();
     expect(f.abort).not.toHaveBeenCalled();
+    gate.disarm();
+  });
+
+  it('confirms a post-permit host stop only after browser and workers have stopped', async () => {
+    const f = fixture();
+    const gate = installGuardedPrePermitShutdown(
+      f.processEndpoint,
+      f.challenge,
+      f.abort,
+      f.stopAndConfirm,
+    );
+    gate.markPermitReceived();
+    f.endpoint.emit('message', guardedRuntimeStopRequest(f.challenge));
+    expect(gate.requested()).toBe(true);
+    expect(f.abort).toHaveBeenCalledOnce();
+    expect(f.stopAndConfirm).toHaveBeenCalledOnce();
+    expect(f.endpoint.send).not.toHaveBeenCalled();
+    f.confirm();
+    await vi.waitFor(() => expect(f.endpoint.send).toHaveBeenCalledOnce());
+    expect(isGuardedRuntimeStopped(f.endpoint.send.mock.calls[0]?.[0], f.challenge)).toBe(true);
+    expect(f.endpoint.disconnect).toHaveBeenCalledOnce();
+    expect(() => gate.markPermitReceived()).toThrow();
+  });
+
+  it('accepts a runtime stop before permit delivery to close the race', async () => {
+    const f = fixture();
+    const gate = installGuardedPrePermitShutdown(
+      f.processEndpoint,
+      f.challenge,
+      f.abort,
+      f.stopAndConfirm,
+    );
+    f.endpoint.emit('message', guardedRuntimeStopRequest(f.challenge));
+    expect(gate.requested()).toBe(true);
+    f.confirm();
+    await vi.waitFor(() => expect(f.endpoint.send).toHaveBeenCalledOnce());
+    expect(isGuardedRuntimeStopped(f.endpoint.send.mock.calls[0]?.[0], f.challenge)).toBe(true);
   });
 
   it('withholds acknowledgement when cleanup is unconfirmed', async () => {
@@ -102,6 +141,39 @@ describe('guarded pre-permit child shutdown', () => {
     expect(f.stopAndConfirm).toHaveBeenCalledOnce();
     f.confirm();
     await Promise.resolve();
+    expect(f.endpoint.send).not.toHaveBeenCalled();
+  });
+
+  it('closes the guarded session without a false acknowledgement if its parent disconnects after a permit', async () => {
+    const f = fixture();
+    const gate = installGuardedPrePermitShutdown(
+      f.processEndpoint,
+      f.challenge,
+      f.abort,
+      f.stopAndConfirm,
+    );
+    gate.markPermitReceived();
+    f.endpoint.connected = false;
+    f.endpoint.emit('disconnect');
+    expect(gate.requested()).toBe(true);
+    expect(f.abort).toHaveBeenCalledOnce();
+    f.confirm();
+    await Promise.resolve();
+    expect(f.endpoint.send).not.toHaveBeenCalled();
+  });
+
+  it('withholds post-permit acknowledgement when shutdown cannot be confirmed', async () => {
+    const f = fixture();
+    const gate = installGuardedPrePermitShutdown(
+      f.processEndpoint,
+      f.challenge,
+      f.abort,
+      f.stopAndConfirm,
+    );
+    gate.markPermitReceived();
+    f.endpoint.emit('message', guardedRuntimeStopRequest(f.challenge));
+    f.fail();
+    await vi.waitFor(() => expect(f.endpoint.disconnect).toHaveBeenCalledOnce());
     expect(f.endpoint.send).not.toHaveBeenCalled();
   });
 });

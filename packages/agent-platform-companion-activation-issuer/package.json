@@ -51,6 +51,22 @@
     "./protected-handoff-loopback-server": {
       "types": "./dist/protected-handoff-loopback-server.d.ts",
       "default": "./dist/protected-handoff-loopback-server.js"
+    },
+    "./protected-operator-query-session": {
+      "types": "./dist/protected-operator-query-session.d.ts",
+      "default": "./dist/protected-operator-query-session.js"
+    },
+    "./protected-operator-query-request": {
+      "types": "./dist/protected-operator-query-request.d.ts",
+      "default": "./dist/protected-operator-query-request.js"
+    },
+    "./protected-operator-query-http-client": {
+      "types": "./dist/protected-operator-query-http-client.d.ts",
+      "default": "./dist/protected-operator-query-http-client.js"
+    },
+    "./guarded-operator-query-client": {
+      "types": "./dist/guarded-operator-query-client.d.ts",
+      "default": "./dist/guarded-operator-query-client.js"
     }
   },
   "dependencies": {

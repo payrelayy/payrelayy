@@ -6,7 +6,6 @@ import {
   type CompanionActivationDatabaseSnapshot,
   type CompanionActivationObservedProcess,
   type CompanionActivationReleaseAttestation,
-  type CompanionExecutionActivationHandoffBody,
   type SignedCompanionExecutionActivationHandoff,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -57,9 +56,7 @@ export interface GuardedOperatorActivationInput {
   readonly processVerifierScriptPath: string;
   readonly windowsEnvironment: NodeJS.ProcessEnv;
   /** Authenticated server operation; the production signing key never enters this process. */
-  readonly signHandoff: (
-    body: CompanionExecutionActivationHandoffBody,
-  ) => Promise<SignedCompanionExecutionActivationHandoff>;
+  readonly signHandoff: (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff>;
   /** Runs the reviewed database emergency-disable operation on its own connection. */
   readonly disableDatabase: () => Promise<unknown>;
   readonly trustedNow: () => Date;

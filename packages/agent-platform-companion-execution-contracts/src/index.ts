@@ -11,6 +11,7 @@ export * from './launch-proof.js';
 export * from './activation-evidence.js';
 export * from './activation-attestation.js';
 export * from './execution-signer.js';
+export * from './guarded-pre-permit-stop.js';
 
 import {
   decodeSignedCompanionEnrollmentCertificate,

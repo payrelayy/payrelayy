@@ -215,7 +215,12 @@ process starter, attested transition invocation, and permit/stop lifecycle are s
 absent. A no-permit rehearsal coordinator now composes this receiver with the
 independent observer around a caller-supplied exact child lifecycle. It reports only
 an inert fixed result after confirmed child exit; no production starter or invocation
-is wired to it. If the supplied stop cannot confirm exit, the rehearsal fails closed
+is wired to it. A new Node IPC pre-permit stop contract lets an already-spawned
+guarded companion abort its permit wait, close the protected browser and profile lock,
+and acknowledge clean shutdown. The operator-side adapter requires that acknowledgement
+and exit code zero from the exact child; Windows force-kill is not clean-shutdown proof.
+This contract is disarmed before workers start and is not a live-execution host stop.
+If the supplied stop cannot confirm exit, the rehearsal fails closed
 and requires operator reconciliation.
 Neither this adapter nor its migration is a production invocation or execution grant.
 Neither package can arm the companion,

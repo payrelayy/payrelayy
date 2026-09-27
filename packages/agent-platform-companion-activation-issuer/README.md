@@ -66,7 +66,17 @@ The `./guarded-process-launch-rehearsal` subpath composes that receiver with the
 independent observer around a caller-supplied, synchronous protected child-process
 starter. It always closes the no-permit channel and attempts a bounded stop of the
 exact returned child. It reports success only after the signed proof and OS process
-are observed and child exit is confirmed. Its fixed, identifier-free result is not
+are observed and child exit is confirmed. The operator-side
+`./guarded-pre-permit-child` adapter binds an already-spawned Node IPC child to
+this stop contract: it sends one challenge-bound pre-permit stop request and
+requires a clean browser-shutdown acknowledgement followed by exit code zero.
+It never substitutes a Windows `child.kill()` for clean shutdown. The companion
+accepts this request only while it is still waiting for a guarded permit, aborts
+that wait, closes its protected browser and profile lock, then acknowledges. A
+parent IPC disconnect before the permit also closes the session without an
+acknowledgement.
+The rehearsal requests this stop before closing its no-permit proof pipe.
+Its fixed, identifier-free result is not
 an activation attestation and cannot arm execution. This package still supplies no
 protected process starter, production invocation, permit sender, database transition,
 or host-wide stop/reconciliation mechanism. A caller must not treat rehearsal success

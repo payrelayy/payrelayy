@@ -29,6 +29,10 @@ import {
   runCompanionExecutionWorker,
   type CompanionExecutionWorkerEvent,
 } from './execution-worker.js';
+import {
+  installGuardedPrePermitShutdown,
+  type GuardedPrePermitShutdown,
+} from './guarded-pre-permit-shutdown.js';
 import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
@@ -144,6 +148,9 @@ export async function runWindowsCompanion(): Promise<void> {
     process.env,
     config.executionV2Enabled,
   );
+  if (config.executionV2Enabled && (!process.connected || typeof process.send !== 'function')) {
+    throw new Error('A protected parent stop channel is required for guarded execution.');
+  }
   console.info(
     JSON.stringify({
       component: 'fetanagent_windows_companion',
@@ -155,6 +162,7 @@ export async function runWindowsCompanion(): Promise<void> {
   const session = await startLocalKemerBetSession(config, report);
   const lookupAbort = new AbortController();
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
+  let guardedShutdown: GuardedPrePermitShutdown | undefined;
   const enrollmentPromise = session.verified.then(async (verified) => {
     if (!verified) return;
     let stage: 'pairing' | 'device_runtime' | 'execution_handoff' | 'launch_proof' | 'workers' =
@@ -214,6 +222,8 @@ export async function runWindowsCompanion(): Promise<void> {
             proof,
             lookupAbort.signal,
           );
+          if (guardedShutdown?.requested()) throw new Error();
+          guardedShutdown?.disarm();
         } else {
           const proof = baseDevice.createSignedLaunchProof(processContext);
           await deliverCompanionLaunchProof(launchProofRequest, proof);
@@ -297,6 +307,18 @@ export async function runWindowsCompanion(): Promise<void> {
       }
     }
   });
+  if (config.executionV2Enabled && launchProofRequest) {
+    guardedShutdown = installGuardedPrePermitShutdown(
+      process,
+      launchProofRequest.challenge,
+      () => lookupAbort.abort(),
+      async () => {
+        await session.stop();
+        await session.done;
+        await enrollmentPromise;
+      },
+    );
+  }
   let stopping = false;
   const stop = () => {
     if (stopping) return;
@@ -306,9 +328,23 @@ export async function runWindowsCompanion(): Promise<void> {
   };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  await session.done;
-  lookupAbort.abort();
-  await enrollmentPromise;
+  try {
+    await session.done;
+    lookupAbort.abort();
+    await enrollmentPromise;
+  } finally {
+    lookupAbort.abort();
+    guardedShutdown?.disarm();
+    if (guardedShutdown && !guardedShutdown.requested() && process.connected) {
+      try {
+        process.disconnect();
+      } catch {
+        // The IPC parent may already have disconnected during natural shutdown.
+      }
+    }
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+  }
 }
 
 const entryPath = process.argv[1];

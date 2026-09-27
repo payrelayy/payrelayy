@@ -76,8 +76,17 @@ that wait, closes its protected browser and profile lock, then acknowledges. A
 parent IPC disconnect before the permit also closes the session without an
 acknowledgement.
 The rehearsal requests this stop before closing its no-permit proof pipe.
-Its fixed, identifier-free result is not
-an activation attestation and cannot arm execution. This package still supplies no
-protected process starter, production invocation, permit sender, database transition,
-or host-wide stop/reconciliation mechanism. A caller must not treat rehearsal success
+Its fixed, identifier-free result is not an activation attestation and cannot arm execution.
+The separate `./guarded-process-starter` subpath prepares a one-use synchronous starter
+for this rehearsal. It requires a fresh independent published-release and installed-tree
+attestation, rechecks the installed launch files and exact markers, launches only the
+bundled Node executable and entry point without a shell, and gives the exact child an
+IPC clean-stop channel. Its child environment is an explicit Windows runtime allowlist
+plus the guarded account and local proof challenge; ambient credentials, pairing
+packages, `NODE_OPTIONS`, and provider settings are not inherited. The returned child
+is bound to the challenge-specific pre-permit stop contract. The operator must still
+run the independent live-process observer and confirm clean child exit. This starter
+does not inspect loaded memory or close the disk-to-spawn race by itself, and it is
+not a production invocation. No permit sender, database transition, or host-wide
+stop/reconciliation mechanism is supplied. A caller must not treat rehearsal success
 as authority to run a deposit job or perform a provider action.

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GuardedOperatorActivationUnavailableError,
   runGuardedOperatorActivationWithAdapters,
+  runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters,
   type GuardedOperatorActivationInput,
 } from './guarded-operator-activation.js';
 
@@ -239,5 +240,50 @@ describe('internal protected operator composition', () => {
     expect(state.child.stop).not.toHaveBeenCalled();
     expect(state.channel.close).toHaveBeenCalledTimes(1);
     expect(state.runLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('uses only the protected remote session and closes it after the lifecycle', async () => {
+    const state = fixture();
+    const { administrator: _discarded, ...input } = state.input;
+    const remote = {
+      backendPid: 499,
+      lost: new Promise<never>(() => undefined),
+      execute: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+    await expect(
+      runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+        input,
+        remote,
+        state.adapters,
+      ),
+    ).resolves.toBe('confirmed');
+    expect(state.adapters.acquireLock).toHaveBeenCalledWith(
+      expect.objectContaining({ processID: 499 }),
+    );
+    expect(remote.close).toHaveBeenCalledTimes(1);
+    expect(state.lock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed if the remote session cannot be confirmed closed', async () => {
+    const state = fixture();
+    const { administrator: _discarded, ...input } = state.input;
+    const remote = {
+      backendPid: 499,
+      lost: new Promise<never>(() => undefined),
+      execute: vi.fn(),
+      close: vi.fn(async () => {
+        throw new Error('transport stopped without confirmation');
+      }),
+    };
+    await expect(
+      runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+        input,
+        remote,
+        state.adapters,
+      ),
+    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    expect(state.runLifecycle).toHaveBeenCalledTimes(1);
+    expect(remote.close).toHaveBeenCalledTimes(1);
   });
 });

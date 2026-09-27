@@ -20,6 +20,10 @@ import {
   type GuardedLocalActivationChannel,
 } from './guarded-local-activation-channel.js';
 import {
+  createGuardedOperatorQueryClient,
+  type GuardedOperatorRemoteSession,
+} from './guarded-operator-query-client.js';
+import {
   runGuardedOneJobLifecycle,
   type GuardedOneJobLifecycleInput,
 } from './guarded-one-job-lifecycle.js';
@@ -296,4 +300,47 @@ export async function runGuardedOperatorActivation(
 ): Promise<'confirmed' | 'review_required'> {
   if (process.platform !== 'win32') throw new GuardedOperatorActivationUnavailableError();
   return runGuardedOperatorActivationWithAdapters(input, productionAdapters);
+}
+
+/** Test seam for a caller-owned, signed and authenticated remote session. */
+export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+  input: Omit<GuardedOperatorActivationInput, 'administrator'>,
+  remote: GuardedOperatorRemoteSession,
+  adapters: GuardedOperatorActivationAdapters,
+): Promise<'confirmed' | 'review_required'> {
+  let client: ReturnType<typeof createGuardedOperatorQueryClient> | undefined;
+  let result: 'confirmed' | 'review_required' | undefined;
+  let cleanupFailed = false;
+  try {
+    client = createGuardedOperatorQueryClient(remote);
+    result = await runGuardedOperatorActivationWithAdapters(
+      { ...input, administrator: client.administrator },
+      adapters,
+    );
+  } catch {
+    result = undefined;
+  } finally {
+    if (client) {
+      try {
+        await client.close();
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+  }
+  if (!result || cleanupFailed) throw new GuardedOperatorActivationUnavailableError();
+  return result;
+}
+
+/** Windows never receives a database URL or a local administrator connection. */
+export function runGuardedOperatorActivationWithProtectedRemoteSession(
+  input: Omit<GuardedOperatorActivationInput, 'administrator'>,
+  remote: GuardedOperatorRemoteSession,
+): Promise<'confirmed' | 'review_required'> {
+  if (process.platform !== 'win32') throw new GuardedOperatorActivationUnavailableError();
+  return runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+    input,
+    remote,
+    productionAdapters,
+  );
 }

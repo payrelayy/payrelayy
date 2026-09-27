@@ -196,9 +196,19 @@ the independent supervisor remains alive and the activation window is valid.
 The internal `guarded-one-job-lifecycle` composes one proof-bound permit, that
 watcher, the exact database/host emergency stop, and a post-stop ledger re-read.
 It never leases, retries, clicks, credits, settles, or executes a job. These
-modules are not a production operator: the protected lifecycle lock, evidence
-attestation, activation entry point, and live result wiring are still required
-before a one-job pilot can run.
+modules are not a production operator. The source-only
+`guarded-operator-activation` module now connects the independently checked
+database snapshot, release/tree measurement, signed handoff, exact Windows
+child/proof observation, attestation retention, supervisor, and one-job
+lifecycle while holding one nonblocking session-level advisory lock on a
+dedicated administrator connection. It stops the exact pre-permit child and
+closes the local channel if attestation fails, and never reports completion
+if the lifecycle or lock release is uncertain. It is deliberately absent
+from package exports and production workflows. A protected production entry
+point, administrator and signer provisioning, host ownership checks, exact
+Owner approval, and post-crash provider reconciliation are still required
+before a one-job pilot can run. The caller must close the dedicated database
+session on every outcome, including a failed lock acquisition.
 
 An internal source-only lifecycle monitor can now bind the exact owned child,
 the database transition expiry, and the reviewed database-and-host emergency

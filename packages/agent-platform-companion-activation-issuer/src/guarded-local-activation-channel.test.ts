@@ -70,9 +70,9 @@ function client(
       if (permit.endsWith('\n')) {
         resolve(permit);
         if (acknowledge === 'correct') {
-          socket.write(permit.replace('PERMIT_V1', 'ACK_V1'));
+          socket.write(permit.replace('PERMIT_V2', 'ACK_V2'));
         } else if (acknowledge === 'incorrect') {
-          socket.write('FETANAGENT_GUARDED_LAUNCH_ACK_V1|wrong\n');
+          socket.write('FETANAGENT_GUARDED_LAUNCH_ACK_V2|wrong\n');
         }
       }
     });
@@ -126,9 +126,10 @@ describe('internal guarded local activation channel', () => {
       });
       await started;
       expect(peer.getPermit()).toBe('');
-      releaseTransition(new Date(Date.now() + 30 * 60_000));
+      const validUntil = new Date(Date.now() + 30 * 60_000).toISOString();
+      releaseTransition(new Date(validUntil));
       const permit = await peer.receivedPermit;
-      expect(permit).toBe(`FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|${f.proofDigest}\n`);
+      expect(permit).toBe(`FETANAGENT_GUARDED_LAUNCH_PERMIT_V2|${f.proofDigest}|${validUntil}\n`);
       await expect(pending).resolves.toMatchObject({
         permitAcknowledged: true,
         runtimeConfirmationRequired: true,

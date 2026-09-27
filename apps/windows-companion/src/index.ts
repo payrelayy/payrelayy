@@ -15,6 +15,7 @@ import {
   type CompanionDeviceEnrollmentResult,
 } from './device-enrollment.js';
 import { loadWindowsCompanionExecutionHandoff } from './execution-activation-handoff.js';
+import { selectGuardedExecutionDeadline } from './execution-deadline.js';
 import {
   deliverCompanionExecutionLaunchProofAndAwaitPermit,
   deliverCompanionLaunchProof,
@@ -189,6 +190,7 @@ export async function runWindowsCompanion(): Promise<void> {
             resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
           )
         : undefined;
+      let guardedDatabaseDeadlineMs: number | undefined;
       if (launchProofRequest) {
         stage = 'launch_proof';
         const installationRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -217,7 +219,7 @@ export async function runWindowsCompanion(): Promise<void> {
             platformAgentAccountId: handoff.accountId,
             executionHandoffSha256: handoff.handoffSha256,
           });
-          await deliverCompanionExecutionLaunchProofAndAwaitPermit(
+          guardedDatabaseDeadlineMs = await deliverCompanionExecutionLaunchProofAndAwaitPermit(
             launchProofRequest,
             proof,
             lookupAbort.signal,
@@ -242,14 +244,21 @@ export async function runWindowsCompanion(): Promise<void> {
             },
           })
         : baseDevice;
-      const remainingHandoffMs = handoff ? handoff.expiresAtMs - Date.now() : undefined;
-      if (remainingHandoffMs !== undefined && remainingHandoffMs <= 0) {
-        throw new Error('The signed Windows companion execution handoff expired.');
+      const executionDeadlineMs = handoff
+        ? selectGuardedExecutionDeadline(handoff.expiresAtMs, guardedDatabaseDeadlineMs)
+        : undefined;
+      const remainingExecutionMs =
+        executionDeadlineMs === undefined ? undefined : executionDeadlineMs - Date.now();
+      if (handoff && (remainingExecutionMs === undefined || remainingExecutionMs <= 0)) {
+        throw new Error('The guarded Windows companion execution deadline is unavailable.');
       }
       const handoffExpiryTimer =
-        remainingHandoffMs === undefined
+        remainingExecutionMs === undefined
           ? undefined
-          : setTimeout(() => lookupAbort.abort(), remainingHandoffMs);
+          : setTimeout(() => {
+              lookupAbort.abort();
+              void session.stop();
+            }, remainingExecutionMs);
       stage = 'workers';
       try {
         const workers: Promise<void>[] = [
@@ -267,7 +276,7 @@ export async function runWindowsCompanion(): Promise<void> {
               dataRoot: config.dataRoot,
               device,
               expectedActivationEpoch: handoff.activationEpoch,
-              handoffExpiresAtMs: handoff.expiresAtMs,
+              handoffExpiresAtMs: executionDeadlineMs!,
               session,
               signal: lookupAbort.signal,
               report: reportExecution,
@@ -277,6 +286,10 @@ export async function runWindowsCompanion(): Promise<void> {
         await Promise.all(workers);
       } finally {
         if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
+        if (handoff) {
+          lookupAbort.abort();
+          await session.stop();
+        }
       }
     } catch {
       if (stage === 'pairing' || stage === 'device_runtime') {
@@ -303,7 +316,7 @@ export async function runWindowsCompanion(): Promise<void> {
               : {}),
           }),
         );
-        if (stage === 'launch_proof') await session.stop();
+        if (config.executionV2Enabled) await session.stop();
       }
     }
   });

@@ -79,10 +79,12 @@ export const COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE =
 export const COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 /** The reviewed database transition caps execution at two hours after consumption. */
 export const COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS = 2 * 60 * 60 * 1_000;
+/** Stop local work before the database's exact expiry, allowing for bounded clock skew. */
+export const COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS = 30_000;
 export const COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX =
-  'FETANAGENT_GUARDED_LAUNCH_PERMIT_V1|' as const;
+  'FETANAGENT_GUARDED_LAUNCH_PERMIT_V2|' as const;
 export const COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX =
-  'FETANAGENT_GUARDED_LAUNCH_ACK_V1|' as const;
+  'FETANAGENT_GUARDED_LAUNCH_ACK_V2|' as const;
 
 export interface CompanionExecutionActivationHandoffBody {
   readonly contractVersion: 1;

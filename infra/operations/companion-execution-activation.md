@@ -117,6 +117,12 @@ activation procedure. The acknowledgement does not prove worker startup or a
 provider outcome. Lifecycle expiry, credential revocation, and provider
 reconciliation remain prerequisites; the companion and financial controls stay
 disabled.
+The local permit now includes the exact database activation expiry. The
+companion rejects the earlier permit version and computes its worker deadline
+from the earlier of the database expiry (minus a clock-skew safety margin) and
+the signed handoff expiry. It aborts workers and closes the protected browser
+at that deadline. This does not revoke a database session or replace an
+independent operator watchdog; no production permit has been issued.
 
 ## Current paid-proof state
 

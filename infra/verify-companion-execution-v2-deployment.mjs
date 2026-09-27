@@ -7,6 +7,7 @@ const [
   executionContracts,
   windowsConfig,
   windowsEntry,
+  windowsDeadline,
   windowsLaunchProof,
   windowsLaunchChannel,
   windowsLaunchVerifier,
@@ -47,6 +48,7 @@ const [
   read('packages/agent-platform-companion-execution-contracts/src/index.ts'),
   read('apps/windows-companion/src/config.ts'),
   read('apps/windows-companion/src/index.ts'),
+  read('apps/windows-companion/src/execution-deadline.ts'),
   read('packages/agent-platform-companion-execution-contracts/src/launch-proof.ts'),
   read('apps/windows-companion/src/launch-proof-channel.ts'),
   read('apps/windows-companion/src/launch-proof-verify-cli.ts'),
@@ -105,7 +107,22 @@ assert.match(windowsConfig, /FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOU
 assert.match(windowsEntry, /loadWindowsCompanionExecutionHandoff/u);
 assert.match(windowsEntry, /certificateBodyDigest: baseDevice\.certificate\.bodyDigest/u);
 assert.match(windowsEntry, /if \(handoff\) \{/u);
-assert.match(windowsEntry, /setTimeout\(\(\) => lookupAbort\.abort\(\), remainingHandoffMs\)/u);
+assert.match(
+  windowsEntry,
+  /selectGuardedExecutionDeadline\(handoff\.expiresAtMs, guardedDatabaseDeadlineMs\)/u,
+);
+assert.match(windowsDeadline, /return Math\.min\(handoffExpiresAtMs, databaseDeadlineMs\)/u);
+assert.match(windowsDeadline, /databaseDeadlineMs <= nowMs/u);
+assert.match(
+  windowsEntry,
+  /setTimeout\(\(\) => \{\s*lookupAbort\.abort\(\);\s*void session\.stop\(\);\s*\}, remainingExecutionMs\)/u,
+);
+assert.match(windowsEntry, /handoffExpiresAtMs: executionDeadlineMs!/u);
+assert.match(
+  windowsEntry,
+  /if \(handoff\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u,
+);
+assert.match(windowsEntry, /if \(config\.executionV2Enabled\) await session\.stop\(\)/u);
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
 assert.match(windowsEntry, /baseDevice\.createSignedLaunchProof/u);
 assert.match(windowsEntry, /deliverCompanionLaunchProof/u);
@@ -124,16 +141,20 @@ assert.match(
 );
 assert.match(
   executionContracts,
-  /COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_PERMIT_V1\|'/u,
+  /COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_PERMIT_V2\|'/u,
 );
 assert.match(
   executionContracts,
-  /COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_ACK_V1\|'/u,
+  /COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX =\s*'FETANAGENT_GUARDED_LAUNCH_ACK_V2\|'/u,
 );
 assert.match(windowsLaunchChannel, /COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX/u);
 assert.match(windowsLaunchChannel, /COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX/u);
-assert.match(windowsLaunchChannel, /received !== expectedPermit/u);
-assert.match(windowsLaunchChannel, /socket\.write\(acknowledgement/u);
+assert.match(windowsLaunchChannel, /received !== `\$\{permitPrefix\}\$\{validUntil\}\\n`/u);
+assert.match(windowsLaunchChannel, /COMPANION_EXECUTION_LOCAL_EXPIRY_SAFETY_MARGIN_MS/u);
+assert.match(
+  windowsLaunchChannel,
+  /socket\.write\(`\$\{acknowledgementPrefix\}\$\{validUntil\}\\n`/u,
+);
 assert.match(windowsLaunchChannel, /proof\.body\.challengeDigest !==/u);
 assert.match(operatorIssuerPackage, /\.\/guarded-local-launch-channel/u);
 assert.match(operatorLocalLaunchChannel, /createServer\(/u);
@@ -141,8 +162,12 @@ assert.match(operatorLocalLaunchChannel, /MAX_PROOF_BYTES = 2_048/u);
 assert.match(operatorLocalLaunchChannel, /MAX_PROOF_WAIT_MS = 90_000/u);
 assert.match(operatorLocalLaunchChannel, /server\.once\('error', fail\)/u);
 assert.match(operatorLocalLaunchChannel, /socket\?\.destroy\(\)/u);
-assert.doesNotMatch(operatorLocalLaunchChannel, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
+assert.doesNotMatch(
+  operatorLocalLaunchChannel,
+  /\.write\(|COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX|FETANAGENT_GUARDED_LAUNCH_PERMIT_V2/u,
+);
 assert.match(operatorActivationChannel, /invokeCompanionActivationTransitionInternal/u);
+assert.match(operatorActivationChannel, /\$\{input\.verifiedProofDigest\}\|\$\{validUntil\}/u);
 assert.match(operatorActivationChannel, /input\.stopOnUncertainty\(\)/u);
 assert.match(operatorActivationChannel, /Promise\.allSettled\(/u);
 assert.doesNotMatch(operatorIssuerPackage, /guarded-local-activation-channel/u);
@@ -157,7 +182,10 @@ assert.ok(
     operatorLaunchRehearsal.indexOf('await bounded(channel.close())'),
 );
 assert.match(operatorLaunchRehearsal, /permitSent: false/u);
-assert.doesNotMatch(operatorLaunchRehearsal, /\.write\(|FETANAGENT_GUARDED_LAUNCH_PERMIT_V1/u);
+assert.doesNotMatch(
+  operatorLaunchRehearsal,
+  /\.write\(|COMPANION_EXECUTION_LOCAL_PERMIT_PREFIX|FETANAGENT_GUARDED_LAUNCH_PERMIT_V2/u,
+);
 assert.match(prePermitContract, /guarded-pre-permit-stop:v1/u);
 assert.match(prePermitContract, /guarded-pre-permit-stopped:v1/u);
 assert.match(prePermitContract, /guarded-runtime-stop:v1/u);

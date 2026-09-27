@@ -44,7 +44,7 @@ const certificate: CompanionActivationCertificateSnapshot = {
   devicePublicKeySpki: deviceSpki.toString('base64url'),
   devicePublicKeySpkiSha256: `sha256:${createHash('sha256').update(deviceSpki).digest('hex')}`,
   validFrom: '2026-09-26T11:00:00.000Z',
-  validUntil: '2026-09-26T13:00:00.000Z',
+  validUntil: '2026-09-26T15:00:00.000Z',
 };
 const release: CompanionActivationReleaseAttestation = {
   releaseSha: request.companionReleaseSha,
@@ -97,7 +97,7 @@ describe('guarded companion handoff publication', () => {
     expect(raw).toBe(JSON.stringify(envelope));
     expect(Object.keys(result)).toEqual(['handoffSha256', 'expiresAt']);
     expect(result.handoffSha256).toBe(`sha256:${createHash('sha256').update(raw).digest('hex')}`);
-    expect(result.expiresAt).toBe(request.expiresAt);
+    expect(result.expiresAt).toBe('2026-09-26T14:09:00.000Z');
     expect(envelope.signerKeyId).toBe(trustedSigner.keyId);
     expect(envelope.body).toEqual({
       contractVersion: 1,
@@ -112,7 +112,7 @@ describe('guarded companion handoff publication', () => {
       companionInstallationTreeSha256: release.installationTreeSha256,
       issuedAt: '2026-09-26T12:00:00.000Z',
       notBefore: '2026-09-26T12:00:00.000Z',
-      expiresAt: request.expiresAt,
+      expiresAt: '2026-09-26T14:09:00.000Z',
     });
     expect(
       verify(
@@ -170,6 +170,16 @@ describe('guarded companion handoff publication', () => {
     expect(result.expiresAt).toBe(shorterCertificate.validUntil);
     const envelope = JSON.parse(await readFile(fileFor(input), 'utf8'));
     expect(envelope.body.expiresAt).toBe(shorterCertificate.validUntil);
+  });
+
+  it('refuses to publish when the request expires during signing', async () => {
+    const input = await fixture();
+    let reads = 0;
+    await unavailable({
+      ...input,
+      trustedNow: () => new Date(reads++ === 0 ? '2026-09-26T12:00:00.000Z' : request.expiresAt),
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('requires an existing canonical directory and the expected signing key', async () => {

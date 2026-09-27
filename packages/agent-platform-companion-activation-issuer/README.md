@@ -66,14 +66,27 @@ The separate operator-only `./guarded-handoff-publication` subpath can publish
 one canonical signed local handoff into an **already existing, operator-protected**
 companion data directory. It binds an authenticated database request and paired
 certificate to a fresh independent release measurement, pins the production
-signer, caps the local handoff at the earlier of request or certificate expiry,
-and uses exclusive creation so an existing handoff is never overwritten. It
+signer, caps the local handoff at the certificate expiry and the reviewed runtime window,
+and uses exclusive creation so an existing handoff is never overwritten. The
+ten-minute request is an issuance deadline; the local handoff lasts no later
+than that deadline plus the reviewed two-hour database window or certificate
+expiry, whichever is earlier. It
 returns only a digest and expiry; it does not log or return the signed document.
 The protected operator workflow must supply the signer key as an in-memory key
 object, verify the directory's Windows ACL and exclusive ownership, and handle
 any failed or ambiguous publication as a stop requiring review. This module does
 not provision that key, create the directory, consume the request, launch a
 process, grant a permit, arm execution, or provide a production entry point.
+
+The separate `./guarded-activation-preflight` subpath composes the read-only
+database snapshot, independent release measurement, one-use signed handoff
+publication, no-permit pipe, exact guarded child starter, and independent process
+observer. It re-reads the request identity after observation and requires a clean
+stop of that exact child before returning a fixed, identifier-free result. It
+does not retain an attestation, invoke the database transition, send a permit,
+or provide a production entry point. A failed publication or uncertain child
+shutdown is terminal and requires operator review, not automatic retry. This
+rehearsal is not the complete financial-state preflight for live activation.
 
 The `./guarded-process-launch-rehearsal` subpath composes that receiver with the
 independent observer around a caller-supplied, synchronous protected child-process

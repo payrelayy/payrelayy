@@ -100,10 +100,14 @@ An operator-only publisher now binds the immutable database request, current ide
 paired certificate, and fresh independently measured release before signing and exclusively
 writing the canonical local handoff. It requires an already-existing, operator-protected data
 directory and an in-memory production signer key supplied by a future protected workflow; it
-does not create either. The file expires no later than the request or certificate, and a
-pre-existing file is never replaced. This source-only component has no production caller,
-permit sender, database transition, credential lifecycle, or provider reconciliation. It has
-not published a production handoff or changed the disabled execution state.
+does not create either. The request must still be live when the file is issued; the file
+expires no later than the request deadline plus the database's two-hour maximum or the
+certificate, and a pre-existing file is never replaced. A source-only no-permit preflight
+now composes this publisher with the read-only database and release checks, guarded child,
+paired proof, independent OS observation, and confirmed exact-child shutdown. It neither
+retains an attestation nor invokes the database transition. These source-only components
+have no production caller, permit sender, credential lifecycle, or provider reconciliation.
+No production handoff has been published and the disabled execution state is unchanged.
 
 ## Current paid-proof state
 

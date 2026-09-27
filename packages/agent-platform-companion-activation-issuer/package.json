@@ -35,6 +35,10 @@
     "./guarded-handoff-publication": {
       "types": "./dist/guarded-handoff-publication.d.ts",
       "default": "./dist/guarded-handoff-publication.js"
+    },
+    "./guarded-activation-preflight": {
+      "types": "./dist/guarded-activation-preflight.d.ts",
+      "default": "./dist/guarded-activation-preflight.js"
     }
   },
   "dependencies": {

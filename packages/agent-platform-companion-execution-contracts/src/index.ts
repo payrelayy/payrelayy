@@ -77,6 +77,8 @@ export const COMPANION_EXECUTION_POSTGRES_INTEGER_MAX = '2147483647' as const;
 export const COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE =
   'fetanagent:windows-companion:execution-activation-handoff:v1' as const;
 export const COMPANION_EXECUTION_MAX_ACTIVATION_HANDOFF_LIFETIME_MS = 12 * 60 * 60 * 1_000;
+/** The reviewed database transition caps execution at two hours after consumption. */
+export const COMPANION_EXECUTION_MAX_DATABASE_ACTIVATION_LIFETIME_MS = 2 * 60 * 60 * 1_000;
 
 export interface CompanionExecutionActivationHandoffBody {
   readonly contractVersion: 1;

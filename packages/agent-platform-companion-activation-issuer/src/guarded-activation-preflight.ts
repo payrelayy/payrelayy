@@ -1,9 +1,11 @@
-import { randomBytes, type KeyObject } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 import {
   matchesCompanionActivationEvidence,
   type CompanionActivationDatabaseSnapshot,
   type CompanionActivationObservedProcess,
+  type CompanionExecutionActivationHandoffBody,
+  type SignedCompanionExecutionActivationHandoff,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import {
@@ -44,8 +46,10 @@ export interface GuardedCompanionActivationPreflightInputs {
   readonly dataRoot: string;
   readonly processVerifierScriptPath: string;
   readonly windowsEnvironment: NodeJS.ProcessEnv;
-  /** In-memory protected production signer. Never pass a path or serialized key. */
-  readonly signerPrivateKey: KeyObject;
+  /** Authenticated server operation; no production signing key is placed on Windows. */
+  readonly signHandoff: (
+    body: CompanionExecutionActivationHandoffBody,
+  ) => Promise<SignedCompanionExecutionActivationHandoff>;
   readonly trustedNow: () => Date;
   readonly signal?: AbortSignal;
 }
@@ -152,7 +156,7 @@ export async function rehearseGuardedCompanionActivationWithAdapters(
       ...first,
       release,
       dataRoot: input.dataRoot,
-      signerPrivateKey: input.signerPrivateKey,
+      signHandoff: input.signHandoff,
       trustedNow: input.trustedNow,
     };
     const handoff = await adapters.publishHandoff(publication);

@@ -132,7 +132,7 @@ function fixture() {
     dataRoot: 'data',
     processVerifierScriptPath: 'process-verifier',
     windowsEnvironment: {},
-    signerPrivateKey: {},
+    signHandoff: vi.fn(),
     disableDatabase: vi.fn(),
     trustedNow: () => new Date(),
   } as unknown as GuardedOperatorActivationInput;

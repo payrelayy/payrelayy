@@ -144,3 +144,14 @@ invoked until the protected operator workflow owns a short-deadline administrato
 session, the lifecycle lock, host-wide stop, credential revocation, and in-flight
 provider reconciliation together. This source addition neither deploys the
 migration nor enables a production activation.
+
+The unexported `guarded-local-activation-channel` now pairs one bounded local
+v2 proof with the exact retained attestation digest, the existing one-use
+database transition, and a proof-bound permit acknowledgement. Before a
+transition it requires an independently bound database-and-exact-child stop;
+any post-dispatch error invokes that stop once and still reports uncertainty.
+The companion acknowledges only receipt of the permit, not worker startup or
+provider outcome. This source-only channel has no production caller, lifecycle
+watchdog, credential-expiry handler, or provider reconciliation. It must not be
+used for a production activation until those pieces and the protected operator
+workflow are reviewed together; it changes no current financial state.

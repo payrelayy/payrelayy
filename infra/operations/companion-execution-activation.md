@@ -108,6 +108,15 @@ paired proof, independent OS observation, and confirmed exact-child shutdown. It
 retains an attestation nor invokes the database transition. These source-only components
 have no production caller, permit sender, credential lifecycle, or provider reconciliation.
 No production handoff has been published and the disabled execution state is unchanged.
+The guarded companion now acknowledges receipt of an exact proof-bound permit.
+An unexported operator-side local channel can pair a retained attestation with
+the existing one-use transition and requires an independent database-and-host
+stop callback before dispatch; any post-dispatch uncertainty invokes that stop.
+This is source-only protocol plumbing, not an installed production caller or an
+activation procedure. The acknowledgement does not prove worker startup or a
+provider outcome. Lifecycle expiry, credential revocation, and provider
+reconciliation remain prerequisites; the companion and financial controls stay
+disabled.
 
 ## Current paid-proof state
 

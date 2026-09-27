@@ -48,6 +48,7 @@ describe('companion activation issuer database snapshot', () => {
         expect(values).toEqual([requestKey]);
         expect(sql).toContain('request.request_key = $1::uuid');
         expect(sql).toContain("session_user = 'postgres'");
+        expect(sql).toContain('agent_platform_companion_execution_activation_consumptions');
         expect(sql).not.toMatch(/for\s+(share|update)/iu);
         expect(sql).not.toMatch(/\b(insert|update|delete|truncate)\b/iu);
         return { rows: [row()] };

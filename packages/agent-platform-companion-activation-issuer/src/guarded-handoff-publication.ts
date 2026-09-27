@@ -43,6 +43,11 @@ export interface GuardedCompanionHandoffPublicationInputs {
   readonly trustedNow: () => Date;
 }
 
+export type GuardedCompanionHandoffBinding = Pick<
+  GuardedCompanionHandoffPublicationInputs,
+  'request' | 'currentIdentity' | 'certificate' | 'release' | 'trustedNow'
+>;
+
 interface TrustedSigner {
   readonly keyId: string;
   readonly publicKeySpki: string;
@@ -187,7 +192,7 @@ function validSignedReply(
   }
 }
 
-function validateBinding(input: GuardedCompanionHandoffPublicationInputs, now: number): number {
+function validateBinding(input: GuardedCompanionHandoffBinding, now: number): number {
   const { request, currentIdentity, certificate, release } = input;
   const requestedAt = timestamp(request.requestedAt);
   const requestExpiresAt = timestamp(request.expiresAt);
@@ -236,6 +241,30 @@ function validateBinding(input: GuardedCompanionHandoffPublicationInputs, now: n
   return handoffExpiresAt;
 }
 
+/** Build from independently checked evidence, never a body supplied by the companion. */
+export function deriveGuardedCompanionHandoffBody(
+  input: GuardedCompanionHandoffBinding,
+): CompanionExecutionActivationHandoffBody {
+  const now = trustedTime(input.trustedNow);
+  const expiresAtMs = validateBinding(input, now);
+  const issuedAt = new Date(now).toISOString();
+  return Object.freeze({
+    contractVersion: 1,
+    purpose: COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
+    deploymentTarget: 'production',
+    requestKey: input.request.requestKey,
+    activationEpoch: input.request.activationEpoch,
+    platformAgentAccountId: input.request.platformAgentAccountId,
+    noMoneyCertificateBodyDigest: input.certificate.certificateBodyDigest,
+    companionReleaseSha: input.release.releaseSha,
+    companionArchiveSha256: input.release.archiveSha256,
+    companionInstallationTreeSha256: input.release.installationTreeSha256,
+    issuedAt,
+    notBefore: issuedAt,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  });
+}
+
 async function canonicalPublicationDirectory(dataRoot: string): Promise<string> {
   if (!isAbsolute(dataRoot) || resolve(dataRoot) !== dataRoot) throw new Error();
   const directory = resolve(dataRoot, 'execution-v2');
@@ -267,26 +296,10 @@ export async function publishGuardedCompanionHandoffWithSigner(
   signer: TrustedSigner,
 ): Promise<Readonly<{ handoffSha256: string; expiresAt: string }>> {
   try {
-    const now = trustedTime(input.trustedNow);
-    const expiresAtMs = validateBinding(input, now);
+    const body = deriveGuardedCompanionHandoffBody(input);
+    const now = timestamp(body.issuedAt);
+    const expiresAtMs = timestamp(body.expiresAt);
     const directory = await canonicalPublicationDirectory(input.dataRoot);
-    const issuedAt = new Date(now).toISOString();
-    const expiresAt = new Date(expiresAtMs).toISOString();
-    const body: CompanionExecutionActivationHandoffBody = Object.freeze({
-      contractVersion: 1,
-      purpose: COMPANION_EXECUTION_ACTIVATION_HANDOFF_PURPOSE,
-      deploymentTarget: 'production',
-      requestKey: input.request.requestKey,
-      activationEpoch: input.request.activationEpoch,
-      platformAgentAccountId: input.request.platformAgentAccountId,
-      noMoneyCertificateBodyDigest: input.certificate.certificateBodyDigest,
-      companionReleaseSha: input.release.releaseSha,
-      companionArchiveSha256: input.release.archiveSha256,
-      companionInstallationTreeSha256: input.release.installationTreeSha256,
-      issuedAt,
-      notBefore: issuedAt,
-      expiresAt,
-    });
     const signed = await input.signHandoff(body);
     if (!validSignedReply(signed, body, signer)) throw new Error();
     const raw = JSON.stringify(signed);
@@ -328,7 +341,7 @@ export async function publishGuardedCompanionHandoffWithSigner(
       throw new Error();
     return Object.freeze({
       handoffSha256: `sha256:${createHash('sha256').update(raw, 'utf8').digest('hex')}`,
-      expiresAt,
+      expiresAt: body.expiresAt,
     });
   } catch {
     throw new GuardedCompanionHandoffPublicationUnavailableError();

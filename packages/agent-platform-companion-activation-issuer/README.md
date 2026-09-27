@@ -185,6 +185,21 @@ and exactly one stop. The supervisor remains internal source-only code; it
 does not authorize an Owner request, launch a child, activate production, or
 decide the outcome of an in-flight KemerBet action.
 
+The internal `guarded-one-job-outcome` adapter now reads one exact
+Owner-approved job through its consumed activation request, pilot, epoch, and
+agent account. It reports completion only when the database's execution job,
+intent, attempt, signed companion result, separate reconciliation job, and
+unique positive KemerBet history/Player/amount/currency/credit evidence all
+agree. Ambiguity and terminal failure are review-only; malformed or missing
+rows fail closed. Its bounded watcher polls only this read-only snapshot while
+the independent supervisor remains alive and the activation window is valid.
+The internal `guarded-one-job-lifecycle` composes one proof-bound permit, that
+watcher, the exact database/host emergency stop, and a post-stop ledger re-read.
+It never leases, retries, clicks, credits, settles, or executes a job. These
+modules are not a production operator: the protected lifecycle lock, evidence
+attestation, activation entry point, and live result wiring are still required
+before a one-job pilot can run.
+
 An internal source-only lifecycle monitor can now bind the exact owned child,
 the database transition expiry, and the reviewed database-and-host emergency
 stop constructed from the protected administrator callback. It invokes that

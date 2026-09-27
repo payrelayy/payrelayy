@@ -108,10 +108,17 @@ accepted by the Windows verifier. It has no endpoint, production key access, dat
 or delivery mechanism. A signature over claimed release digests is not independent release
 attestation and does not itself arm execution.
 An operator-only publisher now binds the immutable database request, current identity,
-paired certificate, and fresh independently measured release before signing and exclusively
-writing the canonical local handoff. It requires an already-existing, operator-protected data
-directory and an in-memory production signer key supplied by a future protected workflow; it
-does not create either. The request must still be live when the file is issued; the file
+paired certificate, and fresh independently measured release before exclusively writing the
+canonical local handoff. It asks a protected server signer for the request key only; it never
+sends a Windows-constructed body or receives the production private key. The server signer
+independently reads the current database request and release before deriving and signing its
+body. The Windows publisher verifies the returned signature, exact binding, server-derived
+issue time, and expiry before writing once. Both pieces are source-only: no authenticated
+transport, production caller, or administrator credential source is provided. In particular,
+the guarded Windows operator still requires a privileged database session; placing a broad
+administrator credential on the PC is not an acceptable shortcut. The publisher also requires
+an already-existing operator-protected data directory. The request must still be live when the
+file is issued; the file
 expires no later than the request deadline plus the database's two-hour maximum or the
 certificate, and a pre-existing file is never replaced. A source-only no-permit preflight
 now composes this publisher with the read-only database and release checks, guarded child,

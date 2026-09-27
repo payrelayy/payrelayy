@@ -21,6 +21,7 @@ const HANDOFF_FILE = 'activation-handoff.v1.json';
 const MAX_HANDOFF_BYTES = 4_096;
 const MAX_REQUEST_MS = 10 * 60_000;
 const MAX_RELEASE_AGE_MS = 2 * 60_000;
+const MAX_SIGNER_CLOCK_SKEW_MS = 5_000;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
@@ -36,10 +37,8 @@ export interface GuardedCompanionHandoffPublicationInputs {
   readonly release: CompanionActivationReleaseAttestation;
   /** Existing, operator-protected Windows companion data root. */
   readonly dataRoot: string;
-  /** A protected server-side signer, never its key or a generic signing oracle on Windows. */
-  readonly signHandoff: (
-    body: CompanionExecutionActivationHandoffBody,
-  ) => Promise<SignedCompanionExecutionActivationHandoff>;
+  /** The protected server derives the body from this key and its own database snapshot. */
+  readonly signHandoff: (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff>;
   readonly trustedNow: () => Date;
 }
 
@@ -296,22 +295,35 @@ export async function publishGuardedCompanionHandoffWithSigner(
   signer: TrustedSigner,
 ): Promise<Readonly<{ handoffSha256: string; expiresAt: string }>> {
   try {
-    const body = deriveGuardedCompanionHandoffBody(input);
-    const now = timestamp(body.issuedAt);
-    const expiresAtMs = timestamp(body.expiresAt);
+    // Validate the local evidence before contacting the protected signer, but
+    // never send a caller-constructed body for the server to sign.
+    const localBody = deriveGuardedCompanionHandoffBody(input);
+    const startedAt = timestamp(localBody.issuedAt);
     const directory = await canonicalPublicationDirectory(input.dataRoot);
-    const signed = await input.signHandoff(body);
-    if (!validSignedReply(signed, body, signer)) throw new Error();
+    const signed = await input.signHandoff(input.request.requestKey);
+    if (!exactDataRecord(signed, ['body', 'signerKeyId', 'signature'])) throw new Error();
+    if (!exactDataRecord(signed.body, HANDOFF_BODY_KEYS)) throw new Error();
+    const signedIssuedAt = timestamp(signed.body.issuedAt);
+    // A remote reply may be minted after the local preflight, but an old reply
+    // must not be replayed as a fresh signing operation.
+    if (signedIssuedAt < startedAt - MAX_SIGNER_CLOCK_SKEW_MS) throw new Error();
+    const expectedBody = deriveGuardedCompanionHandoffBody({
+      ...input,
+      trustedNow: () => new Date(signedIssuedAt),
+    });
+    if (!validSignedReply(signed, expectedBody, signer)) throw new Error();
     const raw = JSON.stringify(signed);
     if (Buffer.byteLength(raw, 'utf8') < 2 || Buffer.byteLength(raw, 'utf8') > MAX_HANDOFF_BYTES)
       throw new Error();
     const beforeWrite = trustedTime(input.trustedNow);
     if (
-      beforeWrite < now ||
+      beforeWrite < startedAt ||
+      beforeWrite < signedIssuedAt ||
       beforeWrite >= timestamp(input.request.expiresAt) ||
-      beforeWrite >= expiresAtMs
+      beforeWrite >= timestamp(expectedBody.expiresAt)
     )
       throw new Error();
+    deriveGuardedCompanionHandoffBody({ ...input, trustedNow: () => new Date(beforeWrite) });
     const file = resolve(directory, HANDOFF_FILE);
     const handle = await open(file, 'wx', 0o600);
     try {
@@ -336,12 +348,13 @@ export async function publishGuardedCompanionHandoffWithSigner(
       stored !== raw ||
       afterWrite < beforeWrite ||
       afterWrite >= timestamp(input.request.expiresAt) ||
-      afterWrite >= expiresAtMs
+      afterWrite >= timestamp(expectedBody.expiresAt)
     )
       throw new Error();
+    deriveGuardedCompanionHandoffBody({ ...input, trustedNow: () => new Date(afterWrite) });
     return Object.freeze({
       handoffSha256: `sha256:${createHash('sha256').update(raw, 'utf8').digest('hex')}`,
-      expiresAt: body.expiresAt,
+      expiresAt: expectedBody.expiresAt,
     });
   } catch {
     throw new GuardedCompanionHandoffPublicationUnavailableError();

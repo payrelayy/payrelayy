@@ -9,11 +9,13 @@ import {
   type CompanionActivationCertificateSnapshot,
   type CompanionActivationReleaseAttestation,
   type CompanionActivationRequestSnapshot,
+  type CompanionExecutionActivationHandoffBody,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   GuardedCompanionHandoffPublicationUnavailableError,
+  deriveGuardedCompanionHandoffBody,
   publishGuardedCompanionHandoffWithSigner,
   type GuardedCompanionHandoffPublicationInputs,
 } from './guarded-handoff-publication.js';
@@ -27,7 +29,7 @@ const trustedSigner = {
   publicKeySpki: signerSpki.toString('base64url'),
   publicKeySpkiSha256: `sha256:${createHash('sha256').update(signerSpki).digest('hex')}`,
 };
-function signHandoff(body: Parameters<GuardedCompanionHandoffPublicationInputs['signHandoff']>[0]) {
+function signBody(body: CompanionExecutionActivationHandoffBody) {
   const signed = signCompanionExecutionActivationHandoff(
     body,
     signer.privateKey,
@@ -64,6 +66,23 @@ const release: CompanionActivationReleaseAttestation = {
   installationTreeSha256: request.companionInstallationTreeSha256,
   observedAt: '2026-09-26T11:59:40.000Z',
 };
+function serverSign(
+  input: Pick<
+    GuardedCompanionHandoffPublicationInputs,
+    'request' | 'currentIdentity' | 'certificate' | 'release'
+  >,
+  issuedAt = '2026-09-26T12:00:00.000Z',
+): GuardedCompanionHandoffPublicationInputs['signHandoff'] {
+  return async (requestKey) => {
+    if (requestKey !== input.request.requestKey) throw new Error();
+    return signBody(
+      deriveGuardedCompanionHandoffBody({
+        ...input,
+        trustedNow: () => new Date(issuedAt),
+      }),
+    );
+  };
+}
 const roots: string[] = [];
 afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -74,7 +93,7 @@ async function fixture(): Promise<GuardedCompanionHandoffPublicationInputs> {
   roots.push(root);
   const dataRoot = resolve(root, 'data');
   await mkdir(resolve(dataRoot, 'execution-v2'), { recursive: true });
-  return {
+  const binding = {
     request,
     currentIdentity: {
       pilotRevisionId: request.pilotRevisionId,
@@ -84,8 +103,11 @@ async function fixture(): Promise<GuardedCompanionHandoffPublicationInputs> {
     },
     certificate,
     release,
+  };
+  return {
+    ...binding,
     dataRoot,
-    signHandoff,
+    signHandoff: serverSign(binding),
     trustedNow: () => new Date('2026-09-26T12:00:00.000Z'),
   };
 }
@@ -176,7 +198,11 @@ describe('guarded companion handoff publication', () => {
       validUntil: '2026-09-26T12:01:00.000Z',
     };
     const result = await publishGuardedCompanionHandoffWithSigner(
-      { ...input, certificate: shorterCertificate },
+      {
+        ...input,
+        certificate: shorterCertificate,
+        signHandoff: serverSign({ ...input, certificate: shorterCertificate }),
+      },
       trustedSigner,
     );
     expect(result.expiresAt).toBe(shorterCertificate.validUntil);
@@ -200,7 +226,8 @@ describe('guarded companion handoff publication', () => {
     await unavailable({ ...input, dataRoot: resolve(input.dataRoot, 'absent') });
     await unavailable({
       ...input,
-      signHandoff: async (body) => {
+      signHandoff: async (requestKey) => {
+        const body = (await serverSign(input)(requestKey)).body;
         const foreign = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
         const signed = signCompanionExecutionActivationHandoff(
           body,
@@ -221,7 +248,8 @@ describe('guarded companion handoff publication', () => {
     const input = await fixture();
     await unavailable({
       ...input,
-      signHandoff: async (body) => signHandoff({ ...body, requestKey: randomUUID() }),
+      signHandoff: async (requestKey) =>
+        signBody({ ...(await serverSign(input)(requestKey)).body, requestKey: randomUUID() }),
     });
     await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -230,7 +258,10 @@ describe('guarded companion handoff publication', () => {
     const input = await fixture();
     await unavailable({
       ...input,
-      signHandoff: async (body) => ({ ...(await signHandoff(body)), signature: 'not-a-signature' }),
+      signHandoff: async (requestKey) => ({
+        ...(await serverSign(input)(requestKey)),
+        signature: 'not-a-signature',
+      }),
     });
     await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });
@@ -239,13 +270,55 @@ describe('guarded companion handoff publication', () => {
     const input = await fixture();
     await unavailable({
       ...input,
-      signHandoff: async (body) => {
-        const signed = { ...(await signHandoff(body)) };
+      signHandoff: async (requestKey) => {
+        const signed = { ...(await serverSign(input)(requestKey)) };
         Object.defineProperty(signed, 'toJSON', {
           value: () => ({ ...signed, signature: 'altered' }),
         });
         return signed;
       },
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('accepts the server-derived timestamp after a real signing round trip', async () => {
+    const input = await fixture();
+    let reads = 0;
+    const result = await publishGuardedCompanionHandoffWithSigner(
+      {
+        ...input,
+        signHandoff: serverSign(input, '2026-09-26T12:00:01.000Z'),
+        trustedNow: () =>
+          new Date(reads++ === 0 ? '2026-09-26T12:00:00.000Z' : '2026-09-26T12:00:02.000Z'),
+      },
+      trustedSigner,
+    );
+    const signed = JSON.parse(await readFile(fileFor(input), 'utf8'));
+    expect(signed.body.issuedAt).toBe('2026-09-26T12:00:01.000Z');
+    expect(result.expiresAt).toBe('2026-09-26T14:09:00.000Z');
+  });
+
+  it('rejects a stale or future server reply without publishing a file', async () => {
+    const input = await fixture();
+    await unavailable({
+      ...input,
+      signHandoff: serverSign(input, '2026-09-26T11:59:54.000Z'),
+    });
+    await unavailable({
+      ...input,
+      signHandoff: serverSign(input, '2026-09-26T12:00:01.000Z'),
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rechecks release freshness after a delayed signing reply', async () => {
+    const input = await fixture();
+    let reads = 0;
+    await unavailable({
+      ...input,
+      signHandoff: serverSign(input, '2026-09-26T12:00:01.000Z'),
+      trustedNow: () =>
+        new Date(reads++ === 0 ? '2026-09-26T12:00:00.000Z' : '2026-09-26T12:01:41.000Z'),
     });
     await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
   });

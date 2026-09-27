@@ -87,6 +87,18 @@ packages, `NODE_OPTIONS`, and provider settings are not inherited. The returned 
 is bound to the challenge-specific pre-permit stop contract. The operator must still
 run the independent live-process observer and confirm clean child exit. This starter
 does not inspect loaded memory or close the disk-to-spawn race by itself, and it is
-not a production invocation. No permit sender, database transition, or host-wide
-stop/reconciliation mechanism is supplied. A caller must not treat rehearsal success
+not a production invocation. The starter supplies no permit sender, database transition,
+or host-wide stop/reconciliation mechanism. A caller must not treat rehearsal success
 as authority to run a deposit job or perform a provider action.
+
+An internal, unexported `activation-transition` adapter now fixes the exact
+parameterized invocation of the existing Postgres-only one-use function. It
+validates the operator-supplied Owner identity, request key, and freshly generated
+runtime password, returns only the database expiry, and treats any post-dispatch
+failure or malformed result as an uncertain activation requiring independent
+stop and reconciliation, never a retry. It is absent from the package exports,
+root entry point, production workflows, and companion. It must not be exposed or
+invoked until the protected operator workflow owns a short-deadline administrator
+session, the lifecycle lock, host-wide stop, credential revocation, and in-flight
+provider reconciliation together. This source addition neither deploys the
+migration nor enables a production activation.

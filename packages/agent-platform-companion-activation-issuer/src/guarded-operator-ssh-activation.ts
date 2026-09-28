@@ -8,14 +8,19 @@ import {
 import type { GuardedOperatorRemoteSession } from './guarded-operator-query-client.js';
 import type { ProtectedOperatorDeviceSigner } from './protected-operator-query-http-client.js';
 import {
+  createProtectedOperatorSshEmergencyStop,
   createProtectedOperatorSshHandoffSigner,
   createProtectedOperatorSshRemoteSession,
   type ProtectedOperatorSshConnection,
 } from './protected-operator-query-ssh-client.js';
 
-type ActivationInput = Omit<GuardedOperatorActivationInput, 'administrator' | 'signHandoff'>;
+type ActivationInput = Omit<
+  GuardedOperatorActivationInput,
+  'administrator' | 'signHandoff' | 'disableDatabase'
+>;
 
 interface SshActivationAdapters {
+  stop(connection: ProtectedOperatorSshConnection): (requestKey: string) => Promise<void>;
   sign(
     device: ProtectedOperatorDeviceSigner,
     connection: ProtectedOperatorSshConnection,
@@ -29,6 +34,7 @@ interface SshActivationAdapters {
 }
 
 const productionAdapters: SshActivationAdapters = {
+  stop: createProtectedOperatorSshEmergencyStop,
   sign: createProtectedOperatorSshHandoffSigner,
   open: createProtectedOperatorSshRemoteSession,
   activate: runGuardedOperatorActivationWithProtectedRemoteSession,
@@ -53,10 +59,12 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
       device,
       connection,
     )(input.requestKey);
+    const stop = adapters.stop(connection);
     remote = await adapters.open(device, input.requestKey, connection);
     const result = await adapters.activate(
       {
         ...input,
+        disableDatabase: () => stop(input.requestKey),
         signHandoff: async (requestKey) => {
           if (requestKey !== input.requestKey || !signed) throw new Error();
           const handoff = signed;

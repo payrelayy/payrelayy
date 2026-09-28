@@ -1,4 +1,8 @@
-import { COMPANION_EXECUTION_HANDOFF_SIGN_PATH } from '@fetanagent/agent-platform-companion-execution-contracts';
+import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
+import {
+  COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_STOP_PATH,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import { createProtectedHandoffLoopbackServer } from './protected-handoff-loopback-server.js';
 import type {
@@ -14,6 +18,31 @@ import { PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT } from './protected-operator-que
 
 const MAX_HOST_LIFETIME_MS = 2 * 60 * 60_000;
 const RESPONSE_DRAIN_MS = 100;
+const stopResponse = Object.freeze({
+  statusCode: 200 as const,
+  headers: Object.freeze({
+    'cache-control': 'no-store',
+    'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+  }),
+  body: Buffer.from('{"stopped":true}', 'utf8'),
+});
+
+function exactStopRequest(request: ProtectedHandoffHttpRequest, requestKey: string): boolean {
+  const values = (name: string) =>
+    request.headers.filter(([header]) => header.toLowerCase() === name).map(([, value]) => value);
+  return (
+    request.method === 'POST' &&
+    request.path === COMPANION_EXECUTION_OPERATOR_STOP_PATH &&
+    values('accept').length === 1 &&
+    values('accept')[0] === AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE &&
+    values('content-type').length === 1 &&
+    values('content-type')[0] === AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE &&
+    values('content-encoding').length === 0 &&
+    values('transfer-encoding').length === 0 &&
+    values('expect').length === 0 &&
+    Buffer.from(request.body).toString('utf8') === JSON.stringify({ requestKey })
+  );
+}
 
 export interface ProtectedOperatorQueryHostInput extends ProtectedOperatorQuerySessionInput {
   readonly trustedNoMoneySignerKeyId: string;
@@ -65,6 +94,7 @@ export async function openProtectedOperatorQueryHostWithPort(
   let signingState: 'pending' | 'succeeded' | 'failed' = input?.signHandoff
     ? 'pending'
     : 'succeeded';
+  let stopAttempt: Promise<unknown> | undefined;
   const stopped = new Promise<void>((resolve, reject) => {
     resolveStopped = resolve;
     rejectStopped = reject;
@@ -79,6 +109,7 @@ export async function openProtectedOperatorQueryHostWithPort(
     stopPromise = (async () => {
       const results = await Promise.allSettled([
         server?.close() ?? Promise.resolve(),
+        stopAttempt ?? Promise.resolve(),
         session?.close() ??
           (typeof input?.closeAdministrator === 'function'
             ? input.closeAdministrator()
@@ -128,6 +159,22 @@ export async function openProtectedOperatorQueryHostWithPort(
       trustedNow: input.trustedNow,
     });
     server = createProtectedHandoffLoopbackServer(async (request) => {
+      if (request.path === COMPANION_EXECUTION_OPERATOR_STOP_PATH) {
+        if (signingState !== 'succeeded' || !exactStopRequest(request, input.requestKey)) {
+          retireAfterResponse();
+          throw new Error();
+        }
+        try {
+          stopAttempt ??= Promise.resolve().then(input.disableDatabase);
+          await stopAttempt;
+          // The independent stop must not close the read-only session; the
+          // coordinator still needs to confirm the exact job outcome.
+          return stopResponse;
+        } catch {
+          retireAfterResponse();
+          throw new Error();
+        }
+      }
       if (request.path === COMPANION_EXECUTION_HANDOFF_SIGN_PATH) {
         if (signingState !== 'pending' || !input.signHandoff) {
           retireAfterResponse();

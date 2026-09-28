@@ -102,6 +102,49 @@ run_once() {
   exit $?
 }
 
+stop_once() {
+  local expected_revision="$1" actual_revision image_id container_image container_id stage entry
+  [[ "$expected_revision" =~ ^[0-9a-f]{40}$ ]] || die
+  actual_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE")" || die
+  image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE")" || die
+  [[ "$actual_revision" == "$expected_revision" && "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die
+  if docker container inspect "$CONTAINER" >/dev/null 2>&1; then
+    container_image="$(docker container inspect --format '{{.Image}}' "$CONTAINER")" || die
+    container_id="$(docker container inspect --format '{{.Id}}' "$CONTAINER")" || die
+    [[ "$container_image" == "$image_id" && "$container_id" =~ ^[0-9a-f]{64}$ ]] || die
+    docker stop --time 20 "$container_id" >/dev/null || die
+  fi
+  ! docker container inspect "$CONTAINER" >/dev/null 2>&1 || die
+  [[ -z "$(ss -H -ltn '( sport = :743 )')" ]] || die
+  if [[ -e "$RUNTIME_DIR" || -L "$RUNTIME_DIR" ]]; then
+    [[ ! -L "$RUNTIME_DIR" && -d "$RUNTIME_DIR" &&
+      "$(stat --format='%u:%g:%a' "$RUNTIME_DIR")" == '0:0:700' ]] || die
+    exec 8>"$RUNTIME_DIR/one-shot.lock"
+    flock -w 20 8 || die
+    shopt -s nullglob
+    for stage in "$RUNTIME_DIR"/session.*; do
+      [[ ! -L "$stage" && -d "$stage" &&
+        "$(stat --format='%u:%g:%a' "$stage")" == '0:0:700' ]] || die
+      for entry in "$stage"/*; do
+        case "$entry" in
+          "$stage/signer.pkcs8.der")
+            [[ ! -L "$entry" && -f "$entry" &&
+              "$(stat --format='%u:%g:%a:%h' "$entry")" == '10001:10001:400:1' ]] || die
+            ;;
+          "$stage/container-id")
+            [[ ! -L "$entry" && -f "$entry" &&
+              "$(stat --format='%u:%g:%a:%h' "$entry")" == '0:0:600:1' ]] || die
+            ;;
+          *) die ;;
+        esac
+      done
+      rm -f -- "$stage/signer.pkcs8.der" "$stage/container-id" || die
+      rmdir -- "$stage" || die
+    done
+  fi
+  printf '%s\n' 'protected_operator_listener_stopped'
+}
+
 [[ $# -eq 2 ]] || die
 require_installed_root_entry
 case "$1" in
@@ -111,6 +154,9 @@ case "$1" in
     ;;
   run)
     run_once "$2"
+    ;;
+  stop)
+    stop_once "$2"
     ;;
   *) die ;;
 esac

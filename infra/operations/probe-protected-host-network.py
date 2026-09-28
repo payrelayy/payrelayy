@@ -10,6 +10,15 @@ import ssl
 import struct
 
 
+try:
+    with open("/proc/sys/net/ipv4/ip_unprivileged_port_start", encoding="ascii") as setting:
+        minimum_unprivileged_port = int(setting.read().strip())
+    loopback_bind = "allowed_without_cap" if minimum_unprivileged_port <= 743 else "requires_cap"
+except (OSError, ValueError):
+    loopback_bind = "unavailable"
+print("operator_loopback_bind=" + loopback_bind)
+
+
 def addresses(family):
     try:
         return socket.getaddrinfo(host, 5432, family, socket.SOCK_STREAM)

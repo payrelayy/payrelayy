@@ -34,7 +34,8 @@ jobs:
           grep -Fx "fetanagent-admin ALL=(root) NOPASSWD: sha256:$digest /usr/local/sbin/fetanagent-production-operator-host-launch *" \
             infra/operations/fetanagent-production-operator-host.sudoers
           sudo visudo -cf infra/operations/fetanagent-production-operator-host.sudoers
-          node --test infra/operations/render-production-operator-launch.test.mjs
+          node --test infra/operations/render-production-operator-launch.test.mjs \
+            infra/operations/protected-operator-bind-contract.test.mjs
 
       - name: Build credential-free one-shot image
         shell: bash
@@ -65,7 +66,7 @@ jobs:
             output="$(printf '%s' "$payload" | timeout 15s docker run --rm -i \
               --network none --read-only \
               --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 \
-              --cap-drop ALL --security-opt no-new-privileges \
+              --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
               fetanagent-protected-operator-host:ci 2>&1)"
             status=$?
             set -e
@@ -73,6 +74,15 @@ jobs:
             test "$output" = 'Protected operator host unavailable; reconcile before activation.'
           done
 
+      - name: Prove only the non-root loopback bind capability is effective
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only \
+            --cap-drop ALL --cap-add NET_BIND_SERVICE \
+            --security-opt no-new-privileges --user 10001:10001 \
+            --entrypoint /usr/local/bin/node fetanagent-protected-operator-host:ci \
+            -e 'const fs=require("node:fs"); const s=fs.readFileSync("/proc/self/status","utf8"); const get=(k)=>s.match(new RegExp("^"+k+":\\s*(\\S+)","m"))?.[1]; if(get("Uid")!=="10001" || get("NoNewPrivs")!=="1" || BigInt("0x"+get("CapEff"))!==1024n || BigInt("0x"+get("CapBnd"))!==1024n) process.exit(1);'
       - name: Seal the inert image for the production host
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash

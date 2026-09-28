@@ -53,17 +53,19 @@ jobs:
           [[ "$CONFIRMED_OPERATION" == 'DIAGNOSE COMPANION OPERATOR HOST NETWORK' ]]
           node infra/operations/require-production-ci.mjs
 
-      - name: Probe DNS and TCP without credentials or SQL
+      - name: Probe DNS, TCP, and PostgreSQL TLS without credentials or SQL
         shell: bash
         env:
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
         run: |
           set -euo pipefail
           umask 077
           [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
-          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
+            -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
           direct_host="$(sed -nE "s/^const DIRECT_HOST = '([^']+)';$/\1/p" \
             packages/agent-platform-companion-operator-host/src/launch-document.ts)"
           [[ "$direct_host" =~ ^db\.[a-z0-9]{20}\.supabase\.co$ ]]
@@ -93,15 +95,19 @@ jobs:
             -o ConnectTimeout=8 -o ConnectionAttempts=1)
           if ! result="$({
             printf 'host = "%s"\n' "$direct_host"
+            printf 'import base64\nca_pem = base64.b64decode("%s").decode("ascii")\n' \
+              "$(printf '%s' "$SUPABASE_CA_CERTIFICATE_PEM" | base64 -w0)"
             cat infra/operations/probe-protected-host-network.py
           } | timeout 20s ssh "${ssh_opts[@]}" \
             "fetanagent-admin@$PRODUCTION_VM_HOST" 'python3 -' 2>/dev/null)"; then
             echo '::error::Read-only protected host network probe unavailable.' >&2
             exit 1
           fi
-          [[ "$(printf '%s\n' "$result" | wc -l)" -eq 3 ]]
+          [[ "$(printf '%s\n' "$result" | wc -l)" -eq 4 ]]
           grep -Eq '^dns_a=(present|absent)$' <<<"$result"
           grep -Eq '^dns_aaaa=(present|absent)$' <<<"$result"
           grep -Eq '^direct_ipv6_tcp=(reachable|not_attempted|timeout|network_unreachable|host_unreachable|refused|other_failure)$' <<<"$result"
+          grep -Eq '^direct_tls=(verified|not_attempted|not_offered|certificate_rejected|handshake_failed|timeout|transport_or_ca_failure)$' <<<"$result"
+          printf '%s\n' "$result"
           printf '%s\n' "$result" >>"$GITHUB_STEP_SUMMARY"
           echo 'No database credential, SQL, operator request, pilot, queue job, financial switch, or production service was changed.' >>"$GITHUB_STEP_SUMMARY"

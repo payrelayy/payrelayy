@@ -1,11 +1,13 @@
-"""Read-only, no-credential TCP probe for the production operator host.
+"""Read-only, no-credential network/TLS probe for the production operator host.
 
-The caller supplies the exact database hostname in this script's first line on
+The caller supplies the exact database hostname and public CA in a prefix on
 stdin, before this source. No hostname, address, or exception text is emitted.
 """
 
 import errno
 import socket
+import ssl
+import struct
 
 
 def addresses(family):
@@ -40,3 +42,26 @@ else:
             errno.ETIMEDOUT: "timeout",
         }.get(error.errno, "other_failure")
     print("direct_ipv6_tcp=" + result)
+
+tls_result = "not_attempted"
+if ipv6 and result == "reachable":
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as connection:
+            connection.settimeout(5)
+            connection.connect(ipv6[0][4])
+            connection.sendall(struct.pack("!II", 8, 80877103))
+            if connection.recv(1) != b"S":
+                tls_result = "not_offered"
+            else:
+                context = ssl.create_default_context(cadata=ca_pem)
+                with context.wrap_socket(connection, server_hostname=host):
+                    tls_result = "verified"
+    except ssl.SSLCertVerificationError:
+        tls_result = "certificate_rejected"
+    except ssl.SSLError:
+        tls_result = "handshake_failed"
+    except TimeoutError:
+        tls_result = "timeout"
+    except (OSError, ValueError):
+        tls_result = "transport_or_ca_failure"
+print("direct_tls=" + tls_result)

@@ -58,3 +58,27 @@ jobs:
             test "$status" -eq 1
             test "$output" = 'Protected operator host unavailable; reconcile before activation.'
           done
+
+      - name: Seal the inert image for the production host
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          docker save fetanagent-protected-operator-host:ci |
+            gzip -1 >"$RUNNER_TEMP/fetanagent-protected-operator-host.tar.gz"
+          cd "$RUNNER_TEMP"
+          sha256sum fetanagent-protected-operator-host.tar.gz \
+            >fetanagent-protected-operator-host.tar.gz.sha256
+
+      - name: Publish the checked main image without starting it
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: protected-operator-host-image-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/fetanagent-protected-operator-host.tar.gz
+            ${{ runner.temp }}/fetanagent-protected-operator-host.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1

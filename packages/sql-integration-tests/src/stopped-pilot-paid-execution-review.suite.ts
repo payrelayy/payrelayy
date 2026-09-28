@@ -36,6 +36,14 @@ const readinessSelect = readinessSource.slice(
   readinessSource.indexOf('with latest_pilot as materialized ('),
   readinessSource.lastIndexOf('\ncommit;'),
 );
+const emergencyReviewSource = readFileSync(
+  new URL('../../../infra/sql/production-review-emergency-stopped-paid-job.sql', import.meta.url),
+  'utf8',
+);
+const emergencyReviewOperation = emergencyReviewSource.slice(
+  emergencyReviewSource.indexOf('do $operation$'),
+  emergencyReviewSource.indexOf("\n\nselect 'review_recorded';"),
+);
 
 async function withRollback(client: Client, body: () => Promise<void>): Promise<void> {
   await client.query('begin');
@@ -401,6 +409,78 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
             [resolutionKey],
           ),
         );
+      });
+    });
+
+    it('moves an emergency-stopped paid job to review without credit or execution', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareTelebirrPilot(client, getOwnerAdminId(), {
+          maximumPerDepositMinor: 2500,
+          maximumPerPlayerMinor: 2500,
+          maximumAggregateMinor: 12500,
+        });
+        const prepared = await prepareVerification(client, pilot);
+        const completion = await completeVerification(client, pilot, prepared, {
+          disposition: 'settlement_candidate',
+          reasonCode: 'exact_proof_match',
+        });
+        const jobId = completion.row.execution_job_id;
+        expect(jobId).toEqual(expect.any(String));
+
+        await client.query(
+          `select app.stop_private_live_deposit_pilot(
+            $1::uuid, $2::uuid, 'execution_uncertainty'
+          )`,
+          [getOwnerAdminId(), pilot.pilotRevisionId],
+        );
+        const beforeReview = await client.query<ReadinessRow>(readinessSelect);
+        expect(beforeReview.rows[0]?.redacted_status).toMatchObject({
+          nextAction: 'paid_stopped_pilot_review',
+          openJobs: 1,
+          stoppedPilotUntouchedJob: true,
+        });
+
+        await client.query(emergencyReviewOperation);
+
+        const afterReview = await client.query<ReadinessRow>(readinessSelect);
+        expect(afterReview.rows[0]?.redacted_status).toMatchObject({
+          cancelledUntouchedJobs: 1,
+          customerResolutionPending: true,
+          nextAction: 'customer_resolution_pending',
+          openExecutionReviewCases: 1,
+          openJobs: 0,
+          stoppedPilotUntouchedJob: false,
+        });
+        const lineage = await client.query<{
+          readonly attempt_count: number;
+          readonly claim_count: number;
+          readonly intent_status: string;
+          readonly job_status: string;
+          readonly reservation_count: number;
+        }>(
+          `select job.status::text as job_status,
+                  intent.status::text as intent_status,
+                  (select count(*)::integer from app.deposit_payment_claims
+                    where deposit_intent_id = intent.id) as claim_count,
+                  (select count(*)::integer from app.private_live_deposit_pilot_reservations
+                    where deposit_intent_id = intent.id) as reservation_count,
+                  (select count(*)::integer from app.deposit_execution_attempts
+                    where deposit_job_id = job.id) as attempt_count
+             from app.deposit_jobs job
+             join app.deposit_intents intent on intent.id = job.deposit_intent_id
+            where job.id = $1::uuid`,
+          [jobId],
+        );
+        expect(lineage.rows).toEqual([
+          {
+            attempt_count: 0,
+            claim_count: 1,
+            intent_status: 'execution_review',
+            job_status: 'cancelled',
+            reservation_count: 1,
+          },
+        ]);
       });
     });
   });

@@ -209,8 +209,10 @@ the job was never leased or executed. A stopped pilot cannot be re-armed or sile
 that payment. Do not submit the receipt again or copy the reservation into a new pilot.
 
 Migration `review_stopped_pilot_paid_execution_job` added a **Postgres-only** disposition
-for this state. Merely installing it changed no production row. Its separately authorized,
-completed invocation required an exact active Owner, stopped `owner_stop` pilot,
+for this state. A later append-only guard correction also permits a pilot stopped with
+`execution_uncertainty`, but it still requires a singular untouched paid job and no companion
+assignment or execution attempt. Merely installing either migration changes no production job.
+Its separately authorized invocation requires an exact active Owner, a stopped pilot,
 singular verified payment claim and reservation, untouched zero-attempt execution job, no
 execution attempt, and every financial switch disabled. It atomically cancels only that job,
 changes the deposit to `execution_review`, opens an execution review case, and records an immutable

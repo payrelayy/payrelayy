@@ -31,8 +31,13 @@ jobs:
             -t fetanagent-protected-operator-host:ci .
           test "$(docker image inspect fetanagent-protected-operator-host:ci \
             --format '{{.Config.User}}')" = '10001:10001'
+          # The pinned PostgreSQL client base declares this inert image
+          # metadata; the entry point never starts PostgreSQL or publishes it.
           test "$(docker image inspect fetanagent-protected-operator-host:ci \
-            --format '{{json .Config.ExposedPorts}}')" = 'null'
+            --format '{{json .Config.ExposedPorts}}')" = '{"5432/tcp":{}}'
+          test "$(docker image inspect fetanagent-protected-operator-host:ci \
+            --format '{{json .Config.Entrypoint}}')" = \
+            '["/usr/local/bin/node","/workspace/packages/agent-platform-companion-operator-host/dist/index.js"]'
           test "$(docker image inspect fetanagent-protected-operator-host:ci \
             --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
             "$GITHUB_SHA"

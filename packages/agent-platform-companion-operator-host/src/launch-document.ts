@@ -2,6 +2,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const DIRECT_HOST = 'db.xzztugbgtulptnbpoelr.supabase.co';
 const MAX_DOCUMENT_BYTES = 16 * 1024;
 const MAX_CA_BYTES = 8 * 1024;
+const RELEASE_TAG = /^windows-companion-v[0-9A-Za-z._-]{1,60}$/u;
 
 export interface OperatorHostLaunchDocument {
   readonly requestKey: string;
@@ -13,6 +14,7 @@ export interface OperatorHostLaunchDocument {
     readonly password: string;
   };
   readonly databaseCaPem: string;
+  readonly releaseTag: string;
 }
 
 /**
@@ -29,12 +31,15 @@ export function parseOperatorHostLaunchDocument(raw: Uint8Array): OperatorHostLa
     throw new Error('Invalid protected operator launch document.');
   const record = decoded as Record<string, unknown>;
   if (
-    Object.keys(record).sort().join(',') !== 'databaseCaPem,databaseUrl,requestKey,version' ||
+    Object.keys(record).sort().join(',') !==
+      'databaseCaPem,databaseUrl,releaseTag,requestKey,version' ||
     record.version !== 1 ||
     typeof record.requestKey !== 'string' ||
     !UUID_V4.test(record.requestKey) ||
     typeof record.databaseUrl !== 'string' ||
     record.databaseUrl.length > 2048 ||
+    typeof record.releaseTag !== 'string' ||
+    !RELEASE_TAG.test(record.releaseTag) ||
     typeof record.databaseCaPem !== 'string' ||
     Buffer.byteLength(record.databaseCaPem, 'utf8') > MAX_CA_BYTES ||
     !/^-----BEGIN CERTIFICATE-----\r?\n[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----\r?\n?$/u.test(
@@ -77,5 +82,6 @@ export function parseOperatorHostLaunchDocument(raw: Uint8Array): OperatorHostLa
       password,
     }),
     databaseCaPem: record.databaseCaPem,
+    releaseTag: record.releaseTag,
   });
 }

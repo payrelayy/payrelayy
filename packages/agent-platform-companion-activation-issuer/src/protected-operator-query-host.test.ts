@@ -2,7 +2,10 @@ import { EventEmitter } from 'node:events';
 import { request as httpRequest } from 'node:http';
 
 import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
-import { COMPANION_EXECUTION_OPERATOR_QUERY_PATH } from '@fetanagent/agent-platform-companion-execution-contracts';
+import {
+  COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -37,13 +40,16 @@ function fixture() {
   return { input, query, closeAdministrator, disableDatabase, controller, events };
 }
 
-async function malformedRequest(port: number): Promise<number> {
+async function malformedRequest(
+  port: number,
+  path = COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
       {
         hostname: '127.0.0.1',
         port,
-        path: COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+        path,
         method: 'POST',
         headers: {
           accept: AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
@@ -109,5 +115,53 @@ describe('on-demand protected operator host', () => {
       ProtectedOperatorQueryHostUnavailableError,
     );
     expect(closeAdministrator).toHaveBeenCalledTimes(1);
+  });
+
+  it('requires its one-use signing operation before opening the query session', async () => {
+    const { input, closeAdministrator, disableDatabase, query } = fixture();
+    const signHandoff = vi.fn(async () => ({
+      statusCode: 200 as const,
+      headers: {
+        'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+        'cache-control': 'no-store',
+      },
+      body: Buffer.from('{}'),
+    }));
+    const host = await openProtectedOperatorQueryHostWithPort({ ...input, signHandoff }, 0);
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_HANDOFF_SIGN_PATH)).toBe(200);
+    expect(signHandoff).toHaveBeenCalledTimes(1);
+    // The second operation reaches the protected query handler, which rejects
+    // malformed input and retires this exact host. Signing cannot be repeated.
+    expect(await malformedRequest(host.port)).toBe(503);
+    await host.stopped;
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
+    expect(disableDatabase).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('retires a host if a query arrives before signing', async () => {
+    const { input, closeAdministrator, query } = fixture();
+    const signHandoff = vi.fn();
+    const host = await openProtectedOperatorQueryHostWithPort({ ...input, signHandoff }, 0);
+    expect(await malformedRequest(host.port)).toBe(503);
+    await host.stopped;
+    expect(signHandoff).not.toHaveBeenCalled();
+    expect(query).not.toHaveBeenCalled();
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires the listener after a failed signing response', async () => {
+    const { input, closeAdministrator, disableDatabase } = fixture();
+    const signHandoff = vi.fn(async () => ({
+      statusCode: 503 as const,
+      headers: { 'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE },
+      body: Buffer.from('{}'),
+    }));
+    const host = await openProtectedOperatorQueryHostWithPort({ ...input, signHandoff }, 0);
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_HANDOFF_SIGN_PATH)).toBe(503);
+    await host.stopped;
+    expect(signHandoff).toHaveBeenCalledTimes(1);
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
+    expect(disableDatabase).not.toHaveBeenCalled();
   });
 });

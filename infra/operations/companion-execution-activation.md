@@ -166,7 +166,13 @@ reviewed query host then owns only that one dedicated backend; its independent
 stop callback runs the established multi-commit emergency-disable SQL on a
 different direct connection. The image is inert until a future protected
 operator supplies an exact, short-lived request and credential through a
-private standard-input stream. Merely building or installing the image does
+private standard-input stream. The same protected SSH port can now accept one
+paired-certificate-authenticated handoff signing request before its finite
+operator query session. The host checks the immutable release tag and both
+published archive digests against the one-use database request, and loads only
+the pinned execution signing key from a runtime-mounted secret. The Windows
+operator still independently measures the installed tree and verifies the
+signed handoff before it is written. Merely building or installing the image does
 not start a listener, provision an administrator credential, issue a permit,
 enable a switch, or authorize a deposit. An authenticated production caller,
 exact-host exit proof, independent watchdog, and provider reconciliation are

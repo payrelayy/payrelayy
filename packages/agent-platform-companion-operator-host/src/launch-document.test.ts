@@ -4,12 +4,20 @@ import { parseOperatorHostLaunchDocument } from './launch-document.js';
 
 const ca = '-----BEGIN CERTIFICATE-----\n' + 'A'.repeat(64) + '\n-----END CERTIFICATE-----\n';
 const requestKey = '00000000-0000-4000-8000-000000000001';
+const releaseTag = 'windows-companion-v0.1.12';
 const direct =
   'postgresql://postgres:encoded%40password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full';
 
 function encoded(databaseUrl = direct, extra: Record<string, unknown> = {}): Uint8Array {
   return Buffer.from(
-    JSON.stringify({ version: 1, requestKey, databaseUrl, databaseCaPem: ca, ...extra }),
+    JSON.stringify({
+      version: 1,
+      requestKey,
+      databaseUrl,
+      databaseCaPem: ca,
+      releaseTag,
+      ...extra,
+    }),
   );
 }
 
@@ -20,6 +28,7 @@ describe('one-use production operator host launch document', () => {
     expect(parsed.database.port).toBe(5432);
     expect(parsed.database.password).toBe('encoded@password');
     expect(parsed.requestKey).toBe(requestKey);
+    expect(parsed.releaseTag).toBe(releaseTag);
   });
 
   it.each([
@@ -40,6 +49,9 @@ describe('one-use production operator host launch document', () => {
       parseOperatorHostLaunchDocument(encoded(direct, { requestKey: 'not-a-uuid' })),
     ).toThrow();
     expect(() => parseOperatorHostLaunchDocument(encoded(direct, { databaseCaPem: '' }))).toThrow();
+    expect(() =>
+      parseOperatorHostLaunchDocument(encoded(direct, { releaseTag: '../main' })),
+    ).toThrow();
     expect(() => parseOperatorHostLaunchDocument(Buffer.alloc(16 * 1024 + 1))).toThrow();
   });
 });

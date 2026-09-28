@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ProtectedOperatorDeviceSigner } from './protected-operator-query-http-client.js';
 import {
+  createProtectedOperatorSshHandoffSignerWithSpawn,
   createProtectedOperatorSshRemoteSessionWithSpawn,
   ProtectedOperatorSshClientUnavailableError,
   type ProtectedOperatorSshConnection,
@@ -136,6 +137,50 @@ describe('authenticated protected operator SSH stream', () => {
         files,
       ),
     ).rejects.toBeInstanceOf(ProtectedOperatorSshClientUnavailableError);
+    expect(spawned).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends one proof-bound handoff signing request through the same pinned SSH endpoint', async () => {
+    const requests: string[] = [];
+    const spawned = vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {
+      const child = new EventEmitter() as ChildProcess;
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      Object.assign(child, { pid: 418, stdin, stdout, kill: vi.fn(() => true) });
+      const chunks: Buffer[] = [];
+      stdin.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      stdin.on('end', () => {
+        requests.push(Buffer.concat(chunks).toString('utf8'));
+        const body = JSON.stringify({
+          body: { requestKey },
+          signature: 'test',
+          signerKeyId: 'test',
+        });
+        stdout.end(
+          `HTTP/1.1 200 OK\r\nContent-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+        );
+        setImmediate(() => child.emit('close', 0, null));
+      });
+      return child;
+    });
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    const signHandoff = createProtectedOperatorSshHandoffSignerWithSpawn(
+      signedDevice,
+      connection,
+      ROOT,
+      spawned,
+      files,
+    );
+    await expect(signHandoff(requestKey)).resolves.toMatchObject({ body: { requestKey } });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain('POST /');
+    expect(requests[0]).toContain('handoff');
+    await expect(signHandoff(requestKey)).rejects.toBeInstanceOf(
+      ProtectedOperatorSshClientUnavailableError,
+    );
     expect(spawned).toHaveBeenCalledTimes(1);
   });
 });

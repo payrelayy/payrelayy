@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { signerPublicKey } from './index.js';
+import { checkedExecutionSignerPrivateKey, signerPublicKey } from './index.js';
 
 const key = Buffer.alloc(91, 7);
 const row = {
@@ -18,5 +18,18 @@ describe('production signer public-key loader', () => {
     expect(() =>
       signerPublicKey([{ ...row, public_key_spki_sha256: `sha256:${'0'.repeat(64)}` }]),
     ).toThrow();
+  });
+});
+
+describe('protected execution signer loader', () => {
+  it('accepts only a key matching the pinned public digest', () => {
+    const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const raw = pair.privateKey.export({ format: 'der', type: 'pkcs8' });
+    const publicKey = pair.publicKey.export({ format: 'der', type: 'spki' });
+    const digest = `sha256:${createHash('sha256').update(publicKey).digest('hex')}`;
+    expect(checkedExecutionSignerPrivateKey(raw, digest).asymmetricKeyType).toBe('ec');
+    expect(() => checkedExecutionSignerPrivateKey(raw)).toThrow();
+    expect(() => checkedExecutionSignerPrivateKey(Buffer.from('invalid'), digest)).toThrow();
+    raw.fill(0);
   });
 });

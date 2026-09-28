@@ -215,6 +215,13 @@ Owner approval, and post-crash provider reconciliation are still required
 before a one-job pilot can run. The caller must close the dedicated database
 session on every outcome, including a failed lock acquisition.
 
+An internal composition can now use the finite, authenticated protected
+operator remote session instead of a Windows-side administrator connection.
+It closes that exact remote session on success and failure and reports no
+confirmed result if closure is uncertain. This is still source-only: it does
+not provision an SSH identity, install the protected host, load a production
+database credential, or create a production activation entry point.
+
 The source-only server handoff signer now derives the handoff from an exact,
 unconsumed database request rather than accepting body fields from the PC. It
 requires a server-owned protected key and an independent published-release

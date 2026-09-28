@@ -38,6 +38,12 @@ COPY --from=build /workspace/packages/agent-platform-companion-operator-host/nod
 COPY --from=build /workspace/packages/agent-platform-companion-operator-host/dist ./packages/agent-platform-companion-operator-host/dist
 COPY infra/sql/production-companion-execution-emergency-disable.sql ./infra/sql/production-companion-execution-emergency-disable.sql
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends libcap2-bin \
+  && setcap 'cap_net_bind_service=+ep' /usr/local/bin/node \
+  && test "$(getcap /usr/local/bin/node)" = '/usr/local/bin/node cap_net_bind_service=ep' \
+  && apt-get purge -y --auto-remove libcap2-bin \
+  && rm -rf /var/lib/apt/lists/* \
   && test "$(node --version)" = 'v22.17.1' \
   && psql --version | grep --extended-regexp --quiet '^psql \(PostgreSQL\) 17\.4([ .]|$)' \
   && chmod -R a-w /workspace

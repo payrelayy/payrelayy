@@ -95,7 +95,7 @@ run_once() {
   docker run --rm -i --name "$CONTAINER" --cidfile "$operator_cidfile" \
     --network host --read-only --log-driver none \
     --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=10001,gid=10001,mode=700 \
-    --cap-drop ALL --security-opt no-new-privileges --pids-limit 64 --memory 512m \
+    --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges --pids-limit 64 --memory 512m \
     --user 10001:10001 --stop-timeout 20 \
     --mount "type=bind,src=$operator_staged_signer,dst=$SIGNER_TARGET,readonly" \
     "$IMAGE"

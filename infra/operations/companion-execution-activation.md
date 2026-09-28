@@ -144,6 +144,16 @@ sequence. It is **not installed** in the production bridge and has no public
 route, operator tunnel, credential loader, or production entry point. An
 authenticated private tunnel, exact-backend termination proof, and independent
 host/provider reconciliation remain necessary before production activation.
+The optional production SSH bootstrap installs only a dormant, password-locked
+`fetanagent-operator` identity. Its key and SSH policy allow local forwarding
+to the protected loopback port only; shell sessions, remote forwarding, agent
+forwarding, TTYs, and all other ports are denied. The installer appends its
+Match block after the host's global SSH configuration, first proving that the
+existing root and admin effective policies are unchanged. `inspect` verifies
+the installed files and account. It does not start a listener, load a database
+credential, issue an activation request, or change any financial switch. The
+protected host credential loader and one-use production entry point remain
+separate prerequisites; this SSH identity alone cannot execute a deposit.
 The guarded companion now acknowledges receipt of an exact proof-bound permit.
 An unexported operator-side local channel can pair a retained attestation with
 the existing one-use transition and requires an independent database-and-host

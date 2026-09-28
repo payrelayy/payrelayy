@@ -44,6 +44,17 @@ const emergencyReviewOperation = emergencyReviewSource.slice(
   emergencyReviewSource.indexOf('do $operation$'),
   emergencyReviewSource.indexOf("\n\nselect 'review_recorded';"),
 );
+const emergencyResolutionSource = readFileSync(
+  new URL(
+    '../../../infra/sql/production-resolve-emergency-stopped-owner-test.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const emergencyResolutionOperation = emergencyResolutionSource.slice(
+  emergencyResolutionSource.indexOf('do $operation$'),
+  emergencyResolutionSource.indexOf("\n\nselect 'owner_test_closed';"),
+);
 
 async function withRollback(client: Client, body: () => Promise<void>): Promise<void> {
   await client.query('begin');
@@ -481,6 +492,55 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
             reservation_count: 1,
           },
         ]);
+
+        await client.query(emergencyResolutionOperation);
+        const afterResolution = await client.query<ReadinessRow>(readinessSelect);
+        expect(afterResolution.rows[0]?.redacted_status).toMatchObject({
+          cancelledUntouchedJobs: 1,
+          customerResolutionPending: false,
+          nextAction: 'pilot_review',
+          openExecutionReviewCases: 0,
+          openJobs: 0,
+        });
+        const closed = await client.query<{
+          readonly attempt_count: number;
+          readonly claim_count: number;
+          readonly intent_status: string;
+          readonly job_status: string;
+          readonly open_review_count: number;
+          readonly reservation_count: number;
+          readonly resolution_count: number;
+        }>(
+          `select job.status::text as job_status,
+                  intent.status::text as intent_status,
+                  (select count(*)::integer from app.deposit_payment_claims
+                    where deposit_intent_id = intent.id) as claim_count,
+                  (select count(*)::integer from app.private_live_deposit_pilot_reservations
+                    where deposit_intent_id = intent.id) as reservation_count,
+                  (select count(*)::integer from app.deposit_execution_attempts
+                    where deposit_job_id = job.id) as attempt_count,
+                  (select count(*)::integer from app.deposit_review_cases
+                    where deposit_intent_id = intent.id and review_kind = 'execution'
+                      and status in ('open', 'assigned')) as open_review_count,
+                  (select count(*)::integer from app.stopped_pilot_owner_test_resolutions
+                    where deposit_intent_id = intent.id) as resolution_count
+             from app.deposit_jobs job
+             join app.deposit_intents intent on intent.id = job.deposit_intent_id
+            where job.id = $1::uuid`,
+          [jobId],
+        );
+        expect(closed.rows).toEqual([
+          {
+            attempt_count: 0,
+            claim_count: 1,
+            intent_status: 'rejected',
+            job_status: 'cancelled',
+            open_review_count: 0,
+            reservation_count: 1,
+            resolution_count: 1,
+          },
+        ]);
+        await expectRejected(client, () => client.query(emergencyResolutionOperation));
       });
     });
   });

@@ -22,6 +22,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check the one-shot host entry point without running it
+        shell: bash
+        run: bash -n infra/operations/fetanagent-production-operator-host-launch.sh
+
       - name: Build credential-free one-shot image
         shell: bash
         run: |

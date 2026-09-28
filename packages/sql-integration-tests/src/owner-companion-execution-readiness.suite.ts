@@ -1,9 +1,15 @@
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
+import {
+  armPilot,
+  createPilotPrerequisites,
+  preparePilot,
+} from './private-live-money-pilot.suite.js';
 
 export function registerOwnerCompanionExecutionReadinessSqlTests(
   getClient: () => Client,
   getOwnerAuthUserId: () => string,
+  getOwnerAdminId: () => string,
 ): void {
   describe('Owner companion execution readiness preview', () => {
     it('has exactly one Owner grant and no public, customer, worker, or execution grant', async () => {
@@ -72,6 +78,44 @@ export function registerOwnerCompanionExecutionReadinessSqlTests(
           'readOnly',
           'untouchedQueuedJobs',
         ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('recognizes an exact armed dry-run pointer without declaring money authority', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const prerequisites = await createPilotPrerequisites(client);
+        const pilot = await preparePilot(client, getOwnerAdminId(), prerequisites);
+        await armPilot(client, getOwnerAdminId(), pilot);
+
+        const result = await client.query<{ readonly readiness: Record<string, unknown> }>(
+          'select app.get_owner_companion_execution_readiness($1::uuid) as readiness',
+          [getOwnerAuthUserId()],
+        );
+        expect(result.rows[0]?.readiness).toMatchObject({
+          activationAvailable: false,
+          companionExecutionDisabled: true,
+          effectiveTrustedEpochAvailable: false,
+          financialSwitchesDisabled: true,
+          nextAction: 'trusted_activation_review',
+          pilotState: 'armed',
+        });
+
+        await client.query(`update app.feature_switches
+          set settings = settings || '{"unexpected":true}'::jsonb
+          where feature_key = 'private_live_deposit_pilot'`);
+        const changed = await client.query<{ readonly readiness: Record<string, unknown> }>(
+          'select app.get_owner_companion_execution_readiness($1::uuid) as readiness',
+          [getOwnerAuthUserId()],
+        );
+        expect(changed.rows[0]?.readiness).toMatchObject({
+          activationAvailable: false,
+          financialSwitchesDisabled: false,
+          nextAction: 'safety_review',
+        });
       } finally {
         await client.query('rollback');
       }

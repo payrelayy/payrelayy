@@ -9797,6 +9797,7 @@ registerStoppedPilotPaidExecutionReviewSqlTests(
 registerOwnerCompanionExecutionReadinessSqlTests(
   () => client,
   () => ownerAuthUserId,
+  () => ownerAdminId,
 );
 registerCompanionExecutionActivationRequestSqlTests(
   () => client,

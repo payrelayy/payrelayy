@@ -1,0 +1,153 @@
+name: Review one emergency-stopped paid job
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type REVIEW ONE EMERGENCY-STOPPED PAID JOB - NO CREDIT OR REFUND
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-emergency-stopped-paid-review
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Validate the one-use review request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Require exact main, target, and operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_OPERATION" == \
+             'REVIEW ONE EMERGENCY-STOPPED PAID JOB - NO CREDIT OR REFUND' ]]
+
+  review:
+    name: Preserve payment and cancel only its untouched queue item
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Review one untouched paid job without credit or refund
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/production-emergency-stopped-paid-review"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == \
+                    "$RUNNER_TEMP/production-emergency-stopped-paid-review" && \
+                  -d "$protected" && ! -L "$protected" && \
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              find "$protected" -mindepth 1 -maxdepth 1 -type f -delete
+              rmdir -- "$protected"
+            else
+              echo '::error::The protected runner directory failed its cleanup boundary.' >&2
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          before="$(timeout --signal=TERM --kill-after=5s 30s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-companion-execution-activation-status.sql)"
+          jq -e '
+            .readOnly and .identifiersRedacted and .readinessOnly and
+            .pilotState == "stopped" and .pilotStopReason == "execution_uncertainty" and
+            .nextAction == "paid_stopped_pilot_review" and
+            .openJobs == 1 and .untouchedQueuedJobs == 1 and .latestPilotJobs == 1 and
+            .openExecutionReviewCases == 0 and .stoppedPilotUntouchedJob and
+            .allFinancialSwitchesDisabled and .noMoneySwitchBoundary and
+            .companionExecutionControlDisabled and .executionCapabilityDormant and
+            .companionExecutionRecords == 0 and (.effectiveTrustedEpochAvailable | not)
+          ' <<<"$before" >/dev/null
+
+          result="$(timeout --signal=TERM --kill-after=5s 30s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-review-emergency-stopped-paid-job.sql)"
+          [[ "$result" == 'review_recorded' ]]
+
+          after="$(timeout --signal=TERM --kill-after=5s 30s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-companion-execution-activation-status.sql)"
+          jq -e '
+            .readOnly and .identifiersRedacted and .readinessOnly and
+            .pilotState == "stopped" and .pilotStopReason == "execution_uncertainty" and
+            .nextAction == "customer_resolution_pending" and
+            .openJobs == 0 and .untouchedQueuedJobs == 0 and
+            .openExecutionReviewCases == 1 and .customerResolutionPending and
+            .allFinancialSwitchesDisabled and .noMoneySwitchBoundary and
+            .companionExecutionControlDisabled and .executionCapabilityDormant and
+            .companionExecutionRecords == 0 and (.effectiveTrustedEpochAvailable | not)
+          ' <<<"$after" >/dev/null
+
+          echo '::notice::One untouched paid job moved to protected customer review; no credit, refund, or execution was performed.'

@@ -149,9 +149,12 @@ jobs:
           export PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt"
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGPORT=5432
 
+          stage='release_view'
           release_info="$(gh release view "$PRODUCTION_COMPANION_RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)"
+          stage='release_tag_ref'
           tag_info="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PRODUCTION_COMPANION_RELEASE_TAG")"
+          stage='release_tag_peel'
           release_sha=''
           for depth in 1 2 3; do
             object_type="$(jq -r '.object.type' <<<"$tag_info")"
@@ -166,6 +169,7 @@ jobs:
           done
           [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
           archive_name="FetanAgent-Windows-Companion-${release_sha:0:12}.zip"
+          stage='release_asset_manifest'
           jq -e --arg tag "$PRODUCTION_COMPANION_RELEASE_TAG" --arg archive "$archive_name" '
             .tagName == $tag and .isDraft == false and .isPrerelease == false and
             (.assets | length) == 4 and
@@ -174,16 +178,22 @@ jobs:
                 "FetanAgent-Windows-Companion.zip",
                 "FetanAgent-Windows-Companion.zip.sha256"] | sort)
           ' <<<"$release_info" >/dev/null
+          stage='release_archive_download'
           gh release download "$PRODUCTION_COMPANION_RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" --pattern "$archive_name" \
             --output "$protected/$archive_name" >/dev/null
+          stage='release_checksum_download'
           gh release download "$PRODUCTION_COMPANION_RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" --pattern "$archive_name.sha256" \
             --output "$protected/$archive_name.sha256" >/dev/null
+          stage='release_archive_hash'
           archive_hash="$(sha256sum "$protected/$archive_name" | cut -d' ' -f1)"
           archive_digest="sha256:$archive_hash"
+          stage='release_named_digest'
           [[ "$(jq -r --arg name "$archive_name" '.assets[] | select(.name == $name) | .digest' <<<"$release_info")" == "$archive_digest" ]]
+          stage='release_stable_digest'
           [[ "$(jq -r '.assets[] | select(.name == "FetanAgent-Windows-Companion.zip") | .digest' <<<"$release_info")" == "$archive_digest" ]]
+          stage='release_checksum_text'
           [[ "$(<"$protected/$archive_name.sha256")" == "$archive_hash  $archive_name" ]]
           stage='published_release_attestation'
           gh attestation verify "$protected/$archive_name" \

@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, randomUUID, verify } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, sep } from 'node:path';
 
@@ -89,10 +89,13 @@ afterEach(async () => {
 });
 
 async function fixture(): Promise<GuardedCompanionHandoffPublicationInputs> {
-  const root = await mkdtemp(resolve(tmpdir(), 'fetanagent-handoff-publication-'));
+  // Hosted Windows runners may expose the temp directory through a junction.
+  // Production requires canonical paths, so exercise the same contract here.
+  const root = await realpath(await mkdtemp(resolve(tmpdir(), 'fetanagent-handoff-publication-')));
   roots.push(root);
-  const dataRoot = resolve(root, 'data');
-  await mkdir(resolve(dataRoot, 'execution-v2'), { recursive: true });
+  const createdDataRoot = resolve(root, 'data');
+  await mkdir(resolve(createdDataRoot, 'execution-v2'), { recursive: true });
+  const dataRoot = await realpath(createdDataRoot);
   const binding = {
     request,
     currentIdentity: {

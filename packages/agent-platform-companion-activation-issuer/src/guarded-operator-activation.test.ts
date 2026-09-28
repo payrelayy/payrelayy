@@ -265,6 +265,27 @@ describe('internal protected operator composition', () => {
     expect(state.lock.release).toHaveBeenCalledTimes(1);
   });
 
+  it('closes the protected remote session when the lifecycle fails', async () => {
+    const state = fixture();
+    const { administrator: _discarded, ...input } = state.input;
+    const remote = {
+      backendPid: 499,
+      lost: new Promise<never>(() => undefined),
+      execute: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+    state.runLifecycle.mockRejectedValueOnce(new Error('private lifecycle detail'));
+    await expect(
+      runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+        input,
+        remote,
+        state.adapters,
+      ),
+    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    expect(remote.close).toHaveBeenCalledTimes(1);
+    expect(state.lock.release).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed if the remote session cannot be confirmed closed', async () => {
     const state = fixture();
     const { administrator: _discarded, ...input } = state.input;

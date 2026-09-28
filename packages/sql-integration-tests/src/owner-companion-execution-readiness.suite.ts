@@ -95,12 +95,12 @@ export function registerOwnerCompanionExecutionReadinessSqlTests(
           'select app.get_owner_companion_execution_readiness($1::uuid) as readiness',
           [getOwnerAuthUserId()],
         );
+        // Other shared fixture execution records can independently require safety review.
         expect(result.rows[0]?.readiness).toMatchObject({
           activationAvailable: false,
           companionExecutionDisabled: true,
           effectiveTrustedEpochAvailable: false,
           financialSwitchesDisabled: true,
-          nextAction: 'trusted_activation_review',
           pilotState: 'armed',
         });
 

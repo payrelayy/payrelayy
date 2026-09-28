@@ -1,9 +1,10 @@
 {
   "name": "@fetanagent/windows-companion",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/agent-platform-companion-activation-issuer": "workspace:*",
     "@fetanagent/agent-platform-companion-contracts": "workspace:*",
     "@fetanagent/agent-platform-companion-execution-contracts": "workspace:*",
     "@fetanagent/agent-platform-kemerbet": "workspace:*",

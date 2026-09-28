@@ -1,0 +1,206 @@
+import { isIP } from 'node:net';
+import { win32 } from 'node:path';
+
+import { runGuardedOperatorActivationOverSsh } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
+import type { ProtectedOperatorSshConnection } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
+
+import {
+  loadCompanionDeviceSigningRuntime,
+  type CompanionDeviceSigningRuntime,
+} from './device-enrollment.js';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const REQUEST_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const TAG = /^windows-companion-v[A-Za-z0-9._-]+$/u;
+const MAX_DOCUMENT_BYTES = 8 * 1_024;
+
+export interface OneJobOperatorDocument {
+  readonly version: 1;
+  readonly requestKey: string;
+  readonly actorAuthUserId: string;
+  readonly releaseTag: string;
+  readonly archivePath: string;
+  readonly checksumPath: string;
+  readonly verifierScriptPath: string;
+  readonly powershellExecutable: string;
+  readonly processVerifierScriptPath: string;
+  readonly connection: ProtectedOperatorSshConnection;
+}
+
+export interface OneJobOperatorContext {
+  readonly dataRoot: string;
+  readonly installationRoot: string;
+  readonly windowsEnvironment: NodeJS.ProcessEnv;
+  readonly trustedNow: () => Date;
+  readonly signal?: AbortSignal;
+}
+
+interface OneJobOperatorAdapters {
+  loadDevice(input: { readonly dataRoot: string }): Promise<CompanionDeviceSigningRuntime>;
+  activate: typeof runGuardedOperatorActivationOverSsh;
+}
+
+const productionAdapters: OneJobOperatorAdapters = {
+  loadDevice: loadCompanionDeviceSigningRuntime,
+  activate: runGuardedOperatorActivationOverSsh,
+};
+
+export class OneJobOperatorUnavailableError extends Error {
+  readonly requiresIndependentStopAndReconciliation = true;
+
+  constructor() {
+    super('The one-job operator is unavailable; reconcile before another request.');
+    this.name = 'OneJobOperatorUnavailableError';
+  }
+}
+
+function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== [...keys].sort().join(',')
+  )
+    throw new OneJobOperatorUnavailableError();
+  return value as Record<string, unknown>;
+}
+
+function canonicalWindowsPath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 3 &&
+    value.length <= 260 &&
+    !/[\u0000-\u001f\u007f]/u.test(value) &&
+    /^[A-Za-z]:\\/u.test(value) &&
+    win32.isAbsolute(value) &&
+    win32.normalize(value) === value
+  );
+}
+
+/** Strict, identifier-silent input for one already prepared Owner-approved job. */
+export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocument {
+  try {
+    if (
+      typeof text !== 'string' ||
+      Buffer.byteLength(text, 'utf8') < 2 ||
+      Buffer.byteLength(text, 'utf8') > MAX_DOCUMENT_BYTES
+    )
+      throw new Error();
+    const value = record(JSON.parse(text) as unknown, [
+      'version',
+      'requestKey',
+      'actorAuthUserId',
+      'releaseTag',
+      'archivePath',
+      'checksumPath',
+      'verifierScriptPath',
+      'powershellExecutable',
+      'processVerifierScriptPath',
+      'connection',
+    ]);
+    const connection = record(value.connection, [
+      'identityFile',
+      'knownHostsFile',
+      'remoteHostIpv4',
+      'remoteUser',
+      'remoteSshPort',
+      'remoteLoopbackPort',
+    ]);
+    if (
+      value.version !== 1 ||
+      typeof value.requestKey !== 'string' ||
+      !REQUEST_KEY.test(value.requestKey) ||
+      typeof value.actorAuthUserId !== 'string' ||
+      !UUID.test(value.actorAuthUserId) ||
+      typeof value.releaseTag !== 'string' ||
+      !TAG.test(value.releaseTag) ||
+      !canonicalWindowsPath(value.archivePath) ||
+      !canonicalWindowsPath(value.checksumPath) ||
+      !canonicalWindowsPath(value.verifierScriptPath) ||
+      !canonicalWindowsPath(value.powershellExecutable) ||
+      !canonicalWindowsPath(value.processVerifierScriptPath) ||
+      !canonicalWindowsPath(connection.identityFile) ||
+      !canonicalWindowsPath(connection.knownHostsFile) ||
+      typeof connection.remoteHostIpv4 !== 'string' ||
+      isIP(connection.remoteHostIpv4) !== 4 ||
+      connection.remoteUser !== 'fetanagent-operator' ||
+      !Number.isInteger(connection.remoteSshPort) ||
+      (connection.remoteSshPort as number) < 1 ||
+      (connection.remoteSshPort as number) > 65535 ||
+      connection.remoteLoopbackPort !== 743
+    )
+      throw new Error();
+    return Object.freeze({
+      version: 1,
+      requestKey: value.requestKey,
+      actorAuthUserId: value.actorAuthUserId,
+      releaseTag: value.releaseTag,
+      archivePath: value.archivePath,
+      checksumPath: value.checksumPath,
+      verifierScriptPath: value.verifierScriptPath,
+      powershellExecutable: value.powershellExecutable,
+      processVerifierScriptPath: value.processVerifierScriptPath,
+      connection: Object.freeze({
+        identityFile: connection.identityFile,
+        knownHostsFile: connection.knownHostsFile,
+        remoteHostIpv4: connection.remoteHostIpv4,
+        remoteUser: connection.remoteUser,
+        remoteSshPort: connection.remoteSshPort,
+        remoteLoopbackPort: connection.remoteLoopbackPort,
+      }) as ProtectedOperatorSshConnection,
+    });
+  } catch {
+    throw new OneJobOperatorUnavailableError();
+  }
+}
+
+/** Executes no lookup, queue lease, or provider action itself; the guarded child owns one job. */
+export async function runOneJobOperatorWithAdapters(
+  document: OneJobOperatorDocument,
+  context: OneJobOperatorContext,
+  adapters: OneJobOperatorAdapters,
+): Promise<'confirmed' | 'review_required'> {
+  try {
+    if (
+      !context ||
+      context.signal?.aborted ||
+      !canonicalWindowsPath(context.dataRoot) ||
+      !canonicalWindowsPath(context.installationRoot) ||
+      typeof context.trustedNow !== 'function'
+    )
+      throw new Error();
+    const device = await adapters.loadDevice({ dataRoot: context.dataRoot });
+    if (context.signal?.aborted) throw new Error();
+    return await adapters.activate(
+      {
+        requestKey: document.requestKey,
+        actorAuthUserId: document.actorAuthUserId,
+        releaseInputs: {
+          releaseTag: document.releaseTag,
+          archivePath: document.archivePath,
+          checksumPath: document.checksumPath,
+          installationRoot: context.installationRoot,
+          verifierScriptPath: document.verifierScriptPath,
+          powershellExecutable: document.powershellExecutable,
+        },
+        dataRoot: context.dataRoot,
+        processVerifierScriptPath: document.processVerifierScriptPath,
+        windowsEnvironment: context.windowsEnvironment,
+        trustedNow: context.trustedNow,
+        ...(context.signal ? { signal: context.signal } : {}),
+      },
+      device,
+      document.connection,
+    );
+  } catch {
+    throw new OneJobOperatorUnavailableError();
+  }
+}
+
+export function runOneJobOperator(
+  document: OneJobOperatorDocument,
+  context: OneJobOperatorContext,
+): Promise<'confirmed' | 'review_required'> {
+  if (process.platform !== 'win32') throw new OneJobOperatorUnavailableError();
+  return runOneJobOperatorWithAdapters(document, context, productionAdapters);
+}

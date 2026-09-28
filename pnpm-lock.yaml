@@ -238,6 +238,9 @@ importers:
 
   apps/windows-companion:
     dependencies:
+      '@fetanagent/agent-platform-companion-activation-issuer':
+        specifier: workspace:*
+        version: link:../../packages/agent-platform-companion-activation-issuer
       '@fetanagent/agent-platform-companion-contracts':
         specifier: workspace:*
         version: link:../../packages/agent-platform-companion-contracts

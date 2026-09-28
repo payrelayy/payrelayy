@@ -31,7 +31,7 @@ try {
   if ($LASTEXITCODE -ne 0 -or $checkedOutSha -ne $ReleaseSha) {
     throw 'The release SHA does not match the checked-out source.'
   }
-  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-contracts packages/agent-platform-companion-execution-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1 scripts/test-windows-companion-pairing-dialog.ps1
+  git diff --quiet HEAD -- apps/windows-companion packages/agent-platform-companion-activation-issuer packages/agent-platform-companion-contracts packages/agent-platform-companion-execution-contracts packages/agent-platform-contracts packages/agent-platform-kemerbet pnpm-lock.yaml scripts/build-windows-companion-package.ps1 scripts/test-windows-companion-pairing-dialog.ps1
   if ($LASTEXITCODE -ne 0) { throw 'Release inputs contain uncommitted changes.' }
 
   pnpm --filter '@fetanagent/windows-companion...' run build
@@ -127,7 +127,7 @@ import { realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = realpathSync(process.cwd()) + sep;
-for (const name of ['@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js']) {
+for (const name of ['@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation', '@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js', './dist/one-job-operator-cli.js']) {
   const url = import.meta.resolve(name);
   assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
   await import(url);

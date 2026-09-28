@@ -53,30 +53,37 @@ jobs:
           [[ "$CONFIRMED_OPERATION" == 'DIAGNOSE COMPANION OPERATOR HOST NETWORK' ]]
           node infra/operations/require-production-ci.mjs
 
-      - name: Probe DNS, TCP, and PostgreSQL TLS without credentials or SQL
+      - name: Probe transport and exact read-only database boundary
         shell: bash
         env:
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -euo pipefail
           umask 077
           [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
           [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
-            -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+            -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$SUPABASE_DB_PASSWORD" ]]
           direct_host="$(sed -nE "s/^const DIRECT_HOST = '([^']+)';$/\1/p" \
             packages/agent-platform-companion-operator-host/src/launch-document.ts)"
           [[ "$direct_host" =~ ^db\.[a-z0-9]{20}\.supabase\.co$ ]]
           protected="$RUNNER_TEMP/production-companion-operator-host-network"
           install -d -m 0700 "$protected"
+          tunnel_pid=''
           cleanup() {
             local status=$?
             trap - EXIT
+            if [[ -n "$tunnel_pid" ]]; then
+              kill "$tunnel_pid" 2>/dev/null || true
+              wait "$tunnel_pid" 2>/dev/null || true
+            fi
             if [[ -d "$protected" && ! -L "$protected" &&
                   "$(realpath -- "$protected")" == "$protected" ]]; then
-              rm -f -- "$protected/deploy-key" "$protected/known-hosts"
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts" \
+                "$protected/supabase-ca.crt" "$protected/psql-stderr"
               rmdir -- "$protected" || status=1
             else
               status=1
@@ -86,7 +93,8 @@ jobs:
           trap cleanup EXIT
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
-          chmod 0600 "$protected/deploy-key" "$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
@@ -110,4 +118,45 @@ jobs:
           grep -Eq '^direct_tls=(verified|not_attempted|not_offered|certificate_rejected|handshake_failed|timeout|transport_or_ca_failure)$' <<<"$result"
           printf '%s\n' "$result"
           printf '%s\n' "$result" >>"$GITHUB_STEP_SUMMARY"
+          command -v psql >/dev/null
+          [[ -z "$(ss -H -ltn '( sport = :55432 )')" ]]
+          ssh "${ssh_opts[@]}" -o ExitOnForwardFailure=yes -N \
+            -L "127.0.0.1:55432:$direct_host:5432" \
+            "fetanagent-admin@$PRODUCTION_VM_HOST" 2>/dev/null &
+          tunnel_pid=$!
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            [[ -n "$(ss -H -ltn '( sport = :55432 )')" ]] && break
+            kill -0 "$tunnel_pid" 2>/dev/null || break
+            sleep 0.2
+          done
+          db_result='tunnel_unavailable'
+          if kill -0 "$tunnel_pid" 2>/dev/null &&
+             [[ -n "$(ss -H -ltn '( sport = :55432 )')" ]]; then
+            probe_sql="select case when session_user = 'postgres'
+              and current_user = 'postgres'
+              and not pg_catalog.pg_is_in_recovery()
+              and (select ssl from pg_catalog.pg_stat_ssl where pid = pg_catalog.pg_backend_pid())
+              then 1 else 0 end"
+            set +e
+            probe_output="$(PGHOST="$direct_host" PGHOSTADDR=127.0.0.1 PGPORT=55432 \
+              PGUSER=postgres PGDATABASE=postgres PGPASSWORD="$SUPABASE_DB_PASSWORD" \
+              PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt" \
+              PGCONNECT_TIMEOUT=5 PGOPTIONS='-c default_transaction_read_only=on' \
+              timeout 20s psql -X -q -A -t -c "$probe_sql" 2>"$protected/psql-stderr")"
+            probe_status=$?
+            set -e
+            if [[ "$probe_status" -eq 0 && "$probe_output" == '1' ]]; then
+              db_result='ready'
+            elif [[ "$probe_status" -eq 0 ]]; then
+              db_result='boundary_rejected'
+            elif grep -qi 'password authentication failed' "$protected/psql-stderr"; then
+              db_result='authentication_rejected'
+            elif grep -Eqi 'certificate verify failed|certificate validation' "$protected/psql-stderr"; then
+              db_result='certificate_rejected'
+            else
+              db_result='connection_or_client_unavailable'
+            fi
+          fi
+          printf 'direct_db_probe=%s\n' "$db_result"
+          printf 'direct_db_probe=%s\n' "$db_result" >>"$GITHUB_STEP_SUMMARY"
           echo 'No database credential, SQL, operator request, pilot, queue job, financial switch, or production service was changed.' >>"$GITHUB_STEP_SUMMARY"

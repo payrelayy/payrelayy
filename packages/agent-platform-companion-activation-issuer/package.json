@@ -72,6 +72,10 @@
       "types": "./dist/protected-operator-query-host.d.ts",
       "default": "./dist/protected-operator-query-host.js"
     },
+    "./guarded-operator-ssh-activation": {
+      "types": "./dist/guarded-operator-ssh-activation.d.ts",
+      "default": "./dist/guarded-operator-ssh-activation.js"
+    },
     "./guarded-operator-query-client": {
       "types": "./dist/guarded-operator-query-client.d.ts",
       "default": "./dist/guarded-operator-query-client.js"

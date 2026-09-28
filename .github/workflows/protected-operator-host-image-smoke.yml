@@ -26,6 +26,16 @@ jobs:
         shell: bash
         run: bash -n infra/operations/fetanagent-production-operator-host-launch.sh
 
+      - name: Check exact sudo contract and launch renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$(sha256sum infra/operations/fetanagent-production-operator-host-launch.sh | cut -d' ' -f1)"
+          grep -Fx "fetanagent-admin ALL=(root) NOPASSWD: sha256:$digest /usr/local/sbin/fetanagent-production-operator-host-launch *" \
+            infra/operations/fetanagent-production-operator-host.sudoers
+          sudo visudo -cf infra/operations/fetanagent-production-operator-host.sudoers
+          node --test infra/operations/render-production-operator-launch.test.mjs
+
       - name: Build credential-free one-shot image
         shell: bash
         run: |

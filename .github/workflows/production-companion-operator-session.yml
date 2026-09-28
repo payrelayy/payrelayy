@@ -1,0 +1,150 @@
+name: One-use production companion operator session
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+      confirm_operation:
+        description: Type OPEN ONE OWNER-APPROVED COMPANION SESSION
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-companion-operator-session
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_OPERATOR_IMAGE_REVISION: 748515fa05ed36587d5d19955820c388059e7b82
+  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.12
+
+jobs:
+  validate:
+    name: Require exact reviewed main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Refuse another revision or operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == 'OPEN ONE OWNER-APPROVED COMPANION SESSION' ]]
+
+  session:
+    name: Open one protected session and independently stop it
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 135
+    environment: production
+    steps:
+      - name: Check out exact main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Recheck one-use request, open and stop protected host
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY: ${{ secrets.PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGDATABASE: postgres
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          [[ "$PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
+          protected="$RUNNER_TEMP/production-companion-operator-session"
+          install -d -m 0700 "$protected"
+          attempted=0
+          remote="fetanagent-admin@$PRODUCTION_VM_HOST"
+          launcher='/usr/local/sbin/fetanagent-production-operator-host-launch'
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$attempted" == 1 ]]; then
+              timeout --signal=TERM --kill-after=5s 45s ssh "${ssh_opts[@]}" "$remote" \
+                "sudo -n '$launcher' stop '$PRODUCTION_OPERATOR_IMAGE_REVISION'" >/dev/null 2>&1 || {
+                  echo '::error::The protected operator host stop needs reconciliation.' >&2
+                  status=1
+                }
+              PGPORT=5432 PGOPTIONS='' PGSSLROOTCERT="$protected/supabase-ca.crt" \
+                PGPASSWORD="$SUPABASE_DB_PASSWORD" PRODUCTION_PROJECT_REF="$PRODUCTION_PROJECT_REF" \
+                timeout --signal=TERM --kill-after=5s 105s psql -X --quiet \
+                  --file=infra/sql/production-companion-execution-emergency-disable.sql \
+                  >/dev/null 2>&1 || {
+                    echo '::error::Independent companion credential revocation needs reconciliation.' >&2
+                    status=1
+                  }
+            fi
+            if [[ "$protected" == "$RUNNER_TEMP/production-companion-operator-session" && \
+                  -d "$protected" && ! -L "$protected" && \
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt"
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGPORT=5432
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          ready="$(timeout --signal=TERM --kill-after=5s 30s psql -X --quiet --tuples-only \
+            --no-align --file=infra/sql/production-companion-operator-session-preflight.sql)"
+          if [[ "$ready" != 'ready' ]]; then
+            echo '::error::The one-use request or production execution boundary is not ready.' >&2
+            exit 1
+          fi
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$launcher' inspect '$PRODUCTION_OPERATOR_IMAGE_REVISION'" \
+            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+
+          attempted=1
+          node infra/operations/render-production-operator-launch.mjs | \
+            timeout --signal=TERM --kill-after=10s 126m ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$launcher' run '$PRODUCTION_OPERATOR_IMAGE_REVISION'"
+          echo '::notice::The one-use protected operator session ended; independent stop and revocation are running.'

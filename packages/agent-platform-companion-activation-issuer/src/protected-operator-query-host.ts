@@ -1,4 +1,10 @@
+import { COMPANION_EXECUTION_HANDOFF_SIGN_PATH } from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import { createProtectedHandoffLoopbackServer } from './protected-handoff-loopback-server.js';
+import type {
+  ProtectedHandoffHttpRequest,
+  ProtectedHandoffHttpResponse,
+} from './protected-handoff-request.js';
 import { createProtectedOperatorQueryRequestHandler } from './protected-operator-query-request.js';
 import {
   createProtectedOperatorQuerySession,
@@ -13,6 +19,10 @@ export interface ProtectedOperatorQueryHostInput extends ProtectedOperatorQueryS
   readonly trustedNoMoneySignerKeyId: string;
   readonly trustedNoMoneySignerPublicKeySpkiDer: Uint8Array;
   readonly trustedNow: () => Date;
+  /** One server-owned signing operation before the finite query session opens. */
+  readonly signHandoff?: (
+    request: ProtectedHandoffHttpRequest,
+  ) => Promise<ProtectedHandoffHttpResponse>;
   /** A caller-owned cancellation, independent of the Windows process. */
   readonly signal?: AbortSignal;
 }
@@ -52,6 +62,9 @@ export async function openProtectedOperatorQueryHostWithPort(
   let responseTimer: NodeJS.Timeout | undefined;
   let resolveStopped!: () => void;
   let rejectStopped!: (error: ProtectedOperatorQueryHostUnavailableError) => void;
+  let signingState: 'pending' | 'succeeded' | 'failed' = input?.signHandoff
+    ? 'pending'
+    : 'succeeded';
   const stopped = new Promise<void>((resolve, reject) => {
     resolveStopped = resolve;
     rejectStopped = reject;
@@ -82,6 +95,10 @@ export async function openProtectedOperatorQueryHostWithPort(
   const onAbort = (): void => {
     void stop().catch(() => undefined);
   };
+  const retireAfterResponse = (): void => {
+    if (!responseTimer)
+      responseTimer = setTimeout(() => void stop().catch(() => undefined), RESPONSE_DRAIN_MS);
+  };
 
   try {
     if (
@@ -111,10 +128,34 @@ export async function openProtectedOperatorQueryHostWithPort(
       trustedNow: input.trustedNow,
     });
     server = createProtectedHandoffLoopbackServer(async (request) => {
+      if (request.path === COMPANION_EXECUTION_HANDOFF_SIGN_PATH) {
+        if (signingState !== 'pending' || !input.signHandoff) {
+          retireAfterResponse();
+          throw new Error();
+        }
+        // A concurrent command cannot overtake the one-use signing response.
+        signingState = 'failed';
+        try {
+          const signed = await input.signHandoff(request);
+          if (signed.statusCode !== 200) {
+            retireAfterResponse();
+            return signed;
+          }
+          signingState = 'succeeded';
+          return signed;
+        } catch {
+          retireAfterResponse();
+          throw new Error();
+        }
+      }
+      if (signingState !== 'succeeded') {
+        retireAfterResponse();
+        throw new Error();
+      }
       const response = await handler(request);
       if (sessionCloseRequested && !responseTimer) {
         // Let the loopback HTTP adapter write the terminal response first.
-        responseTimer = setTimeout(() => void stop().catch(() => undefined), RESPONSE_DRAIN_MS);
+        retireAfterResponse();
       }
       return response;
     }, port);

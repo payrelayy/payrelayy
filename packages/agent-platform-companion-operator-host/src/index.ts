@@ -1,21 +1,25 @@
-import { createHash } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, type KeyObject } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { openProtectedOperatorQueryHost } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-host';
+import { createProtectedHandoffRequestHandler } from '@fetanagent/agent-platform-companion-activation-issuer/protected-handoff-request';
+import { PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import pg from 'pg';
 
 import {
   parseOperatorHostLaunchDocument,
   type OperatorHostLaunchDocument,
 } from './launch-document.js';
+import { verifyPublishedCompanionRelease } from './release-verification.js';
 
 const { Client } = pg;
 const PROJECT_REF = 'xzztugbgtulptnbpoelr';
 const SIGNER_KEY_ID = 'companion-server-production-v1';
 const EMERGENCY_SQL = '/workspace/infra/sql/production-companion-execution-emergency-disable.sql';
+const EXECUTION_SIGNER_FILE = '/run/secrets/companion_execution_signer.pkcs8.der';
 const MAX_INPUT_BYTES = 16 * 1024;
 const PROBE_SQL = `select case when session_user = 'postgres'
   and current_user = 'postgres'
@@ -128,6 +132,32 @@ export function signerPublicKey(rows: readonly Record<string, unknown>[]): Uint8
   return key;
 }
 
+export function checkedExecutionSignerPrivateKey(
+  raw: Buffer,
+  expectedPublicKeyDigest = PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+): KeyObject {
+  const key = createPrivateKey({ key: raw, format: 'der', type: 'pkcs8' });
+  const publicKey = createPublicKey(key).export({ format: 'der', type: 'spki' });
+  if (
+    key.asymmetricKeyType !== 'ec' ||
+    `sha256:${createHash('sha256').update(publicKey).digest('hex')}` !== expectedPublicKeyDigest
+  )
+    throw new Error();
+  return key;
+}
+
+async function executionSignerPrivateKey(): Promise<KeyObject> {
+  const stat = await lstat(EXECUTION_SIGNER_FILE);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 100 || stat.size > 4096)
+    throw new Error();
+  const raw = await readFile(EXECUTION_SIGNER_FILE);
+  try {
+    return checkedExecutionSignerPrivateKey(raw);
+  } finally {
+    raw.fill(0);
+  }
+}
+
 /** A container-private, one-shot process: no service unit and no credential at rest. */
 export async function runOperatorHost(document: OperatorHostLaunchDocument): Promise<void> {
   const scratch = await mkdtemp(join(tmpdir(), 'fetanagent-operator-host-'));
@@ -164,6 +194,7 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
       throw new Error();
     const signer = await client.query(SIGNER_SQL, [SIGNER_KEY_ID]);
     const publicKey = signerPublicKey(signer.rows);
+    const executionSigner = await executionSignerPrivateKey();
     const administrator = {
       processID: backendPid as number,
       async query(sql: string, values: unknown[]) {
@@ -185,6 +216,15 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
       trustedNoMoneySignerKeyId: SIGNER_KEY_ID,
       trustedNoMoneySignerPublicKeySpkiDer: publicKey,
       trustedNow: () => new Date(),
+      signHandoff: createProtectedHandoffRequestHandler({
+        administrator,
+        trustedNoMoneySignerKeyId: SIGNER_KEY_ID,
+        trustedNoMoneySignerPublicKeySpkiDer: publicKey,
+        signerPrivateKey: executionSigner,
+        verifyPublishedRelease: (request) =>
+          verifyPublishedCompanionRelease(request, document.releaseTag, () => new Date()),
+        trustedNow: () => new Date(),
+      }),
       signal: controller.signal,
     });
     await host.stopped;

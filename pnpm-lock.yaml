@@ -282,6 +282,9 @@ importers:
       '@fetanagent/agent-platform-companion-activation-issuer':
         specifier: workspace:*
         version: link:../agent-platform-companion-activation-issuer
+      '@fetanagent/agent-platform-companion-execution-contracts':
+        specifier: workspace:*
+        version: link:../agent-platform-companion-execution-contracts
       pg:
         specifier: 8.22.0
         version: 8.22.0

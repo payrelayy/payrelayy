@@ -4,7 +4,12 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { win32 } from 'node:path';
 
 import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
-import { COMPANION_EXECUTION_OPERATOR_QUERY_PATH } from '@fetanagent/agent-platform-companion-execution-contracts';
+import {
+  COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+  digestCompanionExecutionHandoffSigningContent,
+  type SignedCompanionExecutionActivationHandoff,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import type { GuardedOperatorRemoteSession } from './guarded-operator-query-client.js';
 import {
@@ -17,6 +22,7 @@ const MAX_BODY_BYTES = 16 * 1_024;
 const MAX_HEADERS_BYTES = 8 * 1_024;
 const MAX_RESPONSE_BYTES = MAX_HEADERS_BYTES + MAX_BODY_BYTES + 4;
 const ROUND_TRIP_TIMEOUT_MS = 10_000;
+const SIGN_ROUND_TRIP_TIMEOUT_MS = 40_000;
 const TERMINATION_TIMEOUT_MS = 2_000;
 const RESTRICTED_OPERATOR_USER = 'fetanagent-operator';
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
@@ -108,9 +114,9 @@ function parseResponse(raw: Buffer): unknown {
   return parsed;
 }
 
-function requestHeader(length: number): Buffer {
+function requestHeader(path: string, length: number): Buffer {
   return Buffer.from(
-    `POST ${COMPANION_EXECUTION_OPERATOR_QUERY_PATH} HTTP/1.1\r\n` +
+    `POST ${path} HTTP/1.1\r\n` +
       'Host: 127.0.0.1\r\n' +
       `Accept: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\n` +
       `Content-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\n` +
@@ -174,12 +180,15 @@ function sshArguments(connection: ProtectedOperatorSshConnection): readonly stri
 async function postOverSsh(
   sshExecutable: string,
   connection: ProtectedOperatorSshConnection,
+  path:
+    typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
   body: Buffer,
   spawnChild: SpawnChild,
   windowsRoot: string,
+  timeoutMs = ROUND_TRIP_TIMEOUT_MS,
 ): Promise<unknown> {
   if (body.byteLength < 2 || body.byteLength > MAX_BODY_BYTES) throw new Error();
-  const header = requestHeader(body.byteLength);
+  const header = requestHeader(path, body.byteLength);
   const chunks: Buffer[] = [];
   let child: ChildProcess | undefined;
   let timeout: NodeJS.Timeout | undefined;
@@ -205,10 +214,10 @@ async function postOverSsh(
         failed = true;
         ownedChild.kill();
       };
-      timeout = setTimeout(fail, ROUND_TRIP_TIMEOUT_MS);
+      timeout = setTimeout(fail, timeoutMs);
       terminationTimeout = setTimeout(
         () => reject(new Error()),
-        ROUND_TRIP_TIMEOUT_MS + TERMINATION_TIMEOUT_MS,
+        timeoutMs + TERMINATION_TIMEOUT_MS,
       );
       ownedChild.on('error', fail);
       ownedChild.stdout!.on('error', fail);
@@ -275,11 +284,110 @@ export async function createProtectedOperatorSshRemoteSessionWithSpawn(
     const knownHostsFile = canonicalFile(connection.knownHostsFile, files);
     const checked = Object.freeze({ ...connection, identityFile, knownHostsFile });
     return await createProtectedOperatorRemoteSessionWithPost(device, requestKey, (body) =>
-      postOverSsh(sshExecutable, checked, body, spawnChild, windowsRoot),
+      postOverSsh(
+        sshExecutable,
+        checked,
+        COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+        body,
+        spawnChild,
+        windowsRoot,
+      ),
     );
   } catch {
     throw new ProtectedOperatorSshClientUnavailableError();
   }
+}
+
+/** One signed handoff request over the same pinned SSH transport, before query-session open. */
+export function createProtectedOperatorSshHandoffSignerWithSpawn(
+  device: ProtectedOperatorDeviceSigner,
+  connection: ProtectedOperatorSshConnection,
+  windowsRoot: string,
+  spawnChild: SpawnChild,
+  files: ProtectedOperatorSshFiles = nativeFiles,
+): (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff> {
+  let attempted = false;
+  return async (requestKey) => {
+    try {
+      if (
+        attempted ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestKey)
+      )
+        throw new Error();
+      attempted = true;
+      if (
+        !connection ||
+        !win32.isAbsolute(windowsRoot) ||
+        win32.normalize(windowsRoot) !== windowsRoot ||
+        isIP(connection.remoteHostIpv4) !== 4 ||
+        connection.remoteUser !== RESTRICTED_OPERATOR_USER ||
+        !validPort(connection.remoteSshPort) ||
+        connection.remoteLoopbackPort !== PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT ||
+        /\s/u.test(connection.knownHostsFile)
+      )
+        throw new Error();
+      const sshExecutable = canonicalFile(
+        win32.join(windowsRoot, 'System32', 'OpenSSH', 'ssh.exe'),
+        files,
+      );
+      const checked = Object.freeze({
+        ...connection,
+        identityFile: canonicalFile(connection.identityFile, files),
+        knownHostsFile: canonicalFile(connection.knownHostsFile, files),
+      });
+      const digest = digestCompanionExecutionHandoffSigningContent(
+        requestKey,
+        device.certificate.bodyDigest,
+      );
+      if (!digest) throw new Error();
+      const httpRequest = device.createSignedHttpRequest(
+        COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+        digest,
+      );
+      const body = Buffer.from(
+        JSON.stringify({ requestKey, certificate: device.certificate, httpRequest }),
+        'utf8',
+      );
+      try {
+        const reply = await postOverSsh(
+          sshExecutable,
+          checked,
+          COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+          body,
+          spawnChild,
+          windowsRoot,
+          SIGN_ROUND_TRIP_TIMEOUT_MS,
+        );
+        if (
+          !reply ||
+          typeof reply !== 'object' ||
+          Array.isArray(reply) ||
+          Object.keys(reply).sort().join(',') !== 'body,signature,signerKeyId'
+        )
+          throw new Error();
+        // The publisher checks the exact body and signature before writing a handoff.
+        return reply as SignedCompanionExecutionActivationHandoff;
+      } finally {
+        body.fill(0);
+      }
+    } catch {
+      throw new ProtectedOperatorSshClientUnavailableError();
+    }
+  };
+}
+
+export function createProtectedOperatorSshHandoffSigner(
+  device: ProtectedOperatorDeviceSigner,
+  connection: ProtectedOperatorSshConnection,
+): (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff> {
+  if (process.platform !== 'win32' || !process.env.SystemRoot)
+    throw new ProtectedOperatorSshClientUnavailableError();
+  return createProtectedOperatorSshHandoffSignerWithSpawn(
+    device,
+    connection,
+    process.env.SystemRoot,
+    spawn,
+  );
 }
 
 /** No local forwarding port, ambient SSH config, agent key, shell, or reusable credential. */

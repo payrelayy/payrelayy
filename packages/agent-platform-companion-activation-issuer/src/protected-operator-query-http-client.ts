@@ -5,7 +5,10 @@ import {
   type SignedCompanionEnrollmentCertificate,
   type SignedCompanionHttpRequest,
 } from '@fetanagent/agent-platform-companion-contracts';
-import { COMPANION_EXECUTION_OPERATOR_QUERY_PATH } from '@fetanagent/agent-platform-companion-execution-contracts';
+import {
+  COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+} from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import type { GuardedOperatorRemoteSession } from './guarded-operator-query-client.js';
 import type { ProtectedOperatorQueryName } from './protected-operator-query-catalog.js';
@@ -26,7 +29,8 @@ export type ProtectedOperatorPost = (body: Buffer) => Promise<unknown>;
 export interface ProtectedOperatorDeviceSigner {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   createSignedHttpRequest(
-    path: typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+    path:
+      typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
     contentDigest: string,
   ): SignedCompanionHttpRequest;
 }

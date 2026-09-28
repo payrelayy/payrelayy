@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@fetanagent/agent-platform-companion-activation-issuer": "workspace:*",
+    "@fetanagent/agent-platform-companion-execution-contracts": "workspace:*",
     "pg": "8.22.0"
   },
   "devDependencies": {

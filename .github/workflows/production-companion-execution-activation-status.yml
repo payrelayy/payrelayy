@@ -132,7 +132,8 @@ jobs:
               .reservationBoundJobs, .latestPilotJobs,
               .companionExecutionRecords] |
               all(type == "number" and . >= 0 and . <= 2)) and
-            ([.allFinancialSwitchesDisabled, .effectiveTrustedEpochAvailable,
+            ([.allFinancialSwitchesDisabled, .noMoneySwitchBoundary,
+              .effectiveTrustedEpochAvailable,
               .companionExecutionControlDisabled, .executionCapabilityDormant,
               .stoppedPilotUntouchedJob, .customerResolutionPending] |
               all(type == "boolean")) and
@@ -149,13 +150,14 @@ jobs:
             cancelledUntouchedJobs, changedJobs,
             totalReservations, openExecutionReviewCases,
             customerResolutionPending, reservationBoundJobs, latestPilotJobs,
-            allFinancialSwitchesDisabled, effectiveTrustedEpochAvailable,
+            allFinancialSwitchesDisabled, noMoneySwitchBoundary,
+            effectiveTrustedEpochAvailable,
             companionExecutionControlDisabled, executionCapabilityDormant,
             companionExecutionRecords, stoppedPilotUntouchedJob, nextAction
           }' <<<"$status" | tee -a "$GITHUB_STEP_SUMMARY"
 
           if ! jq -e '
-            .allFinancialSwitchesDisabled and
+            .noMoneySwitchBoundary and
             .companionExecutionControlDisabled and
             .executionCapabilityDormant and
             .companionExecutionRecords == 0

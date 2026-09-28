@@ -108,7 +108,17 @@ with latest_pilot as materialized (
     pg_catalog.count(*) filter (
       where feature_switch.mode = 'disabled'
         and feature_switch.settings = '{}'::jsonb
-    )::integer as disabled_count
+    )::integer as disabled_count,
+    pg_catalog.count(*) filter (
+      where feature_switch.feature_key <> 'private_live_deposit_pilot'
+        and feature_switch.mode = 'disabled'
+        and feature_switch.settings = '{}'::jsonb
+    )::integer as money_disabled_count,
+    pg_catalog.count(*) filter (
+      where feature_switch.feature_key = 'private_live_deposit_pilot'
+        and feature_switch.mode = 'dry_run'
+        and pg_catalog.jsonb_typeof(feature_switch.settings) = 'object'
+    )::integer as pilot_dry_run_count
   from app.feature_switches feature_switch
   where feature_switch.feature_key in (
     'cbe_birr_authoritative_verification',
@@ -208,6 +218,10 @@ select pg_catalog.jsonb_build_object(
   'latestPilotJobs', least(queue_state.latest_pilot_jobs, 2),
   'allFinancialSwitchesDisabled',
     switch_state.switch_count = 7 and switch_state.disabled_count = 7,
+  'noMoneySwitchBoundary',
+    switch_state.switch_count = 7
+      and switch_state.money_disabled_count = 6
+      and (switch_state.disabled_count = 7 or switch_state.pilot_dry_run_count = 1),
   'effectiveTrustedEpochAvailable', effective_epoch.available,
   'companionExecutionControlDisabled',
     execution_control.control_count = 1 and execution_control.disabled_count = 1,
@@ -221,7 +235,9 @@ select pg_catalog.jsonb_build_object(
       and queue_state.untouched_jobs = 1
       and queue_state.latest_pilot_paid_untouched_jobs = 1,
   'nextAction', case
-    when switch_state.switch_count <> 7 or switch_state.disabled_count <> 7
+    when switch_state.switch_count <> 7
+      or switch_state.money_disabled_count <> 6
+      or (switch_state.disabled_count <> 7 and switch_state.pilot_dry_run_count <> 1)
       or execution_control.control_count <> 1 or execution_control.disabled_count <> 1
       or capability.role_count <> 1 or capability.dormant_role_count <> 1
       or capability.non_admin_members <> 0 or execution_records.total_records <> 0

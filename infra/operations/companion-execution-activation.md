@@ -235,6 +235,10 @@ Run `infra/sql/production-companion-execution-activation-status.sql` with a read
 administrator session to obtain one identifier-free status object. It reports bounded counts and
 categorical states only. It performs no activation or queue mutation. The contract verifier is
 `node infra/verify-production-companion-execution-activation-status.mjs`.
+`allFinancialSwitchesDisabled` means all seven switches, including the private pilot, are
+disabled. An armed `dry_run` pilot makes that field false without enabling payment execution.
+`noMoneySwitchBoundary` accepts only six disabled money-capable switches plus a disabled or
+`dry_run` private pilot switch; the workflow uses this field for its fail-closed no-money check.
 `cancelledUntouchedJobs` distinguishes the protected, never-leased paid job from a queued job;
 `customerResolutionPending` requires the open case, immutable review receipt, retained payment
 lineage, and no execution attempt. Neither field means the customer has been credited or refunded.

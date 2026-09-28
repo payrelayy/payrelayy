@@ -48,6 +48,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 135
     environment: production
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
     steps:
       - name: Check out exact main without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +71,7 @@ jobs:
       - name: Recheck one-use request, open and stop protected host
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
@@ -90,8 +95,10 @@ jobs:
           protected="$RUNNER_TEMP/production-companion-operator-session"
           install -d -m 0700 "$protected"
           attempted=0
+          preparation_started=0
           remote="fetanagent-admin@$PRODUCTION_VM_HOST"
           launcher='/usr/local/sbin/fetanagent-production-operator-host-launch'
+          archive_name=''
           ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$protected/known-hosts")
           cleanup() {
             local status=$?
@@ -102,6 +109,8 @@ jobs:
                   echo '::error::The protected operator host stop needs reconciliation.' >&2
                   status=1
                 }
+            fi
+            if [[ "$preparation_started" == 1 ]]; then
               PGPORT=5432 PGOPTIONS='' PGSSLROOTCERT="$protected/supabase-ca.crt" \
                 PGPASSWORD="$SUPABASE_DB_PASSWORD" PRODUCTION_PROJECT_REF="$PRODUCTION_PROJECT_REF" \
                 timeout --signal=TERM --kill-after=5s 105s psql -X --quiet \
@@ -115,6 +124,9 @@ jobs:
                   -d "$protected" && ! -L "$protected" && \
                   "$(realpath -- "$protected")" == "$protected" ]]; then
               rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+              if [[ "$archive_name" =~ ^FetanAgent-Windows-Companion-[0-9a-f]{12}\.zip$ ]]; then
+                rm -f -- "$protected/$archive_name" "$protected/$archive_name.sha256"
+              fi
               rmdir -- "$protected" || status=1
             else
               status=1
@@ -132,6 +144,64 @@ jobs:
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           export PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt"
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGPORT=5432
+
+          release_info="$(gh release view "$PRODUCTION_COMPANION_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)"
+          tag_info="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PRODUCTION_COMPANION_RELEASE_TAG")"
+          release_sha=''
+          for depth in 1 2 3; do
+            object_type="$(jq -r '.object.type' <<<"$tag_info")"
+            object_sha="$(jq -r '.object.sha' <<<"$tag_info")"
+            [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]]
+            if [[ "$object_type" == 'commit' ]]; then
+              release_sha="$object_sha"
+              break
+            fi
+            [[ "$object_type" == 'tag' ]]
+            tag_info="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+          done
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          archive_name="FetanAgent-Windows-Companion-${release_sha:0:12}.zip"
+          jq -e --arg tag "$PRODUCTION_COMPANION_RELEASE_TAG" --arg archive "$archive_name" '
+            .tagName == $tag and .isDraft == false and .isPrerelease == false and
+            (.assets | length) == 4 and
+            ([.assets[].name] | sort) ==
+              ([$archive, ($archive + ".sha256"),
+                "FetanAgent-Windows-Companion.zip",
+                "FetanAgent-Windows-Companion.zip.sha256"] | sort)
+          ' <<<"$release_info" >/dev/null
+          gh release download "$PRODUCTION_COMPANION_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --pattern "$archive_name" \
+            --output "$protected/$archive_name" >/dev/null
+          gh release download "$PRODUCTION_COMPANION_RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --pattern "$archive_name.sha256" \
+            --output "$protected/$archive_name.sha256" >/dev/null
+          archive_hash="$(sha256sum "$protected/$archive_name" | cut -d' ' -f1)"
+          archive_digest="sha256:$archive_hash"
+          [[ "$(jq -r --arg name "$archive_name" '.assets[] | select(.name == $name) | .digest' <<<"$release_info")" == "$archive_digest" ]]
+          [[ "$(jq -r '.assets[] | select(.name == "FetanAgent-Windows-Companion.zip") | .digest' <<<"$release_info")" == "$archive_digest" ]]
+          [[ "$(<"$protected/$archive_name.sha256")" == "$archive_hash  $archive_name" ]]
+          gh attestation verify "$protected/$archive_name" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/windows-companion-package.yml" \
+            --source-ref "refs/tags/$PRODUCTION_COMPANION_RELEASE_TAG" \
+            --source-digest "$release_sha" --deny-self-hosted-runners \
+            --format json >/dev/null
+          package_root="FetanAgent-Windows-Companion-${release_sha:0:12}"
+          [[ "$(unzip -p "$protected/$archive_name" "$package_root/RELEASE_SHA")" == "$release_sha" ]]
+          tree_digest="$(unzip -p "$protected/$archive_name" "$package_root/INSTALLATION_TREE_SHA256")"
+          [[ "$tree_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          export PRODUCTION_COMPANION_RELEASE_SHA="$release_sha"
+          export PRODUCTION_COMPANION_ARCHIVE_SHA256="$archive_digest"
+          export PRODUCTION_COMPANION_INSTALLATION_TREE_SHA256="$tree_digest"
+          preparation_started=1
+          prepared="$(PGOPTIONS='' timeout --signal=TERM --kill-after=5s 40s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-companion-operator-session-prepare.sql)"
+          if [[ "$prepared" != 'ready' ]]; then
+            echo '::error::The exact one-use activation request could not be prepared.' >&2
+            exit 1
+          fi
           export PGOPTIONS='-c default_transaction_read_only=on'
           ready="$(timeout --signal=TERM --kill-after=5s 30s psql -X --quiet --tuples-only \
             --no-align --file=infra/sql/production-companion-operator-session-preflight.sql)"

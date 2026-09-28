@@ -164,6 +164,16 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
   const caPath = join(scratch, 'database-ca.crt');
   let client: pg.Client | undefined;
   let host: Awaited<ReturnType<typeof openProtectedOperatorQueryHost>> | undefined;
+  let disablePromise: Promise<void> | undefined;
+  const disableDatabase = (): Promise<void> => {
+    disablePromise ??= runPsql('disable', document, caPath).catch((error: unknown) => {
+      // A failed kill-switch attempt may be retried by the exact host-close
+      // path; a successful attempt is never repeated just to close a session.
+      disablePromise = undefined;
+      throw error;
+    });
+    return disablePromise;
+  };
   const controller = new AbortController();
   const onSignal = (): void => controller.abort();
   process.once('SIGINT', onSignal);
@@ -211,7 +221,7 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
     host = await openProtectedOperatorQueryHost({
       administrator,
       requestKey: document.requestKey,
-      disableDatabase: () => runPsql('disable', document, caPath),
+      disableDatabase,
       closeAdministrator: () => client!.end(),
       trustedNoMoneySignerKeyId: SIGNER_KEY_ID,
       trustedNoMoneySignerPublicKeySpkiDer: publicKey,
@@ -235,7 +245,7 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
         await host.stop();
       } catch {
         // If the exact close is uncertain, make one independent stop attempt.
-        await runPsql('disable', document, caPath);
+        await disableDatabase();
       }
     }
     throw new Error('Protected operator host unavailable; reconcile before activation.');

@@ -7,6 +7,7 @@ import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent
 import {
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
   COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
+  COMPANION_EXECUTION_OPERATOR_STOP_PATH,
   digestCompanionExecutionHandoffSigningContent,
   type SignedCompanionExecutionActivationHandoff,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
@@ -23,6 +24,7 @@ const MAX_HEADERS_BYTES = 8 * 1_024;
 const MAX_RESPONSE_BYTES = MAX_HEADERS_BYTES + MAX_BODY_BYTES + 4;
 const ROUND_TRIP_TIMEOUT_MS = 10_000;
 const SIGN_ROUND_TRIP_TIMEOUT_MS = 40_000;
+const STOP_ROUND_TRIP_TIMEOUT_MS = 115_000;
 const TERMINATION_TIMEOUT_MS = 2_000;
 const RESTRICTED_OPERATOR_USER = 'fetanagent-operator';
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
@@ -181,7 +183,9 @@ async function postOverSsh(
   sshExecutable: string,
   connection: ProtectedOperatorSshConnection,
   path:
-    typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+    | typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH
+    | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
+    | typeof COMPANION_EXECUTION_OPERATOR_STOP_PATH,
   body: Buffer,
   spawnChild: SpawnChild,
   windowsRoot: string,
@@ -384,6 +388,88 @@ export function createProtectedOperatorSshHandoffSigner(
     throw new ProtectedOperatorSshClientUnavailableError();
   return createProtectedOperatorSshHandoffSignerWithSpawn(
     device,
+    connection,
+    process.env.SystemRoot,
+    spawn,
+  );
+}
+
+/** Stop financial authority through the host's independent database connection. */
+export function createProtectedOperatorSshEmergencyStopWithSpawn(
+  connection: ProtectedOperatorSshConnection,
+  windowsRoot: string,
+  spawnChild: SpawnChild,
+  files: ProtectedOperatorSshFiles = nativeFiles,
+): (requestKey: string) => Promise<void> {
+  let attemptedKey: string | undefined;
+  let stopPromise: Promise<void> | undefined;
+  return (requestKey) => {
+    if (attemptedKey && attemptedKey !== requestKey)
+      return Promise.reject(new ProtectedOperatorSshClientUnavailableError());
+    if (stopPromise) return stopPromise;
+    attemptedKey = requestKey;
+    stopPromise = (async () => {
+      try {
+        if (
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestKey)
+        )
+          throw new Error();
+        if (
+          !connection ||
+          !win32.isAbsolute(windowsRoot) ||
+          win32.normalize(windowsRoot) !== windowsRoot ||
+          isIP(connection.remoteHostIpv4) !== 4 ||
+          connection.remoteUser !== RESTRICTED_OPERATOR_USER ||
+          !validPort(connection.remoteSshPort) ||
+          connection.remoteLoopbackPort !== PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT ||
+          /\s/u.test(connection.knownHostsFile)
+        )
+          throw new Error();
+        const sshExecutable = canonicalFile(
+          win32.join(windowsRoot, 'System32', 'OpenSSH', 'ssh.exe'),
+          files,
+        );
+        const checked = Object.freeze({
+          ...connection,
+          identityFile: canonicalFile(connection.identityFile, files),
+          knownHostsFile: canonicalFile(connection.knownHostsFile, files),
+        });
+        const body = Buffer.from(JSON.stringify({ requestKey }), 'utf8');
+        try {
+          const reply = await postOverSsh(
+            sshExecutable,
+            checked,
+            COMPANION_EXECUTION_OPERATOR_STOP_PATH,
+            body,
+            spawnChild,
+            windowsRoot,
+            STOP_ROUND_TRIP_TIMEOUT_MS,
+          );
+          if (
+            !reply ||
+            typeof reply !== 'object' ||
+            Array.isArray(reply) ||
+            Object.keys(reply).join(',') !== 'stopped' ||
+            (reply as Record<string, unknown>)['stopped'] !== true
+          )
+            throw new Error();
+        } finally {
+          body.fill(0);
+        }
+      } catch {
+        throw new ProtectedOperatorSshClientUnavailableError();
+      }
+    })();
+    return stopPromise;
+  };
+}
+
+export function createProtectedOperatorSshEmergencyStop(
+  connection: ProtectedOperatorSshConnection,
+): (requestKey: string) => Promise<void> {
+  if (process.platform !== 'win32' || !process.env.SystemRoot)
+    throw new ProtectedOperatorSshClientUnavailableError();
+  return createProtectedOperatorSshEmergencyStopWithSpawn(
     connection,
     process.env.SystemRoot,
     spawn,

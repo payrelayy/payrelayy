@@ -1,0 +1,46 @@
+# One-shot protected operator host. The image contains no production credential,
+# request, pairing data, signer private key, or always-on service configuration.
+FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS build
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/agent-platform-companion-contracts/package.json ./packages/agent-platform-companion-contracts/package.json
+COPY packages/agent-platform-companion-execution-contracts/package.json ./packages/agent-platform-companion-execution-contracts/package.json
+COPY packages/agent-platform-companion-activation-issuer/package.json ./packages/agent-platform-companion-activation-issuer/package.json
+COPY packages/agent-platform-companion-operator-host/package.json ./packages/agent-platform-companion-operator-host/package.json
+RUN pnpm install --frozen-lockfile --filter @fetanagent/agent-platform-companion-operator-host...
+COPY packages/agent-platform-companion-contracts/tsconfig.json ./packages/agent-platform-companion-contracts/tsconfig.json
+COPY packages/agent-platform-companion-contracts/src ./packages/agent-platform-companion-contracts/src
+COPY packages/agent-platform-companion-execution-contracts/tsconfig.json ./packages/agent-platform-companion-execution-contracts/tsconfig.json
+COPY packages/agent-platform-companion-execution-contracts/src ./packages/agent-platform-companion-execution-contracts/src
+COPY packages/agent-platform-companion-activation-issuer/tsconfig.json ./packages/agent-platform-companion-activation-issuer/tsconfig.json
+COPY packages/agent-platform-companion-activation-issuer/src ./packages/agent-platform-companion-activation-issuer/src
+COPY packages/agent-platform-companion-operator-host/tsconfig.json ./packages/agent-platform-companion-operator-host/tsconfig.json
+COPY packages/agent-platform-companion-operator-host/src ./packages/agent-platform-companion-operator-host/src
+RUN pnpm --filter @fetanagent/agent-platform-companion-operator-host... run build
+
+FROM --platform=linux/amd64 postgres:17.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+ARG VCS_REF
+LABEL org.opencontainers.image.revision=$VCS_REF
+WORKDIR /workspace
+COPY --from=build /usr/local/bin/node /usr/local/bin/node
+COPY --from=build /workspace/node_modules ./node_modules
+COPY --from=build /workspace/packages/agent-platform-companion-contracts/package.json ./packages/agent-platform-companion-contracts/package.json
+COPY --from=build /workspace/packages/agent-platform-companion-contracts/dist ./packages/agent-platform-companion-contracts/dist
+COPY --from=build /workspace/packages/agent-platform-companion-execution-contracts/package.json ./packages/agent-platform-companion-execution-contracts/package.json
+COPY --from=build /workspace/packages/agent-platform-companion-execution-contracts/node_modules ./packages/agent-platform-companion-execution-contracts/node_modules
+COPY --from=build /workspace/packages/agent-platform-companion-execution-contracts/dist ./packages/agent-platform-companion-execution-contracts/dist
+COPY --from=build /workspace/packages/agent-platform-companion-activation-issuer/package.json ./packages/agent-platform-companion-activation-issuer/package.json
+COPY --from=build /workspace/packages/agent-platform-companion-activation-issuer/node_modules ./packages/agent-platform-companion-activation-issuer/node_modules
+COPY --from=build /workspace/packages/agent-platform-companion-activation-issuer/dist ./packages/agent-platform-companion-activation-issuer/dist
+COPY --from=build /workspace/packages/agent-platform-companion-operator-host/package.json ./packages/agent-platform-companion-operator-host/package.json
+COPY --from=build /workspace/packages/agent-platform-companion-operator-host/node_modules ./packages/agent-platform-companion-operator-host/node_modules
+COPY --from=build /workspace/packages/agent-platform-companion-operator-host/dist ./packages/agent-platform-companion-operator-host/dist
+COPY infra/sql/production-companion-execution-emergency-disable.sql ./infra/sql/production-companion-execution-emergency-disable.sql
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent \
+  && test "$(node --version)" = 'v22.17.1' \
+  && psql --version | grep --extended-regexp --quiet '^psql \(PostgreSQL\) 17\.4([ .]|$)' \
+  && chmod -R a-w /workspace
+USER 10001:10001
+ENV HOME=/tmp
+ENTRYPOINT ["/usr/local/bin/node", "/workspace/packages/agent-platform-companion-operator-host/dist/index.js"]

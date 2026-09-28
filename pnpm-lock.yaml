@@ -277,6 +277,19 @@ importers:
         specifier: workspace:*
         version: link:../agent-platform-companion-contracts
 
+  packages/agent-platform-companion-operator-host:
+    dependencies:
+      '@fetanagent/agent-platform-companion-activation-issuer':
+        specifier: workspace:*
+        version: link:../agent-platform-companion-activation-issuer
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.21.0
+        version: 8.21.0
+
   packages/agent-platform-contracts: {}
 
   packages/agent-platform-kemerbet:

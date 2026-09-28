@@ -1,0 +1,60 @@
+name: Protected operator host image smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  protected-operator-host-image-smoke:
+    name: Build and smoke dormant protected operator host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build credential-free one-shot image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull=false -f infra/Dockerfile.protected-operator-host \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            -t fetanagent-protected-operator-host:ci .
+          test "$(docker image inspect fetanagent-protected-operator-host:ci \
+            --format '{{.Config.User}}')" = '10001:10001'
+          # The pinned PostgreSQL client base declares this inert image
+          # metadata; the entry point never starts PostgreSQL or publishes it.
+          test "$(docker image inspect fetanagent-protected-operator-host:ci \
+            --format '{{json .Config.ExposedPorts}}')" = '{"5432/tcp":{}}'
+          test "$(docker image inspect fetanagent-protected-operator-host:ci \
+            --format '{{json .Config.Entrypoint}}')" = \
+            '["/usr/local/bin/node","/workspace/packages/agent-platform-companion-operator-host/dist/index.js"]'
+          test "$(docker image inspect fetanagent-protected-operator-host:ci \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = \
+            "$GITHUB_SHA"
+
+      - name: Refuse missing and malformed launch material without a listener
+        shell: bash
+        run: |
+          set -euo pipefail
+          for payload in '' '{"version":1}' ; do
+            set +e
+            output="$(printf '%s' "$payload" | timeout 15s docker run --rm -i \
+              --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=700 \
+              --cap-drop ALL --security-opt no-new-privileges \
+              fetanagent-protected-operator-host:ci 2>&1)"
+            status=$?
+            set -e
+            test "$status" -eq 1
+            test "$output" = 'Protected operator host unavailable; reconcile before activation.'
+          done

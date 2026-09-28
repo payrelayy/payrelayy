@@ -154,6 +154,23 @@ the installed files and account. It does not start a listener, load a database
 credential, issue an activation request, or change any financial switch. The
 protected host credential loader and one-use production entry point remain
 separate prerequisites; this SSH identity alone cannot execute a deposit.
+The protected host now has a separate one-shot container image and entry point.
+It reads one bounded launch document from standard input, accepts only the
+production direct PostgreSQL endpoint with verify-full TLS, and keeps its
+administrator password in process memory rather than an image, command line,
+host file, or persistent environment. Before binding the protected loopback
+port, it proves an independent `psql` stop connection, proves the dedicated
+session is the exact administrator over TLS, and loads the current no-money
+certificate signer public key from the database with its digest check. The
+reviewed query host then owns only that one dedicated backend; its independent
+stop callback runs the established multi-commit emergency-disable SQL on a
+different direct connection. The image is inert until a future protected
+operator supplies an exact, short-lived request and credential through a
+private standard-input stream. Merely building or installing the image does
+not start a listener, provision an administrator credential, issue a permit,
+enable a switch, or authorize a deposit. An authenticated production caller,
+exact-host exit proof, independent watchdog, and provider reconciliation are
+still prerequisites before money-capable activation.
 The guarded companion now acknowledges receipt of an exact proof-bound permit.
 An unexported operator-side local channel can pair a retained attestation with
 the existing one-use transition and requires an independent database-and-host

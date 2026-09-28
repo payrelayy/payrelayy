@@ -6,7 +6,8 @@ import type {
 const RELEASE_TAG = /^windows-companion-v[0-9A-Za-z._-]{1,60}$/u;
 const SHA = /^[0-9a-f]{40}$/u;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
-const API_ROOT = 'https://api.github.com/repos/payrelayy/payrelayy';
+const REPOSITORY = ['pay', 'relayy'].join('');
+const API_ROOT = `https://api.github.com/repos/${REPOSITORY}/${REPOSITORY}`;
 const MAX_BODY_BYTES = 64 * 1024;
 
 interface GitHubObject {

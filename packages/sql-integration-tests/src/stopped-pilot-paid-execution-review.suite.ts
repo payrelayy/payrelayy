@@ -17,6 +17,8 @@ type ReadinessRow = {
     readonly cancelledUntouchedJobs: number;
     readonly customerResolutionPending: boolean;
     readonly nextAction: string;
+    readonly allFinancialSwitchesDisabled: boolean;
+    readonly noMoneySwitchBoundary: boolean;
     readonly openExecutionReviewCases: number;
     readonly openJobs: number;
     readonly stoppedPilotUntouchedJob: boolean;
@@ -63,6 +65,42 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('stopped-pilot paid execution review', () => {
+    it('recognizes one dry-run pilot as no-money while six execution switches stay disabled', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await prepareTelebirrPilot(client, getOwnerAdminId());
+        await client.query(`
+          update app.feature_switches
+             set mode = 'disabled'::app.feature_mode,
+                 settings = '{}'::jsonb
+           where feature_key in (
+             'deposit_execution', 'payment_verification',
+             'telebirr_authoritative_verification'
+           )
+        `);
+        await client.query(`
+          update app.feature_switches
+             set mode = 'dry_run'::app.feature_mode
+           where feature_key = 'private_live_deposit_pilot'
+        `);
+        const readiness = await client.query<ReadinessRow>(readinessSelect);
+        expect(readiness.rows[0]?.redacted_status).toMatchObject({
+          allFinancialSwitchesDisabled: false,
+          noMoneySwitchBoundary: true,
+        });
+        await client.query(`
+          update app.feature_switches
+             set mode = 'live'::app.feature_mode
+           where feature_key = 'deposit_execution'
+        `);
+        const unsafeReadiness = await client.query<ReadinessRow>(readinessSelect);
+        expect(unsafeReadiness.rows[0]?.redacted_status).toMatchObject({
+          noMoneySwitchBoundary: false,
+          nextAction: 'safety_review',
+        });
+      });
+    });
+
     it('has no runtime grant and keeps its receipt private and immutable', async () => {
       const client = getClient();
       const boundary = await client.query<{

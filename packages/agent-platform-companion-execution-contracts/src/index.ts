@@ -61,6 +61,9 @@ export const COMPANION_EXECUTION_STATUS_PATH =
 /** Protected, loopback-only operator transport; not a public device-bridge route. */
 export const COMPANION_EXECUTION_HANDOFF_SIGN_PATH =
   '/v2/companion/operator/activation-handoff:sign' as const;
+/** One paired, read-only lookup of the current protected session binding. */
+export const COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH =
+  '/v2/companion/operator/activation-session:bootstrap' as const;
 /** Protected, loopback-only operator session; never a public bridge route. */
 export const COMPANION_EXECUTION_OPERATOR_QUERY_PATH =
   '/v2/companion/operator/activation-session:query' as const;
@@ -2405,6 +2408,20 @@ export function digestCompanionExecutionHandoffSigningContent(
     ? sha256(
         encodeFields('fetanagent:companion:protected-handoff-signing-content:v1', [
           ['requestKey', requestKeyCandidate],
+          ['certificateBodyDigest', certificateBodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+/** Bind a bootstrap request to the paired certificate without needing the hidden request key. */
+export function digestCompanionExecutionOperatorBootstrapContent(
+  certificateBodyDigestCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  return certificateBodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:protected-operator-bootstrap-content:v1', [
           ['certificateBodyDigest', certificateBodyDigest],
         ]),
       )

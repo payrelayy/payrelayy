@@ -7,6 +7,7 @@ import {
 } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
   COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -30,7 +31,9 @@ export interface ProtectedOperatorDeviceSigner {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   createSignedHttpRequest(
     path:
-      typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+      | typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH
+      | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
+      | typeof COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
     contentDigest: string,
   ): SignedCompanionHttpRequest;
 }

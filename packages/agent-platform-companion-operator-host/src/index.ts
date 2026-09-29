@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { openProtectedOperatorQueryHost } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-host';
 import { createProtectedHandoffRequestHandler } from '@fetanagent/agent-platform-companion-activation-issuer/protected-handoff-request';
+import { createProtectedOperatorBootstrapRequestHandler } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-bootstrap-request';
 import { PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256 } from '@fetanagent/agent-platform-companion-execution-contracts';
 import pg from 'pg';
 
@@ -226,6 +227,13 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
       trustedNoMoneySignerKeyId: SIGNER_KEY_ID,
       trustedNoMoneySignerPublicKeySpkiDer: publicKey,
       trustedNow: () => new Date(),
+      bootstrapSession: createProtectedOperatorBootstrapRequestHandler({
+        administrator,
+        requestKey: document.requestKey,
+        trustedNoMoneySignerKeyId: SIGNER_KEY_ID,
+        trustedNoMoneySignerPublicKeySpkiDer: publicKey,
+        trustedNow: () => new Date(),
+      }),
       signHandoff: createProtectedHandoffRequestHandler({
         administrator,
         trustedNoMoneySignerKeyId: SIGNER_KEY_ID,

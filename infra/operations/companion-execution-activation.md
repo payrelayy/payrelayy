@@ -177,6 +177,16 @@ not start a listener, provision an administrator credential, issue a permit,
 enable a switch, or authorize a deposit. An authenticated production caller,
 exact-host exit proof, independent watchdog, and provider reconciliation are
 still prerequisites before money-capable activation.
+The one-job operator can now first request a one-shot session bootstrap over
+that same pinned SSH transport. The bootstrap is signed by the existing paired
+Windows certificate and checked against the exact live database request and
+Owner identity before returning the short-lived request binding in memory. A
+failed or repeated bootstrap retires the protected host. The Windows launch
+document's version 2 contains only connection and local release paths, not a
+request key or Owner identifier; neither value is placed in a command line,
+GitHub log, or durable handoff file. This path is inert until both the updated
+protected host image and Windows companion release are reviewed and installed
+for a separately authorized one-job session.
 The guarded companion now acknowledges receipt of an exact proof-bound permit.
 An unexported operator-side local channel can pair a retained attestation with
 the existing one-use transition and requires an independent database-and-host

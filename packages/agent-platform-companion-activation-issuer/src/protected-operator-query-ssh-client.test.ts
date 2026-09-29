@@ -11,6 +11,7 @@ import {
   createProtectedOperatorSshHandoffSignerWithSpawn,
   createProtectedOperatorSshRemoteSessionWithSpawn,
   ProtectedOperatorSshClientUnavailableError,
+  readProtectedOperatorSshBootstrapWithSpawn,
   type ProtectedOperatorSshConnection,
   type ProtectedOperatorSshFiles,
 } from './protected-operator-query-ssh-client.js';
@@ -61,6 +62,44 @@ function fakeSsh(responseFor: (sequence: number) => unknown) {
 }
 
 describe('authenticated protected operator SSH stream', () => {
+  it('fetches one bounded binding through the pinned SSH tunnel without placing it in argv', async () => {
+    const requests: string[] = [];
+    const spawned = vi.fn((_file: string, args: readonly string[], _options: SpawnOptions) => {
+      expect(args.join(' ')).not.toContain(requestKey);
+      const child = new EventEmitter() as ChildProcess;
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      Object.assign(child, { pid: 420, stdin, stdout, kill: vi.fn(() => true) });
+      const chunks: Buffer[] = [];
+      stdin.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      stdin.on('end', () => {
+        requests.push(Buffer.concat(chunks).toString('utf8'));
+        const body = JSON.stringify({
+          requestKey,
+          actorAuthUserId: '11111111-1111-4111-8111-111111111111',
+        });
+        stdout.end(
+          `HTTP/1.1 200 OK\r\nContent-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+        );
+        setImmediate(() => child.emit('close', 0, null));
+      });
+      return child;
+    });
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    await expect(
+      readProtectedOperatorSshBootstrapWithSpawn(signedDevice, connection, ROOT, spawned, files),
+    ).resolves.toEqual({
+      requestKey,
+      actorAuthUserId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain('POST /v2/companion/operator/activation-session:bootstrap');
+    expect(requests[0]).not.toContain(requestKey);
+    expect(spawned).toHaveBeenCalledTimes(1);
+  });
   it('uses a pinned identity and host key with stdio forwarding, never a local listener or shell', async () => {
     const { spawned, requests } = fakeSsh((sequence) =>
       sequence === 0 ? { sequence: 0, backendPid: 417, sessionNonce } : { sequence, closed: true },

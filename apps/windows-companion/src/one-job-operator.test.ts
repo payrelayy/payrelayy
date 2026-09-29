@@ -31,7 +31,8 @@ const raw = {
 describe('one-job Windows operator entry point', () => {
   it('accepts only a bounded exact one-use run document', () => {
     const document = parseOneJobOperatorDocument(JSON.stringify(raw));
-    expect(document.requestKey).toBe(requestKey);
+    expect(document.version).toBe(1);
+    if (document.version === 1) expect(document.requestKey).toBe(requestKey);
     expect(document.connection.remoteUser).toBe('fetanagent-operator');
     for (const candidate of [
       { ...raw, anotherOperation: true },
@@ -48,6 +49,47 @@ describe('one-job Windows operator entry point', () => {
     expect(() => parseOneJobOperatorDocument('x'.repeat(8_193))).toThrow(
       OneJobOperatorUnavailableError,
     );
+  });
+
+  it('accepts a non-secret bootstrap document and obtains only one session binding after pairing', async () => {
+    const { requestKey: _requestKey, actorAuthUserId: _actorAuthUserId, ...bootstrapRaw } = raw;
+    const document = parseOneJobOperatorDocument(JSON.stringify({ ...bootstrapRaw, version: 2 }));
+    expect(document.version).toBe(2);
+    expect('requestKey' in document).toBe(false);
+    expect('actorAuthUserId' in document).toBe(false);
+    const device = { certificate: {}, createSignedHttpRequest: vi.fn() };
+    const loadDevice = vi.fn(async () => device);
+    const bootstrap = vi.fn(async () => ({ requestKey, actorAuthUserId }));
+    const activate = vi.fn(
+      async (_input: unknown, _device: unknown, _connection: unknown) => 'confirmed' as const,
+    );
+    const context = {
+      dataRoot: 'C:\\FetanAgent\\data',
+      installationRoot: 'C:\\FetanAgent\\installation',
+      windowsEnvironment: {},
+      trustedNow: () => new Date('2026-09-28T00:00:00.000Z'),
+    };
+    await expect(
+      runOneJobOperatorWithAdapters(document, context, {
+        loadDevice,
+        bootstrap,
+        activate,
+      } as unknown as Parameters<typeof runOneJobOperatorWithAdapters>[2]),
+    ).resolves.toBe('confirmed');
+    expect(bootstrap).toHaveBeenCalledExactlyOnceWith(device, raw.connection);
+    expect(activate.mock.calls[0]?.[0]).toMatchObject({ requestKey, actorAuthUserId });
+    expect(() =>
+      parseOneJobOperatorDocument(JSON.stringify({ ...bootstrapRaw, version: 2, requestKey })),
+    ).toThrow(OneJobOperatorUnavailableError);
+    bootstrap.mockResolvedValueOnce({ requestKey: 'invalid', actorAuthUserId });
+    await expect(
+      runOneJobOperatorWithAdapters(document, context, {
+        loadDevice,
+        bootstrap,
+        activate,
+      } as unknown as Parameters<typeof runOneJobOperatorWithAdapters>[2]),
+    ).rejects.toBeInstanceOf(OneJobOperatorUnavailableError);
+    expect(activate).toHaveBeenCalledTimes(1);
   });
 
   it('loads the existing paired certificate then runs one guarded SSH activation', async () => {

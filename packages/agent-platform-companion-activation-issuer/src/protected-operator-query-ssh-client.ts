@@ -6,8 +6,10 @@ import { win32 } from 'node:path';
 import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
   COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
   COMPANION_EXECUTION_OPERATOR_STOP_PATH,
+  digestCompanionExecutionOperatorBootstrapContent,
   digestCompanionExecutionHandoffSigningContent,
   type SignedCompanionExecutionActivationHandoff,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
@@ -27,6 +29,8 @@ const SIGN_ROUND_TRIP_TIMEOUT_MS = 40_000;
 const STOP_ROUND_TRIP_TIMEOUT_MS = 115_000;
 const TERMINATION_TIMEOUT_MS = 2_000;
 const RESTRICTED_OPERATOR_USER = 'fetanagent-operator';
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 
 export interface ProtectedOperatorSshConnection {
@@ -185,6 +189,7 @@ async function postOverSsh(
   path:
     | typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH
     | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
+    | typeof COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH
     | typeof COMPANION_EXECUTION_OPERATOR_STOP_PATH,
   body: Buffer,
   spawnChild: SpawnChild,
@@ -257,6 +262,101 @@ async function postOverSsh(
     for (const chunk of chunks) chunk.fill(0);
     child?.kill();
   }
+}
+
+export interface ProtectedOperatorBootstrapBinding {
+  readonly requestKey: string;
+  readonly actorAuthUserId: string;
+}
+
+/** One paired lookup over pinned SSH; no identifier enters argv or an on-disk file. */
+export async function readProtectedOperatorSshBootstrapWithSpawn(
+  device: ProtectedOperatorDeviceSigner,
+  connection: ProtectedOperatorSshConnection,
+  windowsRoot: string,
+  spawnChild: SpawnChild,
+  files: ProtectedOperatorSshFiles = nativeFiles,
+): Promise<ProtectedOperatorBootstrapBinding> {
+  try {
+    if (
+      !device?.certificate?.bodyDigest ||
+      !connection ||
+      !win32.isAbsolute(windowsRoot) ||
+      win32.normalize(windowsRoot) !== windowsRoot ||
+      isIP(connection.remoteHostIpv4) !== 4 ||
+      connection.remoteUser !== RESTRICTED_OPERATOR_USER ||
+      !validPort(connection.remoteSshPort) ||
+      connection.remoteLoopbackPort !== PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT ||
+      /\s/u.test(connection.knownHostsFile)
+    )
+      throw new Error();
+    const sshExecutable = canonicalFile(
+      win32.join(windowsRoot, 'System32', 'OpenSSH', 'ssh.exe'),
+      files,
+    );
+    const checked = Object.freeze({
+      ...connection,
+      identityFile: canonicalFile(connection.identityFile, files),
+      knownHostsFile: canonicalFile(connection.knownHostsFile, files),
+    });
+    const digest = digestCompanionExecutionOperatorBootstrapContent(device.certificate.bodyDigest);
+    if (!digest) throw new Error();
+    const httpRequest = device.createSignedHttpRequest(
+      COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
+      digest,
+    );
+    const body = Buffer.from(
+      JSON.stringify({ certificate: device.certificate, httpRequest }),
+      'utf8',
+    );
+    try {
+      const reply = await postOverSsh(
+        sshExecutable,
+        checked,
+        COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
+        body,
+        spawnChild,
+        windowsRoot,
+      );
+      if (
+        !reply ||
+        typeof reply !== 'object' ||
+        Array.isArray(reply) ||
+        Object.keys(reply).sort().join(',') !== 'actorAuthUserId,requestKey'
+      )
+        throw new Error();
+      const binding = reply as Record<string, unknown>;
+      if (
+        typeof binding.requestKey !== 'string' ||
+        !UUID_V4.test(binding.requestKey) ||
+        typeof binding.actorAuthUserId !== 'string' ||
+        !UUID.test(binding.actorAuthUserId)
+      )
+        throw new Error();
+      return Object.freeze({
+        requestKey: binding.requestKey,
+        actorAuthUserId: binding.actorAuthUserId,
+      });
+    } finally {
+      body.fill(0);
+    }
+  } catch {
+    throw new ProtectedOperatorSshClientUnavailableError();
+  }
+}
+
+export function readProtectedOperatorSshBootstrap(
+  device: ProtectedOperatorDeviceSigner,
+  connection: ProtectedOperatorSshConnection,
+): Promise<ProtectedOperatorBootstrapBinding> {
+  if (process.platform !== 'win32' || !process.env.SystemRoot)
+    throw new ProtectedOperatorSshClientUnavailableError();
+  return readProtectedOperatorSshBootstrapWithSpawn(
+    device,
+    connection,
+    process.env.SystemRoot,
+    spawn,
+  );
 }
 
 /** Test seam: no network connection is possible until the exact paths and target pass validation. */

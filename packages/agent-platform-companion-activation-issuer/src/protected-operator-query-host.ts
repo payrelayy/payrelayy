@@ -16,6 +16,7 @@ import {
   type ProtectedOperatorQuerySessionInput,
 } from './protected-operator-query-session.js';
 import { PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT } from './protected-operator-query-port.js';
+export { PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT } from './protected-operator-query-port.js';
 
 const MAX_HOST_LIFETIME_MS = 2 * 60 * 60_000;
 const RESPONSE_DRAIN_MS = 100;

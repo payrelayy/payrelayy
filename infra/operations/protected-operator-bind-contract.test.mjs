@@ -22,4 +22,6 @@ test('only the reviewed non-root operator binary can bind the protected port', (
   assert.match(smoke, /CapEff/u);
   assert.match(smoke, /CapBnd/u);
   assert.match(smoke, /--network none --read-only/u);
+  assert.match(launcher, /diagnose\)\s+run_once diagnose/u);
+  assert.match(smoke, /protected_operator_diagnostic=independent_psql/u);
 });

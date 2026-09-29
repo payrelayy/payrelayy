@@ -55,11 +55,18 @@ prepare_runtime_dir() {
 }
 
 run_once() {
+  local mode="$1" expected_revision="$2"
+  local -a mode_args=()
+  if [[ "$mode" == 'diagnose' ]]; then
+    mode_args=(--diagnose)
+  elif [[ "$mode" != 'run' ]]; then
+    die
+  fi
   [[ ! -t 0 ]] || die
   prepare_runtime_dir
   exec 9>"$RUNTIME_DIR/one-shot.lock"
   flock -n 9 || die
-  require_dormant_host "$1"
+  require_dormant_host "$expected_revision"
   operator_stage_dir="$(mktemp -d -p "$RUNTIME_DIR" 'session.XXXXXXXX')" || die
   operator_staged_signer="$operator_stage_dir/signer.pkcs8.der"
   operator_cidfile="$operator_stage_dir/container-id"
@@ -98,7 +105,7 @@ run_once() {
     --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges --pids-limit 64 --memory 512m \
     --user 10001:10001 --stop-timeout 20 \
     --mount "type=bind,src=$operator_staged_signer,dst=$SIGNER_TARGET,readonly" \
-    "$IMAGE"
+    "$IMAGE" "${mode_args[@]}"
   exit $?
 }
 
@@ -153,7 +160,10 @@ case "$1" in
     printf '%s\n' 'protected_operator_image_ready_dormant'
     ;;
   run)
-    run_once "$2"
+    run_once run "$2"
+    ;;
+  diagnose)
+    run_once diagnose "$2"
     ;;
   stop)
     stop_once "$2"

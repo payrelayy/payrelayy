@@ -1,0 +1,145 @@
+name: Diagnose dormant production companion operator startup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed and installed main commit
+        required: true
+        type: string
+      confirm_operation:
+        description: Type DIAGNOSE DORMANT COMPANION OPERATOR STARTUP
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-companion-operator-host-startup-diagnostic
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.14
+
+jobs:
+  diagnose:
+    name: Check dormant host dependencies without an execution request
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Check out exact main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main and diagnostic-only operation
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == 'DIAGNOSE DORMANT COMPANION OPERATOR STARTUP' ]]
+          node infra/operations/require-production-ci.mjs
+
+      - name: Classify existing host startup without opening an execution session
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
+             -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$RUNNER_TEMP/production-companion-operator-host-startup-diagnostic"
+          install -d -m 0700 "$protected"
+          attempted=0
+          remote="fetanagent-admin@$PRODUCTION_VM_HOST"
+          launcher='/usr/local/sbin/fetanagent-production-operator-host-launch'
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$protected/known-hosts"
+            -o ConnectTimeout=8 -o ConnectionAttempts=1
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=1)
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$attempted" == 1 ]]; then
+              timeout --signal=TERM --kill-after=5s 45s ssh "${ssh_opts[@]}" "$remote" \
+                "sudo -n '$launcher' stop '$GITHUB_SHA'" >/dev/null 2>&1 || status=1
+            fi
+            if [[ "$protected" == "$RUNNER_TEMP/production-companion-operator-host-startup-diagnostic" &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+
+          status_json="$(PGHOST="$PRODUCTION_DATABASE_POOLER_HOST" PGPORT=6543 \
+            PGUSER="postgres.$PRODUCTION_PROJECT_REF" PGDATABASE=postgres \
+            PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt" \
+            PGPASSWORD="$SUPABASE_DB_PASSWORD" PGCONNECT_TIMEOUT=5 \
+            PGOPTIONS='-c default_transaction_read_only=on' \
+            timeout 30s psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-companion-execution-activation-status.sql)"
+          jq -e '.readOnly and .identifiersRedacted and .allFinancialSwitchesDisabled and
+            .companionExecutionControlDisabled and .executionCapabilityDormant and
+            .openJobs == 0 and .companionExecutionRecords == 0' <<<"$status_json" >/dev/null
+
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$launcher' inspect '$GITHUB_SHA'" \
+            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+          PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          export PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY
+          attempted=1
+          set +e
+          result="$(node infra/operations/render-production-operator-launch.mjs | \
+            timeout --signal=TERM --kill-after=5s 45s ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$launcher' diagnose '$GITHUB_SHA'" 2>/dev/null)"
+          status=$?
+          set -e
+          [[ "$result" =~ ^protected_operator_diagnostic=(ready|ca_staging|independent_psql|node_database|database_boundary|server_signer|execution_signer|loopback_bind|cleanup)$ ]] || {
+            echo '::error::The diagnostic did not return a fixed classification.' >&2
+            exit 1
+          }
+          printf '%s\n' "$result" >>"$GITHUB_STEP_SUMMARY"
+          if [[ "$status" -ne 0 || "$result" != 'protected_operator_diagnostic=ready' ]]; then
+            echo "::error::$result" >&2
+            exit 1
+          fi
+          echo 'The dormant operator host dependencies passed without a request, approval, KemerBet action, or queue execution.' >>"$GITHUB_STEP_SUMMARY"

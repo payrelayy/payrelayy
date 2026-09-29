@@ -74,6 +74,28 @@ jobs:
             test "$output" = 'Protected operator host unavailable; reconcile before activation.'
           done
 
+      - name: Classify a non-executing diagnostic before any database access
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(node -e 'process.stdout.write(JSON.stringify({
+            version: 1,
+            requestKey: "00000000-0000-4000-8000-000000000001",
+            databaseUrl: "postgresql://postgres:synthetic@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full",
+            databaseCaPem: "-----BEGIN CERTIFICATE-----\n" + "A".repeat(64) + "\n-----END CERTIFICATE-----\n",
+            releaseTag: "windows-companion-v0.1.14"
+          }))')"
+          set +e
+          output="$(printf '%s' "$payload" | timeout 15s docker run --rm -i \
+            --network none --read-only --log-driver none \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=10001,gid=10001,mode=700 \
+            --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
+            --user 10001:10001 fetanagent-protected-operator-host:ci --diagnose 2>&1)"
+          status=$?
+          set -e
+          test "$status" -eq 1
+          test "$output" = 'protected_operator_diagnostic=independent_psql'
+
       - name: Prove only the non-root loopback bind capability is effective
         shell: bash
         run: |

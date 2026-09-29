@@ -181,10 +181,11 @@ The one-job operator can now first request a one-shot session bootstrap over
 that same pinned SSH transport. The bootstrap is signed by the existing paired
 Windows certificate and checked against the exact live database request and
 Owner identity before returning the short-lived request binding in memory. A
-failed or repeated bootstrap retires the protected host. The Windows launch
-document's version 2 contains only connection and local release paths, not a
-request key or Owner identifier; neither value is placed in a command line,
-GitHub log, or durable handoff file. This path is inert until both the updated
+failed or repeated bootstrap retires the protected host. The Windows operator
+accepts only launch document version 2, which contains connection and local
+release paths, not a request key or Owner identifier; neither value is placed
+in a command line, GitHub log, or durable handoff file. A missing or failed
+signed bootstrap stops before activation. This path is inert until both the updated
 protected host image and Windows companion release are reviewed and installed
 for a separately authorized one-job session.
 The guarded companion now acknowledges receipt of an exact proof-bound permit.

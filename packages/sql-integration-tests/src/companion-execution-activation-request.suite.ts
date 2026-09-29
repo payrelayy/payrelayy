@@ -645,6 +645,76 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         );
         await client.query('rollback to savepoint competing_verified_job');
 
+        const queuedBoundary = await client.query<{
+          readonly job_ready: boolean;
+          readonly intent_ready: boolean;
+          readonly reservation_ready: boolean;
+          readonly outcome_ready: boolean;
+          readonly platform_ready: boolean;
+        }>(
+          `select
+             job.job_kind = 'execute_deposit' and job.status = 'queued'
+               and job.attempt_count = 0 and job.max_attempts = 1
+               and job.lease_token is null and job.leased_by is null
+               and job.lease_expires_at is null
+               and job.run_after <= clock_timestamp() as job_ready,
+             intent.status = 'execution_pending' and intent.verified_at is not null
+               and intent.expected_amount_minor = 2500
+               and intent.currency_code = 'ETB' as intent_ready,
+             exists (
+               select 1 from app.private_live_deposit_pilot_reservations reservation
+                where reservation.deposit_intent_id = intent.id
+                  and reservation.pilot_revision_id = $2::uuid
+                  and reservation.submitting_customer_id = intent.customer_id
+                  and reservation.player_account_id = intent.player_account_id
+                  and reservation.payment_provider_id = intent.payment_provider_id
+                  and reservation.amount_minor = intent.expected_amount_minor
+                  and reservation.currency_code = intent.currency_code
+             ) as reservation_ready,
+             exists (
+               select 1 from app.private_live_deposit_pilot_reservations reservation
+               join app.private_live_telebirr_verification_outcomes outcome
+                 on outcome.deposit_intent_id = intent.id
+                and outcome.private_live_deposit_pilot_proof_id =
+                    reservation.private_live_deposit_pilot_proof_id
+                and outcome.provider_payment_evidence_id =
+                    reservation.provider_payment_evidence_id
+                and outcome.pilot_revision_id = $2::uuid
+                and outcome.player_account_id = intent.player_account_id
+                and outcome.payment_provider_id = intent.payment_provider_id
+                where reservation.deposit_intent_id = intent.id
+                  and outcome.disposition = 'settlement_candidate'
+                  and outcome.reason_code = 'exact_proof_match'
+                  and outcome.principal_amount_minor = intent.expected_amount_minor
+                  and outcome.currency_code = intent.currency_code
+             ) as outcome_ready,
+             exists (
+               select 1 from app.payment_providers provider
+               join app.platform_agent_accounts account
+                 on account.id = $3::uuid
+                and account.platform_id = intent.platform_id
+                where provider.id = intent.payment_provider_id
+                  and provider.code = 'telebirr' and provider.status = 'active'
+             ) as platform_ready
+           from app.deposit_jobs job
+           join app.deposit_intents intent on intent.id = job.deposit_intent_id
+          where job.id = $1::uuid`,
+          [
+            verifiedProof.row.execution_job_id,
+            pilot.pilotRevisionId,
+            snapshot.request.platformAgentAccountId,
+          ],
+        );
+        expect(queuedBoundary.rows).toEqual([
+          {
+            job_ready: true,
+            intent_ready: true,
+            reservation_ready: true,
+            outcome_ready: true,
+            platform_ready: true,
+          },
+        ]);
+
         const activated = await activate('e'.repeat(64));
         expect(activated.rows).toHaveLength(1);
         expect(activated.rows[0]!.valid_until.getTime()).toBeGreaterThan(Date.now() + 5 * 60_000);

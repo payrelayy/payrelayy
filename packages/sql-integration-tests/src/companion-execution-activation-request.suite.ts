@@ -11,7 +11,11 @@ import {
 } from '@fetanagent/agent-platform-companion-activation-issuer';
 import { prepareGuardedCompanionEmergencyStopRehearsal } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-emergency-stop-rehearsal';
 
-import { prepareTelebirrPilot } from './private-live-telebirr-proof-lineage.suite.js';
+import {
+  completeVerification,
+  prepareTelebirrPilot,
+  prepareVerification,
+} from './private-live-telebirr-proof-lineage.suite.js';
 
 function digest(): string {
   return `sha256:${createHash('sha256').update(randomUUID()).digest('hex')}`;
@@ -623,6 +627,24 @@ export function registerCompanionExecutionActivationRequestSqlTests(
         );
         await client.query('rollback to savepoint revoked_certificate');
 
+        const preparedProof = await prepareVerification(client, pilot);
+        const verifiedProof = await completeVerification(client, pilot, preparedProof, {
+          disposition: 'settlement_candidate',
+          reasonCode: 'exact_proof_match',
+        });
+        expect(verifiedProof.row.execution_job_id).toEqual(expect.any(String));
+
+        await client.query('savepoint competing_verified_job');
+        const competingProof = await prepareVerification(client, pilot, 1);
+        await completeVerification(client, pilot, competingProof, {
+          disposition: 'settlement_candidate',
+          reasonCode: 'exact_proof_match',
+        });
+        await expect(activate('e'.repeat(64))).rejects.toThrow(
+          'An execution or reconciliation boundary is already open.',
+        );
+        await client.query('rollback to savepoint competing_verified_job');
+
         const activated = await activate('e'.repeat(64));
         expect(activated.rows).toHaveLength(1);
         expect(activated.rows[0]!.valid_until.getTime()).toBeGreaterThan(Date.now() + 5 * 60_000);
@@ -665,7 +687,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
             runtime_passworded: true,
             has_runtime_member: true,
             valid_until_matches: true,
-            open_jobs: '0',
+            open_jobs: '1',
           },
         ]);
 

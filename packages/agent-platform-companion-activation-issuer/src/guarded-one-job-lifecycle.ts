@@ -37,8 +37,9 @@ export class GuardedOneJobLifecycleUnavailableError extends Error {
 
 /**
  * Internal post-attestation composition, not a production activation entry
- * point. It consumes the one-use transition while the queue is empty, waits
- * for exactly one later Owner approval, watches only that job, and always
+ * point. It consumes the one-use transition with at most one independently
+ * verified, untouched queued command, waits for one later Owner approval,
+ * watches only that approved job, and always
  * disables credentials/financial authority and
  * stops the exact child before reporting a terminal result. A confirmed result
  * is re-read after that stop. No provider action is ever retried here.

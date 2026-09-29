@@ -251,7 +251,7 @@ begin
              join app.private_live_deposit_pilot_reservations reservation
                on reservation.deposit_intent_id = intent.id
               and reservation.pilot_revision_id = pilot.id
-              and reservation.submitting_customer_id = intent.customer_id
+              and reservation.player_owner_customer_id_snapshot = intent.customer_id
               and reservation.player_account_id = intent.player_account_id
               and reservation.payment_provider_id = intent.payment_provider_id
               and reservation.amount_minor = intent.expected_amount_minor
@@ -265,6 +265,8 @@ begin
               and outcome.pilot_revision_id = pilot.id
               and outcome.player_account_id = intent.player_account_id
               and outcome.payment_provider_id = intent.payment_provider_id
+              and outcome.submitting_customer_id = reservation.submitting_customer_id
+              and outcome.player_owner_customer_id_snapshot = intent.customer_id
              join app.payment_providers provider
                on provider.id = intent.payment_provider_id
               and provider.code = 'telebirr'

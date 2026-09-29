@@ -665,7 +665,7 @@ export function registerCompanionExecutionActivationRequestSqlTests(
                select 1 from app.private_live_deposit_pilot_reservations reservation
                 where reservation.deposit_intent_id = intent.id
                   and reservation.pilot_revision_id = $2::uuid
-                  and reservation.submitting_customer_id = intent.customer_id
+                  and reservation.player_owner_customer_id_snapshot = intent.customer_id
                   and reservation.player_account_id = intent.player_account_id
                   and reservation.payment_provider_id = intent.payment_provider_id
                   and reservation.amount_minor = intent.expected_amount_minor
@@ -682,6 +682,8 @@ export function registerCompanionExecutionActivationRequestSqlTests(
                 and outcome.pilot_revision_id = $2::uuid
                 and outcome.player_account_id = intent.player_account_id
                 and outcome.payment_provider_id = intent.payment_provider_id
+                and outcome.submitting_customer_id = reservation.submitting_customer_id
+                and outcome.player_owner_customer_id_snapshot = intent.customer_id
                 where reservation.deposit_intent_id = intent.id
                   and outcome.disposition = 'settlement_candidate'
                   and outcome.reason_code = 'exact_proof_match'

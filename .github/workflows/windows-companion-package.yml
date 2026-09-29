@@ -76,10 +76,14 @@ jobs:
         shell: pwsh
         run: |
           $env:FETANAGENT_OPERATOR_HOST_IPV4 = 'not-an-ip'
-          & pwsh -NoProfile -File ./infra/operations/prepare-windows-companion-one-job-local.ps1 `
-            -ReleaseTag windows-companion-v0.1.14 `
-            -ReleaseDirectory $env:RUNNER_TEMP -PlanOnly *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $child = Start-Process -FilePath (Get-Command pwsh).Source `
+            -ArgumentList @(
+              '-NoProfile', '-File',
+              './infra/operations/prepare-windows-companion-one-job-local.ps1',
+              '-ReleaseTag', 'windows-companion-v0.1.14',
+              '-ReleaseDirectory', $env:RUNNER_TEMP, '-PlanOnly'
+            ) -Wait -PassThru -WindowStyle Hidden
+          if ($child.ExitCode -eq 0) {
             throw 'The local operator setup accepted an invalid production host.'
           }
 

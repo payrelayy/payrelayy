@@ -19,6 +19,7 @@ on:
       - 'scripts/test-windows-companion-one-job-launch.ps1'
       - 'infra/operations/verify-windows-companion-release-installation.ps1'
       - 'infra/operations/observe-windows-companion-verified-launch.ps1'
+      - 'infra/operations/prepare-windows-companion-one-job-local.ps1'
       - 'pnpm-lock.yaml'
   push:
     tags:
@@ -57,7 +58,8 @@ jobs:
         run: |
           foreach ($path in @(
             'infra/operations/verify-windows-companion-release-installation.ps1',
-            'infra/operations/observe-windows-companion-verified-launch.ps1'
+            'infra/operations/observe-windows-companion-verified-launch.ps1',
+            'infra/operations/prepare-windows-companion-one-job-local.ps1'
           )) {
             $scriptPath = (Resolve-Path -LiteralPath $path).Path
             $tokens = $null
@@ -69,6 +71,21 @@ jobs:
       - name: Test activation archive claim binding without external access
         shell: pwsh
         run: ./scripts/test-companion-activation-claim-binding.ps1
+
+      - name: Refuse one-job local setup without a pinned host
+        shell: pwsh
+        run: |
+          $env:FETANAGENT_OPERATOR_HOST_IPV4 = 'not-an-ip'
+          $child = Start-Process -FilePath (Get-Command pwsh).Source `
+            -ArgumentList @(
+              '-NoProfile', '-File',
+              './infra/operations/prepare-windows-companion-one-job-local.ps1',
+              '-ReleaseTag', 'windows-companion-v0.1.14',
+              '-ReleaseDirectory', $env:RUNNER_TEMP, '-PlanOnly'
+            ) -Wait -PassThru -WindowStyle Hidden
+          if ($child.ExitCode -eq 0) {
+            throw 'The local operator setup accepted an invalid production host.'
+          }
 
       - name: Build, test, and package
         shell: pwsh

@@ -197,7 +197,13 @@ The internal `guarded-one-job-lifecycle` composes one proof-bound permit, that
 watcher, the exact database/host emergency stop, and a post-stop ledger re-read.
 It never leases, retries, clicks, credits, settles, or executes a job. These
 modules are not a production operator. The source-only
-`guarded-operator-activation` module now connects the independently checked
+`guarded-post-stop-review` adapter requires the complete independent stop
+proof before reading an exact consumed activation after its approval window
+expires. It distinguishes a missing activation from no matching Owner approval
+and reports success only when the existing reconciliation ledger is positive;
+all pending or uncertain outcomes still require provider review. It cannot
+establish that no provider action happened, and it is not wired to production.
+The source-only `guarded-operator-activation` module now connects the independently checked
 database snapshot, release/tree measurement, signed handoff, exact Windows
 child/proof observation, attestation retention, supervisor, and one-job
 lifecycle while holding one nonblocking session-level advisory lock on a

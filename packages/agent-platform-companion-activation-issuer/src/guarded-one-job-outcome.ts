@@ -47,6 +47,7 @@ export const OUTCOME_SQL = `
     on approval.activation_epoch = consumption.activation_epoch
    and approval.pilot_revision_id = consumption.pilot_revision_id
    and approval.approved_by_admin_id = consumption.activated_by_admin_id
+   and approval.approved_at >= consumption.activated_at
   join app.deposit_jobs job
     on job.id = approval.execution_job_id
    and job.deposit_intent_id = approval.deposit_intent_id

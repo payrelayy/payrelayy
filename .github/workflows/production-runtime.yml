@@ -134,11 +134,21 @@ jobs:
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
+          REQUESTED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
         run: |
           set -euo pipefail
           shadow_release_mode="$(<infra/production-shadow-release-mode)"
           pilot_binding="$(<infra/production-telebirr-pilot-binding)"
+          operational_promotion_binding="$(<infra/production-telebirr-operational-promotion.sha256)"
           [[ "$pilot_binding" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$operational_promotion_binding" =~ ^[0-9a-f]{64}$ ]]
+          if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
+            expected_operational_binding="$(printf '%s:%s' "$REQUESTED_TELEBIRR_PILOT" "$REQUESTED_TELEBIRR_EPOCH" | sha256sum | cut -d ' ' -f 1)"
+            if [[ "$operational_promotion_binding" != "$expected_operational_binding" ]]; then
+              echo '::error::This exact production commit is not bound to the requested operational pilot and epoch.'
+              exit 1
+            fi
+          fi
           case "$REQUESTED_MODE:$shadow_release_mode" in
             'deploy:receiver-review'|\
             'deploy:shadow-intake'|\
@@ -266,11 +276,21 @@ jobs:
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
+          REQUESTED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
         run: |
           set -euo pipefail
           shadow_release_mode="$(<infra/production-shadow-release-mode)"
           pilot_binding="$(<infra/production-telebirr-pilot-binding)"
+          operational_promotion_binding="$(<infra/production-telebirr-operational-promotion.sha256)"
           [[ "$pilot_binding" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$operational_promotion_binding" =~ ^[0-9a-f]{64}$ ]]
+          if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
+            expected_operational_binding="$(printf '%s:%s' "$REQUESTED_TELEBIRR_PILOT" "$REQUESTED_TELEBIRR_EPOCH" | sha256sum | cut -d ' ' -f 1)"
+            if [[ "$operational_promotion_binding" != "$expected_operational_binding" ]]; then
+              echo '::error::This exact production commit is not bound to the requested operational pilot and epoch.'
+              exit 1
+            fi
+          fi
           case "$REQUESTED_MODE:$shadow_release_mode" in
             'deploy:receiver-review'|\
             'deploy:shadow-intake'|\

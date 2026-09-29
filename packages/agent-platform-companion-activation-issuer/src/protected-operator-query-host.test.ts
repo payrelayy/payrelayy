@@ -4,6 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
   COMPANION_EXECUTION_OPERATOR_QUERY_PATH,
   COMPANION_EXECUTION_OPERATOR_STOP_PATH,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
@@ -139,6 +140,81 @@ describe('on-demand protected operator host', () => {
     expect(closeAdministrator).toHaveBeenCalledTimes(1);
     expect(disableDatabase).not.toHaveBeenCalled();
     expect(query).not.toHaveBeenCalled();
+  });
+
+  it('requires exactly one successful bootstrap before the one-use signing operation', async () => {
+    const { input, closeAdministrator, query } = fixture();
+    const bootstrapSession = vi.fn(async () => ({
+      statusCode: 200 as const,
+      headers: {
+        'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+        'cache-control': 'no-store',
+      },
+      body: Buffer.from('{}'),
+    }));
+    const signHandoff = vi.fn(async () => ({
+      statusCode: 200 as const,
+      headers: {
+        'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+        'cache-control': 'no-store',
+      },
+      body: Buffer.from('{}'),
+    }));
+    const host = await openProtectedOperatorQueryHostWithPort(
+      { ...input, bootstrapSession, signHandoff },
+      0,
+    );
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH)).toBe(
+      200,
+    );
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_HANDOFF_SIGN_PATH)).toBe(200);
+    expect(bootstrapSession).toHaveBeenCalledTimes(1);
+    expect(signHandoff).toHaveBeenCalledTimes(1);
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH)).toBe(
+      503,
+    );
+    await host.stopped;
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('retires a production-style host when signing overtakes bootstrap', async () => {
+    const { input, closeAdministrator } = fixture();
+    const bootstrapSession = vi.fn();
+    const signHandoff = vi.fn();
+    const host = await openProtectedOperatorQueryHostWithPort(
+      { ...input, bootstrapSession, signHandoff },
+      0,
+    );
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_HANDOFF_SIGN_PATH)).toBe(503);
+    await host.stopped;
+    expect(bootstrapSession).not.toHaveBeenCalled();
+    expect(signHandoff).not.toHaveBeenCalled();
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires the protected host after an unsuccessful bootstrap', async () => {
+    const { input, closeAdministrator } = fixture();
+    const bootstrapSession = vi.fn(async () => ({
+      statusCode: 503 as const,
+      headers: {
+        'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+        'cache-control': 'no-store',
+      },
+      body: Buffer.from('{"code":"temporarily_unavailable"}'),
+    }));
+    const signHandoff = vi.fn();
+    const host = await openProtectedOperatorQueryHostWithPort(
+      { ...input, bootstrapSession, signHandoff },
+      0,
+    );
+    expect(await malformedRequest(host.port, COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH)).toBe(
+      503,
+    );
+    await host.stopped;
+    expect(bootstrapSession).toHaveBeenCalledTimes(1);
+    expect(signHandoff).not.toHaveBeenCalled();
+    expect(closeAdministrator).toHaveBeenCalledTimes(1);
   });
 
   it('retires a host if a query arrives before signing', async () => {

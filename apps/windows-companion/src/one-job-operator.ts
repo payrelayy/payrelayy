@@ -3,6 +3,7 @@ import { win32 } from 'node:path';
 
 import { runGuardedOperatorActivationOverSsh } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
 import type { ProtectedOperatorSshConnection } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
+import { readProtectedOperatorSshBootstrap } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
 
 import {
   loadCompanionDeviceSigningRuntime,
@@ -14,10 +15,7 @@ const REQUEST_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const TAG = /^windows-companion-v[A-Za-z0-9._-]+$/u;
 const MAX_DOCUMENT_BYTES = 8 * 1_024;
 
-export interface OneJobOperatorDocument {
-  readonly version: 1;
-  readonly requestKey: string;
-  readonly actorAuthUserId: string;
+interface OneJobOperatorCommonDocument {
   readonly releaseTag: string;
   readonly archivePath: string;
   readonly checksumPath: string;
@@ -26,6 +24,12 @@ export interface OneJobOperatorDocument {
   readonly processVerifierScriptPath: string;
   readonly connection: ProtectedOperatorSshConnection;
 }
+
+export type OneJobOperatorDocument = OneJobOperatorCommonDocument &
+  (
+    | { readonly version: 1; readonly requestKey: string; readonly actorAuthUserId: string }
+    | { readonly version: 2 }
+  );
 
 export interface OneJobOperatorContext {
   readonly dataRoot: string;
@@ -37,11 +41,13 @@ export interface OneJobOperatorContext {
 
 interface OneJobOperatorAdapters {
   loadDevice(input: { readonly dataRoot: string }): Promise<CompanionDeviceSigningRuntime>;
+  bootstrap: typeof readProtectedOperatorSshBootstrap;
   activate: typeof runGuardedOperatorActivationOverSsh;
 }
 
 const productionAdapters: OneJobOperatorAdapters = {
   loadDevice: loadCompanionDeviceSigningRuntime,
+  bootstrap: readProtectedOperatorSshBootstrap,
   activate: runGuardedOperatorActivationOverSsh,
 };
 
@@ -86,10 +92,13 @@ export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocumen
       Buffer.byteLength(text, 'utf8') > MAX_DOCUMENT_BYTES
     )
       throw new Error();
-    const value = record(JSON.parse(text) as unknown, [
+    const candidate: unknown = JSON.parse(text);
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error();
+    const version = (candidate as Record<string, unknown>).version;
+    if (version !== 1 && version !== 2) throw new Error();
+    const value = record(candidate, [
       'version',
-      'requestKey',
-      'actorAuthUserId',
+      ...(version === 1 ? ['requestKey', 'actorAuthUserId'] : []),
       'releaseTag',
       'archivePath',
       'checksumPath',
@@ -107,11 +116,11 @@ export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocumen
       'remoteLoopbackPort',
     ]);
     if (
-      value.version !== 1 ||
-      typeof value.requestKey !== 'string' ||
-      !REQUEST_KEY.test(value.requestKey) ||
-      typeof value.actorAuthUserId !== 'string' ||
-      !UUID.test(value.actorAuthUserId) ||
+      (version === 1 &&
+        (typeof value.requestKey !== 'string' ||
+          !REQUEST_KEY.test(value.requestKey) ||
+          typeof value.actorAuthUserId !== 'string' ||
+          !UUID.test(value.actorAuthUserId))) ||
       typeof value.releaseTag !== 'string' ||
       !TAG.test(value.releaseTag) ||
       !canonicalWindowsPath(value.archivePath) ||
@@ -130,10 +139,7 @@ export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocumen
       connection.remoteLoopbackPort !== 743
     )
       throw new Error();
-    return Object.freeze({
-      version: 1,
-      requestKey: value.requestKey,
-      actorAuthUserId: value.actorAuthUserId,
+    const common = {
       releaseTag: value.releaseTag,
       archivePath: value.archivePath,
       checksumPath: value.checksumPath,
@@ -148,7 +154,15 @@ export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocumen
         remoteSshPort: connection.remoteSshPort,
         remoteLoopbackPort: connection.remoteLoopbackPort,
       }) as ProtectedOperatorSshConnection,
-    });
+    } as OneJobOperatorCommonDocument;
+    return version === 1
+      ? Object.freeze({
+          ...common,
+          version: 1,
+          requestKey: value.requestKey as string,
+          actorAuthUserId: value.actorAuthUserId as string,
+        })
+      : Object.freeze({ ...common, version: 2 });
   } catch {
     throw new OneJobOperatorUnavailableError();
   }
@@ -171,10 +185,21 @@ export async function runOneJobOperatorWithAdapters(
       throw new Error();
     const device = await adapters.loadDevice({ dataRoot: context.dataRoot });
     if (context.signal?.aborted) throw new Error();
+    const binding =
+      document.version === 2
+        ? await adapters.bootstrap(device, document.connection)
+        : { requestKey: document.requestKey, actorAuthUserId: document.actorAuthUserId };
+    if (
+      context.signal?.aborted ||
+      !binding ||
+      !REQUEST_KEY.test(binding.requestKey) ||
+      !UUID.test(binding.actorAuthUserId)
+    )
+      throw new Error();
     return await adapters.activate(
       {
-        requestKey: document.requestKey,
-        actorAuthUserId: document.actorAuthUserId,
+        requestKey: binding.requestKey,
+        actorAuthUserId: binding.actorAuthUserId,
         releaseInputs: {
           releaseTag: document.releaseTag,
           archivePath: document.archivePath,

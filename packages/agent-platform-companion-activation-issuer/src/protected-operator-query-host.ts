@@ -1,6 +1,7 @@
 import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_HANDOFF_SIGN_PATH,
+  COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH,
   COMPANION_EXECUTION_OPERATOR_STOP_PATH,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
@@ -52,6 +53,10 @@ export interface ProtectedOperatorQueryHostInput extends ProtectedOperatorQueryS
   readonly signHandoff?: (
     request: ProtectedHandoffHttpRequest,
   ) => Promise<ProtectedHandoffHttpResponse>;
+  /** Optional one-use paired bootstrap before signing; production supplies it. */
+  readonly bootstrapSession?: (
+    request: ProtectedHandoffHttpRequest,
+  ) => Promise<ProtectedHandoffHttpResponse>;
   /** A caller-owned cancellation, independent of the Windows process. */
   readonly signal?: AbortSignal;
 }
@@ -92,6 +97,9 @@ export async function openProtectedOperatorQueryHostWithPort(
   let resolveStopped!: () => void;
   let rejectStopped!: (error: ProtectedOperatorQueryHostUnavailableError) => void;
   let signingState: 'pending' | 'succeeded' | 'failed' = input?.signHandoff
+    ? 'pending'
+    : 'succeeded';
+  let bootstrapState: 'pending' | 'succeeded' | 'failed' = input?.bootstrapSession
     ? 'pending'
     : 'succeeded';
   let stopAttempt: Promise<unknown> | undefined;
@@ -159,6 +167,29 @@ export async function openProtectedOperatorQueryHostWithPort(
       trustedNow: input.trustedNow,
     });
     server = createProtectedHandoffLoopbackServer(async (request) => {
+      if (request.path === COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH) {
+        if (bootstrapState !== 'pending' || !input.bootstrapSession) {
+          retireAfterResponse();
+          throw new Error();
+        }
+        bootstrapState = 'failed';
+        try {
+          const response = await input.bootstrapSession(request);
+          if (response.statusCode !== 200) {
+            retireAfterResponse();
+            return response;
+          }
+          bootstrapState = 'succeeded';
+          return response;
+        } catch {
+          retireAfterResponse();
+          throw new Error();
+        }
+      }
+      if (bootstrapState !== 'succeeded') {
+        retireAfterResponse();
+        throw new Error();
+      }
       if (request.path === COMPANION_EXECUTION_OPERATOR_STOP_PATH) {
         if (signingState !== 'succeeded' || !exactStopRequest(request, input.requestKey)) {
           retireAfterResponse();

@@ -72,6 +72,10 @@
       "types": "./dist/protected-operator-query-host.d.ts",
       "default": "./dist/protected-operator-query-host.js"
     },
+    "./protected-operator-bootstrap-request": {
+      "types": "./dist/protected-operator-bootstrap-request.d.ts",
+      "default": "./dist/protected-operator-bootstrap-request.js"
+    },
     "./guarded-operator-ssh-activation": {
       "types": "./dist/guarded-operator-ssh-activation.d.ts",
       "default": "./dist/guarded-operator-ssh-activation.js"

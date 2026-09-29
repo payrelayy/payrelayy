@@ -1,10 +1,14 @@
 import { createHash, createPrivateKey, createPublicKey, type KeyObject } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { lstat, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openProtectedOperatorQueryHost } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-host';
+import {
+  openProtectedOperatorQueryHost,
+  PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT,
+} from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-host';
 import { createProtectedHandoffRequestHandler } from '@fetanagent/agent-platform-companion-activation-issuer/protected-handoff-request';
 import { createProtectedOperatorBootstrapRequestHandler } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-bootstrap-request';
 import { PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256 } from '@fetanagent/agent-platform-companion-execution-contracts';
@@ -159,6 +163,98 @@ async function executionSignerPrivateKey(): Promise<KeyObject> {
   }
 }
 
+type DiagnosticPhase =
+  | 'ready'
+  | 'ca_staging'
+  | 'independent_psql'
+  | 'node_database'
+  | 'database_boundary'
+  | 'server_signer'
+  | 'execution_signer'
+  | 'loopback_bind'
+  | 'cleanup';
+
+/**
+ * No request is prepared or consumed here. The diagnostic performs only SELECTs,
+ * validates the already-installed signer, and briefly binds a handler-free
+ * loopback socket. It never constructs an execution session or calls a
+ * financial transition. Only a fixed phase label leaves the container.
+ */
+export async function diagnoseOperatorHost(
+  document: OperatorHostLaunchDocument,
+): Promise<DiagnosticPhase> {
+  let phase: DiagnosticPhase = 'ca_staging';
+  let scratch: string | undefined;
+  let client: pg.Client | undefined;
+  let listener: Server | undefined;
+  try {
+    scratch = await mkdtemp(join(tmpdir(), 'fetanagent-operator-diagnostic-'));
+    const caPath = join(scratch, 'database-ca.crt');
+    await writeFile(caPath, document.databaseCaPem, { mode: 0o600, flag: 'wx' });
+    phase = 'independent_psql';
+    await runPsql('probe', document, caPath);
+    phase = 'node_database';
+    client = new Client({
+      ...document.database,
+      ssl: {
+        ca: document.databaseCaPem,
+        rejectUnauthorized: true,
+        servername: document.database.host,
+      },
+      connectionTimeoutMillis: 5_000,
+      query_timeout: 10_000,
+      statement_timeout: 10_000,
+      application_name: 'fetanagent-protected-operator-diagnostic',
+    });
+    await client.connect();
+    await client.query('begin read only');
+    phase = 'database_boundary';
+    const probe = await client.query(PROBE_SQL);
+    if (probe.rows.length !== 1 || probe.rows[0]?.case !== 1) throw new Error();
+    phase = 'server_signer';
+    signerPublicKey((await client.query(SIGNER_SQL, [SIGNER_KEY_ID])).rows);
+    phase = 'execution_signer';
+    await executionSignerPrivateKey();
+    await client.query('rollback');
+    phase = 'loopback_bind';
+    listener = createServer();
+    await new Promise<void>((resolve, reject) => {
+      listener!.once('error', reject);
+      listener!.listen(PROTECTED_OPERATOR_QUERY_LOOPBACK_PORT, '127.0.0.1', resolve);
+    });
+    phase = 'ready';
+  } catch {
+    // Never emit the underlying error: it may contain a credential or address.
+  } finally {
+    let cleanupFailed = false;
+    if (listener?.listening) {
+      try {
+        await new Promise<void>((resolve, reject) =>
+          listener!.close((error) => (error ? reject(error) : resolve())),
+        );
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (client) {
+      try {
+        await client.end();
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (scratch) {
+      try {
+        await rm(scratch, { recursive: true, force: true });
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (cleanupFailed && phase === 'ready') phase = 'cleanup';
+  }
+  return phase;
+}
+
 /** A container-private, one-shot process: no service unit and no credential at rest. */
 export async function runOperatorHost(document: OperatorHostLaunchDocument): Promise<void> {
   const scratch = await mkdtemp(join(tmpdir(), 'fetanagent-operator-host-'));
@@ -268,7 +364,16 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
 async function main(): Promise<void> {
   const raw = await readOneLaunchDocument();
   try {
-    await runOperatorHost(parseOperatorHostLaunchDocument(raw));
+    const document = parseOperatorHostLaunchDocument(raw);
+    if (process.argv.length === 3 && process.argv[2] === '--diagnose') {
+      const phase = await diagnoseOperatorHost(document);
+      process.stdout.write(`protected_operator_diagnostic=${phase}\n`);
+      if (phase !== 'ready') process.exitCode = 1;
+    } else if (process.argv.length === 2) {
+      await runOperatorHost(document);
+    } else {
+      throw new Error();
+    }
   } finally {
     raw.fill(0);
   }

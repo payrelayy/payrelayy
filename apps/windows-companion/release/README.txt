@@ -27,8 +27,15 @@ and enabled the execution-v2 pilot for this Windows account. A current signed lo
 handoff must also match the paired certificate, exact companion release, and account; setting the
 internal switch or account ID yourself cannot replace it. The signed handoff must also match a
 fresh measurement of every installed package file. Do not set the switch or account yourself.
-No production handoff issuer or automatic-deposit activation is available in this release. When a
-later reviewed pilot is enabled, one fresh server-signed assignment may prepare one
+The standard Companion launcher remains Find-only. The separate "Start FetanAgent One-Job
+Operator.cmd" is for a separately reviewed, current Owner-approved session only. It needs a
+protected local operator document at the paired data root under operator\one-job-launch.json,
+an installed pinned SSH identity and host key, an independently opened short-lived server
+session, and the exact published release. Without those inputs it stops without starting a
+deposit. The document contains local paths and connection details, never a payment reference,
+password, or request key. Its PowerShell script supports -CheckOnly to inspect local file
+presence without connecting. Do not copy a document from another machine or another release.
+When the reviewed one-job session is enabled, one fresh server-signed assignment may prepare one
 specific Player, verify the receiver name/number and ETB currency, enter exactly 25.00 ETB with an
 empty Notes field, obtain a one-use database fence, and issue exactly one Transfer request. A
 duplicate, expired authority, changed page, redirect, malformed request, timeout, crash, or

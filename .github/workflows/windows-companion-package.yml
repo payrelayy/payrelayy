@@ -16,6 +16,7 @@ on:
       - 'scripts/build-windows-companion-package.ps1'
       - 'scripts/test-companion-activation-claim-binding.ps1'
       - 'scripts/test-windows-companion-pairing-dialog.ps1'
+      - 'scripts/test-windows-companion-one-job-launch.ps1'
       - 'infra/operations/verify-windows-companion-release-installation.ps1'
       - 'infra/operations/observe-windows-companion-verified-launch.ps1'
       - 'pnpm-lock.yaml'

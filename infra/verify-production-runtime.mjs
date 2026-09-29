@@ -12,6 +12,7 @@ const [
   shadowIntakeCompose,
   shadowReleaseMode,
   telebirrPilotBinding,
+  operationalPromotionBinding,
   inertCompose,
   workflow,
   helper,
@@ -34,6 +35,7 @@ const [
   read('infra/compose.production.shadow-intake.yaml'),
   read('infra/production-shadow-release-mode'),
   read('infra/production-telebirr-pilot-binding'),
+  read('infra/production-telebirr-operational-promotion.sha256'),
   read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
@@ -79,6 +81,35 @@ function count(source, expression) {
 assert.match(
   telebirrPilotBinding,
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\r?\n?$/u,
+);
+assert.match(operationalPromotionBinding, /^[0-9a-f]{64}\r?\n?$/u);
+assert.equal(
+  count(
+    workflow,
+    /REQUESTED_TELEBIRR_EPOCH: \$\{\{ inputs\.confirm_telebirr_activation_epoch \}\}/gu,
+  ),
+  2,
+);
+assert.equal(
+  count(
+    workflow,
+    /operational_promotion_binding="\$\(<infra\/production-telebirr-operational-promotion\.sha256\)"/gu,
+  ),
+  2,
+);
+assert.equal(
+  count(
+    workflow,
+    /expected_operational_binding="\$\(printf '%s:%s' "\$REQUESTED_TELEBIRR_PILOT" "\$REQUESTED_TELEBIRR_EPOCH" \| sha256sum \| cut -d ' ' -f 1\)"/gu,
+  ),
+  2,
+);
+assert.equal(
+  count(
+    workflow,
+    /This exact production commit is not bound to the requested operational pilot and epoch\./gu,
+  ),
+  2,
 );
 assert.equal(
   count(workflow, /pilot_binding="\$\(<infra\/production-telebirr-pilot-binding\)"/gu),

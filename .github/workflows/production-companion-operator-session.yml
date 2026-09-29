@@ -22,8 +22,8 @@ concurrency:
 env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
-  PRODUCTION_OPERATOR_IMAGE_REVISION: 9f0a3cd0326f8cbaf391fd6a55bc7adc5d2546c0
-  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.12
+  PRODUCTION_OPERATOR_IMAGE_REVISION: 7d3872867babb6032f91b4b0c108745ada06ff40
+  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.13
 
 jobs:
   validate:

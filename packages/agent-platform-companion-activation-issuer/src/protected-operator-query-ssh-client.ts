@@ -208,7 +208,14 @@ async function postOverSsh(
       detached: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'ignore'],
-      env: { SystemRoot: windowsRoot, WINDIR: windowsRoot },
+      // Windows OpenSSH exits before connecting when PROGRAMDATA is absent.
+      // Derive it from the trusted Windows drive instead of inheriting the
+      // caller's ambient environment or SSH configuration.
+      env: {
+        SystemRoot: windowsRoot,
+        WINDIR: windowsRoot,
+        PROGRAMDATA: win32.join(win32.parse(windowsRoot).root, 'ProgramData'),
+      },
     });
     // A failed Windows spawn reports error asynchronously, including when it
     // did not assign a PID. Never let that become an unhandled process error.

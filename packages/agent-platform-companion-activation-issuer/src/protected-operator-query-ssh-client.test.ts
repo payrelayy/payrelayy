@@ -125,7 +125,11 @@ describe('authenticated protected operator SSH stream', () => {
     expect(args).not.toContain('-L');
     expect(options.shell).toBe(false);
     expect(options.stdio).toEqual(['pipe', 'pipe', 'ignore']);
-    expect(Object.keys(options.env ?? {}).sort()).toEqual(['SystemRoot', 'WINDIR']);
+    expect(options.env).toEqual({
+      SystemRoot: ROOT,
+      WINDIR: ROOT,
+      PROGRAMDATA: 'C:\\ProgramData',
+    });
     expect(requests).toHaveLength(2);
     expect(requests[0]).toContain('Connection: close\r\n');
   });

@@ -258,6 +258,12 @@ async function postOverSsh(
         }
         chunks.push(Buffer.from(chunk));
       });
+      // Content-Length frames the complete request. Keep SSH stdin open until
+      // the remote closes its response: Windows OpenSSH can exit on an immediate
+      // local EOF before its stdio-forward channel is established.
+      ownedChild.stdout!.on('end', () => {
+        if (!ownedChild.stdin!.writableEnded) ownedChild.stdin!.end();
+      });
       ownedChild.once('close', (code, signal) => {
         if (failed || code !== 0 || signal !== null || size < 2) {
           reject(new Error());
@@ -266,7 +272,7 @@ async function postOverSsh(
         resolve(Buffer.concat(chunks, size));
       });
       ownedChild.stdin!.write(header);
-      ownedChild.stdin!.end(body);
+      ownedChild.stdin!.write(body);
     });
     try {
       stage = 'http_response';

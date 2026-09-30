@@ -112,6 +112,14 @@ try {
   }
   $dataRoot = OrdinaryDirectory $dataRoot
   $null = OrdinaryFile (Join-Path $dataRoot 'device\companion-primary.enrollment.json')
+  $handoffDirectory = Join-Path $dataRoot 'execution-v2'
+  $createHandoffDirectory = -not (Test-Path -LiteralPath $handoffDirectory)
+  if (-not $createHandoffDirectory) {
+    $null = OrdinaryDirectory $handoffDirectory
+    if (@(Get-ChildItem -LiteralPath $handoffDirectory -Force).Count -ne 0) {
+      throw 'The local execution handoff directory requires review.'
+    }
+  }
   $operatorDirectory = Join-Path $dataRoot 'operator'
   $documentPath = Join-Path $operatorDirectory 'one-job-launch.json'
   if ((Test-Path -LiteralPath $operatorDirectory) -or
@@ -137,6 +145,15 @@ try {
   if ($PlanOnly) {
     'ONE_JOB_LOCAL_PLAN_READY; no files changed.'
     exit 0
+  }
+
+  $stage = 'activation_directory'
+  if ($createHandoffDirectory) {
+    New-Item -ItemType Directory -Path $handoffDirectory -ErrorAction Stop | Out-Null
+  }
+  $null = OrdinaryDirectory $handoffDirectory
+  if (@(Get-ChildItem -LiteralPath $handoffDirectory -Force).Count -ne 0) {
+    throw 'The local execution handoff directory requires review.'
   }
 
   $stage = 'reviewed_copy'

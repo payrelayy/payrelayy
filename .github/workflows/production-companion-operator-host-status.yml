@@ -87,12 +87,57 @@ jobs:
           chmod 0600 "$protected/deploy-key" "$protected/known-hosts"
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
-          ssh -F /dev/null -i "$protected/deploy-key" -o BatchMode=yes \
-            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$protected/known-hosts" \
-            -o ConnectTimeout=8 -o ConnectionAttempts=1 \
-            -o ServerAliveInterval=5 -o ServerAliveCountMax=1 \
-            "fetanagent-admin@$PRODUCTION_VM_HOST" \
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$protected/known-hosts"
+            -o ConnectTimeout=8 -o ConnectionAttempts=1
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=1)
+          remote="fetanagent-admin@$PRODUCTION_VM_HOST"
+          if ! ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n /usr/local/sbin/fetanagent-production-operator-host-launch inspect '$revision'" \
-            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null; then
+            ssh "${ssh_opts[@]}" "$remote" 'bash -s' <<'REMOTE' | tee -a "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          if command -v ss >/dev/null 2>&1; then
+            if [[ -n "$(ss -H -ltn '( sport = :743 )' 2>/dev/null)" ]]; then
+              echo 'operator_listener=listening'
+            else
+              echo 'operator_listener=closed'
+            fi
+          else
+            echo 'operator_listener=unavailable'
+          fi
+          if systemctl is-active --quiet docker; then
+            echo 'docker_service=active'
+          else
+            echo 'docker_service=not_active'
+          fi
+          if docker info >/dev/null 2>&1; then
+            echo 'docker_inspection=available'
+            if docker container inspect fetanagent-protected-operator-host >/dev/null 2>&1; then
+              echo 'operator_container=present'
+            else
+              echo 'operator_container=absent'
+            fi
+            if docker image inspect fetanagent-protected-operator-host:ci >/dev/null 2>&1; then
+              echo 'operator_image=present'
+            else
+              echo 'operator_image=absent'
+            fi
+          else
+            echo 'docker_inspection=unavailable'
+            echo 'operator_container=unavailable'
+            echo 'operator_image=unavailable'
+          fi
+          installed=/usr/local/sbin/fetanagent-production-operator-host-launch
+          if [[ ! -L "$installed" && -f "$installed" &&
+            "$(stat --format='%u:%g:%a:%h' "$installed" 2>/dev/null)" == '0:0:700:1' ]]; then
+            echo 'launcher_file=exact'
+          else
+            echo 'launcher_file=not_exact'
+          fi
+          REMOTE
+            echo '::error::The protected operator host is not proven dormant; no session or job was started.' >&2
+            exit 1
+          fi
           echo 'The exact production operator image is installed and dormant. No request, listener, credential, queue job, or financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"

@@ -3,7 +3,10 @@ import { win32 } from 'node:path';
 
 import { runGuardedOperatorActivationOverSsh } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
 import type { ProtectedOperatorSshConnection } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
-import { readProtectedOperatorSshBootstrap } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
+import {
+  ProtectedOperatorSshClientUnavailableError,
+  readProtectedOperatorSshBootstrap,
+} from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
 
 import {
   loadCompanionDeviceSigningRuntime,
@@ -50,11 +53,22 @@ const productionAdapters: OneJobOperatorAdapters = {
 export class OneJobOperatorUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
 
-  constructor() {
+  constructor(readonly stage: OneJobOperatorFailureStage = 'local_preflight') {
     super('The one-job operator is unavailable; reconcile before another request.');
     this.name = 'OneJobOperatorUnavailableError';
   }
 }
+
+export type OneJobOperatorFailureStage =
+  | 'platform'
+  | 'document'
+  | 'local_preflight'
+  | 'device_enrollment'
+  | 'bootstrap_local_preflight'
+  | 'bootstrap_ssh_transport'
+  | 'bootstrap_http_response'
+  | 'bootstrap_binding'
+  | 'guarded_activation';
 
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (
@@ -147,7 +161,7 @@ export function parseOneJobOperatorDocument(text: string): OneJobOperatorDocumen
     } as OneJobOperatorCommonDocument;
     return Object.freeze({ ...common, version: 2 });
   } catch {
-    throw new OneJobOperatorUnavailableError();
+    throw new OneJobOperatorUnavailableError('document');
   }
 }
 
@@ -157,6 +171,7 @@ export async function runOneJobOperatorWithAdapters(
   context: OneJobOperatorContext,
   adapters: OneJobOperatorAdapters,
 ): Promise<'confirmed' | 'review_required'> {
+  let stage: OneJobOperatorFailureStage = 'local_preflight';
   try {
     if (
       !document ||
@@ -168,9 +183,12 @@ export async function runOneJobOperatorWithAdapters(
       typeof context.trustedNow !== 'function'
     )
       throw new Error();
+    stage = 'device_enrollment';
     const device = await adapters.loadDevice({ dataRoot: context.dataRoot });
     if (context.signal?.aborted) throw new Error();
+    stage = 'bootstrap_local_preflight';
     const binding = await adapters.bootstrap(device, document.connection);
+    stage = 'bootstrap_binding';
     if (
       context.signal?.aborted ||
       !binding ||
@@ -178,6 +196,7 @@ export async function runOneJobOperatorWithAdapters(
       !UUID.test(binding.actorAuthUserId)
     )
       throw new Error();
+    stage = 'guarded_activation';
     return await adapters.activate(
       {
         requestKey: binding.requestKey,
@@ -199,8 +218,17 @@ export async function runOneJobOperatorWithAdapters(
       device,
       document.connection,
     );
-  } catch {
-    throw new OneJobOperatorUnavailableError();
+  } catch (error) {
+    if (
+      stage === 'bootstrap_local_preflight' &&
+      error instanceof ProtectedOperatorSshClientUnavailableError
+    ) {
+      const bootstrapStage = error.bootstrapStage;
+      if (bootstrapStage === 'ssh_transport') stage = 'bootstrap_ssh_transport';
+      else if (bootstrapStage === 'http_response') stage = 'bootstrap_http_response';
+      else if (bootstrapStage === 'bootstrap_binding') stage = 'bootstrap_binding';
+    }
+    throw new OneJobOperatorUnavailableError(stage);
   }
 }
 
@@ -208,6 +236,6 @@ export function runOneJobOperator(
   document: OneJobOperatorDocument,
   context: OneJobOperatorContext,
 ): Promise<'confirmed' | 'review_required'> {
-  if (process.platform !== 'win32') throw new OneJobOperatorUnavailableError();
+  if (process.platform !== 'win32') throw new OneJobOperatorUnavailableError('platform');
   return runOneJobOperatorWithAdapters(document, context, productionAdapters);
 }

@@ -100,6 +100,58 @@ describe('authenticated protected operator SSH stream', () => {
     expect(requests[0]).not.toContain(requestKey);
     expect(spawned).toHaveBeenCalledTimes(1);
   });
+
+  it('classifies bootstrap failure without exposing transport or response details', async () => {
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    const spawnFor = (kind: 'transport' | 'response' | 'binding') =>
+      vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {
+        const child = new EventEmitter() as ChildProcess;
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        Object.assign(child, { pid: 420, stdin, stdout, kill: vi.fn(() => true) });
+        stdin.on('data', () => undefined);
+        stdin.on('end', () => {
+          if (kind === 'transport') {
+            setImmediate(() => child.emit('close', 255, null));
+            return;
+          }
+          const body = JSON.stringify({ unexpected: 'private response detail' });
+          stdout.end(
+            `HTTP/1.1 ${kind === 'response' ? '403 Forbidden' : '200 OK'}\r\n` +
+              `Content-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\n` +
+              'Cache-Control: no-store\r\n' +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+          );
+          setImmediate(() => child.emit('close', 0, null));
+        });
+        return child;
+      });
+    for (const [kind, bootstrapStage] of [
+      ['transport', 'ssh_transport'],
+      ['response', 'http_response'],
+      ['binding', 'bootstrap_binding'],
+    ] as const) {
+      const spawned = spawnFor(kind);
+      await expect(
+        readProtectedOperatorSshBootstrapWithSpawn(signedDevice, connection, ROOT, spawned, files),
+      ).rejects.toMatchObject({ bootstrapStage });
+      expect(spawned).toHaveBeenCalledTimes(1);
+    }
+    const spawned = spawnFor('transport');
+    await expect(
+      readProtectedOperatorSshBootstrapWithSpawn(
+        signedDevice,
+        { ...connection, remoteLoopbackPort: 744 },
+        ROOT,
+        spawned,
+        files,
+      ),
+    ).rejects.toMatchObject({ bootstrapStage: 'local_preflight' });
+    expect(spawned).not.toHaveBeenCalled();
+  });
   it('uses a pinned identity and host key with stdio forwarding, never a local listener or shell', async () => {
     const { spawned, requests } = fakeSsh((sequence) =>
       sequence === 0 ? { sequence: 0, backendPid: 417, sessionNonce } : { sequence, closed: true },

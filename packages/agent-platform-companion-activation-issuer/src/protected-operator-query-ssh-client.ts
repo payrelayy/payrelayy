@@ -48,9 +48,19 @@ export interface ProtectedOperatorSshConnection {
 export class ProtectedOperatorSshClientUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
 
-  constructor() {
+  constructor(
+    readonly bootstrapStage?:
+      'local_preflight' | 'ssh_transport' | 'http_response' | 'bootstrap_binding',
+  ) {
     super('The authenticated protected operator stream is unavailable.');
     this.name = 'ProtectedOperatorSshClientUnavailableError';
+  }
+}
+
+class ProtectedOperatorSshExchangeError extends Error {
+  constructor(readonly stage: 'ssh_transport' | 'http_response') {
+    super('The protected operator exchange is unavailable.');
+    this.name = 'ProtectedOperatorSshExchangeError';
   }
 }
 
@@ -202,6 +212,7 @@ async function postOverSsh(
   let child: ChildProcess | undefined;
   let timeout: NodeJS.Timeout | undefined;
   let terminationTimeout: NodeJS.Timeout | undefined;
+  let stage: 'ssh_transport' | 'http_response' = 'ssh_transport';
   try {
     child = spawnChild(sshExecutable, sshArguments(connection), {
       shell: false,
@@ -258,10 +269,13 @@ async function postOverSsh(
       ownedChild.stdin!.end(body);
     });
     try {
+      stage = 'http_response';
       return parseResponse(raw);
     } finally {
       raw.fill(0);
     }
+  } catch {
+    throw new ProtectedOperatorSshExchangeError(stage);
   } finally {
     clearTimeout(timeout);
     clearTimeout(terminationTimeout);
@@ -284,6 +298,7 @@ export async function readProtectedOperatorSshBootstrapWithSpawn(
   spawnChild: SpawnChild,
   files: ProtectedOperatorSshFiles = nativeFiles,
 ): Promise<ProtectedOperatorBootstrapBinding> {
+  let stage: 'local_preflight' | 'bootstrap_binding' = 'local_preflight';
   try {
     if (
       !device?.certificate?.bodyDigest ||
@@ -325,6 +340,7 @@ export async function readProtectedOperatorSshBootstrapWithSpawn(
         spawnChild,
         windowsRoot,
       );
+      stage = 'bootstrap_binding';
       if (
         !reply ||
         typeof reply !== 'object' ||
@@ -347,8 +363,10 @@ export async function readProtectedOperatorSshBootstrapWithSpawn(
     } finally {
       body.fill(0);
     }
-  } catch {
-    throw new ProtectedOperatorSshClientUnavailableError();
+  } catch (error) {
+    throw new ProtectedOperatorSshClientUnavailableError(
+      error instanceof ProtectedOperatorSshExchangeError ? error.stage : stage,
+    );
   }
 }
 
@@ -357,7 +375,7 @@ export function readProtectedOperatorSshBootstrap(
   connection: ProtectedOperatorSshConnection,
 ): Promise<ProtectedOperatorBootstrapBinding> {
   if (process.platform !== 'win32' || !process.env.SystemRoot)
-    throw new ProtectedOperatorSshClientUnavailableError();
+    throw new ProtectedOperatorSshClientUnavailableError('local_preflight');
   return readProtectedOperatorSshBootstrapWithSpawn(
     device,
     connection,

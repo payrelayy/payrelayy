@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ProtectedOperatorSshClientUnavailableError } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
 
 import {
   OneJobOperatorUnavailableError,
@@ -192,5 +193,71 @@ describe('one-job Windows operator entry point', () => {
     expect(loadDevice).not.toHaveBeenCalled();
     expect(bootstrap).not.toHaveBeenCalled();
     expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('reports only fixed startup stages and never the underlying failure', async () => {
+    const document = parseOneJobOperatorDocument(JSON.stringify(raw));
+    const context = {
+      dataRoot: 'C:\\FetanAgent\\data',
+      installationRoot: 'C:\\FetanAgent\\installation',
+      windowsEnvironment: {},
+      trustedNow: () => new Date(),
+    };
+    const device = { certificate: {}, createSignedHttpRequest: vi.fn() };
+    const failures = [
+      {
+        expected: 'device_enrollment',
+        loadDevice: vi.fn(async () => {
+          throw new Error('private device detail');
+        }),
+        bootstrap: vi.fn(),
+        activate: vi.fn(),
+      },
+      {
+        expected: 'bootstrap_ssh_transport',
+        loadDevice: vi.fn(async () => device),
+        bootstrap: vi.fn(async () => {
+          throw new ProtectedOperatorSshClientUnavailableError('ssh_transport');
+        }),
+        activate: vi.fn(),
+      },
+      {
+        expected: 'bootstrap_http_response',
+        loadDevice: vi.fn(async () => device),
+        bootstrap: vi.fn(async () => {
+          throw new ProtectedOperatorSshClientUnavailableError('http_response');
+        }),
+        activate: vi.fn(),
+      },
+      {
+        expected: 'bootstrap_binding',
+        loadDevice: vi.fn(async () => device),
+        bootstrap: vi.fn(async () => ({ requestKey: 'invalid', actorAuthUserId })),
+        activate: vi.fn(),
+      },
+      {
+        expected: 'guarded_activation',
+        loadDevice: vi.fn(async () => device),
+        bootstrap: vi.fn(async () => ({ requestKey, actorAuthUserId })),
+        activate: vi.fn(async () => {
+          throw new Error('private activation detail');
+        }),
+      },
+    ];
+    for (const failure of failures) {
+      const error = await runOneJobOperatorWithAdapters(
+        document,
+        context,
+        failure as unknown as Parameters<typeof runOneJobOperatorWithAdapters>[2],
+      ).catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(OneJobOperatorUnavailableError);
+      expect((error as OneJobOperatorUnavailableError).stage).toBe(failure.expected);
+      expect(JSON.stringify(error)).not.toContain('private');
+      if (failure.expected !== 'guarded_activation')
+        expect(failure.activate).not.toHaveBeenCalled();
+    }
+    expect(() => parseOneJobOperatorDocument('{private')).toThrowError(
+      new OneJobOperatorUnavailableError('document'),
+    );
   });
 });

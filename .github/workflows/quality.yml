@@ -57,6 +57,7 @@ jobs:
           node --test infra/operations/production-companion-operator-host-status-workflow.test.mjs
           node --test infra/operations/production-companion-operator-host-startup-diagnostic.test.mjs
           node --test infra/operations/production-companion-operator-session-workflow.test.mjs
+          node --test infra/operations/prepare-windows-companion-one-job-local.test.mjs
           node --test infra/operations/production-live-telebirr-source-binding-shadow-recovery-workflow.test.mjs
 
       - name: Verify FetanAgent branding

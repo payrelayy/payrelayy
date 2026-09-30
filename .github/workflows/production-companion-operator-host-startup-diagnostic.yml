@@ -22,7 +22,7 @@ concurrency:
 env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
-  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.15
+  PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.16
 
 jobs:
   diagnose:

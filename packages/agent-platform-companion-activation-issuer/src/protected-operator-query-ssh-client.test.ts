@@ -36,6 +36,25 @@ const device = {
 const requestKey = '00000000-0000-4000-8000-000000000001';
 const sessionNonce = 'a'.repeat(43);
 
+function onCompleteRequest(stdin: PassThrough, callback: (raw: string) => void): void {
+  const chunks: Buffer[] = [];
+  let complete = false;
+  stdin.on('data', (chunk: Buffer) => {
+    if (complete) return;
+    chunks.push(Buffer.from(chunk));
+    const raw = Buffer.concat(chunks);
+    const boundary = raw.indexOf('\r\n\r\n');
+    if (boundary < 0) return;
+    const length = /^Content-Length: ([0-9]+)$/imu.exec(
+      raw.subarray(0, boundary).toString('ascii'),
+    );
+    if (!length) return;
+    if (raw.byteLength !== boundary + 4 + Number(length[1])) return;
+    complete = true;
+    callback(raw.toString('utf8'));
+  });
+}
+
 function fakeSsh(responseFor: (sequence: number) => unknown) {
   const requests: string[] = [];
   const spawned = vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {
@@ -43,10 +62,7 @@ function fakeSsh(responseFor: (sequence: number) => unknown) {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     Object.assign(child, { pid: 417, stdin, stdout, kill: vi.fn(() => true) });
-    const incoming: Buffer[] = [];
-    stdin.on('data', (chunk: Buffer) => incoming.push(Buffer.from(chunk)));
-    stdin.on('end', () => {
-      const raw = Buffer.concat(incoming).toString('utf8');
+    onCompleteRequest(stdin, (raw) => {
       requests.push(raw);
       const boundary = raw.indexOf('\r\n\r\n');
       const envelope = JSON.parse(raw.slice(boundary + 4)) as { command: { sequence: number } };
@@ -70,10 +86,8 @@ describe('authenticated protected operator SSH stream', () => {
       const stdin = new PassThrough();
       const stdout = new PassThrough();
       Object.assign(child, { pid: 420, stdin, stdout, kill: vi.fn(() => true) });
-      const chunks: Buffer[] = [];
-      stdin.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
-      stdin.on('end', () => {
-        requests.push(Buffer.concat(chunks).toString('utf8'));
+      onCompleteRequest(stdin, (raw) => {
+        requests.push(raw);
         const body = JSON.stringify({
           requestKey,
           actorAuthUserId: '11111111-1111-4111-8111-111111111111',
@@ -101,6 +115,48 @@ describe('authenticated protected operator SSH stream', () => {
     expect(spawned).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps SSH stdin open until the remote response is complete', async () => {
+    let inputClosedBeforeResponse = false;
+    let responseStarted = false;
+    const spawned = vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {
+      const child = new EventEmitter() as ChildProcess;
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      Object.assign(child, { pid: 421, stdin, stdout, kill: vi.fn(() => true) });
+      onCompleteRequest(stdin, (raw) => {
+        expect(raw).toContain('POST /v2/companion/operator/activation-session:bootstrap');
+        setImmediate(() => {
+          if (inputClosedBeforeResponse) return;
+          responseStarted = true;
+          const body = JSON.stringify({
+            requestKey,
+            actorAuthUserId: '11111111-1111-4111-8111-111111111111',
+          });
+          stdout.end(
+            `HTTP/1.1 200 OK\r\nContent-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\n` +
+              `Cache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+          );
+          setImmediate(() => child.emit('close', 0, null));
+        });
+      });
+      stdin.on('end', () => {
+        if (responseStarted) return;
+        inputClosedBeforeResponse = true;
+        setImmediate(() => child.emit('close', 0, null));
+      });
+      return child;
+    });
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    await expect(
+      readProtectedOperatorSshBootstrapWithSpawn(signedDevice, connection, ROOT, spawned, files),
+    ).resolves.toMatchObject({ requestKey });
+    expect(inputClosedBeforeResponse).toBe(false);
+    expect(responseStarted).toBe(true);
+  });
+
   it('classifies bootstrap failure without exposing transport or response details', async () => {
     const signedDevice = {
       certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
@@ -112,8 +168,7 @@ describe('authenticated protected operator SSH stream', () => {
         const stdin = new PassThrough();
         const stdout = new PassThrough();
         Object.assign(child, { pid: 420, stdin, stdout, kill: vi.fn(() => true) });
-        stdin.on('data', () => undefined);
-        stdin.on('end', () => {
+        onCompleteRequest(stdin, () => {
           if (kind === 'transport') {
             setImmediate(() => child.emit('close', 255, null));
             return;
@@ -243,10 +298,8 @@ describe('authenticated protected operator SSH stream', () => {
       const stdin = new PassThrough();
       const stdout = new PassThrough();
       Object.assign(child, { pid: 418, stdin, stdout, kill: vi.fn(() => true) });
-      const chunks: Buffer[] = [];
-      stdin.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
-      stdin.on('end', () => {
-        requests.push(Buffer.concat(chunks).toString('utf8'));
+      onCompleteRequest(stdin, (raw) => {
+        requests.push(raw);
         const body = JSON.stringify({
           body: { requestKey },
           signature: 'test',
@@ -287,10 +340,8 @@ describe('authenticated protected operator SSH stream', () => {
       const stdin = new PassThrough();
       const stdout = new PassThrough();
       Object.assign(child, { pid: 419, stdin, stdout, kill: vi.fn(() => true) });
-      const chunks: Buffer[] = [];
-      stdin.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
-      stdin.on('end', () => {
-        requests.push(Buffer.concat(chunks).toString('utf8'));
+      onCompleteRequest(stdin, (raw) => {
+        requests.push(raw);
         const body = '{"stopped":true}';
         stdout.end(
           `HTTP/1.1 200 OK\r\nContent-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,

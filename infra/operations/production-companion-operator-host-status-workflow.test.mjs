@@ -34,3 +34,23 @@ test('uses pinned SSH identity and cannot create an operator or financial sessio
   assert.doesNotMatch(workflow, /\b(?:prepare|run|stop)\s+'?\$revision/u);
   assert.doesNotMatch(workflow, /\b(?:insert|update|delete|truncate)\s+(?:into\s+)?app\./iu);
 });
+
+test('classifies a failed dormant check without restarting or stopping the host', () => {
+  for (const fragment of [
+    'operator_listener=listening',
+    'operator_listener=closed',
+    'docker_service=active',
+    'docker_service=not_active',
+    'operator_container=present',
+    'operator_container=absent',
+    'launcher_file=exact',
+    'The protected operator host is not proven dormant',
+  ]) {
+    assert.ok(workflow.includes(fragment));
+  }
+  assert.doesNotMatch(
+    workflow,
+    /fetanagent-production-operator-host-launch (?:run|stop|diagnose)/u,
+  );
+  assert.doesNotMatch(workflow, /docker (?:run|start|stop|rm|rmi)\b/u);
+});

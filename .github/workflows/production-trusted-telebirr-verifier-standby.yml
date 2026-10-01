@@ -70,7 +70,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$(gh api repos/payrelayy/payrelayy/git/ref/heads/main --jq .object.sha)" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
           node infra/operations/require-production-ci.mjs
       - name: Verify contract and build sealed image
         shell: bash
@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$(gh api repos/payrelayy/payrelayy/git/ref/heads/main --jq .object.sha)" == "$GITHUB_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           protected="$RUNNER_TEMP/verifier-standby-connection"
           install -d -m 0700 "$protected"

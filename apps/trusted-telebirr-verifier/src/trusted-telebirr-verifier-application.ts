@@ -123,10 +123,11 @@ export async function createTrustedTelebirrVerifierApplication(
       config.connection,
     );
     const exactRuntime = runtime;
-    const verifier = (dependencies.createVerifier ?? createTrustedTelebirrVerifier)(
-      exactRuntime.database,
-      config.pinnedKeys,
-    );
+    const verifier = dependencies.createVerifier
+      ? dependencies.createVerifier(exactRuntime.database, config.pinnedKeys)
+      : createTrustedTelebirrVerifier(exactRuntime.database, config.pinnedKeys, (diagnostic) =>
+          console.warn(`FetanAgent trusted TeleBirr invalid evidence stage: ${diagnostic}.`),
+        );
     if (typeof verifier.verifyAndComplete !== 'function' || !(await exactRuntime.ready())) {
       throw new TrustedTelebirrVerifierApplicationUnavailableError();
     }

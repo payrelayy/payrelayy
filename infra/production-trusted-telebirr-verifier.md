@@ -6,6 +6,10 @@ checked-in artifacts does not install a host helper, create a GitHub secret or v
 image, invoke activation, enable a database login, start a container, change a feature switch,
 complete a payment, enqueue an execution, or move money.
 
+When a verifier is already active, use the separate [standby image check](production-trusted-telebirr-verifier-standby.md)
+to inspect a replacement image without stopping the live service. It is not a live handoff;
+`stage-disabled` still stops the existing verifier and must not be used as a hot-swap path.
+
 Production runtime activation is available only through `activate-verification`. That manual mode
 requires the exact reviewed `main` commit, production project and droplet, pin-manifest digest,
 active Owner UUID, fresh companion-verified pilot UUID, new UUIDv4 idempotency key, and the exact

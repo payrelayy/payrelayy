@@ -234,6 +234,21 @@ export type TrustedTelebirrVerifierFailureStage =
   | 'persist_completion'
   | 'validate_completion';
 
+type AuthenticationDiagnostic =
+  | `protocol_${TelebirrLivePilotVerificationReason}`
+  | 'snapshot_digest_invalid'
+  | 'adapter_unavailable'
+  | 'database_facts_unbound'
+  | 'invalid_assessment_input';
+
+/** Fixed categories only: no receipt, identity, key, token, or digest may enter this sink. */
+export type TrustedTelebirrInvalidEvidenceDiagnostic =
+  | `first_${AuthenticationDiagnostic | 'pin_mismatch'}`
+  | `second_${AuthenticationDiagnostic | 'pin_mismatch' | 'authority_changed'}`
+  | 'completion_reference_mismatch'
+  | 'completion_replay_invalid'
+  | 'completion_conflict';
+
 export class TrustedTelebirrVerifierUnavailableError extends Error {
   constructor(readonly failureStage: TrustedTelebirrVerifierFailureStage = 'unavailable') {
     super('The trusted TeleBirr verifier is unavailable.');
@@ -724,6 +739,7 @@ function authenticatedOutcome(
   signedObservation: TelebirrLivePilotSignedObservation,
   signerSpki: Uint8Array,
   deviceSpki: Uint8Array,
+  reportInvalid: (reason: AuthenticationDiagnostic) => void,
 ) {
   const protocolInput = verificationInput(authority, signedAssignment, signedObservation);
   const protocol = verifyTelebirrLivePrivatePilotEvidence(protocolInput, signerSpki, deviceSpki);
@@ -734,6 +750,7 @@ function authenticatedOutcome(
       ? protocol.disposition !== 'would_forward_signed_evidence'
       : protocol.disposition !== 'would_review')
   ) {
+    reportInvalid(`protocol_${protocol.reasonCode}`);
     return undefined;
   }
   const databaseSnapshotMaterial = {
@@ -745,7 +762,10 @@ function authenticatedOutcome(
     facts: authority.outcomeInputBase.databaseFacts,
   };
   const snapshotDigest = deriveTelebirrLivePilotDatabaseSnapshotDigest(databaseSnapshotMaterial);
-  if (!snapshotDigest) return undefined;
+  if (!snapshotDigest) {
+    reportInvalid('snapshot_digest_invalid');
+    return undefined;
+  }
   const outcome = adaptTelebirrLivePilotOutcome(
     {
       contractVersion: TELEBIRR_LIVE_PILOT_OUTCOME_ADAPTER_CONTRACT_VERSION,
@@ -771,11 +791,15 @@ function authenticatedOutcome(
     signerSpki,
     deviceSpki,
   );
+  if (!outcome) {
+    reportInvalid('adapter_unavailable');
+    return undefined;
+  }
   if (
-    !outcome ||
     outcome.reasonCode === 'database_facts_unbound' ||
     outcome.reasonCode === 'invalid_assessment_input'
   ) {
+    reportInvalid(outcome.reasonCode);
     return undefined;
   }
   return Object.freeze({
@@ -930,6 +954,7 @@ function createTelebirrVerifier(
   database: TrustedTelebirrVerifierDatabase,
   pinnedKeys: TrustedTelebirrPinnedKeys,
   verificationMode: TrustedTelebirrVerificationMode,
+  onInvalidEvidence?: (diagnostic: TrustedTelebirrInvalidEvidenceDiagnostic) => void,
 ): TrustedTelebirrVerifier {
   const pinRecord = exactDataRecord(pinnedKeys, ['assignmentSigners', 'devices']);
   if (
@@ -948,6 +973,14 @@ function createTelebirrVerifier(
   ) {
     throw new TrustedTelebirrVerifierUnavailableError();
   }
+
+  const reportInvalid = (diagnostic: TrustedTelebirrInvalidEvidenceDiagnostic): void => {
+    try {
+      onInvalidEvidence?.(diagnostic);
+    } catch {
+      // Diagnostics cannot change the fail-closed verification result.
+    }
+  };
 
   return Object.freeze({
     async verifyAndComplete(requestCandidate: TrustedTelebirrVerificationRequest) {
@@ -983,6 +1016,7 @@ function createTelebirrVerifier(
           !devicePin ||
           devicePin.fingerprint !== firstAuthority.deviceSpkiFingerprint
         ) {
+          reportInvalid('first_pin_mismatch');
           return nonSettlementResult(undefined, verificationMode);
         }
 
@@ -993,6 +1027,7 @@ function createTelebirrVerifier(
           request.signedObservation,
           signerPin.spki,
           devicePin.spki,
+          (reason) => reportInvalid(`first_${reason}`),
         );
         if (!firstVerification) return nonSettlementResult(undefined, verificationMode);
 
@@ -1014,6 +1049,7 @@ function createTelebirrVerifier(
           secondAuthority.authorityStateDigest !== firstAuthority.authorityStateDigest ||
           !exactTranscriptMatch(secondAuthority, request.signedAssignment)
         ) {
+          reportInvalid('second_authority_changed');
           return nonSettlementResult(undefined, verificationMode);
         }
         const secondSignerPin = signerPins.get(String(secondAuthority.signer.signerKeyId));
@@ -1024,6 +1060,7 @@ function createTelebirrVerifier(
           !secondDevicePin ||
           secondDevicePin.fingerprint !== secondAuthority.deviceSpkiFingerprint
         ) {
+          reportInvalid('second_pin_mismatch');
           return nonSettlementResult(undefined, verificationMode);
         }
         failureStage = 'authenticate_second_evidence';
@@ -1033,6 +1070,7 @@ function createTelebirrVerifier(
           request.signedObservation,
           secondSignerPin.spki,
           secondDevicePin.spki,
+          (reason) => reportInvalid(`second_${reason}`),
         );
         if (!secondVerification) return nonSettlementResult(undefined, verificationMode);
         const { outcome: secondOutcome, protocol: secondProtocol } = secondVerification;
@@ -1046,6 +1084,7 @@ function createTelebirrVerifier(
               secondOutcome.canonicalReference.fingerprint !== trustedReference.fingerprint ||
               secondOutcome.canonicalReference.masked !== trustedReference.masked))
         ) {
+          reportInvalid('completion_reference_mismatch');
           return nonSettlementResult(undefined, verificationMode);
         }
         const replayIdentity = deriveTelebirrLivePilotReplayIdentity(
@@ -1060,6 +1099,7 @@ function createTelebirrVerifier(
           replayIdentity !== secondProtocol.replayIdentity ||
           !observationSignatureDigest
         ) {
+          reportInvalid('completion_replay_invalid');
           return nonSettlementResult(undefined, verificationMode);
         }
 
@@ -1109,6 +1149,7 @@ function createTelebirrVerifier(
                 !trustedReceiver ||
                 existingCompletion.receiverIdentityDigest !== trustedReceiver.identityDigest)))
         ) {
+          reportInvalid('completion_conflict');
           return nonSettlementResult(undefined, verificationMode);
         }
         const completionInput = existingCompletion ?? currentCompletionInput;
@@ -1135,16 +1176,18 @@ function createTelebirrVerifier(
 export function createTrustedTelebirrVerifier(
   database: TrustedTelebirrVerifierDatabase,
   pinnedKeys: TrustedTelebirrPinnedKeys,
+  onInvalidEvidence?: (diagnostic: TrustedTelebirrInvalidEvidenceDiagnostic) => void,
 ): TrustedTelebirrVerifier {
-  return createTelebirrVerifier(database, pinnedKeys, 'live');
+  return createTelebirrVerifier(database, pinnedKeys, 'live', onInvalidEvidence);
 }
 
 /** No-money factory. It accepts only advisory completion rows with every financial field absent. */
 export function createTelebirrShadowVerifier(
   database: TrustedTelebirrVerifierDatabase,
   pinnedKeys: TrustedTelebirrPinnedKeys,
+  onInvalidEvidence?: (diagnostic: TrustedTelebirrInvalidEvidenceDiagnostic) => void,
 ): TrustedTelebirrVerifier {
-  return createTelebirrVerifier(database, pinnedKeys, 'shadow');
+  return createTelebirrVerifier(database, pinnedKeys, 'shadow', onInvalidEvidence);
 }
 
 /** Fixed-key projection; it excludes IDs, references, digests, signatures, tokens, and keys. */

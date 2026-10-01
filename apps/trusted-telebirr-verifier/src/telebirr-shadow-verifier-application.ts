@@ -113,10 +113,11 @@ export async function createTelebirrShadowVerifierApplication(
       config.connection,
     );
     const exactRuntime = runtime;
-    const verifier = (dependencies.createVerifier ?? createTelebirrShadowVerifier)(
-      exactRuntime.database,
-      config.pinnedKeys,
-    );
+    const verifier = dependencies.createVerifier
+      ? dependencies.createVerifier(exactRuntime.database, config.pinnedKeys)
+      : createTelebirrShadowVerifier(exactRuntime.database, config.pinnedKeys, (diagnostic) =>
+          console.warn(`FetanAgent TeleBirr shadow invalid evidence stage: ${diagnostic}.`),
+        );
     if (typeof verifier.verifyAndComplete !== 'function' || !(await exactRuntime.ready())) {
       throw new TelebirrShadowVerifierApplicationUnavailableError();
     }

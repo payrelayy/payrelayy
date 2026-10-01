@@ -1089,6 +1089,35 @@ describe('trusted TeleBirr verifier', () => {
     });
   });
 
+  it('reports a fixed invalid-evidence category without changing the rejection', async () => {
+    const value = fixture();
+    Object.assign(value.observation.body, { normalizedFactsDigest: sha('f') });
+    const complete = vi.fn();
+    const diagnostics: string[] = [];
+    const verifier = createTrustedTelebirrVerifier(
+      { loadAuthority: async () => value.authority, complete },
+      {
+        assignmentSigners: [
+          { keyId: value.assignment.signerKeyId, publicKeySpkiDer: value.signer.spki },
+        ],
+        devices: [{ keyId: value.assignment.body.keyId, publicKeySpkiDer: value.device.spki }],
+      },
+      (diagnostic) => {
+        diagnostics.push(diagnostic);
+        throw new Error(rawReference);
+      },
+    );
+
+    await expect(verifier.verifyAndComplete(value.request)).resolves.toEqual({
+      status: 'not_settled',
+      disposition: 'invalid',
+      reasonCode: 'trusted_evidence_invalid',
+    });
+    expect(diagnostics).toEqual(['first_protocol_facts_digest_mismatch']);
+    expect(JSON.stringify(diagnostics)).not.toContain(rawReference);
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it('uses constant safe errors and fixed-key logs with no secret-bearing material', async () => {
     const value = fixture();
     const { verifier } = verifierFor(value);

@@ -91,6 +91,8 @@ jobs:
           bash -n infra/operations/fetanagent-telebirr-shadow-verifier-helper.sh
           bash -n infra/operations/fetanagent-production-trusted-telebirr-verifier-standby-helper.sh
           sudo visudo -cf infra/operations/fetanagent-production-trusted-telebirr-verifier-standby-helper.sudoers
+          bash -n infra/operations/fetanagent-production-trusted-telebirr-verifier-handoff.sh
+          node infra/verify-production-trusted-telebirr-verifier-handoff.mjs
           bash -n infra/operations/fetanagent-staging-direct-database-tunnel.sh
           FETANAGENT_IMAGE_TAG=ci \
           FETANAGENT_VCS_REF="${GITHUB_SHA}" \

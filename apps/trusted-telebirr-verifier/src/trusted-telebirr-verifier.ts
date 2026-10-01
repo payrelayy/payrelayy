@@ -57,12 +57,18 @@ const AUTHORITY_KEYS = [
   'databaseAuthority',
   'databaseFacts',
 ] as const;
+// The production live authority predates the shadow verifier and has no verificationMode key.
+// Keep its exact shape distinct from the explicitly mode-tagged shadow response.
+const LIVE_AUTHORITY_KEYS = AUTHORITY_KEYS.filter((key) => key !== 'verificationMode');
 const SHADOW_AUTHORITY_KEYS = [...AUTHORITY_KEYS, 'evidenceStagedAt'] as const;
 const HISTORICAL_COMPLETION_AUTHORITY_KEYS = [
   ...AUTHORITY_KEYS,
   'historicalCompletionRecovery',
   'evidenceStagedAt',
 ] as const;
+const LIVE_HISTORICAL_COMPLETION_AUTHORITY_KEYS = HISTORICAL_COMPLETION_AUTHORITY_KEYS.filter(
+  (key) => key !== 'verificationMode',
+);
 const ATTEMPT_KEYS = [
   'assignmentId',
   'requestId',
@@ -573,15 +579,22 @@ function authorityFrom(
   expectedVerificationMode: TrustedTelebirrVerificationMode,
 ): ParsedAuthority | undefined {
   const candidate = dataRecord(value);
+  const untaggedLiveAuthority =
+    expectedVerificationMode === 'live' && candidate?.verificationMode === undefined;
   const historicalCompletionRecovery =
-    candidate?.verificationMode === 'live' && candidate.historicalCompletionRecovery === true;
+    (candidate?.verificationMode === 'live' || untaggedLiveAuthority) &&
+    candidate?.historicalCompletionRecovery === true;
   const record = exactDataRecord(
     value,
     candidate?.verificationMode === 'shadow'
       ? SHADOW_AUTHORITY_KEYS
       : historicalCompletionRecovery
-        ? HISTORICAL_COMPLETION_AUTHORITY_KEYS
-        : AUTHORITY_KEYS,
+        ? untaggedLiveAuthority
+          ? LIVE_HISTORICAL_COMPLETION_AUTHORITY_KEYS
+          : HISTORICAL_COMPLETION_AUTHORITY_KEYS
+        : untaggedLiveAuthority
+          ? LIVE_AUTHORITY_KEYS
+          : AUTHORITY_KEYS,
   );
   const capturedAt = canonicalTimestamp(record?.capturedAt);
   const evidenceStagedAt =
@@ -605,7 +618,7 @@ function authorityFrom(
   if (
     !record ||
     record.contractVersion !== TRUSTED_TELEBIRR_VERIFIER_CONTRACT_VERSION ||
-    record.verificationMode !== expectedVerificationMode ||
+    (record.verificationMode !== expectedVerificationMode && !untaggedLiveAuthority) ||
     (historicalCompletionRecovery && record.historicalCompletionRecovery !== true) ||
     record.verificationAttemptId !== expectedAttemptId ||
     record.leaseTokenAccepted !== true ||

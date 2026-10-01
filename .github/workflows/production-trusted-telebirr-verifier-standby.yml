@@ -1,0 +1,148 @@
+name: Production trusted TeleBirr verifier standby smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Type the exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_operation:
+        description: Type STAGE AND SMOKE STANDBY VERIFIER - NO LIVE HANDOFF
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-trusted-telebirr-verifier-standby
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact standby-only operation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require main and exact bounded operation
+        env:
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_DROPLET" == '593344964' ]]
+          [[ "$CONFIRMED_OPERATION" == 'STAGE AND SMOKE STANDBY VERIFIER - NO LIVE HANDOFF' ]]
+
+  stage-and-smoke:
+    name: Load inert image without touching the active verifier
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Require latest exact-main CI before protected access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
+          node infra/operations/require-production-ci.mjs
+      - name: Verify contract and build sealed image
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n infra/operations/fetanagent-production-trusted-telebirr-verifier-standby-helper.sh
+          node infra/verify-production-trusted-telebirr-verifier-standby.mjs
+          sudo visudo -cf infra/operations/fetanagent-production-trusted-telebirr-verifier-standby-helper.sudoers
+          tag="${GITHUB_SHA:0:12}"
+          image="fetanagent-trusted-telebirr-verifier:$tag"
+          docker build --pull=false --target trusted-telebirr-verifier \
+            --build-arg "VCS_REF=$GITHUB_SHA" --tag "$image" .
+          [[ "$(docker image inspect "$image" --format '{{.Config.User}}')" == '10001:10001' ]]
+          [[ "$(docker image inspect "$image" \
+            --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "$GITHUB_SHA" ]]
+          [[ "$(docker image inspect "$image" --format '{{json .Config.ExposedPorts}}')" == 'null' ]]
+          umask 077
+          docker save --output "$RUNNER_TEMP/verifier-image.tar" "$image"
+      - name: Transfer only the image and run an inert on-host startup check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" == "$GITHUB_SHA" ]]
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          protected="$RUNNER_TEMP/verifier-standby-connection"
+          install -d -m 0700 "$protected"
+          trap 'rm -f -- "$protected/deploy-key" "$protected/known-hosts"; rmdir -- "$protected"' EXIT
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected"/*
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$protected/known-hosts" -o ConnectTimeout=8 \
+            -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=1)
+          remote="fetanagent-admin@$PRODUCTION_VM_HOST"
+          helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-standby-helper'
+          helper_sha="$(sha256sum \
+            infra/operations/fetanagent-production-trusted-telebirr-verifier-standby-helper.sh | cut -d ' ' -f 1)"
+          archive="$RUNNER_TEMP/verifier-image.tar"
+          archive_sha="$(sha256sum "$archive" | cut -d ' ' -f 1)"
+          archive_bytes="$(stat -c %s "$archive")"
+          incoming="/tmp/fetanagent-production-verifier-standby-$GITHUB_SHA"
+          prepared=0
+          cleanup() {
+            local prior=$? cleanup_status=0
+            trap - EXIT
+            if [[ "$prepared" -eq 1 ]]; then
+              timeout --signal=TERM --kill-after=10s 60s \
+                ssh "${ssh_opts[@]}" "$remote" \
+                "sudo -n '$helper' cleanup '$GITHUB_SHA'" || cleanup_status=$?
+            fi
+            rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$archive"
+            rmdir -- "$protected" || cleanup_status=$?
+            if [[ "$prior" -ne 0 ]]; then exit "$prior"; fi
+            exit "$cleanup_status"
+          }
+          trap cleanup EXIT
+          timeout --signal=TERM --kill-after=10s 70s \
+            ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$helper' verify '$helper_sha' && sudo -n '$helper' prepare '$GITHUB_SHA' '$archive_bytes'"
+          prepared=1
+          timeout --signal=TERM --kill-after=30s 10m \
+            scp "${ssh_opts[@]}" "$archive" "$remote:$incoming/verifier-image.tar"
+          timeout --signal=TERM --kill-after=10s 90s \
+            ssh "${ssh_opts[@]}" "$remote" \
+            "chmod 0600 '$incoming/verifier-image.tar' && sudo -n '$helper' stage-smoke '$GITHUB_SHA' '$archive_sha'"
+          echo 'The reviewed image was loaded on the host and failed closed without a network, credential, or activation input. The existing live verifier remained healthy and unchanged; no live handoff or evidence processing occurred.' >>"$GITHUB_STEP_SUMMARY"

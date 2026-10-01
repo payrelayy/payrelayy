@@ -1,0 +1,8 @@
+# Standby-only image installation and network-free startup smoke. No live handoff authority.
+Cmnd_Alias FETANAGENT_PRODUCTION_VERIFIER_STANDBY = \
+  sha256:ee692cf27357189363455a26964fb466b93f55ba19b5002c1d4728659c99c980 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-standby-helper verify *, \
+  sha256:ee692cf27357189363455a26964fb466b93f55ba19b5002c1d4728659c99c980 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-standby-helper prepare *, \
+  sha256:ee692cf27357189363455a26964fb466b93f55ba19b5002c1d4728659c99c980 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-standby-helper stage-smoke *, \
+  sha256:ee692cf27357189363455a26964fb466b93f55ba19b5002c1d4728659c99c980 /usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-standby-helper cleanup *
+
+fetanagent-admin ALL=(root) NOPASSWD: FETANAGENT_PRODUCTION_VERIFIER_STANDBY

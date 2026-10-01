@@ -279,7 +279,6 @@ function fixture(facts: TelebirrLivePilotReceiptFacts = foundFacts()) {
   };
   const authority = {
     contractVersion: 1,
-    verificationMode: 'live',
     capturedAt: assessedAt,
     authorityStateDigest: sha('a'),
     verificationAttemptId: ids.attempt,
@@ -513,6 +512,44 @@ function verifierFor(value: ReturnType<typeof fixture>, authorities = [value.aut
 }
 
 describe('trusted TeleBirr verifier', () => {
+  it('accepts the exact untagged production live authority without accepting a shadow payload', async () => {
+    const value = fixture();
+    const { verifier, complete } = verifierFor(value);
+    await expect(verifier.verifyAndComplete(value.request)).resolves.toMatchObject({
+      status: 'settled',
+    });
+    expect(complete).toHaveBeenCalledTimes(1);
+
+    const tagged = fixture();
+    Object.assign(tagged.authority, { verificationMode: 'live' });
+    const taggedRuntime = verifierFor(tagged);
+    await expect(taggedRuntime.verifier.verifyAndComplete(tagged.request)).resolves.toMatchObject({
+      status: 'settled',
+    });
+    expect(taggedRuntime.complete).toHaveBeenCalledTimes(1);
+
+    const crossWired = fixture();
+    Object.assign(crossWired.authority, {
+      verificationMode: 'shadow',
+      evidenceStagedAt: crossWired.observation.body.observedAt,
+    });
+    const rejected = verifierFor(crossWired);
+    await expect(rejected.verifier.verifyAndComplete(crossWired.request)).rejects.toBeInstanceOf(
+      TrustedTelebirrVerifierUnavailableError,
+    );
+    expect(rejected.complete).not.toHaveBeenCalled();
+
+    const malformed = fixture();
+    Object.assign(malformed.authority, {
+      evidenceStagedAt: malformed.observation.body.observedAt,
+    });
+    const malformedRuntime = verifierFor(malformed);
+    await expect(
+      malformedRuntime.verifier.verifyAndComplete(malformed.request),
+    ).rejects.toBeInstanceOf(TrustedTelebirrVerifierUnavailableError);
+    expect(malformedRuntime.complete).not.toHaveBeenCalled();
+  });
+
   it('uses two matching server snapshots and completes only the exact signed settlement candidate', async () => {
     const value = fixture();
     const { verifier, complete } = verifierFor(value);

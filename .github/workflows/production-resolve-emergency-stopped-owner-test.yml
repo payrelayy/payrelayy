@@ -122,12 +122,12 @@ jobs:
               --file=infra/sql/production-companion-execution-activation-status.sql)"
           jq -e '
             .readOnly and .identifiersRedacted and .readinessOnly and
-            .pilotState == "stopped" and .pilotStopReason == "execution_uncertainty" and
+            .pilotState == "armed" and .pilotStopReason == null and
             .nextAction == "customer_resolution_pending" and
             .openJobs == 0 and .untouchedQueuedJobs == 0 and
             .openExecutionReviewCases == 1 and
-            .customerResolutionPending and .latestPilotJobs == 1 and
-            .allFinancialSwitchesDisabled and .noMoneySwitchBoundary and
+            .customerResolutionPending and .latestPilotJobs == 0 and
+            (.allFinancialSwitchesDisabled | not) and .noMoneySwitchBoundary and
             .companionExecutionControlDisabled and .executionCapabilityDormant and
             .companionExecutionRecords == 0 and (.effectiveTrustedEpochAvailable | not)
           ' <<<"$before" >/dev/null
@@ -142,12 +142,12 @@ jobs:
               --file=infra/sql/production-companion-execution-activation-status.sql)"
           jq -e '
             .readOnly and .identifiersRedacted and .readinessOnly and
-            .pilotState == "stopped" and .pilotStopReason == "execution_uncertainty" and
-            .nextAction == "pilot_review" and
+            .pilotState == "armed" and .pilotStopReason == null and
+            .nextAction == "trusted_activation_review" and
             .openJobs == 0 and .untouchedQueuedJobs == 0 and
             .openExecutionReviewCases == 0 and
-            (.customerResolutionPending | not) and .latestPilotJobs == 1 and
-            .allFinancialSwitchesDisabled and .noMoneySwitchBoundary and
+            (.customerResolutionPending | not) and .latestPilotJobs == 0 and
+            (.allFinancialSwitchesDisabled | not) and .noMoneySwitchBoundary and
             .companionExecutionControlDisabled and .executionCapabilityDormant and
             .companionExecutionRecords == 0 and (.effectiveTrustedEpochAvailable | not)
           ' <<<"$after" >/dev/null

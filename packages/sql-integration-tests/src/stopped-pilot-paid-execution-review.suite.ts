@@ -543,5 +543,133 @@ export function registerStoppedPilotPaidExecutionReviewSqlTests(
         await expectRejected(client, () => client.query(emergencyResolutionOperation));
       });
     });
+
+    it('closes only the historical review while a newer unspent dry-run pilot stays armed', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const ownerAdminId = getOwnerAdminId();
+        const paidPilot = await prepareTelebirrPilot(client, ownerAdminId, {
+          maximumPerDepositMinor: 2500,
+          maximumPerPlayerMinor: 2500,
+          maximumAggregateMinor: 12500,
+        });
+        const prepared = await prepareVerification(client, paidPilot);
+        const completion = await completeVerification(client, paidPilot, prepared, {
+          disposition: 'settlement_candidate',
+          reasonCode: 'exact_proof_match',
+        });
+        expect(completion.row.execution_job_id).toEqual(expect.any(String));
+
+        await client.query(
+          `select app.stop_private_live_deposit_pilot(
+            $1::uuid, $2::uuid, 'execution_uncertainty'
+          )`,
+          [ownerAdminId, paidPilot.pilotRevisionId],
+        );
+        await client.query(emergencyReviewOperation);
+
+        const newPilot = await client.query<{ readonly pilot_revision_id: string }>(
+          `select app.prepare_private_live_deposit_pilot(
+             $1::uuid, $2::uuid, array['telebirr']::text[], $3::text[],
+             $4::uuid[], 2500::bigint, 2500::bigint, 2500::bigint,
+             12500::bigint, 5::smallint, $5::timestamptz, $6::timestamptz
+           ) as pilot_revision_id`,
+          [
+            ownerAdminId,
+            randomUUID(),
+            paidPilot.playerIds,
+            [paidPilot.submittingCustomerId],
+            new Date(Date.now() - 30_000),
+            new Date(Date.now() + 60 * 60_000),
+          ],
+        );
+        expect(newPilot.rows).toHaveLength(1);
+        await client.query(`select app.arm_private_live_deposit_pilot($1::uuid, $2::uuid)`, [
+          ownerAdminId,
+          newPilot.rows[0]!.pilot_revision_id,
+        ]);
+
+        const before = await client.query<ReadinessRow>(readinessSelect);
+        expect(before.rows[0]?.redacted_status).toMatchObject({
+          allFinancialSwitchesDisabled: false,
+          customerResolutionPending: true,
+          nextAction: 'customer_resolution_pending',
+          noMoneySwitchBoundary: true,
+          openExecutionReviewCases: 1,
+          openJobs: 0,
+        });
+
+        await client.query(`
+          update app.feature_switches
+             set mode = 'live'::app.feature_mode
+           where feature_key = 'deposit_execution'
+        `);
+        await expectRejected(client, () => client.query(emergencyResolutionOperation));
+        await client.query(`
+          update app.feature_switches
+             set mode = 'disabled'::app.feature_mode
+           where feature_key = 'deposit_execution'
+        `);
+        await client.query(`
+          update app.feature_switches
+             set settings = settings || '{"unexpected":true}'::jsonb
+           where feature_key = 'private_live_deposit_pilot'
+        `);
+        await expectRejected(client, () => client.query(emergencyResolutionOperation));
+        await client.query(`
+          update app.feature_switches
+             set settings = settings - 'unexpected'
+           where feature_key = 'private_live_deposit_pilot'
+        `);
+
+        await client.query(emergencyResolutionOperation);
+        const after = await client.query<ReadinessRow>(readinessSelect);
+        expect(after.rows[0]?.redacted_status).toMatchObject({
+          allFinancialSwitchesDisabled: false,
+          customerResolutionPending: false,
+          nextAction: 'trusted_activation_review',
+          noMoneySwitchBoundary: true,
+          openExecutionReviewCases: 0,
+          openJobs: 0,
+        });
+        const preserved = await client.query<{
+          readonly cancelled_job_count: number;
+          readonly current_pilot_reservations: number;
+          readonly current_pilot_status: string;
+          readonly current_pilot_switch_mode: string;
+          readonly historical_resolution_count: number;
+          readonly historical_execution_attempts: number;
+        }>(
+          `select (select count(*)::integer
+                    from app.stopped_pilot_owner_test_resolutions resolution
+                    join app.stopped_pilot_paid_execution_reviews review
+                      on review.request_key = resolution.paid_review_request_key
+                   where review.deposit_job_id = $1::uuid) as historical_resolution_count,
+                  (select count(*)::integer from app.deposit_jobs
+                    where id = $1::uuid and status = 'cancelled' and attempt_count = 0)
+                    as cancelled_job_count,
+                  (select count(*)::integer from app.deposit_execution_attempts
+                    where deposit_job_id = $1::uuid) as historical_execution_attempts,
+                  (select status::text from app.private_live_deposit_pilot_revisions
+                    where id = $2::uuid) as current_pilot_status,
+                  (select mode::text from app.feature_switches
+                    where feature_key = 'private_live_deposit_pilot')
+                    as current_pilot_switch_mode,
+                  (select count(*)::integer from app.private_live_deposit_pilot_reservations
+                    where pilot_revision_id = $2::uuid) as current_pilot_reservations`,
+          [completion.row.execution_job_id, newPilot.rows[0]!.pilot_revision_id],
+        );
+        expect(preserved.rows).toEqual([
+          {
+            cancelled_job_count: 1,
+            current_pilot_reservations: 0,
+            current_pilot_status: 'armed',
+            current_pilot_switch_mode: 'dry_run',
+            historical_resolution_count: 1,
+            historical_execution_attempts: 0,
+          },
+        ]);
+      });
+    });
   });
 }

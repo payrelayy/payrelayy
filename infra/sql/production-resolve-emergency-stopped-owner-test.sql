@@ -2,8 +2,9 @@
 
 -- The Owner explicitly attested that both wallets are theirs and that this one
 -- payment needs neither KemerBet credit nor a refund. Resolve only the singular
--- existing emergency-stopped review; the private function rechecks its full
--- payment lineage and no-money boundary under locks.
+-- existing emergency-stopped review even if a newer unspent dry-run pilot is
+-- armed. The private function rechecks its full payment lineage and no-money
+-- boundary under locks.
 begin transaction isolation level serializable;
 set local search_path = pg_catalog;
 set local statement_timeout = '20s';
@@ -29,13 +30,7 @@ begin
         join app.deposit_review_cases review_case
           on review_case.deposit_intent_id = review.deposit_intent_id
         cross join app.admin_users owner_user
-       where pilot.id = (
-               select recent.id
-                 from app.private_live_deposit_pilot_revisions recent
-                order by recent.created_at desc, recent.revision desc
-                limit 1
-             )
-         and pilot.status = 'stopped'
+       where pilot.status = 'stopped'
          and pilot.stop_reason_code = 'execution_uncertainty'
          and pilot.armed_by_admin_id = owner_user.id
          and pilot.stopped_by_admin_id = owner_user.id

@@ -5,6 +5,44 @@ old activation and credential remain unchanged, as do the pilot, feature switche
 records, queue, and settlement state. It does not grant authority to retry a receipt. The
 previous standby smoke proves only inert startup; it does not prove a receipt will pass.
 
+## One-use public device-pin correction after an image handoff
+
+The same helper supports a separately reviewed `pin-preflight`, `pin-handoff`, and `pin-status`
+operation when a newly paired phone has a different public key from the immutable release's
+device pin. This public-key-only update does not change the original release, credential, signer
+pin, activation, pilot, feature switches, payment lineage, or verifier image. It grants no
+authority to retry a payment or accept a quarantined observation.
+
+Before staging the candidate, independently compare the current, unrevoked enrollment with its
+completed pairing challenge and the most recent assignment. Require the same device key ID and
+public-key digest in all three, an intact public-key digest calculation, exactly one eligible
+current device, and an unchanged assignment signer. Do not select a key by recency alone. Create
+canonical JSON with exactly one unchanged assignment-signer pin and one current device pin. The
+file contains public keys only. Review its SHA-256 digest and the current device SPKI digest
+independently. Stage it as root-owned mode `0444` at the helper's fixed
+`device-pin-handoff-manifest.v1.json` path inside the protected verifier state directory. Never
+overwrite the immutable release pin file or the runtime credential's pin binding.
+
+Run `infra/sql/production-trusted-telebirr-verifier-handoff-inspect.sql` immediately before
+`pin-preflight` and again just before the
+single `pin-handoff`. Require zero active and historical loader candidates, exactly one armed pilot
+with at least 30 minutes remaining, one expected verifier session, no unexpected verifier or
+executor session/login, four verification switches live, and three unrelated financial switches
+disabled. Require no payment instruction or observation being dispatched during the swap. Record
+staged, outcome, and quarantine counts privately. The helper's pin preflight additionally proves
+the prior image handoff marker, one healthy verifier, the original pin mount, the unchanged signer
+pin, a different device pin matching the independently confirmed SPKI digest, and valid Compose.
+
+Invoke `pin-handoff` exactly once with the exact image commit, canonical manifest digest, and
+device SPKI digest. It recreates only the verifier service with the same image and credential and
+the new public pin. On a failed health or mount check it attempts one rollback to the original
+release pin; if rollback cannot be proven it attempts the host emergency stop and the operator
+must independently revoke database authority through the existing emergency procedure. Never
+retry automatically. After success, require `pin-status`, the same database inspection, one
+healthy verifier session, unchanged switches, and unchanged staged/outcome/quarantine counts.
+The one-use marker and protected override file remain for audit; future releases must pin the
+current key explicitly instead of silently inheriting this override.
+
 Use this runbook only for one explicitly approved handoff of the exact standby image already
 loaded and smoke-tested on the production host. First merge and verify the reviewed handoff
 helper on exact `main`. The host administrator separately checks its digest and installs it as

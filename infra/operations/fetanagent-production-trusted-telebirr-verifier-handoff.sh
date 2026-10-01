@@ -17,6 +17,8 @@ readonly STATE='/var/lib/fetanagent/production-trusted-telebirr-verifier'
 readonly SHARED_STATE='/var/lib/fetanagent/production'
 readonly RECORD="$STATE/active-record"
 readonly MARKER="$STATE/image-handoff-record"
+readonly PIN_MARKER="$STATE/device-pin-handoff-record"
+readonly PIN_OVERRIDE="$STATE/device-pin-handoff-manifest.v1.json"
 readonly FENCE="$STATE/emergency-fence"
 readonly PROJECT='fetanagent-production-trusted-telebirr-verifier'
 readonly SERVICE='trusted-telebirr-verifier'
@@ -209,6 +211,61 @@ wait_healthy() {
   done
 }
 
+pin_mount_source() {
+  local container="$1"
+  timeout --signal=TERM --kill-after=5s 20s docker container inspect \
+    --format '{{range .Mounts}}{{if eq .Destination "/run/configs/trusted_telebirr_verifier_pins.v1.json"}}{{.Source}}{{end}}{{end}}' \
+    "$container"
+}
+
+read_image_handoff() {
+  require_file "$MARKER" '0:0:600'
+  [[ "$(<"$MARKER")" == "$(printf '%s\n%s\n%s\n%s' "$old_sha" "$target_sha" "$old_image" "$new_image")" ]] ||
+    die 'the prior image handoff is not exact'
+}
+
+read_pin_candidate() {
+  local expected_pin="$1" expected_device="$2" old_pin compact device_pin
+  [[ "$expected_pin" =~ ^sha256:[0-9a-f]{64}$ &&
+    "$expected_device" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die 'exact public-pin digests are required'
+  require_file "$PIN_OVERRIDE" '0:0:444'
+  [[ "sha256:$(sha256sum "$PIN_OVERRIDE" | cut -d ' ' -f 1)" == "$expected_pin" ]] ||
+    die 'the candidate pin manifest digest changed'
+  jq -e '
+    type == "object" and keys_unsorted == ["contractVersion", "assignmentSigners", "devices"] and
+    .contractVersion == 1 and
+    (.assignmentSigners | type == "array" and length == 1) and
+    (.devices | type == "array" and length == 1) and
+    ([.assignmentSigners[], .devices[]] | all(
+      type == "object" and keys_unsorted == ["keyId", "publicKeySpkiDerBase64"] and
+      (.keyId | type == "string" and test("^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$")) and
+      (.publicKeySpkiDerBase64 | type == "string" and test("^[A-Za-z0-9+/]+={0,2}$"))
+    )) and
+    ([.assignmentSigners[], .devices[]] | map(.keyId) | length == (unique | length))
+  ' "$PIN_OVERRIDE" >/dev/null || die 'the candidate pin manifest shape is invalid'
+  compact="$(jq -c . "$PIN_OVERRIDE")" || die 'the candidate manifest is not JSON'
+  [[ "$(wc -c <"$PIN_OVERRIDE")" -eq "${#compact}" && "$(<"$PIN_OVERRIDE")" == "$compact" ]] ||
+    die 'the candidate pin manifest is not canonical JSON'
+  jq -e '.contractVersion == 1 and (.assignmentSigners | length == 1) and (.devices | length == 1)' \
+    "$release/trusted-telebirr-verifier-pins.v1.json" >/dev/null ||
+    die 'the original pin manifest is not a one-phone release'
+  [[ "$(jq -c '.assignmentSigners' "$PIN_OVERRIDE")" == \
+    "$(jq -c '.assignmentSigners' "$release/trusted-telebirr-verifier-pins.v1.json")" ]] ||
+    die 'the assignment signer pin changed'
+  device_pin="sha256:$(jq -r '.devices[0].publicKeySpkiDerBase64' "$PIN_OVERRIDE" |
+    base64 --decode | sha256sum | cut -d ' ' -f 1)" ||
+    die 'the candidate device pin is invalid'
+  old_pin="sha256:$(jq -r '.devices[0].publicKeySpkiDerBase64' \
+    "$release/trusted-telebirr-verifier-pins.v1.json" |
+    base64 --decode | sha256sum | cut -d ' ' -f 1)" || die 'the original device pin is invalid'
+  [[ "$device_pin" == "$expected_device" && "$device_pin" != "$old_pin" ]] ||
+    die 'the candidate device pin is not the independently confirmed new key'
+  [[ "$device_pin" != "sha256:$(jq -r '.assignmentSigners[0].publicKeySpkiDerBase64' \
+    "$PIN_OVERRIDE" | base64 --decode | sha256sum | cut -d ' ' -f 1)" ]] ||
+    die 'the device and signer pins must differ'
+}
+
 case "${1:-}" in
   verify)
     [[ $# -eq 2 && "$2" =~ ^[0-9a-f]{64}$ ]] || die 'verify expects a helper digest'
@@ -216,8 +273,12 @@ case "${1:-}" in
       die 'installed helper digest mismatch'
     printf '%s\n' 'Verifier handoff helper digest verified.'
     ;;
-  preflight|handoff|status)
-    [[ $# -eq 2 ]] || die 'the command expects one exact staged-image commit'
+  preflight|handoff|status|pin-preflight|pin-handoff|pin-status)
+    if [[ "$1" == pin-* ]]; then
+      [[ $# -eq 4 ]] || die 'the pin command expects image, manifest and device digests'
+    else
+      [[ $# -eq 2 ]] || die 'the command expects one exact staged-image commit'
+    fi
     target_sha="$2"
     require_sha "$target_sha"
     lock_operations
@@ -303,7 +364,93 @@ case "${1:-}" in
           die 'the successor verifier is not healthy and exact'
         printf '%s\n' 'Verifier image handoff status: one healthy successor; original activation unchanged.'
         ;;
+      pin-preflight|pin-handoff|pin-status)
+        read_image_handoff
+        original_pin_file="$pin_file"
+        expected_pin_digest="$3"
+        expected_device_digest="$4"
+        read_pin_candidate "$expected_pin_digest" "$expected_device_digest"
+        container="$(active_container)"
+        healthy_image "$container" "$new_image" && network_exact ||
+          die 'the image successor is not healthy and exact'
+        if [[ "$1" == 'pin-status' ]]; then
+          require_file "$PIN_MARKER" '0:0:600'
+          [[ "$(<"$PIN_MARKER")" == "$(printf '%s\n%s\n%s' "$target_sha" "$expected_pin_digest" "$expected_device_digest")" &&
+            "$(pin_mount_source "$container")" == "$PIN_OVERRIDE" ]] ||
+            die 'the device pin handoff is not exact'
+          printf '%s\n' 'Verifier device-pin handoff status: one healthy successor; original activation unchanged.'
+          exit 0
+        fi
+        [[ ! -e "$PIN_MARKER" && ! -L "$PIN_MARKER" &&
+          "$(pin_mount_source "$container")" == "$original_pin_file" ]] ||
+          die 'the device pin handoff was already used or the original mount changed'
+        pin_file="$PIN_OVERRIDE"
+        compose_valid "$new_image" || die 'the candidate Compose configuration is invalid'
+        if [[ "$1" == 'pin-preflight' ]]; then
+          printf '%s\n' 'Verifier device-pin preflight passed; no service changed.'
+          exit 0
+        fi
+        pin_rollback() {
+          local marker_safe=1
+          trap - EXIT INT TERM
+          if [[ -e "$PIN_MARKER" || -L "$PIN_MARKER" ]]; then
+            if [[ ! -L "$PIN_MARKER" && -f "$PIN_MARKER" &&
+              "$(stat --format='%u:%g:%a' "$PIN_MARKER")" == '0:0:600' &&
+              "$(<"$PIN_MARKER")" == "$(printf '%s\n%s\n%s' "$target_sha" "$expected_pin_digest" "$expected_device_digest")" ]]; then
+              rm -- "$PIN_MARKER" || marker_safe=0
+            else
+              marker_safe=0
+            fi
+          fi
+          if [[ -e "${pending:-}" || -L "${pending:-}" ]]; then
+            if [[ "${pending:-}" == "$STATE/.device-pin-handoff-record.$$" &&
+              ! -L "$pending" && -f "$pending" &&
+              "$(stat --format='%u:%g:%a' "$pending")" == '0:0:600' ]]; then
+              rm -- "$pending" || marker_safe=0
+            else
+              marker_safe=0
+            fi
+          fi
+          pin_file="$original_pin_file"
+          if [[ "$marker_safe" == '1' && ! -e "$FENCE" && ! -L "$FENCE" ]] &&
+            healthy_image "$(active_container)" "$new_image" && network_exact &&
+            [[ "$(pin_mount_source "$(active_container)")" == "$original_pin_file" ]]; then
+            printf '%s\n' 'Verifier pin handoff failed before replacement; original service unchanged.' >&2
+            exit 2
+          fi
+          if [[ "$marker_safe" == '1' && ! -e "$FENCE" && ! -L "$FENCE" ]] &&
+            compose_up "$new_image" && wait_healthy "$new_image" && network_exact &&
+            [[ "$(pin_mount_source "$(active_container)")" == "$original_pin_file" ]]; then
+            printf '%s\n' 'Verifier pin handoff failed; original pin restored. No retry performed.' >&2
+            exit 2
+          fi
+          "$EMERGENCY" emergency-stop >/dev/null 2>&1 || true
+          printf '%s\n' 'Verifier pin handoff failed; emergency host stop attempted.' >&2
+          exit 3
+        }
+        trap pin_rollback EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        compose_up "$new_image" || die 'the new pin configuration could not be started'
+        wait_healthy "$new_image" && network_exact ||
+          die 'the new pin configuration did not become healthy and exact'
+        [[ "$(active_container)" != "$container" &&
+          "$(pin_mount_source "$(active_container)")" == "$PIN_OVERRIDE" ]] ||
+          die 'the verifier was not replaced with the new pin mount'
+        pending="$STATE/.device-pin-handoff-record.$$"
+        [[ ! -e "$pending" && ! -L "$pending" ]] || die 'the pin marker staging path is unsafe'
+        printf '%s\n%s\n%s\n' "$target_sha" "$expected_pin_digest" "$expected_device_digest" >"$pending"
+        chown root:root "$pending"
+        chmod 0600 "$pending"
+        mv -- "$pending" "$PIN_MARKER"
+        sync -f "$STATE" || die 'the pin handoff record could not be synced'
+        healthy_image "$(active_container)" "$new_image" && network_exact &&
+          [[ "$(pin_mount_source "$(active_container)")" == "$PIN_OVERRIDE" ]] ||
+          die 'the verifier changed after recording the pin handoff'
+        trap - EXIT INT TERM
+        printf '%s\n' 'Verifier device-pin handoff completed; original activation unchanged.'
+        ;;
     esac
     ;;
-  *) die 'expected verify, preflight, handoff, or status' ;;
+  *) die 'expected verify, image handoff, or device-pin handoff mode' ;;
 esac

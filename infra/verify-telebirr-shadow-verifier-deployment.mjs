@@ -122,7 +122,10 @@ assert.match(applicationSource, /createTelebirrShadowPostgresRuntime/u);
 assert.match(applicationSource, /createTelebirrShadowVerifier/u);
 assert.match(applicationSource, /await exactRuntime\.ready\(\)/u);
 assert.doesNotMatch(applicationSource, /\.verifyAndComplete\(/u);
-assert.match(verifierSource, /createTelebirrVerifier\(database, pinnedKeys, 'shadow'\)/u);
+assert.match(
+  verifierSource,
+  /createTelebirrVerifier\(database, pinnedKeys, 'shadow', onInvalidEvidence\)/u,
+);
 assert.match(verifierSource, /settlement_created !== false/u);
 assert.match(verifierSource, /row\.deposit_intent_id !== null/u);
 assert.match(verifierSource, /row\.deposit_payment_claim_id !== null/u);

@@ -661,6 +661,15 @@ assert.match(productionHelper, /trap rollback_host_start EXIT/);
 assert.match(productionHelper, /trap 'exit 130' INT/);
 assert.match(productionHelper, /trap 'exit 143' TERM/);
 assert.match(productionHelper, /inspect_active_container "\$image_id"/g);
+assert.match(
+  applicationSource,
+  /FetanAgent trusted TeleBirr verifier startup failed closed at stage: \$\{fixedStage\}\./u,
+);
+assert.match(productionHelper, /report_redacted_verifier_failure_stage "\$container_id"/u);
+assert.match(
+  productionHelper,
+  /startup failed closed at stage: \(configuration\|database_runtime\|verifier_construction\|runtime_ready\|worker_construction\|health_server_construction\|health_server_start\|worker_run\)/u,
+);
 assert.doesNotMatch(
   productionHelper,
   /CURRENT_LINK|pending-.*\.previous|compose_release|docker container start/im,

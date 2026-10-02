@@ -73,13 +73,43 @@ function healthServer(events: string[]): TrustedTelebirrVerifierHealthServer {
 describe('trusted TeleBirr verifier application', () => {
   it('refuses a disabled checked-in configuration without opening PostgreSQL', async () => {
     const createPostgresRuntime = vi.fn();
+    const reportStartupFailureStage = vi.fn();
     await expect(
       createTrustedTelebirrVerifierApplication({
         loadConfiguration: () => ({ enabled: false }),
         createPostgresRuntime,
+        reportStartupFailureStage,
       }),
     ).rejects.toBeInstanceOf(TrustedTelebirrVerifierApplicationUnavailableError);
     expect(createPostgresRuntime).not.toHaveBeenCalled();
+    expect(reportStartupFailureStage).not.toHaveBeenCalled();
+  });
+
+  it('reports only a fixed configuration stage on startup failure', async () => {
+    const reportStartupFailureStage = vi.fn();
+    await expect(
+      createTrustedTelebirrVerifierApplication({
+        loadConfiguration: () => {
+          throw new Error('sensitive configuration detail');
+        },
+        reportStartupFailureStage,
+      }),
+    ).rejects.toBeInstanceOf(TrustedTelebirrVerifierApplicationUnavailableError);
+    expect(reportStartupFailureStage).toHaveBeenCalledExactlyOnceWith('configuration');
+  });
+
+  it('reports only a fixed database-runtime stage before a verifier exists', async () => {
+    const reportStartupFailureStage = vi.fn();
+    await expect(
+      createTrustedTelebirrVerifierApplication({
+        loadConfiguration: () => ENABLED_CONFIG,
+        createPostgresRuntime: async () => {
+          throw new Error('sensitive database detail');
+        },
+        reportStartupFailureStage,
+      }),
+    ).rejects.toBeInstanceOf(TrustedTelebirrVerifierApplicationUnavailableError);
+    expect(reportStartupFailureStage).toHaveBeenCalledExactlyOnceWith('database_runtime');
   });
 
   it('composes the singleton database and pinned verifier before health, then shuts down cleanly', async () => {
@@ -196,12 +226,14 @@ describe('trusted TeleBirr verifier application', () => {
       throw new Error('sensitive database detail');
     });
     const reportFailureStage = vi.fn();
+    const reportStartupFailureStage = vi.fn();
     const application = await createTrustedTelebirrVerifierApplication({
       loadConfiguration: () => ENABLED_CONFIG,
       createPostgresRuntime: async () => postgres,
       createVerifier: () => ({ verifyAndComplete: vi.fn() }),
       createHealthServer: () => healthServer(events),
       reportFailureStage,
+      reportStartupFailureStage,
     });
 
     await expect(application.run()).rejects.toEqual(
@@ -210,5 +242,28 @@ describe('trusted TeleBirr verifier application', () => {
     expect(reportFailureStage).toHaveBeenCalledOnce();
     expect(reportFailureStage).toHaveBeenCalledWith('load_staged_evidence');
     expect(reportFailureStage).not.toHaveBeenCalledWith('sensitive database detail');
+    expect(reportStartupFailureStage).toHaveBeenCalledExactlyOnceWith('worker_run');
+  });
+
+  it('reports the fixed listener-start stage without leaking the thrown error', async () => {
+    const events: string[] = [];
+    const reportStartupFailureStage = vi.fn();
+    const application = await createTrustedTelebirrVerifierApplication({
+      loadConfiguration: () => ENABLED_CONFIG,
+      createPostgresRuntime: async () => runtime(events),
+      createVerifier: () => ({ verifyAndComplete: vi.fn() }),
+      createHealthServer: () => ({
+        ...healthServer(events),
+        start: async () => {
+          throw new Error('sensitive listener detail');
+        },
+      }),
+      reportStartupFailureStage,
+    });
+    await expect(application.run()).rejects.toBeInstanceOf(
+      TrustedTelebirrVerifierApplicationUnavailableError,
+    );
+    expect(reportStartupFailureStage).toHaveBeenCalledExactlyOnceWith('health_server_start');
+    expect(events).toEqual(['health_closed', 'database_closed']);
   });
 });

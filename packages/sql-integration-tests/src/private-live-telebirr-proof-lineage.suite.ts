@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { Client, QueryResultRow } from 'pg';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   armPilot,
@@ -650,7 +650,17 @@ export async function completeVerification(
     readonly retrievedAt: Date;
   };
 }> {
-  const assessedAt = options.assessedAt ?? new Date();
+  // PostgreSQL records lease issuance at microsecond precision. A millisecond-truncated PC
+  // clock, backdated below for the observation, can precede that issuance on a fast runner.
+  // Round the database clock upward instead; explicit boundary-test timestamps stay untouched.
+  const assessedAt =
+    options.assessedAt ??
+    (
+      await client.query<{ readonly assessed_at: Date }>(
+        `select date_trunc('milliseconds', clock_timestamp()) + interval '2 milliseconds'
+           as assessed_at`,
+      )
+    ).rows[0]!.assessed_at;
   const observedAt = new Date(assessedAt.getTime() - 1);
   const retrievedAt = new Date(assessedAt.getTime() - 1);
   const completionRequestKey = options.completionRequestKey ?? randomUUID();
@@ -1221,6 +1231,41 @@ export function registerPrivateLiveTelebirrProofLineageSqlTests(
           [],
           /cannot truncate/u,
         );
+      });
+    });
+
+    it('uses the database fixture clock while preserving explicit invalid timestamps', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const pilot = await prepareTelebirrPilot(client, getOwnerAdminId());
+        const prepared = await prepareVerification(client, pilot);
+        const oldTime = new Date('2000-01-01T00:00:00.000Z');
+        await client.query('savepoint explicit_invalid_clock');
+        await expect(
+          completeVerification(client, pilot, prepared, {
+            assessedAt: oldTime,
+            disposition: 'review_required',
+            reasonCode: 'source_uncertain',
+          }),
+        ).rejects.toThrow('The private live TeleBirr verification completion lineage is invalid.');
+        await client.query('rollback to savepoint explicit_invalid_clock');
+
+        vi.useFakeTimers({ toFake: ['Date'] });
+        try {
+          vi.setSystemTime(oldTime);
+          const completion = await completeVerification(client, pilot, prepared, {
+            disposition: 'review_required',
+            reasonCode: 'source_uncertain',
+          });
+          expect(completion.times.assessedAt.getTime()).toBeGreaterThan(oldTime.getTime());
+          expect(completion.row).toMatchObject({
+            outcome_disposition: 'review_required',
+            execution_job_id: null,
+            settlement_created: false,
+          });
+        } finally {
+          vi.useRealTimers();
+        }
       });
     });
 

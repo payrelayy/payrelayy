@@ -62,6 +62,109 @@ alter table app.private_live_telebirr_historical_completion_authorities
     )
   );
 
+-- The original retry helper deliberately returns NULL after a third assignment.
+-- Recheck the two immutable pre-retry pairs without weakening that helper.
+create function app.is_private_live_telebirr_pin_handoff_recovery_intact(p_job_id uuid)
+returns boolean
+language plpgsql
+volatile
+security invoker
+set search_path = pg_catalog
+as $integrity$
+declare
+  job app.private_live_telebirr_verification_jobs%rowtype;
+  pair_count integer;
+  valid_pair_count integer;
+  enrollment_count integer;
+  evidence_material text;
+  evidence_digest text;
+  expected_digest text;
+begin
+  select candidate.* into job
+    from app.private_live_telebirr_verification_jobs candidate
+   where candidate.id = p_job_id;
+  if job.id is null
+    or job.recovery_reason_code <> 'device_pin_handoff_retry'
+    or job.recovery_request_key is null
+    or job.recovery_request_digest is null
+    or job.original_expires_at is null
+    or job.recovered_at is null then
+    return false;
+  end if;
+
+  select count(*)::integer,
+         count(*) filter (
+           where attempt.expires_at <= pg_catalog.clock_timestamp()
+             and transcript.verification_attempt_id is not null
+             and delivery.verification_attempt_id is not null
+             and delivery.assignment_transcript_id = transcript.id
+             and staged.verification_attempt_id is not null
+             and staged.signed_assignment is not null
+             and staged.signed_observation is not null
+             and staged.observed_at >= attempt.issued_at
+             and staged.observed_at < attempt.expires_at
+             and staged.staged_at < attempt.expires_at
+             and quarantine.verification_attempt_id is not null
+             and quarantine.observation_body_digest = staged.observation_body_digest
+             and quarantine.reason_code = 'trusted_evidence_invalid'
+             and quarantine.quarantined_at >= staged.staged_at
+         )::integer,
+         count(distinct attempt.device_enrollment_id)::integer,
+         pg_catalog.string_agg(
+           attempt.id::text || ':' || transcript.assignment_body_digest || ':'
+             || staged.observation_body_digest || ':'
+             || quarantine.quarantined_at::text,
+           E'\n' order by attempt.attempt_number
+         )
+    into pair_count, valid_pair_count, enrollment_count, evidence_material
+    from app.private_live_telebirr_verification_attempts attempt
+    left join app.private_live_telebirr_assignment_transcripts transcript
+      on transcript.verification_attempt_id = attempt.id
+    left join app.private_live_telebirr_assignment_deliveries delivery
+      on delivery.verification_attempt_id = attempt.id
+    left join app.private_live_telebirr_device_evidence_staging staged
+      on staged.verification_attempt_id = attempt.id
+    left join app.private_live_telebirr_verifier_evidence_quarantine quarantine
+      on quarantine.verification_attempt_id = attempt.id
+   where attempt.verification_job_id = p_job_id
+     and attempt.attempt_number in (1, 2);
+
+  if pair_count <> 2 or valid_pair_count <> 2 or enrollment_count <> 1
+    or exists (
+      select 1 from app.private_live_telebirr_observation_transcripts observation
+      join app.private_live_telebirr_verification_attempts attempt
+        on attempt.id = observation.verification_attempt_id
+      where attempt.verification_job_id = p_job_id
+        and attempt.attempt_number in (1, 2)
+    ) then
+    return false;
+  end if;
+
+  evidence_digest := app.private_live_deposit_pilot_sha256(
+    'fetanagent:telebirr:pin-handoff-evidence:v1|' || evidence_material
+  );
+  expected_digest := app.private_live_deposit_pilot_sha256(
+    'fetanagent:telebirr:live-device-pin-handoff-retry:v1'
+    || '|request_key=' || job.recovery_request_key::text
+    || '|job_id=' || job.id::text
+    || '|pilot_revision_id=' || job.pilot_revision_id::text
+    || '|evidence_digest=' || evidence_digest
+    || '|original_expires_at_us=' ||
+       (extract(epoch from job.original_expires_at) * 1000000)::bigint::text
+    || '|recovered_at_us=' ||
+       (extract(epoch from job.recovered_at) * 1000000)::bigint::text
+    || '|recovered_expires_at_us=' ||
+       (extract(epoch from job.expires_at) * 1000000)::bigint::text
+  );
+  return job.recovery_request_digest is not distinct from expected_digest;
+end;
+$integrity$;
+
+alter function app.is_private_live_telebirr_pin_handoff_recovery_intact(uuid)
+  owner to postgres;
+revoke all on function app.is_private_live_telebirr_pin_handoff_recovery_intact(uuid)
+  from public, anon, authenticated, service_role;
+
 create function pg_temp.patch_pin_handoff_historical_function(
   p_signature pg_catalog.regprocedure,
   p_markers text[],
@@ -137,7 +240,8 @@ select pg_temp.patch_pin_handoff_historical_function(
           or (
             job.recovery_reason_code = 'device_pin_handoff_retry'
             and job.recovered_at is not null
-            and app.private_live_telebirr_pin_handoff_evidence_digest(job.id) is not null
+            and job.recovery_request_key is not null
+            and job.recovery_request_digest is not null
           )
         )
         and activation_epoch.expires_at <= pg_catalog.clock_timestamp()$replacement$
@@ -191,7 +295,7 @@ select pg_temp.patch_pin_handoff_historical_function(
       p_reason_code = 'device_pin_handoff_late_completion'
       and (
         attempt.attempt_number <> 4
-        or app.private_live_telebirr_pin_handoff_evidence_digest(job.id) is null
+        or not app.is_private_live_telebirr_pin_handoff_recovery_intact(job.id)
         or (select pg_catalog.count(*)
               from app.private_live_telebirr_verifier_evidence_quarantine quarantine
               join app.private_live_telebirr_verification_attempts candidate

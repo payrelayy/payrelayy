@@ -8,11 +8,35 @@ const migrationPath = fileURLToPath(
     import.meta.url,
   ),
 );
+const workflowPath = fileURLToPath(
+  new URL(
+    '../../../.github/workflows/production-live-telebirr-pin-handoff-late-completion.yml',
+    import.meta.url,
+  ),
+);
+const eligibilityPath = fileURLToPath(
+  new URL(
+    '../../../infra/sql/production-live-telebirr-pin-handoff-late-eligibility.sql',
+    import.meta.url,
+  ),
+);
+const armPath = fileURLToPath(
+  new URL('../../../infra/sql/production-live-telebirr-pin-handoff-late-arm.sql', import.meta.url),
+);
 
 let source = '';
+let workflow = '';
+let eligibility = '';
+let arm = '';
 
 beforeAll(async () => {
-  source = await readFile(migrationPath, 'utf8');
+  const sources = await Promise.all(
+    [migrationPath, workflowPath, eligibilityPath, armPath].map((path) => readFile(path, 'utf8')),
+  );
+  source = sources[0]!;
+  workflow = sources[1]!;
+  eligibility = sources[2]!;
+  arm = sources[3]!;
 });
 
 describe('late, staged device-pin-handoff completion', () => {
@@ -27,7 +51,8 @@ describe('late, staged device-pin-handoff completion', () => {
   it('requires the exact existing job and four immutable signed attempts', () => {
     expect(source).toContain("verification_job.recovery_reason_code = 'device_pin_handoff_retry'");
     expect(source).toContain('attempt.attempt_number <> 4');
-    expect(source).toContain('app.private_live_telebirr_pin_handoff_evidence_digest(job.id)');
+    expect(source).toContain('app.is_private_live_telebirr_pin_handoff_recovery_intact(job.id)');
+    expect(source).toContain('job.recovery_request_digest is not distinct from expected_digest');
     expect(source).toContain('candidate.attempt_number in (1, 2)');
     expect(source).toContain('candidate.attempt_number in (3, 4)');
     expect(source).toContain("quarantine.reason_code = 'trusted_evidence_invalid'");
@@ -49,5 +74,19 @@ describe('late, staged device-pin-handoff completion', () => {
     expect(source).not.toMatch(
       /(?:insert\s+into|update)\s+app\.(?:deposit_jobs|private_live_deposit_pilot_reservations|provider_payment_evidence)/iu,
     );
+  });
+
+  it('binds the one-use operation to the recovered job and leaves its queue untouched', () => {
+    expect(eligibility).toContain("job.recovery_reason_code = 'device_pin_handoff_retry'");
+    expect(eligibility).toContain('job.recovery_request_key =');
+    expect(eligibility).toContain('summary.fresh_evidence_count <> 2');
+    expect(eligibility).toContain('summary.prior_quarantine_count <> 2');
+    expect(eligibility).toContain("control.control_state = 'disabled'");
+    expect(arm).toContain("'device_pin_handoff_late_completion'");
+    expect(workflow).toContain('queue_observed=1');
+    expect(workflow).toContain('.queuedDepositJobs == 1');
+    expect(workflow).toContain('.executionEnabled == false');
+    expect(workflow).toContain('emergency-stop');
+    expect(workflow).not.toContain('approve_deposit');
   });
 });

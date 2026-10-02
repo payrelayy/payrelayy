@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 import type { Client } from 'pg';
@@ -184,6 +186,73 @@ export function registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
       } finally {
         await client.query('rollback');
       }
+    });
+
+    it('rejects a late pin-handoff completion without the exact recovered proof', async () => {
+      const client = getClient();
+      const scramVerifier =
+        `SCRAM-SHA-256$4096:${'A'.repeat(22)}==` + `$${'B'.repeat(43)}=:${'C'.repeat(43)}=`;
+
+      await withRollback(client, async () => {
+        const integrity = await client.query<{ readonly intact: boolean }>(
+          `select app.is_private_live_telebirr_pin_handoff_recovery_intact($1::uuid) as intact`,
+          ['00000000-0000-4000-8000-000000000031'],
+        );
+        expect(integrity.rows).toEqual([{ intact: false }]);
+
+        let failure: unknown;
+        try {
+          await client.query(
+            `select * from app.arm_private_live_telebirr_historical_completion(
+               $1::uuid, $2::uuid, $3::bigint, $4::uuid, $5::text, $6::text
+             )`,
+            [
+              '00000000-0000-4000-8000-000000000031',
+              '00000000-0000-4000-8000-000000000032',
+              '1',
+              '00000000-0000-4000-8000-000000000033',
+              scramVerifier,
+              'device_pin_handoff_late_completion',
+            ],
+          );
+        } catch (error) {
+          failure = error;
+        }
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toContain(
+          'The expired TeleBirr evidence is not recoverable.',
+        );
+        expect((failure as Error).message).not.toContain('ambiguous');
+      });
+    });
+
+    it('compiles the exact late pin-handoff eligibility query against PostgreSQL', async () => {
+      const client = getClient();
+      const path = fileURLToPath(
+        new URL(
+          '../../../infra/sql/production-live-telebirr-pin-handoff-late-eligibility.sql',
+          import.meta.url,
+        ),
+      );
+      const source = await readFile(path, 'utf8');
+      const start = source.indexOf('with target as materialized (');
+      const end = source.lastIndexOf('\ncommit;');
+      expect(start).toBeGreaterThan(0);
+      expect(end).toBeGreaterThan(start);
+      const query = source
+        .slice(start, end)
+        .trim()
+        .replaceAll(":'target_pilot_revision_id'", "'00000000-0000-4000-8000-000000000041'")
+        .replaceAll(":'target_expired_activation_epoch'", "'1'")
+        .replaceAll(
+          ":'pin_handoff_recovery_request_key'",
+          "'00000000-0000-4000-8000-000000000042'",
+        );
+
+      const result = await client.query<{ readonly result: string }>(query);
+      expect(result.rows).toHaveLength(1);
+      const outcome = JSON.parse(result.rows[0]!.result) as { reasonCode: string };
+      expect(outcome.reasonCode).toBe('target_not_exact');
     });
 
     it('recognizes one exact source-binding authority after an early emergency stop', async () => {

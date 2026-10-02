@@ -40,6 +40,16 @@ export interface TrustedTelebirrVerifierApplication {
   stop(): Promise<void>;
 }
 
+export type TrustedTelebirrVerifierStartupFailureStage =
+  | 'configuration'
+  | 'database_runtime'
+  | 'verifier_construction'
+  | 'runtime_ready'
+  | 'worker_construction'
+  | 'health_server_construction'
+  | 'health_server_start'
+  | 'worker_run';
+
 export interface TrustedTelebirrVerifierApplicationDependencies {
   readonly loadConfiguration?: () => TrustedTelebirrVerifierConfig;
   readonly createPostgresRuntime?: (
@@ -57,6 +67,7 @@ export interface TrustedTelebirrVerifierApplicationDependencies {
     verifier: TrustedTelebirrVerifier,
   ) => TrustedTelebirrVerifierWorker;
   readonly reportFailureStage?: (stage: TrustedTelebirrVerifierWorkerFailureStage) => void;
+  readonly reportStartupFailureStage?: (stage: TrustedTelebirrVerifierStartupFailureStage) => void;
   readonly signalSource?: TrustedTelebirrVerifierSignalSource;
   readonly shutdownTimeoutMilliseconds?: number;
 }
@@ -114,23 +125,41 @@ export async function createTrustedTelebirrVerifierApplication(
     dependencies.shutdownTimeoutMilliseconds ?? TRUSTED_TELEBIRR_VERIFIER_SHUTDOWN_TIMEOUT_MS;
   const deadline = shutdownDeadline(timeoutMilliseconds);
   let runtime: TrustedTelebirrPostgresRuntime | null = null;
+  let startupStage: TrustedTelebirrVerifierStartupFailureStage = 'configuration';
+  const reportStartupFailure = (stage: TrustedTelebirrVerifierStartupFailureStage): void => {
+    try {
+      (
+        dependencies.reportStartupFailureStage ??
+        ((fixedStage) =>
+          console.error(
+            `FetanAgent trusted TeleBirr verifier startup failed closed at stage: ${fixedStage}.`,
+          ))
+      )(stage);
+    } catch {
+      // A redacted diagnostic sink must never change the fail-closed outcome.
+    }
+  };
 
   try {
     const config = (dependencies.loadConfiguration ?? loadTrustedTelebirrVerifierConfig)();
     if (!config.enabled) throw new TrustedTelebirrVerifierApplicationUnavailableError();
 
+    startupStage = 'database_runtime';
     runtime = await (dependencies.createPostgresRuntime ?? createTrustedTelebirrPostgresRuntime)(
       config.connection,
     );
     const exactRuntime = runtime;
+    startupStage = 'verifier_construction';
     const verifier = dependencies.createVerifier
       ? dependencies.createVerifier(exactRuntime.database, config.pinnedKeys)
       : createTrustedTelebirrVerifier(exactRuntime.database, config.pinnedKeys, (diagnostic) =>
           console.warn(`FetanAgent trusted TeleBirr invalid evidence stage: ${diagnostic}.`),
         );
+    startupStage = 'runtime_ready';
     if (typeof verifier.verifyAndComplete !== 'function' || !(await exactRuntime.ready())) {
       throw new TrustedTelebirrVerifierApplicationUnavailableError();
     }
+    startupStage = 'worker_construction';
     const worker = (
       dependencies.createWorker ??
       ((source, pinnedVerifier) =>
@@ -148,6 +177,7 @@ export async function createTrustedTelebirrVerifierApplication(
         }))
     )(exactRuntime.workSource, verifier);
 
+    startupStage = 'health_server_construction';
     const health = createTrustedTelebirrVerifierHealth(() => exactRuntime.ready());
     const healthServer = (
       dependencies.createHealthServer ??
@@ -190,6 +220,7 @@ export async function createTrustedTelebirrVerifierApplication(
           throw new TrustedTelebirrVerifierApplicationUnavailableError();
         }
         started = true;
+        let runStage: TrustedTelebirrVerifierStartupFailureStage = 'health_server_start';
         try {
           signalSource.once('SIGINT', onSignal);
           signalSource.once('SIGTERM', onSignal);
@@ -198,12 +229,14 @@ export async function createTrustedTelebirrVerifierApplication(
             await stopPromise;
             return;
           }
+          runStage = 'worker_run';
           await worker.run();
           if (stopPromise === null) {
             throw new TrustedTelebirrVerifierApplicationUnavailableError();
           }
           await stopPromise;
         } catch {
+          reportStartupFailure(runStage);
           await stop().catch(() => undefined);
           throw new TrustedTelebirrVerifierApplicationUnavailableError();
         }
@@ -212,6 +245,7 @@ export async function createTrustedTelebirrVerifierApplication(
       stop,
     });
   } catch {
+    reportStartupFailure(startupStage);
     if (runtime !== null) await closeRuntimeAfterStartupFailure(runtime, timeoutMilliseconds);
     throw new TrustedTelebirrVerifierApplicationUnavailableError();
   }

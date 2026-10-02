@@ -295,7 +295,9 @@ report_redacted_verifier_failure_stage() {
   diagnostic="$(
     timeout --signal=TERM --kill-after=5s 20s docker container logs --tail 80 "$container_id" \
       2>/dev/null |
-      grep -E '^FetanAgent trusted TeleBirr verifier failed closed at stage: (load_staged_evidence|unavailable|decode_request|load_first_authority|validate_first_authority|authenticate_first_evidence|load_second_authority|validate_second_authority|authenticate_second_evidence|derive_completion_input|persist_completion|validate_completion|persist_quarantine|unpersisted_result)\.$' |
+      grep -E \
+        -e '^FetanAgent trusted TeleBirr verifier failed closed at stage: (load_staged_evidence|unavailable|decode_request|load_first_authority|validate_first_authority|authenticate_first_evidence|load_second_authority|validate_second_authority|authenticate_second_evidence|derive_completion_input|persist_completion|validate_completion|persist_quarantine|unpersisted_result)\.$' \
+        -e '^FetanAgent trusted TeleBirr verifier startup failed closed at stage: (configuration|database_runtime|verifier_construction|runtime_ready|worker_construction|health_server_construction|health_server_start|worker_run)\.$' |
       tail -n 1 || true
   )"
   if [[ -n "$diagnostic" ]]; then

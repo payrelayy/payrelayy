@@ -123,7 +123,7 @@ jobs:
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
-          PIN_MANIFEST_BASE64: ${{ secrets.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
+          PIN_MANIFEST_BASE64: ${{ vars.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
           VERIFIER_RELEASE_SHA: ${{ inputs.confirm_verifier_release_sha }}
           TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
           TARGET_EXPIRED_ACTIVATION_EPOCH: ${{ inputs.confirm_expired_activation_epoch }}

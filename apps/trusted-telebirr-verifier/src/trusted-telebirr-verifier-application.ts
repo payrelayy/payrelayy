@@ -126,6 +126,7 @@ export async function createTrustedTelebirrVerifierApplication(
   const deadline = shutdownDeadline(timeoutMilliseconds);
   let runtime: TrustedTelebirrPostgresRuntime | null = null;
   let startupStage: TrustedTelebirrVerifierStartupFailureStage = 'configuration';
+  let expectedDisabledConfiguration = false;
   const reportStartupFailure = (stage: TrustedTelebirrVerifierStartupFailureStage): void => {
     try {
       (
@@ -142,7 +143,10 @@ export async function createTrustedTelebirrVerifierApplication(
 
   try {
     const config = (dependencies.loadConfiguration ?? loadTrustedTelebirrVerifierConfig)();
-    if (!config.enabled) throw new TrustedTelebirrVerifierApplicationUnavailableError();
+    if (!config.enabled) {
+      expectedDisabledConfiguration = true;
+      throw new TrustedTelebirrVerifierApplicationUnavailableError();
+    }
 
     startupStage = 'database_runtime';
     runtime = await (dependencies.createPostgresRuntime ?? createTrustedTelebirrPostgresRuntime)(
@@ -245,7 +249,7 @@ export async function createTrustedTelebirrVerifierApplication(
       stop,
     });
   } catch {
-    reportStartupFailure(startupStage);
+    if (!expectedDisabledConfiguration) reportStartupFailure(startupStage);
     if (runtime !== null) await closeRuntimeAfterStartupFailure(runtime, timeoutMilliseconds);
     throw new TrustedTelebirrVerifierApplicationUnavailableError();
   }

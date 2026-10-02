@@ -73,13 +73,16 @@ function healthServer(events: string[]): TrustedTelebirrVerifierHealthServer {
 describe('trusted TeleBirr verifier application', () => {
   it('refuses a disabled checked-in configuration without opening PostgreSQL', async () => {
     const createPostgresRuntime = vi.fn();
+    const reportStartupFailureStage = vi.fn();
     await expect(
       createTrustedTelebirrVerifierApplication({
         loadConfiguration: () => ({ enabled: false }),
         createPostgresRuntime,
+        reportStartupFailureStage,
       }),
     ).rejects.toBeInstanceOf(TrustedTelebirrVerifierApplicationUnavailableError);
     expect(createPostgresRuntime).not.toHaveBeenCalled();
+    expect(reportStartupFailureStage).not.toHaveBeenCalled();
   });
 
   it('reports only a fixed configuration stage on startup failure', async () => {

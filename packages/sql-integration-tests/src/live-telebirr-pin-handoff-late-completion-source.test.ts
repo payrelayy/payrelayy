@@ -32,6 +32,8 @@ describe('late, staged device-pin-handoff completion', () => {
     expect(source).toContain('candidate.attempt_number in (3, 4)');
     expect(source).toContain("quarantine.reason_code = 'trusted_evidence_invalid'");
     expect(source).toContain('evidence.staged_at < candidate.expires_at');
+    expect(source).toContain("(p_reason_code = 'device_pin_handoff_late_completion')::integer");
+    expect(source).not.toContain('case when p_reason_code');
     expect(source).not.toMatch(
       /(?:delete\s+from|update)\s+app\.(?:private_live_telebirr_verifier_evidence_quarantine|private_live_telebirr_device_evidence_staging)/iu,
     );

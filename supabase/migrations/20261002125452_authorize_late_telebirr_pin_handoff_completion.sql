@@ -180,8 +180,7 @@ select pg_temp.patch_pin_handoff_historical_function(
        )
      )$replacement$,
     $replacement$where candidate.verification_job_id = job.id) <>
-           case when p_reason_code = 'device_pin_handoff_late_completion'
-                then 4 else 2 end$replacement$,
+           (2 + 2 * (p_reason_code = 'device_pin_handoff_late_completion')::integer)$replacement$,
     $replacement$or (
       p_reason_code = 'expired_authority_staged_evidence_completion'
       and not exists (
@@ -207,7 +206,7 @@ select pg_temp.patch_pin_handoff_historical_function(
              where candidate.verification_job_id = job.id
                and candidate.attempt_number in (3, 4)
                and evidence.signed_observation -> 'body' ->> 'sourceDocumentDigest' =
-                   source_document_digest
+                   target_source_document_digest
                and evidence.observed_at >= candidate.issued_at
                and evidence.observed_at < candidate.expires_at
                and evidence.staged_at < candidate.expires_at

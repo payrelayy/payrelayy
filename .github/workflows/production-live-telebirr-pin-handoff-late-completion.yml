@@ -11,6 +11,10 @@ on:
         description: Type the exact full reviewed main commit SHA
         required: true
         type: string
+      confirm_verifier_release_sha:
+        description: Type the exact already-installed verifier release SHA
+        required: true
+        type: string
       confirm_pilot_revision_id:
         description: Type the exact expired live-pilot UUID
         required: true
@@ -25,10 +29,6 @@ on:
         type: string
       confirm_historical_completion_request_key:
         description: Type one fresh UUIDv4 for this one-use completion
-        required: true
-        type: string
-      confirm_pin_manifest_sha256:
-        description: Type the exact sha256-prefixed production verifier pin digest
         required: true
         type: string
       confirm_operation:
@@ -56,11 +56,11 @@ jobs:
     env:
       CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_VERIFIER_RELEASE: ${{ inputs.confirm_verifier_release_sha }}
       CONFIRMED_PILOT: ${{ inputs.confirm_pilot_revision_id }}
       CONFIRMED_EPOCH: ${{ inputs.confirm_expired_activation_epoch }}
       CONFIRMED_PIN_HANDOFF_REQUEST: ${{ inputs.confirm_pin_handoff_recovery_request_key }}
       CONFIRMED_COMPLETION_REQUEST: ${{ inputs.confirm_historical_completion_request_key }}
-      CONFIRMED_PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
     steps:
       - name: Require main, exact identifiers, and disabled-executor phrase
@@ -69,17 +69,16 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_VERIFIER_RELEASE" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
           uuid='^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           uuid_v4='^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
           epoch='^[1-9][0-9]{0,18}$'
-          pin='^sha256:[0-9a-f]{64}$'
           [[ "$CONFIRMED_PILOT" =~ $uuid ]]
           [[ "$CONFIRMED_EPOCH" =~ $epoch ]]
           [[ "$CONFIRMED_PIN_HANDOFF_REQUEST" =~ $uuid_v4 ]]
           [[ "$CONFIRMED_COMPLETION_REQUEST" =~ $uuid_v4 ]]
           [[ "$CONFIRMED_PIN_HANDOFF_REQUEST" != "$CONFIRMED_COMPLETION_REQUEST" ]]
-          [[ "$CONFIRMED_PIN_DIGEST" =~ $pin ]]
           [[ "$CONFIRMED_OPERATION" == \
              'COMPLETE LATE TELEBIRR PIN HANDOFF - KEMERBET DISABLED' ]]
 
@@ -124,15 +123,16 @@ jobs:
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          PIN_MANIFEST_BASE64: ${{ secrets.TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64 }}
+          VERIFIER_RELEASE_SHA: ${{ inputs.confirm_verifier_release_sha }}
           TARGET_PILOT_REVISION_ID: ${{ inputs.confirm_pilot_revision_id }}
           TARGET_EXPIRED_ACTIVATION_EPOCH: ${{ inputs.confirm_expired_activation_epoch }}
           PIN_HANDOFF_RECOVERY_REQUEST_KEY: ${{ inputs.confirm_pin_handoff_recovery_request_key }}
           HISTORICAL_COMPLETION_REQUEST_KEY: ${{ inputs.confirm_historical_completion_request_key }}
-          PIN_DIGEST: ${{ inputs.confirm_pin_manifest_sha256 }}
         run: |
           set -euo pipefail
           umask 077
-          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$PIN_MANIFEST_BASE64" ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
 
           protected="$RUNNER_TEMP/production-live-telebirr-pin-handoff-late"
@@ -140,10 +140,12 @@ jobs:
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s' "$PIN_MANIFEST_BASE64" | base64 --decode >"$protected/trusted-telebirr-verifier-pins.v1.json"
           chmod 0600 "$protected"/*
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          PIN_DIGEST="sha256:$(sha256sum "$protected/trusted-telebirr-verifier-pins.v1.json" | cut -d ' ' -f 1)"
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
 
           helper='/usr/local/sbin/fetanagent-production-trusted-telebirr-verifier-helper'
@@ -285,7 +287,7 @@ jobs:
               "$remote:$remote_credential"
           timeout --signal=TERM --kill-after=10s 90s \
             ssh "${ssh_opts[@]}" "$remote" \
-              "chmod 0600 '$remote_credential' && sudo -n '$helper' prepare-activation '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$PIN_DIGEST'"
+              "chmod 0600 '$remote_credential' && sudo -n '$helper' prepare-activation '$VERIFIER_RELEASE_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$PIN_DIGEST'"
 
           TRUSTED_TELEBIRR_SCRAM_VERIFIER="$(<"$protected/trusted-telebirr-verifier.scram")"
           export TRUSTED_TELEBIRR_SCRAM_VERIFIER
@@ -312,7 +314,7 @@ jobs:
 
           timeout --signal=TERM --kill-after=15s 150s \
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' start-activated '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST' && sudo -n '$helper' status-active '$GITHUB_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST'"
+              "sudo -n '$helper' start-activated '$VERIFIER_RELEASE_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST' && sudo -n '$helper' status-active '$VERIFIER_RELEASE_SHA' '$HISTORICAL_COMPLETION_REQUEST_KEY' '$TARGET_EXPIRED_ACTIVATION_EPOCH' '$TARGET_PILOT_REVISION_ID' '$PIN_DIGEST'"
 
           terminal_state=''
           terminal_result=''

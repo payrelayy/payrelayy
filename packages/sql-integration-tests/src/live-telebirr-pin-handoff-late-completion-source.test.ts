@@ -91,6 +91,8 @@ describe('late, staged device-pin-handoff completion', () => {
       expect(workflow).toContain('.queuedDepositJobs == 1');
       expect(workflow).toContain('.executionEnabled == false');
       expect(workflow).toContain('emergency-stop');
+      expect(workflow).toContain("prepare-activation '$VERIFIER_RELEASE_SHA'");
+      expect(workflow).toContain('TRUSTED_TELEBIRR_VERIFIER_PIN_MANIFEST_V1_BASE64');
       expect(workflow).not.toContain('approve_deposit');
     }
   });

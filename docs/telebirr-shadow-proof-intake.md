@@ -109,6 +109,14 @@ different reviewed `main` commits, so an already installed immutable release can
 reinterpreted as the other mode. Both the pre-build CI gate and the protected deploy job recheck
 that binding before production secrets are consumed.
 
+A live `operational` deployment likewise needs a separately reviewed source identity from an
+installed `shadow-review` release. Before activating verification for a planned live handoff, run
+the protected helper's `check-release-mode` with the reviewed source and intended host mode. This
+read-only check rejects a conflicting sealed mode or an already-current release without changing
+containers, credentials, or database state. The deployment workflow repeats it before provisioning
+or transferring the candidate. Do not solve a mode conflict by overwriting the installed release
+or by asking the customer to send another payment.
+
 Even after shadow observations succeed, a separate decision and authorization are required before
 enabling live payment verification or any automatic deposit. A queued shadow check is never proof
 that a payment was completed or that a Player ID was credited.

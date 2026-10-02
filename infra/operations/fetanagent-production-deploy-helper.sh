@@ -544,6 +544,25 @@ case "${1:-}" in
     fi
     ;;
 
+  check-release-mode)
+    [[ $# -eq 3 ]] || die 'check-release-mode requires an exact commit SHA and deployment mode'
+    sha="$2"
+    requested_mode="$3"
+    require_sha "$sha"
+    case "$requested_mode" in
+      operational|shadow-review|inert-maintenance) ;;
+      *) die 'the requested runtime deployment mode is invalid' ;;
+    esac
+    release="$(release_dir "$sha")"
+    if [[ -e "$release" || -L "$release" ]]; then
+      release="$(require_release "$sha")"
+      [[ "$(release_deployment_mode "$release")" == "$requested_mode" ]] ||
+        die 'the exact commit is sealed in another deployment mode; prepare a separately reviewed release'
+      [[ ! -L "$CURRENT_LINK" || "$(readlink -f -- "$CURRENT_LINK")" != "$release" ]] ||
+        die 'the requested release is already current; inspect status instead of redeploying it'
+    fi
+    ;;
+
   prepare-incoming)
     [[ $# -eq 2 ]] || die 'prepare-incoming requires one exact commit SHA'
     sha="$2"
@@ -834,6 +853,6 @@ case "${1:-}" in
     ;;
 
   *)
-    die 'expected verify, preflight, current-state, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, check-rollback, or stop'
+    die 'expected verify, preflight, current-state, check-release-mode, prepare-incoming, cleanup-incoming, install, activate, status, finalize, rollback, check-rollback, or stop'
     ;;
 esac

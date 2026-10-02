@@ -192,8 +192,8 @@ function fixture({
     saveConfig,
     calls,
     snapshot,
-    run(command = 'check-rollback', sha = candidate) {
-      const result = spawnSync('/bin/bash', [helper, command, sha], {
+    run(command = 'check-rollback', sha = candidate, ...extraArguments) {
+      const result = spawnSync('/bin/bash', [helper, command, sha, ...extraArguments], {
         env: { PATH: '/usr/bin:/bin', LANG: 'C', FETANAGENT_TEST_FIXTURE: directory },
         timeout: 5_000,
         encoding: 'utf8',
@@ -241,6 +241,81 @@ if (process.platform !== 'linux') {
     () => {},
   );
 } else {
+  for (const mode of ['operational', 'shadow-review', 'inert-maintenance']) {
+    isolated(`release-mode preflight accepts an unused exact source for ${mode}`, (subject) => {
+      rmSync(subject.release(candidate), { recursive: true });
+      const before = subject.snapshot();
+      const result = subject.run('check-release-mode', candidate, mode);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, '');
+      assert.equal(subject.snapshot(), before);
+      assert.equal(subject.calls().length, 0);
+    });
+  }
+  isolated(
+    'release-mode preflight rejects shadow-to-live source reuse without mutations',
+    (subject) => {
+      write(join(subject.release(candidate), 'runtime-deployment-mode'), 'shadow-review\n', 0o444);
+      const before = subject.snapshot();
+      const result = subject.run('check-release-mode', candidate, 'operational');
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /sealed in another deployment mode/u);
+      assert.equal(subject.snapshot(), before);
+      assert.equal(subject.calls().length, 0);
+    },
+  );
+  isolated(
+    'release-mode preflight accepts a matching installed candidate that is not current',
+    (subject) => {
+      write(join(subject.release(candidate), 'runtime-deployment-mode'), 'operational\n', 0o444);
+      const before = subject.snapshot();
+      const result = subject.run('check-release-mode', candidate, 'operational');
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(subject.snapshot(), before);
+      assert.equal(subject.calls().length, 0);
+    },
+  );
+  isolated(
+    'release-mode preflight rejects the already-current source without mutations',
+    (subject) => {
+      write(join(subject.release(predecessor), 'runtime-deployment-mode'), 'operational\n', 0o444);
+      const before = subject.snapshot();
+      const result = subject.run('check-release-mode', predecessor, 'operational');
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /already current/u);
+      assert.equal(subject.snapshot(), before);
+      assert.equal(subject.calls().length, 0);
+    },
+  );
+  for (const mode of ['legacy', 'untrusted;touch /tmp/forbidden']) {
+    isolated(`release-mode preflight rejects unrecognized mode ${mode}`, (subject) => {
+      const before = subject.snapshot();
+      const result = subject.run('check-release-mode', candidate, mode);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /deployment mode is invalid/u);
+      assert.equal(subject.snapshot(), before);
+      assert.equal(subject.calls().length, 0);
+    });
+  }
+  isolated('release-mode preflight rejects a linked release without mutations', (subject) => {
+    rmSync(subject.release(candidate), { recursive: true });
+    symlinkSync(subject.release(predecessor), subject.release(candidate));
+    const before = subject.snapshot();
+    const result = subject.run('check-release-mode', candidate, 'operational');
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /absent or unsafe/u);
+    assert.equal(subject.snapshot(), before);
+    assert.equal(subject.calls().length, 0);
+  });
+  isolated('release-mode preflight rejects an unsafe mode marker without mutations', (subject) => {
+    write(join(subject.release(candidate), 'runtime-deployment-mode'), 'operational\n', 0o600);
+    const before = subject.snapshot();
+    const result = subject.run('check-release-mode', candidate, 'operational');
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /marker is unsafe/u);
+    assert.equal(subject.snapshot(), before);
+    assert.equal(subject.calls().length, 0);
+  });
   for (const command of ['check-rollback', 'rollback']) {
     isolated(`${command} rejects an older receipt against newer healthy production`, (subject) => {
       rmSync(subject.currentLink);

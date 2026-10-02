@@ -710,6 +710,16 @@ assert.match(
   /compose_files\+=\(--file "\$release\/compose\.production\.inert-maintenance\.yaml"\)/u,
 );
 assert.match(helper, /current-state\)/u);
+assert.match(helper, /check-release-mode\)/u);
+assert.match(helper, /the exact commit is sealed in another deployment mode/u);
+assert.match(workflow, /check-release-mode '\$GITHUB_SHA' '\$runtime_deployment_mode'/u);
+assert.ok(
+  workflow.indexOf("check-release-mode '$GITHUB_SHA' '$runtime_deployment_mode'") <
+    workflow.indexOf(
+      '- name: Verify the existing continuous least-privilege production credentials',
+    ),
+  'release-mode conflicts must fail before credential provisioning or release transfer',
+);
 assert.match(helper, /cleanup-incoming\)/u);
 assert.match(helper, /rollback_transition/u);
 assert.match(helper, /flock --nonblock 9/u);

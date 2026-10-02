@@ -711,8 +711,13 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           remote="fetanagent-admin@$VM_HOST"
           helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          runtime_deployment_mode="$(<"$RUNNER_TEMP/release/runtime-deployment-mode")"
+          case "$runtime_deployment_mode" in
+            operational|shadow-review|inert-maintenance) ;;
+            *) echo '::error::The sealed runtime deployment mode is invalid.'; exit 1 ;;
+          esac
           current_state="$(ssh "${ssh_opts[@]}" "$remote" \
-            "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
+            "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' check-release-mode '$GITHUB_SHA' '$runtime_deployment_mode' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
           echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
 

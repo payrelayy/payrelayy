@@ -160,6 +160,11 @@ with target as materialized (
               on staged.source_document_digest = settled.source_document_digest)
            as settled_document_count,
          (select count(*)::integer
+            from app.private_live_telebirr_source_document_bindings binding
+            join latest_evidence staged
+              on staged.source_document_digest = binding.source_document_digest)
+           as bound_document_count,
+         (select count(*)::integer
             from app.private_live_telebirr_verifier_evidence_quarantine quarantine
             join latest_evidence staged
               on quarantine.verification_attempt_id = staged.verification_attempt_id
@@ -332,6 +337,7 @@ with target as materialized (
              then 'global_queue_not_empty'
            when summary.disabled_companion_count <> 1 then 'companion_enabled'
            when summary.settled_document_count <> 0 then 'document_already_settled'
+           when summary.bound_document_count <> 0 then 'document_already_bound'
            when summary.duplicate_payment_count <> 0 then 'payment_already_used'
            when summary.quarantine_count <> 0 then 'evidence_quarantined'
            when summary.outcome_count <> 0 or summary.reservation_count <> 0

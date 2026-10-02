@@ -235,6 +235,7 @@ jobs:
               "evidence_shape_mismatch", "prior_evidence_quarantine_missing",
               "migration_not_deployed", "proof_not_on_time",
               "global_queue_not_empty", "companion_enabled",
+              "document_already_bound",
               "document_already_settled", "payment_already_used",
               "evidence_quarantined", "downstream_rows_present",
               "recovery_already_recorded", "expired_authority_not_exact",

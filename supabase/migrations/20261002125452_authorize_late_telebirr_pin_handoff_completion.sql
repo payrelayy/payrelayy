@@ -335,6 +335,10 @@ select pg_temp.patch_pin_handoff_historical_function(
                  job.candidate_reference_fingerprint
         )
         or exists (
+          select 1 from app.private_live_telebirr_source_document_bindings binding
+           where binding.source_document_digest = target_source_document_digest
+        )
+        or exists (
           select 1 from app.deposit_jobs execution_job
            where execution_job.status in ('queued', 'leased', 'retry_wait')
         )

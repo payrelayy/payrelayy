@@ -31,12 +31,14 @@ let arm = '';
 
 beforeAll(async () => {
   const sources = await Promise.all(
-    [migrationPath, workflowPath, eligibilityPath, armPath].map((path) => readFile(path, 'utf8')),
+    [migrationPath, eligibilityPath, armPath].map((path) => readFile(path, 'utf8')),
   );
   source = sources[0]!;
-  workflow = sources[1]!;
-  eligibility = sources[2]!;
-  arm = sources[3]!;
+  eligibility = sources[1]!;
+  arm = sources[2]!;
+  if (process.env.SQL_INTEGRATION_MODE !== 'local-disposable') {
+    workflow = await readFile(workflowPath, 'utf8');
+  }
 });
 
 describe('late, staged device-pin-handoff completion', () => {
@@ -71,6 +73,7 @@ describe('late, staged device-pin-handoff completion', () => {
     expect(source).toContain("execution_job.status in ('queued', 'leased', 'retry_wait')");
     expect(source).toContain("control.control_state = 'disabled'");
     expect(source).toContain('provider_payment_evidence payment_evidence');
+    expect(source).toContain('private_live_telebirr_source_document_bindings binding');
     expect(source).not.toMatch(
       /(?:insert\s+into|update)\s+app\.(?:deposit_jobs|private_live_deposit_pilot_reservations|provider_payment_evidence)/iu,
     );
@@ -83,10 +86,12 @@ describe('late, staged device-pin-handoff completion', () => {
     expect(eligibility).toContain('summary.prior_quarantine_count <> 2');
     expect(eligibility).toContain("control.control_state = 'disabled'");
     expect(arm).toContain("'device_pin_handoff_late_completion'");
-    expect(workflow).toContain('queue_observed=1');
-    expect(workflow).toContain('.queuedDepositJobs == 1');
-    expect(workflow).toContain('.executionEnabled == false');
-    expect(workflow).toContain('emergency-stop');
-    expect(workflow).not.toContain('approve_deposit');
+    if (workflow) {
+      expect(workflow).toContain('queue_observed=1');
+      expect(workflow).toContain('.queuedDepositJobs == 1');
+      expect(workflow).toContain('.executionEnabled == false');
+      expect(workflow).toContain('emergency-stop');
+      expect(workflow).not.toContain('approve_deposit');
+    }
   });
 });

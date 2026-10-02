@@ -92,6 +92,10 @@ COPY infra/sql/production-live-telebirr-source-document-eligibility.sql \
   ./infra/sql/production-live-telebirr-source-document-eligibility.sql
 COPY infra/sql/production-live-telebirr-source-document-status.sql \
   ./infra/sql/production-live-telebirr-source-document-status.sql
+COPY infra/sql/production-live-telebirr-pin-handoff-late-eligibility.sql \
+  ./infra/sql/production-live-telebirr-pin-handoff-late-eligibility.sql
+COPY infra/sql/production-live-telebirr-pin-handoff-late-arm.sql \
+  ./infra/sql/production-live-telebirr-pin-handoff-late-arm.sql
 COPY infra/sql/production-companion-execution-activation-status.sql \
   ./infra/sql/production-companion-execution-activation-status.sql
 COPY infra/sql/production-review-emergency-stopped-paid-job.sql \

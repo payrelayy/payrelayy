@@ -89,4 +89,3 @@ select pg_catalog.jsonb_build_object(
 from runtime;
 
 commit;
-

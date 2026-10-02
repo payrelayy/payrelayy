@@ -217,4 +217,3 @@ select pg_catalog.jsonb_build_object(
 from classified;
 
 commit;
-

@@ -57,6 +57,8 @@ jobs:
           node --test infra/operations/production-companion-operator-host-status-workflow.test.mjs
           node --test infra/operations/production-companion-operator-host-startup-diagnostic.test.mjs
           node --test infra/operations/companion-activation-diagnostic.test.mjs
+          node --test infra/operations/production-companion-activation-diagnostic-delivery.test.mjs
+          python3 -I infra/operations/test_activation_diagnostic_delivery.py
           node --test infra/operations/production-companion-operator-session-workflow.test.mjs
           node --test infra/operations/prepare-windows-companion-one-job-local.test.mjs
           node --test infra/operations/production-live-telebirr-source-binding-shadow-recovery-workflow.test.mjs

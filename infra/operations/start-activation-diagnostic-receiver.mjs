@@ -2,6 +2,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 
+const REPOSITORY = 'payrelayy/payrelayy';
+
 function requireCondition(value) {
   if (!value) throw new Error('Read-only diagnostic receiver unavailable.');
 }
@@ -17,7 +19,7 @@ try {
   requireCondition(typeof alias === 'string' && /^[a-z0-9-]{1,80}$/u.test(alias));
   const result = spawnSync(
     'gh',
-    ['pr', 'view', '619', '--repo', 'payrelayy/payrelayy', '--json', 'state,mergeCommit'],
+    ['pr', 'view', '619', '--repo', REPOSITORY, '--json', 'state,mergeCommit'],
     { encoding: 'utf8', timeout: 30_000, windowsHide: true },
   );
   requireCondition(result.status === 0);

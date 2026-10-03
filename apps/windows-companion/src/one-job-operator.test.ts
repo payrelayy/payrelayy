@@ -5,6 +5,7 @@ import { GuardedOperatorActivationUnavailableError } from '@fetanagent/agent-pla
 import {
   OneJobOperatorUnavailableError,
   parseOneJobOperatorDocument,
+  previewOneJobOperatorConnectionWithAdapters,
   runOneJobOperatorWithAdapters,
 } from './one-job-operator.js';
 
@@ -272,5 +273,129 @@ describe('one-job Windows operator entry point', () => {
     expect(() => parseOneJobOperatorDocument('{private')).toThrowError(
       new OneJobOperatorUnavailableError('document'),
     );
+  });
+});
+
+describe('connection-only Windows operator preview', () => {
+  const context = {
+    dataRoot: 'C:\\FetanAgent\\data',
+    installationRoot: 'C:\\FetanAgent\\installation',
+    windowsEnvironment: {},
+    trustedNow: () => new Date('2026-10-03T00:00:00.000Z'),
+  };
+
+  it('performs one bootstrap, discards its binding, and never calls activation', async () => {
+    const device = { certificate: {}, createSignedHttpRequest: vi.fn() };
+    const loadDevice = vi.fn(async () => device);
+    const bootstrap = vi.fn(async () => ({ requestKey, actorAuthUserId }));
+    const activate = vi.fn();
+    const adapters = { loadDevice, bootstrap, activate } as unknown as Parameters<
+      typeof previewOneJobOperatorConnectionWithAdapters
+    >[2];
+    const result = await previewOneJobOperatorConnectionWithAdapters(
+      parseOneJobOperatorDocument(JSON.stringify(raw)),
+      context,
+      adapters,
+    );
+    expect(result).toBe('connection_ready');
+    expect(result).not.toContain(requestKey);
+    expect(result).not.toContain(actorAuthUserId);
+    expect(loadDevice).toHaveBeenCalledExactlyOnceWith({ dataRoot: context.dataRoot });
+    expect(bootstrap).toHaveBeenCalledExactlyOnceWith(device, raw.connection);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { requestKey: 'invalid', actorAuthUserId },
+    { requestKey, actorAuthUserId: 'invalid' },
+    undefined,
+  ])('rejects an invalid or missing response without retrying', async (binding) => {
+    const bootstrap = vi.fn(async () => binding);
+    const activate = vi.fn();
+    await expect(
+      previewOneJobOperatorConnectionWithAdapters(
+        parseOneJobOperatorDocument(JSON.stringify(raw)),
+        context,
+        {
+          loadDevice: vi.fn(async () => ({})),
+          bootstrap,
+          activate,
+        } as unknown as Parameters<typeof previewOneJobOperatorConnectionWithAdapters>[2],
+      ),
+    ).rejects.toMatchObject({ stage: 'bootstrap_binding' });
+    expect(bootstrap).toHaveBeenCalledTimes(1);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it('reports only the fixed transport category and never retries a failed bootstrap', async () => {
+    const bootstrap = vi.fn(async () => {
+      throw new ProtectedOperatorSshClientUnavailableError('ssh_transport');
+    });
+    await expect(
+      previewOneJobOperatorConnectionWithAdapters(
+        parseOneJobOperatorDocument(JSON.stringify(raw)),
+        context,
+        {
+          loadDevice: vi.fn(async () => ({})),
+          bootstrap,
+        } as unknown as Parameters<typeof previewOneJobOperatorConnectionWithAdapters>[2],
+      ),
+    ).rejects.toMatchObject({ stage: 'bootstrap_ssh_transport' });
+    expect(bootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes no connection after an abort, including an abort during device load', async () => {
+    const controller = new AbortController();
+    const bootstrap = vi.fn();
+    const loadDevice = vi.fn(async () => {
+      controller.abort();
+      return {};
+    });
+    const document = parseOneJobOperatorDocument(JSON.stringify(raw));
+    const adapters = { loadDevice, bootstrap } as unknown as Parameters<
+      typeof previewOneJobOperatorConnectionWithAdapters
+    >[2];
+    await expect(
+      previewOneJobOperatorConnectionWithAdapters(
+        document,
+        {
+          ...context,
+          signal: AbortSignal.abort(),
+        },
+        adapters,
+      ),
+    ).rejects.toMatchObject({ stage: 'local_preflight' });
+    expect(loadDevice).not.toHaveBeenCalled();
+    await expect(
+      previewOneJobOperatorConnectionWithAdapters(
+        document,
+        {
+          ...context,
+          signal: controller.signal,
+        },
+        adapters,
+      ),
+    ).rejects.toMatchObject({ stage: 'device_enrollment' });
+    expect(loadDevice).toHaveBeenCalledTimes(1);
+    expect(bootstrap).not.toHaveBeenCalled();
+  });
+
+  it('does not report Ready after an abort during the remote check', async () => {
+    const controller = new AbortController();
+    const bootstrap = vi.fn(async () => {
+      controller.abort();
+      return { requestKey, actorAuthUserId };
+    });
+    await expect(
+      previewOneJobOperatorConnectionWithAdapters(
+        parseOneJobOperatorDocument(JSON.stringify(raw)),
+        { ...context, signal: controller.signal },
+        {
+          loadDevice: vi.fn(async () => ({})),
+          bootstrap,
+        } as unknown as Parameters<typeof previewOneJobOperatorConnectionWithAdapters>[2],
+      ),
+    ).rejects.toMatchObject({ stage: 'bootstrap_binding' });
+    expect(bootstrap).toHaveBeenCalledTimes(1);
   });
 });

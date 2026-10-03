@@ -253,3 +253,61 @@ export function runOneJobOperator(
   if (process.platform !== 'win32') throw new OneJobOperatorUnavailableError('platform');
   return runOneJobOperatorWithAdapters(document, context, productionAdapters);
 }
+
+/** A separate read-only entry point: its adapters contain no activation capability. */
+export async function previewOneJobOperatorConnectionWithAdapters(
+  document: OneJobOperatorDocument,
+  context: OneJobOperatorContext,
+  adapters: Pick<OneJobOperatorAdapters, 'loadDevice' | 'bootstrap'>,
+): Promise<'connection_ready'> {
+  let stage: OneJobOperatorFailureStage = 'local_preflight';
+  try {
+    if (
+      !document ||
+      document.version !== 2 ||
+      !context ||
+      context.signal?.aborted ||
+      !canonicalWindowsPath(context.dataRoot) ||
+      !canonicalWindowsPath(context.installationRoot) ||
+      typeof context.trustedNow !== 'function'
+    )
+      throw new Error();
+    stage = 'device_enrollment';
+    const device = await adapters.loadDevice({ dataRoot: context.dataRoot });
+    if (context.signal?.aborted) throw new Error();
+    stage = 'bootstrap_local_preflight';
+    const binding = await adapters.bootstrap(device, document.connection);
+    stage = 'bootstrap_binding';
+    if (
+      context.signal?.aborted ||
+      !binding ||
+      !REQUEST_KEY.test(binding.requestKey) ||
+      !UUID.test(binding.actorAuthUserId)
+    )
+      throw new Error();
+    // The private binding never leaves this function. Do not sign a handoff,
+    // create a query session, activate a child, or proceed into execution.
+    return 'connection_ready';
+  } catch (error) {
+    if (
+      stage === 'bootstrap_local_preflight' &&
+      error instanceof ProtectedOperatorSshClientUnavailableError
+    ) {
+      if (error.bootstrapStage === 'ssh_transport') stage = 'bootstrap_ssh_transport';
+      else if (error.bootstrapStage === 'http_response') stage = 'bootstrap_http_response';
+      else if (error.bootstrapStage === 'bootstrap_binding') stage = 'bootstrap_binding';
+    }
+    throw new OneJobOperatorUnavailableError(stage);
+  }
+}
+
+export function previewOneJobOperatorConnection(
+  document: OneJobOperatorDocument,
+  context: OneJobOperatorContext,
+): Promise<'connection_ready'> {
+  if (process.platform !== 'win32') throw new OneJobOperatorUnavailableError('platform');
+  return previewOneJobOperatorConnectionWithAdapters(document, context, {
+    loadDevice: loadCompanionDeviceSigningRuntime,
+    bootstrap: readProtectedOperatorSshBootstrap,
+  });
+}

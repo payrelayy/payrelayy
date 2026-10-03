@@ -90,36 +90,75 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
-          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
-            -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
-          protected="$(mktemp -d "$RUNNER_TEMP/activation-diagnostic-delivery.XXXXXXXX")"
+          # Report only fixed public categories, never a failing command or its data.
+          diagnostic_stage=host_input
+          protected=''
           tunnel_pid=''
+          delivery_attempted=false
+          delivery_confirmed=false
           cleanup() {
             local status=$?
+            local cleanup_ok=true report_result=stopped
             trap - EXIT
             if [[ -n "$tunnel_pid" ]]; then
               kill "$tunnel_pid" 2>/dev/null || true
               wait "$tunnel_pid" 2>/dev/null || true
             fi
-            if [[ -d "$protected" && ! -L "$protected" &&
-                  "$(realpath -- "$protected")" == "$protected" &&
-                  "$protected" == "$RUNNER_TEMP"/activation-diagnostic-delivery.* ]]; then
-              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
-              rmdir -- "$protected" || status=1
-            else
+            if [[ -n "$protected" ]]; then
+              if [[ -d "$protected" && ! -L "$protected" &&
+                    "$(realpath -- "$protected")" == "$protected" &&
+                    "$protected" == "$RUNNER_TEMP"/activation-diagnostic-delivery.* ]]; then
+                rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt" \
+                  2>/dev/null || cleanup_ok=false
+                rmdir -- "$protected" 2>/dev/null || cleanup_ok=false
+              else
+                cleanup_ok=false
+              fi
+            fi
+            if [[ "$cleanup_ok" != true ]]; then
+              diagnostic_stage=cleanup
               status=1
             fi
+            case "$diagnostic_stage" in
+              host_input|credential_inputs|protected_temp|protected_files|ssh_key|ssh_host_pin|\
+              database_certificate|database_endpoint|pooler_select|pooler_shape|source_inspection|\
+              cli_version|cli_commands|network_ban|tunnel_port|tunnel_start|direct_select|\
+              direct_match|direct_shape|request_shape|release_metadata|release_binding|\
+              private_delivery|delivery_confirmation|delivered|cleanup) ;;
+              *) diagnostic_stage=unknown_guard ;;
+            esac
+            [[ "$delivery_attempted" == true ]] || delivery_attempted=false
+            [[ "$delivery_confirmed" == true ]] || delivery_confirmed=false
+            if [[ "$status" == 0 && "$diagnostic_stage" == delivered &&
+                  "$delivery_confirmed" == true ]]; then
+              report_result=passed
+            elif [[ "$status" == 0 ]]; then
+              status=1
+            fi
+            printf '{"component":"fetanagent_activation_diagnostic_delivery","result":"%s","stage":"%s","deliveryAttempted":%s,"deliveryConfirmed":%s,"moneyMoved":false,"identifiersRedacted":true}\n' \
+              "$report_result" "$diagnostic_stage" "$delivery_attempted" "$delivery_confirmed"
             exit "$status"
           }
           trap cleanup EXIT
+          # Begin the unchanged protected delivery; reporting adds no authority.
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          diagnostic_stage=credential_inputs
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
+            -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          diagnostic_stage=protected_temp
+          protected="$(mktemp -d "$RUNNER_TEMP/activation-diagnostic-delivery.XXXXXXXX")"
+          diagnostic_stage=protected_files
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+          diagnostic_stage=ssh_key
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          diagnostic_stage=ssh_host_pin
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          diagnostic_stage=database_certificate
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          diagnostic_stage=database_endpoint
           direct_host="$(sed -nE "s/^const DIRECT_HOST = '([^']+)';$/\1/p" \
             packages/agent-platform-companion-operator-host/src/launch-document.ts)"
           [[ "$direct_host" =~ ^db\.[a-z0-9]{20}\.supabase\.co$ ]]
@@ -135,21 +174,29 @@ jobs:
           export PGOPTIONS='-c default_transaction_read_only=on'
           export PGAPPNAME=fetanagent_activation_diagnostic_delivery
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+          diagnostic_stage=pooler_select
           if ! pooler_selected="$(timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
             --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
             echo '::error::The existing administrator credential or read-only boundary is unavailable; no ban was removed.' >&2
             exit 1
           fi
+          diagnostic_stage=pooler_shape
           [[ "$(printf '%s' "$pooler_selected" | jq -r 'keys|sort|join(",")')" == 'companionReleaseSha,requestKey' ]]
+          diagnostic_stage=source_inspection
           source_ip="$(timeout 15s ssh "${ssh_opts[@]}" "fetanagent-admin@$PRODUCTION_VM_HOST" \
             "python3 - '$direct_host'" <infra/operations/read-diagnostic-database-source.py 2>/dev/null)"
           export FETANAGENT_DIAGNOSTIC_PROJECT_REF="$project_ref"
           export FETANAGENT_DIAGNOSTIC_SOURCE_IP="$source_ip"
+          diagnostic_stage=cli_version
           supabase --version | grep -Fx '2.113.0'
+          diagnostic_stage=cli_commands
           supabase network-bans get --help >/dev/null
           supabase network-bans remove --help >/dev/null
+          diagnostic_stage=network_ban
           python3 -I infra/operations/repair-diagnostic-database-ban.py
+          diagnostic_stage=tunnel_port
           [[ -z "$(ss -H -ltn '( sport = :55432 )')" ]]
+          diagnostic_stage=tunnel_start
           ssh "${ssh_opts[@]}" -o ExitOnForwardFailure=yes -N \
             -L "127.0.0.1:55432:$direct_host:5432" \
             "fetanagent-admin@$PRODUCTION_VM_HOST" 2>/dev/null &
@@ -167,17 +214,22 @@ jobs:
           export PGOPTIONS='-c default_transaction_read_only=on'
           export PGAPPNAME=fetanagent_activation_diagnostic_delivery
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+          diagnostic_stage=direct_select
           if ! selected="$(timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
             --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
             echo '::error::The read-only existing-request selection is unavailable.' >&2
             exit 1
           fi
+          diagnostic_stage=direct_match
           [[ "$selected" == "$pooler_selected" ]]
+          diagnostic_stage=direct_shape
           [[ "$(printf '%s' "$selected" | jq -r 'keys|sort|join(",")')" == 'companionReleaseSha,requestKey' ]]
+          diagnostic_stage=request_shape
           request_key="$(printf '%s' "$selected" | jq -r '.requestKey')"
           stored_release="$(printf '%s' "$selected" | jq -r '.companionReleaseSha')"
           [[ "$request_key" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           [[ "$stored_release" =~ ^[0-9a-f]{40}$ ]]
+          diagnostic_stage=release_metadata
           ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PRODUCTION_COMPANION_RELEASE_TAG" 2>/dev/null)"
           released=''
           for depth in 1 2 3; do
@@ -188,8 +240,11 @@ jobs:
             [[ "$object_type" == 'tag' ]]
             ref="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" 2>/dev/null)"
           done
+          diagnostic_stage=release_binding
           [[ "$released" == "$stored_release" ]]
           export PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY="$request_key"
+          diagnostic_stage=private_delivery
+          delivery_attempted=true
           if ! result="$(node infra/operations/render-production-operator-launch.mjs |
             node infra/operations/render-activation-diagnostic-delivery.mjs |
             timeout 25s ssh "${ssh_opts[@]}" "fetanagent-admin@$PRODUCTION_VM_HOST" \
@@ -197,6 +252,9 @@ jobs:
             echo '::error::The single read-only diagnostic delivery was refused.' >&2
             exit 1
           fi
+          diagnostic_stage=delivery_confirmation
           [[ "$result" == 'activation_diagnostic_delivery=accepted' ]]
+          delivery_confirmed=true
+          diagnostic_stage=delivered
           printf '%s\n' "$result"
           echo 'The existing launch document was delivered once without a new request, login, financial switch, approval, or queue execution.' >>"$GITHUB_STEP_SUMMARY"

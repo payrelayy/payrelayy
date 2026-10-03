@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { redactedOneJobOperatorFailure } from './one-job-operator-cli.js';
+import {
+  parseOneJobOperatorArguments,
+  redactedOneJobOperatorFailure,
+  runOneJobOperatorCommand,
+} from './one-job-operator-cli.js';
+import * as operator from './one-job-operator.js';
 import { OneJobOperatorUnavailableError } from './one-job-operator.js';
 
 describe('one-job operator diagnostic output', () => {
@@ -38,5 +43,45 @@ describe('one-job operator diagnostic output', () => {
         ),
       ),
     ).toMatchObject({ failureStage: 'bootstrap_http_response' });
+  });
+});
+
+describe('explicit connection-preview command mode', () => {
+  it('retains the existing default and accepts only the one exact preview flag', () => {
+    expect(parseOneJobOperatorArguments([])).toBe('execute');
+    expect(parseOneJobOperatorArguments(['--preview-connection'])).toBe('preview_connection');
+    for (const args of [
+      ['--preview-connection', '--execute'],
+      ['--preview-connection', '--preview-connection'],
+      ['--preview-connection=true'],
+      ['--unknown'],
+    ])
+      expect(() => parseOneJobOperatorArguments(args)).toThrow('Unsupported');
+  });
+
+  it('routes preview only to the read-only runner and leaves execution untouched', async () => {
+    const preview = vi
+      .spyOn(operator, 'previewOneJobOperatorConnection')
+      .mockResolvedValue('connection_ready');
+    const execute = vi.spyOn(operator, 'runOneJobOperator').mockResolvedValue('confirmed');
+    const document = {} as Parameters<typeof runOneJobOperatorCommand>[0];
+    const context = {} as Parameters<typeof runOneJobOperatorCommand>[1];
+    try {
+      await expect(runOneJobOperatorCommand(document, context, 'preview_connection')).resolves.toBe(
+        'connection_ready',
+      );
+      expect(preview).toHaveBeenCalledExactlyOnceWith(document, context);
+      expect(execute).not.toHaveBeenCalled();
+      await expect(runOneJobOperatorCommand(document, context, 'execute')).resolves.toBe(
+        'confirmed',
+      );
+      expect(execute).toHaveBeenCalledExactlyOnceWith(document, context);
+      expect(() => runOneJobOperatorCommand(document, context, 'invalid' as never)).toThrow(
+        'Unsupported',
+      );
+      expect(execute).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });

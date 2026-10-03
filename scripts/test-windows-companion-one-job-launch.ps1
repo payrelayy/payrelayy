@@ -117,6 +117,25 @@ try {
       ((@($overrideFailure) -join ' ') -notmatch 'one-job operator is not ready or stopped')) {
     throw 'An alternate data root was accepted for a live one-job session.'
   }
+
+  foreach ($checkArguments in @(
+    @('-CheckOnly', '-PreviewConnection', '-CheckDataRoot', $dataRoot),
+    @('-PreviewConnection', '-CheckDataRoot', $dataRoot)
+  )) {
+    $priorErrorAction = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = 'Continue'
+      $previewFailure = @(& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+        -File $fixtureLauncher @checkArguments 2>&1)
+    } finally {
+      $ErrorActionPreference = $priorErrorAction
+    }
+    if ($LASTEXITCODE -ne 1 -or
+        ((@($previewFailure) -join ' ') -notmatch 'one-job operator is not ready or stopped')) {
+      throw 'Connection preview accepted conflicting modes or an alternate paired data root.'
+    }
+  }
 } finally {
   if ((Test-Path -LiteralPath $fixtureFull -PathType Container) -and
       $fixtureFull.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and

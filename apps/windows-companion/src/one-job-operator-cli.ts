@@ -7,11 +7,32 @@ import { loadWindowsCompanionConfig } from './config.js';
 import {
   OneJobOperatorUnavailableError,
   parseOneJobOperatorDocument,
+  previewOneJobOperatorConnection,
   runOneJobOperator,
+  type OneJobOperatorContext,
+  type OneJobOperatorDocument,
   type OneJobOperatorFailureStage,
 } from './one-job-operator.js';
 
 const MAX_DOCUMENT_BYTES = 8 * 1_024;
+
+export type OneJobOperatorMode = 'execute' | 'preview_connection';
+
+export function parseOneJobOperatorArguments(args: readonly string[]): OneJobOperatorMode {
+  if (args.length === 0) return 'execute';
+  if (args.length === 1 && args[0] === '--preview-connection') return 'preview_connection';
+  throw new Error('Unsupported one-job operator mode.');
+}
+
+export function runOneJobOperatorCommand(
+  document: OneJobOperatorDocument,
+  context: OneJobOperatorContext,
+  mode: OneJobOperatorMode,
+): Promise<'connection_ready' | 'confirmed' | 'review_required'> {
+  if (mode === 'preview_connection') return previewOneJobOperatorConnection(document, context);
+  if (mode === 'execute') return runOneJobOperator(document, context);
+  throw new Error('Unsupported one-job operator mode.');
+}
 
 export function redactedOneJobOperatorFailure(
   error: unknown,
@@ -61,23 +82,37 @@ async function main(): Promise<void> {
   process.once('SIGTERM', onStop);
   let stage: 'configuration' | OneJobOperatorFailureStage = 'configuration';
   try {
+    const mode = parseOneJobOperatorArguments(process.argv.slice(2));
     const config = loadWindowsCompanionConfig();
     if (config.executionV2Enabled || config.pairingPackageProvided) throw new Error();
     stage = 'document';
     const document = parseOneJobOperatorDocument(await readDocument());
     stage = 'local_preflight';
     const installationRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-    const result = await runOneJobOperator(document, {
-      dataRoot: config.dataRoot,
-      installationRoot,
-      windowsEnvironment: process.env,
-      trustedNow: () => new Date(),
-      signal: controller.signal,
-    });
+    const result = await runOneJobOperatorCommand(
+      document,
+      {
+        dataRoot: config.dataRoot,
+        installationRoot,
+        windowsEnvironment: process.env,
+        trustedNow: () => new Date(),
+        signal: controller.signal,
+      },
+      mode,
+    );
     console.info(
       JSON.stringify({
         component: 'fetanagent_one_job_operator',
         result,
+        ...(mode === 'preview_connection'
+          ? {
+              requestCreated: false,
+              handoffSigned: false,
+              executionEnabled: false,
+              jobApproved: false,
+              moneyMoved: false,
+            }
+          : {}),
         identifiersRedacted: true,
       }),
     );

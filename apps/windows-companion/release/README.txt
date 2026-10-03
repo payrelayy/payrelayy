@@ -35,6 +35,13 @@ session, and the exact published release. Without those inputs it stops without 
 deposit. The document contains local paths and connection details, never a payment reference,
 password, or request key. Its PowerShell script supports -CheckOnly to inspect local file
 presence without connecting. Do not copy a document from another machine or another release.
+Use -PreviewConnection for a separately prepared server session to check the paired
+bootstrap connection only. This sends one signed read-only bootstrap request over the
+existing pinned SSH connection and discards its private response binding. It never
+signs an execution handoff, enables execution, opens KemerBet, approves a job, or
+starts a deposit. It cannot prepare a pilot or server session itself, and a pass
+does not prove that a real deposit will succeed. Test this connection before asking
+for another payment. -CheckOnly and -PreviewConnection cannot be used together.
 When the reviewed one-job session is enabled, one fresh server-signed assignment may prepare one
 specific Player, verify the receiver name/number and ETB currency, enter exactly 25.00 ETB with an
 empty Notes field, obtain a one-use database fence, and issue exactly one Transfer request. A

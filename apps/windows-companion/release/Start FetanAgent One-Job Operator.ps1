@@ -1,11 +1,13 @@
 param(
   [switch] $CheckOnly,
+  [switch] $PreviewConnection,
   [string] $CheckDataRoot
 )
 
 $ErrorActionPreference = 'Stop'
 
 try {
+  if ($CheckOnly -and $PreviewConnection) { throw 'Conflicting check modes.' }
   if ($CheckDataRoot -and (-not $CheckOnly -or
       -not [System.IO.Path]::IsPathRooted($CheckDataRoot))) {
     throw 'A check-only directory was used for execution.'
@@ -92,8 +94,14 @@ try {
 
   $env:FETANAGENT_COMPANION_DATA_ROOT = $dataRoot
   $env:FETANAGENT_COMPANION_RELEASE_SHA = $releaseSha
-  $document | & $node $entry
+  $operatorArguments = @()
+  if ($PreviewConnection) { $operatorArguments = @('--preview-connection') }
+  $document | & $node $entry @operatorArguments
   if ($LASTEXITCODE -ne 0) { throw 'The one-job operator stopped.' }
+  if ($PreviewConnection) {
+    Write-Output 'The protected connection preview passed. No activation or deposit was started.'
+    exit 0
+  }
   Write-Output 'The one-job operator finished. Check the Owner page for the final result.'
   exit 0
 } catch {

@@ -2,17 +2,26 @@ import type { SignedCompanionExecutionActivationHandoff } from '@fetanagent/agen
 
 import {
   GuardedOperatorActivationUnavailableError,
+  guardedOperatorActivationFailureStage,
   runGuardedOperatorActivationWithProtectedRemoteSession,
+  type GuardedOperatorActivationFailureStage,
   type GuardedOperatorActivationInput,
 } from './guarded-operator-activation.js';
 import type { GuardedOperatorRemoteSession } from './guarded-operator-query-client.js';
 import type { ProtectedOperatorDeviceSigner } from './protected-operator-query-http-client.js';
 import {
+  ProtectedOperatorSshClientUnavailableError,
   createProtectedOperatorSshEmergencyStop,
   createProtectedOperatorSshHandoffSigner,
   createProtectedOperatorSshRemoteSession,
   type ProtectedOperatorSshConnection,
 } from './protected-operator-query-ssh-client.js';
+
+export {
+  GuardedOperatorActivationUnavailableError,
+  isGuardedOperatorActivationFailureStage,
+  type GuardedOperatorActivationFailureStage,
+} from './guarded-operator-activation.js';
 
 type ActivationInput = Omit<
   GuardedOperatorActivationInput,
@@ -53,14 +62,18 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
   adapters: SshActivationAdapters,
 ): Promise<'confirmed' | 'review_required'> {
   let remote: GuardedOperatorRemoteSession | undefined;
+  let stage: GuardedOperatorActivationFailureStage = 'input_validation';
   try {
     if (!input || input.signal?.aborted || !device || !connection) throw new Error();
+    stage = 'handoff_signing';
     let signed: SignedCompanionExecutionActivationHandoff | undefined = await adapters.sign(
       device,
       connection,
     )(input.requestKey);
     const stop = adapters.stop(connection);
+    stage = 'remote_session_open';
     remote = await adapters.open(device, input.requestKey, connection);
+    stage = 'unconfirmed';
     const result = await adapters.activate(
       {
         ...input,
@@ -74,12 +87,25 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
       },
       remote,
     );
+    stage = 'handoff_binding';
     if (signed) throw new Error();
     return result;
-  } catch {
+  } catch (error) {
+    let failureStage = guardedOperatorActivationFailureStage(error, stage);
+    if (
+      stage === 'handoff_signing' &&
+      error instanceof ProtectedOperatorSshClientUnavailableError
+    ) {
+      if (error.handoffStage === 'local_preflight') failureStage = 'handoff_local_preflight';
+      else if (error.handoffStage === 'ssh_transport') failureStage = 'handoff_ssh_transport';
+      else if (error.handoffStage === 'http_response') failureStage = 'handoff_http_response';
+      else if (error.handoffStage === 'handoff_binding') failureStage = 'handoff_binding';
+    }
     // The coordinator normally owns close; cover a failure before it takes ownership.
-    await remote?.close().catch(() => undefined);
-    throw new GuardedOperatorActivationUnavailableError();
+    await remote?.close().catch(() => {
+      failureStage = 'remote_session_close';
+    });
+    throw new GuardedOperatorActivationUnavailableError(failureStage);
   }
 }
 

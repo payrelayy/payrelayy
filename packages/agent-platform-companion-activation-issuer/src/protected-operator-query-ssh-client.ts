@@ -51,6 +51,8 @@ export class ProtectedOperatorSshClientUnavailableError extends Error {
   constructor(
     readonly bootstrapStage?:
       'local_preflight' | 'ssh_transport' | 'http_response' | 'bootstrap_binding',
+    readonly handoffStage?:
+      'local_preflight' | 'ssh_transport' | 'http_response' | 'handoff_binding',
   ) {
     super('The authenticated protected operator stream is unavailable.');
     this.name = 'ProtectedOperatorSshClientUnavailableError';
@@ -443,6 +445,7 @@ export function createProtectedOperatorSshHandoffSignerWithSpawn(
 ): (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff> {
   let attempted = false;
   return async (requestKey) => {
+    let stage: 'local_preflight' | 'handoff_binding' = 'local_preflight';
     try {
       if (
         attempted ||
@@ -493,6 +496,7 @@ export function createProtectedOperatorSshHandoffSignerWithSpawn(
           windowsRoot,
           SIGN_ROUND_TRIP_TIMEOUT_MS,
         );
+        stage = 'handoff_binding';
         if (
           !reply ||
           typeof reply !== 'object' ||
@@ -505,8 +509,11 @@ export function createProtectedOperatorSshHandoffSignerWithSpawn(
       } finally {
         body.fill(0);
       }
-    } catch {
-      throw new ProtectedOperatorSshClientUnavailableError();
+    } catch (error) {
+      throw new ProtectedOperatorSshClientUnavailableError(
+        undefined,
+        error instanceof ProtectedOperatorSshExchangeError ? error.stage : stage,
+      );
     }
   };
 }
@@ -516,7 +523,7 @@ export function createProtectedOperatorSshHandoffSigner(
   connection: ProtectedOperatorSshConnection,
 ): (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff> {
   if (process.platform !== 'win32' || !process.env.SystemRoot)
-    throw new ProtectedOperatorSshClientUnavailableError();
+    throw new ProtectedOperatorSshClientUnavailableError(undefined, 'local_preflight');
   return createProtectedOperatorSshHandoffSignerWithSpawn(
     device,
     connection,

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ProtectedOperatorSshClientUnavailableError } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
+import { GuardedOperatorActivationUnavailableError } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
 
 import {
   OneJobOperatorUnavailableError,
@@ -243,6 +244,15 @@ describe('one-job Windows operator entry point', () => {
           throw new Error('private activation detail');
         }),
       },
+      {
+        expected: 'guarded_activation',
+        activationStage: 'handoff_http_response',
+        loadDevice: vi.fn(async () => device),
+        bootstrap: vi.fn(async () => ({ requestKey, actorAuthUserId })),
+        activate: vi.fn(async () => {
+          throw new GuardedOperatorActivationUnavailableError('handoff_http_response');
+        }),
+      },
     ];
     for (const failure of failures) {
       const error = await runOneJobOperatorWithAdapters(
@@ -252,6 +262,9 @@ describe('one-job Windows operator entry point', () => {
       ).catch((value: unknown) => value);
       expect(error).toBeInstanceOf(OneJobOperatorUnavailableError);
       expect((error as OneJobOperatorUnavailableError).stage).toBe(failure.expected);
+      expect((error as OneJobOperatorUnavailableError).activationStage).toBe(
+        'activationStage' in failure ? failure.activationStage : undefined,
+      );
       expect(JSON.stringify(error)).not.toContain('private');
       if (failure.expected !== 'guarded_activation')
         expect(failure.activate).not.toHaveBeenCalled();

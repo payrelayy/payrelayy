@@ -1,6 +1,8 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { isGuardedOperatorActivationFailureStage } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
+
 import { loadWindowsCompanionConfig } from './config.js';
 import {
   OneJobOperatorUnavailableError,
@@ -15,10 +17,17 @@ export function redactedOneJobOperatorFailure(
   error: unknown,
   fallbackStage: 'configuration' | OneJobOperatorFailureStage,
 ): string {
+  const activationStage =
+    error instanceof OneJobOperatorUnavailableError &&
+    error.stage === 'guarded_activation' &&
+    isGuardedOperatorActivationFailureStage(error.activationStage)
+      ? error.activationStage
+      : undefined;
   return JSON.stringify({
     component: 'fetanagent_one_job_operator',
     result: 'stopped',
     failureStage: error instanceof OneJobOperatorUnavailableError ? error.stage : fallbackStage,
+    ...(activationStage ? { activationStage } : {}),
     identifiersRedacted: true,
   });
 }
@@ -74,7 +83,7 @@ async function main(): Promise<void> {
     );
     if (result === 'review_required') process.exitCode = 2;
   } catch (error) {
-    // Only a fixed stage is emitted. The original error may contain private
+    // Only fixed stage categories are emitted. The original error may contain private
     // request or host details and must never reach a log or terminal.
     console.error(redactedOneJobOperatorFailure(error, stage));
     console.error('The one-job operator stopped; reconcile the exact job before another request.');

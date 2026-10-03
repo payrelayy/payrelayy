@@ -1,7 +1,12 @@
 import { isIP } from 'node:net';
 import { win32 } from 'node:path';
 
-import { runGuardedOperatorActivationOverSsh } from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
+import {
+  GuardedOperatorActivationUnavailableError,
+  isGuardedOperatorActivationFailureStage,
+  runGuardedOperatorActivationOverSsh,
+  type GuardedOperatorActivationFailureStage,
+} from '@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation';
 import type { ProtectedOperatorSshConnection } from '@fetanagent/agent-platform-companion-activation-issuer/protected-operator-query-ssh-client';
 import {
   ProtectedOperatorSshClientUnavailableError,
@@ -53,7 +58,10 @@ const productionAdapters: OneJobOperatorAdapters = {
 export class OneJobOperatorUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
 
-  constructor(readonly stage: OneJobOperatorFailureStage = 'local_preflight') {
+  constructor(
+    readonly stage: OneJobOperatorFailureStage = 'local_preflight',
+    readonly activationStage?: GuardedOperatorActivationFailureStage,
+  ) {
     super('The one-job operator is unavailable; reconcile before another request.');
     this.name = 'OneJobOperatorUnavailableError';
   }
@@ -228,7 +236,13 @@ export async function runOneJobOperatorWithAdapters(
       else if (bootstrapStage === 'http_response') stage = 'bootstrap_http_response';
       else if (bootstrapStage === 'bootstrap_binding') stage = 'bootstrap_binding';
     }
-    throw new OneJobOperatorUnavailableError(stage);
+    const activationStage =
+      stage === 'guarded_activation' &&
+      error instanceof GuardedOperatorActivationUnavailableError &&
+      isGuardedOperatorActivationFailureStage(error.activationStage)
+        ? error.activationStage
+        : undefined;
+    throw new OneJobOperatorUnavailableError(stage, activationStage);
   }
 }
 

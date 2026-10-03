@@ -29,3 +29,10 @@ test('retains independent emergency revocation after request preparation begins'
   assert.match(workflow, /production-companion-execution-emergency-disable\.sql/u);
   assert.match(workflow, /node infra\/operations\/require-production-ci\.mjs/u);
 });
+
+test('selects the diagnostic companion release without adding an automatic session trigger', () => {
+  assert.match(workflow, /PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0\.1\.18/u);
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request|schedule|workflow_run):/mu);
+  assert.match(workflow, /OPEN ONE OWNER-APPROVED COMPANION SESSION/u);
+});

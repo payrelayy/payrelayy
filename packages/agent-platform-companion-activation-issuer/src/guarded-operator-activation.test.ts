@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   GuardedOperatorActivationUnavailableError,
+  guardedOperatorActivationFailureStage,
   runGuardedOperatorActivationWithAdapters,
   runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters,
   type GuardedOperatorActivationInput,
@@ -152,6 +153,71 @@ function fixture() {
 }
 
 describe('internal protected operator composition', () => {
+  it.each([
+    ['acquireLock', 'lifecycle_lock'],
+    ['attest', 'attestation'],
+    ['loadSnapshot', 'database_snapshot'],
+    ['verifyRelease', 'release_verification'],
+    ['publishHandoff', 'handoff_publication'],
+    ['openChannel', 'local_channel'],
+    ['start', 'child_start'],
+    ['observe', 'process_observation'],
+    ['retainRow', 'attestation_retention'],
+    ['prepareSupervisor', 'supervisor'],
+    ['runLifecycle', 'one_job_lifecycle'],
+  ] as const)('reports only the fixed category when %s fails', async (adapter, activationStage) => {
+    const state = fixture();
+    vi.spyOn(state.adapters, adapter).mockImplementationOnce(() => {
+      throw new Error('private request, signature, host, or response detail');
+    });
+    const error = await runGuardedOperatorActivationWithAdapters(state.input, state.adapters).catch(
+      (value: unknown) => value,
+    );
+    expect(error).toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    expect(error).toMatchObject({
+      activationStage,
+      requiresIndependentStopAndReconciliation: true,
+    });
+    expect(JSON.stringify(error)).not.toContain('private');
+    if (adapter !== 'runLifecycle') expect(state.runLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes launch proof from process observation without retrying the child', async () => {
+    const state = fixture();
+    state.channel.receiveProof.mockRejectedValueOnce(new Error('private proof'));
+    await expect(
+      runGuardedOperatorActivationWithAdapters(state.input, state.adapters),
+    ).rejects.toMatchObject({ activationStage: 'launch_proof' });
+    expect(state.adapters.start).toHaveBeenCalledTimes(1);
+    expect(state.child.stop).toHaveBeenCalledTimes(1);
+    expect(state.observe).not.toHaveBeenCalled();
+    expect(state.runLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('prioritizes an unconfirmed cleanup category over the original private failure', async () => {
+    const state = fixture();
+    state.observe.mockRejectedValueOnce(new Error('private process failure'));
+    state.child.stop.mockRejectedValueOnce(new Error('private cleanup failure'));
+    await expect(
+      runGuardedOperatorActivationWithAdapters(state.input, state.adapters),
+    ).rejects.toMatchObject({ activationStage: 'pre_permit_child_cleanup' });
+    expect(state.channel.close).toHaveBeenCalledTimes(1);
+    expect(state.lock.release).toHaveBeenCalledTimes(1);
+    expect(state.runLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('never trusts arbitrary diagnostic properties or a mutated typed error', () => {
+    const forged = new Error('private');
+    Object.assign(forged, { activationStage: 'release_verification' });
+    expect(guardedOperatorActivationFailureStage(forged, 'attestation')).toBe('attestation');
+    const typed = new GuardedOperatorActivationUnavailableError('release_verification');
+    Object.assign(typed, { activationStage: 'private receipt reference' });
+    expect(guardedOperatorActivationFailureStage(typed, 'attestation')).toBe('attestation');
+    expect(new GuardedOperatorActivationUnavailableError('private' as never).activationStage).toBe(
+      'unconfirmed',
+    );
+  });
+
   it('holds one lock across independent attestation and the one-job lifecycle', async () => {
     const state = fixture();
     await expect(
@@ -222,7 +288,7 @@ describe('internal protected operator composition', () => {
     state.lock.release.mockRejectedValueOnce(new Error('lost'));
     await expect(
       runGuardedOperatorActivationWithAdapters(state.input, state.adapters),
-    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    ).rejects.toMatchObject({ activationStage: 'lifecycle_lock_cleanup' });
     expect(state.runLifecycle).toHaveBeenCalledTimes(1);
     expect(state.child.stop).toHaveBeenCalledTimes(1);
   });
@@ -281,7 +347,7 @@ describe('internal protected operator composition', () => {
         remote,
         state.adapters,
       ),
-    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    ).rejects.toMatchObject({ activationStage: 'one_job_lifecycle' });
     expect(remote.close).toHaveBeenCalledTimes(1);
     expect(state.lock.release).toHaveBeenCalledTimes(1);
   });
@@ -303,7 +369,7 @@ describe('internal protected operator composition', () => {
         remote,
         state.adapters,
       ),
-    ).rejects.toBeInstanceOf(GuardedOperatorActivationUnavailableError);
+    ).rejects.toMatchObject({ activationStage: 'remote_session_close' });
     expect(state.runLifecycle).toHaveBeenCalledTimes(1);
     expect(remote.close).toHaveBeenCalledTimes(1);
   });

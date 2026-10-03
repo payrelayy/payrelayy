@@ -333,6 +333,67 @@ describe('authenticated protected operator SSH stream', () => {
     expect(spawned).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ['transport', 'ssh_transport'],
+    ['response', 'http_response'],
+    ['binding', 'handoff_binding'],
+  ] as const)(
+    'classifies a %s handoff failure without retaining response data or retrying',
+    async (kind, handoffStage) => {
+      const signedDevice = {
+        certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+        createSignedHttpRequest: () => ({ testOnly: true }),
+      } as unknown as ProtectedOperatorDeviceSigner;
+      const spawned = vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {
+        const child = new EventEmitter() as ChildProcess;
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        Object.assign(child, { pid: 420, stdin, stdout, kill: vi.fn(() => true) });
+        onCompleteRequest(stdin, () => {
+          if (kind === 'transport') {
+            setImmediate(() => child.emit('close', 255, null));
+            return;
+          }
+          const body = JSON.stringify({ unexpected: 'private signed response' });
+          stdout.end(
+            `HTTP/1.1 ${kind === 'response' ? '403 Forbidden' : '200 OK'}\r\n` +
+              `Content-Type: ${AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE}\r\n` +
+              'Cache-Control: no-store\r\n' +
+              `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+          );
+          setImmediate(() => child.emit('close', 0, null));
+        });
+        return child;
+      });
+      const signer = createProtectedOperatorSshHandoffSignerWithSpawn(
+        signedDevice,
+        connection,
+        ROOT,
+        spawned,
+        files,
+      );
+      const error = await signer(requestKey).catch((value: unknown) => value);
+      expect(error).toBeInstanceOf(ProtectedOperatorSshClientUnavailableError);
+      expect(error).toMatchObject({ handoffStage });
+      expect(JSON.stringify(error)).not.toContain('private');
+      await expect(signer(requestKey)).rejects.toMatchObject({ handoffStage: 'local_preflight' });
+      expect(spawned).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('reports a handoff local preflight failure before starting SSH', async () => {
+    const { spawned } = fakeSsh(() => undefined);
+    const signer = createProtectedOperatorSshHandoffSignerWithSpawn(
+      device,
+      { ...connection, remoteLoopbackPort: 744 },
+      ROOT,
+      spawned,
+      files,
+    );
+    await expect(signer(requestKey)).rejects.toMatchObject({ handoffStage: 'local_preflight' });
+    expect(spawned).not.toHaveBeenCalled();
+  });
+
   it('sends one stop-only command without exposing a database credential or local listener', async () => {
     const requests: string[] = [];
     const spawned = vi.fn((_file: string, _args: readonly string[], _options: SpawnOptions) => {

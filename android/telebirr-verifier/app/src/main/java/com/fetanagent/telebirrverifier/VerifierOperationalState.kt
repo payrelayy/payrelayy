@@ -2,6 +2,7 @@ package com.fetanagent.telebirrverifier
 
 import android.Manifest
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 
@@ -13,9 +14,28 @@ data class VerifierOperationalSnapshot(
 
 /** Stores only non-sensitive lifecycle state. Keys, references, receipts, and signed payloads never
  * enter preferences. */
-class VerifierOperationalStateStore(context: Context) {
-  private val preferences =
-    context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+class VerifierOperationalStateStore internal constructor(
+  private val preferences: SharedPreferences,
+) {
+  constructor(context: Context) : this(
+    context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
+  )
+
+  /** Keeps a visible screen in sync with writes made by the separate service store instance. */
+  fun observeChanges(onChange: () -> Unit): () -> Unit {
+    var observing = true
+    val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+      if (observing && key in OPERATIONAL_KEYS) onChange()
+    }
+    preferences.registerOnSharedPreferenceChangeListener(listener)
+    // Retaining this closure also retains the listener, which SharedPreferences holds weakly.
+    return {
+      if (observing) {
+        observing = false
+        preferences.unregisterOnSharedPreferenceChangeListener(listener)
+      }
+    }
+  }
 
   fun snapshot(): VerifierOperationalSnapshot {
     val state =
@@ -69,6 +89,8 @@ class VerifierOperationalStateStore(context: Context) {
     private const val STATUS_STATE = "status_state"
     private const val STATUS_CODE = "status_code"
     private const val UPDATED_AT_MILLIS = "updated_at_millis"
+    private val OPERATIONAL_KEYS =
+      setOf(OPERATOR_ENABLED, STATUS_STATE, STATUS_CODE, UPDATED_AT_MILLIS)
   }
 }
 

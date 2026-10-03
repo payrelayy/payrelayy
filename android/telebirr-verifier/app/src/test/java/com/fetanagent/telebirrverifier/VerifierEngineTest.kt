@@ -10,6 +10,20 @@ import org.junit.Test
 
 class VerifierEngineTest {
   @Test
+  fun `shows starting instead of a stale stop or rejection during service startup`() {
+    val starting = LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "starting_verification")
+    assertEquals("Starting", VerifierLifecycle.from(starting).label)
+    assertEquals(
+      "starting_verification",
+      VerifierStatusPresentation.code(
+        verifierEnabled = true,
+        enrolled = true,
+        VerifierOperationalSnapshot(operatorEnabled = true, status = starting, updatedAtMillis = 1L),
+      ),
+    )
+  }
+
+  @Test
   fun `shows the redacted pairing failure while enrollment is still required`() {
     val snapshot =
       VerifierOperationalSnapshot(

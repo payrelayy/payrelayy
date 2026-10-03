@@ -1,6 +1,7 @@
 package com.fetanagent.telebirrverifier
 
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.UUID
 
 object DeviceBridgeAppVersion {
@@ -255,9 +256,16 @@ class AuthenticatedDeviceBridgeClient(
     command: DeviceBridgeCommand,
     payloadDigest: String,
   ): SignedDeviceBridgeRequest {
-    val issuedAtMillis = clock.nowMillis()
+    val nowMillis = clock.nowMillis()
+    requireEnrollmentActiveAt(SafeOfficialReceiptTransport.canonicalTimestamp(nowMillis))
+    // Pairing uses the same clock margin. Backdate only the signed command, not the local
+    // enrollment assessment, and retain the protocol's strict maximum request window.
+    val issuedAtMillis =
+      maxOf(
+        nowMillis - REQUEST_CLOCK_SKEW_TOLERANCE_MILLIS,
+        Instant.parse(certificate.body.validFrom).toEpochMilli(),
+      )
     val issuedAt = SafeOfficialReceiptTransport.canonicalTimestamp(issuedAtMillis)
-    requireEnrollmentActiveAt(issuedAt)
     val body =
       DeviceBridgeRequestBody(
         requestId = requestMaterial.nextRequestId(),
@@ -268,7 +276,10 @@ class AuthenticatedDeviceBridgeClient(
         payloadDigest = payloadDigest,
         nonceDigest = requestMaterial.nextNonceDigest(),
         issuedAt = issuedAt,
-        expiresAt = SafeOfficialReceiptTransport.canonicalTimestamp(issuedAtMillis + 60_000),
+        expiresAt =
+          SafeOfficialReceiptTransport.canonicalTimestamp(
+            issuedAtMillis + MAXIMUM_REQUEST_WINDOW_MILLIS,
+          ),
       )
     return DeviceBridgeSignedFactory.request(body, identity)
   }
@@ -337,4 +348,9 @@ class AuthenticatedDeviceBridgeClient(
     }
 
   override fun toString(): String = "AuthenticatedDeviceBridgeClient(<redacted>)"
+
+  private companion object {
+    const val REQUEST_CLOCK_SKEW_TOLERANCE_MILLIS = 30_000L
+    const val MAXIMUM_REQUEST_WINDOW_MILLIS = 60_000L
+  }
 }

@@ -147,6 +147,152 @@ class DeviceBridgeClientTest {
   }
 
   @Test
+  fun `signed command remains valid when the phone is slightly ahead of the server`() {
+    val fixture = fixture()
+    val phoneNow = instant("2026-09-04T10:01:00.200Z")
+    val serverNow = "2026-09-04T10:01:00.000Z"
+    val payload = DeviceBridgeAssignmentPollPayload(120)
+    val expectedRequest =
+      signedRequest(
+        fixture,
+        "bridge-request-clock-0001",
+        repeatedDigest('e'),
+        DeviceBridgeCommand.ASSIGNMENT_POLL,
+        DeviceBridgeCanonical.assignmentPollPayloadDigest(payload),
+        issuedAt = "2026-09-04T10:00:30.200Z",
+        expiresAt = "2026-09-04T10:01:30.200Z",
+      )
+    val exchange =
+      DeviceBridgeExchange { _, _, frame ->
+        val serialized = frame.toString(Charsets.UTF_8)
+        assertTrue(serialized.contains("\"bodyDigest\":\"${expectedRequest.bodyDigest}\""))
+        assertTrue(serialized.contains("\"issuedAt\":\"${expectedRequest.body.issuedAt}\""))
+        assertTrue(serialized.contains("\"expiresAt\":\"${expectedRequest.body.expiresAt}\""))
+        // These are the unchanged server's strict timestamp conditions.
+        assertTrue(serverNow >= expectedRequest.body.issuedAt)
+        assertTrue(serverNow < expectedRequest.body.expiresAt)
+        assertEquals(
+          60_000L,
+          instant(expectedRequest.body.expiresAt) - instant(expectedRequest.body.issuedAt),
+        )
+        val ack = acknowledgementBody(expectedRequest).copy(issuedAt = serverNow)
+        DeviceBridgeRawResponse(
+          200,
+          DeviceBridgeProtocol.CONTENT_TYPE,
+          DeviceBridgeJsonCodec.encodeCommandResponseForTest(
+            DeviceBridgeCommandResponse(signedAcknowledgement(ack, fixture.server), null),
+          ),
+        )
+      }
+    assertNull(
+      client(
+          fixture,
+          exchange,
+          fixedMaterial("bridge-request-clock-0001", repeatedDigest('e')),
+          MillisClock { phoneNow },
+        )
+        .nextAssignment(),
+    )
+  }
+
+  @Test
+  fun `command clock margin never predates the enrollment validity window`() {
+    val fixture = fixture()
+    val now = instant("2026-09-04T10:00:06.000Z")
+    val payload = DeviceBridgeAssignmentPollPayload(120)
+    val expectedRequest =
+      signedRequest(
+        fixture,
+        "bridge-request-clock-0002",
+        repeatedDigest('f'),
+        DeviceBridgeCommand.ASSIGNMENT_POLL,
+        DeviceBridgeCanonical.assignmentPollPayloadDigest(payload),
+        issuedAt = fixture.certificate.body.validFrom,
+        expiresAt = "2026-09-04T10:01:05.000Z",
+      )
+    val exchange =
+      DeviceBridgeExchange { _, _, frame ->
+        val serialized = frame.toString(Charsets.UTF_8)
+        assertTrue(serialized.contains("\"bodyDigest\":\"${expectedRequest.bodyDigest}\""))
+        assertTrue(serialized.contains("\"issuedAt\":\"${expectedRequest.body.issuedAt}\""))
+        assertTrue(serialized.contains("\"expiresAt\":\"${expectedRequest.body.expiresAt}\""))
+        val ack =
+          acknowledgementBody(expectedRequest).copy(issuedAt = "2026-09-04T10:00:06.000Z")
+        DeviceBridgeRawResponse(
+          200,
+          DeviceBridgeProtocol.CONTENT_TYPE,
+          DeviceBridgeJsonCodec.encodeCommandResponseForTest(
+            DeviceBridgeCommandResponse(signedAcknowledgement(ack, fixture.server), null),
+          ),
+        )
+      }
+    assertNull(
+      client(
+          fixture,
+          exchange,
+          fixedMaterial("bridge-request-clock-0002", repeatedDigest('f')),
+          MillisClock { now },
+        )
+        .nextAssignment(),
+    )
+  }
+
+  @Test
+  fun `clock margin cannot revive an expired or not yet valid enrollment`() {
+    val fixture = fixture()
+    for (now in listOf(
+      instant(fixture.certificate.body.validFrom) - 1,
+      instant(fixture.certificate.body.validUntil),
+    )) {
+      var contacted = false
+      val exchange = DeviceBridgeExchange { _, _, _ ->
+        contacted = true
+        throw AssertionError("An inactive enrollment must not contact the server")
+      }
+      val material = object : DeviceBridgeRequestMaterialSource {
+        override fun nextRequestId(): String =
+          throw AssertionError("An inactive enrollment must not prepare a request")
+
+        override fun nextNonceDigest(): String =
+          throw AssertionError("An inactive enrollment must not prepare a nonce")
+      }
+      assertThrows(IllegalArgumentException::class.java) {
+        client(fixture, exchange, material, MillisClock { now }).nextAssignment()
+      }
+      assertFalse(contacted)
+    }
+  }
+
+  @Test
+  fun `backdated command acknowledgement still expires at the exact boundary`() {
+    val fixture = fixture()
+    var now = instant("2026-09-04T10:01:00.000Z")
+    val request = pollRequest(fixture, "bridge-request-0001", repeatedDigest('5'))
+    val exchange = DeviceBridgeExchange { _, _, _ ->
+      now = instant(request.body.expiresAt)
+      DeviceBridgeRawResponse(
+        200,
+        DeviceBridgeProtocol.CONTENT_TYPE,
+        DeviceBridgeJsonCodec.encodeCommandResponseForTest(
+          DeviceBridgeCommandResponse(
+            signedAcknowledgement(acknowledgementBody(request), fixture.server),
+            null,
+          ),
+        ),
+      )
+    }
+    assertThrows(IllegalArgumentException::class.java) {
+      client(
+          fixture,
+          exchange,
+          fixedMaterial("bridge-request-0001", repeatedDigest('5')),
+          MillisClock { now },
+        )
+        .nextAssignment()
+    }
+  }
+
+  @Test
   fun `authenticated client maps signed upload acknowledgement to the runtime idempotency digest`() {
     val fixture = fixture()
     val (authenticated, assignmentSigner, device) =
@@ -416,6 +562,8 @@ class DeviceBridgeClientTest {
     nonceDigest: String,
     command: DeviceBridgeCommand,
     payloadDigest: String,
+    issuedAt: String = "2026-09-04T10:00:30.000Z",
+    expiresAt: String = "2026-09-04T10:01:30.000Z",
   ): SignedDeviceBridgeRequest =
     DeviceBridgeSignedFactory.request(
       DeviceBridgeRequestBody(
@@ -426,8 +574,8 @@ class DeviceBridgeClientTest {
         command = command,
         payloadDigest = payloadDigest,
         nonceDigest = nonceDigest,
-        issuedAt = "2026-09-04T10:01:00.000Z",
-        expiresAt = "2026-09-04T10:02:00.000Z",
+        issuedAt = issuedAt,
+        expiresAt = expiresAt,
       ),
       fixture.device,
     )

@@ -165,6 +165,18 @@ transaction-status cell cannot consume the receipt cell. Conflicting class-bound
 unattested documents, and ambiguous facts still fail closed; the evidence-only build retains no
 settlement, execution, or financial authority.
 
+Version `0.5.12` refreshes the visible lifecycle and Start/Stop buttons when the background service
+changes operational state. Its observer is active only while the screen is visible, and callbacks
+are coalesced on the main thread. Starting shows `starting_verification` rather than retaining an
+old stop or rejection while the first signed exchange is pending. A service rejection therefore
+re-enables Start without requiring an app restart. Authenticated polling, heartbeat, and upload
+commands now use the same bounded 30-second issue-time margin as pairing, so a slightly fast
+phone clock does not make every command appear to come from the future. The issue time is never
+earlier than the enrollment's validity start, the signed request window remains at most 60
+seconds, and local enrollment expiry is assessed against the actual clock before preparing any
+request. Signatures, replay checks, server expiry checks, receipt parsing, pairing storage, and
+all financial boundaries are unchanged.
+
 Version `0.5.10` extends only the bounded official-receipt network deadline from five to fifteen
 seconds after intermittent header-read timeouts. The fixed host, public-address policy, TLS
 hostname check, redirect rejection, strict UTF-8 HTML requirement, and 32 KiB response cap remain

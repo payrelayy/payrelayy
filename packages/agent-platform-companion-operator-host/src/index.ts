@@ -19,6 +19,11 @@ import {
   type OperatorHostLaunchDocument,
 } from './launch-document.js';
 import { verifyPublishedCompanionRelease } from './release-verification.js';
+import {
+  activationDiagnosticReport,
+  inspectOperatorActivationRequest,
+  type ActivationDiagnosticReport,
+} from './activation-diagnostic.js';
 
 const { Client } = pg;
 const PROJECT_REF = 'xzztugbgtulptnbpoelr';
@@ -255,6 +260,66 @@ export async function diagnoseOperatorHost(
   return phase;
 }
 
+/** Separate inspection mode: no listener, signing handler, or execution transition. */
+export async function diagnoseOperatorActivation(
+  document: OperatorHostLaunchDocument,
+): Promise<ActivationDiagnosticReport> {
+  let report = activationDiagnosticReport('node_database');
+  let client: pg.Client | undefined;
+  let transactionStarted = false;
+  try {
+    client = new Client({
+      ...document.database,
+      ssl: {
+        ca: document.databaseCaPem,
+        rejectUnauthorized: true,
+        servername: document.database.host,
+      },
+      connectionTimeoutMillis: 5_000,
+      query_timeout: 10_000,
+      statement_timeout: 10_000,
+      application_name: 'fetanagent-operator-activation-diagnostic',
+    });
+    await client.connect();
+    await client.query('begin read only');
+    transactionStarted = true;
+    report = await inspectOperatorActivationRequest({
+      requestKey: document.requestKey,
+      administrator: {
+        async query(sql, values) {
+          const result = await client!.query(sql, values);
+          return { rows: result.rows as Record<string, unknown>[] };
+        },
+      },
+      verifyPublishedRelease: (request, reconstructionTime) =>
+        verifyPublishedCompanionRelease(request, document.releaseTag, () => reconstructionTime),
+      checkExecutionSigner: async () => {
+        await executionSignerPrivateKey();
+      },
+    });
+  } catch {
+    // Fixed report only; no connection material or raw error can leave the process.
+  } finally {
+    let cleanupFailed = false;
+    if (transactionStarted) {
+      try {
+        await client!.query('rollback');
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (client) {
+      try {
+        await client.end();
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (cleanupFailed) report = activationDiagnosticReport('cleanup');
+  }
+  return report;
+}
+
 /** A container-private, one-shot process: no service unit and no credential at rest. */
 export async function runOperatorHost(document: OperatorHostLaunchDocument): Promise<void> {
   const scratch = await mkdtemp(join(tmpdir(), 'fetanagent-operator-host-'));
@@ -362,6 +427,21 @@ export async function runOperatorHost(document: OperatorHostLaunchDocument): Pro
 }
 
 async function main(): Promise<void> {
+  if (process.argv.length === 3 && process.argv[2] === '--diagnose-activation') {
+    let raw: Uint8Array | undefined;
+    let report = activationDiagnosticReport('input_validation');
+    try {
+      raw = await readOneLaunchDocument();
+      report = await diagnoseOperatorActivation(parseOperatorHostLaunchDocument(raw));
+    } catch {
+      // The diagnostic has its own fixed output even for malformed stdin.
+    } finally {
+      raw?.fill(0);
+    }
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    if (report.result !== 'passed') process.exitCode = 1;
+    return;
+  }
   const raw = await readOneLaunchDocument();
   try {
     const document = parseOperatorHostLaunchDocument(raw);

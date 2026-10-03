@@ -1,0 +1,35 @@
+# Non-executing companion activation diagnosis
+
+Status: prepared for review and testing only. This is not a production release,
+installation, execution request, or permission to retry a deposit.
+
+The protected operator image has a separate `--diagnose-activation` CLI mode. It
+accepts the existing stdin-only launch document, selecting exactly its stored
+request. The release tag must be the release recorded for that historical
+request, not a newer Windows download. No request is created or consumed.
+
+It requires a direct, verified-TLS administrator connection inside `BEGIN READ
+ONLY`, all seven financial switches disabled, disabled companion execution
+control, and no executor login/session. Queries use the exact request key as a
+parameter. They do not read receipt contents, Player IDs, jobs, or OS files through
+SQL, take row/advisory locks, or call any financial transition.
+
+The diagnostic checks database representation and identity/time bindings at the
+stored request's creation, independently verifies its public release metadata,
+validates the same handoff body **in memory only**, checks the existing execution
+key's format and pinned public identity without signing, then rereads the request
+to detect changes. It opens no listener or HTTP handler, spawns no subprocess,
+publishes no handoff, enables no authority, and always rolls back/closes.
+
+Only a fixed JSON report leaves the process. `stage` identifies the first failed
+check; no underlying exception, identifier, digest, URL, credential, private key,
+or reconstructed body is reported. Cleanup uncertainty overrides other outcomes.
+`inspectionMode` is always `historical_reconstruction` and `liveReadinessProven`
+is always false. A passed result is not proof that the original SSH/HTTP request
+succeeded, nor permission to execute an expired/stopped pilot. Historical public
+release checks inspect current immutable metadata; they do not claim an original
+network observation or verify the Windows installation tree anew.
+
+No production workflow, launcher, release marker, database migration, permission,
+or financial control is changed by this preparation. A reviewed production image
+installation and one non-executing diagnostic run require separate authorization.

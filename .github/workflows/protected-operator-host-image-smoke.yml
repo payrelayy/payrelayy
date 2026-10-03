@@ -96,6 +96,38 @@ jobs:
           test "$status" -eq 1
           test "$output" = 'protected_operator_diagnostic=independent_psql'
 
+      - name: Refuse activation diagnosis without network or valid stdin
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(node -e 'const fs=require("node:fs");
+            const host=fs.readFileSync("packages/agent-platform-companion-operator-host/src/launch-document.ts","utf8").match(/const DIRECT_HOST = (.+);/)[1].slice(1,-1);
+            process.stdout.write(JSON.stringify({ version:1,
+              requestKey:"00000000-0000-4000-8000-000000000001",
+              databaseUrl:"postgresql://postgres:synthetic@"+host+":5432/postgres?sslmode=verify-full",
+              databaseCaPem:"-----BEGIN CERTIFICATE-----\n"+"A".repeat(64)+"\n-----END CERTIFICATE-----\n",
+              releaseTag:"windows-companion-v0.1.17" }))')"
+          for expected in input_validation node_database ; do
+            input='{"version":1}'
+            if test "$expected" = node_database ; then input="$payload"; fi
+            set +e
+            output="$(printf '%s' "$input" | timeout 15s docker run --rm -i \
+              --network none --read-only --log-driver none \
+              --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
+              fetanagent-protected-operator-host:ci --diagnose-activation 2>&1)"
+            status=$?
+            set -e
+            test "$status" -eq 1
+            printf '%s' "$output" | EXPECTED_STAGE="$expected" node -e '
+              let raw=""; process.stdin.on("data",p=>raw+=p); process.stdin.on("end",()=>{
+                const wanted={ component:"fetanagent_operator_activation_diagnostic",result:"stopped",
+                  stage:process.env.EXPECTED_STAGE,inspectionMode:"historical_reconstruction",
+                  liveReadinessProven:false,requestCreated:false,handoffSigned:false,
+                  executionEnabled:false,moneyMoved:false,identifiersRedacted:true };
+                if(raw.trim()!==JSON.stringify(wanted)) process.exit(1);
+              });'
+          done
+
       - name: Prove only the non-root loopback bind capability is effective
         shell: bash
         run: |

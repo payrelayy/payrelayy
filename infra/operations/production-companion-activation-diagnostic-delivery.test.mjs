@@ -86,6 +86,11 @@ test('delivery requires exact passing main and never prepares, consumes, activat
   assert.match(workflow, /render-production-operator-launch\.mjs/u);
   assert.match(workflow, /render-activation-diagnostic-delivery\.mjs/u);
   assert.match(workflow, /ConnectionAttempts=1/u);
+  assert.match(workflow, /pooler_selected/u);
+  assert.match(workflow, /selected" == "\$pooler_selected/u);
+  assert.match(workflow, /repair-diagnostic-database-ban\.py/u);
+  assert.match(workflow, /read-diagnostic-database-source\.py/u);
+  assert.match(workflow, /network-bans remove --help/u);
   assert.doesNotMatch(
     workflow,
     /operator-session-prepare|randomUUID|workflow run|apply_migration|sudo|docker run|\bretry\b/u,

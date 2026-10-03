@@ -168,6 +168,7 @@ jobs:
             -o ConnectTimeout=8 -o ConnectionAttempts=1)
           project_ref="${direct_host#db.}"
           project_ref="${project_ref%.supabase.co}"
+          unset PGHOSTADDR PGSERVICE
           export PGHOST=aws-0-eu-west-1.pooler.supabase.com PGPORT=5432
           export PGUSER="postgres.$project_ref" PGDATABASE=postgres PGSSLMODE=verify-full
           export PGSSLROOTCERT="$protected/supabase-ca.crt" PGCONNECT_TIMEOUT=5
@@ -175,8 +176,11 @@ jobs:
           export PGAPPNAME=fetanagent_activation_diagnostic_delivery
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
           diagnostic_stage=pooler_select
+          # pg_stat_ssl sees the pooler-to-database backend, not this libpq client.
+          # Explicit verify-full parameters cannot fall back to unverified TLS.
           if ! pooler_selected="$(timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
-            --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
+            --dbname="host=$PGHOST port=5432 user=$PGUSER dbname=postgres sslmode=verify-full sslrootcert='$PGSSLROOTCERT' connect_timeout=5" \
+            --file=infra/sql/production-companion-activation-diagnostic-pooler-request.sql 2>/dev/null)"; then
             echo '::error::The existing administrator credential or read-only boundary is unavailable; no ban was removed.' >&2
             exit 1
           fi

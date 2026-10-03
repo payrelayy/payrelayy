@@ -11,13 +11,17 @@ import { renderProductionOperatorLaunch } from './render-production-operator-lau
 import { renderActivationDiagnosticDelivery } from './render-activation-diagnostic-delivery.mjs';
 
 const root = new URL('../../', import.meta.url);
-const [workflow, sql, receiver, coordinator] = await Promise.all([
+const [workflow, sql, poolerSql, receiver, coordinator] = await Promise.all([
   readFile(
     new URL('.github/workflows/production-companion-activation-diagnostic-delivery.yml', root),
     'utf8',
   ),
   readFile(
     new URL('infra/sql/production-companion-activation-diagnostic-request.sql', root),
+    'utf8',
+  ),
+  readFile(
+    new URL('infra/sql/production-companion-activation-diagnostic-pooler-request.sql', root),
     'utf8',
   ),
   readFile(new URL('infra/operations/operator-activation-diagnostic-receiver.py', root), 'utf8'),
@@ -137,6 +141,59 @@ const reporter = deliveryRun.match(
   /# Report only fixed public categories, never a failing command or its data\.\n([\s\S]+?)# Begin the unchanged protected delivery; reporting adds no authority\./u,
 )?.[1];
 const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash';
+
+test('pooler and direct selectors have identical non-TLS boundaries; direct TLS is unchanged', () => {
+  const withoutComments = (source) => source.replace(/^--.*\n/gmu, '').trim();
+  const directBackendTls =
+    /\n  AND EXISTS \(SELECT 1 FROM pg_catalog\.pg_stat_ssl\n    WHERE pid = pg_catalog\.pg_backend_pid\(\) AND ssl\);/u;
+  assert.match(sql, directBackendTls);
+  assert.equal(withoutComments(sql).replace(directBackendTls, ';'), withoutComments(poolerSql));
+  assert.doesNotMatch(poolerSql, /\b(?:insert|update|delete|grant|alter|create)\b/iu);
+  const directRun = deliveryRun.slice(deliveryRun.indexOf('diagnostic_stage=direct_select'));
+  assert.match(
+    directRun,
+    /--file=infra\/sql\/production-companion-activation-diagnostic-request\.sql/u,
+  );
+  assert.match(directRun, /selected" == "\$pooler_selected/u);
+});
+
+test('the actual pooler invocation explicitly requires CA and hostname verification', () => {
+  const poolerRun = deliveryRun.slice(
+    deliveryRun.indexOf('unset PGHOSTADDR PGSERVICE'),
+    deliveryRun.indexOf('diagnostic_stage=pooler_shape'),
+  );
+  assert.match(poolerRun, /sslmode=verify-full sslrootcert='\$PGSSLROOTCERT'/u);
+  assert.match(
+    poolerRun,
+    /--file=infra\/sql\/production-companion-activation-diagnostic-pooler-request\.sql/u,
+  );
+  const result = spawnSync(bash, ['--noprofile', '--norc', '-s'], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+    input: [
+      'set -euo pipefail',
+      'project_ref=syntheticonlynotprivate',
+      'protected=/synthetic-only',
+      'SUPABASE_DB_PASSWORD=synthetic-private-password',
+      'PGHOSTADDR=unwanted-override PGSERVICE=unwanted-service',
+      'timeout() { shift; "$@"; }',
+      `psql() {
+        [[ -z "\${PGHOSTADDR+x}" && -z "\${PGSERVICE+x}" ]]
+        [[ "$PGSSLMODE" == verify-full && "$PGOPTIONS" == '-c default_transaction_read_only=on' ]]
+        [[ "$*" == *"sslmode=verify-full sslrootcert='/synthetic-only/supabase-ca.crt'"* ]]
+        [[ "$*" == *'host=aws-0-eu-west-1.pooler.supabase.com port=5432 user=postgres.syntheticonlynotprivate dbname=postgres'* ]]
+        [[ "$*" == *'--file=infra/sql/production-companion-activation-diagnostic-pooler-request.sql'* ]]
+        printf '%s' '{"requestKey":"synthetic-only","companionReleaseSha":"synthetic-only"}'
+      }`,
+      poolerRun,
+      `[[ "$pooler_selected" == '{"requestKey":"synthetic-only","companionReleaseSha":"synthetic-only"}' ]]`,
+    ].join('\n'),
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
+});
 
 function runReporter(body, { protectedFiles = false, leftover = false } = {}) {
   assert.ok(reporter);

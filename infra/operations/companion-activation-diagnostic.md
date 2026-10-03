@@ -60,6 +60,19 @@ network restrictions, firewall rules, credentials, or financial authority are
 created or changed. The direct endpoint must select the identical existing
 request before delivery proceeds. A failed repair or delivery is not repeated.
 
+The session-pooler preflight verifies client TLS with explicit libpq
+`sslmode=verify-full` and the pinned Supabase CA. PostgreSQL's `pg_stat_ssl` reports
+the pooler's separate database backend connection, so it cannot attest the
+client-to-pooler TLS connection. The pooler-only selector retains every original
+administrator, read-only, sole untouched job, no-approval, and no-execution
+condition. The direct selector is unchanged: it still requires backend TLS and
+must select the identical request before delivery. Neither selector is a runtime
+activation or authorization to execute the job.
+
+References: [PostgreSQL backend SSL statistics](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-SSL-VIEW),
+[libpq certificate and hostname verification](https://www.postgresql.org/docs/current/libpq-ssl.html),
+and [Supabase pooler SSL configuration](https://supabase.com/docs/guides/platform/ssl-enforcement).
+
 Delivery now reports its first failed preparation guard as a fixed public stage,
 including failures before any temporary directory exists. The report never
 contains a failing command, underlying exception, private input, or identifier.

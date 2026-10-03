@@ -57,6 +57,19 @@ const diagnosticSelectionSql = diagnosticSelectionSource
     diagnosticSelectionSource.lastIndexOf('\nROLLBACK;'),
   )
   .trim();
+const poolerSelectionSource = await readFile(
+  new URL(
+    '../../../infra/sql/production-companion-activation-diagnostic-pooler-request.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const poolerSelectionSql = poolerSelectionSource
+  .slice(
+    poolerSelectionSource.indexOf('WITH bounded_target AS ('),
+    poolerSelectionSource.lastIndexOf('\nROLLBACK;'),
+  )
+  .trim();
 
 function runDisposableStop(administratorPassword: string, projectRef: string): Promise<string> {
   const environment: NodeJS.ProcessEnv = { ...process.env };
@@ -110,6 +123,42 @@ export function registerCompanionExecutionActivationRequestSqlTests(
     it('the historical diagnostic delivery selector is valid SQL and refuses non-TLS fixture access', async () => {
       const selected = await getClient().query(diagnosticSelectionSql);
       expect(selected.rows).toEqual([]);
+      expect((await getClient().query(poolerSelectionSql)).rows).toEqual([]);
+    });
+    it('libpq verify-full refuses the non-TLS disposable server rather than downgrading', async () => {
+      await expect(
+        new Promise<{
+          readonly refused: boolean;
+          readonly tlsRequired: boolean;
+          readonly noOutput: boolean;
+        }>((resolve) => {
+          execFile(
+            'psql',
+            [
+              '-X',
+              '--dbname=host=postgres port=5432 user=postgres dbname=postgres sslmode=verify-full connect_timeout=5',
+              '--command=select 1',
+            ],
+            {
+              encoding: 'utf8',
+              timeout: 10_000,
+              env: {
+                PATH: process.env.PATH,
+                PGPASSWORD: getAdministratorPassword(),
+                PGPASSFILE: '/dev/null',
+                PGSERVICEFILE: '/dev/null',
+              },
+            },
+            (error, stdout, stderr) => {
+              resolve({
+                refused: error !== null,
+                tlsRequired: stderr.includes('server does not support SSL, but SSL was required'),
+                noOutput: stdout === '',
+              });
+            },
+          );
+        }),
+      ).resolves.toEqual({ refused: true, tlsRequired: true, noOutput: true });
     });
     it('is immutable, empty, and inaccessible to application and execution roles', async () => {
       const result = await getClient().query<{
@@ -716,6 +765,43 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           reasonCode: 'exact_proof_match',
         });
         expect(verifiedProof.row.execution_job_id).toEqual(expect.any(String));
+
+        // Only the pooler SQL ignores backend TLS. Its production caller must
+        // independently require libpq verify-full; the direct SQL stays strict.
+        for (const boundary of ['read_only', 'read_write', 'switch_live', 'attempted'] as const) {
+          await client.query('savepoint diagnostic_delivery_boundary');
+          await client.query(`update app.feature_switches set mode = 'disabled'
+            where feature_key::text in ('deposit_execution', 'payment_verification',
+              'withdrawal_collection', 'withdrawal_validation', 'private_live_deposit_pilot',
+              'cbe_birr_authoritative_verification', 'telebirr_authoritative_verification')`);
+          if (boundary === 'switch_live') {
+            await client.query(`update app.feature_switches set mode = 'live'
+              where feature_key::text = 'deposit_execution'`);
+          } else if (boundary === 'attempted') {
+            await client.query(
+              `update app.deposit_jobs set attempt_count = 1
+              where id = $1::uuid`,
+              [verifiedProof.row.execution_job_id],
+            );
+          }
+          if (boundary !== 'read_write') {
+            await client.query('set local transaction_read_only = on');
+          }
+          const selected = await client.query<{ readonly existing_request: string }>(
+            poolerSelectionSql,
+          );
+          if (boundary === 'read_only') {
+            expect(selected.rows).toHaveLength(1);
+            expect(JSON.parse(selected.rows[0]!.existing_request)).toEqual({
+              requestKey,
+              companionReleaseSha: releaseSha,
+            });
+          } else {
+            expect(selected.rows).toEqual([]);
+          }
+          expect((await client.query(diagnosticSelectionSql)).rows).toEqual([]);
+          await client.query('rollback to savepoint diagnostic_delivery_boundary');
+        }
 
         await client.query('savepoint competing_verified_job');
         const competingProof = await prepareVerification(client, pilot, 1);

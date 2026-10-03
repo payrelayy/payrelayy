@@ -49,3 +49,13 @@ temporary signer copy and diagnostic container, and verifies the original image
 and launcher are unchanged. A failed or uncertain run is never automatically
 retried. A historical pass does not prove present live readiness or authorize the
 stopped pilot's job to execute.
+
+The separately approved connectivity repair first validates the existing
+administrator credential and the same read-only job boundary through the
+production session pooler. Over the existing verified SSH connection it reads
+only this host's native IPv6 source for the pinned direct database endpoint.
+Using the existing protected management access, it removes at most that one
+source from the current network-ban list, only if it is already banned. No
+network restrictions, firewall rules, credentials, or financial authority are
+created or changed. The direct endpoint must select the identical existing
+request before delivery proceeds. A failed repair or delivery is not repeated.

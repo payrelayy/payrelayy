@@ -44,6 +44,7 @@ jobs:
           node-version: '24'
 
       - name: Require exact passing main and only the approved delivery
+        # The separately approved repair only removes this host's existing ban.
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -71,10 +72,16 @@ jobs:
               }
             });'
 
-      - name: Read the sole untouched job's existing request and deliver private stdin once
+      - name: Set up the already pinned Supabase CLI for the approved connection repair
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Repair only this host's database ban and deliver private stdin once
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
@@ -120,6 +127,28 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$protected/known-hosts"
             -o ConnectTimeout=8 -o ConnectionAttempts=1)
+          project_ref="${direct_host#db.}"
+          project_ref="${project_ref%.supabase.co}"
+          export PGHOST=aws-0-eu-west-1.pooler.supabase.com PGPORT=5432
+          export PGUSER="postgres.$project_ref" PGDATABASE=postgres PGSSLMODE=verify-full
+          export PGSSLROOTCERT="$protected/supabase-ca.crt" PGCONNECT_TIMEOUT=5
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          export PGAPPNAME=fetanagent_activation_diagnostic_delivery
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+          if ! pooler_selected="$(timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
+            --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
+            echo '::error::The existing administrator credential or read-only boundary is unavailable; no ban was removed.' >&2
+            exit 1
+          fi
+          [[ "$(printf '%s' "$pooler_selected" | jq -r 'keys|sort|join(",")')" == 'companionReleaseSha,requestKey' ]]
+          source_ip="$(timeout 15s ssh "${ssh_opts[@]}" "fetanagent-admin@$PRODUCTION_VM_HOST" \
+            "python3 - '$direct_host'" <infra/operations/read-diagnostic-database-source.py 2>/dev/null)"
+          export FETANAGENT_DIAGNOSTIC_PROJECT_REF="$project_ref"
+          export FETANAGENT_DIAGNOSTIC_SOURCE_IP="$source_ip"
+          supabase --version | grep -Fx '2.113.0'
+          supabase network-bans get --help >/dev/null
+          supabase network-bans remove --help >/dev/null
+          python3 -I infra/operations/repair-diagnostic-database-ban.py
           [[ -z "$(ss -H -ltn '( sport = :55432 )')" ]]
           ssh "${ssh_opts[@]}" -o ExitOnForwardFailure=yes -N \
             -L "127.0.0.1:55432:$direct_host:5432" \
@@ -138,11 +167,12 @@ jobs:
           export PGOPTIONS='-c default_transaction_read_only=on'
           export PGAPPNAME=fetanagent_activation_diagnostic_delivery
           export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
-          if ! selected="$(timeout 30s psql -X -q -A -t \
+          if ! selected="$(timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
             --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
             echo '::error::The read-only existing-request selection is unavailable.' >&2
             exit 1
           fi
+          [[ "$selected" == "$pooler_selected" ]]
           [[ "$(printf '%s' "$selected" | jq -r 'keys|sort|join(",")')" == 'companionReleaseSha,requestKey' ]]
           request_key="$(printf '%s' "$selected" | jq -r '.requestKey')"
           stored_release="$(printf '%s' "$selected" | jq -r '.companionReleaseSha')"

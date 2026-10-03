@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -124,4 +127,118 @@ test('one non-executing image invocation is separate from the unchanged live lau
   assert.match(coordinator, /run-one-readonly-diagnostic/u);
   assert.match(coordinator, /child\.stderr\.resume\(\)/u);
   assert.match(coordinator, /report\.liveReadinessProven === false/u);
+});
+
+const deliveryRun = workflow
+  .split("      - name: Repair only this host's database ban and deliver private stdin once")[1]
+  .split('        run: |\n')[1]
+  .replace(/^ {10}/gmu, '');
+const reporter = deliveryRun.match(
+  /# Report only fixed public categories, never a failing command or its data\.\n([\s\S]+?)# Begin the unchanged protected delivery; reporting adds no authority\./u,
+)?.[1];
+const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash';
+
+function runReporter(body, { protectedFiles = false, leftover = false } = {}) {
+  assert.ok(reporter);
+  const temporary = mkdtempSync(join(tmpdir(), 'fetanagent-delivery-report-test-'));
+  const protectedDirectory = join(temporary, 'activation-diagnostic-delivery.fixture');
+  if (protectedFiles) {
+    mkdirSync(protectedDirectory);
+    for (const name of ['deploy-key', 'known-hosts', 'supabase-ca.crt']) {
+      writeFileSync(join(protectedDirectory, name), 'synthetic-private-material', { mode: 0o600 });
+    }
+    if (leftover) writeFileSync(join(protectedDirectory, 'unexpected'), 'synthetic-only');
+  }
+  try {
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-s'], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        TEST_RUNNER_TEMP: temporary.replaceAll('\\', '/'),
+        TEST_PROTECTED: protectedDirectory.replaceAll('\\', '/'),
+        PRIVATE_TEST_MATERIAL: 'synthetic-private-reference-cookie-signature',
+      },
+      input: [
+        'set -euo pipefail',
+        'RUNNER_TEMP="$(cd "$TEST_RUNNER_TEMP" && pwd -P)"',
+        reporter,
+        protectedFiles ? 'protected="$(cd "$TEST_PROTECTED" && pwd -P)"' : '',
+        body,
+      ].join('\n'),
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.stderr, '');
+    const lines = result.stdout.trim().split('\n');
+    assert.equal(lines.length, 1);
+    assert.ok(!result.stdout.includes('synthetic-private'));
+    return {
+      status: result.status,
+      report: JSON.parse(lines[0]),
+      protectedRemoved: protectedFiles && !existsSync(protectedDirectory),
+    };
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+test('the full delivery shell parses and every fixed failure stage produces only public JSON', () => {
+  const syntax = spawnSync(bash, ['--noprofile', '--norc', '-n'], {
+    input: deliveryRun,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.equal(syntax.status, 0, syntax.stderr);
+  const stages = [
+    ...new Set([...deliveryRun.matchAll(/diagnostic_stage=([a-z_]+)/gu)].map((m) => m[1])),
+  ];
+  assert.ok(stages.includes('host_input') && stages.includes('pooler_shape'));
+  assert.ok(stages.includes('source_inspection') && stages.includes('cleanup'));
+  for (const stage of stages) {
+    const result = runReporter(`diagnostic_stage=${stage}\nfalse`);
+    assert.equal(result.status, 1, stage);
+    assert.deepEqual(result.report, {
+      component: 'fetanagent_activation_diagnostic_delivery',
+      result: 'stopped',
+      stage,
+      deliveryAttempted: false,
+      deliveryConfirmed: false,
+      moneyMoved: false,
+      identifiersRedacted: true,
+    });
+  }
+  assert.doesNotMatch(reporter, /BASH_COMMAND|set -x|SUPABASE_DB_PASSWORD|PRODUCTION_VM_HOST/u);
+  assert.ok(
+    deliveryRun.indexOf('trap cleanup EXIT') < deliveryRun.indexOf('[[ "$PRODUCTION_VM_HOST"'),
+  );
+});
+
+test('unknown stage data is redacted and private-delivery acknowledgement is not guessed', () => {
+  const unknown = runReporter('diagnostic_stage="$PRIVATE_TEST_MATERIAL"\nfalse');
+  assert.equal(unknown.report.stage, 'unknown_guard');
+  const attempted = runReporter(
+    'diagnostic_stage=private_delivery\ndelivery_attempted=true\nfalse',
+  );
+  assert.equal(attempted.report.deliveryAttempted, true);
+  assert.equal(attempted.report.deliveryConfirmed, false);
+  const zeroExit = runReporter('diagnostic_stage=pooler_shape\nexit 0');
+  assert.equal(zeroExit.status, 1);
+  assert.equal(zeroExit.report.result, 'stopped');
+});
+
+test('cleanup runs before the report and uncertainty overrides a confirmed delivery', () => {
+  const body =
+    'diagnostic_stage=delivered\ndelivery_attempted=true\ndelivery_confirmed=true\nexit 0';
+  const clean = runReporter(body, { protectedFiles: true });
+  assert.equal(clean.status, 0);
+  assert.equal(clean.report.result, 'passed');
+  assert.equal(clean.report.stage, 'delivered');
+  assert.equal(clean.protectedRemoved, true);
+  const uncertain = runReporter(body, { protectedFiles: true, leftover: true });
+  assert.equal(uncertain.status, 1);
+  assert.equal(uncertain.report.result, 'stopped');
+  assert.equal(uncertain.report.stage, 'cleanup');
+  assert.equal(uncertain.report.deliveryConfirmed, true);
+  assert.equal(uncertain.protectedRemoved, false);
 });

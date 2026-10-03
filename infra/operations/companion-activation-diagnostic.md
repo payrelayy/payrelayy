@@ -59,3 +59,11 @@ source from the current network-ban list, only if it is already banned. No
 network restrictions, firewall rules, credentials, or financial authority are
 created or changed. The direct endpoint must select the identical existing
 request before delivery proceeds. A failed repair or delivery is not repeated.
+
+Delivery now reports its first failed preparation guard as a fixed public stage,
+including failures before any temporary directory exists. The report never
+contains a failing command, underlying exception, private input, or identifier.
+Unknown stage values are replaced with `unknown_guard`; cleanup failures override
+the stage with `cleanup`. `deliveryAttempted` means the stdin writer was invoked,
+while `deliveryConfirmed` means its fixed acknowledgement was validated. Neither
+flag claims that the separate historical diagnostic passed or proves live readiness.

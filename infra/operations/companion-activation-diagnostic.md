@@ -80,3 +80,30 @@ Unknown stage values are replaced with `unknown_guard`; cleanup failures overrid
 the stage with `cleanup`. `deliveryAttempted` means the stdin writer was invoked,
 while `deliveryConfirmed` means its fixed acknowledgement was validated. Neither
 flag claims that the separate historical diagnostic passed or proves live readiness.
+
+## Installed operator startup probe
+
+The separate startup diagnostic invokes the already-installed image's existing
+`--diagnose` mode. It checks independent verified-TLS psql access, the Node database
+connection, the current public signer, the existing private key format and public
+identity, and a briefly bound **handler-free** loopback listener. It does not open
+the real bootstrap or handoff handler, sign anything, create/consume a request,
+approve a job, or enable execution. Its launch-document nonce is syntax-only and
+never stored or queried. No image, launcher, role, or migration is installed.
+
+The workflow revision still requires exact passing main, but the image revision
+comes from the reviewed session workflow's installed-image pin. New workflow code
+must not be mistaken for a deployed image. The empty-queue scope remains the
+default. An explicitly selected recovery scope may instead preserve exactly one
+untouched paid job on a stopped pilot, with no open review, effective trusted
+authority, Owner approval, execution attempt, executor login/session, or companion
+execution login/session. All seven financial switches and companion control must
+remain disabled. Historical records are not authority to execute the job.
+
+The same no-money boundary is checked before and after the probe. A private
+SHA-256 fingerprint of the entire queued job row must remain identical; neither
+that fingerprint nor the row is printed or saved. Only fixed failure categories
+are reported. The existing container, temporary signer copy, certificate, and
+credentials are cleaned up, and the listener must be absent. A failure is not
+retried automatically. A successful startup probe proves dependency readiness,
+not live execution readiness, a valid new pilot, or permission for a Transfer.

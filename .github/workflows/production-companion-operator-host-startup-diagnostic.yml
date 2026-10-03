@@ -4,13 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       confirm_main_commit_sha:
-        description: Exact reviewed and installed main commit
+        description: Exact reviewed diagnostic workflow main commit
         required: true
         type: string
       confirm_operation:
         description: Type DIAGNOSE DORMANT COMPANION OPERATOR STARTUP
         required: true
         type: string
+      job_scope:
+        description: Inspect an empty queue or preserve its sole untouched stopped-pilot job
+        required: true
+        type: choice
+        default: empty_queue
+        options:
+          - empty_queue
+          - preserve_one_stopped_pilot_job
 
 permissions:
   contents: read
@@ -36,6 +44,7 @@ jobs:
     env:
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+      DIAGNOSTIC_JOB_SCOPE: ${{ inputs.job_scope }}
     steps:
       - name: Check out exact main without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,11 +65,31 @@ jobs:
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
           [[ "$CONFIRMED_OPERATION" == 'DIAGNOSE DORMANT COMPANION OPERATOR STARTUP' ]]
+          [[ "$DIAGNOSTIC_JOB_SCOPE" == empty_queue ||
+            "$DIAGNOSTIC_JOB_SCOPE" == preserve_one_stopped_pilot_job ]]
           node infra/operations/require-production-ci.mjs
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?filter=latest" 2>/dev/null | node -e '
+            let raw=""; process.stdin.on("data", p => raw += p);
+            process.stdin.on("end", () => {
+              try {
+              const checks=JSON.parse(raw).check_runs;
+              for(const name of ["Build and smoke dormant protected operator host",
+                "Build and smoke ingress-free trusted TeleBirr verifier",
+                "Build and smoke ingress-free no-money TeleBirr shadow verifier"]) {
+                const matches=checks.filter(c=>c.name===name);
+                if(matches.length!==1 || matches[0].status!=="completed" ||
+                  matches[0].conclusion!=="success") process.exit(1);
+              }
+              } catch {
+                process.stderr.write("Additional diagnostic image checks are unavailable.\n");
+                process.exitCode=1;
+              }
+            });'
 
       - name: Classify existing host startup without opening an execution session
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
           PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
@@ -69,68 +98,148 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
-          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
-             -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
-          protected="$RUNNER_TEMP/production-companion-operator-host-startup-diagnostic"
-          install -d -m 0700 "$protected"
+          diagnostic_stage=host_input
+          protected=''
+          revision=''
           attempted=0
+          dependencies_ready=false
+          queue_unchanged=false
           remote="fetanagent-admin@$PRODUCTION_VM_HOST"
           launcher='/usr/local/sbin/fetanagent-production-operator-host-launch'
-          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
-            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
-            -o UserKnownHostsFile="$protected/known-hosts"
-            -o ConnectTimeout=8 -o ConnectionAttempts=1
-            -o ServerAliveInterval=5 -o ServerAliveCountMax=1)
           cleanup() {
-            local status=$?
+            local status=$? cleanup_ok=true report_result=stopped
             trap - EXIT INT TERM
             if [[ "$attempted" == 1 ]]; then
               timeout --signal=TERM --kill-after=5s 45s ssh "${ssh_opts[@]}" "$remote" \
-                "sudo -n '$launcher' stop '$GITHUB_SHA'" >/dev/null 2>&1 || status=1
+                "sudo -n '$launcher' stop '$revision'" >/dev/null 2>&1 || cleanup_ok=false
             fi
-            if [[ "$protected" == "$RUNNER_TEMP/production-companion-operator-host-startup-diagnostic" &&
+            if [[ -z "$protected" ]]; then
+              :
+            elif [[ "$protected" == "$RUNNER_TEMP"/operator-startup-diagnostic.* &&
                   -d "$protected" && ! -L "$protected" &&
                   "$(realpath -- "$protected")" == "$protected" ]]; then
-              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
-              rmdir -- "$protected" || status=1
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt" \
+                2>/dev/null || cleanup_ok=false
+              rmdir -- "$protected" 2>/dev/null || cleanup_ok=false
             else
+              cleanup_ok=false
+            fi
+            if [[ "$cleanup_ok" != true ]]; then
+              diagnostic_stage=cleanup
               status=1
             fi
+            case "$diagnostic_stage" in
+              host_input|credential_inputs|installed_revision|protected_temp|protected_files|\
+              ssh_key|ssh_host_pin|database_certificate|pooler_status|queue_boundary|\
+              capability_boundary|queue_fingerprint|host_inspection|\
+              startup_probe|ca_staging|independent_psql|node_database|database_boundary|\
+              server_signer|execution_signer|loopback_bind|postflight|ready|cleanup) ;;
+              *) diagnostic_stage=unknown_guard ;;
+            esac
+            if [[ "$status" == 0 && "$diagnostic_stage" == ready &&
+                  "$dependencies_ready" == true && "$cleanup_ok" == true ]]; then
+              report_result=passed
+            elif [[ "$status" == 0 ]]; then
+              status=1
+            fi
+            printf '{"component":"fetanagent_operator_startup_diagnostic","result":"%s","stage":"%s","diagnosisAttempted":%s,"startupDependenciesReady":%s,"liveExecutionReadinessProven":false,"queueUnchanged":%s,"cleanupConfirmed":%s,"requestCreated":false,"approvalCreated":false,"handoffSigned":false,"executionEnabled":false,"queueMutationAttempted":false,"moneyMoved":false,"identifiersRedacted":true}\n' \
+              "$report_result" "$diagnostic_stage" "$([[ "$attempted" == 1 ]] && echo true || echo false)" \
+              "$dependencies_ready" "$queue_unchanged" "$cleanup_ok"
             exit "$status"
           }
           trap cleanup EXIT
           trap 'exit 130' INT
           trap 'exit 143' TERM
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          diagnostic_stage=credential_inputs
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
+             -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          diagnostic_stage=installed_revision
+          # The reviewed session pin describes the installed image, not new workflow code.
+          revision="$(sed -nE 's/^  PRODUCTION_OPERATOR_IMAGE_REVISION: ([0-9a-f]{40})$/\1/p' \
+            .github/workflows/production-companion-operator-session.yml)"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          diagnostic_stage=protected_temp
+          protected="$(mktemp -d "$RUNNER_TEMP/operator-startup-diagnostic.XXXXXXXX")"
+          diagnostic_stage=protected_files
           printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
           printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+          diagnostic_stage=ssh_key
           ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          diagnostic_stage=ssh_host_pin
           ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          diagnostic_stage=database_certificate
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
-
-          status_json="$(PGHOST="$PRODUCTION_DATABASE_POOLER_HOST" PGPORT=6543 \
-            PGUSER="postgres.$PRODUCTION_PROJECT_REF" PGDATABASE=postgres \
-            PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt" \
-            PGPASSWORD="$SUPABASE_DB_PASSWORD" PGCONNECT_TIMEOUT=5 \
-            PGOPTIONS='-c default_transaction_read_only=on' \
-            timeout 30s psql -X --quiet --tuples-only --no-align \
-              --file=infra/sql/production-companion-execution-activation-status.sql)"
-          jq -e '.readOnly and .identifiersRedacted and .allFinancialSwitchesDisabled and
-            .companionExecutionControlDisabled and .executionCapabilityDormant and
-            .openJobs == 0 and .companionExecutionRecords == 0' <<<"$status_json" >/dev/null
-
-          ssh "${ssh_opts[@]}" "$remote" \
-            "sudo -n '$launcher' inspect '$GITHUB_SHA'" \
-            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$protected/known-hosts"
+            -o ConnectTimeout=8 -o ConnectionAttempts=1
+            -o ServerAliveInterval=5 -o ServerAliveCountMax=1)
+          # Force verified client TLS; a pooler's backend pg_stat_ssl is not client TLS.
+          unset PGHOSTADDR PGSERVICE
+          export PGHOST="$PRODUCTION_DATABASE_POOLER_HOST" PGPORT=5432
+          export PGUSER="postgres.$PRODUCTION_PROJECT_REF" PGDATABASE=postgres
+          export PGSSLMODE=verify-full PGSSLROOTCERT="$protected/supabase-ca.crt"
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGCONNECT_TIMEOUT=5
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          export PGAPPNAME=fetanagent_operator_startup_diagnostic
+          export PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+          pooler_query() {
+            timeout 30s psql -X -q -A -t -v ON_ERROR_STOP=1 \
+              --dbname="host=$PGHOST port=5432 user=$PGUSER dbname=postgres sslmode=verify-full sslrootcert='$PGSSLROOTCERT' connect_timeout=5" \
+              "$@" 2>/dev/null
+          }
+          assert_boundary() {
+            local status_json capability
+            diagnostic_stage=pooler_status
+            status_json="$(pooler_query --file=infra/sql/production-companion-execution-activation-status.sql)"
+            diagnostic_stage=queue_boundary
+            printf '%s' "$status_json" | node infra/operations/operator-startup-diagnostic-boundary.mjs \
+              "$DIAGNOSTIC_JOB_SCOPE" >/dev/null
+            diagnostic_stage=capability_boundary
+            capability="$(pooler_query --command="begin read only; select case when
+              not exists (select 1 from pg_catalog.pg_roles where
+                (rolname like 'fetanagent%executor%' or rolname='fetanagent_companion_execution_bridge') and rolcanlogin)
+              and not exists (select 1 from pg_catalog.pg_stat_activity where
+                usename like 'fetanagent%executor%' or usename='fetanagent_companion_execution_bridge')
+              and not exists (select 1 from app.deposit_execution_owner_approvals approval
+                join app.deposit_jobs job on job.id=approval.execution_job_id where job.status::text='queued')
+              and not exists (select 1 from app.deposit_execution_attempts attempt
+                join app.deposit_jobs job on job.id=attempt.deposit_job_id where job.status::text='queued')
+              then 'dormant' else 'blocked' end; rollback;")"
+            [[ "$capability" == dormant ]]
+          }
+          queue_fingerprint() {
+            local fingerprint
+            fingerprint="$(pooler_query --command="begin read only; select
+              pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(job::text,'UTF8')),'hex')
+              from app.deposit_jobs job where job.status::text='queued'
+                and job.job_kind::text='execute_deposit'; rollback;")" || return 1
+            if [[ "$DIAGNOSTIC_JOB_SCOPE" == preserve_one_stopped_pilot_job ]]; then
+              [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+            else
+              [[ -z "$fingerprint" ]] || return 1
+            fi
+            printf '%s' "$fingerprint"
+          }
+          assert_boundary
+          diagnostic_stage=queue_fingerprint
+          before_queue="$(queue_fingerprint)"
+          # A syntax-only nonce, never stored, signed, or used to select a request.
           PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
           export PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY
+          diagnostic_stage=host_inspection
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$launcher' inspect '$revision'" 2>/dev/null \
+            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+          diagnostic_stage=startup_probe
           attempted=1
           set +e
           result="$(node infra/operations/render-production-operator-launch.mjs | \
             timeout --signal=TERM --kill-after=5s 45s ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$launcher' diagnose '$GITHUB_SHA'" 2>/dev/null)"
+              "sudo -n '$launcher' diagnose '$revision'" 2>/dev/null)"
           status=$?
           set -e
           [[ "$result" =~ ^protected_operator_diagnostic=(ready|ca_staging|independent_psql|node_database|database_boundary|server_signer|execution_signer|loopback_bind|cleanup)$ ]] || {
@@ -139,7 +248,18 @@ jobs:
           }
           printf '%s\n' "$result" >>"$GITHUB_STEP_SUMMARY"
           if [[ "$status" -ne 0 || "$result" != 'protected_operator_diagnostic=ready' ]]; then
+            diagnostic_stage="${result#protected_operator_diagnostic=}"
             echo "::error::$result" >&2
             exit 1
           fi
+          dependencies_ready=true
+          diagnostic_stage=postflight
+          assert_boundary
+          diagnostic_stage=queue_fingerprint
+          [[ "$(queue_fingerprint)" == "$before_queue" ]]
+          queue_unchanged=true
+          ssh "${ssh_opts[@]}" "$remote" \
+            "sudo -n '$launcher' inspect '$revision'" 2>/dev/null \
+            | grep -Fx 'protected_operator_image_ready_dormant' >/dev/null
+          diagnostic_stage=ready
           echo 'The dormant operator host dependencies passed without a request, approval, KemerBet action, or queue execution.' >>"$GITHUB_STEP_SUMMARY"

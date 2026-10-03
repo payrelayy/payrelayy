@@ -50,6 +50,42 @@ import { loadCompanionActivationDatabaseSnapshot } from './snapshot.js';
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const PRE_PERMIT_STOP_MS = 12_000;
 
+const ACTIVATION_FAILURE_STAGES = [
+  'unconfirmed',
+  'input_validation',
+  'handoff_signing',
+  'handoff_local_preflight',
+  'handoff_ssh_transport',
+  'handoff_http_response',
+  'handoff_binding',
+  'remote_session_open',
+  'remote_session_close',
+  'lifecycle_lock',
+  'attestation',
+  'database_snapshot',
+  'release_verification',
+  'handoff_publication',
+  'local_channel',
+  'child_start',
+  'launch_proof',
+  'process_observation',
+  'attestation_retention',
+  'supervisor',
+  'one_job_lifecycle',
+  'pre_permit_child_cleanup',
+  'local_channel_cleanup',
+  'lifecycle_lock_cleanup',
+] as const;
+
+export type GuardedOperatorActivationFailureStage = (typeof ACTIVATION_FAILURE_STAGES)[number];
+
+/** Only source-defined categories may cross an error or logging boundary. */
+export function isGuardedOperatorActivationFailureStage(
+  value: unknown,
+): value is GuardedOperatorActivationFailureStage {
+  return ACTIVATION_FAILURE_STAGES.some((stage) => stage === value);
+}
+
 export interface GuardedOperatorActivationInput {
   readonly requestKey: string;
   readonly actorAuthUserId: string;
@@ -100,11 +136,23 @@ const productionAdapters: GuardedOperatorActivationAdapters = {
 
 export class GuardedOperatorActivationUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
+  readonly activationStage: GuardedOperatorActivationFailureStage;
 
-  constructor() {
+  constructor(stage: GuardedOperatorActivationFailureStage = 'unconfirmed') {
     super('The guarded one-job operator activation could not be confirmed.');
     this.name = 'GuardedOperatorActivationUnavailableError';
+    this.activationStage = isGuardedOperatorActivationFailureStage(stage) ? stage : 'unconfirmed';
   }
+}
+
+export function guardedOperatorActivationFailureStage(
+  error: unknown,
+  fallback: GuardedOperatorActivationFailureStage,
+): GuardedOperatorActivationFailureStage {
+  return error instanceof GuardedOperatorActivationUnavailableError &&
+    isGuardedOperatorActivationFailureStage(error.activationStage)
+    ? error.activationStage
+    : fallback;
 }
 
 function boundedStop(child: GuardedCompanionOwnedChild): Promise<void> {
@@ -140,6 +188,9 @@ export async function runGuardedOperatorActivationWithAdapters(
   let lifecycleStarted = false;
   let result: 'confirmed' | 'review_required' | undefined;
   let cleanupFailed = false;
+  let stage: GuardedOperatorActivationFailureStage = 'input_validation';
+  let failureStage: GuardedOperatorActivationFailureStage = 'unconfirmed';
+  let cleanupStage: GuardedOperatorActivationFailureStage | undefined;
   try {
     if (!input || input.signal?.aborted || typeof input.disableDatabase !== 'function')
       throw new Error();
@@ -147,12 +198,14 @@ export async function runGuardedOperatorActivationWithAdapters(
     const signal = input.signal
       ? AbortSignal.any([input.signal, lockLoss.signal])
       : lockLoss.signal;
+    stage = 'lifecycle_lock';
     lock = await adapters.acquireLock(input.administrator);
     void lock.lost.catch(() => lockLoss.abort());
     if (signal.aborted) throw new Error();
 
     const sources: CompanionActivationAttestationSources = {
       loadDatabaseSnapshot: async (requestKey) => {
+        stage = 'database_snapshot';
         if (signal.aborted) throw new Error();
         const snapshot = await adapters.loadSnapshot(requestKey, input.administrator);
         if (signal.aborted) throw new Error();
@@ -160,6 +213,7 @@ export async function runGuardedOperatorActivationWithAdapters(
         return snapshot;
       },
       verifyPublishedReleaseAndInstalledTree: async (request) => {
+        stage = 'release_verification';
         if (signal.aborted) throw new Error();
         release = await adapters.verifyRelease(request, {
           ...input.releaseInputs,
@@ -169,6 +223,7 @@ export async function runGuardedOperatorActivationWithAdapters(
         return release;
       },
       observePairedProcess: async ({ request, certificate, challenge, challengeIssuedAt }) => {
+        stage = 'handoff_publication';
         if (!first || !release || signal.aborted) throw new Error();
         const handoff = await adapters.publishHandoff({
           ...first,
@@ -178,8 +233,10 @@ export async function runGuardedOperatorActivationWithAdapters(
           trustedNow: input.trustedNow,
         } satisfies GuardedCompanionHandoffPublicationInputs);
         if (!SHA256.test(handoff.handoffSha256) || signal.aborted) throw new Error();
+        stage = 'local_channel';
         channel = await adapters.openChannel(challenge);
         if (signal.aborted) throw new Error();
+        stage = 'child_start';
         child = adapters.start(
           {
             request,
@@ -201,6 +258,7 @@ export async function runGuardedOperatorActivationWithAdapters(
         )
           throw new Error();
         const ownedChild = child;
+        stage = 'launch_proof';
         const proof = await Promise.race([
           channel.receiveProof(signal),
           ownedChild.stopped.then(() => {
@@ -208,6 +266,7 @@ export async function runGuardedOperatorActivationWithAdapters(
           }),
         ]);
         if (signal.aborted) throw new Error();
+        stage = 'process_observation';
         const observed = await adapters.observe({
           request,
           certificate,
@@ -230,6 +289,7 @@ export async function runGuardedOperatorActivationWithAdapters(
         return observed satisfies CompanionActivationObservedProcess;
       },
       retainAttestation: async (attestation) => {
+        stage = 'attestation_retention';
         if (!channel || !child || attestation.requestKey !== input.requestKey || signal.aborted)
           throw new Error();
         await adapters.retainRow(attestation, input.administrator);
@@ -238,8 +298,10 @@ export async function runGuardedOperatorActivationWithAdapters(
       },
       trustedNow: input.trustedNow,
     };
+    stage = 'attestation';
     await adapters.attest(input.requestKey, sources);
     if (!first || !channel || !child || !proofDigest || signal.aborted) throw new Error();
+    stage = 'supervisor';
     const supervisor = adapters.prepareSupervisor({
       child,
       administrator: input.administrator,
@@ -249,6 +311,7 @@ export async function runGuardedOperatorActivationWithAdapters(
       signal,
     });
     lifecycleStarted = true;
+    stage = 'one_job_lifecycle';
     result = await adapters.runLifecycle({
       channel,
       child,
@@ -261,7 +324,8 @@ export async function runGuardedOperatorActivationWithAdapters(
       trustedNow: input.trustedNow,
       signal,
     } satisfies GuardedOneJobLifecycleInput);
-  } catch {
+  } catch (error) {
+    failureStage = guardedOperatorActivationFailureStage(error, stage);
     result = undefined;
   } finally {
     // Before lifecycle ownership transfers, there is no permit and only the
@@ -272,6 +336,7 @@ export async function runGuardedOperatorActivationWithAdapters(
           await boundedStop(child);
         } catch {
           cleanupFailed = true;
+          cleanupStage ??= 'pre_permit_child_cleanup';
         }
       }
       if (channel) {
@@ -279,6 +344,7 @@ export async function runGuardedOperatorActivationWithAdapters(
           await channel.close();
         } catch {
           cleanupFailed = true;
+          cleanupStage ??= 'local_channel_cleanup';
         }
       }
     }
@@ -287,10 +353,12 @@ export async function runGuardedOperatorActivationWithAdapters(
         await lock.release();
       } catch {
         cleanupFailed = true;
+        cleanupStage ??= 'lifecycle_lock_cleanup';
       }
     }
   }
-  if (!result || cleanupFailed) throw new GuardedOperatorActivationUnavailableError();
+  if (!result || cleanupFailed)
+    throw new GuardedOperatorActivationUnavailableError(cleanupStage ?? failureStage);
   return result;
 }
 
@@ -311,13 +379,15 @@ export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndA
   let client: ReturnType<typeof createGuardedOperatorQueryClient> | undefined;
   let result: 'confirmed' | 'review_required' | undefined;
   let cleanupFailed = false;
+  let failureStage: GuardedOperatorActivationFailureStage = 'remote_session_open';
   try {
     client = createGuardedOperatorQueryClient(remote);
     result = await runGuardedOperatorActivationWithAdapters(
       { ...input, administrator: client.administrator },
       adapters,
     );
-  } catch {
+  } catch (error) {
+    failureStage = guardedOperatorActivationFailureStage(error, failureStage);
     result = undefined;
   } finally {
     if (client) {
@@ -325,10 +395,11 @@ export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndA
         await client.close();
       } catch {
         cleanupFailed = true;
+        failureStage = 'remote_session_close';
       }
     }
   }
-  if (!result || cleanupFailed) throw new GuardedOperatorActivationUnavailableError();
+  if (!result || cleanupFailed) throw new GuardedOperatorActivationUnavailableError(failureStage);
   return result;
 }
 

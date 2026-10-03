@@ -768,8 +768,20 @@ export function registerCompanionExecutionActivationRequestSqlTests(
 
         // Only the pooler SQL ignores backend TLS. Its production caller must
         // independently require libpq verify-full; the direct SQL stays strict.
-        for (const boundary of ['read_only', 'read_write', 'switch_live', 'attempted'] as const) {
+        for (const boundary of [
+          'read_only',
+          'read_write',
+          'switch_live',
+          'competing_job',
+        ] as const) {
           await client.query('savepoint diagnostic_delivery_boundary');
+          if (boundary === 'competing_job') {
+            const extraProof = await prepareVerification(client, pilot, 1);
+            await completeVerification(client, pilot, extraProof, {
+              disposition: 'settlement_candidate',
+              reasonCode: 'exact_proof_match',
+            });
+          }
           await client.query(`update app.feature_switches set mode = 'disabled'
             where feature_key::text in ('deposit_execution', 'payment_verification',
               'withdrawal_collection', 'withdrawal_validation', 'private_live_deposit_pilot',
@@ -777,12 +789,6 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           if (boundary === 'switch_live') {
             await client.query(`update app.feature_switches set mode = 'live'
               where feature_key::text = 'deposit_execution'`);
-          } else if (boundary === 'attempted') {
-            await client.query(
-              `update app.deposit_jobs set attempt_count = 1
-              where id = $1::uuid`,
-              [verifiedProof.row.execution_job_id],
-            );
           }
           if (boundary !== 'read_write') {
             await client.query('set local transaction_read_only = on');

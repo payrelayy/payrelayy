@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
@@ -23,6 +25,11 @@ class MainActivity : Activity() {
   private lateinit var stateStore: VerifierOperationalStateStore
   private lateinit var pairingExecutor: ExecutorService
   private var pairingInProgress = false
+  private var removeStateObserver: (() -> Unit)? = null
+  private val stateRefreshHandler = Handler(Looper.getMainLooper())
+  private val refreshOperationalState = Runnable {
+    if (removeStateObserver != null && !isFinishing && !isDestroyed) render()
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -42,6 +49,21 @@ class MainActivity : Activity() {
   override fun onResume() {
     super.onResume()
     render()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    removeStateObserver = stateStore.observeChanges {
+      stateRefreshHandler.removeCallbacks(refreshOperationalState)
+      stateRefreshHandler.post(refreshOperationalState)
+    }
+  }
+
+  override fun onStop() {
+    removeStateObserver?.invoke()
+    removeStateObserver = null
+    stateRefreshHandler.removeCallbacks(refreshOperationalState)
+    super.onStop()
   }
 
   override fun onRequestPermissionsResult(
@@ -282,6 +304,9 @@ class MainActivity : Activity() {
   private fun startVerifier() {
     val started =
       runCatching {
+          stateStore.recordStatus(
+            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "starting_verification"),
+          )
           stateStore.setOperatorEnabled(true)
           VerifierForegroundService.requestStart(this)
         }
@@ -416,7 +441,11 @@ class VerifierLifecycle private constructor(val state: State, val label: String)
         LivePilotRuntimeState.BUSY -> VerifierLifecycle(State.BUSY, "Observing")
         LivePilotRuntimeState.UPLOAD_PENDING ->
           VerifierLifecycle(State.UPLOAD_PENDING, "Upload pending")
-        LivePilotRuntimeState.ATTENTION -> VerifierLifecycle(State.ATTENTION, "Attention required")
+        LivePilotRuntimeState.ATTENTION ->
+          VerifierLifecycle(
+            State.ATTENTION,
+            if (status.code == "starting_verification") "Starting" else "Attention required",
+          )
       }
   }
 }

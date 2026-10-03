@@ -106,6 +106,8 @@ COPY infra/sql/production-resolve-emergency-stopped-owner-test.sql \
   ./infra/sql/production-resolve-emergency-stopped-owner-test.sql
 COPY infra/sql/production-companion-execution-emergency-disable.sql \
   ./infra/sql/production-companion-execution-emergency-disable.sql
+COPY infra/sql/production-companion-activation-diagnostic-request.sql \
+  ./infra/sql/production-companion-activation-diagnostic-request.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
 COPY supabase/migrations ./supabase/migrations

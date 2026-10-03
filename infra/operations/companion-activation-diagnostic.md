@@ -33,3 +33,19 @@ network observation or verify the Windows installation tree anew.
 No production workflow, launcher, release marker, database migration, permission,
 or financial control is changed by this preparation. A reviewed production image
 installation and one non-executing diagnostic run require separate authorization.
+
+The separately approved delivery workflow reads the sole untouched queued job's
+existing request inside a verified-TLS read-only transaction. It verifies that
+request's historical public release, then sends the original launch document
+through private SSH stdin into an ephemeral memory-only pipe. It creates no
+request, role, login, execution grant, or approval. No launch document is saved to
+a file or artifact.
+
+The local coordinator starts only the separate diagnostic receiver, using the
+already staged checked diagnostic image. The existing image tag, live launcher,
+and sudo rule remain untouched. The receiver holds the existing host operation
+lock, invokes only --diagnose-activation once, closes its pipe, removes its
+temporary signer copy and diagnostic container, and verifies the original image
+and launcher are unchanged. A failed or uncertain run is never automatically
+retried. A historical pass does not prove present live readiness or authorize the
+stopped pilot's job to execute.

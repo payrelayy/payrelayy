@@ -27,11 +27,15 @@ const exactCompanionReleaseLinks = [
 
 // The production CI gate must bind GitHub's externally assigned repository
 // identity literally, and its tests must verify that exact API target. Allow
-// only these three complete code lines in these two files, not either whole
+// only these complete code lines in the listed files, not any whole
 // file, arbitrary repository mentions, product copy, or legacy-named paths.
 const exactRepositoryIdentityLines = new Map([
   [
     'infra/operations/require-production-ci.mjs',
+    new Set([`const REPOSITORY = '${repositorySlug}/${repositorySlug}';`]),
+  ],
+  [
+    'infra/operations/start-activation-diagnostic-receiver.mjs',
     new Set([`const REPOSITORY = '${repositorySlug}/${repositorySlug}';`]),
   ],
   [

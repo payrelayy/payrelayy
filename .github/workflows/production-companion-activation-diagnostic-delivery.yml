@@ -1,0 +1,172 @@
+name: Deliver one read-only companion activation diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed delivery workflow main commit
+        required: true
+        type: string
+      confirm_operation:
+        description: Type DELIVER ONE READ-ONLY ACTIVATION DIAGNOSTIC
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-companion-activation-diagnostic-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    name: Deliver existing launch document through an ephemeral memory-only pipe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+      PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0.1.17
+    steps:
+      - name: Check out exact main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main and only the approved delivery
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == 'DELIVER ONE READ-ONLY ACTIVATION DIAGNOSTIC' ]]
+          node infra/operations/require-production-ci.mjs
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?filter=latest" 2>/dev/null | node -e '
+            let raw=""; process.stdin.on("data", p => raw += p);
+            process.stdin.on("end", () => {
+              try {
+              const checks=JSON.parse(raw).check_runs;
+              for(const name of ["Build and smoke dormant protected operator host",
+                "Build and smoke ingress-free trusted TeleBirr verifier",
+                "Build and smoke ingress-free no-money TeleBirr shadow verifier"]) {
+                const matches=checks.filter(c=>c.name===name);
+                if(matches.length!==1 || matches[0].status!=="completed" ||
+                  matches[0].conclusion!=="success") process.exit(1);
+              }
+              } catch {
+                process.stderr.write("Additional diagnostic image checks are unavailable.\n");
+                process.exitCode=1;
+              }
+            });'
+
+      - name: Read the sole untouched job's existing request and deliver private stdin once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" &&
+            -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$(mktemp -d "$RUNNER_TEMP/activation-diagnostic-delivery.XXXXXXXX")"
+          tunnel_pid=''
+          cleanup() {
+            local status=$?
+            trap - EXIT
+            if [[ -n "$tunnel_pid" ]]; then
+              kill "$tunnel_pid" 2>/dev/null || true
+              wait "$tunnel_pid" 2>/dev/null || true
+            fi
+            if [[ -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" &&
+                  "$protected" == "$RUNNER_TEMP"/activation-diagnostic-delivery.* ]]; then
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts" "$protected/supabase-ca.crt"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          direct_host="$(sed -nE "s/^const DIRECT_HOST = '([^']+)';$/\1/p" \
+            packages/agent-platform-companion-operator-host/src/launch-document.ts)"
+          [[ "$direct_host" =~ ^db\.[a-z0-9]{20}\.supabase\.co$ ]]
+          ssh_opts=(-F /dev/null -i "$protected/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$protected/known-hosts"
+            -o ConnectTimeout=8 -o ConnectionAttempts=1)
+          [[ -z "$(ss -H -ltn '( sport = :55432 )')" ]]
+          ssh "${ssh_opts[@]}" -o ExitOnForwardFailure=yes -N \
+            -L "127.0.0.1:55432:$direct_host:5432" \
+            "fetanagent-admin@$PRODUCTION_VM_HOST" 2>/dev/null &
+          tunnel_pid=$!
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            [[ -n "$(ss -H -ltn '( sport = :55432 )')" ]] && break
+            kill -0 "$tunnel_pid" 2>/dev/null || break
+            sleep 0.2
+          done
+          kill -0 "$tunnel_pid"
+          [[ -n "$(ss -H -ltn '( sport = :55432 )')" ]]
+          export PGHOST="$direct_host" PGHOSTADDR=127.0.0.1 PGPORT=55432
+          export PGUSER=postgres PGDATABASE=postgres PGSSLMODE=verify-full
+          export PGSSLROOTCERT="$protected/supabase-ca.crt" PGCONNECT_TIMEOUT=5
+          export PGOPTIONS='-c default_transaction_read_only=on'
+          export PGAPPNAME=fetanagent_activation_diagnostic_delivery
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD" PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+          if ! selected="$(timeout 30s psql -X -q -A -t \
+            --file=infra/sql/production-companion-activation-diagnostic-request.sql 2>/dev/null)"; then
+            echo '::error::The read-only existing-request selection is unavailable.' >&2
+            exit 1
+          fi
+          [[ "$(printf '%s' "$selected" | jq -r 'keys|sort|join(",")')" == 'companionReleaseSha,requestKey' ]]
+          request_key="$(printf '%s' "$selected" | jq -r '.requestKey')"
+          stored_release="$(printf '%s' "$selected" | jq -r '.companionReleaseSha')"
+          [[ "$request_key" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$stored_release" =~ ^[0-9a-f]{40}$ ]]
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$PRODUCTION_COMPANION_RELEASE_TAG" 2>/dev/null)"
+          released=''
+          for depth in 1 2 3; do
+            object_type="$(printf '%s' "$ref" | jq -r '.object.type')"
+            object_sha="$(printf '%s' "$ref" | jq -r '.object.sha')"
+            [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]]
+            if [[ "$object_type" == 'commit' ]]; then released="$object_sha"; break; fi
+            [[ "$object_type" == 'tag' ]]
+            ref="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" 2>/dev/null)"
+          done
+          [[ "$released" == "$stored_release" ]]
+          export PRODUCTION_COMPANION_EXECUTION_REQUEST_KEY="$request_key"
+          if ! result="$(node infra/operations/render-production-operator-launch.mjs |
+            node infra/operations/render-activation-diagnostic-delivery.mjs |
+            timeout 25s ssh "${ssh_opts[@]}" "fetanagent-admin@$PRODUCTION_VM_HOST" \
+              'python3 -' 2>/dev/null)"; then
+            echo '::error::The single read-only diagnostic delivery was refused.' >&2
+            exit 1
+          fi
+          [[ "$result" == 'activation_diagnostic_delivery=accepted' ]]
+          printf '%s\n' "$result"
+          echo 'The existing launch document was delivered once without a new request, login, financial switch, approval, or queue execution.' >>"$GITHUB_STEP_SUMMARY"

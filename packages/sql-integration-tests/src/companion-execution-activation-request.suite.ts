@@ -44,6 +44,20 @@ const activationDiagnosticSql = (() => {
   return sql;
 })();
 
+const diagnosticSelectionSource = await readFile(
+  new URL(
+    '../../../infra/sql/production-companion-activation-diagnostic-request.sql',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const diagnosticSelectionSql = diagnosticSelectionSource
+  .slice(
+    diagnosticSelectionSource.indexOf('WITH bounded_target AS ('),
+    diagnosticSelectionSource.lastIndexOf('\nROLLBACK;'),
+  )
+  .trim();
+
 function runDisposableStop(administratorPassword: string, projectRef: string): Promise<string> {
   const environment: NodeJS.ProcessEnv = { ...process.env };
   for (const name of Object.keys(environment)) {
@@ -93,6 +107,10 @@ export function registerCompanionExecutionActivationRequestSqlTests(
   getAdministratorPassword: () => string,
 ): void {
   describe('dormant companion execution activation request', () => {
+    it('the historical diagnostic delivery selector is valid SQL and refuses non-TLS fixture access', async () => {
+      const selected = await getClient().query(diagnosticSelectionSql);
+      expect(selected.rows).toEqual([]);
+    });
     it('is immutable, empty, and inaccessible to application and execution roles', async () => {
       const result = await getClient().query<{
         readonly row_count: string;

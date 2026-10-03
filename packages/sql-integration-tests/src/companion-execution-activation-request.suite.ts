@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import type { Client } from 'pg';
@@ -27,6 +28,21 @@ const emergencyStopScript = fileURLToPath(
     import.meta.url,
   ),
 );
+
+// Read the diagnostic SELECT as source only. The integration image never loads
+// the operator entry point, its credentials, signing key, or runtime dependencies.
+const diagnosticSource = await readFile(
+  new URL(
+    '../../agent-platform-companion-operator-host/src/activation-diagnostic.ts',
+    import.meta.url,
+  ),
+  'utf8',
+);
+const activationDiagnosticSql = (() => {
+  const sql = diagnosticSource.match(/export const ACTIVATION_DIAGNOSTIC_SQL = `([^`]+)`;/u)?.[1];
+  if (!sql) throw new Error('Activation diagnostic SELECT is missing.');
+  return sql;
+})();
 
 function runDisposableStop(administratorPassword: string, projectRef: string): Promise<string> {
   const environment: NodeJS.ProcessEnv = { ...process.env };
@@ -448,6 +464,55 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           platformAgentAccountId: snapshot.request.platformAgentAccountId,
         });
         expect(snapshot.certificate.devicePublicKeySpki).toBe(devicePublicKeySpki);
+        await client.query('savepoint activation_diagnostic');
+        // This deliberately non-TLS disposable client must NOT pass the real
+        // database boundary, but all other columns are evaluated by PostgreSQL.
+        const beforeDiagnostic = await client.query(activationDiagnosticSql, [requestKey]);
+        expect(beforeDiagnostic.rows).toHaveLength(1);
+        expect(beforeDiagnostic.rows[0]).toMatchObject({
+          request_key: requestKey,
+          database_boundary: false,
+          financial_state: false,
+          request_binding: true,
+          historical_window: true,
+          certificate_binding: true,
+          device_public_key_spki: devicePublicKeySpki,
+        });
+        expect(beforeDiagnostic.rows[0]!.requested_at).toBeInstanceOf(Date);
+        expect(beforeDiagnostic.rows[0]!.request_expires_at).toBeInstanceOf(Date);
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key::text in ('deposit_execution', 'payment_verification',
+            'withdrawal_collection', 'withdrawal_validation', 'private_live_deposit_pilot',
+            'cbe_birr_authoritative_verification', 'telebirr_authoritative_verification')`);
+        await client.query(
+          `update app.private_live_deposit_pilot_revisions
+          set status = 'stopped', stopped_at = clock_timestamp(),
+            stopped_by_admin_id = $2::uuid, stop_reason_code = 'execution_uncertainty'
+          where id = $1::uuid`,
+          [pilot.pilotRevisionId, ownerAdminId],
+        );
+        await expect(loadCompanionActivationDatabaseSnapshot(requestKey, client)).rejects.toThrow(
+          'The companion activation database snapshot is unavailable.',
+        );
+        const stoppedDiagnostic = await client.query(activationDiagnosticSql, [requestKey]);
+        expect(stoppedDiagnostic.rows[0]).toMatchObject({
+          request_key: requestKey,
+          database_boundary: false,
+          financial_state: true,
+          request_binding: true,
+          historical_window: true,
+          certificate_binding: true,
+        });
+        expect((await client.query(activationDiagnosticSql, [randomUUID()])).rows).toEqual([]);
+        const noDiagnosticAuthority = await client.query(`select
+          (select count(*) from app.agent_platform_companion_execution_activation_requests) as requests,
+          (select count(*) from app.agent_platform_companion_execution_activation_attestations) as attestations,
+          (select count(*) from app.agent_platform_companion_execution_activation_consumptions) as consumptions,
+          (select control_state from app.agent_platform_companion_execution_control where singleton) as control`);
+        expect(noDiagnosticAuthority.rows).toEqual([
+          { requests: '1', attestations: '0', consumptions: '0', control: 'disabled' },
+        ]);
+        await client.query('rollback to savepoint activation_diagnostic');
         await expect(loadCompanionActivationDatabaseSnapshot(randomUUID(), client)).rejects.toThrow(
           'The companion activation database snapshot is unavailable.',
         );

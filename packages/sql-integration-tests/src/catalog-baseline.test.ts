@@ -14,6 +14,7 @@ import { registerCompanionExecutionActivationRequestSqlTests } from './companion
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
+import { registerExpiredTelebirrPredecessorSqlTests } from './expired-telebirr-predecessor.suite.js';
 import { registerLiveCustomerDepositIntakeSqlTests } from './live-customer-deposit-intake.suite.js';
 import { registerLiveDepositExecutionLineageSqlTests } from './live-deposit-execution-lineage.suite.js';
 import { applyMigrationsLexically, listMigrationsLexically } from './migration-runner.js';
@@ -9826,6 +9827,10 @@ registerTrustedTelebirrActivationEpochSqlTests(
   () => client,
   () => ownerAdminId,
   () => createSqlIntegrationClient(environment),
+);
+registerExpiredTelebirrPredecessorSqlTests(
+  () => client,
+  () => ownerAdminId,
 );
 registerPrivateLiveExecutionActivationEpochSqlTests(
   () => client,

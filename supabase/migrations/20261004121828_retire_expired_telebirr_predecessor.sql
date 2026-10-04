@@ -16,7 +16,7 @@ security invoker
 set search_path = ''
 as $$
 declare
-  actor_admin_id uuid;
+  retirement_actor_admin_id uuid;
   authority app.private_trusted_telebirr_activation_epochs%rowtype;
   previous_pilot app.private_live_deposit_pilot_revisions%rowtype;
   replacement app.private_live_deposit_pilot_revisions%rowtype;
@@ -36,12 +36,12 @@ begin
     raise exception 'The expired verifier predecessor request is invalid.';
   end if;
 
-  select admin_user.id into actor_admin_id
+  select admin_user.id into retirement_actor_admin_id
     from app.admin_users admin_user
    where (admin_user.auth_user_id = p_actor_auth_user_id or admin_user.id = p_actor_auth_user_id)
      and admin_user.role = 'owner' and admin_user.status = 'active'
    for share;
-  if actor_admin_id is null or (
+  if retirement_actor_admin_id is null or (
     select pg_catalog.count(*) from app.admin_users admin_user
      where (admin_user.auth_user_id = p_actor_auth_user_id or admin_user.id = p_actor_auth_user_id)
        and admin_user.role = 'owner' and admin_user.status = 'active'
@@ -60,11 +60,11 @@ begin
       or emergency_intent.expected_epoch = p_expected_epoch;
   if intent.request_key is not null then
     if intent.request_key = p_request_key and intent.expected_epoch = p_expected_epoch
-      and intent.requested_by_admin_id = actor_admin_id and intent.reason_code = 'owner_stop'
+      and intent.requested_by_admin_id = retirement_actor_admin_id and intent.reason_code = 'owner_stop'
       and exists (
         select 1 from app.audit_events audit
          where audit.action = 'deposit.trusted_telebirr_expired_predecessor_retired'
-           and audit.actor_admin_id = actor_admin_id
+           and audit.actor_admin_id = retirement_actor_admin_id
            and audit.metadata = pg_catalog.jsonb_build_object(
              'contract_version', 1, 'activation_epoch', p_expected_epoch,
              'replacement_pilot_revision_id', p_replacement_pilot_revision_id,
@@ -112,13 +112,13 @@ begin
   -- Evaluate all time boundaries after acquiring the shared authority/switch/pilot locks.
   retired_at := pg_catalog.clock_timestamp();
   if authority.authority_state <> 'active' or authority.revoked_at is not null
-    or authority.expires_at > retired_at or authority.activated_by_admin_id <> actor_admin_id
+    or authority.expires_at > retired_at or authority.activated_by_admin_id <> retirement_actor_admin_id
     or previous_pilot.id is null or previous_pilot.status <> 'stopped'
     or previous_pilot.expires_at > retired_at or previous_pilot.stop_reason_code <> 'owner_stop'
-    or previous_pilot.created_by_admin_id <> actor_admin_id
+    or previous_pilot.created_by_admin_id <> retirement_actor_admin_id
     or replacement.id is null or replacement.id = previous_pilot.id
-    or replacement.status <> 'armed' or replacement.created_by_admin_id <> actor_admin_id
-    or replacement.armed_by_admin_id <> actor_admin_id
+    or replacement.status <> 'armed' or replacement.created_by_admin_id <> retirement_actor_admin_id
+    or replacement.armed_by_admin_id <> retirement_actor_admin_id
     or replacement.created_at <= authority.expires_at
     or replacement.active_from > retired_at
     or replacement.expires_at <= retired_at + interval '10 minutes'
@@ -186,14 +186,14 @@ begin
   perform * from app.disable_private_trusted_telebirr_verifier_login();
   insert into app.private_trusted_telebirr_emergency_disable_intents (
     request_key, expected_epoch, requested_by_admin_id, reason_code, requested_at
-  ) values (p_request_key, p_expected_epoch, actor_admin_id, 'owner_stop', retired_at);
+  ) values (p_request_key, p_expected_epoch, retirement_actor_admin_id, 'owner_stop', retired_at);
   update app.private_trusted_telebirr_activation_epochs activation_epoch
      set revoked_at = retired_at, revocation_reason_code = 'owner_stop'
    where activation_epoch.epoch = p_expected_epoch;
   insert into app.audit_events (
     actor_kind, actor_admin_id, action, resource_type, resource_id, metadata
   ) values (
-    'admin', actor_admin_id, 'deposit.trusted_telebirr_expired_predecessor_retired',
+    'admin', retirement_actor_admin_id, 'deposit.trusted_telebirr_expired_predecessor_retired',
     'private_live_deposit_pilot', previous_pilot.id,
     pg_catalog.jsonb_build_object(
       'contract_version', 1, 'activation_epoch', p_expected_epoch,

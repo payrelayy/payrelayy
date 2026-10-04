@@ -16,6 +16,7 @@ import {
   createProtectedOperatorSshHandoffSigner,
   createProtectedOperatorSshRemoteSession,
   type ProtectedOperatorSshConnection,
+  type ProtectedOperatorSshTransportFailure,
 } from './protected-operator-query-ssh-client.js';
 
 export {
@@ -48,6 +49,18 @@ const productionAdapters: SshActivationAdapters = {
   sign: createProtectedOperatorSshHandoffSigner,
   open: createProtectedOperatorSshRemoteSession,
   activate: runGuardedOperatorActivationWithProtectedRemoteSession,
+};
+
+const TRANSPORT_FAILURE_STAGES: Record<
+  ProtectedOperatorSshTransportFailure,
+  GuardedOperatorActivationFailureStage
+> = {
+  connect_timeout: 'handoff_ssh_connect_timeout',
+  authentication: 'handoff_ssh_authentication',
+  host_key: 'handoff_ssh_host_key',
+  channel_unavailable: 'handoff_ssh_channel_unavailable',
+  response_timeout: 'handoff_ssh_response_timeout',
+  process_start: 'handoff_ssh_process_start',
 };
 
 /**
@@ -119,8 +132,13 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
       error instanceof ProtectedOperatorSshClientUnavailableError
     ) {
       if (error.handoffStage === 'local_preflight') failureStage = 'handoff_local_preflight';
-      else if (error.handoffStage === 'ssh_transport') failureStage = 'handoff_ssh_transport';
-      else if (error.handoffStage === 'http_response') failureStage = 'handoff_http_response';
+      else if (error.handoffStage === 'ssh_transport') {
+        failureStage =
+          (error.transportFailure &&
+            Object.hasOwn(TRANSPORT_FAILURE_STAGES, error.transportFailure) &&
+            TRANSPORT_FAILURE_STAGES[error.transportFailure]) ||
+          'handoff_ssh_transport';
+      } else if (error.handoffStage === 'http_response') failureStage = 'handoff_http_response';
       else if (error.handoffStage === 'handoff_binding') failureStage = 'handoff_binding';
     }
     // The coordinator normally owns close; cover a failure before it takes ownership.

@@ -122,10 +122,11 @@ async function prepareRenewal(client: Client, ownerAdminId: string) {
   );
   await client.query(
     `insert into app.private_live_telebirr_device_enrollments (
-       pilot_revision_id, receiver_profile_id, device_id, key_id,
+       id, pilot_revision_id, receiver_profile_id, device_id, key_id,
        public_key_spki_sha256, valid_from, valid_until
-     ) values ($1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::timestamptz, $7::timestamptz)`,
+     ) values ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::timestamptz, $8::timestamptz)`,
     [
+      randomUUID(),
       replacementId,
       receiverProfileId,
       `sql-renewal-${randomUUID()}`,

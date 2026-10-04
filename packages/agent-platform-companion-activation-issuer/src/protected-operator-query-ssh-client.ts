@@ -45,6 +45,14 @@ export interface ProtectedOperatorSshConnection {
   readonly remoteLoopbackPort: number;
 }
 
+export type ProtectedOperatorSshTransportFailure =
+  | 'connect_timeout'
+  | 'authentication'
+  | 'host_key'
+  | 'channel_unavailable'
+  | 'response_timeout'
+  | 'process_start';
+
 export class ProtectedOperatorSshClientUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
 
@@ -53,6 +61,7 @@ export class ProtectedOperatorSshClientUnavailableError extends Error {
       'local_preflight' | 'ssh_transport' | 'http_response' | 'bootstrap_binding',
     readonly handoffStage?:
       'local_preflight' | 'ssh_transport' | 'http_response' | 'handoff_binding',
+    readonly transportFailure?: ProtectedOperatorSshTransportFailure,
   ) {
     super('The authenticated protected operator stream is unavailable.');
     this.name = 'ProtectedOperatorSshClientUnavailableError';
@@ -60,10 +69,26 @@ export class ProtectedOperatorSshClientUnavailableError extends Error {
 }
 
 class ProtectedOperatorSshExchangeError extends Error {
-  constructor(readonly stage: 'ssh_transport' | 'http_response') {
+  constructor(
+    readonly stage: 'ssh_transport' | 'http_response',
+    readonly transportFailure?: ProtectedOperatorSshTransportFailure,
+  ) {
     super('The protected operator exchange is unavailable.');
     this.name = 'ProtectedOperatorSshExchangeError';
   }
+}
+
+function classifySshTransportFailure(
+  text: string,
+): ProtectedOperatorSshTransportFailure | undefined {
+  if (/host key verification failed|remote host identification has changed/iu.test(text))
+    return 'host_key';
+  if (/permission denied|bad permissions|unprotected private key file|invalid format/iu.test(text))
+    return 'authentication';
+  if (/connection timed out|operation timed out/iu.test(text)) return 'connect_timeout';
+  if (/channel [0-9]+: open failed|stdio forwarding failed/iu.test(text))
+    return 'channel_unavailable';
+  return undefined;
 }
 
 type SpawnChild = (file: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
@@ -215,12 +240,16 @@ async function postOverSsh(
   let timeout: NodeJS.Timeout | undefined;
   let terminationTimeout: NodeJS.Timeout | undefined;
   let stage: 'ssh_transport' | 'http_response' = 'ssh_transport';
+  let transportFailure: ProtectedOperatorSshTransportFailure | undefined;
+  // Stderr is scanned only in a bounded, in-memory window. Neither its text nor
+  // a private endpoint/key path can cross the error or terminal boundary.
+  let stderrWindow = '';
   try {
     child = spawnChild(sshExecutable, sshArguments(connection), {
       shell: false,
       detached: false,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'ignore'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       // Windows OpenSSH exits before connecting when PROGRAMDATA is absent.
       // Derive it from the trusted Windows drive instead of inheriting the
       // caller's ambient environment or SSH configuration.
@@ -232,9 +261,21 @@ async function postOverSsh(
     });
     // A failed Windows spawn reports error asynchronously, including when it
     // did not assign a PID. Never let that become an unhandled process error.
-    child.on('error', () => undefined);
-    if (!Number.isInteger(child.pid) || !child.pid || !child.stdin || !child.stdout)
+    child.on('error', () => {
+      transportFailure = 'process_start';
+    });
+    child.stderr?.on('error', () => undefined);
+    child.stderr?.on('data', (value: Buffer | string) => {
+      const text = Buffer.isBuffer(value)
+        ? value.subarray(0, 4096).toString('utf8')
+        : value.slice(0, 4096);
+      stderrWindow = (stderrWindow + text).slice(-4096);
+      transportFailure = classifySshTransportFailure(stderrWindow) ?? transportFailure;
+    });
+    if (!Number.isInteger(child.pid) || !child.pid || !child.stdin || !child.stdout) {
+      transportFailure = 'process_start';
       throw new Error();
+    }
     const ownedChild = child;
     const raw = await new Promise<Buffer>((resolve, reject) => {
       let size = 0;
@@ -243,7 +284,10 @@ async function postOverSsh(
         failed = true;
         ownedChild.kill();
       };
-      timeout = setTimeout(fail, timeoutMs);
+      timeout = setTimeout(() => {
+        transportFailure ??= 'response_timeout';
+        fail();
+      }, timeoutMs);
       terminationTimeout = setTimeout(
         () => reject(new Error()),
         timeoutMs + TERMINATION_TIMEOUT_MS,
@@ -283,12 +327,16 @@ async function postOverSsh(
       raw.fill(0);
     }
   } catch {
-    throw new ProtectedOperatorSshExchangeError(stage);
+    throw new ProtectedOperatorSshExchangeError(
+      stage,
+      stage === 'ssh_transport' ? transportFailure : undefined,
+    );
   } finally {
     clearTimeout(timeout);
     clearTimeout(terminationTimeout);
     header.fill(0);
     for (const chunk of chunks) chunk.fill(0);
+    stderrWindow = '';
     child?.kill();
   }
 }
@@ -374,6 +422,8 @@ export async function readProtectedOperatorSshBootstrapWithSpawn(
   } catch (error) {
     throw new ProtectedOperatorSshClientUnavailableError(
       error instanceof ProtectedOperatorSshExchangeError ? error.stage : stage,
+      undefined,
+      error instanceof ProtectedOperatorSshExchangeError ? error.transportFailure : undefined,
     );
   }
 }
@@ -513,6 +563,7 @@ export function createProtectedOperatorSshHandoffSignerWithSpawn(
       throw new ProtectedOperatorSshClientUnavailableError(
         undefined,
         error instanceof ProtectedOperatorSshExchangeError ? error.stage : stage,
+        error instanceof ProtectedOperatorSshExchangeError ? error.transportFailure : undefined,
       );
     }
   };

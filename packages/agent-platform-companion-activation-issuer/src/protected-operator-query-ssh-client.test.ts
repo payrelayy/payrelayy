@@ -231,7 +231,7 @@ describe('authenticated protected operator SSH stream', () => {
     expect(args).toContain('fetanagent-operator@192.0.2.12');
     expect(args).not.toContain('-L');
     expect(options.shell).toBe(false);
-    expect(options.stdio).toEqual(['pipe', 'pipe', 'ignore']);
+    expect(options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
     expect(options.env).toEqual({
       SystemRoot: ROOT,
       WINDIR: ROOT,
@@ -392,6 +392,126 @@ describe('authenticated protected operator SSH stream', () => {
     );
     await expect(signer(requestKey)).rejects.toMatchObject({ handoffStage: 'local_preflight' });
     expect(spawned).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Connection timed out', 'connect_timeout'],
+    ['Permission denied (publickey)', 'authentication'],
+    ['Host key verification failed', 'host_key'],
+    ['channel 0: open failed: connect failed: Connection refused', 'channel_unavailable'],
+  ] as const)(
+    'keeps only the fixed category for %s, with no second SSH attempt',
+    async (text, category) => {
+      const spawned = vi.fn(() => {
+        const child = new EventEmitter() as ChildProcess;
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        const stderr = new PassThrough();
+        Object.assign(child, { pid: 421, stdin, stdout, stderr, kill: vi.fn(() => true) });
+        onCompleteRequest(stdin, () => {
+          stderr.write('private-key-path and host-detail: ');
+          // Real SSH can split a diagnostic across arbitrary stream chunks.
+          stderr.write(text.slice(0, 5));
+          stderr.write(text.slice(5));
+          setImmediate(() => child.emit('close', 255, null));
+        });
+        return child;
+      });
+      const signedDevice = {
+        certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+        createSignedHttpRequest: () => ({ testOnly: true }),
+      } as unknown as ProtectedOperatorDeviceSigner;
+      const signer = createProtectedOperatorSshHandoffSignerWithSpawn(
+        signedDevice,
+        connection,
+        ROOT,
+        spawned,
+        files,
+      );
+      const error = await signer(requestKey).catch((value: unknown) => value);
+      expect(error).toMatchObject({ handoffStage: 'ssh_transport', transportFailure: category });
+      expect(JSON.stringify(error)).not.toContain('private-key-path');
+      expect(JSON.stringify(error)).not.toContain('host-detail');
+      expect(JSON.stringify(error)).not.toContain(text);
+      await expect(signer(requestKey)).rejects.toMatchObject({ handoffStage: 'local_preflight' });
+      expect(spawned).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('classifies the unchanged handoff response deadline without retaining output or retrying', async () => {
+    vi.useFakeTimers();
+    const spawned = vi.fn(() => {
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, {
+        pid: 422,
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: vi.fn(() => {
+          child.emit('close', null, 'SIGTERM');
+          return true;
+        }),
+      });
+      return child;
+    });
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    try {
+      const signer = createProtectedOperatorSshHandoffSignerWithSpawn(
+        signedDevice,
+        connection,
+        ROOT,
+        spawned,
+        files,
+      );
+      const pending = signer(requestKey).catch((value: unknown) => value);
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(await pending).toMatchObject({
+        handoffStage: 'ssh_transport',
+        transportFailure: 'response_timeout',
+      });
+      expect(spawned).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('classifies a failed SSH spawn without leaking its original OS error', async () => {
+    const spawned = vi.fn(() => {
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, {
+        pid: 423,
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: vi.fn(() => {
+          child.emit('close', -1, null);
+          return true;
+        }),
+      });
+      setImmediate(() => child.emit('error', new Error('private executable path')));
+      return child;
+    });
+    const signedDevice = {
+      certificate: { bodyDigest: `sha256:${'a'.repeat(64)}` },
+      createSignedHttpRequest: () => ({ testOnly: true }),
+    } as unknown as ProtectedOperatorDeviceSigner;
+    const signer = createProtectedOperatorSshHandoffSignerWithSpawn(
+      signedDevice,
+      connection,
+      ROOT,
+      spawned,
+      files,
+    );
+    const error = await signer(requestKey).catch((value: unknown) => value);
+    expect(error).toMatchObject({
+      handoffStage: 'ssh_transport',
+      transportFailure: 'process_start',
+    });
+    expect(JSON.stringify(error)).not.toContain('private');
+    expect(spawned).toHaveBeenCalledTimes(1);
   });
 
   it('sends one stop-only command without exposing a database credential or local listener', async () => {

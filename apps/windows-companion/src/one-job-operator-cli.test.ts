@@ -9,6 +9,27 @@ import * as operator from './one-job-operator.js';
 import { OneJobOperatorUnavailableError } from './one-job-operator.js';
 
 describe('one-job operator diagnostic output', () => {
+  it.each([
+    'handoff_ssh_connect_timeout',
+    'handoff_ssh_authentication',
+    'handoff_ssh_host_key',
+    'handoff_ssh_channel_unavailable',
+    'handoff_ssh_response_timeout',
+    'handoff_ssh_process_start',
+  ] as const)('emits only the fixed %s transport category', (stage) => {
+    const output = redactedOneJobOperatorFailure(
+      new OneJobOperatorUnavailableError('guarded_activation', stage),
+      'configuration',
+    );
+    expect(JSON.parse(output)).toEqual({
+      component: 'fetanagent_one_job_operator',
+      result: 'stopped',
+      failureStage: 'guarded_activation',
+      activationStage: stage,
+      identifiersRedacted: true,
+    });
+  });
+
   it('logs a source-defined activation category but never a caller-supplied value', () => {
     const fixed = new OneJobOperatorUnavailableError('guarded_activation', 'handoff_http_response');
     expect(JSON.parse(redactedOneJobOperatorFailure(fixed, 'configuration'))).toEqual({

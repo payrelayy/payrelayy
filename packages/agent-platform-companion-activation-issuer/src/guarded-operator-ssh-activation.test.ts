@@ -28,6 +28,60 @@ type Adapters = Parameters<typeof runGuardedOperatorActivationOverSshWithAdapter
 
 describe('protected SSH one-job operator ordering', () => {
   it.each([
+    ['connect_timeout', 'handoff_ssh_connect_timeout'],
+    ['authentication', 'handoff_ssh_authentication'],
+    ['host_key', 'handoff_ssh_host_key'],
+    ['channel_unavailable', 'handoff_ssh_channel_unavailable'],
+    ['response_timeout', 'handoff_ssh_response_timeout'],
+    ['process_start', 'handoff_ssh_process_start'],
+  ] as const)(
+    'preserves %s without opening or activating a session',
+    async (category, activationStage) => {
+      const adapters = {
+        stop: vi.fn(),
+        sign: vi.fn(() => async () => {
+          throw new ProtectedOperatorSshClientUnavailableError(
+            undefined,
+            'ssh_transport',
+            category,
+          );
+        }),
+        open: vi.fn(),
+        activate: vi.fn(),
+      } as unknown as Adapters;
+      await expect(
+        runGuardedOperatorActivationOverSshWithAdapters(input, device, connection, adapters),
+      ).rejects.toMatchObject({ activationStage });
+      expect(adapters.sign).toHaveBeenCalledTimes(1);
+      expect(adapters.open).not.toHaveBeenCalled();
+      expect(adapters.activate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects forged transport details instead of copying them to the terminal category', async () => {
+    const error = new ProtectedOperatorSshClientUnavailableError(undefined, 'ssh_transport');
+    Object.assign(error, { transportFailure: 'constructor' });
+    const adapters = {
+      stop: vi.fn(),
+      sign: vi.fn(() => async () => {
+        throw error;
+      }),
+      open: vi.fn(),
+      activate: vi.fn(),
+    } as unknown as Adapters;
+    const result = await runGuardedOperatorActivationOverSshWithAdapters(
+      input,
+      device,
+      connection,
+      adapters,
+    ).catch((value: unknown) => value);
+    expect(result).toMatchObject({ activationStage: 'handoff_ssh_transport' });
+    expect(JSON.stringify(result)).not.toContain('constructor');
+    expect(adapters.open).not.toHaveBeenCalled();
+    expect(adapters.activate).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['local_preflight', 'handoff_local_preflight'],
     ['ssh_transport', 'handoff_ssh_transport'],
     ['http_response', 'handoff_http_response'],

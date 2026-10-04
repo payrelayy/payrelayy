@@ -56,6 +56,7 @@ jobs:
           node --test infra/operations/production-live-telebirr-source-binding-recovery-status-workflow.test.mjs
           node --test infra/operations/production-companion-operator-host-status-workflow.test.mjs
           node --test infra/operations/production-companion-operator-host-startup-diagnostic.test.mjs
+          node --test infra/operations/operator-transport-preview.test.mjs
           node --test infra/operations/companion-activation-diagnostic.test.mjs
           node --test infra/operations/production-companion-activation-diagnostic-delivery.test.mjs
           python3 -I infra/operations/test_activation_diagnostic_delivery.py

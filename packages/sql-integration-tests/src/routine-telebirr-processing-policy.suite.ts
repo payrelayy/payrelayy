@@ -344,12 +344,19 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
           client,
           `update app.routine_telebirr_processing_events set event_kind = 'stop'`,
         );
-        // Keep the last-Owner constraint intact while testing actual authorization revocation.
+        // Transfer to a synthetic Administrator through the existing operation so the
+        // one-active-Owner index and last-Owner constraint both remain intact.
         const backupOwner = randomUUID();
         await client.query('insert into auth.users (id) values ($1::uuid)', [backupOwner]);
         await client.query(
-          "insert into app.admin_users (auth_user_id, role, status) values ($1::uuid, 'owner', 'active')",
+          "insert into app.admin_users (auth_user_id, role, status) values ($1::uuid, 'administrator', 'active')",
           [backupOwner],
+        );
+        await client.query(
+          `select app.transfer_owner(source.id, source.id, destination.id)
+            from app.admin_users source, app.admin_users destination
+            where source.auth_user_id = $1::uuid and destination.auth_user_id = $2::uuid`,
+          [getOwner(), backupOwner],
         );
         await client.query(
           `update app.admin_users set status = 'inactive' where auth_user_id = $1::uuid`,
@@ -459,7 +466,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         const mutations = [
           `update app.platform_agent_accounts set status = 'inactive' where id = '${policy.accountId}'::uuid`,
           `update app.customer_platform_players set status = 'inactive' where id = (select player_account_id from app.deposit_intents where id = '${deposit.depositIntentId}'::uuid)`,
-          `update app.receiver_accounts set status = 'inactive' where id = (select receiver_account_id from app.deposit_intents where id = '${deposit.depositIntentId}'::uuid)`,
+          `update app.receiver_accounts set status = 'inactive', retired_at = clock_timestamp() where id = (select receiver_account_id from app.deposit_intents where id = '${deposit.depositIntentId}'::uuid)`,
         ];
         for (const mutation of mutations) {
           await client.query(mutation);

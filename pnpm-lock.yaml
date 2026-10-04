@@ -250,6 +250,9 @@ importers:
       '@fetanagent/agent-platform-kemerbet':
         specifier: workspace:*
         version: link:../../packages/agent-platform-kemerbet
+      '@fetanagent/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1

@@ -9,6 +9,7 @@ import {
   validateKemerBetReadOnlyPlayerLookupResponse,
 } from '@fetanagent/agent-platform-kemerbet';
 import type { Locator, Page, Response } from 'playwright-core';
+import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR, ETB_SCALE } from '@fetanagent/domain';
 
 import type { MutableLocalKemerBetLookupAuthorization } from './local-kemerbet-lookup.js';
 import { KEMERBET_DEPOSIT_PATH } from './request-guard.js';
@@ -19,7 +20,7 @@ import type {
 } from './provider-route.js';
 
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const EXACT_AMOUNT_TEXT = '25.00' as const;
+const PILOT_AMOUNT_MINOR = 2500 as const;
 const TIMEOUT_MS = 30_000;
 const DEPOSIT_URL = `${KEMERBET_AGENT_API_ORIGIN}${KEMERBET_DEPOSIT_PATH}`;
 
@@ -37,6 +38,7 @@ const selectors = Object.freeze({
 
 interface PendingDeposit {
   readonly internalPlayerId: number;
+  readonly amountMinor: number;
   readonly isFresh: () => boolean;
   readonly settle: (outcome: LocalKemerBetDepositDispatchOutcome) => void;
 }
@@ -46,11 +48,37 @@ export interface MutableLocalKemerBetDepositAuthorization extends LocalKemerBetD
     internalPlayerId: number,
     isFresh: () => boolean,
   ): Promise<LocalKemerBetDepositDispatchOutcome>;
+  beginRoutine(
+    internalPlayerId: number,
+    amountMinor: number,
+    isFresh: () => boolean,
+  ): Promise<LocalKemerBetDepositDispatchOutcome>;
   clear(): void;
 }
 
 export interface LocalKemerBetFinalAction {
   isFresh(): boolean;
+}
+
+/** Only the routine worker may supply this binding, after its database fence is acquired. */
+export interface LocalKemerBetRoutineFinalAction extends LocalKemerBetFinalAction {
+  readonly playerId: string;
+  readonly amountMinor: number;
+}
+
+export function isRoutineDepositAmountMinor(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= DEPOSIT_MINIMUM_MINOR &&
+    value <= DEPOSIT_MAXIMUM_MINOR
+  );
+}
+
+export function routineDepositAmountText(amountMinor: number): string {
+  if (!isRoutineDepositAmountMinor(amountMinor)) unavailable();
+  // Format from integer minor units; neither a Telegram amount nor a UI float is authoritative.
+  return `${Math.floor(amountMinor / ETB_SCALE)}.${String(amountMinor % ETB_SCALE).padStart(2, '0')}`;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -90,20 +118,45 @@ function exactDataKeys(candidate: UnknownRecord, keys: readonly string[]): boole
 
 export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetDepositAuthorization {
   let pending: PendingDeposit | undefined;
+  let active: PendingDeposit | undefined;
+  function begin(
+    internalPlayerId: number,
+    amountMinor: number,
+    isFresh: () => boolean,
+  ): Promise<LocalKemerBetDepositDispatchOutcome> {
+    if (
+      active !== undefined ||
+      !Number.isSafeInteger(internalPlayerId) ||
+      internalPlayerId <= 0 ||
+      !isRoutineDepositAmountMinor(amountMinor) ||
+      typeof isFresh !== 'function'
+    ) {
+      return Promise.reject(new LocalKemerBetDepositError());
+    }
+    return new Promise<LocalKemerBetDepositDispatchOutcome>((resolve) => {
+      let settled = false;
+      const selected: PendingDeposit = Object.freeze({
+        internalPlayerId,
+        amountMinor,
+        isFresh,
+        settle(outcome: LocalKemerBetDepositDispatchOutcome) {
+          if (settled) return;
+          settled = true;
+          if (active === selected) active = undefined;
+          if (pending === selected) pending = undefined;
+          resolve(outcome);
+        },
+      });
+      pending = selected;
+      active = selected;
+    });
+  }
   return Object.freeze({
     begin(internalPlayerId: number, isFresh: () => boolean) {
-      if (
-        pending !== undefined ||
-        !Number.isSafeInteger(internalPlayerId) ||
-        internalPlayerId <= 0 ||
-        typeof isFresh !== 'function'
-      ) {
-        return Promise.reject(new LocalKemerBetDepositError());
-      }
-      return new Promise<LocalKemerBetDepositDispatchOutcome>((resolve) => {
-        pending = Object.freeze({ internalPlayerId, isFresh, settle: resolve });
-      });
+      // The v2 pilot capability remains exactly 25 ETB. Do not broaden its signed authority.
+      return begin(internalPlayerId, PILOT_AMOUNT_MINOR, isFresh);
     },
+    beginRoutine: begin,
     consumeExactRequest(method: string, rawUrl: string, postData: unknown) {
       // Consume before validation and before the route callback's first await. A malformed request
       // can burn an allowance, but no request can retain or reuse it.
@@ -122,7 +175,7 @@ export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetD
         !plainRecord(postData) ||
         !exactDataKeys(postData, ['playerId', 'amount', 'notes']) ||
         postData.playerId !== selected.internalPlayerId ||
-        postData.amount !== 25 ||
+        postData.amount !== selected.amountMinor / ETB_SCALE ||
         postData.notes !== '' ||
         !fresh
       ) {
@@ -136,8 +189,9 @@ export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetD
       return consumed;
     },
     clear() {
-      const selected = pending;
+      const selected = active;
       pending = undefined;
+      active = undefined;
       selected?.settle({ outcome: 'local_uncertain', providerResponseDigest: null });
     },
   });
@@ -311,7 +365,11 @@ function privateInternalPlayer(
   return Object.freeze({ internalPlayerId: value.id as number, identities });
 }
 
-async function verifyPreparedSurface(page: Page, identities: readonly string[]): Promise<Locator> {
+async function verifyPreparedSurface(
+  page: Page,
+  identities: readonly string[],
+  amountText: string,
+): Promise<Locator> {
   await requireAuthenticatedAgentPage(page);
   const root = await exactlyOneVisible(page.locator(selectors.lookupRoot));
   const amount = await requireEnabled(page.locator(selectors.amountInput));
@@ -325,7 +383,7 @@ async function verifyPreparedSurface(page: Page, identities: readonly string[]):
     !currency ||
     !identities.includes((await identity.innerText()).trim()) ||
     (await currency.innerText()).trim() !== 'ETB' ||
-    (await amount.inputValue()) !== EXACT_AMOUNT_TEXT ||
+    (await amount.inputValue()) !== amountText ||
     (await notes.inputValue()) !== ''
   ) {
     unavailable();
@@ -344,7 +402,49 @@ export async function executeExactOneUseLocalKemerBetDeposit(
   depositAuthorization: MutableLocalKemerBetDepositAuthorization,
   acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
 ): Promise<LocalKemerBetDepositDispatchOutcome> {
+  return executeLocalDepositForAmount(
+    page,
+    playerId,
+    PILOT_AMOUNT_MINOR,
+    lookupAuthorization,
+    depositAuthorization,
+    acquireFinalAction,
+  );
+}
+
+/** Separate from the fixed-25-ETB v2 entry point; requires an exact routine fence binding. */
+export async function executeRoutineOneUseLocalKemerBetDeposit(
+  page: Page,
+  playerId: string,
+  amountMinor: number,
+  lookupAuthorization: MutableLocalKemerBetLookupAuthorization,
+  depositAuthorization: MutableLocalKemerBetDepositAuthorization,
+  acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
+): Promise<LocalKemerBetDepositDispatchOutcome> {
+  return executeLocalDepositForAmount(
+    page,
+    playerId,
+    amountMinor,
+    lookupAuthorization,
+    depositAuthorization,
+    async () => {
+      const authority = await acquireFinalAction();
+      if (authority.playerId !== playerId || authority.amountMinor !== amountMinor) unavailable();
+      return authority;
+    },
+  );
+}
+
+async function executeLocalDepositForAmount(
+  page: Page,
+  playerId: string,
+  amountMinor: number,
+  lookupAuthorization: MutableLocalKemerBetLookupAuthorization,
+  depositAuthorization: MutableLocalKemerBetDepositAuthorization,
+  acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
+): Promise<LocalKemerBetDepositDispatchOutcome> {
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
+  const amountText = routineDepositAmountText(amountMinor);
   await openSearchSurface(page);
   const input = await requireEnabled(page.locator(selectors.playerIdInput));
   await input.fill('', { timeout: TIMEOUT_MS });
@@ -395,17 +495,18 @@ export async function executeExactOneUseLocalKemerBetDeposit(
   const amount = await requireEnabled(page.locator(selectors.amountInput));
   const notes = await requireEnabled(page.locator(selectors.notesInput));
   if ((await amount.inputValue()) !== '' || (await notes.inputValue()) !== '') unavailable();
-  await amount.fill(EXACT_AMOUNT_TEXT, { timeout: TIMEOUT_MS });
+  await amount.fill(amountText, { timeout: TIMEOUT_MS });
   await notes.fill('', { timeout: TIMEOUT_MS });
-  const trialTransfer = await verifyPreparedSurface(page, privatePlayer.identities);
+  const trialTransfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
   await trialTransfer.click({ trial: true, timeout: TIMEOUT_MS });
 
   // The server/database fence is intentionally requested only after the page is fully prepared.
   const finalAction = await acquireFinalAction();
-  const transfer = await verifyPreparedSurface(page, privatePlayer.identities);
+  const transfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
   if (finalAction.isFresh() !== true) unavailable();
-  const routeOutcome = depositAuthorization.begin(
+  const routeOutcome = depositAuthorization.beginRoutine(
     privatePlayer.internalPlayerId,
+    amountMinor,
     finalAction.isFresh,
   );
   let routeTimeout: ReturnType<typeof setTimeout> | undefined;

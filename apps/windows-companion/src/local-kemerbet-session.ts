@@ -16,7 +16,9 @@ import { verifyLocalKemerBetIdentity } from './local-kemerbet-identity.js';
 import {
   createLocalKemerBetDepositAuthorization,
   executeExactOneUseLocalKemerBetDeposit,
+  executeRoutineOneUseLocalKemerBetDeposit,
   type LocalKemerBetFinalAction,
+  type LocalKemerBetRoutineFinalAction,
 } from './local-kemerbet-deposit.js';
 import {
   createLocalKemerBetLookupAuthorization,
@@ -79,6 +81,11 @@ export interface LocalKemerBetSession {
   executeExactOneUseDeposit(
     playerId: string,
     acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
+  ): Promise<LocalKemerBetDepositDispatchOutcome>;
+  executeRoutineOneUseDeposit(
+    playerId: string,
+    amountMinor: number,
+    acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetDepositDispatchOutcome>;
   stop(): Promise<void>;
 }
@@ -508,6 +515,31 @@ export async function startLocalKemerBetSession(
         return await executeExactOneUseLocalKemerBetDeposit(
           page,
           playerId,
+          lookupAuthorization,
+          depositAuthorization,
+          acquireFinalAction,
+        );
+      } finally {
+        lookupAuthorization.clear();
+        depositAuthorization.clear();
+        operationInProgress = false;
+      }
+    },
+    async executeRoutineOneUseDeposit(
+      playerId: string,
+      amountMinor: number,
+      acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
+    ) {
+      const page = localPage;
+      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+        throw new Error('The local KemerBet execution session is unavailable.');
+      }
+      operationInProgress = true;
+      try {
+        return await executeRoutineOneUseLocalKemerBetDeposit(
+          page,
+          playerId,
+          amountMinor,
           lookupAuthorization,
           depositAuthorization,
           acquireFinalAction,

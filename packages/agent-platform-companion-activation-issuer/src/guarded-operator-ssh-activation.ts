@@ -26,7 +26,7 @@ export {
 
 type ActivationInput = Omit<
   GuardedOperatorActivationInput,
-  'administrator' | 'signHandoff' | 'disableDatabase'
+  'administrator' | 'signHandoff' | 'disableDatabase' | 'handoffSigningStartedAt'
 >;
 
 interface SshActivationAdapters {
@@ -66,6 +66,10 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
   let stage: GuardedOperatorActivationFailureStage = 'input_validation';
   try {
     if (!input || input.signal?.aborted || !device || !connection) throw new Error();
+    const signingStarted = input.trustedNow();
+    if (!(signingStarted instanceof Date) || !Number.isFinite(signingStarted.getTime()))
+      throw new Error();
+    const handoffSigningStartedAt = signingStarted.toISOString();
     stage = 'handoff_signing';
     let signed: SignedCompanionExecutionActivationHandoff | undefined = await adapters.sign(
       device,
@@ -78,7 +82,23 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
     const result = await adapters.activate(
       {
         ...input,
-        disableDatabase: () => stop(input.requestKey),
+        handoffSigningStartedAt,
+        disableDatabase: async () => {
+          // The stop client resolves only after the protected host acknowledges
+          // successful completion of its reviewed emergency SQL. Translate that
+          // acknowledgement to the existing supervisor receipt, rather than
+          // discarding it as void and making every confirmed stop look uncertain.
+          await stop(input.requestKey);
+          return Object.freeze({
+            schemaVersion: 1,
+            operation: 'companion_execution_emergency_disable',
+            deploymentTarget: 'production',
+            runtimeLogin: 'disabled',
+            companionExecution: 'disabled',
+            financialAuthority: 'disabled',
+            providerOutcomeRequiresReconciliation: true,
+          });
+        },
         signHandoff: async (requestKey) => {
           if (requestKey !== input.requestKey || !signed) throw new Error();
           const handoff = signed;

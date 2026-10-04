@@ -97,6 +97,8 @@ export interface GuardedOperatorActivationInput {
   readonly windowsEnvironment: NodeJS.ProcessEnv;
   /** Authenticated server operation; the production signing key never enters this process. */
   readonly signHandoff: (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff>;
+  /** Captured by the SSH coordinator before its one-use signing request, not by an Owner form. */
+  readonly handoffSigningStartedAt?: string;
   /** Runs the reviewed database emergency-disable operation on its own connection. */
   readonly disableDatabase: () => Promise<unknown>;
   readonly trustedNow: () => Date;
@@ -247,6 +249,9 @@ export async function runGuardedOperatorActivationWithAdapters(
           release,
           dataRoot: input.dataRoot,
           signHandoff: input.signHandoff,
+          ...(input.handoffSigningStartedAt
+            ? { handoffSigningStartedAt: input.handoffSigningStartedAt }
+            : {}),
           trustedNow: input.trustedNow,
         } satisfies GuardedCompanionHandoffPublicationInputs);
         if (!SHA256.test(handoff.handoffSha256) || signal.aborted) throw new Error();

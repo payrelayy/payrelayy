@@ -39,6 +39,8 @@ export interface GuardedCompanionHandoffPublicationInputs {
   readonly dataRoot: string;
   /** The protected server derives the body from this key and its own database snapshot. */
   readonly signHandoff: (requestKey: string) => Promise<SignedCompanionExecutionActivationHandoff>;
+  /** Source-only SSH context: time captured immediately before fetching this cached response. */
+  readonly handoffSigningStartedAt?: string;
   readonly trustedNow: () => Date;
 }
 
@@ -299,17 +301,31 @@ export async function publishGuardedCompanionHandoffWithSigner(
     // never send a caller-constructed body for the server to sign.
     const localBody = deriveGuardedCompanionHandoffBody(input);
     const startedAt = timestamp(localBody.issuedAt);
+    const signingStartedAt =
+      input.handoffSigningStartedAt === undefined
+        ? startedAt
+        : timestamp(input.handoffSigningStartedAt);
+    if (signingStartedAt < timestamp(input.request.requestedAt) || signingStartedAt > startedAt)
+      throw new Error();
     const directory = await canonicalPublicationDirectory(input.dataRoot);
     const signed = await input.signHandoff(input.request.requestKey);
     if (!exactDataRecord(signed, ['body', 'signerKeyId', 'signature'])) throw new Error();
     if (!exactDataRecord(signed.body, HANDOFF_BODY_KEYS)) throw new Error();
     const signedIssuedAt = timestamp(signed.body.issuedAt);
-    // A remote reply may be minted after the local preflight, but an old reply
-    // must not be replayed as a fresh signing operation.
-    if (signedIssuedAt < startedAt - MAX_SIGNER_CLOCK_SKEW_MS) throw new Error();
-    const expectedBody = deriveGuardedCompanionHandoffBody({
-      ...input,
-      trustedNow: () => new Date(signedIssuedAt),
+    // SSH must sign before the first query, then measure the local release.
+    // Judge signing freshness against that actual request time, while judging
+    // local evidence freshness NOW. Rewinding the release check to issuedAt
+    // falsely rejects every measurement made after the server signature.
+    if (
+      signedIssuedAt < signingStartedAt - MAX_SIGNER_CLOCK_SKEW_MS ||
+      signedIssuedAt < timestamp(input.request.requestedAt) ||
+      signedIssuedAt >= timestamp(input.request.expiresAt)
+    )
+      throw new Error();
+    const expectedBody: CompanionExecutionActivationHandoffBody = Object.freeze({
+      ...localBody,
+      issuedAt: signed.body.issuedAt,
+      notBefore: signed.body.issuedAt,
     });
     if (!validSignedReply(signed, expectedBody, signer)) throw new Error();
     const raw = JSON.stringify(signed);

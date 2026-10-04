@@ -938,6 +938,85 @@ export function registerCompanionExecutionActivationRequestSqlTests(
           },
         ]);
 
+        // Rehearse the actual Owner approval function after the one-use
+        // activation, not a directly inserted approval fixture. All rows and
+        // role changes are synthetic and rolled back before the existing test
+        // resumes; no provider operation or execution lease is performed.
+        await client.query('savepoint joined_owner_approval_rehearsal');
+        const approvalKey = randomUUID();
+        const approve = (jobId: string, key = approvalKey, actor = getOwnerAuthUserId()) =>
+          client.query<{
+            readonly approval: {
+              readonly alreadyApproved: boolean;
+              readonly approvedAt: string;
+              readonly expiresAt: string;
+            };
+          }>(
+            `select app.approve_owner_telebirr_execution(
+               $1::uuid, $2::uuid, $3::uuid
+             ) as approval`,
+            [actor, jobId, key],
+          );
+        const executionJobId = verifiedProof.row.execution_job_id!;
+        await client.query('savepoint non_owner_approval');
+        await expect(approve(executionJobId, approvalKey, randomUUID())).rejects.toThrow(
+          'Only the active Owner can approve execution.',
+        );
+        await client.query('rollback to savepoint non_owner_approval');
+        const approved = (await approve(executionJobId)).rows[0]!.approval;
+        expect(approved.alreadyApproved).toBe(false);
+        expect(Date.parse(approved.expiresAt)).toBeGreaterThan(Date.parse(approved.approvedAt));
+        expect((await approve(executionJobId)).rows).toEqual([
+          { approval: { ...approved, alreadyApproved: true } },
+        ]);
+        await client.query('savepoint changed_owner_approval');
+        await expect(approve(executionJobId, randomUUID())).rejects.toThrow(
+          'The selected deposit already has a different approval.',
+        );
+        await client.query('rollback to savepoint changed_owner_approval');
+        const approvalBinding = await client.query<{
+          readonly exact_job: boolean;
+          readonly later_approval: boolean;
+          readonly untouched_job: boolean;
+          readonly attempts: string;
+        }>(
+          `select approval.execution_job_id = $2::uuid as exact_job,
+                  approval.approved_at >= consumption.activated_at as later_approval,
+                  job.status = 'queued' and job.attempt_count = 0
+                    and job.lease_token is null as untouched_job,
+                  (select count(*) from app.deposit_execution_attempts
+                    where deposit_job_id = job.id) as attempts
+             from app.agent_platform_companion_execution_activation_consumptions consumption
+             join app.deposit_execution_owner_approvals approval
+               on approval.activation_epoch = consumption.activation_epoch
+              and approval.pilot_revision_id = consumption.pilot_revision_id
+              and approval.approved_by_admin_id = consumption.activated_by_admin_id
+             join app.deposit_jobs job on job.id = approval.execution_job_id
+            where consumption.request_key = $1::uuid`,
+          [requestKey, executionJobId],
+        );
+        expect(approvalBinding.rows).toEqual([
+          { exact_job: true, later_approval: true, untouched_job: true, attempts: '0' },
+        ]);
+        const secondPrepared = await prepareVerification(client, pilot, 1);
+        const secondVerified = await completeVerification(client, pilot, secondPrepared, {
+          disposition: 'settlement_candidate',
+          reasonCode: 'exact_proof_match',
+        });
+        await client.query('savepoint overlapping_owner_approval');
+        await expect(approve(secondVerified.row.execution_job_id!, randomUUID())).rejects.toThrow(
+          'Another deposit must finish or be reconciled first.',
+        );
+        await client.query('rollback to savepoint overlapping_owner_approval');
+        expect(
+          (
+            await client.query(
+              'select count(*) as approvals from app.deposit_execution_owner_approvals',
+            )
+          ).rows,
+        ).toEqual([{ approvals: '1' }]);
+        await client.query('rollback to savepoint joined_owner_approval_rehearsal');
+
         const watchdog = await client.query<{
           readonly lease_count: string;
           readonly initial_deadline_bounded: boolean;

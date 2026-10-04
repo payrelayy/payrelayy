@@ -15,10 +15,10 @@ import {
 } from './protected-operator-query-ssh-client.js';
 
 const REQUEST = '22222222-2222-4222-8222-222222222222';
-const input = { requestKey: REQUEST } as Omit<
-  GuardedOperatorActivationInput,
-  'administrator' | 'signHandoff' | 'disableDatabase'
->;
+const input = {
+  requestKey: REQUEST,
+  trustedNow: () => new Date('2026-10-04T12:00:00.000Z'),
+} as Omit<GuardedOperatorActivationInput, 'administrator' | 'signHandoff' | 'disableDatabase'>;
 const device = {} as ProtectedOperatorDeviceSigner;
 const connection = {} as ProtectedOperatorSshConnection;
 const closeRemote = vi.fn(async () => undefined);
@@ -122,9 +122,18 @@ describe('protected SSH one-job operator ordering', () => {
       }),
       activate: vi.fn(async (activation: GuardedOperatorActivationInput) => {
         order.push('activate');
+        expect(activation.handoffSigningStartedAt).toBe('2026-10-04T12:00:00.000Z');
         expect(await activation.signHandoff(REQUEST)).toBe(signed);
         await expect(activation.signHandoff(REQUEST)).rejects.toThrow();
-        await activation.disableDatabase();
+        expect(await activation.disableDatabase()).toEqual({
+          schemaVersion: 1,
+          operation: 'companion_execution_emergency_disable',
+          deploymentTarget: 'production',
+          runtimeLogin: 'disabled',
+          companionExecution: 'disabled',
+          financialAuthority: 'disabled',
+          providerOutcomeRequiresReconciliation: true,
+        });
         return 'confirmed' as const;
       }),
     } as unknown as Adapters;

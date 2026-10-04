@@ -44,6 +44,22 @@ describe('one-job operator diagnostic output', () => {
       ),
     ).toMatchObject({ failureStage: 'bootstrap_http_response' });
   });
+
+  it('reports primary and cleanup categories separately and redacts forged cleanup details', () => {
+    const error = new OneJobOperatorUnavailableError(
+      'guarded_activation',
+      'lifecycle_lock',
+      'remote_session_close',
+    );
+    expect(JSON.parse(redactedOneJobOperatorFailure(error, 'configuration'))).toMatchObject({
+      activationStage: 'lifecycle_lock',
+      activationCleanupStage: 'remote_session_close',
+    });
+    Object.assign(error, { activationCleanupStage: 'private reference or credentials' });
+    const output = redactedOneJobOperatorFailure(error, 'configuration');
+    expect(JSON.parse(output)).not.toHaveProperty('activationCleanupStage');
+    expect(output).not.toContain('private');
+  });
 });
 
 describe('explicit connection-preview command mode', () => {

@@ -137,11 +137,18 @@ const productionAdapters: GuardedOperatorActivationAdapters = {
 export class GuardedOperatorActivationUnavailableError extends Error {
   readonly requiresIndependentStopAndReconciliation = true;
   readonly activationStage: GuardedOperatorActivationFailureStage;
+  readonly cleanupStage: GuardedOperatorActivationFailureStage | undefined;
 
-  constructor(stage: GuardedOperatorActivationFailureStage = 'unconfirmed') {
+  constructor(
+    stage: GuardedOperatorActivationFailureStage = 'unconfirmed',
+    cleanupStage?: GuardedOperatorActivationFailureStage,
+  ) {
     super('The guarded one-job operator activation could not be confirmed.');
     this.name = 'GuardedOperatorActivationUnavailableError';
     this.activationStage = isGuardedOperatorActivationFailureStage(stage) ? stage : 'unconfirmed';
+    this.cleanupStage = isGuardedOperatorActivationFailureStage(cleanupStage)
+      ? cleanupStage
+      : undefined;
   }
 }
 
@@ -153,6 +160,16 @@ export function guardedOperatorActivationFailureStage(
     isGuardedOperatorActivationFailureStage(error.activationStage)
     ? error.activationStage
     : fallback;
+}
+
+/** Cleanup uncertainty is reported separately, never substituted for the first failure. */
+export function guardedOperatorActivationCleanupStage(
+  error: unknown,
+): GuardedOperatorActivationFailureStage | undefined {
+  return error instanceof GuardedOperatorActivationUnavailableError &&
+    isGuardedOperatorActivationFailureStage(error.cleanupStage)
+    ? error.cleanupStage
+    : undefined;
 }
 
 function boundedStop(child: GuardedCompanionOwnedChild): Promise<void> {
@@ -358,7 +375,10 @@ export async function runGuardedOperatorActivationWithAdapters(
     }
   }
   if (!result || cleanupFailed)
-    throw new GuardedOperatorActivationUnavailableError(cleanupStage ?? failureStage);
+    throw new GuardedOperatorActivationUnavailableError(
+      result ? (cleanupStage ?? failureStage) : failureStage,
+      cleanupStage,
+    );
   return result;
 }
 
@@ -380,6 +400,7 @@ export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndA
   let result: 'confirmed' | 'review_required' | undefined;
   let cleanupFailed = false;
   let failureStage: GuardedOperatorActivationFailureStage = 'remote_session_open';
+  let cleanupStage: GuardedOperatorActivationFailureStage | undefined;
   try {
     client = createGuardedOperatorQueryClient(remote);
     result = await runGuardedOperatorActivationWithAdapters(
@@ -388,6 +409,7 @@ export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndA
     );
   } catch (error) {
     failureStage = guardedOperatorActivationFailureStage(error, failureStage);
+    cleanupStage = guardedOperatorActivationCleanupStage(error);
     result = undefined;
   } finally {
     if (client) {
@@ -395,11 +417,15 @@ export async function runGuardedOperatorActivationWithProtectedRemoteSessionAndA
         await client.close();
       } catch {
         cleanupFailed = true;
-        failureStage = 'remote_session_close';
+        cleanupStage ??= 'remote_session_close';
       }
     }
   }
-  if (!result || cleanupFailed) throw new GuardedOperatorActivationUnavailableError(failureStage);
+  if (!result || cleanupFailed)
+    throw new GuardedOperatorActivationUnavailableError(
+      result ? 'remote_session_close' : failureStage,
+      cleanupStage,
+    );
   return result;
 }
 

@@ -72,6 +72,37 @@ describe('protected SSH one-job operator ordering', () => {
     expect(closeRemote).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the primary failure through both coordinator and SSH cleanup failures', async () => {
+    const failingClose = vi.fn(async () => {
+      throw new Error('private close error');
+    });
+    const adapters = {
+      stop: vi.fn(() => async () => undefined),
+      sign: vi.fn(() => async () => signed),
+      open: vi.fn(async () => ({ close: failingClose }) as unknown as GuardedOperatorRemoteSession),
+      activate: vi.fn(async () => {
+        throw new GuardedOperatorActivationUnavailableError(
+          'database_snapshot',
+          'lifecycle_lock_cleanup',
+        );
+      }),
+    } as unknown as Adapters;
+    const error = await runGuardedOperatorActivationOverSshWithAdapters(
+      input,
+      device,
+      connection,
+      adapters,
+    ).catch((value: unknown) => value);
+    expect(error).toMatchObject({
+      activationStage: 'database_snapshot',
+      cleanupStage: 'lifecycle_lock_cleanup',
+      requiresIndependentStopAndReconciliation: true,
+    });
+    expect(JSON.stringify(error)).not.toContain('private');
+    expect(failingClose).toHaveBeenCalledTimes(1);
+    expect(adapters.activate).toHaveBeenCalledTimes(1);
+  });
+
   it('signs before the first query and consumes the cached handoff exactly once', async () => {
     closeRemote.mockClear();
     const order: string[] = [];

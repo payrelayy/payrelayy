@@ -11,6 +11,7 @@ import {
 import { registerCompanionDevicePairingSqlTests } from './companion-device-pairing.suite.js';
 import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five-lookup.suite.js';
 import { registerCompanionExecutionActivationRequestSqlTests } from './companion-execution-activation-request.suite.js';
+import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
@@ -9747,6 +9748,7 @@ describe('disposable SQL migration baseline', () => {
 });
 
 registerDepositExecutionCommandSqlTests(() => client);
+registerOperatorLifecycleConnectionSqlTests(() => createSqlIntegrationClient(environment));
 registerCompanionDevicePairingSqlTests(
   () => client,
   () => ownerAdminId,

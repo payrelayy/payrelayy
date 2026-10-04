@@ -20,6 +20,10 @@ import {
 } from './launch-document.js';
 import { verifyPublishedCompanionRelease } from './release-verification.js';
 import {
+  inspectLifecycleConnection,
+  OPERATOR_BACKEND_SQL as BACKEND_SQL,
+} from './lifecycle-connection-diagnostic.js';
+import {
   activationDiagnosticReport,
   inspectOperatorActivationRequest,
   type ActivationDiagnosticReport,
@@ -36,7 +40,6 @@ const PROBE_SQL = `select case when session_user = 'postgres'
   and not pg_catalog.pg_is_in_recovery()
   and (select ssl from pg_catalog.pg_stat_ssl where pid = pg_catalog.pg_backend_pid())
   then 1 else 0 end`;
-const BACKEND_SQL = `select pg_catalog.pg_backend_pid() as backend_pid`;
 const SIGNER_SQL = `select signer.public_key_spki, signer.public_key_spki_sha256
   from app.agent_platform_companion_server_signers signer
   left join app.agent_platform_companion_server_signer_revocations revoked
@@ -174,13 +177,18 @@ type DiagnosticPhase =
   | 'independent_psql'
   | 'node_database'
   | 'database_boundary'
+  | 'backend_binding'
+  | 'lifecycle_lock'
+  | 'lifecycle_lock_release'
   | 'server_signer'
   | 'execution_signer'
   | 'loopback_bind'
   | 'cleanup';
 
 /**
- * No request is prepared or consumed here. The diagnostic performs only SELECTs,
+ * No request is prepared or consumed here. The diagnostic performs only SELECTs
+ * inside a read-only transaction, briefly acquires/releases the exact session-only
+ * operator lock, and closes its dedicated connection on every outcome. It
  * validates the already-installed signer, and briefly binds a handler-free
  * loopback socket. It never constructs an execution session or calls a
  * financial transition. Only a fixed phase label leaves the container.
@@ -216,6 +224,15 @@ export async function diagnoseOperatorHost(
     phase = 'database_boundary';
     const probe = await client.query(PROBE_SQL);
     if (probe.rows.length !== 1 || probe.rows[0]?.case !== 1) throw new Error();
+    phase = await inspectLifecycleConnection({
+      async query(sql, values) {
+        const result = await client!.query(sql, values);
+        return { rows: result.rows as Record<string, unknown>[] };
+      },
+      on: (event, listener) => client!.on(event, listener),
+      off: (event, listener) => client!.off(event, listener),
+    });
+    if (phase !== 'ready') throw new Error();
     phase = 'server_signer';
     signerPublicKey((await client.query(SIGNER_SQL, [SIGNER_KEY_ID])).rows);
     phase = 'execution_signer';

@@ -11,6 +11,10 @@ on:
         description: Type DIAGNOSE DORMANT COMPANION OPERATOR STARTUP
         required: true
         type: string
+      diagnostic_image_revision:
+        description: Installed diagnostic image revision; blank uses the existing session pin
+        required: false
+        type: string
       job_scope:
         description: Inspect an empty queue or preserve its sole untouched stopped-pilot job
         required: true
@@ -45,6 +49,7 @@ jobs:
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
       DIAGNOSTIC_JOB_SCOPE: ${{ inputs.job_scope }}
+      DIAGNOSTIC_IMAGE_REVISION: ${{ inputs.diagnostic_image_revision }}
     steps:
       - name: Check out exact main without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,6 +138,7 @@ jobs:
               ssh_key|ssh_host_pin|database_certificate|pooler_status|queue_boundary|\
               capability_boundary|queue_fingerprint|host_inspection|\
               startup_probe|ca_staging|independent_psql|node_database|database_boundary|\
+              backend_binding|lifecycle_lock|lifecycle_lock_release|\
               server_signer|execution_signer|loopback_bind|postflight|ready|cleanup) ;;
               *) diagnostic_stage=unknown_guard ;;
             esac
@@ -156,8 +162,14 @@ jobs:
              -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
           diagnostic_stage=installed_revision
           # The reviewed session pin describes the installed image, not new workflow code.
-          revision="$(sed -nE 's/^  PRODUCTION_OPERATOR_IMAGE_REVISION: ([0-9a-f]{40})$/\1/p' \
-            .github/workflows/production-companion-operator-session.yml)"
+          revision="$DIAGNOSTIC_IMAGE_REVISION"
+          if [[ -z "$revision" ]]; then
+            revision="$(sed -nE 's/^  PRODUCTION_OPERATOR_IMAGE_REVISION: ([0-9a-f]{40})$/\1/p' \
+              .github/workflows/production-companion-operator-session.yml)"
+          else
+            # An optional diagnostic installation never repins the execution workflow.
+            [[ "$revision" == "$GITHUB_SHA" ]]
+          fi
           [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
           diagnostic_stage=protected_temp
           protected="$(mktemp -d "$RUNNER_TEMP/operator-startup-diagnostic.XXXXXXXX")"
@@ -242,7 +254,7 @@ jobs:
               "sudo -n '$launcher' diagnose '$revision'" 2>/dev/null)"
           status=$?
           set -e
-          [[ "$result" =~ ^protected_operator_diagnostic=(ready|ca_staging|independent_psql|node_database|database_boundary|server_signer|execution_signer|loopback_bind|cleanup)$ ]] || {
+          [[ "$result" =~ ^protected_operator_diagnostic=(ready|ca_staging|independent_psql|node_database|database_boundary|backend_binding|lifecycle_lock|lifecycle_lock_release|server_signer|execution_signer|loopback_bind|cleanup)$ ]] || {
             echo '::error::The diagnostic did not return a fixed classification.' >&2
             exit 1
           }

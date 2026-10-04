@@ -13,6 +13,10 @@ import {
   OwnerExecutionApprovalConflictError,
   OwnerExecutionApprovalRejectedError,
 } from './owner-telebirr-execution-approvals.js';
+import {
+  OwnerRoutineProcessingConflictError,
+  OwnerRoutineProcessingRejectedError,
+} from './owner-routine-telebirr-processing.js';
 
 import {
   OwnerDepositIntakeRejectedError,
@@ -2081,6 +2085,79 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get('/v1/owner/routine-telebirr-processing', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as object).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.routineProcessing)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const configuration = await dependencies.runtime.routineProcessing.get(authUserId);
+      return reply.code(200).send({ configuration });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerRoutineProcessingRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      request.log.warn('Owner routine processing configuration is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  for (const operation of ['save', 'stop'] as const) {
+    app.post('/v1/owner/routine-telebirr-processing/' + operation, async (request, reply) => {
+      try {
+        const body = exactObject(
+          request.body,
+          operation === 'save' ? ['requestId', 'platformAgentAccountId'] : ['requestId'],
+        );
+        if (
+          Object.keys(request.query as object).length !== 0 ||
+          !body ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            'owner-routine-telebirr-processing-v1' ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId ||
+          (operation === 'save' &&
+            (typeof body.platformAgentAccountId !== 'string' ||
+              !UUID_V4_PATTERN.test(body.platformAgentAccountId)))
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.routineProcessing)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const configuration =
+          operation === 'save'
+            ? await dependencies.runtime.routineProcessing.save(
+                authUserId,
+                body.platformAgentAccountId as string,
+                body.requestId,
+              )
+            : await dependencies.runtime.routineProcessing.stop(authUserId, body.requestId);
+        return reply.code(200).send({ configuration });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerRoutineProcessingRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerRoutineProcessingConflictError)
+          return reply.code(409).send({ error: 'routine_configuration_not_ready' });
+        request.log.warn('Owner routine processing configuration could not be confirmed.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    });
+  }
 
   app.post<{ Params: { executionJobId: string } }>(
     '/v1/owner/telebirr-execution/approvals/:executionJobId',

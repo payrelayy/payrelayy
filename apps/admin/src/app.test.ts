@@ -561,6 +561,108 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('saves only a persistent business policy through verified Owner and exact mutation headers', async () => {
+    const platformAgentAccountId = '88888888-8888-4888-8888-888888888888';
+    const requestId = '99999999-9999-4999-8999-999999999999';
+    const configuration = {
+      configurationState: 'not_configured' as const,
+      executionEnabled: false as const,
+      authorizationId: null,
+      revision: null,
+      platformAgentAccountId: null,
+      authorizedAt: null,
+      changedAt: null,
+      policy: null,
+    };
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineProcessing: {
+          get: async (actor) => {
+            calls.push(['get', actor]);
+            return configuration;
+          },
+          save: async (actor, selectedAccount, key) => {
+            calls.push(['save', actor, selectedAccount, key]);
+            return configuration;
+          },
+          stop: async (actor, key) => {
+            calls.push(['stop', actor, key]);
+            return configuration;
+          },
+        },
+      }),
+    });
+    const url = '/v1/owner/routine-telebirr-processing';
+    const headers = {
+      authorization: `Bearer ${bearer}`,
+      origin: 'http://127.0.0.1:3002',
+      'content-type': 'application/json',
+      'x-fetanagent-owner-csrf': 'owner-routine-telebirr-processing-v1',
+      'x-idempotency-key': requestId,
+    };
+    try {
+      expect((await app.inject(url)).statusCode).toBe(403);
+      expect((await app.inject({ url, headers })).json()).toEqual({ configuration });
+      expect((await app.inject({ url: url + '?extra=true', headers })).statusCode).toBe(400);
+      for (const invalidHeaders of [
+        { ...headers, origin: 'https://untrusted.example.invalid' },
+        { ...headers, 'x-idempotency-key': platformAgentAccountId },
+        { ...headers, 'x-fetanagent-owner-csrf': 'owner-telebirr-execution-approval-v1' },
+      ]) {
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: url + '/save',
+              headers: invalidHeaders,
+              payload: { requestId, platformAgentAccountId },
+            })
+          ).statusCode,
+        ).toBe(400);
+      }
+      for (const extra of [
+        { executionEnabled: true },
+        { amountMinor: 2500 },
+        { actorAuthUserId: authUserId },
+      ]) {
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: url + '/save',
+              headers,
+              payload: { requestId, platformAgentAccountId, ...extra },
+            })
+          ).statusCode,
+        ).toBe(400);
+      }
+      expect(calls).toEqual([['get', authUserId]]);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: url + '/save',
+            headers,
+            payload: { requestId, platformAgentAccountId },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (await app.inject({ method: 'POST', url: url + '/stop', headers, payload: { requestId } }))
+          .statusCode,
+      ).toBe(200);
+      expect(calls).toEqual([
+        ['get', authUserId],
+        ['save', authUserId, platformAgentAccountId, requestId],
+        ['stop', authUserId, requestId],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('lists verified jobs and requires an interactive one-use Owner approval request', async () => {
     const jobId = '88888888-8888-4888-8888-888888888888';
     const requestId = '99999999-9999-4999-8999-999999999999';

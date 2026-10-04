@@ -14,6 +14,7 @@ import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pa
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
 import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
 import { PostgresOwnerTelebirrExecutionApprovals } from './owner-telebirr-execution-approvals.js';
+import { PostgresOwnerRoutineTelebirrProcessing } from './owner-routine-telebirr-processing.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
@@ -27,6 +28,8 @@ export interface OwnerControlPostgresRuntime {
     Pick<PostgresOwnerCompanionExecutionReadiness, 'status'> | undefined;
   readonly executionApprovals?:
     Pick<PostgresOwnerTelebirrExecutionApprovals, 'list' | 'approve'> | undefined;
+  readonly routineProcessing?:
+    Pick<PostgresOwnerRoutineTelebirrProcessing, 'get' | 'save' | 'stop'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
@@ -173,6 +176,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 'execute'), true) as companion_execution_readiness_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 'execute'), true) as execution_approval_list_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 'execute'), true) as execution_approval_write_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_processing(uuid)')::oid, 'execute'), true) as routine_processing_read_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)')::oid, 'execute'), true) as routine_processing_save_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)')::oid, 'execute'), true) as routine_processing_stop_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
@@ -225,6 +231,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)') is not null)::integer
         + (to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)') is not null)::integer
+        + (to_regprocedure('app.get_owner_routine_telebirr_processing(uuid)') is not null)::integer
+        + (to_regprocedure('app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)') is not null)::integer
+        + (to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -269,6 +278,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_companion_execution_readiness(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_processing(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)
@@ -342,6 +354,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     executionApprovals: new PostgresOwnerTelebirrExecutionApprovals({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    routineProcessing: new PostgresOwnerRoutineTelebirrProcessing({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     supportContact: new PostgresOwnerSupportContact({

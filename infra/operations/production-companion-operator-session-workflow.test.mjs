@@ -31,7 +31,7 @@ test('retains independent emergency revocation after request preparation begins'
 });
 
 test('selects the diagnostic companion release without adding an automatic session trigger', () => {
-  assert.match(workflow, /PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0\.1\.20/u);
+  assert.match(workflow, /PRODUCTION_COMPANION_RELEASE_TAG: windows-companion-v0\.1\.21/u);
   assert.match(
     workflow,
     /PRODUCTION_OPERATOR_IMAGE_REVISION: a10b597547db6b556453401fe921512ad84ff964/u,

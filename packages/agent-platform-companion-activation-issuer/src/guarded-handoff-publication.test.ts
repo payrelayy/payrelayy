@@ -301,6 +301,61 @@ describe('guarded companion handoff publication', () => {
     expect(result.expiresAt).toBe('2026-09-26T14:09:00.000Z');
   });
 
+  it('publishes a pre-query cached reply against a later fresh local measurement', async () => {
+    const input = await fixture();
+    const cached = await serverSign(input)(request.requestKey);
+    const result = await publishGuardedCompanionHandoffWithSigner(
+      {
+        ...input,
+        release: { ...release, observedAt: '2026-09-26T12:00:20.000Z' },
+        handoffSigningStartedAt: '2026-09-26T12:00:00.000Z',
+        signHandoff: async () => cached,
+        trustedNow: () => new Date('2026-09-26T12:00:21.000Z'),
+      },
+      trustedSigner,
+    );
+    const envelope = JSON.parse(await readFile(fileFor(input), 'utf8'));
+    expect(envelope).toEqual(cached);
+    expect(result.expiresAt).toBe('2026-09-26T14:09:00.000Z');
+  });
+
+  it.each(['2026-09-26T12:00:22.000Z', '2026-09-26T11:58:59.000Z', '2026-09-26T12:00:00Z'])(
+    'rejects an invalid cached signing context: %s',
+    async (handoffSigningStartedAt) => {
+      const input = await fixture();
+      const cached = await serverSign(input)(request.requestKey);
+      await unavailable({
+        ...input,
+        release: { ...release, observedAt: '2026-09-26T12:00:20.000Z' },
+        handoffSigningStartedAt,
+        signHandoff: async () => cached,
+        trustedNow: () => new Date('2026-09-26T12:00:21.000Z'),
+      });
+      await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
+  it('does not let cached signing context accept an old signature or stale local evidence', async () => {
+    const input = await fixture();
+    const old = await serverSign(input, '2026-09-26T11:59:54.000Z')(request.requestKey);
+    await unavailable({
+      ...input,
+      release: { ...release, observedAt: '2026-09-26T12:00:20.000Z' },
+      handoffSigningStartedAt: '2026-09-26T12:00:00.000Z',
+      signHandoff: async () => old,
+      trustedNow: () => new Date('2026-09-26T12:00:21.000Z'),
+    });
+    const cached = await serverSign(input)(request.requestKey);
+    await unavailable({
+      ...input,
+      release: { ...release, observedAt: '2026-09-26T12:00:00.000Z' },
+      handoffSigningStartedAt: '2026-09-26T12:00:00.000Z',
+      signHandoff: async () => cached,
+      trustedNow: () => new Date('2026-09-26T12:02:01.000Z'),
+    });
+    await expect(readFile(fileFor(input))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('rejects a stale or future server reply without publishing a file', async () => {
     const input = await fixture();
     await unavailable({

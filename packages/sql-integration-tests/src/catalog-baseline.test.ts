@@ -13,6 +13,7 @@ import { registerCompanionExactFiveLookupSqlTests } from './companion-exact-five
 import { registerCompanionExecutionActivationRequestSqlTests } from './companion-execution-activation-request.suite.js';
 import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
+import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
 import { registerExpiredTelebirrPredecessorSqlTests } from './expired-telebirr-predecessor.suite.js';
@@ -6826,6 +6827,7 @@ describe('disposable SQL migration baseline', () => {
     expect(nonTriggerEligibilityReaders.rows).toEqual([
       { signature: 'app.agent_platform_companion_current_exact_five_players()' },
       { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
+      { signature: 'app.assess_routine_telebirr_execution_job(uuid)' },
       {
         signature:
           'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
@@ -6910,6 +6912,7 @@ describe('disposable SQL migration baseline', () => {
          and procedure.oid in (
             'app.agent_platform_companion_current_exact_five_players()'::regprocedure,
             'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)'::regprocedure,
+            'app.assess_routine_telebirr_execution_job(uuid)'::regprocedure,
            'app.complete_private_live_telebirr_verification_internal(uuid,uuid,uuid,text,text,text,text,text,timestamptz,text,text,text,timestamptz,text,text,text,timestamptz,bigint,timestamptz,text)'::regprocedure,
            'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)'::regprocedure,
            'app.enqueue_verified_deposit_execution(uuid)'::regprocedure,
@@ -6948,6 +6951,15 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)',
+      },
+      {
+        customer_web_runtime: false,
+        deposit_executor_runtime: false,
+        owner_control_runtime: false,
+        player_actions_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.assess_routine_telebirr_execution_job(uuid)',
       },
       {
         customer_web_runtime: false,
@@ -8628,6 +8640,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.admit_routine_telebirr_execution_job(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature:
           'app.agent_platform_companion_execution_certificate_is_active(uuid,text,text,text,timestamp with time zone)',
       },
@@ -8655,6 +8673,12 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.assess_routine_telebirr_execution_job(uuid)',
       },
       {
         deposit_executor_runtime: true,
@@ -9748,6 +9772,10 @@ describe('disposable SQL migration baseline', () => {
 });
 
 registerDepositExecutionCommandSqlTests(() => client);
+registerRoutineTelebirrProcessingPolicySqlTests(
+  () => client,
+  () => ownerAuthUserId,
+);
 registerOperatorLifecycleConnectionSqlTests(() => createSqlIntegrationClient(environment));
 registerCompanionDevicePairingSqlTests(
   () => client,

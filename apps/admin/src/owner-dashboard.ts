@@ -465,6 +465,27 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <dl id="execution-readiness-facts"></dl>
         </section>
 
+        <section class="review-section" aria-labelledby="routine-processing-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Persistent business policy</p>
+              <h2 id="routine-processing-title">Routine TeleBirr processing</h2>
+            </div>
+            <button class="secondary" id="routine-processing-refresh" type="button">Refresh policy</button>
+          </div>
+          <p class="receipt-label">
+            25–25,000 ETB per deposit, any active deposit-eligible Player, no daily or deposit-count
+            quota. Process one at a time; uncertain results pause the queue. This policy has no
+            expiry. Saving it does not enable execution; the routine operator connection is not
+            available in this release. The pilot approval controls below are a separate mode.
+          </p>
+          <p class="request-meta" id="routine-processing-status" role="status">Sign in to load the saved policy.</p>
+          <div class="review-actions">
+            <button id="routine-processing-save" type="button" disabled>Save persistent routine policy</button>
+            <button class="danger" id="routine-processing-stop" type="button" disabled>Stop routine policy</button>
+          </div>
+        </section>
+
         <section class="review-section" aria-labelledby="execution-approvals-title">
           <div class="panel-heading">
             <div>
@@ -714,6 +735,13 @@ const executionReadinessFacts = document.querySelector('#execution-readiness-fac
 const executionApprovalsRefresh = document.querySelector('#execution-approvals-refresh');
 const executionApprovalsStatus = document.querySelector('#execution-approvals-status');
 const executionApprovalsList = document.querySelector('#execution-approvals-list');
+const routineProcessingRefresh = document.querySelector('#routine-processing-refresh');
+const routineProcessingSave = document.querySelector('#routine-processing-save');
+const routineProcessingStop = document.querySelector('#routine-processing-stop');
+const routineProcessingStatus = document.querySelector('#routine-processing-status');
+let routineProcessingLoaded = false;
+let routineProcessingBusy = false;
+let routineProcessingState;
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
 const pilotConfirmation = document.querySelector('#pilot-confirmation');
@@ -1565,6 +1593,118 @@ function clearExecutionReadiness() {
 function clearExecutionApprovals() {
   executionApprovalsList.replaceChildren();
   executionApprovalsStatus.textContent = 'Sign in to check the approval queue.';
+  routineProcessingLoaded = false;
+  routineProcessingState = undefined;
+  routineProcessingStatus.textContent = 'Sign in to load the saved policy.';
+  routineProcessingSave.disabled = true;
+  routineProcessingStop.disabled = true;
+}
+
+function updateRoutineProcessingAvailability() {
+  routineProcessingSave.disabled = !accessToken || !routineProcessingLoaded ||
+    routineProcessingBusy || kemerbetAgentProfileLoadState !== 'loaded' || !activeKemerbetAgentProfileId;
+  routineProcessingStop.disabled = !accessToken || !routineProcessingLoaded ||
+    routineProcessingBusy || routineProcessingState?.configurationState !== 'authorized';
+}
+
+function renderRoutineProcessing(value) {
+  const expectedPolicy = {
+    mode: 'routine_production', version: 1, provider: 'telebirr', platformCode: 'kemerbet',
+    currencyCode: 'ETB', minimumAmountMinor: 2500, maximumAmountMinor: 2500000,
+    freshnessWindowSeconds: 3600, playerScope: 'all_active_deposit_eligible',
+    playerOwnershipRequired: false, dailyQuotaMinor: null, successfulDepositQuota: null,
+    maxConcurrentDeposits: 1, amountSource: 'official_receipt_settled_amount',
+  };
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !==
+      'authorizationId,authorizedAt,changedAt,configurationState,executionEnabled,platformAgentAccountId,policy,revision' ||
+    !['not_configured', 'authorized', 'stopped'].includes(value.configurationState) ||
+    value.executionEnabled !== false ||
+    (value.authorizationId === null
+      ? value.configurationState === 'authorized' || value.authorizedAt !== null ||
+        value.platformAgentAccountId !== null || value.revision !== null || value.policy !== null ||
+        (value.configurationState === 'not_configured' ? value.changedAt !== null :
+          typeof value.changedAt !== 'string' || !Number.isFinite(Date.parse(value.changedAt)))
+      : value.configurationState === 'not_configured' ||
+        typeof value.authorizationId !== 'string' || typeof value.platformAgentAccountId !== 'string' ||
+        typeof value.revision !== 'string' || !/^[1-9][0-9]{0,18}$/.test(value.revision) ||
+        BigInt(value.revision) > 9223372036854775807n ||
+        typeof value.authorizedAt !== 'string' || !Number.isFinite(Date.parse(value.authorizedAt)) ||
+        typeof value.changedAt !== 'string' || !Number.isFinite(Date.parse(value.changedAt)) ||
+        Date.parse(value.changedAt) < Date.parse(value.authorizedAt) ||
+        !value.policy || Array.isArray(value.policy) ||
+        Object.keys(value.policy).sort().join(',') !== Object.keys(expectedPolicy).sort().join(',') ||
+        Object.entries(expectedPolicy).some(([key, expected]) => value.policy[key] !== expected))) {
+    throw new Error('routine_processing');
+  }
+  routineProcessingState = value;
+  routineProcessingLoaded = true;
+  routineProcessingStatus.textContent = value.configurationState === 'authorized'
+    ? 'Persistent policy saved; no expiry. Execution is not enabled. Saved ' + new Date(value.authorizedAt).toLocaleString() + '.'
+    : value.configurationState === 'stopped'
+      ? 'Routine policy stopped. Payment evidence and queued jobs are preserved; no execution is enabled.'
+      : 'No routine policy saved. Execution is not enabled.';
+  updateRoutineProcessingAvailability();
+}
+
+async function loadRoutineProcessing() {
+  if (!accessToken || routineProcessingBusy) return;
+  const selectedGeneration = ownerAuthGeneration;
+  routineProcessingBusy = true;
+  routineProcessingRefresh.disabled = true;
+  updateRoutineProcessingAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-processing', { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('routine_processing');
+    const payload = await response.json();
+    if (!accessToken || ownerAuthGeneration !== selectedGeneration) return;
+    renderRoutineProcessing(payload.configuration);
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === selectedGeneration && !isSignedOutError(error)) {
+      routineProcessingLoaded = false;
+      routineProcessingState = undefined;
+      routineProcessingStatus.textContent = 'Routine policy controls are not available yet. Execution is not enabled.';
+    }
+  } finally {
+    routineProcessingBusy = false;
+    routineProcessingRefresh.disabled = false;
+    updateRoutineProcessingAvailability();
+  }
+}
+
+async function mutateRoutineProcessing(operation) {
+  if (!accessToken || !routineProcessingLoaded || routineProcessingBusy ||
+    !['save', 'stop'].includes(operation) ||
+    (operation === 'stop' && routineProcessingState?.configurationState !== 'authorized') ||
+    (operation === 'save' && (kemerbetAgentProfileLoadState !== 'loaded' || !activeKemerbetAgentProfileId))) return;
+  if (operation === 'save' && !window.confirm(
+    'Save a persistent routine TeleBirr policy: 25–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving this policy does not start execution.'
+  )) return;
+  const selectedGeneration = ownerAuthGeneration;
+  const requestId = crypto.randomUUID();
+  routineProcessingBusy = true;
+  routineProcessingRefresh.disabled = true;
+  updateRoutineProcessingAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-processing/' + operation, {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-processing-v1', 'x-idempotency-key': requestId },
+      body: JSON.stringify(operation === 'save' ? { requestId, platformAgentAccountId: activeKemerbetAgentProfileId } : { requestId }),
+    });
+    if (!response.ok) throw new Error('routine_processing');
+    const payload = await response.json();
+    if (!accessToken || ownerAuthGeneration !== selectedGeneration) return;
+    renderRoutineProcessing(payload.configuration);
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === selectedGeneration && !isSignedOutError(error)) {
+      routineProcessingLoaded = false;
+      routineProcessingStatus.textContent = 'The policy change could not be confirmed. Refresh policy before trying again; it did not enable execution.';
+    }
+  } finally {
+    routineProcessingBusy = false;
+    routineProcessingRefresh.disabled = false;
+    updateRoutineProcessingAvailability();
+  }
 }
 
 function validExecutionReadiness(value) {
@@ -2558,6 +2698,7 @@ function renderKemerbetAgentProfiles(profiles) {
   activeKemerbetAgentProfileId = profiles.find((profile) => profile.profileStatus === 'active')
     ?.platformAgentAccountId;
   kemerbetAgentProfileLoadState = 'loaded';
+  updateRoutineProcessingAvailability();
   if (!activeKemerbetAgentProfileId || previousLoadState !== 'loaded' ||
       previousActiveProfileId !== activeKemerbetAgentProfileId) {
     invalidateKemerbetLifecycleApplications();
@@ -4963,6 +5104,7 @@ async function loadOwnerPlayerQueues() {
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),
+      loadRoutineProcessing(),
       loadCompanionLookupStatus(),
       loadCompanionConnection(),
     ]);
@@ -5244,6 +5386,9 @@ pilotPrepareForm.addEventListener('submit', async (event) => {
 pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 executionReadinessRefresh.addEventListener('click', loadExecutionReadiness);
 executionApprovalsRefresh.addEventListener('click', loadExecutionApprovals);
+routineProcessingRefresh.addEventListener('click', loadRoutineProcessing);
+routineProcessingSave.addEventListener('click', () => mutateRoutineProcessing('save'));
+routineProcessingStop.addEventListener('click', () => mutateRoutineProcessing('stop'));
 pilotArmButton.addEventListener('click', armFixedPilot);
 pilotStopButton.addEventListener('click', stopCurrentPilot);
 companionDevicePairingConfirmation.addEventListener(

@@ -203,6 +203,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_owner_companion_connection_status(uuid)' },
         { signature: 'app.get_owner_companion_execution_readiness(uuid)' },
+        { signature: 'app.get_owner_routine_telebirr_processing(uuid)' },
         { signature: 'app.get_owner_support_contact(uuid)' },
         { signature: 'app.get_owner_telebirr_shadow_verification_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
@@ -255,7 +256,9 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature:
             'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
         },
+        { signature: 'app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)' },
         { signature: 'app.set_owner_support_contact(uuid,text,integer)' },
+        { signature: 'app.stop_owner_routine_telebirr_processing(uuid,uuid)' },
         { signature: 'app.stop_private_live_deposit_pilot(uuid,uuid,text)' },
       ]);
 

@@ -2,9 +2,10 @@
 
 This implements the Windows execution core for the approved
 [TeleBirr product contract](telebirr-deposit-product-contract.md). It is not a go-live declaration.
-The production database broker, signed routine authorization channel and deployment entry point
-are not connected to this core yet. The existing v2 pilot and Owner-approved one-job path remain
-unchanged, and merging this code does not start automatic deposits.
+Persistent Owner policy storage and verified-job admission are implemented alongside the Windows
+core. The production claim/fence/reconciliation broker, signed routine authorization channel and
+deployment entry point are not connected to this core yet. The existing v2 pilot and Owner-approved
+one-job path remain unchanged, and merging this code does not start automatic deposits.
 
 ## Business rules
 
@@ -50,15 +51,44 @@ another job. The pause is set locally before any pause-notification I/O.
 It has an abortable idle interval, stops on uncertainty and closes its browser session exactly once.
 It is not imported or started by the production/read-only entry point.
 
+### Persistent policy and database admission
+
+`20261004212527_persistent_routine_telebirr_processing_policy.sql` stores the Owner's routine
+business scope separately from the twelve-hour pilot and individual deposit approvals. The policy
+has no expiry, daily quota or successful-deposit quota. Saving the same active scope retains its
+authorization ID and original authorization time; it does not renew a testing window. Stops are
+append-only and persistent, and replaying an older save request cannot undo a later stop.
+
+Owner-control exposes only read, save and stop configuration procedures through
+`/v1/owner/routine-telebirr-processing`. Mutation routes require the existing verified Owner,
+same-origin request boundary and matching idempotency key. The dashboard explicitly distinguishes
+"policy saved" from execution enabled. This release always reports `executionEnabled: false`;
+none of these procedures opens an operator, changes financial switches or creates a job.
+
+The private `assess_routine_telebirr_execution_job` and `admit_routine_telebirr_execution_job`
+procedures recheck a current authorization, active KemerBet agent and deposit policy, current
+validated/eligible destination, exact verified receipt amount and receiver revision, original
+submission freshness and the unique global payment claim. Admission binds an untouched queued
+job to that immutable lineage. It does not create an execution attempt, lease the job or authorize
+Transfer. Old pilot reservations and payments predating the authorization cannot be adopted.
+There is no five-Player or five-deposit quota. The client/operator/API/Owner roles cannot execute
+these internal admission procedures or write their ledgers directly.
+
+New admission metadata is not a substitute for the existing durable execution-attempt/account
+lane. The future authenticated routine broker must use that ledger for atomic claim, fence and
+reconciliation. The fixed-pilot insertion/lease/final-action guards and one-job Owner approval
+gate are deliberately unchanged by this policy/admission migration.
+
 ## Remaining production integration
 
 The `RoutineDepositExecutionStore` port is deliberately not a mock production adapter. Before
 routine mode can be enabled, its real implementation must:
 
-1. Persist the Owner's routine authorization separately from pilot/per-job approvals. Keep its
-   policy/version binding current through revocation and emergency stop.
-2. Select verified receipt-derived jobs outside the five-Player/fixed-25-ETB pilot boundary.
-   Recheck the current Player eligibility, exact verified amount and global one-use payment claim.
+1. Connect the saved routine authorization to a distinctly authorized production runtime,
+   retaining its policy/version binding through revocation and emergency stop.
+2. Connect the routine receipt-intake/settlement path and internal admission to the authenticated
+   broker, outside the five-Player/fixed-25-ETB pilot boundary. Readiness metadata alone is not a
+   financial capability or a replacement for the existing verified-payment ledger.
 3. Use the existing durable execution-attempt/agent-account blocking ledger, not just this process's
    `busy` flag. Claim, fence and complete operations must be atomic; multiple processes must not
    open parallel account lanes. A prepared/fenced/uncertain attempt must not become a fresh
@@ -72,14 +102,18 @@ routine mode can be enabled, its real implementation must:
 6. Wire the routine runner into an explicitly authorized launcher, renewal/stop handling and
    production readiness projection. Verify the whole path without a live payment before rollout.
 
-These are integration requirements, not new daily business limits. No migration, role grant,
-production switch, phone enrollment, deployment or live financial action is performed by this PR.
+These are integration requirements, not new daily business limits. The policy migration includes
+only three Owner configuration function grants; it adds no worker execution grant or new login.
+Adding/merging the migration does not apply it to production. No production switch, phone
+enrollment, deployment or live financial action is performed by the implementation PRs.
 
 ## Verification
 
 ```powershell
 pnpm -r run build
 pnpm --filter @fetanagent/windows-companion test
+pnpm --filter @fetanagent/admin test
+pnpm test:sql
 node infra/verify-companion-execution-v2-deployment.mjs
 ```
 
@@ -89,3 +123,9 @@ than five distinct deposits for one Player. Isolated Windows Chrome tests exerci
 adapter at 25.00, 25.01 and 25,000.00 ETB and reject wrong authority or UI tampering. All fixture
 requests are fulfilled/aborted locally; they cannot reach KemerBet or move money. Those fixtures
 do not prove a production deposit or production reconciliation has succeeded.
+
+Disposable PostgreSQL coverage additionally checks immutable policy/stop history, non-reactivating
+request replay, exact scope, zero execution privileges, minimum/cents/maximum receipt-derived
+admission, more than five distinct deposits, current eligibility/agent/receiver rechecks, and
+refusal to lease a readiness-only job through the unchanged Owner approval gate. The harness
+uses only synthetic data in an isolated local container, never a Supabase application database.

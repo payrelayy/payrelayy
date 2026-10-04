@@ -157,10 +157,12 @@ async function rotateActiveKemerbetAgent(client: Client, suffix: string): Promis
   );
 }
 
-async function createVerifiedDepositFixture(
+export async function createVerifiedDepositFixture(
   client: Client,
   suffix: string,
+  options: { readonly providerCode?: 'cbe_birr' | 'telebirr'; readonly amountMinor?: number } = {},
 ): Promise<VerifiedDepositFixture> {
+  const amountMinor = options.amountMinor ?? 2500;
   const referenceFingerprint = createHash('sha256')
     .update(`production-command-reference:${suffix}`, 'utf8')
     .digest('hex');
@@ -208,16 +210,19 @@ async function createVerifiedDepositFixture(
   const paymentBoundary = await client.query<{
     readonly payment_provider_id: string;
     readonly receiver_account_id: string;
-  }>(`
+  }>(
+    `
     select provider.id as payment_provider_id,
            receiver.id as receiver_account_id
       from app.payment_providers provider
       join app.receiver_accounts receiver
         on receiver.provider_id = provider.id
        and receiver.status = 'active'
-     where provider.code = 'cbe_birr'
+     where provider.code = $1::text
        and provider.status = 'active'
-  `);
+  `,
+    [options.providerCode ?? 'cbe_birr'],
+  );
   expect(paymentBoundary.rows).toHaveLength(1);
 
   const intent = await client.query<{
@@ -229,7 +234,7 @@ async function createVerifiedDepositFixture(
     `insert into app.deposit_intents (
        customer_id, platform_id, player_account_id, payment_provider_id,
        receiver_account_id, expected_amount_minor
-     ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+     ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::bigint)
      returning id, opened_at, payment_deadline_at, receiver_account_version`,
     [
       customer.rows[0]!.id,
@@ -237,6 +242,7 @@ async function createVerifiedDepositFixture(
       playerAccountId,
       paymentBoundary.rows[0]!.payment_provider_id,
       paymentBoundary.rows[0]!.receiver_account_id,
+      amountMinor,
     ],
   );
   const depositIntentId = intent.rows[0]!.id;
@@ -273,7 +279,7 @@ async function createVerifiedDepositFixture(
        evidence_digest, adapter_version, normalization_version, retrieved_at
      ) values (
        $1::uuid, $2::text, $3::text, $4::text, 1, 'provider_receipt_lookup',
-       2500, 'ETB', $5::timestamptz + interval '1 millisecond',
+       $9::bigint, 'ETB', $5::timestamptz + interval '1 millisecond',
        $6::uuid, $7::integer, $8::text, 'fixture_v1', 'fixture_v1',
        $5::timestamptz + interval '2 milliseconds'
      )
@@ -287,6 +293,7 @@ async function createVerifiedDepositFixture(
       paymentBoundary.rows[0]!.receiver_account_id,
       intent.rows[0]!.receiver_account_version,
       `evidence-digest-${suffix}`,
+      amountMinor,
     ],
   );
 

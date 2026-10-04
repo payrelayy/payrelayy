@@ -372,6 +372,207 @@ function ownerBrowserHarness(
   };
 }
 
+describe('persistent routine TeleBirr policy controls', () => {
+  const unconfigured = {
+    configurationState: 'not_configured',
+    executionEnabled: false,
+    authorizationId: null,
+    revision: null,
+    platformAgentAccountId: null,
+    authorizedAt: null,
+    changedAt: null,
+    policy: null,
+  } as const;
+  const saved = {
+    configurationState: 'authorized',
+    executionEnabled: false,
+    authorizationId: '22222222-2222-4222-8222-222222222222',
+    revision: '1',
+    platformAgentAccountId: kemerbetAgentProfile().platformAgentAccountId,
+    authorizedAt: '2026-10-04T21:00:00.000Z',
+    changedAt: '2026-10-04T21:00:00.001Z',
+    policy: {
+      mode: 'routine_production',
+      version: 1,
+      provider: 'telebirr',
+      platformCode: 'kemerbet',
+      currencyCode: 'ETB',
+      minimumAmountMinor: 2500,
+      maximumAmountMinor: 2500000,
+      freshnessWindowSeconds: 3600,
+      playerScope: 'all_active_deposit_eligible',
+      playerOwnershipRequired: false,
+      dailyQuotaMinor: null,
+      successfulDepositQuota: null,
+      maxConcurrentDeposits: 1,
+      amountSource: 'official_receipt_settled_amount',
+    },
+  } as const;
+  const profiles = (url: string) =>
+    url === '/v1/owner/kemerbet-agent-profiles'
+      ? response(200, { profiles: [kemerbetAgentProfile()] })
+      : undefined;
+  const routinePosts = (browser: ReturnType<typeof ownerBrowserHarness>) =>
+    browser.fetchCalls.filter(
+      ({ url, init }) =>
+        url.startsWith('/v1/owner/routine-telebirr-processing/') && init.method === 'POST',
+    );
+
+  it('loads read-only and saves only the persistent policy, never a deposit or activation', async () => {
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/routine-telebirr-processing')
+          return response(200, { configuration: unconfigured });
+        if (url === '/v1/owner/routine-telebirr-processing/save')
+          return response(200, { configuration: saved });
+        return profiles(url);
+      },
+    });
+    expect(browser.fetchCalls).toHaveLength(0);
+    await browser.signIn();
+    expect(routinePosts(browser)).toHaveLength(0);
+    expect(browser.element('#routine-processing-save').disabled).toBe(false);
+    expect(browser.element('#routine-processing-stop').disabled).toBe(true);
+    await browser.element('#routine-processing-save').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    expect(routinePosts(browser)).toHaveLength(1);
+    const post = routinePosts(browser)[0]!;
+    expect(JSON.parse(String(post.init.body))).toEqual({
+      requestId: '11111111-1111-4111-8111-111111111111',
+      platformAgentAccountId: kemerbetAgentProfile().platformAgentAccountId,
+    });
+    expect(post.init.headers).toMatchObject({
+      'x-fetanagent-owner-csrf': 'owner-routine-telebirr-processing-v1',
+      'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+    });
+    expect(browser.element('#routine-processing-status').textContent).toContain('no expiry');
+    expect(browser.element('#routine-processing-status').textContent).toContain(
+      'Execution is not enabled',
+    );
+    expect(
+      browser.fetchCalls.filter(({ init }) => init.method === 'POST').map(({ url }) => url),
+    ).toEqual([
+      'https://spzpiyxheappsfyswewl.supabase.co/auth/v1/token?grant_type=password',
+      '/v1/owner/routine-telebirr-processing/save',
+    ]);
+  });
+
+  it('requires an active agent profile and an explicit policy confirmation before saving', async () => {
+    for (const withProfile of [false, true]) {
+      const browser = ownerBrowserHarness(503, {
+        confirm: !withProfile,
+        fetchOverride: (url) =>
+          url === '/v1/owner/routine-telebirr-processing'
+            ? response(200, { configuration: unconfigured })
+            : withProfile
+              ? profiles(url)
+              : undefined,
+      });
+      await browser.signIn();
+      await browser.call('mutateRoutineProcessing', 'save');
+      await browser.call('mutateRoutineProcessing', 'activate');
+      await browser.call('mutateRoutineProcessing', 'stop');
+      expect(routinePosts(browser)).toHaveLength(0);
+    }
+  });
+
+  it('stops the policy once and preserves payment/queue records without an execution request', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/routine-telebirr-processing')
+          return response(200, { configuration: saved });
+        if (url === '/v1/owner/routine-telebirr-processing/stop')
+          return response(200, {
+            configuration: { ...saved, configurationState: 'stopped' },
+          });
+        return profiles(url);
+      },
+    });
+    await browser.signIn();
+    expect(browser.element('#routine-processing-stop').disabled).toBe(false);
+    await browser.call('mutateRoutineProcessing', 'stop');
+    await browser.call('mutateRoutineProcessing', 'stop');
+    expect(routinePosts(browser)).toHaveLength(1);
+    expect(JSON.parse(String(routinePosts(browser)[0]!.init.body))).toEqual({
+      requestId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(browser.element('#routine-processing-status').textContent).toContain(
+      'queued jobs are preserved',
+    );
+    expect(browser.element('#routine-processing-stop').disabled).toBe(true);
+  });
+
+  it.each([
+    { ...saved, executionEnabled: true },
+    { ...saved, expiresAt: '2026-10-05T09:00:00.000Z' },
+    { ...saved, policy: { ...saved.policy, successfulDepositQuota: 5 } },
+    { ...saved, policy: { ...saved.policy, maxConcurrentDeposits: 2 } },
+    { ...saved, policy: { ...saved.policy, amountSource: 'total_paid' } },
+  ])('hides incompatible policy responses without sending a mutation', async (configuration) => {
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-processing'
+          ? response(200, { configuration })
+          : profiles(url),
+    });
+    await browser.signIn();
+    expect(browser.element('#routine-processing-status').textContent).toContain('not available');
+    expect(browser.element('#routine-processing-save').disabled).toBe(true);
+    expect(browser.element('#routine-processing-stop').disabled).toBe(true);
+    await browser.call('mutateRoutineProcessing', 'save');
+    expect(routinePosts(browser)).toHaveLength(0);
+  });
+
+  it('does not retry ambiguous mutations, and disables both mutation controls until refresh', async () => {
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/routine-telebirr-processing')
+          return response(200, { configuration: unconfigured });
+        if (url === '/v1/owner/routine-telebirr-processing/save') return response(503, {});
+        return profiles(url);
+      },
+    });
+    await browser.signIn();
+    await browser.call('mutateRoutineProcessing', 'save');
+    await browser.call('mutateRoutineProcessing', 'save');
+    expect(routinePosts(browser)).toHaveLength(1);
+    expect(browser.element('#routine-processing-status').textContent).toContain('Refresh policy');
+    expect(browser.element('#routine-processing-save').disabled).toBe(true);
+    expect(browser.element('#routine-processing-stop').disabled).toBe(true);
+  });
+
+  it('ignores delayed mutation responses after sign-out, even when the next login returns the same token', async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/routine-telebirr-processing')
+          return response(200, { configuration: unconfigured });
+        if (url === '/v1/owner/routine-telebirr-processing/save') return pending.promise;
+        return profiles(url);
+      },
+    });
+    await browser.signIn();
+    const mutation = browser.call('mutateRoutineProcessing', 'save');
+    await vi.waitFor(() => expect(routinePosts(browser)).toHaveLength(1));
+    await browser.call('mutateRoutineProcessing', 'save');
+    expect(routinePosts(browser)).toHaveLength(1);
+    await browser.call('signOut');
+    await browser.signIn();
+    pending.resolve(response(200, { configuration: saved }));
+    await mutation;
+    expect(browser.element('#routine-processing-status').textContent).not.toContain(
+      'Persistent policy saved',
+    );
+    expect(browser.element('#routine-processing-save').disabled).toBe(true);
+    expect(browser.element('#routine-processing-stop').disabled).toBe(true);
+  });
+});
+
 describe('Owner execution readiness preview', () => {
   const readiness = {
     activationAvailable: false,

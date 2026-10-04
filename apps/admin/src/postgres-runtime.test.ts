@@ -36,6 +36,22 @@ const config = {
 } satisfies Extract<OwnerControlRuntimeConfig, { readonly enabled: true }>;
 
 describe('Owner-control bounded PostgreSQL pool', () => {
+  it('allows only three optional policy procedures, never routine admission or execution', () => {
+    for (const signature of [
+      'app.get_owner_routine_telebirr_processing(uuid)',
+      'app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)',
+      'app.stop_owner_routine_telebirr_processing(uuid,uuid)',
+    ]) {
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+        `to_regprocedure('${signature}')::oid, 'execute'), true)`,
+      );
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+        `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
+      );
+    }
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).not.toContain('app.admit_routine_telebirr_execution_job');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).not.toContain('app.assess_routine_telebirr_execution_job');
+  });
   it('enforces one connection, verify-full, and strict client/server timeouts', () => {
     expect(ownerControlPoolConfig(config)).toMatchObject({
       max: 1,

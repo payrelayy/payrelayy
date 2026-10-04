@@ -82,6 +82,28 @@ async function paidJob(
   amountMinor = 2500,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
 ) {
+  if (providerCode === 'telebirr') {
+    // The shared catalog seeds CBE Birr only. Create a protected synthetic TeleBirr receiver
+    // inside this test's rollback transaction, without a pilot or real wallet information.
+    await client.query(`
+      insert into app.receiver_accounts (
+        provider_id, version, account_holder_name, account_reference_ciphertext,
+        verification_reference_ciphertext, account_reference_masked, instructions,
+        rotation_request_id, rotation_reason, account_reference_fingerprint,
+        protection_profile_version, encryption_key_version, fingerprint_key_version
+      ) select provider.id,
+        coalesce((select max(receiver.version) + 1 from app.receiver_accounts receiver
+          where receiver.provider_id = provider.id), 1),
+        'Synthetic Routine TeleBirr Receiver',
+        'receiver-v1.telebirr.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCC',
+        'synthetic-routine-telebirr-verification-ciphertext', '***7003',
+        jsonb_build_object('customer_message', 'Synthetic disposable SQL fixture only'),
+        gen_random_uuid(), 'initial_configuration', repeat('4', 64), 1, 1, 1
+      from app.payment_providers provider where provider.code = 'telebirr' and provider.status = 'active'
+        and not exists (select 1 from app.receiver_accounts receiver
+          where receiver.provider_id = provider.id and receiver.status = 'active')
+    `);
+  }
   const fixture = await createVerifiedDepositFixture(client, 'routine-' + randomUUID(), {
     providerCode,
     amountMinor,
@@ -215,6 +237,9 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         const before = await client.query(
           `select jsonb_agg(to_jsonb(switch) order by feature_key) as switches from app.feature_switches switch`,
         );
+        const beforeAttempts = await client.query(
+          `select jsonb_agg(to_jsonb(attempt) order by id) as attempts from app.deposit_execution_attempts attempt`,
+        );
         const key = randomUUID();
         const saved = await save(client, getOwner(), selectedAccount, key);
         expect(saved).toMatchObject({
@@ -250,10 +275,10 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         expect(
           (
             await client.query(
-              `select count(*)::integer as count from app.deposit_execution_attempts`,
+              `select jsonb_agg(to_jsonb(attempt) order by id) as attempts from app.deposit_execution_attempts attempt`,
             )
-          ).rows[0].count,
-        ).toBe(0);
+          ).rows,
+        ).toEqual(beforeAttempts.rows);
       });
     });
 
@@ -319,6 +344,13 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
           client,
           `update app.routine_telebirr_processing_events set event_kind = 'stop'`,
         );
+        // Keep the last-Owner constraint intact while testing actual authorization revocation.
+        const backupOwner = randomUUID();
+        await client.query('insert into auth.users (id) values ($1::uuid)', [backupOwner]);
+        await client.query(
+          "insert into app.admin_users (auth_user_id, role, status) values ($1::uuid, 'owner', 'active')",
+          [backupOwner],
+        );
         await client.query(
           `update app.admin_users set status = 'inactive' where auth_user_id = $1::uuid`,
           [getOwner()],
@@ -369,14 +401,16 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
           expect(
             (
               await client.query(
-                `select count(*)::integer as count from app.deposit_execution_owner_approvals`,
+                `select count(*)::integer as count from app.deposit_execution_owner_approvals where execution_job_id = $1::uuid`,
+                [deposit.jobId],
               )
             ).rows[0].count,
           ).toBe(0);
           expect(
             (
               await client.query(
-                `select count(*)::integer as count from app.deposit_execution_attempts`,
+                `select count(*)::integer as count from app.deposit_execution_attempts where deposit_job_id = $1::uuid`,
+                [deposit.jobId],
               )
             ).rows[0].count,
           ).toBe(0);

@@ -315,8 +315,14 @@ assert.match(windowsWorker, /currentTrusted\.getTime\(\) < options\.handoffExpir
 assert.match(windowsWorker, /recheckOneUseActionAuthorityDeadlineAfterAtomicConsumption/u);
 assert.match(windowsWorker, /signed_result_recorded_reconciliation_required/u);
 assert.match(windowsWorker, /authorityRequestStarted = true;[\s\S]*?postTimed/u);
-assert.match(localDeposit, /const EXACT_AMOUNT_TEXT = '25\.00'/u);
-assert.match(localDeposit, /await amount\.fill\(EXACT_AMOUNT_TEXT/u);
+assert.match(localDeposit, /const PILOT_AMOUNT_MINOR = 2500 as const/u);
+// The new routine amount path is separate. A v2 caller still cannot choose an amount.
+assert.match(
+  localDeposit,
+  /export async function executeExactOneUseLocalKemerBetDeposit\([\s\S]*?return executeLocalDepositForAmount\(\s*page,\s*playerId,\s*PILOT_AMOUNT_MINOR,/u,
+);
+assert.match(localDeposit, /return begin\(internalPlayerId, PILOT_AMOUNT_MINOR, isFresh\)/u);
+assert.match(localDeposit, /await amount\.fill\(amountText/u);
 assert.match(localDeposit, /await notes\.fill\(''/u);
 assert.match(localDeposit, /await transfer\.click\(\{ timeout: TIMEOUT_MS \}\)/u);
 assert.match(providerRoute, /maxRedirects: 0/u);

@@ -3,6 +3,7 @@ import type { SignedCompanionExecutionActivationHandoff } from '@fetanagent/agen
 import {
   GuardedOperatorActivationUnavailableError,
   guardedOperatorActivationFailureStage,
+  guardedOperatorActivationCleanupStage,
   runGuardedOperatorActivationWithProtectedRemoteSession,
   type GuardedOperatorActivationFailureStage,
   type GuardedOperatorActivationInput,
@@ -92,6 +93,7 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
     return result;
   } catch (error) {
     let failureStage = guardedOperatorActivationFailureStage(error, stage);
+    let cleanupStage = guardedOperatorActivationCleanupStage(error);
     if (
       stage === 'handoff_signing' &&
       error instanceof ProtectedOperatorSshClientUnavailableError
@@ -103,9 +105,9 @@ export async function runGuardedOperatorActivationOverSshWithAdapters(
     }
     // The coordinator normally owns close; cover a failure before it takes ownership.
     await remote?.close().catch(() => {
-      failureStage = 'remote_session_close';
+      cleanupStage ??= 'remote_session_close';
     });
-    throw new GuardedOperatorActivationUnavailableError(failureStage);
+    throw new GuardedOperatorActivationUnavailableError(failureStage, cleanupStage);
   }
 }
 

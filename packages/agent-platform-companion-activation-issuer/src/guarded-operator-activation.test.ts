@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   GuardedOperatorActivationUnavailableError,
   guardedOperatorActivationFailureStage,
+  guardedOperatorActivationCleanupStage,
   runGuardedOperatorActivationWithAdapters,
   runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters,
   type GuardedOperatorActivationInput,
@@ -194,13 +195,16 @@ describe('internal protected operator composition', () => {
     expect(state.runLifecycle).not.toHaveBeenCalled();
   });
 
-  it('prioritizes an unconfirmed cleanup category over the original private failure', async () => {
+  it('preserves the original category and separately reports cleanup uncertainty', async () => {
     const state = fixture();
     state.observe.mockRejectedValueOnce(new Error('private process failure'));
     state.child.stop.mockRejectedValueOnce(new Error('private cleanup failure'));
     await expect(
       runGuardedOperatorActivationWithAdapters(state.input, state.adapters),
-    ).rejects.toMatchObject({ activationStage: 'pre_permit_child_cleanup' });
+    ).rejects.toMatchObject({
+      activationStage: 'process_observation',
+      cleanupStage: 'pre_permit_child_cleanup',
+    });
     expect(state.channel.close).toHaveBeenCalledTimes(1);
     expect(state.lock.release).toHaveBeenCalledTimes(1);
     expect(state.runLifecycle).not.toHaveBeenCalled();
@@ -216,6 +220,12 @@ describe('internal protected operator composition', () => {
     expect(new GuardedOperatorActivationUnavailableError('private' as never).activationStage).toBe(
       'unconfirmed',
     );
+    Object.assign(typed, { cleanupStage: 'private response' });
+    expect(guardedOperatorActivationCleanupStage(typed)).toBeUndefined();
+    expect(guardedOperatorActivationCleanupStage(forged)).toBeUndefined();
+    expect(
+      new GuardedOperatorActivationUnavailableError('attestation', 'private' as never).cleanupStage,
+    ).toBeUndefined();
   });
 
   it('holds one lock across independent attestation and the one-job lifecycle', async () => {
@@ -373,4 +383,36 @@ describe('internal protected operator composition', () => {
     expect(state.runLifecycle).toHaveBeenCalledTimes(1);
     expect(remote.close).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ['acquireLock', 'lifecycle_lock'],
+    ['loadSnapshot', 'database_snapshot'],
+    ['verifyRelease', 'release_verification'],
+  ] as const)(
+    'does not mask %s when the remote close also fails',
+    async (adapter, activationStage) => {
+      const state = fixture();
+      const { administrator: _discarded, ...input } = state.input;
+      const remote = {
+        backendPid: 499,
+        lost: new Promise<never>(() => undefined),
+        execute: vi.fn(),
+        close: vi.fn(async () => {
+          throw new Error('private close failure');
+        }),
+      };
+      vi.spyOn(state.adapters, adapter).mockImplementationOnce(() => {
+        throw new Error('private original failure');
+      });
+      const error = await runGuardedOperatorActivationWithProtectedRemoteSessionAndAdapters(
+        input,
+        remote,
+        state.adapters,
+      ).catch((value: unknown) => value);
+      expect(error).toMatchObject({ activationStage, cleanupStage: 'remote_session_close' });
+      expect(JSON.stringify(error)).not.toContain('private');
+      expect(state.runLifecycle).not.toHaveBeenCalled();
+      expect(remote.close).toHaveBeenCalledTimes(1);
+    },
+  );
 });

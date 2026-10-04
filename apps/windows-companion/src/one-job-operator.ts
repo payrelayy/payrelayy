@@ -61,6 +61,7 @@ export class OneJobOperatorUnavailableError extends Error {
   constructor(
     readonly stage: OneJobOperatorFailureStage = 'local_preflight',
     readonly activationStage?: GuardedOperatorActivationFailureStage,
+    readonly activationCleanupStage?: GuardedOperatorActivationFailureStage,
   ) {
     super('The one-job operator is unavailable; reconcile before another request.');
     this.name = 'OneJobOperatorUnavailableError';
@@ -242,7 +243,13 @@ export async function runOneJobOperatorWithAdapters(
       isGuardedOperatorActivationFailureStage(error.activationStage)
         ? error.activationStage
         : undefined;
-    throw new OneJobOperatorUnavailableError(stage, activationStage);
+    const activationCleanupStage =
+      stage === 'guarded_activation' &&
+      error instanceof GuardedOperatorActivationUnavailableError &&
+      isGuardedOperatorActivationFailureStage(error.cleanupStage)
+        ? error.cleanupStage
+        : undefined;
+    throw new OneJobOperatorUnavailableError(stage, activationStage, activationCleanupStage);
   }
 }
 

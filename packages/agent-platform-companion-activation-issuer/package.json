@@ -83,6 +83,10 @@
     "./guarded-operator-query-client": {
       "types": "./dist/guarded-operator-query-client.d.ts",
       "default": "./dist/guarded-operator-query-client.js"
+    },
+    "./guarded-operator-lifecycle-lock": {
+      "types": "./dist/guarded-operator-lifecycle-lock.d.ts",
+      "default": "./dist/guarded-operator-lifecycle-lock.js"
     }
   },
   "dependencies": {

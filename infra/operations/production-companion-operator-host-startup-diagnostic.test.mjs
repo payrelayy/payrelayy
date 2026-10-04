@@ -24,6 +24,9 @@ test('startup diagnostic is exact-main, read-only, and never opens an execution 
   assert.match(workflow, /stop '\$revision'/u);
   assert.doesNotMatch(workflow, /(?:inspect|diagnose|stop) '\$GITHUB_SHA'/u);
   assert.match(workflow, /protected_operator_diagnostic=ready/u);
+  assert.match(workflow, /diagnostic_image_revision/u);
+  assert.match(workflow, /\[\[ "\$revision" == "\$GITHUB_SHA" \]\]/u);
+  assert.match(workflow, /backend_binding\|lifecycle_lock\|lifecycle_lock_release/u);
   assert.doesNotMatch(workflow, /operator-session-prepare|\bactivate\b|deposit-job-execute/u);
 
   const diagnostic = host.slice(
@@ -36,6 +39,11 @@ test('startup diagnostic is exact-main, read-only, and never opens an execution 
   assert.match(diagnostic, /begin read only/u);
   assert.match(diagnostic, /runPsql\('probe'/u);
   assert.match(diagnostic, /createServer\(\)/u);
+  assert.match(diagnostic, /inspectLifecycleConnection/u);
+  assert.ok(
+    diagnostic.indexOf('begin read only') < diagnostic.indexOf('inspectLifecycleConnection'),
+  );
+  assert.ok(diagnostic.indexOf('inspectLifecycleConnection') < diagnostic.indexOf('rollback'));
   assert.doesNotMatch(
     diagnostic,
     /runPsql\('disable'|openProtectedOperatorQueryHost|createProtectedOperatorBootstrapRequestHandler|signHandoff/u,

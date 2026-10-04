@@ -44,11 +44,18 @@ export function redactedOneJobOperatorFailure(
     isGuardedOperatorActivationFailureStage(error.activationStage)
       ? error.activationStage
       : undefined;
+  const activationCleanupStage =
+    error instanceof OneJobOperatorUnavailableError &&
+    error.stage === 'guarded_activation' &&
+    isGuardedOperatorActivationFailureStage(error.activationCleanupStage)
+      ? error.activationCleanupStage
+      : undefined;
   return JSON.stringify({
     component: 'fetanagent_one_job_operator',
     result: 'stopped',
     failureStage: error instanceof OneJobOperatorUnavailableError ? error.stage : fallbackStage,
     ...(activationStage ? { activationStage } : {}),
+    ...(activationCleanupStage ? { activationCleanupStage } : {}),
     identifiersRedacted: true,
   });
 }

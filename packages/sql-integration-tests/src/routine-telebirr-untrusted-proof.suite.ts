@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { loadApiConfig } from '@fetanagent/config/api';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
+
+import {
+  captureTelegramRoutineTelebirrCandidate,
+  type TelegramRoutineTelebirrCandidateDatabase,
+} from '../../../apps/api/src/telegram-routine-telebirr-candidate-intake.js';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
 const CAPTURE = `
@@ -16,6 +22,39 @@ function digest(seed: string = randomUUID()): string {
 
 function semanticHmac(): string {
   return `hmac-sha256-v1:${digest()}`;
+}
+
+function stagingCandidateConfig() {
+  const keyFingerprint = (hex: string): string =>
+    `sha256:${createHash('sha256').update(Buffer.from(hex, 'hex')).digest('hex')}`;
+  return loadApiConfig({
+    NODE_ENV: 'test',
+    INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+    INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
+    INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true',
+    TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED: 'true',
+    PLAYER_ACTION_DEPLOYMENT_TARGET: 'staging',
+    BOT_TO_API_ACTION_HMAC_SECRET: 'a'.repeat(64),
+    API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
+    API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
+    API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: 'd'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: 'e'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: 'f'.repeat(64),
+    CBE_DEPOSIT_REFERENCE_KEY_PROFILE: JSON.stringify({
+      encryptionKeyFingerprint: keyFingerprint('e'.repeat(64)),
+      fingerprintKeyFingerprint: keyFingerprint('f'.repeat(64)),
+      version: 1,
+    }),
+    DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: '1'.repeat(64),
+    DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: '2'.repeat(64),
+    DEPOSIT_PROOF_REFERENCE_PROFILE: JSON.stringify({
+      encryptionMasterFingerprint: keyFingerprint('1'.repeat(64)),
+      fingerprintMasterFingerprint: keyFingerprint('2'.repeat(64)),
+      version: 2,
+    }),
+    PLAYER_ACTION_DATABASE_URL:
+      'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+  });
 }
 
 type CaptureRow = {
@@ -590,6 +629,109 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         expect(second.rows[0]!.proof_request_id).not.toBe(first.rows[0]!.proof_request_id);
         expect(await snapshot(client)).toBe(before);
       });
+    });
+
+    it('runs the staging API adapter against PostgreSQL with only a rolled-back role grant', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const eventId = await fixtureInboundEvent(client, actor.identityId);
+        const action = {
+          version: 1,
+          kind: 'deposit_proof_command',
+          updateId: '10',
+          telegramUserId: '20',
+          privateChatId: '20',
+          preferredLocale: 'en',
+          providerCode: 'telebirr',
+          playerId,
+          transactionReference: 'FETANTESTREF7890',
+        } as const;
+        const database: TelegramRoutineTelebirrCandidateDatabase = {
+          async query(query, values) {
+            return client.query(query, [...values]);
+          },
+        };
+
+        await client.query(`
+          grant execute on function app.capture_telegram_routine_telebirr_untrusted_proof(
+            uuid, text, text, text, text, text, smallint, smallint, text
+          ) to fetanagent_player_actions
+        `);
+        const temporaryPrivilege = await client.query<{ allowed: boolean }>(`
+          select pg_catalog.has_function_privilege(
+            'fetanagent_player_actions_runtime',
+            'app.capture_telegram_routine_telebirr_untrusted_proof(
+              uuid,text,text,text,text,text,smallint,smallint,text
+            )', 'EXECUTE'
+          ) as allowed
+        `);
+        expect(temporaryPrivilege.rows[0]!.allowed).toBe(true);
+        await client.query('set local role fetanagent_player_actions_runtime');
+        const first = await captureTelegramRoutineTelebirrCandidate(
+          database,
+          eventId,
+          action,
+          stagingCandidateConfig(),
+        );
+        expect(first).toEqual({
+          version: 1,
+          outcome: 'telebirr_routine_candidate_recorded_no_money',
+          providerCode: 'telebirr',
+          providerName: 'TeleBirr',
+          proofStatus: 'untrusted_received',
+          verificationMode: 'not_started_no_money',
+        });
+        expect(
+          await captureTelegramRoutineTelebirrCandidate(
+            database,
+            eventId,
+            action,
+            stagingCandidateConfig(),
+          ),
+        ).toEqual(first);
+        await client.query('reset role');
+
+        const stored = await client.query<{
+          readonly origin_request_key: string;
+          readonly candidate_reference_ciphertext: string;
+          readonly candidate_reference_fingerprint: string;
+          readonly candidate_reference_masked: string;
+          readonly processed_at: Date;
+        }>(
+          `
+          select proof.origin_request_key, proof.candidate_reference_ciphertext,
+                 proof.candidate_reference_fingerprint, proof.candidate_reference_masked,
+                 event.processed_at
+            from ${TABLE} proof
+            join app.inbound_events event on event.id = proof.origin_request_key
+           where proof.origin_request_key = $1::uuid
+        `,
+          [eventId],
+        );
+        expect(stored.rows).toHaveLength(1);
+        expect(stored.rows[0]).toMatchObject({
+          origin_request_key: eventId,
+          candidate_reference_masked: '***7890',
+        });
+        expect(stored.rows[0]!.processed_at).toBeInstanceOf(Date);
+        expect(stored.rows[0]!.candidate_reference_ciphertext).toMatch(/^v2\.telebirr\./u);
+        expect(stored.rows[0]!.candidate_reference_fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+        expect(JSON.stringify(stored.rows[0])).not.toContain(action.transactionReference);
+        expect(await snapshot(client)).toBe(before);
+      });
+      const privilege = await client.query<{ allowed: boolean }>(`
+        select pg_catalog.has_function_privilege(
+          'fetanagent_player_actions_runtime',
+          'app.capture_telegram_routine_telebirr_untrusted_proof(
+            uuid,text,text,text,text,text,smallint,smallint,text
+          )', 'EXECUTE'
+        ) as allowed
+      `);
+      expect(privilege.rows[0]!.allowed).toBe(false);
     });
 
     it('rejects an inactive identity, processed event, and any armed financial switch', async () => {

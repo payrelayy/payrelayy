@@ -12,6 +12,7 @@
     "pg": "8.22.0"
   },
   "devDependencies": {
+    "@fetanagent/config": "workspace:*",
     "@types/node": "24.13.3",
     "@types/pg": "8.21.0",
     "tsx": "4.23.9",

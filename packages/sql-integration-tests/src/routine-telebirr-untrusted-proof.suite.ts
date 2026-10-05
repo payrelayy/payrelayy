@@ -380,18 +380,25 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
                     candidate_reference_masked, reference_encryption_key_version,
                     reference_profile_version, statement_timestamp() - interval '8 days'
                from ${TABLE} source
-               cross join pg_catalog.generate_series(1, 1001) series
+               cross join pg_catalog.generate_series(1, 1002) series
               where source.id = $1::uuid returning id`,
           [current.rows[0]!.proof_request_id, semanticHmac()],
         );
-        expect(old.rows).toHaveLength(1001);
+        expect(old.rows).toHaveLength(1002);
 
-        await rejected(client, `delete from ${TABLE} where id = $1::uuid`, [old.rows[0]!.id]);
+        await rejected(client, `delete from ${TABLE} where id = $1::uuid`, [
+          current.rows[0]!.proof_request_id,
+        ]);
+        const privilegedDueDelete = await client.query(
+          `delete from ${TABLE} where id = $1::uuid returning id`,
+          [old.rows[0]!.id],
+        );
+        expect(privilegedDueDelete.rows).toEqual([{ id: old.rows[0]!.id }]);
         await rejected(
           client,
           `update ${TABLE} set candidate_reference_masked = '***ZZ99'
             where id = $1::uuid`,
-          [old.rows[0]!.id],
+          [old.rows[1]!.id],
         );
         await client.query('set local role fetanagent_player_actions');
         await rejected(client, 'select app.purge_expired_routine_telebirr_untrusted_proofs()');
@@ -471,7 +478,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           player_allowed: false,
           service_allowed: false,
           nonce_allowed: false,
-          function_settings: ['search_path=pg_catalog', 'app.routine_telebirr_retention_delete=on'],
+          function_settings: ['search_path=pg_catalog'],
         },
       ]);
     });

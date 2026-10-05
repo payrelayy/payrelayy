@@ -199,14 +199,17 @@ async function fixtureEligiblePlayer(client: Client): Promise<string> {
   return playerId;
 }
 
-async function fixtureTelebirrReceiver(client: Client): Promise<void> {
-  const existing = await client.query<{ id: string }>(
-    `select receiver.id from app.receiver_accounts receiver
+async function fixtureTelebirrReceiver(client: Client): Promise<{
+  readonly id: string;
+  readonly version: number;
+}> {
+  const existing = await client.query<{ id: string; version: number }>(
+    `select receiver.id, receiver.version from app.receiver_accounts receiver
        join app.payment_providers provider on provider.id = receiver.provider_id
       where provider.code = 'telebirr' and receiver.status = 'active'`,
   );
-  if (existing.rows.length > 0) return;
-  await client.query(
+  if (existing.rows.length > 0) return existing.rows[0]!;
+  const inserted = await client.query<{ id: string; version: number }>(
     `insert into app.receiver_accounts (
        provider_id, version, account_holder_name, account_reference_ciphertext,
        account_reference_masked, account_reference_fingerprint,
@@ -215,13 +218,15 @@ async function fixtureTelebirrReceiver(client: Client): Promise<void> {
      ) select provider.id, 1, 'FetanAgent Fixture',
               $1::text, '***7001', $2::text, 1, 1, 1,
               $3::uuid, 'initial_configuration'
-         from app.payment_providers provider where provider.code = 'telebirr'`,
+         from app.payment_providers provider where provider.code = 'telebirr'
+     returning id, version`,
     [
       `receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
       digest(),
       randomUUID(),
     ],
   );
+  return inserted.rows[0]!;
 }
 
 function captureArguments(eventId: string, playerId: string): readonly string[] {
@@ -303,6 +308,53 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       ]);
     });
 
+    it('binds a mandatory receiver revision through a private insert trigger', async () => {
+      const client = getClient();
+      const binding = await client.query<{
+        receiver_not_null: boolean;
+        version_not_null: boolean;
+        trigger_enabled: boolean;
+        function_owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        service_allowed: boolean;
+        player_allowed: boolean;
+      }>(`
+        select
+          (select attnotnull from pg_catalog.pg_attribute
+            where attrelid = '${TABLE}'::pg_catalog.regclass
+              and attname = 'receiver_account_id') as receiver_not_null,
+          (select attnotnull from pg_catalog.pg_attribute
+            where attrelid = '${TABLE}'::pg_catalog.regclass
+              and attname = 'receiver_account_version') as version_not_null,
+          exists (select 1 from pg_catalog.pg_trigger trigger
+            where trigger.tgrelid = '${TABLE}'::pg_catalog.regclass
+              and trigger.tgname = 'routine_telebirr_candidate_bind_receiver_revision'
+              and trigger.tgenabled = 'O' and not trigger.tgisinternal) as trigger_enabled,
+          routine.proowner::pg_catalog.regrole::text as function_owner,
+          routine.prosecdef as security_definer,
+          pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE') as public_allowed,
+          pg_catalog.has_function_privilege('service_role', routine.oid, 'EXECUTE') as service_allowed,
+          pg_catalog.has_function_privilege(
+            'fetanagent_player_actions', routine.oid, 'EXECUTE') as player_allowed
+        from pg_catalog.pg_proc routine
+        where routine.oid =
+          'app.bind_routine_telebirr_candidate_receiver_revision()'::pg_catalog.regprocedure
+      `);
+      expect(binding.rows).toEqual([
+        {
+          receiver_not_null: true,
+          version_not_null: true,
+          trigger_enabled: true,
+          function_owner: 'postgres',
+          security_definer: true,
+          public_allowed: false,
+          service_allowed: false,
+          player_allowed: false,
+        },
+      ]);
+    });
+
     it('retains separate untrusted candidates without creating financial lineage', async () => {
       const client = getClient();
       await rollback(client, async () => {
@@ -315,6 +367,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         const provider = await client.query<{ id: string }>(
           `select id from app.payment_providers where code = 'telebirr' and status = 'active'`,
         );
+        const receiver = await fixtureTelebirrReceiver(client);
         expect(platform.rows).toHaveLength(1);
         expect(provider.rows).toHaveLength(1);
         const player = await client.query<{ id: string }>(
@@ -368,10 +421,18 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             $1::uuid, $2::uuid, 'telegram', $3::uuid, $4::text,
             $5::uuid, $6::uuid, $7::uuid, $8::uuid,
             $9::text, $10::text, $11::text, 2, 2
-          ) returning id
+          ) returning id, receiver_account_id, receiver_account_version
         `;
-        const first = await client.query<{ id: string }>(insert, values);
+        const first = await client.query<{
+          id: string;
+          receiver_account_id: string;
+          receiver_account_version: number;
+        }>(insert, values);
         expect(first.rows).toHaveLength(1);
+        expect(first.rows[0]).toMatchObject({
+          receiver_account_id: receiver.id,
+          receiver_account_version: receiver.version,
+        });
         await rejected(client, insert, values); // An origin event has one immutable result.
         await rejected(
           client,
@@ -570,7 +631,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         const actor = await fixtureTelegramActor(client, getOwnerAdminId());
         const secondActor = await fixtureTelegramActor(client, getOwnerAdminId());
         const playerId = await fixtureEligiblePlayer(client); // Deliberately owned by neither submitter.
-        await fixtureTelebirrReceiver(client);
+        const receiver = await fixtureTelebirrReceiver(client);
         const eventId = await fixtureInboundEvent(client, actor.identityId);
         const args = captureArguments(eventId, playerId);
 
@@ -593,11 +654,14 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           readonly origin_identity_id: string;
           readonly origin_request_key: string;
           readonly player_owner_customer_id: string;
+          readonly receiver_account_id: string;
+          readonly receiver_account_version: number;
           readonly processed_at: Date;
         }>(
           `
           select proof.submitting_customer_id, proof.origin_identity_id,
                  proof.origin_request_key, player.customer_id as player_owner_customer_id,
+                 proof.receiver_account_id, proof.receiver_account_version,
                  event.processed_at
             from ${TABLE} proof
             join app.customer_platform_players player on player.id = proof.player_account_id
@@ -611,6 +675,8 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           submitting_customer_id: actor.customerId,
           origin_identity_id: actor.identityId,
           origin_request_key: eventId,
+          receiver_account_id: receiver.id,
+          receiver_account_version: receiver.version,
           processed_at: first.rows[0]!.submitted_at,
         });
         expect(stored.rows[0]!.player_owner_customer_id).not.toBe(actor.customerId);
@@ -627,6 +693,26 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         ]);
         expect(second.rows).toHaveLength(1);
         expect(second.rows[0]!.proof_request_id).not.toBe(first.rows[0]!.proof_request_id);
+        await client.query(
+          `update app.receiver_accounts
+              set status = 'inactive', retired_at = clock_timestamp()
+            where id = $1::uuid`,
+          [receiver.id],
+        );
+        const historicalBinding = await client.query<{
+          receiver_account_id: string;
+          receiver_account_version: number;
+        }>(
+          `select receiver_account_id, receiver_account_version
+             from ${TABLE} where id = $1::uuid`,
+          [first.rows[0]!.proof_request_id],
+        );
+        expect(historicalBinding.rows).toEqual([
+          {
+            receiver_account_id: receiver.id,
+            receiver_account_version: receiver.version,
+          },
+        ]);
         expect(await snapshot(client)).toBe(before);
       });
     });

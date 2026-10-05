@@ -12,6 +12,7 @@ import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 // 106 pending, and these four older gaps before the latest applied version.
 // This fixture contains versions only: no staging schema, data, or credentials.
 const latestAppliedVersion = '20260915190000';
+const observedLatestRepositoryVersion = '20261005180558';
 const olderMissingVersions = new Set([
   '20260912233000',
   '20260914030000',
@@ -48,9 +49,14 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
   );
   const pending = migrations.filter((name) => !alreadyApplied.includes(name));
 
-  expect(migrations).toHaveLength(193);
+  expect(
+    migrations.filter((name) => version(name) <= observedLatestRepositoryVersion),
+  ).toHaveLength(193);
   expect(alreadyApplied).toHaveLength(87);
-  expect(pending).toHaveLength(106);
+  expect(pending.filter((name) => version(name) <= observedLatestRepositoryVersion)).toHaveLength(
+    106,
+  );
+  expect(pending).toHaveLength(migrations.length - alreadyApplied.length);
   expect(pending.filter((name) => version(name) < latestAppliedVersion).map(version)).toEqual(
     [...olderMissingVersions].sort(),
   );
@@ -81,7 +87,7 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     const applied = await client.query<{ count: number }>(`
       select count(*)::integer as count from sql_integration.applied_migrations
     `);
-    expect(applied.rows).toEqual([{ count: 193 }]);
+    expect(applied.rows).toEqual([{ count: migrations.length }]);
 
     const switches = await client.query<{ feature_key: string; mode: string }>(`
       select feature_key, mode::text

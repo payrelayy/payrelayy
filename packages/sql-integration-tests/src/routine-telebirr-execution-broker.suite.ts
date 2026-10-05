@@ -25,16 +25,23 @@ async function activeCertificate(
 ): Promise<CertificateFixture> {
   const signerId = randomUUID();
   const signerKeyId = `routine-signer-${randomUUID().slice(0, 8)}`;
+  const { publicKey: signerPublicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const signerPublicKeyBytes = signerPublicKey.export({ type: 'spki', format: 'der' });
   await client.query(
     `insert into app.agent_platform_companion_server_signers (
       id, signer_key_id, public_key_spki, public_key_spki_sha256,
       signature_algorithm, signature_encoding, valid_from, valid_until
     ) values (
-      $1::uuid, $2::text, 'MFkwSyntheticRoutineSignerKey', $3::text,
+      $1::uuid, $2::text, $3::text, $4::text,
       'ecdsa-p256-sha256', 'ieee-p1363-base64url',
       clock_timestamp() - interval '1 day', clock_timestamp() + interval '730 days'
     )`,
-    [signerId, signerKeyId, digest()],
+    [
+      signerId,
+      signerKeyId,
+      signerPublicKeyBytes.toString('base64url'),
+      `sha256:${createHash('sha256').update(signerPublicKeyBytes).digest('hex')}`,
+    ],
   );
   const pairingId = randomUUID();
   const certificateId = randomUUID();
@@ -216,19 +223,18 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           (select procedure.prosecdef and procedure.proowner = 'postgres'::regrole
              and procedure.proconfig = array['search_path=pg_catalog']::text[]
              from pg_proc procedure where procedure.oid = $3::regprocedure) as hardened,
-          (select count(*)::text from (
-            select relation.oid from pg_class relation
+          (select count(*)::text from pg_class relation
             join pg_namespace namespace on namespace.oid = relation.relnamespace
-            where namespace.nspname = 'app' and relation.relkind in ('r','p','v','m','f')
-              and has_table_privilege(
-                $1::text, relation.oid, 'select,insert,update,delete,truncate'
-              )
-            union all
-            select sequence.oid from pg_class sequence
-            join pg_namespace namespace on namespace.oid = sequence.relnamespace
-            where namespace.nspname = 'app' and sequence.relkind = 'S'
-              and has_sequence_privilege($1::text, sequence.oid, 'usage,select,update')
-          ) privileged_relation) as base_tables`,
+           where namespace.nspname = 'app'
+             and case
+               when relation.relkind in ('r','p','v','m','f') then has_table_privilege(
+                 $1::text, relation.oid, 'select,insert,update,delete,truncate'
+               )
+               when relation.relkind = 'S' then has_sequence_privilege(
+                 $1::text, relation.oid, 'usage,select,update'
+               )
+               else false
+             end) as base_tables`,
         [brokerRole, runtimeRole, commandSignature],
       );
       expect(privileges.rows).toEqual([

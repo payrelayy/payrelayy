@@ -352,7 +352,7 @@ begin
     p_request_key, 'disable', latest.authorization_id, latest.certificate_id,
     latest.device_id, latest.device_key_id, latest.no_money_signer_key_id,
     latest.execution_signer_key_id, latest.platform_agent_account_id,
-    pg_catalog.greatest(latest.valid_until, pg_catalog.clock_timestamp() + interval '1 minute'),
+    greatest(latest.valid_until, pg_catalog.clock_timestamp() + interval '1 minute'),
     p_reason_code
   );
   return true;
@@ -392,7 +392,8 @@ begin
       and approval.approved_at <= pg_catalog.clock_timestamp()
       and approval.expires_at > pg_catalog.clock_timestamp()
   ) and not (
-    pg_catalog.pg_has_role(session_user, 'fetanagent_routine_deposit_broker', 'member')
+    session_user = 'fetanagent_routine_deposit_broker_runtime'
+    and pg_catalog.pg_has_role(session_user, 'fetanagent_routine_deposit_broker', 'member')
     and exists (
       select 1 from app.routine_telebirr_execution_bindings binding
       join app.routine_telebirr_processing_events policy_event
@@ -468,9 +469,9 @@ begin
       is distinct from 'windows_companion_routine_deposit_execution_v1'
     or p_command ->> 'capability'
       is distinct from 'kemerbet.deposit.submit.verified_receipt_amount.routine.v1'
-    or pg_catalog.coalesce(p_command ->> 'requestId' !~
+    or coalesce(p_command ->> 'requestId' !~
       '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', true)
-    or pg_catalog.coalesce(p_command ->> 'workerInstanceId' !~
+    or coalesce(p_command ->> 'workerInstanceId' !~
       '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', true)
     or p_command ->> 'operation' is null
     or p_command ->> 'operation'
@@ -488,7 +489,7 @@ begin
   if (operation = 'lease' and (
       (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_command)) <> 7
       or not (p_command ? 'expectedPlatformAgentAccountId')
-      or pg_catalog.coalesce(p_command ->> 'expectedPlatformAgentAccountId' !~
+      or coalesce(p_command ->> 'expectedPlatformAgentAccountId' !~
         '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', true)
     )) or (operation in ('fence', 'reconcile') and (
       (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_command)) <> 7
@@ -499,13 +500,13 @@ begin
       or pg_catalog.jsonb_typeof(p_command -> 'dispatch') is distinct from 'object'
       or (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_command -> 'dispatch')) <> 3
       or p_command #>> '{dispatch,outcome}' is distinct from 'submission_attempted'
-      or pg_catalog.coalesce(p_command #>> '{dispatch,providerResponseDigest}' !~
+      or coalesce(p_command #>> '{dispatch,providerResponseDigest}' !~
         '^sha256:[0-9a-f]{64}$', true)
       or p_command #>> '{dispatch,exactPlayerCreditMatch}' is distinct from 'true'
     )) or (operation = 'complete' and (
       (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_command)) <> 8
       or pg_catalog.jsonb_typeof(p_command -> 'binding') is distinct from 'object'
-      or pg_catalog.coalesce(p_command ->> 'reconciliationId' !~
+      or coalesce(p_command ->> 'reconciliationId' !~
         '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', true)
     )) or (operation = 'pause' and (
       (select pg_catalog.count(*) from pg_catalog.jsonb_object_keys(p_command)) <> 8

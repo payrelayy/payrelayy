@@ -8641,6 +8641,12 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.activate_routine_telebirr_execution_transport(uuid,uuid,uuid,text)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature: 'app.admit_routine_telebirr_execution_job(uuid)',
       },
       {
@@ -8732,6 +8738,12 @@ describe('disposable SQL migration baseline', () => {
         public_execute: false,
         settlement_runtime: false,
         signature: 'app.disable_agent_platform_companion_execution_transport()',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.disable_routine_telebirr_execution_transport(uuid,text)',
       },
       {
         deposit_executor_runtime: false,

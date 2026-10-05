@@ -159,6 +159,13 @@ assert.doesNotMatch(
   /grant execute on function app\.activate_routine_telebirr_execution_transport/iu,
 );
 assert.match(activateSql, /current_user = 'postgres' and session_user = 'postgres'/u);
+const nonpilotStopGate = activateSql.indexOf('nonpilot_lineage_not_ready');
+const activationInputs = activateSql.indexOf('\\getenv confirmed_project_ref');
+const activationCall = activateSql.indexOf('app.activate_routine_telebirr_execution_transport');
+assert.ok(nonpilotStopGate >= 0 && activationInputs > nonpilotStopGate);
+assert.ok(activationCall > activationInputs);
+assert.match(activateSql, /^\\set ON_ERROR_STOP on/mu);
+assert.match(activateSql, /select 1 \/ 0 as nonpilot_lineage_not_ready/u);
 assert.match(activateSql, /livePaymentPerformed', false/u);
 const disableRole = disableSql.indexOf('app.disable_routine_telebirr_execution_transport');
 const terminateSession = disableSql.indexOf('pg_catalog.pg_terminate_backend');

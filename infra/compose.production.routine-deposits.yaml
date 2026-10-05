@@ -1,0 +1,37 @@
+# Explicit production overlay for the separately authorized routine-deposit lane.
+# The normal production composition does not load this file. Applying it still does not activate
+# the database login: postgres must bind a current Owner authorization and paired certificate with
+# app.activate_routine_telebirr_execution_transport before the route can lease any work.
+services:
+  production-companion-device-bridge:
+    environment:
+      INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true'
+      COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE: /run/secrets/companion_execution_signer.pkcs8.der
+      COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE: /run/secrets/companion_routine_deposit_database_url
+    secrets:
+      - source: companion_device_bridge_execution_signer
+        target: companion_execution_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: companion_routine_deposit_database_url
+        target: companion_routine_deposit_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: companion_device_bridge_runtime_manifest_routine_v3
+        target: /run/configs/companion_device_bridge_runtime_manifest.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+
+configs:
+  companion_device_bridge_runtime_manifest_routine_v3:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/companion-bridge-runtime-manifest.v3.json
+
+secrets:
+  companion_device_bridge_execution_signer:
+    file: /etc/fetanagent/companion-execution-secrets/production-execution-signer.pkcs8.der
+  companion_routine_deposit_database_url:
+    file: /etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url

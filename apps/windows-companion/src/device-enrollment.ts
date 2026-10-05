@@ -70,6 +70,7 @@ import {
   COMPANION_EXECUTION_POLL_PATH,
   COMPANION_EXECUTION_RESULT_PATH,
   COMPANION_EXECUTION_STATUS_PATH,
+  ROUTINE_DEPOSIT_COMMAND_PATH,
   decodeSignedAuthoritativeExecutionStatus,
   decodeSignedExecutionAssignment,
   decodeSignedExecutionEnrollment,
@@ -936,6 +937,7 @@ export type CompanionLookupRequestPath =
 export type CompanionDeviceRequestPath =
   | CompanionLookupRequestPath
   | CompanionExecutionRequestPath
+  | typeof ROUTINE_DEPOSIT_COMMAND_PATH
   | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
   | typeof COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH
   | typeof COMPANION_EXECUTION_OPERATOR_QUERY_PATH;
@@ -1138,6 +1140,7 @@ export async function loadCompanionDeviceSigningRuntime(
         path !== COMPANION_EXECUTION_AUTHORITY_PATH &&
         path !== COMPANION_EXECUTION_RESULT_PATH &&
         path !== COMPANION_EXECUTION_STATUS_PATH &&
+        path !== ROUTINE_DEPOSIT_COMMAND_PATH &&
         path !== COMPANION_EXECUTION_HANDOFF_SIGN_PATH &&
         path !== COMPANION_EXECUTION_OPERATOR_BOOTSTRAP_PATH &&
         path !== COMPANION_EXECUTION_OPERATOR_QUERY_PATH) ||

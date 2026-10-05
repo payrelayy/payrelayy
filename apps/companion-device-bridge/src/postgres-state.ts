@@ -34,6 +34,13 @@ import {
   decodeSignedOneUseActionAuthority,
   digestCompanionExecutionPlayerId,
   digestExecutionEnrollmentBody,
+  decodeRoutineDepositResponseBody,
+  digestRoutineDepositCommand,
+  ROUTINE_DEPOSIT_CAPABILITY,
+  ROUTINE_DEPOSIT_CONTRACT_VERSION,
+  ROUTINE_DEPOSIT_PROTOCOL_MODE,
+  type RoutineDepositCommand,
+  type RoutineDepositResponseResult,
   type SignedAuthoritativeExecutionStatus,
   type SignedExecutionAssignment,
   type SignedExecutionEnrollment,
@@ -260,6 +267,24 @@ export const COMPLETE_COMPANION_EXECUTION_STATUS_SQL = `
     $1::text,
     $2::jsonb
   ) as completed
+`;
+
+export const EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL = `
+  select app.execute_agent_platform_routine_deposit_command(
+    $1::text,
+    $2::text,
+    $3::text,
+    $4::text,
+    $5::text,
+    $6::text,
+    $7::timestamptz,
+    $8::timestamptz,
+    $9::timestamptz,
+    $10::text,
+    $11::text,
+    $12::text,
+    $13::jsonb
+  ) as result
 `;
 
 function rowObject(row: unknown): Record<string, unknown> {
@@ -914,6 +939,51 @@ export class PostgresCompanionDeviceState {
       const row = rowObject(result.rows[0]);
       return exactKeys(row, ['completed']) && row.completed === true;
     } catch {
+      throw new CompanionDeviceStateUnavailableError();
+    }
+  }
+
+  async executeRoutineDepositCommand(
+    certificate: SignedCompanionEnrollmentCertificate,
+    request: SignedCompanionHttpRequest,
+    httpReplayIdentity: string,
+    command: RoutineDepositCommand,
+    assessedAt: string,
+  ): Promise<RoutineDepositResponseResult | undefined> {
+    try {
+      const commandDigest = digestRoutineDepositCommand(command);
+      if (!commandDigest) throw new CompanionDeviceStateUnavailableError();
+      const result = await this.database.query(EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL, [
+        httpReplayIdentity,
+        request.bodyDigest,
+        request.body.requestId,
+        certificate.body.certificateId,
+        certificate.body.deviceId,
+        certificate.body.deviceKeyId,
+        request.body.issuedAt,
+        request.body.expiresAt,
+        assessedAt,
+        this.signerKeyId,
+        this.requireExecutionSignerKeyId(),
+        commandDigest,
+        JSON.stringify(command),
+      ]);
+      if (result.rows.length !== 1) return undefined;
+      const row = rowObject(result.rows[0]);
+      if (!exactKeys(row, ['result'])) throw new CompanionDeviceStateUnavailableError();
+      const response = decodeRoutineDepositResponseBody({
+        contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
+        protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
+        capability: ROUTINE_DEPOSIT_CAPABILITY,
+        requestId: command.requestId,
+        operation: command.operation,
+        requestContentDigest: commandDigest,
+        serverIssuedAt: assessedAt,
+        result: row.result,
+      });
+      return response?.result;
+    } catch (error) {
+      if (error instanceof CompanionDeviceStateUnavailableError) throw error;
       throw new CompanionDeviceStateUnavailableError();
     }
   }

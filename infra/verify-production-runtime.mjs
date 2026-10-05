@@ -800,7 +800,7 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=32/u);
+assert.match(helper, /expected_count=33/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);

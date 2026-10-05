@@ -5,4 +5,6 @@ export * from './lookup-handler.js';
 export * from './pairing-handler.js';
 export * from './postgres-runtime.js';
 export * from './postgres-state.js';
+export * from './routine-deposit-handler.js';
+export * from './routine-postgres-runtime.js';
 export * from './server.js';

@@ -18,6 +18,7 @@ import {
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
   type LocalKemerBetFinalAction,
+  type LocalKemerBetRoutineDepositDispatchOutcome,
   type LocalKemerBetRoutineFinalAction,
 } from './local-kemerbet-deposit.js';
 import {
@@ -86,7 +87,7 @@ export interface LocalKemerBetSession {
     playerId: string,
     amountMinor: number,
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
-  ): Promise<LocalKemerBetDepositDispatchOutcome>;
+  ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
   stop(): Promise<void>;
 }
 

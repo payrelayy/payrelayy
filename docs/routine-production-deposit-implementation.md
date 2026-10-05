@@ -1,131 +1,167 @@
 # Routine production TeleBirr deposits
 
-This implements the Windows execution core for the approved
-[TeleBirr product contract](telebirr-deposit-product-contract.md). It is not a go-live declaration.
-Persistent Owner policy storage and verified-job admission are implemented alongside the Windows
-core. The production claim/fence/reconciliation broker, signed routine authorization channel and
-deployment entry point are not connected to this core yet. The existing v2 pilot and Owner-approved
-one-job path remain unchanged, and merging this code does not start automatic deposits.
+This repository now contains the complete, separately gated execution path for FetanAgent routine
+TeleBirr deposits into KemerBet. It implements the approved rules in
+[telebirr-deposit-product-contract.md](telebirr-deposit-product-contract.md), while keeping the
+fixed 25 ETB execution-v2 pilot unchanged.
 
-## Business rules
+The implementation is dormant after deployment. Merging or applying its migration does not start
+the Windows companion, create a database password, enable the production overlay, lease a job, or
+move money. Production use requires all of the explicit activation inputs described below. No live
+payment was performed while implementing or testing this path.
 
-- TeleBirr, ETB, KemerBet deposits only.
-- 25–25,000 ETB per deposit, inclusive, including valid cents. The amount comes from the verified
-  official receipt's Settled Amount; payment fees and customer-entered amounts are not credited.
-- Any currently active, validated, deposit-eligible Player ID, not a five-Player allowlist.
-  TeleBirr payer-to-Player ownership matching is not required.
-- No daily, lifetime, frequency or successful-deposit-count quota. Distinct accepted receipts
-  for the same Player are permitted without a five-deposit limit.
-- Persistent business authorization, rather than a twelve-hour testing policy. Revocation,
-  emergency stop, one-use payment claims and per-action freshness still apply.
-- One deposit at a time. Positive history and Player-credit reconciliation is required before
-  the next deposit starts. An uncertain result holds the account lane; it is not retried.
-- No per-deposit customer confirmation or Owner approval in routine automatic mode. The
-  existing Owner-approved pilot mode is a separate path, not an automatic-approval workaround.
+## Product rules
 
-## Implemented code
+- TeleBirr receipts, ETB, and KemerBet deposits only.
+- 25–25,000 ETB per deposit, inclusive, with valid cents. The credited amount is the verified
+  official receipt's Settled Amount, not a customer-entered value or the amount plus fees.
+- Any currently active, validated, deposit-eligible Player ID may be used. There is no five-Player
+  allowlist and TeleBirr payer-to-Player ownership matching is not required.
+- There is no daily, lifetime, frequency, or successful-deposit quota. Every payment claim remains
+  globally one-use.
+- At most one deposit may occupy the KemerBet account lane. A fenced or uncertain attempt blocks
+  later work until exact durable reconciliation.
+- Routine mode does not ask for per-deposit Owner confirmation. It still requires a current
+  persistent Owner policy, an active paired certificate, an account-bound Windows launch, and the
+  separately activated production transport.
 
-`apps/windows-companion/src/local-kemerbet-deposit.ts` now has a separate
-`executeRoutineOneUseLocalKemerBetDeposit` entry point. It validates integer minor units against
-the existing domain limits, fills the exact two-decimal amount, resolves the requested Player
-through the reviewed lookup response, and rechecks Player, ETB, amount and empty notes before
-requesting a database fence. Final routine authority must bind the same Player and amount.
+## Implemented execution path
 
-The provider route allowance is exact, single-use and remains occupied until its outcome settles.
-An old/late callback cannot settle a later allowance. The existing `begin` and
-`executeExactOneUseLocalKemerBetDeposit` APIs remain fixed at 25 ETB, as does the signed v2 capability.
-Provider redirects, transport retries and arbitrary financial requests are still forbidden.
+The routine protocol is domain-separated from execution-v2:
 
-`local-kemerbet-session.ts` exposes the separate routine operation under the existing exclusive
-browser-profile and operation locks. The read-only and v2 workers do not call it.
+- protocol mode `windows_companion_routine_deposit_execution_v1`;
+- capability `kemerbet.deposit.submit.verified_receipt_amount.routine.v1`;
+- endpoint `/v3/companion/device/routine-deposits:command`;
+- operations `lease`, `fence`, `record_dispatch`, `reconcile`, `complete`, and `pause`.
 
-`routine-deposit-worker.ts` implements one complete execute → record dispatch → reconcile →
-complete sequence. It checks an active routine policy and the exact job/intent/attempt/payment
-claim/account/Player/amount binding. A ten-second one-use fence is requested only after UI
-preparation. A submission response is not treated as successful credit. Pending reconciliation
-retains the current job, and recovered fenced attempts reconcile without another submission.
-Database failure, authority mismatch or uncertain credit pauses the worker instead of leasing
-another job. The pause is set locally before any pause-notification I/O.
+Every Windows request contains the current paired-device certificate and an exact signed HTTP
+request. The bridge validates those with the no-money certificate signer, executes one reviewed
+database function through a dedicated one-connection login, and signs the response with the
+distinct production execution key. The Windows client pins that key, validates the exact response
+digest and request binding, rejects stale responses, and never retries a command after transport
+uncertainty.
 
-`routine-deposit-runner.ts` continuously invokes that worker, sequentially, without a count quota.
-It has an abortable idle interval, stops on uncertainty and closes its browser session exactly once.
-It is not imported or started by the production/read-only entry point.
+The database migration `20261005090000_routine_telebirr_execution_broker.sql` adds immutable,
+forced-RLS runtime, request, dispatch-evidence, and pause ledgers. Its runtime role starts as
+`NOLOGIN`, passwordless, and without capability membership. Only a `postgres` session can activate
+it, and activation binds one current Owner authorization, paired certificate, KemerBet agent
+account, no-money signer, and production execution signer. The runtime receives schema usage and
+EXECUTE on one security-definer broker function; it receives no table, sequence, or column access.
 
-### Persistent policy and database admission
+Lease and final-action state use the existing durable execution-attempt and KemerBet account-lane
+ledgers. A process restart cannot turn a fenced attempt into new executable work. Exact request,
+body, replay, and command digests are append-only and replay-safe. A provider response cannot
+complete an attempt: completion re-reads one durable `confirmed_executed` reconciliation with
+exact Player, amount, currency, history cardinality, and Player-credit evidence.
 
-`20261004212527_persistent_routine_telebirr_processing_policy.sql` stores the Owner's routine
-business scope separately from the twelve-hour pilot and individual deposit approvals. The policy
-has no expiry, daily quota or successful-deposit quota. Saving the same active scope retains its
-authorization ID and original authorization time; it does not renew a testing window. Stops are
-append-only and persistent, and replaying an older save request cannot undo a later stop.
+The Windows routine worker remains sequential. It validates the policy and immutable
+job/intent/attempt/payment-claim/account/Player/amount binding, asks for the ten-second database
+fence only after the page is prepared, and allows one Transfer request. After submission, it
+requires both exact visible provider messages:
 
-Owner-control exposes only read, save and stop configuration procedures through
-`/v1/owner/routine-telebirr-processing`. Mutation routes require the existing verified Owner,
-same-origin request boundary and matching idempotency key. The dashboard explicitly distinguishes
-"policy saved" from execution enabled. This release always reports `executionEnabled: false`;
-none of these procedures opens an operator, changes financial switches or creates a job.
+- `Transfer Successful!`
+- `Player Balance +<exact two-decimal amount> ETB Success`
 
-The private `assess_routine_telebirr_execution_job` and `admit_routine_telebirr_execution_job`
-procedures recheck a current authorization, active KemerBet agent and deposit policy, current
-validated/eligible destination, exact verified receipt amount and receiver revision, original
-submission freshness and the unique global payment claim. Admission binds an untouched queued
-job to that immutable lineage. It does not create an execution attempt, lease the job or authorize
-Transfer. Old pilot reservations and payments predating the authorization cannot be adopted.
-There is no five-Player or five-deposit quota. The client/operator/API/Owner roles cannot execute
-these internal admission procedures or write their ledgers directly.
+Those messages are dispatch evidence, not the durable completion decision. The worker records the
+dispatch and enters reconciliation. Pending reconciliation retains the account lane; uncertain or
+mismatched reconciliation pauses the worker. Local pause state is set before pause-notification
+I/O, so a database outage cannot make the worker continue.
 
-New admission metadata is not a substitute for the existing durable execution-attempt/account
-lane. The future authenticated routine broker must use that ledger for atomic claim, fence and
-reconciliation. The fixed-pilot insertion/lease/final-action guards and one-job Owner approval
-gate are deliberately unchanged by this policy/admission migration.
+## Protected Windows launch
 
-## Remaining production integration
+The standard companion launcher remains read-only. Routine execution is available only through
+`Start FetanAgent Automatic Deposits.cmd` in a packaged release.
 
-The `RoutineDepositExecutionStore` port is deliberately not a mock production adapter. Before
-routine mode can be enabled, its real implementation must:
+That launcher requires the ordinary, non-reparse-point local document
+`operator\routine-deposit-launch.json` under the paired companion data root. The document contains
+only version 1, the exact installed release SHA, and the production platform-agent account UUID.
+`infra/operations/prepare-windows-companion-routine-local.ps1` creates it exclusively and runs the
+packaged launcher's `-CheckOnly` path. It never connects to the server or opens KemerBet.
 
-1. Connect the saved routine authorization to a distinctly authorized production runtime,
-   retaining its policy/version binding through revocation and emergency stop.
-2. Connect the routine receipt-intake/settlement path and internal admission to the authenticated
-   broker, outside the five-Player/fixed-25-ETB pilot boundary. Readiness metadata alone is not a
-   financial capability or a replacement for the existing verified-payment ledger.
-3. Use the existing durable execution-attempt/agent-account blocking ledger, not just this process's
-   `busy` flag. Claim, fence and complete operations must be atomic; multiple processes must not
-   open parallel account lanes. A prepared/fenced/uncertain attempt must not become a fresh
-   executable job merely because a worker lease or process expired.
-4. Deliver an authenticated, distinctly versioned routine job/amount authority to the Windows
-   worker. Never change the meaning of the fixed-25-ETB v2 signature, pretend that a routine job
-   belongs to a pilot, or synthesize individual Owner approvals.
-5. Bind confirmed reconciliation to the same attempt, exact Player/ETB/amount and unique provider
-   history plus confirmed Player credit. `completeConfirmed` must re-read that durable result
-   before releasing the lane. An HTTP 200 alone cannot release it.
-6. Wire the routine runner into an explicitly authorized launcher, renewal/stop handling and
-   production readiness projection. Verify the whole path without a live payment before rollout.
+At execution time, the launcher independently verifies the complete installation tree, loads the
+paired certificate, creates a random named pipe and challenge, and starts the exact packaged child
+with an allowlisted environment and an IPC stop channel. The child remeasures the installation and
+signs a launch proof. The parent verifies the certificate signature, challenge, release, tree,
+exact child PID, and observed time before returning a permit bound to the SHA-256 digest of those
+exact proof bytes. The child acknowledges that same digest before starting either the lookup or
+routine worker. Parent termination or IPC disconnect stops the child and closes the protected
+browser session.
 
-These are integration requirements, not new daily business limits. The policy migration includes
-only three Owner configuration function grants; it adds no worker execution grant or new login.
-Adding/merging the migration does not apply it to production. No production switch, phone
-enrollment, deployment or live financial action is performed by the implementation PRs.
+The routine and execution-v2 Windows flags are mutually exclusive. Manually setting an internal
+flag does not bypass the required parent IPC channel, named-pipe proof, installed-tree measurement,
+paired key, account binding, server-signed commands, database activation, or final-action fence.
+
+## Production deployment and activation
+
+The normal production composition stays no-money. The sealed release includes
+`compose.production.routine-deposits.yaml`, but the deploy helper loads it only when the protected
+root-owned `routine-deposits.release` marker contains the exact release SHA. The routine marker and
+the execution-v2 marker are mutually exclusive. Before using the overlay, the helper validates the
+pinned execution key and v3 manifest plus the root-owned, mode-0400 routine database URL. The
+public route returns a dormant 503 while the overlay is absent.
+
+Activation is an ordered operator procedure, documented in
+`infra/operations/routine-deposit-activation.md`. Its independent gates are:
+
+1. deploy the reviewed migration and compatible bridge/Windows release;
+2. save the exact routine policy from an authenticated active Owner;
+3. pair the reviewed Windows release and obtain its current certificate ID and exact agent account;
+4. generate a fresh dedicated SCRAM credential and database URL with
+   `create-production-routine-deposit-runtime-credential.mjs`;
+5. use a production `postgres` session and the exact activation SQL to bind that password to the
+   current policy and certificate;
+6. install the protected URL and exact-release overlay marker, then deploy the bridge;
+7. create and check the local Windows account-binding document;
+8. start the separate Automatic Deposits launcher and verify the Owner projection reports the
+   bound runtime active.
+
+Credential generation uses exclusive file creation and mode 0600. If either output collides or a
+later write fails, it removes only files created by that invocation and preserves pre-existing
+operator material.
+
+The stop path is independent of the Windows process. Run
+`production-routine-deposit-disable.sql` from `postgres` first; it revokes capability membership,
+sets the runtime to `NOLOGIN`, clears its password, commits, and then terminates remaining runtime
+sessions. Remove the exact-release overlay marker and stop the Windows launcher afterward. A
+provider action already beyond its fence is not undone by stopping transport and must remain in
+reconciliation.
+
+## Safety invariants
+
+- The fixed 25 ETB v2 protocol, worker, handoff, and Owner-approved one-job path retain their old
+  capability and semantics.
+- The bridge's no-money database login never receives the routine broker function. The routine
+  login never receives pairing, lookup, v2 execution, table, sequence, or column privileges.
+- The certificate signer and execution-response signer must have different key IDs and keys.
+- Server-side feature switches, current policy, paired certificate, exact account, one-use payment
+  claim, receiver revision, Player eligibility, and verified receipt amount are rechecked before a
+  fresh lease or fence.
+- A duplicate, redirect, timeout, crash, database failure, changed page, wrong modal, malformed
+  response, or uncertain provider outcome never causes an automatic Transfer retry.
+- A stop prevents new execution but cannot erase an already fenced action. Reconciliation remains
+  mandatory.
 
 ## Verification
 
+The non-financial verification set is:
+
 ```powershell
 pnpm -r run build
+pnpm --filter @fetanagent/agent-platform-companion-execution-contracts test
 pnpm --filter @fetanagent/windows-companion test
-pnpm --filter @fetanagent/admin test
-pnpm test:sql
+pnpm --filter @fetanagent/companion-device-bridge test
+pnpm --filter @fetanagent/sql-integration-tests build
+pnpm verify:routine-deposits
 node infra/verify-companion-execution-v2-deployment.mjs
+pnpm test:sql
 ```
 
-Unit tests cover minimum/maximum amounts, cents, exact one-use payloads, v2 preservation, in-flight
-serialization, mismatch/expiry/abort, ambiguous fence requests, recovery, reconciliation and more
-than five distinct deposits for one Player. Isolated Windows Chrome tests exercise the real UI
-adapter at 25.00, 25.01 and 25,000.00 ETB and reject wrong authority or UI tampering. All fixture
-requests are fulfilled/aborted locally; they cannot reach KemerBet or move money. Those fixtures
-do not prove a production deposit or production reconciliation has succeeded.
+The routine verifier checks the dormant deployment boundary, domain separation, signed launch and
+HTTP channels, exact modal evidence, one-function runtime role, explicit production overlay,
+activation/disable ordering, packaged launcher, and collision-safe credential generator. Unit
+tests use only local fixtures and cannot reach KemerBet or move money.
 
-Disposable PostgreSQL coverage additionally checks immutable policy/stop history, non-reactivating
-request replay, exact scope, zero execution privileges, minimum/cents/maximum receipt-derived
-admission, more than five distinct deposits, current eligibility/agent/receiver rechecks, and
-refusal to lease a readiness-only job through the unchanged Owner approval gate. The harness
-uses only synthetic data in an isolated local container, never a Supabase application database.
+`pnpm test:sql` is the authoritative disposable-PostgreSQL test for migration syntax, runtime ACLs,
+explicit activation, replay-safe idle commands, Owner execution projection, and immediate disable.
+It must pass in an environment with the repository's Docker-backed SQL harness before production
+deployment.

@@ -74,6 +74,8 @@ Set-Content -LiteralPath (Join-Path $packageRoot 'runtime\VERSION') -Value $node
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Companion.vbs') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent One-Job Operator.ps1') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent One-Job Operator.cmd') -Destination $packageRoot
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Automatic Deposits.ps1') -Destination $packageRoot
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Automatic Deposits.cmd') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Enter FetanAgent Pairing Package.ps1') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\README.txt') -Destination $packageRoot
 Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseSha -Encoding ascii -NoNewline
@@ -135,7 +137,7 @@ import { realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = realpathSync(process.cwd()) + sep;
-for (const name of ['@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation', '@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js', './dist/one-job-operator-cli.js']) {
+for (const name of ['@fetanagent/agent-platform-companion-activation-issuer/guarded-operator-ssh-activation', '@fetanagent/agent-platform-companion-contracts', '@fetanagent/agent-platform-companion-execution-contracts', '@fetanagent/agent-platform-kemerbet', '@fetanagent/agent-platform-contracts', 'playwright-core', './dist/index.js', './dist/one-job-operator-cli.js', './dist/routine-deposit-launcher-cli.js']) {
   const url = import.meta.resolve(name);
   assert(realpathSync(fileURLToPath(url)).startsWith(root), 'Runtime dependency escaped the extracted package.');
   await import(url);

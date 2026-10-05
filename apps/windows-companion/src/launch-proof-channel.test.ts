@@ -12,8 +12,11 @@ import {
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import {
+  COMPANION_ROUTINE_LOCAL_PERMIT_ACK_PREFIX,
+  COMPANION_ROUTINE_LOCAL_PERMIT_PREFIX,
   deliverCompanionExecutionLaunchProofAndAwaitPermit,
   deliverCompanionLaunchProof,
+  deliverCompanionRoutineLaunchProofAndAwaitPermit,
   takeCompanionLaunchProofRequest,
 } from './launch-proof-channel.js';
 
@@ -25,6 +28,14 @@ const guardedProof = {
     contractVersion: 2,
     purpose: COMPANION_EXECUTION_LAUNCH_PROOF_PURPOSE,
     executionMode: 'guarded',
+    challengeDigest,
+  },
+  signature: 'test-only',
+} as never;
+const routineProof = {
+  body: {
+    contractVersion: 1,
+    purpose: COMPANION_LAUNCH_PROOF_PURPOSE,
     challengeDigest,
   },
   signature: 'test-only',
@@ -151,6 +162,69 @@ describe('local companion launch-proof channel', () => {
         await expect(acknowledgement).resolves.toBe(
           `${COMPANION_EXECUTION_LOCAL_PERMIT_ACK_PREFIX}sha256:${digest}|${validUntil}\n`,
         );
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'holds routine execution until its parent verifies the proof and returns an exact permit',
+    async () => {
+      let acknowledge!: (value: string) => void;
+      const acknowledgement = new Promise<string>((resolve) => {
+        acknowledge = resolve;
+      });
+      const server = createServer((socket) => {
+        let received = '';
+        let proofReceived = false;
+        socket.on('data', (chunk) => {
+          received += chunk.toString('utf8');
+          if (!received.endsWith('\n')) return;
+          if (proofReceived) {
+            acknowledge(received);
+            return;
+          }
+          proofReceived = true;
+          const digest = createHash('sha256').update(received.slice(0, -1), 'utf8').digest('hex');
+          received = '';
+          socket.write(`${COMPANION_ROUTINE_LOCAL_PERMIT_PREFIX}sha256:${digest}\n`);
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(pipePath, resolve);
+      });
+      try {
+        await expect(
+          deliverCompanionRoutineLaunchProofAndAwaitPermit({ challenge, pipePath }, routineProof),
+        ).resolves.toBeUndefined();
+        const digest = createHash('sha256').update(JSON.stringify(routineProof)).digest('hex');
+        await expect(acknowledgement).resolves.toBe(
+          `${COMPANION_ROUTINE_LOCAL_PERMIT_ACK_PREFIX}sha256:${digest}\n`,
+        );
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
+
+  it.skipIf(process.platform !== 'win32')(
+    'rejects a routine permit that is not bound to the delivered proof',
+    async () => {
+      const server = createServer((socket) => {
+        socket.once('data', () =>
+          socket.end(`${COMPANION_ROUTINE_LOCAL_PERMIT_PREFIX}sha256:${'0'.repeat(64)}\n`),
+        );
+      });
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(pipePath, resolve);
+      });
+      try {
+        await expect(
+          deliverCompanionRoutineLaunchProofAndAwaitPermit({ challenge, pipePath }, routineProof),
+        ).rejects.toThrow('The routine local launch permit is unavailable.');
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }

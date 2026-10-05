@@ -10,6 +10,7 @@ import {
   COMPANION_EXECUTION_POLL_PATH,
   COMPANION_EXECUTION_RESULT_PATH,
   COMPANION_EXECUTION_STATUS_PATH,
+  ROUTINE_DEPOSIT_COMMAND_PATH,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import type { CompanionDeviceBridgeConfig } from './config.js';
@@ -20,10 +21,18 @@ import {
 import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
 import {
+  createDormantRoutineDepositHandler,
+  createRoutineDepositHandler,
+} from './routine-deposit-handler.js';
+import {
   createCompanionDeviceBridgePostgresRuntime,
   createCompanionExecutionPostgresRuntime,
   type CompanionDeviceBridgePostgresRuntime,
 } from './postgres-runtime.js';
+import {
+  createRoutineDepositPostgresRuntime,
+  type RoutineDepositPostgresRuntime,
+} from './routine-postgres-runtime.js';
 import {
   COMPANION_DEVICE_BRIDGE_LISTEN_HOST,
   COMPANION_DEVICE_BRIDGE_LISTEN_PORT,
@@ -50,6 +59,11 @@ export interface CompanionDeviceBridgeApplicationDependencies {
     signerKeyId: string,
     executionSignerKeyId: string,
   ) => Promise<CompanionDeviceBridgePostgresRuntime>;
+  readonly createRoutinePostgresRuntime?: (
+    config: Extract<EnabledConfig['routine'], { readonly enabled: true }>['connection'],
+    signerKeyId: string,
+    executionSignerKeyId: string,
+  ) => Promise<RoutineDepositPostgresRuntime>;
   readonly createServer?: (
     handler: CompanionDeviceBridgeHandler,
   ) => CompanionDeviceBridgeServerRuntime;
@@ -72,10 +86,16 @@ async function closeRuntimes(
   server: CompanionDeviceBridgeServerRuntime | undefined,
   postgres: CompanionDeviceBridgePostgresRuntime | undefined,
   executionPostgres: CompanionDeviceBridgePostgresRuntime | undefined,
+  routinePostgres: RoutineDepositPostgresRuntime | undefined,
 ): Promise<void> {
   let failed = false;
   try {
     await server?.close();
+  } catch {
+    failed = true;
+  }
+  try {
+    await routinePostgres?.close();
   } catch {
     failed = true;
   }
@@ -101,6 +121,8 @@ export async function startCompanionDeviceBridgeApplication(
     dependencies.createPostgresRuntime ?? createCompanionDeviceBridgePostgresRuntime;
   const createExecutionPostgresRuntime =
     dependencies.createExecutionPostgresRuntime ?? createCompanionExecutionPostgresRuntime;
+  const createRoutinePostgresRuntime =
+    dependencies.createRoutinePostgresRuntime ?? createRoutineDepositPostgresRuntime;
   const createServer =
     dependencies.createServer ??
     ((handler: CompanionDeviceBridgeHandler) =>
@@ -110,6 +132,7 @@ export async function startCompanionDeviceBridgeApplication(
       }));
   let postgres: CompanionDeviceBridgePostgresRuntime | undefined;
   let executionPostgres: CompanionDeviceBridgePostgresRuntime | undefined;
+  let routinePostgres: RoutineDepositPostgresRuntime | undefined;
   let server: CompanionDeviceBridgeServerRuntime | undefined;
   try {
     postgres = await createPostgresRuntime(config.connection, config.signer.keyId);
@@ -121,6 +144,14 @@ export async function startCompanionDeviceBridgeApplication(
         config.execution.signer.keyId,
       );
       if (!(await executionPostgres.ready())) throw new Error();
+    }
+    if (config.routine.enabled) {
+      routinePostgres = await createRoutinePostgresRuntime(
+        config.routine.connection,
+        config.signer.keyId,
+        config.routine.signer.keyId,
+      );
+      if (!(await routinePostgres.ready())) throw new Error();
     }
     const state = postgres.state;
     const pairingHandler = createCompanionPairingHandler({
@@ -255,6 +286,25 @@ export async function startCompanionDeviceBridgeApplication(
               executionState.completeExecutionStatus(statusBodyDigest, status),
           })
         : createDormantCompanionExecutionHandler();
+    const routineConfig = config.routine;
+    const routineState = routinePostgres?.state;
+    if (routineConfig.enabled && routineState === undefined) throw new Error();
+    const routineHandler =
+      routineConfig.enabled && routineState !== undefined
+        ? createRoutineDepositHandler({
+            noMoneySigner: config.signer,
+            executionSigner: routineConfig.signer,
+            now: () => new Date((dependencies.now ?? (() => new Date().toISOString()))()),
+            executeCommand: (certificate, request, replayIdentity, command, assessedAt) =>
+              routineState.executeRoutineDepositCommand(
+                certificate,
+                request,
+                replayIdentity,
+                command,
+                assessedAt,
+              ),
+          })
+        : createDormantRoutineDepositHandler();
     const handler: CompanionDeviceBridgeHandler = (request) =>
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
       request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
@@ -264,25 +314,31 @@ export async function startCompanionDeviceBridgeApplication(
             request.path === COMPANION_EXECUTION_RESULT_PATH ||
             request.path === COMPANION_EXECUTION_STATUS_PATH
           ? executionHandler(request)
-          : pairingHandler(request);
+          : request.path === ROUTINE_DEPOSIT_COMMAND_PATH
+            ? routineHandler(request)
+            : pairingHandler(request);
     server = createServer(handler);
     await server.listen();
     if (
       !server.ready() ||
       !server.server.listening ||
       !(await postgres.ready()) ||
-      (executionPostgres !== undefined && !(await executionPostgres.ready()))
+      (executionPostgres !== undefined && !(await executionPostgres.ready())) ||
+      (routinePostgres !== undefined && !(await routinePostgres.ready()))
     ) {
       throw new Error();
     }
   } catch {
-    await closeRuntimes(server, postgres, executionPostgres).catch(() => undefined);
+    await closeRuntimes(server, postgres, executionPostgres, routinePostgres).catch(
+      () => undefined,
+    );
     throw new CompanionDeviceBridgeApplicationError();
   }
 
   const activeServer = server;
   const activePostgres = postgres;
   const activeExecutionPostgres = executionPostgres;
+  const activeRoutinePostgres = routinePostgres;
   let closed = false;
   let closePromise: Promise<void> | undefined;
   return Object.freeze({
@@ -291,7 +347,8 @@ export async function startCompanionDeviceBridgeApplication(
       try {
         return (
           (await activePostgres.ready()) &&
-          (activeExecutionPostgres === undefined || (await activeExecutionPostgres.ready()))
+          (activeExecutionPostgres === undefined || (await activeExecutionPostgres.ready())) &&
+          (activeRoutinePostgres === undefined || (await activeRoutinePostgres.ready()))
         );
       } catch {
         return false;
@@ -300,7 +357,12 @@ export async function startCompanionDeviceBridgeApplication(
     close() {
       closePromise ??= (async () => {
         closed = true;
-        await closeRuntimes(activeServer, activePostgres, activeExecutionPostgres);
+        await closeRuntimes(
+          activeServer,
+          activePostgres,
+          activeExecutionPostgres,
+          activeRoutinePostgres,
+        );
       })();
       return closePromise;
     },

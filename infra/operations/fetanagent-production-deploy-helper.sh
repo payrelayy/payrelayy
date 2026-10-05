@@ -19,6 +19,8 @@ readonly STAGING_BOT_TOKEN='/srv/fetanagent/secrets/staging/bot-token'
 readonly COMPANION_EXECUTION_V2_MARKER="$STATE_ROOT/companion-execution-v2.release"
 readonly COMPANION_EXECUTION_V2_KEY='/etc/fetanagent/companion-execution-secrets/production-execution-signer.pkcs8.der'
 readonly COMPANION_EXECUTION_V2_KEY_SHA256='c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2'
+readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
+readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -177,19 +179,58 @@ companion_execution_v2_enabled_for_release() {
   return 0
 }
 
+validate_routine_deposit_material() {
+  local release="$1" database_url
+  validate_companion_execution_v2_material "$release"
+  [[ ! -L "$ROUTINE_DEPOSITS_DATABASE_URL" && -f "$ROUTINE_DEPOSITS_DATABASE_URL" &&
+    "$(realpath -- "$ROUTINE_DEPOSITS_DATABASE_URL")" == "$ROUTINE_DEPOSITS_DATABASE_URL" &&
+    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_DATABASE_URL")" == '0:0:400:1' &&
+    "$(stat --format='%s' "$ROUTINE_DEPOSITS_DATABASE_URL")" -le 1024 ]] ||
+    die 'the protected routine-deposit database credential is absent or unsafe'
+  database_url="$(<"$ROUTINE_DEPOSITS_DATABASE_URL")"
+  [[ "$database_url" =~ ^postgresql://fetanagent_routine_deposit_broker_runtime\.xzztugbgtulptnbpoelr:[0-9a-f]{64}@aws-0-eu-west-1\.pooler\.supabase\.com:5432/postgres\?sslmode=verify-full$ ]] ||
+    die 'the protected routine-deposit database credential is malformed'
+}
+
+routine_deposits_enabled_for_release() {
+  local release="$1" sha
+  if [[ ! -e "$ROUTINE_DEPOSITS_MARKER" && ! -L "$ROUTINE_DEPOSITS_MARKER" ]]; then
+    return 1
+  fi
+  [[ ! -L "$ROUTINE_DEPOSITS_MARKER" && -f "$ROUTINE_DEPOSITS_MARKER" &&
+    "$(realpath -- "$ROUTINE_DEPOSITS_MARKER")" == "$ROUTINE_DEPOSITS_MARKER" &&
+    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_MARKER")" == '0:0:600:1' ]] ||
+    die 'the routine-deposit release marker is unsafe'
+  sha="${release##*/}"
+  [[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$sha" ]] || return 1
+  validate_routine_deposit_material "$release"
+  return 0
+}
+
 compose_release() {
   local release="$1"
   shift
-  local tag signer_id deployment_mode
+  local tag signer_id deployment_mode execution_v2_enabled=false routine_deposits_enabled=false
   local -a compose_files=(--file "$release/compose.production.yaml")
+  if { [[ -e "$COMPANION_EXECUTION_V2_MARKER" || -L "$COMPANION_EXECUTION_V2_MARKER" ]] &&
+    [[ -e "$ROUTINE_DEPOSITS_MARKER" || -L "$ROUTINE_DEPOSITS_MARKER" ]]; }; then
+    die 'companion execution-v2 and routine-deposit markers cannot coexist'
+  fi
   tag="$(<"$release/.image-tag")"
   signer_id="$(<"$release/telebirr-assignment-signer-key-id")"
   deployment_mode="$(release_deployment_mode "$release")"
   require_tag "$tag"
   [[ "$signer_id" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$ ]] ||
     die 'the production assignment signer identifier is malformed'
-  if companion_execution_v2_enabled_for_release "$release"; then
+  if companion_execution_v2_enabled_for_release "$release"; then execution_v2_enabled=true; fi
+  if routine_deposits_enabled_for_release "$release"; then routine_deposits_enabled=true; fi
+  [[ "$execution_v2_enabled" != true || "$routine_deposits_enabled" != true ]] ||
+    die 'companion execution-v2 and routine deposits cannot be enabled in the same release'
+  if [[ "$execution_v2_enabled" == true ]]; then
     compose_files+=(--file "$release/compose.production.companion-execution-v2.yaml")
+  fi
+  if [[ "$routine_deposits_enabled" == true ]]; then
+    compose_files+=(--file "$release/compose.production.routine-deposits.yaml")
   fi
   if [[ "$deployment_mode" == 'shadow-review' ]]; then
     compose_files+=(--file "$release/compose.production.shadow-review.yaml")
@@ -382,6 +423,10 @@ verify_release_files() {
       -f "$release/compose.production.companion-execution-v2.yaml" &&
       "$(stat --format='%u:%g:%a:%h' "$release/compose.production.companion-execution-v2.yaml")" == '0:0:444:1' ]] ||
       die 'the companion execution-v2 production overlay is absent or unsafe'
+    [[ ! -L "$release/compose.production.routine-deposits.yaml" &&
+      -f "$release/compose.production.routine-deposits.yaml" &&
+      "$(stat --format='%u:%g:%a:%h' "$release/compose.production.routine-deposits.yaml")" == '0:0:444:1' ]] ||
+      die 'the routine-deposit production overlay is absent or unsafe'
   fi
   [[ ! -L "$release/secrets" && -d "$release/secrets" ]] || die 'the secret directory is unsafe'
   for name in "${required[@]}"; do
@@ -460,7 +505,7 @@ negative_telebirr_public_smoke() {
 }
 
 negative_companion_public_smoke() {
-  local release="$1" status route
+  local release="$1" status route routine_status=503
   if ! grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then return; fi
   for route in \
     '/v1/companion/device/enrollments:pair' \
@@ -478,6 +523,14 @@ negative_companion_public_smoke() {
       --data '{}' "https://device.fetanagent.com$route")"
     [[ "$status" == '401' ]] || die 'a production companion route did not reject an unsigned request'
   done
+  if routine_deposits_enabled_for_release "$release"; then routine_status=400; fi
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.companion-device-bridge+json' \
+    --header 'Accept: application/vnd.fetanagent.companion-device-bridge+json' \
+    --data '{}' "https://device.fetanagent.com/v3/companion/device/routine-deposits:command")"
+  [[ "$status" == "$routine_status" ]] ||
+    die 'the production routine-deposit route did not match its guarded deployment state'
 }
 
 rollback_transition() {
@@ -620,6 +673,10 @@ case "${1:-}" in
       -f "$incoming/compose.production.inert-maintenance.yaml" &&
       -s "$incoming/compose.production.inert-maintenance.yaml" ]] ||
       die 'the incoming inert-maintenance production overlay is absent or unsafe'
+    [[ ! -L "$incoming/compose.production.routine-deposits.yaml" &&
+      -f "$incoming/compose.production.routine-deposits.yaml" &&
+      -s "$incoming/compose.production.routine-deposits.yaml" ]] ||
+      die 'the incoming routine-deposit production overlay is absent or unsafe'
     release="$RELEASE_ROOT/$sha"
     if [[ -e "$release" || -L "$release" ]]; then
       [[ ! -L "$release" && -d "$release" && "$(<"$release/.release-sha")" == "$sha" &&
@@ -632,7 +689,7 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=32
+    expected_count=33
     if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]]; then
       expected_count=$((expected_count + 4))
       for name in \
@@ -665,7 +722,7 @@ case "${1:-}" in
     install -d -m 0700 "$incoming/secrets"
     for file in "$incoming"/*; do
       case "${file##*/}" in
-        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.shadow-review.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
+        fetanagent-production-images.tar|compose.production.yaml|compose.production.companion-execution-v2.yaml|compose.production.routine-deposits.yaml|compose.production.shadow-review.yaml|compose.production.inert-maintenance.yaml|runtime-deployment-mode|telebirr-assignment-signer-key-id|secrets) ;;
         *) mv -- "$file" "$incoming/secrets/" ;;
       esac
     done
@@ -689,6 +746,7 @@ case "${1:-}" in
       "$incoming/secrets/telebirr-bridge-runtime-manifest.v1.json"
     chmod 0444 "$incoming/compose.production.yaml" \
       "$incoming/compose.production.companion-execution-v2.yaml" \
+      "$incoming/compose.production.routine-deposits.yaml" \
       "$incoming/compose.production.shadow-review.yaml" \
       "$incoming/compose.production.inert-maintenance.yaml" \
       "$incoming/runtime-deployment-mode" \

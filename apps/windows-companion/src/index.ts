@@ -19,6 +19,7 @@ import { selectGuardedExecutionDeadline } from './execution-deadline.js';
 import {
   deliverCompanionExecutionLaunchProofAndAwaitPermit,
   deliverCompanionLaunchProof,
+  deliverCompanionRoutineLaunchProofAndAwaitPermit,
   takeCompanionLaunchProofRequest,
 } from './launch-proof-channel.js';
 import { verifyWindowsCompanionInstallationTree } from './installation-tree.js';
@@ -35,6 +36,9 @@ import {
   type GuardedPrePermitShutdown,
 } from './guarded-pre-permit-shutdown.js';
 import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
+import { createRoutineDepositHttpStore } from './routine-deposit-http-store.js';
+import { startRoutineDepositQueue } from './routine-deposit-runner.js';
+import type { RoutineDepositWorkerResult } from './routine-deposit-worker.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
   const messages: Record<LocalKemerBetSessionEvent['state'], string> = {
@@ -143,13 +147,29 @@ function reportExecution(event: CompanionExecutionWorkerEvent): void {
   );
 }
 
+function reportRoutineDeposit(result: RoutineDepositWorkerResult): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'routine_deposit_state_changed',
+      state: result.status,
+      ...(result.status === 'paused' ? { reason: result.reason } : {}),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+    }),
+  );
+}
+
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
   const launchProofRequest = takeCompanionLaunchProofRequest(
     process.env,
-    config.executionV2Enabled,
+    config.executionV2Enabled || config.routineDepositsEnabled,
   );
-  if (config.executionV2Enabled && (!process.connected || typeof process.send !== 'function')) {
+  if (
+    (config.executionV2Enabled || config.routineDepositsEnabled) &&
+    (!process.connected || typeof process.send !== 'function')
+  ) {
     throw new Error('A protected parent stop channel is required for guarded execution.');
   }
   console.info(
@@ -226,6 +246,13 @@ export async function runWindowsCompanion(): Promise<void> {
           );
           if (guardedShutdown?.requested()) throw new Error();
           guardedShutdown?.markPermitReceived();
+        } else if (config.routineDepositsEnabled) {
+          const proof = baseDevice.createSignedLaunchProof(processContext);
+          await deliverCompanionRoutineLaunchProofAndAwaitPermit(
+            launchProofRequest,
+            proof,
+            lookupAbort.signal,
+          );
         } else {
           const proof = baseDevice.createSignedLaunchProof(processContext);
           await deliverCompanionLaunchProof(launchProofRequest, proof);
@@ -283,10 +310,32 @@ export async function runWindowsCompanion(): Promise<void> {
             }),
           );
         }
+        if (config.routineDepositsEnabled) {
+          const queue = startRoutineDepositQueue({
+            store: createRoutineDepositHttpStore({
+              device,
+              expectedPlatformAgentAccountId: config.routineExpectedPlatformAgentAccountId!,
+              trustedExecutionSignerKeyId: PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID,
+              trustedExecutionSignerPublicKeySpki:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI,
+              trustedExecutionSignerPublicKeySpkiSha256:
+                PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+              signal: lookupAbort.signal,
+            }),
+            session,
+            signal: lookupAbort.signal,
+            report: reportRoutineDeposit,
+          });
+          workers.push(
+            queue.done.then((result) => {
+              if (result.status === 'paused') lookupAbort.abort();
+            }),
+          );
+        }
         await Promise.all(workers);
       } finally {
         if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
-        if (handoff) {
+        if (handoff || config.routineDepositsEnabled) {
           lookupAbort.abort();
           await session.stop();
         }
@@ -316,7 +365,7 @@ export async function runWindowsCompanion(): Promise<void> {
               : {}),
           }),
         );
-        if (config.executionV2Enabled) await session.stop();
+        if (config.executionV2Enabled || config.routineDepositsEnabled) await session.stop();
       }
     }
   });
@@ -332,6 +381,13 @@ export async function runWindowsCompanion(): Promise<void> {
       },
     );
   }
+  const onParentDisconnect = () => {
+    if (!config.routineDepositsEnabled) return;
+    lookupAbort.abort();
+    void session.stop();
+  };
+  process.once('disconnect', onParentDisconnect);
+  if (config.routineDepositsEnabled && !process.connected) onParentDisconnect();
   let stopping = false;
   const stop = () => {
     if (stopping) return;
@@ -357,6 +413,7 @@ export async function runWindowsCompanion(): Promise<void> {
     }
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    process.off('disconnect', onParentDisconnect);
   }
 }
 

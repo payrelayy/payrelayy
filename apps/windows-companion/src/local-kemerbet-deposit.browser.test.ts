@@ -35,11 +35,13 @@ function renderSearch() {
       '<div data-placeholder="Enter Amount"><input></div>' +
       '<div data-placeholder="Enter Notes"><textarea></textarea></div><button id="transfer">Transfer</button></div>';
     document.getElementById('transfer').onclick = async () => {
+      const amount = surface.querySelector('[data-placeholder="Enter Amount"] input').value;
       await fetch('${DEPOSIT_URL}', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ playerId: body.value.id,
-          amount: Number(surface.querySelector('[data-placeholder="Enter Amount"] input').value),
+          amount: Number(amount),
           notes: surface.querySelector('textarea').value }) });
-      renderSearch();
+      surface.innerHTML = '<div class="ant-modal-content"><h2>Transfer Successful!</h2>' +
+        '<p>Player Balance +' + Number(amount).toFixed(2) + ' ETB Success</p></div>';
     };
   };
 }
@@ -53,8 +55,8 @@ describe.skipIf(process.platform !== 'win32')(
     let context: BrowserContext | undefined;
 
     beforeAll(async () => {
-      browser = await chromium.launch({ channel: 'chrome', headless: true });
-    }, 30000);
+      browser = await chromium.launch({ channel: 'chrome', headless: true, timeout: 90_000 });
+    }, 90_000);
     afterEach(async () => {
       await context?.close();
       context = undefined;
@@ -163,6 +165,7 @@ describe.skipIf(process.platform !== 'win32')(
         expect(outcome).toEqual({
           outcome: 'submission_attempted',
           providerResponseDigest: DIGEST,
+          exactPlayerCreditMatch: true,
         });
         expect(submitted).toEqual([{ playerId: 42, amount: (amount as number) / 100, notes: '' }]);
         expect(fences).toBe(1);

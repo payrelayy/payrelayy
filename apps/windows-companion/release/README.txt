@@ -22,39 +22,43 @@ FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable relea
    redacted outcomes and aggregate counts.
 10. Close the companion Chrome window to stop it.
 
-Automatic Deposit remains off unless FetanAgent has installed an exact production account binding
-and enabled the execution-v2 pilot for this Windows account. A current signed local activation
-handoff must also match the paired certificate, exact companion release, and account; setting the
-internal switch or account ID yourself cannot replace it. The signed handoff must also match a
-fresh measurement of every installed package file. Do not set the switch or account yourself.
-The standard Companion launcher remains Find-only. The separate "Start FetanAgent One-Job
-Operator.cmd" is for a separately reviewed, current Owner-approved session only. It needs a
-protected local operator document at the paired data root under operator\one-job-launch.json,
-an installed pinned SSH identity and host key, an independently opened short-lived server
-session, and the exact published release. Without those inputs it stops without starting a
-deposit. The document contains local paths and connection details, never a payment reference,
-password, or request key. Its PowerShell script supports -CheckOnly to inspect local file
-presence without connecting. Do not copy a document from another machine or another release.
-Use -PreviewConnection for a separately prepared server session to check the paired
-bootstrap connection only. This sends one signed read-only bootstrap request over the
-existing pinned SSH connection and discards its private response binding. It never
-signs an execution handoff, enables execution, opens KemerBet, approves a job, or
-starts a deposit. It cannot prepare a pilot or server session itself, and a pass
-does not prove that a real deposit will succeed. Test this connection before asking
-for another payment. -CheckOnly and -PreviewConnection cannot be used together.
-When the reviewed one-job session is enabled, one fresh server-signed assignment may prepare one
-specific Player, verify the receiver name/number and ETB currency, enter exactly 25.00 ETB with an
-empty Notes field, obtain a one-use database fence, and issue exactly one Transfer request. A
-duplicate, expired authority, changed page, redirect, malformed request, timeout, crash, or
-uncertain provider response blocks any blind retry and requires signed server reconciliation.
+The standard Companion launcher remains Find-only. Money-capable modes require a separate launcher,
+the exact paired device and account, a measured installed release, and independently enabled server
+authority. Setting an internal switch or account ID yourself cannot replace those inputs.
+
+"Start FetanAgent One-Job Operator.cmd" is the fixed 25 ETB execution-v2 pilot. It is for a
+separately reviewed, current Owner-approved session only. It needs a protected local operator
+document at operator\one-job-launch.json, an installed pinned SSH identity and host key, an
+independently opened short-lived server session, a signed handoff, and the exact published release.
+Its PowerShell script supports -CheckOnly and -PreviewConnection; neither starts a deposit or proves
+that a live deposit will succeed. A permitted session can issue one Transfer request for the one
+approved Player and then requires signed server reconciliation.
+
+"Start FetanAgent Automatic Deposits.cmd" is the separate routine mode. It remains off unless the
+Owner routine policy is current, FetanAgent has activated a dedicated production database login for
+this exact paired certificate and account, and the production bridge has loaded the separately
+marked routine overlay. It also requires operator\routine-deposit-launch.json with this installed
+release SHA and exact platform-agent account UUID. The file contains no password, payment reference,
+or request key. The PowerShell launcher supports -CheckOnly and will not connect or open KemerBet in
+that mode. Do not copy or edit an operator document from another machine, account, or release.
+
+Before routine work begins, a protected parent remeasures every package file, starts the exact child,
+verifies its fresh paired-device launch proof, and returns a permit bound to those exact proof bytes.
+Routine mode processes one admitted TeleBirr/ETB job at a time, using the verified receipt amount from
+25.00 through 25,000.00 ETB. It requires the exact Player and amount, empty Notes, a one-use database
+fence, the exact success and Player-credit messages, and positive durable reconciliation. A duplicate,
+changed page, redirect, malformed response, timeout, crash, database failure, or uncertain provider
+outcome stops without a blind retry. Do not run the one-job and routine launchers together.
 
 When Automatic Deposit is off, KemerBet wallet and transaction requests remain blocked even if the
 provider page displays a Transfer button. The read-only exact-five flow never enters Amount or Notes
 and never clicks Transfer.
 Detecting the agent page is only a candidate until the exact locally bound header is
 observed twice, visible signed-out/CAPTCHA markers are absent, and the protected fingerprint
-matches. Repeated page events do not extend the twelve-hour deadline. Each guarded session has an
-overall twelve-hour-ten-minute cap.
+matches. Repeated page events do not extend the fixed one-job pilot deadline; that guarded pilot
+session has an overall twelve-hour-ten-minute cap. Routine mode has no client-renewed testing
+window, but every command still requires the current server policy, certificate, account binding,
+runtime activation, one-use claim and fence. Losing any of those stops new work.
 
 The dedicated browser profile is stored at D:\FetanAgent Companion when drive D exists, otherwise
 under the current Windows user's Local AppData folder. Credentials are submitted to KemerBet, and

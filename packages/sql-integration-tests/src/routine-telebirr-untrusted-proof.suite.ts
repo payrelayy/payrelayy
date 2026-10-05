@@ -355,6 +355,127 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
+    it('purges only 7-day-old candidates through the postgres-only fixed batch', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const current = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const old = await client.query<{ id: string }>(
+          `insert into ${TABLE} (
+             submitting_customer_id, origin_identity_id, origin_channel,
+             origin_request_key, semantic_input_hmac, platform_id, player_account_id,
+             player_deposit_eligibility_decision_id, payment_provider_id, provider_code,
+             candidate_reference_ciphertext, candidate_reference_fingerprint,
+             candidate_reference_masked, reference_encryption_key_version,
+             reference_profile_version, submitted_at
+           ) select submitting_customer_id, origin_identity_id, origin_channel,
+                    pg_catalog.gen_random_uuid(), $2::text, platform_id, player_account_id,
+                    player_deposit_eligibility_decision_id, payment_provider_id, provider_code,
+                    candidate_reference_ciphertext, candidate_reference_fingerprint,
+                    candidate_reference_masked, reference_encryption_key_version,
+                    reference_profile_version, statement_timestamp() - interval '8 days'
+               from ${TABLE} source
+               cross join pg_catalog.generate_series(1, 1001) series
+              where source.id = $1::uuid returning id`,
+          [current.rows[0]!.proof_request_id, semanticHmac()],
+        );
+        expect(old.rows).toHaveLength(1001);
+
+        await rejected(client, `delete from ${TABLE} where id = $1::uuid`, [old.rows[0]!.id]);
+        await rejected(
+          client,
+          `update ${TABLE} set candidate_reference_masked = '***ZZ99'
+            where id = $1::uuid`,
+          [old.rows[0]!.id],
+        );
+        await client.query('set local role fetanagent_player_actions');
+        await rejected(client, 'select app.purge_expired_routine_telebirr_untrusted_proofs()');
+        await client.query('reset role');
+
+        const purged = await client.query<{ deleted_count: number }>(
+          'select app.purge_expired_routine_telebirr_untrusted_proofs() as deleted_count',
+        );
+        expect(purged.rows[0]!.deleted_count).toBe(1000);
+        expect(
+          (
+            await client.query<{ count: string }>(
+              `select count(*) from ${TABLE}
+                where submitted_at <= statement_timestamp() - interval '7 days'`,
+            )
+          ).rows[0]!.count,
+        ).toBe('1');
+        expect(
+          (
+            await client.query<{ deleted_count: number }>(
+              'select app.purge_expired_routine_telebirr_untrusted_proofs() as deleted_count',
+            )
+          ).rows[0]!.deleted_count,
+        ).toBe(1);
+        expect(
+          (
+            await client.query<{ deleted_count: number }>(
+              'select app.purge_expired_routine_telebirr_untrusted_proofs() as deleted_count',
+            )
+          ).rows[0]!.deleted_count,
+        ).toBe(0);
+        const remaining = await client.query<{ id: string }>(
+          `select id from ${TABLE} where origin_identity_id = $1::uuid`,
+          [actor.identityId],
+        );
+        expect(remaining.rows).toEqual([{ id: current.rows[0]!.proof_request_id }]);
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('does not grant candidate retention execution to public or application roles', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        player_allowed: boolean;
+        service_allowed: boolean;
+        nonce_allowed: boolean;
+        function_settings: string[];
+      }>(`
+        select owner.rolname as owner,
+               routine.prosecdef as security_definer,
+               exists (
+                 select 1 from pg_catalog.aclexplode(
+                   coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+                 ) privilege
+                 where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+               ) as public_allowed,
+               pg_catalog.has_function_privilege('fetanagent_player_actions', routine.oid, 'execute')
+                 as player_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'execute')
+                 as service_allowed,
+               pg_catalog.has_function_privilege('fetanagent_nonce_retention', routine.oid, 'execute')
+                 as nonce_allowed,
+               routine.proconfig as function_settings
+          from pg_catalog.pg_proc routine
+          join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+         where routine.oid = 'app.purge_expired_routine_telebirr_untrusted_proofs()'
+           ::pg_catalog.regprocedure
+      `);
+      expect(catalog.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: false,
+          public_allowed: false,
+          player_allowed: false,
+          service_allowed: false,
+          nonce_allowed: false,
+          function_settings: ['search_path=pg_catalog', 'app.routine_telebirr_retention_delete=on'],
+        },
+      ]);
+    });
+
     it('keeps the private capture RPC outside every application role', async () => {
       const client = getClient();
       const catalog = await client.query<{

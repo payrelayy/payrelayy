@@ -31,12 +31,30 @@ This adapter is **not imported by the Player-action runtime**, and the runtime r
 EXECUTE grant on the RPC. The Bot knows how to render that projection but cannot receive it from
 the live route. These pieces are preparatory code, not a customer intake or payment test.
 
+## Untrusted-candidate active-database retention
+
+The owner-chosen retention boundary makes a candidate eligible for **whole-row deletion after 7
+days**. A postgres-owned database Cron job runs every 15 minutes and removes at most 1,000 due
+rows per run, oldest first. The append-only guard still rejects ordinary update, delete, and
+truncate. Only that fixed-batch maintenance function may delete due rows; it is not executable by
+the API, Bot, customer web, verifier, executor, nonce-retention role, `anon`, `authenticated`, or
+`service_role`. It does not read payment receipts or alter financial state. The seven-day cutoff
+applies only to untrusted candidates, not verified payment or financial records. It is an owner
+choice for this technical boundary, not a legal-retention determination.
+
+The active-database deletion is **not an immediate erasure from historical backups or WAL/PITR**.
+Those copies follow the actual Supabase backup/recovery settings. Before customer intake is wired,
+verify the retention job runs successfully, alert on overdue rows and failed runs, confirm the
+actual backup retention, and ensure future verified financial lineage does not depend on a
+candidate row surviving past the cutoff. A Cron failure or backlog can delay deletion beyond 7
+days; do not call this an exact seven-day erasure guarantee.
+
 The next reviewed slices must, in order:
 
-1. Review a bounded retention/erasure policy for the protected untrusted candidate, then wire
-   the gated API/Bot adapter to the separate Telegram capture RPC. Grant only the exact RPC after
-   no-money integration proves the route, without table or financial grants. Customer web can
-   follow under its own authenticated receipt.
+1. Verify scheduled purge health and the backup caveat, then wire the gated API/Bot adapter to
+   the separate Telegram capture RPC. Grant only the exact RPC after no-money integration proves
+   the route, without table or financial grants. Customer web can follow under its own
+   authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
    domain-separated from every pilot certificate and manifest. Keep the phone observation-only.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision

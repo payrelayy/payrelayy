@@ -1,7 +1,7 @@
 # Isolated test runner for the disposable SQL integration harness.
-# It contains the test package, migrations, operational SQL, and the Owner startup query source.
-# The application module is read only as text, never imported or executed. No production credential,
-# environment file, host socket, or application dependency tree is included.
+# It contains the test package, migrations, operational SQL, and only the two API adapter
+# modules needed for a no-money integration test. No application entry point, production
+# credential, environment file, or host socket is included.
 FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS dependencies
 
 WORKDIR /workspace
@@ -9,7 +9,13 @@ WORKDIR /workspace
 RUN corepack enable
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/api/package.json ./apps/api/package.json
 COPY packages/sql-integration-tests/package.json ./packages/sql-integration-tests/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/deposit-reference-protection/package.json \
+  ./packages/deposit-reference-protection/package.json
+COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/agent-platform-companion-contracts/package.json \
   ./packages/agent-platform-companion-contracts/package.json
 COPY packages/agent-platform-companion-execution-contracts/package.json \
@@ -17,13 +23,24 @@ COPY packages/agent-platform-companion-execution-contracts/package.json \
 COPY packages/agent-platform-companion-activation-issuer/package.json \
   ./packages/agent-platform-companion-activation-issuer/package.json
 
-RUN pnpm install --frozen-lockfile --filter @fetanagent/sql-integration-tests...
+RUN pnpm install --frozen-lockfile \
+  --filter @fetanagent/sql-integration-tests... \
+  --filter @fetanagent/api...
 
-# Build only the new operator-only adapter and its pure type dependencies for
-# the disposable test image. None of these packages supplies a credential.
-FROM dependencies AS issuer-build
+# Build only the pure package dependencies imported by the test adapters.
+# None of these packages supplies a credential or starts an application runtime.
+FROM dependencies AS test-dependency-build
 
 COPY tsconfig.base.json ./
+COPY packages/domain/tsconfig.json ./packages/domain/tsconfig.json
+COPY packages/domain/src ./packages/domain/src
+COPY packages/contracts/tsconfig.json ./packages/contracts/tsconfig.json
+COPY packages/contracts/src ./packages/contracts/src
+COPY packages/config/tsconfig.json ./packages/config/tsconfig.json
+COPY packages/config/src ./packages/config/src
+COPY packages/deposit-reference-protection/tsconfig.json \
+  ./packages/deposit-reference-protection/tsconfig.json
+COPY packages/deposit-reference-protection/src ./packages/deposit-reference-protection/src
 COPY packages/agent-platform-companion-contracts/tsconfig.json \
   ./packages/agent-platform-companion-contracts/tsconfig.json
 COPY packages/agent-platform-companion-contracts/src \
@@ -37,7 +54,10 @@ COPY packages/agent-platform-companion-activation-issuer/tsconfig.json \
 COPY packages/agent-platform-companion-activation-issuer/src \
   ./packages/agent-platform-companion-activation-issuer/src
 
-RUN pnpm --filter @fetanagent/agent-platform-companion-activation-issuer... run build
+RUN pnpm --filter @fetanagent/config... \
+  --filter @fetanagent/contracts... \
+  --filter @fetanagent/deposit-reference-protection... \
+  --filter @fetanagent/agent-platform-companion-activation-issuer... run build
 
 # This content-addressed stage supplies the exact psql 17.4 client. Its server entrypoint is
 # replaced below; no PostgreSQL daemon or data directory is used by the test runner.
@@ -66,10 +86,27 @@ RUN test "$(node --version)" = 'v22.17.1' \
 COPY --from=dependencies /workspace/node_modules ./node_modules
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/sql-integration-tests ./packages/sql-integration-tests
-COPY --from=issuer-build /workspace/packages/agent-platform-companion-activation-issuer/package.json \
+COPY --from=test-dependency-build /workspace/packages/domain/package.json \
+  ./packages/domain/package.json
+COPY --from=test-dependency-build /workspace/packages/domain/dist ./packages/domain/dist
+COPY --from=test-dependency-build /workspace/packages/contracts/package.json \
+  ./packages/contracts/package.json
+COPY --from=test-dependency-build /workspace/packages/contracts/dist ./packages/contracts/dist
+COPY --from=test-dependency-build /workspace/packages/config/package.json \
+  ./packages/config/package.json
+COPY --from=test-dependency-build /workspace/packages/config/dist ./packages/config/dist
+COPY --from=test-dependency-build /workspace/packages/deposit-reference-protection/package.json \
+  ./packages/deposit-reference-protection/package.json
+COPY --from=test-dependency-build /workspace/packages/deposit-reference-protection/dist \
+  ./packages/deposit-reference-protection/dist
+COPY --from=test-dependency-build /workspace/packages/agent-platform-companion-activation-issuer/package.json \
   ./packages/agent-platform-companion-activation-issuer/package.json
-COPY --from=issuer-build /workspace/packages/agent-platform-companion-activation-issuer/dist \
+COPY --from=test-dependency-build /workspace/packages/agent-platform-companion-activation-issuer/dist \
   ./packages/agent-platform-companion-activation-issuer/dist
+COPY apps/api/package.json ./apps/api/package.json
+COPY apps/api/src/telegram-action-capability.ts ./apps/api/src/telegram-action-capability.ts
+COPY apps/api/src/telegram-routine-telebirr-candidate-intake.ts \
+  ./apps/api/src/telegram-routine-telebirr-candidate-intake.ts
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts \
   ./packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts
@@ -112,6 +149,9 @@ COPY infra/sql/production-companion-activation-diagnostic-pooler-request.sql \
   ./infra/sql/production-companion-activation-diagnostic-pooler-request.sql
 COPY --from=dependencies /workspace/packages/sql-integration-tests/node_modules \
   ./packages/sql-integration-tests/node_modules
+COPY --from=dependencies /workspace/apps/api/node_modules ./apps/api/node_modules
+COPY --from=dependencies /workspace/packages/config/node_modules ./packages/config/node_modules
+COPY --from=dependencies /workspace/packages/contracts/node_modules ./packages/contracts/node_modules
 COPY supabase/migrations ./supabase/migrations
 
 # Vite creates a transient bundled config here. Keep all test source and

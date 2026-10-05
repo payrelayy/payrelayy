@@ -405,6 +405,9 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
     devDependencies:
+      '@fetanagent/config':
+        specifier: workspace:*
+        version: link:../config
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3

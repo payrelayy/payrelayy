@@ -5,12 +5,16 @@ separate append-only table for an **untrusted, amount-free candidate reference**
 KemerBet Player account. It does not reuse historical dry-run proofs, five-Player pilot proofs,
 shadow-verifier jobs, or the routine execution broker's verified-job binding.
 
-The table is deliberately not customer intake yet. It has forced RLS, no policies, and no table
-grant to the API, Telegram Player-actions runtime, customer web, Android verifier, routine broker,
-executor, `anon`, `authenticated`, or `service_role`. There is no capture RPC, HTTP route, worker,
-or reader. Applying the migration cannot create a provider observation, payment claim, deposit
-intent, verification or execution job, settlement, or KemerBet action. No financial switch, role
-login, device enrollment, or production overlay is changed.
+The table has forced RLS, no policies, and no table grant to the API, Telegram Player-actions
+runtime, customer web, Android verifier, routine broker, executor, `anon`, `authenticated`, or
+`service_role`. The follow-on private `capture_telegram_routine_telebirr_untrusted_proof` RPC
+validates an admitted private Telegram origin, current KemerBet Player eligibility, a protected
+TeleBirr reference, an active protected receiver, no-money switches, event exclusivity, exact
+replay, and per-identity storage abuse bounds. It is **not granted to any application role** and
+has no API/Bot route or reader; it is exercised only in disposable SQL tests. It cannot create a
+provider observation, payment claim, deposit intent, verification or execution job, settlement,
+or KemerBet action. No financial switch, role login, device enrollment, or production overlay is
+changed.
 
 Each future record must retain the server-resolved submitting customer and identity, channel and
 one-use request key, the selected Player and eligibility-decision identifiers, and a protected
@@ -22,10 +26,10 @@ interpreted as proof of payment.
 
 The next reviewed slices must, in order:
 
-1. Add an authenticated, replay-safe Telegram capture RPC and API/Bot adapter for this separate
-   lineage, with destination and current-eligibility checks, abuse bounds, a retention policy,
-   safe status copy, and no financial grants. Customer web can follow under its own authenticated
-   receipt.
+1. Review a bounded retention/erasure policy for the protected untrusted candidate, then add
+   a gated API/Bot adapter and safe customer status copy for the separate Telegram capture RPC.
+   Grant only the exact RPC after no-money integration proves the route, without table or financial
+   grants. Customer web can follow under its own authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
    domain-separated from every pilot certificate and manifest. Keep the phone observation-only.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision

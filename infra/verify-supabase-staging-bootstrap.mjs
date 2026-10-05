@@ -106,11 +106,20 @@ assertInOrder(
     'Verify tooling and staging credentials',
     'Link only the staging project',
     'supabase migration list --linked',
-    'supabase db push --linked --dry-run',
+    'supabase db push --linked --dry-run --include-all',
     "if: inputs.mode == 'apply'",
     'supabase db push --linked --yes',
   ],
   'Commit verification and dry-run must precede credentials, linking, and conditional apply',
+);
+const applyStep = /- name: Apply canonical migrations to staging([\s\S]*)$/u.exec(
+  protectedJob,
+)?.[1];
+assert.ok(applyStep, 'The conditional apply step must exist.');
+assert.doesNotMatch(
+  applyStep,
+  /--include-all/u,
+  'An older migration backlog must not become automatically applicable from this planning change.',
 );
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);

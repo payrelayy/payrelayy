@@ -176,7 +176,8 @@ jobs:
           fi
 
           supabase migration list --linked
-          supabase db push --linked --dry-run
+          # Preview older missing versions too; this never applies them.
+          supabase db push --linked --dry-run --include-all
 
       - name: Apply canonical migrations to staging
         if: inputs.mode == 'apply'

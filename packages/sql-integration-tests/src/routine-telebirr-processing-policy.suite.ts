@@ -83,8 +83,8 @@ export async function paidJob(
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
 ) {
   if (providerCode === 'telebirr') {
-    // The shared catalog seeds CBE Birr only. Create a protected synthetic TeleBirr receiver
-    // inside this test's rollback transaction, without a pilot or real wallet information.
+    // The shared catalog seeds CBE Birr only. Use the same synthetic TeleBirr receiver mask
+    // as the other SQL fixtures so a committed broker test cannot alter their expectations.
     await client.query(`
       insert into app.receiver_accounts (
         provider_id, version, account_holder_name, account_reference_ciphertext,
@@ -96,7 +96,7 @@ export async function paidJob(
           where receiver.provider_id = provider.id), 1),
         'Synthetic Routine TeleBirr Receiver',
         'receiver-v1.telebirr.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCC',
-        'synthetic-routine-telebirr-verification-ciphertext', '***7003',
+        'synthetic-routine-telebirr-verification-ciphertext', '***7001',
         jsonb_build_object('customer_message', 'Synthetic disposable SQL fixture only'),
         gen_random_uuid(), 'initial_configuration', repeat('4', 64), 1, 1, 1
       from app.payment_providers provider where provider.code = 'telebirr' and provider.status = 'active'

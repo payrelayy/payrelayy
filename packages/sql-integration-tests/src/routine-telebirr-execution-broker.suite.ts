@@ -332,8 +332,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           where feature_key in ('payment_verification', 'deposit_execution', 'private_live_deposit_pilot')
           order by feature_key`,
       );
-      let attemptId: string | undefined;
-      let leaseToken: string | undefined;
+      let jobId: string | undefined;
       let disabled = false;
       const password = randomBytes(32).toString('hex');
       const runtime = createRuntimeClient(password);
@@ -346,6 +345,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         );
         const policy = await persistentPolicyFixture(client, getOwnerAuthUserId());
         const deposit = await paidJob(client, 2501);
+        jobId = deposit.jobId;
         const certificate = await activeCertificate(client, getOwnerAdminId());
         await client.query(
           `select app.activate_routine_telebirr_execution_transport(
@@ -381,7 +381,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           status: string;
         }>(
           `select attempt.id as attempt_id, job.lease_token::text,
-             job.status::text, count(approval.id)::integer as owner_approvals
+             job.status::text, count(approval.execution_job_id)::integer as owner_approvals
            from app.deposit_jobs job
            join app.deposit_execution_attempts attempt on attempt.deposit_job_id = job.id
            left join app.deposit_execution_owner_approvals approval on approval.execution_job_id = job.id
@@ -391,9 +391,6 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         );
         expect(leased.rows).toHaveLength(1);
         expect(leased.rows[0]).toMatchObject({ status: 'leased', owner_approvals: 0 });
-        attemptId = leased.rows[0]!.attempt_id;
-        leaseToken = leased.rows[0]!.lease_token;
-
         await client.query(
           `select app.disable_routine_telebirr_execution_transport($1::uuid, 'operator_requested')`,
           [randomUUID()],
@@ -404,29 +401,40 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         ).rejects.toThrow();
       } finally {
         await runtime.end().catch(() => undefined);
-        if (attemptId && leaseToken) {
-          await client
-            .query(
-              `select * from app.cancel_deposit_execution_before_action(
-                $1::uuid, $2::uuid, 'operator_stopped_before_action'
-              )`,
-              [attemptId, leaseToken],
-            )
-            .catch(() => undefined);
-        }
-        if (!disabled) {
-          await client
-            .query(
-              `select app.disable_routine_telebirr_execution_transport($1::uuid, 'incident_stop')`,
-              [randomUUID()],
-            )
-            .catch(() => undefined);
-        }
-        for (const row of originalModes.rows) {
-          await client.query(
-            `update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text`,
-            [row.feature_key, row.mode],
-          );
+        try {
+          if (jobId) {
+            const prepared = await client.query<{ attempt_id: string; lease_token: string }>(
+              `select attempt.id as attempt_id, job.lease_token::text
+                 from app.deposit_execution_attempts attempt
+                 join app.deposit_jobs job on job.id = attempt.deposit_job_id
+                where job.id = $1::uuid and attempt.status = 'prepared'
+                  and job.status = 'leased' and job.lease_token is not null`,
+              [jobId],
+            );
+            for (const row of prepared.rows) {
+              await client.query(
+                `select * from app.cancel_deposit_execution_before_action(
+                  $1::uuid, $2::uuid, 'operator_stopped_before_action'
+                )`,
+                [row.attempt_id, row.lease_token],
+              );
+            }
+          }
+        } finally {
+          if (!disabled) {
+            await client
+              .query(
+                `select app.disable_routine_telebirr_execution_transport($1::uuid, 'incident_stop')`,
+                [randomUUID()],
+              )
+              .catch(() => undefined);
+          }
+          for (const row of originalModes.rows) {
+            await client.query(
+              `update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text`,
+              [row.feature_key, row.mode],
+            );
+          }
         }
       }
     });

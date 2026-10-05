@@ -1,8 +1,30 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
+const CAPTURE = `
+  select * from app.capture_telegram_routine_telebirr_untrusted_proof(
+    $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
+    2::smallint, 2::smallint, $6::text
+  )
+`;
+
+function digest(seed: string = randomUUID()): string {
+  return createHash('sha256').update(seed).digest('hex');
+}
+
+function semanticHmac(): string {
+  return `hmac-sha256-v1:${digest()}`;
+}
+
+type CaptureRow = {
+  proof_request_id: string;
+  provider_code: string;
+  proof_status: string;
+  submitted_at: Date;
+  request_replayed: boolean;
+};
 
 async function rollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
   await client.query('begin');
@@ -42,6 +64,138 @@ async function fixtureIdentity(client: Client): Promise<{
   return { customerId: customer.rows[0]!.id, identityId: identity.rows[0]!.id };
 }
 
+async function fixtureTelegramActor(
+  client: Client,
+  ownerAdminId: string,
+): Promise<{ customerId: string; identityId: string }> {
+  const customer = await client.query<{ id: string }>(
+    `insert into app.customers (status) values ('active') returning id`,
+  );
+  const customerId = customer.rows[0]!.id;
+  const telegramUserId = `${800_000_000_000n + BigInt(`0x${randomUUID().replaceAll('-', '').slice(0, 10)}`)}`;
+  const identity = await client.query<{ id: string }>(
+    `insert into app.customer_identities (customer_id, identity_kind, external_subject, status)
+     values ($1::uuid, 'telegram', $2::text, 'active') returning id`,
+    [customerId, telegramUserId],
+  );
+  const identityId = identity.rows[0]!.id;
+  await client.query(
+    `insert into app.telegram_identities (
+       customer_identity_id, telegram_user_id, private_chat_id, preferred_locale
+     ) values ($1::uuid, $2::bigint, $2::bigint, 'en')`,
+    [identityId, telegramUserId],
+  );
+  await client.query(`insert into app.bot_conversations (telegram_identity_id) values ($1::uuid)`, [
+    identityId,
+  ]);
+  const admissionEventId = await fixtureInboundEvent(client, identityId);
+  const inviteDigest = `sha256-v1:${digest()}`;
+  await client.query(
+    `insert into app.telegram_beta_invites (
+       token_digest, expires_at, issued_by_admin_id, created_at
+     ) values ($1::text, clock_timestamp() + interval '1 hour',
+       $2::uuid, clock_timestamp() - interval '10 minutes')`,
+    [inviteDigest, ownerAdminId],
+  );
+  await client.query(
+    `update app.telegram_beta_invites
+        set status = 'redeemed',
+            redeemed_telegram_user_id = $2::bigint,
+            redeemed_private_chat_id = $2::bigint,
+            redeemed_customer_id = $3::uuid,
+            redeemed_customer_identity_id = $4::uuid,
+            redeemed_inbound_event_id = $5::uuid,
+            redeemed_at = clock_timestamp() - interval '5 minutes'
+      where token_digest = $1::text`,
+    [inviteDigest, telegramUserId, customerId, identityId, admissionEventId],
+  );
+  return { customerId, identityId };
+}
+
+async function fixtureInboundEvent(client: Client, identityId: string): Promise<string> {
+  const event = await client.query<{ id: string }>(
+    `insert into app.inbound_events (
+       channel, external_event_id, customer_identity_id, payload_digest
+     ) values ('telegram', $1::text, $2::uuid, $3::text) returning id`,
+    [
+      `update:${BigInt(`0x${randomUUID().replaceAll('-', '').slice(0, 15)}`)}`,
+      identityId,
+      semanticHmac(),
+    ],
+  );
+  return event.rows[0]!.id;
+}
+
+async function fixtureEligiblePlayer(client: Client): Promise<string> {
+  const customer = await client.query<{ id: string }>(
+    `insert into app.customers (status) values ('active') returning id`,
+  );
+  const platform = await client.query<{ id: string }>(
+    `select id from app.platforms where code = 'kemerbet' and status = 'active'`,
+  );
+  const playerId = `ROUTINE-${randomUUID()}`;
+  const player = await client.query<{ id: string }>(
+    `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+     values ($1::uuid, $2::uuid, $3::text) returning id`,
+    [customer.rows[0]!.id, platform.rows[0]!.id, playerId],
+  );
+  await client.query(
+    `insert into app.player_validation_attempts (
+       player_account_id, attempt_number, outcome, reason_code, adapter_version,
+       started_at, completed_at, result_digest
+     ) values ($1::uuid, 1, 'valid', 'routine_proof_fixture', 'fixture_v1',
+       clock_timestamp() - interval '1 second', clock_timestamp(), $2::text)`,
+    [player.rows[0]!.id, `routine-proof-validation-${randomUUID()}`],
+  );
+  await client.query(
+    `update app.customer_platform_players set validation_status = 'valid' where id = $1::uuid`,
+    [player.rows[0]!.id],
+  );
+  await client.query(
+    `insert into app.player_deposit_eligibility_decisions
+       (player_account_id, decision_version, decision, reason_code, actor_kind)
+     values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
+    [player.rows[0]!.id],
+  );
+  return playerId;
+}
+
+async function fixtureTelebirrReceiver(client: Client): Promise<void> {
+  const existing = await client.query<{ id: string }>(
+    `select receiver.id from app.receiver_accounts receiver
+       join app.payment_providers provider on provider.id = receiver.provider_id
+      where provider.code = 'telebirr' and receiver.status = 'active'`,
+  );
+  if (existing.rows.length > 0) return;
+  await client.query(
+    `insert into app.receiver_accounts (
+       provider_id, version, account_holder_name, account_reference_ciphertext,
+       account_reference_masked, account_reference_fingerprint,
+       protection_profile_version, encryption_key_version, fingerprint_key_version,
+       rotation_request_id, rotation_reason
+     ) select provider.id, 1, 'FetanAgent Fixture',
+              $1::text, '***7001', $2::text, 1, 1, 1,
+              $3::uuid, 'initial_configuration'
+         from app.payment_providers provider where provider.code = 'telebirr'`,
+    [
+      `receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+      digest(),
+      randomUUID(),
+    ],
+  );
+}
+
+function captureArguments(eventId: string, playerId: string): readonly string[] {
+  return [
+    eventId,
+    playerId,
+    `v2.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+    digest(),
+    '***AB12',
+    semanticHmac(),
+  ];
+}
+
 async function snapshot(client: Client): Promise<string> {
   const result = await client.query<{ state: string }>(`
     select jsonb_build_object(
@@ -56,7 +210,10 @@ async function snapshot(client: Client): Promise<string> {
   return result.rows[0]!.state;
 }
 
-export function registerRoutineTelebirrUntrustedProofSqlTests(getClient: () => Client): void {
+export function registerRoutineTelebirrUntrustedProofSqlTests(
+  getClient: () => Client,
+  getOwnerAdminId: () => string,
+): void {
   describe('dormant non-pilot TeleBirr proof foundation', () => {
     it('has forced RLS, no policies, no application access, and no amount or pilot column', async () => {
       const client = getClient();
@@ -195,6 +352,179 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(getClient: () => C
         expect(second.rows).toHaveLength(1);
         expect(second.rows[0]!.id).not.toBe(first.rows[0]!.id);
         expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('keeps the private capture RPC outside every application role', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        readonly owner: string;
+        readonly security_definer: boolean;
+        readonly search_path: string[];
+        readonly public_allowed: boolean;
+        readonly player_allowed: boolean;
+        readonly service_allowed: boolean;
+      }>(`
+        select owner.rolname as owner,
+               routine.prosecdef as security_definer,
+               routine.proconfig as search_path,
+               exists (
+                 select 1 from pg_catalog.aclexplode(
+                   coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+                 ) privilege
+                 where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+               ) as public_allowed,
+               pg_catalog.has_function_privilege('fetanagent_player_actions', routine.oid, 'execute')
+                 as player_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'execute')
+                 as service_allowed
+          from pg_catalog.pg_proc routine
+          join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+         where routine.oid = 'app.capture_telegram_routine_telebirr_untrusted_proof(
+           uuid,text,text,text,text,text,smallint,smallint,text
+         )'::pg_catalog.regprocedure
+      `);
+      expect(catalog.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: true,
+          search_path: ['search_path=pg_catalog'],
+          public_allowed: false,
+          player_allowed: false,
+          service_allowed: false,
+        },
+      ]);
+    });
+
+    it('captures only an admitted private Telegram candidate, replays exactly, and never creates money', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const secondActor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client); // Deliberately owned by neither submitter.
+        await fixtureTelebirrReceiver(client);
+        const eventId = await fixtureInboundEvent(client, actor.identityId);
+        const args = captureArguments(eventId, playerId);
+
+        await client.query('set local role fetanagent_player_actions');
+        await rejected(client, CAPTURE, args);
+        await client.query('reset role');
+
+        const first = await client.query<CaptureRow>(CAPTURE, [...args]);
+        expect(first.rows).toHaveLength(1);
+        expect(first.rows[0]).toMatchObject({
+          provider_code: 'telebirr',
+          proof_status: 'untrusted_received',
+          request_replayed: false,
+        });
+        const replay = await client.query<CaptureRow>(CAPTURE, [...args]);
+        expect(replay.rows).toEqual([{ ...first.rows[0], request_replayed: true }]);
+        await rejected(client, CAPTURE, [...args.slice(0, 3), digest(), ...args.slice(4)]);
+        const stored = await client.query<{
+          readonly submitting_customer_id: string;
+          readonly origin_identity_id: string;
+          readonly origin_request_key: string;
+          readonly player_owner_customer_id: string;
+          readonly processed_at: Date;
+        }>(
+          `
+          select proof.submitting_customer_id, proof.origin_identity_id,
+                 proof.origin_request_key, player.customer_id as player_owner_customer_id,
+                 event.processed_at
+            from ${TABLE} proof
+            join app.customer_platform_players player on player.id = proof.player_account_id
+            join app.inbound_events event on event.id = proof.origin_request_key
+           where proof.id = $1::uuid
+        `,
+          [first.rows[0]!.proof_request_id],
+        );
+        expect(stored.rows).toHaveLength(1);
+        expect(stored.rows[0]).toMatchObject({
+          submitting_customer_id: actor.customerId,
+          origin_identity_id: actor.identityId,
+          origin_request_key: eventId,
+          processed_at: first.rows[0]!.submitted_at,
+        });
+        expect(stored.rows[0]!.player_owner_customer_id).not.toBe(actor.customerId);
+
+        // The candidate is not globally claimed at intake; a second submitter can offer it.
+        const otherEvent = await fixtureInboundEvent(client, secondActor.identityId);
+        const second = await client.query<CaptureRow>(CAPTURE, [
+          otherEvent,
+          playerId,
+          args[2],
+          args[3],
+          args[4],
+          semanticHmac(),
+        ]);
+        expect(second.rows).toHaveLength(1);
+        expect(second.rows[0]!.proof_request_id).not.toBe(first.rows[0]!.proof_request_id);
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('rejects an inactive identity, processed event, and any armed financial switch', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const processedEvent = await fixtureInboundEvent(client, actor.identityId);
+        await client.query(
+          `update app.inbound_events set processed_at = clock_timestamp() where id = $1::uuid`,
+          [processedEvent],
+        );
+        await rejected(client, CAPTURE, captureArguments(processedEvent, playerId));
+
+        await client.query(
+          `update app.customer_identities set status = 'inactive' where id = $1::uuid`,
+          [actor.identityId],
+        );
+        await rejected(
+          client,
+          CAPTURE,
+          captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        );
+        await client.query(
+          `update app.customer_identities set status = 'active' where id = $1::uuid`,
+          [actor.identityId],
+        );
+
+        await client.query(
+          `update app.feature_switches set mode = 'dry_run'
+            where feature_key = 'withdrawal_validation'`,
+        );
+        await rejected(
+          client,
+          CAPTURE,
+          captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        );
+        const count = await client.query<{ count: string }>(`select count(*) from ${TABLE}`);
+        expect(count.rows[0]!.count).toBe('0');
+      });
+    });
+
+    it('bounds new stored candidates per Telegram identity without claiming a reference', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        for (let index = 0; index < 5; index += 1) {
+          const eventId = await fixtureInboundEvent(client, actor.identityId);
+          const rows = await client.query<CaptureRow>(CAPTURE, [
+            ...captureArguments(eventId, playerId),
+          ]);
+          expect(rows.rows).toHaveLength(1);
+        }
+        const rejectedEventId = await fixtureInboundEvent(client, actor.identityId);
+        await rejected(client, CAPTURE, captureArguments(rejectedEventId, playerId));
+        const count = await client.query<{ count: string }>(
+          `select count(*) from ${TABLE} where origin_identity_id = $1::uuid`,
+          [actor.identityId],
+        );
+        expect(count.rows[0]!.count).toBe('5');
       });
     });
   });

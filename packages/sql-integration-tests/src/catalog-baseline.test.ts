@@ -9865,7 +9865,10 @@ registerRoutineTelebirrExecutionBrokerSqlTests(
       user: 'fetanagent_routine_deposit_broker_runtime',
     }),
 );
-registerRoutineTelebirrUntrustedProofSqlTests(() => client);
+registerRoutineTelebirrUntrustedProofSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(
   () => client,

@@ -14,6 +14,7 @@ import { registerCompanionExecutionActivationRequestSqlTests } from './companion
 import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
+import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
 import { registerExpiredTelebirrPredecessorSqlTests } from './expired-telebirr-predecessor.suite.js';
@@ -9835,6 +9836,21 @@ registerCompanionExecutionActivationRequestSqlTests(
   () => ownerAuthUserId,
   () => ownerAdminId,
   () => environment.administratorPassword,
+);
+registerRoutineTelebirrExecutionBrokerSqlTests(
+  () => client,
+  () => ownerAuthUserId,
+  () => ownerAdminId,
+  (password) =>
+    new Client({
+      application_name: 'fetanagent_routine_deposit_broker_sql_integration',
+      database: 'postgres',
+      host: environment.host,
+      password,
+      port: 5432,
+      ssl: false,
+      user: 'fetanagent_routine_deposit_broker_runtime',
+    }),
 );
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(

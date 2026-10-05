@@ -54,6 +54,45 @@ describe('Windows companion configuration', () => {
     expect(config.takePairingPackage()).toBeUndefined();
   });
 
+  it('enables only an explicitly account-bound routine lane', () => {
+    const config = loadWindowsCompanionConfig({
+      NODE_ENV: 'test',
+      FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+      INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+      FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID:
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+    expect(config.routineDepositsEnabled).toBe(true);
+    expect(config.routineExpectedPlatformAgentAccountId).toBe(
+      'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    );
+    expect(config.executionV2Enabled).toBe(false);
+    expect(redactedWindowsCompanionConfig(config)).toMatchObject({
+      routineDepositsEnabled: true,
+      routineExpectedAccountConfigured: true,
+    });
+
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+        INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+      }),
+    ).toThrow('account binding is required');
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+        INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+        FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID:
+          'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
+        FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID:
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      }),
+    ).toThrow('mutually exclusive');
+  });
+
   it('rejects relative paths, control characters, and unreviewed release identities', () => {
     for (const dataRoot of ['relative', `D:\\bad\u0000path`]) {
       expect(() =>
@@ -94,6 +133,15 @@ describe('Windows companion configuration', () => {
           NODE_ENV: 'test',
           FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
           INTERNAL_COMPANION_EXECUTION_V2_ENABLED: executionFlag,
+        }),
+      ).toThrow();
+    }
+    for (const routineFlag of ['', 'false', 'TRUE', '1']) {
+      expect(() =>
+        loadWindowsCompanionConfig({
+          NODE_ENV: 'test',
+          FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+          INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: routineFlag,
         }),
       ).toThrow();
     }

@@ -19,6 +19,10 @@ const MAX_PROOF_BYTES = 2_048;
 const MAX_PERMIT_BYTES = 192;
 const MAX_PERMIT_WAIT_MS = 2 * 60_000;
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+export const COMPANION_ROUTINE_LOCAL_PERMIT_PREFIX =
+  'FETANAGENT_ROUTINE_LAUNCH_PERMIT_V1|' as const;
+export const COMPANION_ROUTINE_LOCAL_PERMIT_ACK_PREFIX =
+  'FETANAGENT_ROUTINE_LAUNCH_PERMIT_ACK_V1|' as const;
 
 export interface CompanionLaunchProofRequest {
   readonly challenge: string;
@@ -91,6 +95,73 @@ export async function deliverCompanionLaunchProof(
     const timer = setTimeout(() => finish(new Error('timeout')), 5_000);
     socket.once('error', (error) => finish(error));
     socket.once('connect', () => socket.end(payload, () => finish()));
+  });
+}
+
+/** Routine workers remain blocked until the local parent verifies this exact signed proof. */
+export async function deliverCompanionRoutineLaunchProofAndAwaitPermit(
+  request: CompanionLaunchProofRequest,
+  proof: SignedCompanionLaunchProof,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (
+    !validRequest(request) ||
+    proof?.body?.contractVersion !== 1 ||
+    proof.body.purpose !== COMPANION_LAUNCH_PROOF_PURPOSE ||
+    proof.body.challengeDigest !==
+      `sha256:${createHash('sha256').update(Buffer.from(request.challenge, 'base64url')).digest('hex')}`
+  ) {
+    throw new Error('The routine local launch proof is invalid.');
+  }
+  const serialized = JSON.stringify(proof);
+  const payload = `${serialized}\n`;
+  if (Buffer.byteLength(payload, 'utf8') > MAX_PROOF_BYTES) {
+    throw new Error('The routine local launch proof is too large.');
+  }
+  const proofDigest = `sha256:${createHash('sha256').update(serialized, 'utf8').digest('hex')}`;
+  const permit = `${COMPANION_ROUTINE_LOCAL_PERMIT_PREFIX}${proofDigest}\n`;
+  const acknowledgement = `${COMPANION_ROUTINE_LOCAL_PERMIT_ACK_PREFIX}${proofDigest}\n`;
+  await new Promise<void>((resolve, reject) => {
+    const socket = createConnection(request.pipePath);
+    let settled = false;
+    let received = '';
+    const abort = () => finish(new Error('aborted'));
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      socket.destroy();
+      if (error) reject(new Error('The routine local launch permit is unavailable.'));
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error('timeout')), MAX_PERMIT_WAIT_MS);
+    if (signal?.aborted) {
+      finish(new Error('aborted'));
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) {
+      finish(new Error('aborted'));
+      return;
+    }
+    socket.once('error', (error) => finish(error));
+    socket.once('end', () => finish(new Error('closed')));
+    socket.once('close', () => finish(new Error('closed')));
+    socket.once('connect', () => {
+      if (!settled) socket.write(payload);
+    });
+    socket.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      received += chunk.toString('utf8');
+      if (Buffer.byteLength(received, 'utf8') > MAX_PERMIT_BYTES || received.includes('\n')) {
+        if (received !== permit) {
+          finish(new Error('invalid permit'));
+          return;
+        }
+        socket.write(acknowledgement, (error) => finish(error ?? undefined));
+      }
+    });
   });
 }
 

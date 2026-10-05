@@ -11,6 +11,7 @@ import {
   COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
   COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
   COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE,
+  COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE,
   loadCompanionDeviceBridgeConfig,
   redactedCompanionDeviceBridgeConfigForLog,
   type CompanionDeviceBridgeGuardedFileStat,
@@ -28,6 +29,8 @@ const executionPoolerDatabaseUrl = executionDatabaseUrl
     'fetanagent_companion_execution_bridge_runtime.spzpiyxheappsfyswewl:',
   )
   .replace('db.spzpiyxheappsfyswewl.supabase.co', 'aws-1-eu-west-1.pooler.supabase.com');
+const routineDatabaseUrl =
+  'postgresql://fetanagent_routine_deposit_broker_runtime:synthetic-routine-password-123456@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full';
 const productionDatabaseUrl = databaseUrl
   .replace('spzpiyxheappsfyswewl', 'xzztugbgtulptnbpoelr')
   .replace('aws-1-', 'aws-0-');
@@ -101,6 +104,12 @@ const executionEnvironment: NodeJS.ProcessEnv = {
   COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
   COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
 };
+const routineEnvironment: NodeJS.ProcessEnv = {
+  ...enabledEnvironment,
+  INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+  COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+  COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE,
+};
 
 function executionFiles(runtimeManifest = executionManifest, key = executionPrivateKey) {
   return {
@@ -109,6 +118,17 @@ function executionFiles(runtimeManifest = executionManifest, key = executionPriv
     [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
     [COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE]: key,
     [COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE]: executionDatabaseUrl,
+    [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
+  };
+}
+
+function routineFiles(url = routineDatabaseUrl) {
+  return {
+    [COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE]: databaseUrl,
+    [COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE]: executionManifest,
+    [COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE]: privateKey,
+    [COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE]: executionPrivateKey,
+    [COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE]: url,
     [COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE]: ca,
   };
 }
@@ -316,6 +336,68 @@ describe('companion device bridge configuration', () => {
       host: 'aws-1-eu-west-1.pooler.supabase.com',
       user: 'fetanagent_companion_execution_bridge_runtime.spzpiyxheappsfyswewl',
     });
+  });
+
+  it('loads a separately credentialed routine broker behind its own gate', async () => {
+    const dependencies = guardedDependencies(routineFiles());
+    const config = loadCompanionDeviceBridgeConfig(routineEnvironment, dependencies);
+    if (!config.enabled || !config.routine.enabled) throw new Error('expected routine config');
+    expect(config.execution.enabled).toBe(false);
+    expect(config.routine.connection).toMatchObject({
+      host: 'db.spzpiyxheappsfyswewl.supabase.co',
+      user: 'fetanagent_routine_deposit_broker_runtime',
+      ca,
+    });
+    expect(config.routine.signer.keyId).toBe('companion_execution_staging_v1');
+    const transcript = Buffer.from('routine-deposit-trust-root-check', 'utf8');
+    const signature = await config.routine.signer.signP1363(transcript);
+    expect(
+      verify(
+        'sha256',
+        transcript,
+        { key: executionKeyPair.publicKey, dsaEncoding: 'ieee-p1363' },
+        Buffer.from(signature, 'base64url'),
+      ),
+    ).toBe(true);
+    expect(dependencies.fileSystem.lstat).toHaveBeenCalledTimes(6);
+    expect(redactedCompanionDeviceBridgeConfigForLog(config)).toMatchObject({
+      executionTransportConfigured: false,
+      executionSignerConfigured: true,
+      routineDepositTransportConfigured: true,
+      financialActionAllowed: false,
+      moneyMovementAllowed: false,
+    });
+  });
+
+  it('rejects enabling the one-job pilot and routine deposit transports together', () => {
+    const dependencies = guardedDependencies({});
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        {
+          ...executionEnvironment,
+          INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+          COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE,
+        },
+        dependencies,
+      ),
+    ).toThrow('configuration is unavailable');
+    expect(dependencies.fileSystem.open).not.toHaveBeenCalled();
+  });
+
+  it('rejects a routine broker that reuses the baseline database password', () => {
+    expect(() =>
+      loadCompanionDeviceBridgeConfig(
+        routineEnvironment,
+        guardedDependencies(
+          routineFiles(
+            routineDatabaseUrl.replace(
+              'synthetic-routine-password-123456',
+              'synthetic-password-123456',
+            ),
+          ),
+        ),
+      ),
+    ).toThrow('configuration is unavailable');
   });
 
   it.each([
@@ -631,6 +713,7 @@ describe('companion device bridge configuration', () => {
       signerConfigured: true,
       executionTransportConfigured: false,
       executionSignerConfigured: false,
+      routineDepositTransportConfigured: false,
       pairingAllowed: true,
       exactFiveReadOnlyLookupAllowed: true,
       financialActionAllowed: false,

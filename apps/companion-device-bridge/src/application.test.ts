@@ -33,6 +33,7 @@ const enabledConfig: CompanionDeviceBridgeConfig = {
     signP1363: async () => 'synthetic-signature',
   },
   execution: { enabled: false },
+  routine: { enabled: false },
 };
 
 function postgresRuntime(initiallyReady = true) {

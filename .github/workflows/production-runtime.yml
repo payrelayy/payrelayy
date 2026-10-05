@@ -813,6 +813,7 @@ jobs:
             "$RUNNER_TEMP/release/runtime-deployment-mode" \
             infra/compose.production.yaml \
             infra/compose.production.companion-execution-v2.yaml \
+            infra/compose.production.routine-deposits.yaml \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \

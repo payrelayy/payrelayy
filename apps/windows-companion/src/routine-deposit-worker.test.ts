@@ -96,6 +96,7 @@ function fixture(lease = makeLease()) {
         return {
           outcome: 'submission_attempted' as const,
           providerResponseDigest: `sha256:${'b'.repeat(64)}`,
+          exactPlayerCreditMatch: true as const,
         };
       },
     ),
@@ -345,6 +346,7 @@ describe('routine production serial deposit worker', () => {
         return {
           outcome: 'submission_attempted',
           providerResponseDigest: `sha256:${'b'.repeat(64)}`,
+          exactPlayerCreditMatch: true,
         };
       },
     );

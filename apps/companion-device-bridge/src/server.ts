@@ -11,6 +11,7 @@ import {
   COMPANION_EXECUTION_POLL_PATH,
   COMPANION_EXECUTION_RESULT_PATH,
   COMPANION_EXECUTION_STATUS_PATH,
+  ROUTINE_DEPOSIT_COMMAND_PATH,
 } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 import type { CompanionBridgeHttpRequest, CompanionBridgeHttpResponse } from './pairing-handler.js';
@@ -97,7 +98,8 @@ function declaredBodyLength(
       path !== COMPANION_EXECUTION_POLL_PATH &&
       path !== COMPANION_EXECUTION_AUTHORITY_PATH &&
       path !== COMPANION_EXECUTION_RESULT_PATH &&
-      path !== COMPANION_EXECUTION_STATUS_PATH) ||
+      path !== COMPANION_EXECUTION_STATUS_PATH &&
+      path !== ROUTINE_DEPOSIT_COMMAND_PATH) ||
     contentTypes?.length !== 1 ||
     contentTypes[0] !== AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE ||
     accepts?.length !== 1 ||

@@ -21,6 +21,8 @@ export const COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE =
   'fetanagent_companion_execution_bridge' as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE =
   'fetanagent_companion_execution_bridge_runtime' as const;
+export const COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE =
+  'fetanagent_routine_deposit_broker_runtime' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl' as const;
 export const COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST =
   'db.spzpiyxheappsfyswewl.supabase.co' as const;
@@ -39,6 +41,10 @@ export const COMPANION_DEVICE_BRIDGE_EXECUTION_STAGING_SESSION_POOLER_USER =
   `${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE}` as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER =
   `${COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE}` as const;
+export const COMPANION_ROUTINE_DEPOSIT_STAGING_SESSION_POOLER_USER =
+  `${COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_STAGING_PROJECT_REFERENCE}` as const;
+export const COMPANION_ROUTINE_DEPOSIT_PRODUCTION_SESSION_POOLER_USER =
+  `${COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE}.${COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE}` as const;
 type DeploymentTarget = 'staging' | 'production';
 const databaseTargets = {
   staging: {
@@ -47,6 +53,7 @@ const databaseTargets = {
     poolerHost: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST,
     poolerUser: COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_USER,
     executionPoolerUser: COMPANION_DEVICE_BRIDGE_EXECUTION_STAGING_SESSION_POOLER_USER,
+    routinePoolerUser: COMPANION_ROUTINE_DEPOSIT_STAGING_SESSION_POOLER_USER,
   },
   production: {
     projectReference: COMPANION_DEVICE_BRIDGE_PRODUCTION_PROJECT_REFERENCE,
@@ -54,12 +61,15 @@ const databaseTargets = {
     poolerHost: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST,
     poolerUser: COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_USER,
     executionPoolerUser: COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER,
+    routinePoolerUser: COMPANION_ROUTINE_DEPOSIT_PRODUCTION_SESSION_POOLER_USER,
   },
 } as const;
 export const COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE =
   '/run/secrets/companion_device_bridge_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE =
   '/run/secrets/companion_execution_database_url' as const;
+export const COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE =
+  '/run/secrets/companion_routine_deposit_database_url' as const;
 export const COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE =
   '/run/secrets/companion_device_bridge_server_signer.pkcs8.der' as const;
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE =
@@ -106,6 +116,22 @@ export interface CompanionExecutionBridgeConnectionConfig {
     | typeof COMPANION_DEVICE_BRIDGE_EXECUTION_PRODUCTION_SESSION_POOLER_USER;
 }
 
+export interface CompanionRoutineDepositConnectionConfig {
+  readonly ca: string;
+  readonly database: 'postgres';
+  readonly host:
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_STAGING_SESSION_POOLER_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_DATABASE_HOST
+    | typeof COMPANION_DEVICE_BRIDGE_PRODUCTION_SESSION_POOLER_HOST;
+  readonly password: string;
+  readonly port: 5432;
+  readonly user:
+    | typeof COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE
+    | typeof COMPANION_ROUTINE_DEPOSIT_STAGING_SESSION_POOLER_USER
+    | typeof COMPANION_ROUTINE_DEPOSIT_PRODUCTION_SESSION_POOLER_USER;
+}
+
 export type CompanionDeviceBridgeConfig =
   | { readonly enabled: false }
   | {
@@ -122,6 +148,13 @@ export type CompanionDeviceBridgeConfig =
         | {
             readonly enabled: true;
             readonly connection: CompanionExecutionBridgeConnectionConfig;
+            readonly signer: CompanionBridgeSigner;
+          };
+      readonly routine:
+        | { readonly enabled: false }
+        | {
+            readonly enabled: true;
+            readonly connection: CompanionRoutineDepositConnectionConfig;
             readonly signer: CompanionBridgeSigner;
           };
     };
@@ -572,6 +605,46 @@ function executionConnectionFromUrl(
   });
 }
 
+function routineConnectionFromUrl(
+  value: string,
+  deploymentTarget: DeploymentTarget,
+): Omit<CompanionRoutineDepositConnectionConfig, 'ca'> {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return unavailable();
+  }
+  const entries = [...url.searchParams.entries()];
+  const user = decodeUrlComponent(url.username);
+  const password = decodeUrlComponent(url.password);
+  const target = databaseTargets[deploymentTarget];
+  const directRoute =
+    url.hostname === target.directHost && user === COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE;
+  const sessionPoolerRoute =
+    url.hostname === target.poolerHost && user === target.routinePoolerUser;
+  if (
+    (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
+    (!directRoute && !sessionPoolerRoute) ||
+    (url.port !== '' && url.port !== '5432') ||
+    password.length < 16 ||
+    decodeUrlComponent(url.pathname.slice(1)) !== 'postgres' ||
+    url.hash !== '' ||
+    entries.length !== 1 ||
+    entries[0]?.[0] !== 'sslmode' ||
+    entries[0]?.[1] !== 'verify-full'
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({
+    database: 'postgres' as const,
+    host: directRoute ? target.directHost : target.poolerHost,
+    password,
+    port: 5432 as const,
+    user: directRoute ? COMPANION_ROUTINE_DEPOSIT_DATABASE_ROLE : target.routinePoolerUser,
+  });
+}
+
 function guardedCa(value: unknown): string {
   if (
     typeof value !== 'string' ||
@@ -663,26 +736,43 @@ function signerFromPkcs8(
   }
 }
 
-function requireFixedFiles(environment: NodeJS.ProcessEnv, executionEnabled: boolean): void {
+function requireFixedFiles(
+  environment: NodeJS.ProcessEnv,
+  executionEnabled: boolean,
+  routineEnabled: boolean,
+): void {
+  const financialTransportEnabled = executionEnabled || routineEnabled;
   const expected = {
     COMPANION_DEVICE_BRIDGE_DATABASE_URL_FILE,
     COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE,
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
-    ...(executionEnabled
+    ...(financialTransportEnabled
       ? {
           COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
+        }
+      : {}),
+    ...(executionEnabled
+      ? {
           COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
         }
       : {}),
+    ...(routineEnabled ? { COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE } : {}),
   } as const;
   for (const [name, value] of Object.entries(expected)) {
     if (environment[name] !== value) unavailable();
   }
   if (
-    !executionEnabled &&
-    (environment.COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE !== undefined ||
-      environment.COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE !== undefined)
+    !financialTransportEnabled &&
+    environment.COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE !== undefined
   ) {
+    unavailable();
+  }
+  if (
+    !executionEnabled &&
+    environment.COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE !== undefined
+  )
+    unavailable();
+  if (!routineEnabled && environment.COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE !== undefined) {
     unavailable();
   }
 }
@@ -695,6 +785,7 @@ function rejectInlineOrBroaderSecrets(environment: NodeJS.ProcessEnv): void {
     'SUPABASE_SECRET_KEY',
     'COMPANION_DEVICE_BRIDGE_DATABASE_URL',
     'COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL',
+    'COMPANION_ROUTINE_DEPOSIT_DATABASE_URL',
     'COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY',
     'COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY',
     'OWNER_CONTROL_DATABASE_URL',
@@ -714,6 +805,9 @@ export function loadCompanionDeviceBridgeConfig(
   const enabled = exactBoolean(environment.INTERNAL_COMPANION_DEVICE_BRIDGE_ENABLED);
   if (!enabled) return Object.freeze({ enabled: false });
   const executionEnabled = exactBoolean(environment.INTERNAL_COMPANION_EXECUTION_V2_ENABLED);
+  const routineEnabled = exactBoolean(environment.INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED);
+  if (executionEnabled && routineEnabled) return unavailable();
+  const financialTransportEnabled = executionEnabled || routineEnabled;
   const deploymentTarget = environment.COMPANION_DEVICE_BRIDGE_DEPLOYMENT_TARGET;
   if (deploymentTarget !== 'staging' && deploymentTarget !== 'production') return unavailable();
   if (
@@ -725,14 +819,14 @@ export function loadCompanionDeviceBridgeConfig(
     return unavailable();
   }
   rejectInlineOrBroaderSecrets(environment);
-  requireFixedFiles(environment, executionEnabled);
+  requireFixedFiles(environment, executionEnabled, routineEnabled);
 
   const manifest = runtimeManifestFrom(
     guardedCanonicalJson(
       readGuardedText(COMPANION_DEVICE_BRIDGE_RUNTIME_MANIFEST_FILE, dependencies, 'public_config'),
     ),
     deploymentTarget,
-    executionEnabled,
+    financialTransportEnabled,
   );
   const privateKeyBytes = readGuardedBytes(
     COMPANION_DEVICE_BRIDGE_SIGNER_PRIVATE_KEY_FILE,
@@ -753,6 +847,7 @@ export function loadCompanionDeviceBridgeConfig(
     readGuardedText(COMPANION_DEVICE_BRIDGE_SUPABASE_CA_FILE, dependencies, 'public_config'),
   );
   let execution: Extract<CompanionDeviceBridgeConfig, { readonly enabled: true }>['execution'];
+  let routine: Extract<CompanionDeviceBridgeConfig, { readonly enabled: true }>['routine'];
   if (manifest.contractVersion === 3) {
     const executionPrivateKeyBytes = readGuardedBytes(
       COMPANION_DEVICE_BRIDGE_EXECUTION_SIGNER_PRIVATE_KEY_FILE,
@@ -777,23 +872,43 @@ export function loadCompanionDeviceBridgeConfig(
     ) {
       return unavailable();
     }
-    const executionConnection = executionConnectionFromUrl(
-      guardedSingleLine(
-        readGuardedText(
-          COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
-          dependencies,
-          'secret',
+    if (executionEnabled) {
+      const executionConnection = executionConnectionFromUrl(
+        guardedSingleLine(
+          readGuardedText(
+            COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_URL_FILE,
+            dependencies,
+            'secret',
+          ),
         ),
-      ),
-      deploymentTarget,
-    );
-    execution = Object.freeze({
-      enabled: true,
-      signer: executionSigner,
-      connection: Object.freeze({ ...executionConnection, ca }),
-    });
+        deploymentTarget,
+      );
+      execution = Object.freeze({
+        enabled: true,
+        signer: executionSigner,
+        connection: Object.freeze({ ...executionConnection, ca }),
+      });
+    } else {
+      execution = Object.freeze({ enabled: false });
+    }
+    if (routineEnabled) {
+      const routineConnection = routineConnectionFromUrl(
+        guardedSingleLine(
+          readGuardedText(COMPANION_ROUTINE_DEPOSIT_DATABASE_URL_FILE, dependencies, 'secret'),
+        ),
+        deploymentTarget,
+      );
+      routine = Object.freeze({
+        enabled: true,
+        signer: executionSigner,
+        connection: Object.freeze({ ...routineConnection, ca }),
+      });
+    } else {
+      routine = Object.freeze({ enabled: false });
+    }
   } else {
     execution = Object.freeze({ enabled: false });
+    routine = Object.freeze({ enabled: false });
   }
   const connectionWithoutCa = connectionFromUrl(
     guardedSingleLine(
@@ -804,6 +919,13 @@ export function loadCompanionDeviceBridgeConfig(
   if (execution.enabled && execution.connection.password === connectionWithoutCa.password) {
     return unavailable();
   }
+  if (
+    routine.enabled &&
+    (routine.connection.password === connectionWithoutCa.password ||
+      (execution.enabled && routine.connection.password === execution.connection.password))
+  ) {
+    return unavailable();
+  }
   return Object.freeze({
     enabled: true,
     deploymentTarget,
@@ -812,6 +934,7 @@ export function loadCompanionDeviceBridgeConfig(
     serverSignerId: manifest.serverSignerId,
     signer,
     execution,
+    routine,
   });
 }
 
@@ -825,6 +948,7 @@ export function redactedCompanionDeviceBridgeConfigForLog(
   signerConfigured: boolean;
   executionTransportConfigured: boolean;
   executionSignerConfigured: boolean;
+  routineDepositTransportConfigured: boolean;
   pairingAllowed: true;
   exactFiveReadOnlyLookupAllowed: true;
   financialActionAllowed: false;
@@ -836,7 +960,9 @@ export function redactedCompanionDeviceBridgeConfigForLog(
     connectionConfigured: config.enabled,
     signerConfigured: config.enabled,
     executionTransportConfigured: config.enabled && config.execution.enabled,
-    executionSignerConfigured: config.enabled && config.execution.enabled,
+    executionSignerConfigured:
+      config.enabled && (config.execution.enabled || config.routine.enabled),
+    routineDepositTransportConfigured: config.enabled && config.routine.enabled,
     pairingAllowed: true,
     exactFiveReadOnlyLookupAllowed: true,
     financialActionAllowed: false,

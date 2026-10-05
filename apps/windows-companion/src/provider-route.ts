@@ -21,6 +21,8 @@ export type LocalKemerBetDepositDispatchOutcome =
   | {
       readonly outcome: 'submission_attempted';
       readonly providerResponseDigest: string;
+      /** Present only after the routine UI observes the exact success-modal credit delta. */
+      readonly exactPlayerCreditMatch?: true;
     }
   | {
       readonly outcome: 'local_uncertain';

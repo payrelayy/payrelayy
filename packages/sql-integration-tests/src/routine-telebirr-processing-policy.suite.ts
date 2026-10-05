@@ -49,7 +49,7 @@ async function save(client: Client, owner: string, selectedAccount: string, key 
   return result.rows[0]!.configuration;
 }
 
-async function persistentPolicyFixture(
+export async function persistentPolicyFixture(
   client: Client,
   owner: string,
 ): Promise<{ authorityId: string; accountId: string }> {
@@ -77,7 +77,7 @@ async function persistentPolicyFixture(
   return { authorityId, accountId };
 }
 
-async function paidJob(
+export async function paidJob(
   client: Client,
   amountMinor = 2500,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',

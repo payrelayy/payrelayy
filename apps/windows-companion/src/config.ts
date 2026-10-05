@@ -18,6 +18,8 @@ export interface WindowsCompanionConfig {
   readonly dataRoot: string;
   readonly executionV2Enabled: boolean;
   readonly executionV2ExpectedPlatformAgentAccountId?: string;
+  readonly routineDepositsEnabled: boolean;
+  readonly routineExpectedPlatformAgentAccountId?: string;
   readonly expectedAgentIdentityProvided: boolean;
   readonly pairingPackageProvided: boolean;
   readonly profileRoot: string;
@@ -82,6 +84,14 @@ export function loadWindowsCompanionConfig(
     throw new Error('FetanAgent Companion execution-v2 feature state is invalid.');
   }
   const executionV2Enabled = executionFlag === 'true';
+  const routineFlag = environment.INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED;
+  if (routineFlag !== undefined && routineFlag !== 'true') {
+    throw new Error('FetanAgent Companion routine-deposit feature state is invalid.');
+  }
+  const routineDepositsEnabled = routineFlag === 'true';
+  if (executionV2Enabled && routineDepositsEnabled) {
+    throw new Error('FetanAgent Companion financial execution modes are mutually exclusive.');
+  }
   const executionV2ExpectedPlatformAgentAccountId =
     environment.FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID;
   if (
@@ -93,12 +103,27 @@ export function loadWindowsCompanionConfig(
   if (executionV2Enabled && executionV2ExpectedPlatformAgentAccountId === undefined) {
     throw new Error('FetanAgent Companion execution-v2 account binding is required.');
   }
+  const routineExpectedPlatformAgentAccountId =
+    environment.FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID;
+  if (
+    routineExpectedPlatformAgentAccountId !== undefined &&
+    !PLATFORM_AGENT_ACCOUNT_ID_PATTERN.test(routineExpectedPlatformAgentAccountId)
+  ) {
+    throw new Error('FetanAgent Companion routine-deposit account binding is invalid.');
+  }
+  if (routineDepositsEnabled && routineExpectedPlatformAgentAccountId === undefined) {
+    throw new Error('FetanAgent Companion routine-deposit account binding is required.');
+  }
   return Object.freeze({
     dataRoot,
     executionV2Enabled,
     ...(executionV2ExpectedPlatformAgentAccountId === undefined
       ? {}
       : { executionV2ExpectedPlatformAgentAccountId }),
+    routineDepositsEnabled,
+    ...(routineExpectedPlatformAgentAccountId === undefined
+      ? {}
+      : { routineExpectedPlatformAgentAccountId }),
     expectedAgentIdentityProvided,
     pairingPackageProvided,
     profileRoot: resolve(dataRoot, 'profiles', 'kemerbet', 'primary'),
@@ -122,6 +147,8 @@ export function redactedWindowsCompanionConfig(config: WindowsCompanionConfig) {
     executionV2Enabled: config.executionV2Enabled,
     executionV2ExpectedAccountConfigured:
       config.executionV2ExpectedPlatformAgentAccountId !== undefined,
+    routineDepositsEnabled: config.routineDepositsEnabled,
+    routineExpectedAccountConfigured: config.routineExpectedPlatformAgentAccountId !== undefined,
     expectedAgentIdentityProvided: config.expectedAgentIdentityProvided,
     pairingPackageProvided: config.pairingPackageProvided,
     profileConfigured: config.profileRoot.length > 0,

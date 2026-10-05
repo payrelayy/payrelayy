@@ -313,6 +313,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
           !fenceGranted ||
           !actionAuthority ||
           dispatch.outcome !== 'submission_attempted' ||
+          dispatch.exactPlayerCreditMatch !== true ||
           !DIGEST.test(dispatch.providerResponseDigest)
         )
           return await pause(selected, 'execution_uncertain');

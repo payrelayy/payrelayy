@@ -66,6 +66,17 @@ export interface LocalKemerBetRoutineFinalAction extends LocalKemerBetFinalActio
   readonly amountMinor: number;
 }
 
+export type LocalKemerBetRoutineDepositDispatchOutcome =
+  | {
+      readonly outcome: 'submission_attempted';
+      readonly providerResponseDigest: string;
+      readonly exactPlayerCreditMatch: true;
+    }
+  | {
+      readonly outcome: 'local_uncertain';
+      readonly providerResponseDigest: string | null;
+    };
+
 export function isRoutineDepositAmountMinor(value: unknown): value is number {
   return (
     typeof value === 'number' &&
@@ -420,8 +431,8 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   lookupAuthorization: MutableLocalKemerBetLookupAuthorization,
   depositAuthorization: MutableLocalKemerBetDepositAuthorization,
   acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
-): Promise<LocalKemerBetDepositDispatchOutcome> {
-  return executeLocalDepositForAmount(
+): Promise<LocalKemerBetRoutineDepositDispatchOutcome> {
+  const outcome = await executeLocalDepositForAmount(
     page,
     playerId,
     amountMinor,
@@ -433,6 +444,35 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       return authority;
     },
   );
+  if (outcome.outcome !== 'submission_attempted') return outcome;
+  const expectedCredit = `Player Balance +${routineDepositAmountText(amountMinor)} ETB Success`;
+  try {
+    await waitUntil(async () => {
+      await requireAuthenticatedAgentPage(page);
+      const dialogs = page.locator('.ant-modal-content');
+      const count = await dialogs.count();
+      if (count > 20) unavailable();
+      let matched = false;
+      for (let index = 0; index < count; index += 1) {
+        const dialog = dialogs.nth(index);
+        if (!(await dialog.isVisible())) continue;
+        const title = await exactlyOneVisible(
+          dialog.getByText('Transfer Successful!', { exact: true }),
+        );
+        if (!title) continue;
+        const credit = await exactlyOneVisible(dialog.getByText(expectedCredit, { exact: true }));
+        if (!credit || matched) unavailable();
+        matched = true;
+      }
+      return matched;
+    });
+  } catch {
+    return Object.freeze({
+      outcome: 'local_uncertain',
+      providerResponseDigest: outcome.providerResponseDigest,
+    });
+  }
+  return Object.freeze({ ...outcome, exactPlayerCreditMatch: true });
 }
 
 async function executeLocalDepositForAmount(

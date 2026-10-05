@@ -122,15 +122,18 @@ assert.match(
 assert.match(windowsEntry, /handoffExpiresAtMs: executionDeadlineMs!/u);
 assert.match(
   windowsEntry,
-  /if \(handoff\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u,
+  /if \(handoff \|\| config\.routineDepositsEnabled\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u,
 );
-assert.match(windowsEntry, /if \(config\.executionV2Enabled\) await session\.stop\(\)/u);
+assert.match(
+  windowsEntry,
+  /if \(config\.executionV2Enabled \|\| config\.routineDepositsEnabled\) await session\.stop\(\)/u,
+);
 assert.match(windowsEntry, /signed_handoff_or_installation_unavailable/u);
 assert.match(windowsEntry, /baseDevice\.createSignedLaunchProof/u);
 assert.match(windowsEntry, /deliverCompanionLaunchProof/u);
 assert.match(
   windowsEntry,
-  /takeCompanionLaunchProofRequest\(\s*process\.env,\s*config\.executionV2Enabled,?\s*\)/u,
+  /takeCompanionLaunchProofRequest\(\s*process\.env,\s*config\.executionV2Enabled \|\| config\.routineDepositsEnabled,?\s*\)/u,
 );
 assert.match(windowsEntry, /await deliverCompanionExecutionLaunchProofAndAwaitPermit\(/u);
 assert.match(windowsEntry, /verifyWindowsCompanionInstallationTree/u);

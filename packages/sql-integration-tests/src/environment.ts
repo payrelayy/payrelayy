@@ -77,10 +77,13 @@ export function readSqlIntegrationEnvironment(
   };
 }
 
-export function createSqlIntegrationClient(environment: SqlIntegrationEnvironment): Client {
+export function createSqlIntegrationClient(
+  environment: SqlIntegrationEnvironment,
+  database: 'postgres' | 'staging_ledger_rehearsal' = 'postgres',
+): Client {
   const config: ClientConfig = {
     application_name: 'fetanagent_sql_integration',
-    database: 'postgres',
+    database,
     host: environment.host,
     password: environment.administratorPassword,
     port: 5432,

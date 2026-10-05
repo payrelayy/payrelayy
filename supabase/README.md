@@ -42,6 +42,13 @@ never includes seed data, targets production, deploys an application, starts Tel
 payment flow. Review the staging project's security and performance advisors separately after the
 first successful apply.
 
+The disposable SQL integration suite separately replays a **staging-ledger-shaped** history in a
+fresh, internal-only PostgreSQL database: the 87 migrations listed as applied in the 6 October 2026
+read-only staging plan, followed by its 106 pending migrations in filename order. The four older
+gaps are included in that pending phase. This tests migration ordering against synthetic, empty
+application data; it does not copy staging schema or data, reproduce staging-specific configuration,
+prove recovery from a backup, or authorize lifting the staging apply guard.
+
 ## Production database release
 
 The manually dispatched

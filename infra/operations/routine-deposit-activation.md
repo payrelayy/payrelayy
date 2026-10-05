@@ -23,6 +23,11 @@ line history:
   review;
 - passing build, unit, deployment-verifier, and Docker-backed SQL results for the exact SHA.
 
+The production deploy also requires the seven latest `push` CI workflows on `main` to pass for
+that exact SHA. Passing pull-request checks, a manual package build, or a production build plan
+does not satisfy this gate. If a merge produces no main-branch push runs, stop and resolve that
+release event before attempting deployment; do not bypass the CI gate.
+
 The current Owner policy must retain the fixed production scope: TeleBirr, KemerBet, ETB,
 receipt-derived 25–25,000 ETB, all active deposit-eligible Players, one concurrent deposit, and no
 daily or count quota.

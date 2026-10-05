@@ -109,6 +109,11 @@ jobs:
         with:
           version: 2.113.0
 
+      - name: Set up Node.js for the migration-gap guard
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
       - name: Verify tooling and staging credentials
         shell: bash
         env:
@@ -152,6 +157,7 @@ jobs:
       - name: Verify the linked ref and plan canonical migrations
         shell: bash
         env:
+          REQUESTED_MODE: ${{ inputs.mode }}
           SUPABASE_HOME: ${{ runner.temp }}/fetanagent-supabase-home
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -175,9 +181,11 @@ jobs:
             exit 1
           fi
 
-          supabase migration list --linked
+          migration_list="$(supabase migration list --linked 2>&1)"
+          printf '%s\n' "$migration_list"
           # Preview older missing versions too; this never applies them.
           supabase db push --linked --dry-run --include-all
+          printf '%s\n' "$migration_list" | node infra/staging-migration-gap-guard.mjs "$REQUESTED_MODE"
 
       - name: Apply canonical migrations to staging
         if: inputs.mode == 'apply'

@@ -30,8 +30,14 @@ state, and runs `supabase db push --linked --dry-run --include-all` so the previ
 missing migrations without executing them. The `apply` mode performs that same complete plan
 before running the ordinary `supabase db push --linked --yes` and listing the resulting migration
 state. It intentionally does not use `--include-all` for the actual push: an older migration
-backlog remains a stop, not an authorization to replay it. Review pending SQL effects, backup and
-restore readiness, and an explicit staged application path before changing that guard. The workflow
+backlog remains a stop, not an authorization to replay it. The read-only migration-gap guard
+compares the linked ledger with every checked-out SQL file and fails `apply` before any push if
+an older migration is missing, any migration in the unrehearsed catch-up through
+`20261005180558` is pending, or the CLI listing cannot be reconciled. On 6 October 2026,
+staging had 87 applied and 106 pending canonical migrations, including four older than its latest
+applied version. A successful `plan` is not permission to run `apply` while this gap remains.
+Review pending SQL effects, backup and restore readiness, and an explicit staged application
+path before changing that guard. The workflow
 never includes seed data, targets production, deploys an application, starts Telegram, or enables a
 payment flow. Review the staging project's security and performance advisors separately after the
 first successful apply.

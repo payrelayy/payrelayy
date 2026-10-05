@@ -4,6 +4,13 @@ This is a money-capable production procedure. It is intentionally not part of mi
 or the normal production composition. Use it only for a reviewed exact release, from protected
 operator hosts, after the non-financial verification and disposable SQL suite pass.
 
+**Current stop gate:** The non-pilot customer proof-to-official-observation-to-one-use-claim-to-
+verified-job path is not implemented end to end. The dormant table in
+`20261005165930_routine_telebirr_untrusted_proof_foundation.sql` does not satisfy that path.
+Do not run this activation procedure, install its runtime credential or release marker, or start
+the Automatic Deposits launcher until a later reviewed release proves the whole path with
+disposable SQL and no-money end-to-end tests.
+
 Do not use this procedure to test whether KemerBet Transfer works. Do not create a synthetic paid
 job, reuse a payment claim, or submit a live payment as an activation check. A pre-existing fenced
 or uncertain attempt must be reconciled before activation.
@@ -22,6 +29,8 @@ line history:
 - confirmation that no routine attempt is prepared, fenced, reconciliation-required, or under
   review;
 - passing build, unit, deployment-verifier, and Docker-backed SQL results for the exact SHA.
+- a passing, reviewed non-pilot receipt-to-verified-job lineage and no-money end-to-end result;
+  the existing five-Player pilot lineage does not satisfy this requirement.
 
 The production deploy also requires the seven latest `push` CI workflows on `main` to pass for
 that exact SHA. Passing pull-request checks, a manual package build, or a production build plan

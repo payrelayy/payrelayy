@@ -15,6 +15,7 @@ import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycl
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
 import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
+import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
 import { registerExpiredTelebirrPredecessorSqlTests } from './expired-telebirr-predecessor.suite.js';
@@ -9864,6 +9865,7 @@ registerRoutineTelebirrExecutionBrokerSqlTests(
       user: 'fetanagent_routine_deposit_broker_runtime',
     }),
 );
+registerRoutineTelebirrUntrustedProofSqlTests(() => client);
 registerReviewedSourceBindingShadowWindowRetrySqlTests(() => client);
 registerTelegramLiveTelebirrProofIntakeSqlTests(
   () => client,

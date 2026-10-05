@@ -1,7 +1,10 @@
 # Routine production TeleBirr deposits
 
-This repository now contains the complete, separately gated execution path for FetanAgent routine
-TeleBirr deposits into KemerBet. It implements the approved rules in
+This repository contains the separately gated **execution path from an already verified, queued
+job** for FetanAgent routine TeleBirr deposits into KemerBet. It does not yet contain the
+non-pilot customer proof, Android verification, authoritative claim, and settlement path needed
+to create that job. The dormant first proof-ledger slice is described in
+[routine-telebirr-proof-foundation.md](routine-telebirr-proof-foundation.md). The execution path implements the approved rules in
 [telebirr-deposit-product-contract.md](telebirr-deposit-product-contract.md), while keeping the
 fixed 25 ETB execution-v2 pilot unchanged.
 

@@ -103,10 +103,12 @@ assertInOrder(
   [
     'Verify exact checked-out commit',
     `git rev-parse HEAD)" != "$GITHUB_SHA`,
+    'Set up Node.js for the migration-gap guard',
     'Verify tooling and staging credentials',
     'Link only the staging project',
     'supabase migration list --linked',
     'supabase db push --linked --dry-run --include-all',
+    'node infra/staging-migration-gap-guard.mjs "$REQUESTED_MODE"',
     "if: inputs.mode == 'apply'",
     'supabase db push --linked --yes',
   ],
@@ -121,6 +123,9 @@ assert.doesNotMatch(
   /--include-all/u,
   'An older migration backlog must not become automatically applicable from this planning change.',
 );
+assert.match(protectedJob, /REQUESTED_MODE: \$\{\{ inputs\.mode \}\}/u);
+assert.match(protectedJob, /uses: actions\/setup-node@[0-9a-f]{40}/u);
+assert.match(protectedJob, /migration_list="\$\(supabase migration list --linked 2>&1\)"/u);
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/);
 assert.doesNotMatch(workflow, /service[_-]?role|seed\.sql|telegram|payment/i);
@@ -196,5 +201,5 @@ assert.match(
 );
 
 console.log(
-  'Supabase staging bootstrap verified: manual staging-only dispatch, exact commit binding, hosted-ledger reconciliation, checked-out SHA verification, and dry-run before apply',
+  'Supabase staging bootstrap verified: manual staging-only dispatch, exact commit binding, hosted-ledger reconciliation, migration-gap guard, and dry-run before apply',
 );

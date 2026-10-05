@@ -7,8 +7,9 @@ begin;
 create index routine_telebirr_untrusted_retention_due_idx
   on app.routine_telebirr_untrusted_proof_requests (submitted_at, id);
 
--- Keep ordinary UPDATE, DELETE, and TRUNCATE forbidden. The only exception is a
--- 7-day-old row removed by the postgres-owned, fixed-batch retention function.
+-- Keep UPDATE and TRUNCATE forbidden, and DELETE forbidden to every application
+-- role and for every younger row. The privileged postgres owner may remove only
+-- rows at least seven days old; the fixed-batch Cron function is the normal path.
 create or replace function app.reject_routine_telebirr_untrusted_proof_mutation()
 returns trigger
 language plpgsql
@@ -18,7 +19,6 @@ as $$
 begin
   if tg_op = 'DELETE' then
     if current_user = 'postgres'
-      and pg_catalog.current_setting('app.routine_telebirr_retention_delete', true) = 'on'
       and old.submitted_at <= pg_catalog.statement_timestamp() - interval '7 days' then
       return old;
     end if;
@@ -32,7 +32,6 @@ returns integer
 language plpgsql
 security invoker
 set search_path = pg_catalog
-set app.routine_telebirr_retention_delete = 'on'
 as $$
 declare
   v_deleted_count integer;

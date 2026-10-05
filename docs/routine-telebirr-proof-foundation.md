@@ -35,10 +35,12 @@ the live route. These pieces are preparatory code, not a customer intake or paym
 
 The owner-chosen retention boundary makes a candidate eligible for **whole-row deletion after 7
 days**. A postgres-owned database Cron job runs every 15 minutes and removes at most 1,000 due
-rows per run, oldest first. The append-only guard still rejects ordinary update, delete, and
-truncate. Only that fixed-batch maintenance function may delete due rows; it is not executable by
-the API, Bot, customer web, verifier, executor, nonce-retention role, `anon`, `authenticated`, or
-`service_role`. It does not read payment receipts or alter financial state. The seven-day cutoff
+rows per run, oldest first. The append-only guard still rejects update and truncate, all deletes
+by application roles, and deletes of younger rows even by the privileged database owner. The
+postgres owner can delete due rows directly, but the fixed-batch maintenance function is the
+scheduled path; no application role may execute it. This includes the API, Bot, customer web,
+verifier, executor, nonce-retention role, `anon`, `authenticated`, and `service_role`. It does not
+read payment receipts or alter financial state. The seven-day cutoff
 applies only to untrusted candidates, not verified payment or financial records. It is an owner
 choice for this technical boundary, not a legal-retention determination.
 

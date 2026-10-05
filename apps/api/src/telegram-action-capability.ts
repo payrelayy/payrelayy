@@ -25,6 +25,7 @@ export type TelegramActionSemanticConsumer =
   | 'capture_dry_run_deposit_proof'
   | 'capture_telegram_telebirr_shadow_proof'
   | 'capture_telegram_live_telebirr_proof'
+  | 'capture_telegram_routine_telebirr_untrusted_proof'
   | 'prepare_telegram_telebirr_destination'
   | 'prepare_telegram_live_telebirr_destination'
   | 'open_live_deposit_intent'
@@ -86,7 +87,8 @@ type DepositProofSemanticInput = {
   readonly consumer:
     | 'capture_dry_run_deposit_proof'
     | 'capture_telegram_telebirr_shadow_proof'
-    | 'capture_telegram_live_telebirr_proof';
+    | 'capture_telegram_live_telebirr_proof'
+    | 'capture_telegram_routine_telebirr_untrusted_proof';
   readonly originInboundEventId: string;
   readonly playerId: string;
   readonly providerCode: DepositProofProviderCode;
@@ -335,10 +337,12 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
     case 'capture_dry_run_deposit_proof':
     case 'capture_telegram_telebirr_shadow_proof':
     case 'capture_telegram_live_telebirr_proof':
+    case 'capture_telegram_routine_telebirr_untrusted_proof':
       if (
         (input.providerCode !== 'cbe_birr' && input.providerCode !== 'telebirr') ||
         ((input.consumer === 'capture_telegram_telebirr_shadow_proof' ||
-          input.consumer === 'capture_telegram_live_telebirr_proof') &&
+          input.consumer === 'capture_telegram_live_telebirr_proof' ||
+          input.consumer === 'capture_telegram_routine_telebirr_untrusted_proof') &&
           input.providerCode !== 'telebirr') ||
         !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
         !/^\*{3}[A-Z0-9]{4}$/u.test(input.referenceMasked) ||
@@ -363,7 +367,9 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
             ? 'shadow_no_money'
             : input.consumer === 'capture_telegram_live_telebirr_proof'
               ? 'live'
-              : 'dry_run',
+              : input.consumer === 'capture_telegram_routine_telebirr_untrusted_proof'
+                ? 'routine_candidate_no_money'
+                : 'dry_run',
       });
       break;
     default:

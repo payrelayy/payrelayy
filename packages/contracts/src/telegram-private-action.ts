@@ -209,6 +209,15 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      /** A synthetic candidate was stored; no payment lookup or credit was attempted. */
+      readonly outcome: 'telebirr_routine_candidate_recorded_no_money';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly proofStatus: 'untrusted_received';
+      readonly verificationMode: 'not_started_no_money';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'telebirr_live_verification_queued';
       /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
       readonly proofToken: string;

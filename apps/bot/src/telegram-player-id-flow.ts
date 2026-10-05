@@ -146,6 +146,15 @@ export function presentTelegramPlayerIdFlowResult(
           'Automatic credit is not live yet.',
         ].join('\n'),
       };
+    case 'telebirr_routine_candidate_recorded_no_money':
+      return {
+        kind: 'message',
+        text: [
+          '🧪 Simulation only — test transaction number recorded.',
+          'No payment was checked or verified. No KemerBet deposit or credit will be made.',
+          'Do not send money. This is not a payment-status confirmation.',
+        ].join('\n'),
+      };
     case 'telebirr_live_verification_queued':
       return {
         kind: 'menu',

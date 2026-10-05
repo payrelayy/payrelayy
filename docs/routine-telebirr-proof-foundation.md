@@ -24,12 +24,19 @@ official receipt and its occurrence time. Candidate fingerprints are **not globa
 intake**; only an authoritative verified payment may win the one-use claim. The table cannot be
 interpreted as proof of payment.
 
+The dormant TypeScript candidate adapter accepts only synthetic `FETANTEST...` references in
+staging dry-run configuration. It prepares encrypted/fingerprinted input and a domain-separated
+semantic HMAC for the private RPC, then returns a token-free, explicitly no-money projection.
+This adapter is **not imported by the Player-action runtime**, and the runtime role still has no
+EXECUTE grant on the RPC. The Bot knows how to render that projection but cannot receive it from
+the live route. These pieces are preparatory code, not a customer intake or payment test.
+
 The next reviewed slices must, in order:
 
-1. Review a bounded retention/erasure policy for the protected untrusted candidate, then add
-   a gated API/Bot adapter and safe customer status copy for the separate Telegram capture RPC.
-   Grant only the exact RPC after no-money integration proves the route, without table or financial
-   grants. Customer web can follow under its own authenticated receipt.
+1. Review a bounded retention/erasure policy for the protected untrusted candidate, then wire
+   the gated API/Bot adapter to the separate Telegram capture RPC. Grant only the exact RPC after
+   no-money integration proves the route, without table or financial grants. Customer web can
+   follow under its own authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
    domain-separated from every pilot certificate and manifest. Keep the phone observation-only.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision

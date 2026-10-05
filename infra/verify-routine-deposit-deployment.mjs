@@ -71,6 +71,9 @@ for (const source of [protocol, migration]) {
   assert.match(source, new RegExp(mode, 'u'));
   assert.match(source, new RegExp(capability.replaceAll('.', '\\.'), 'u'));
 }
+// PostgreSQL 17 gives a non-superuser CREATEROLE creator ADMIN on each new role.
+// A redundant self-grant broke the first managed-production broker migration.
+assert.doesNotMatch(migration, /grant\s+fetanagent_routine_deposit_broker\s+to\s+postgres\b/iu);
 assert.match(windowsStore, /ROUTINE_DEPOSIT_PROTOCOL_MODE/u);
 assert.match(windowsStore, /ROUTINE_DEPOSIT_CAPABILITY/u);
 assert.match(bridgeHandler, /decodeRoutineDepositCommand/u);

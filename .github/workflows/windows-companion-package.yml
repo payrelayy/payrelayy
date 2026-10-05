@@ -245,7 +245,7 @@ jobs:
               --repo $repository `
               --verify-tag `
               --title "FetanAgent Windows Companion $tag" `
-              --notes 'Portable Windows companion. The standard launcher is Find-only. The separate one-job operator requires a protected local setup and a live Owner-approved session; extracting this archive grants no execution authority.'
+              --notes 'Portable Windows companion. The standard launcher is Find-only. The separate one-job and Automatic Deposits launchers require their own protected local setup and independent Owner and server authority. Extracting this archive grants no execution authority or permission to submit a payment.'
             if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
           }
 

@@ -61,6 +61,9 @@ describe('routine-deposit PostgreSQL runtime', () => {
       'app.execute_agent_platform_routine_deposit_command',
     );
     expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain('has_any_column_privilege');
+    expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain(
+      "when relation.relkind = 'S' then pg_catalog.has_sequence_privilege",
+    );
     const fake = fakePool(preflightRow());
     let observedConfig: Readonly<Record<string, unknown>> | undefined;
     const runtime = await createRoutineDepositPostgresRuntime(

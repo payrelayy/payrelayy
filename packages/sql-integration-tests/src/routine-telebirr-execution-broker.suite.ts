@@ -132,10 +132,28 @@ function leaseCommand(accountId: string, requestId = randomUUID()) {
   };
 }
 
+function boundCommand(
+  lease: ReturnType<typeof leaseCommand>,
+  operation: string,
+  binding: Record<string, unknown>,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    contractVersion: 1,
+    protocolMode: lease.protocolMode,
+    capability: lease.capability,
+    requestId: randomUUID(),
+    workerInstanceId: lease.workerInstanceId,
+    operation,
+    binding,
+    ...extra,
+  };
+}
+
 async function execute(
   client: Client,
   certificate: CertificateFixture,
-  command: ReturnType<typeof leaseCommand>,
+  command: Record<string, unknown>,
   identities = {
     replayIdentity: digest(),
     bodyDigest: digest(),
@@ -277,6 +295,39 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
       let disabled = false;
       try {
         await runtime.connect();
+        const runtimeSurface = await runtime.query<{
+          callable_functions: number;
+          relation_privileges: number;
+        }>(`
+          select
+            (select count(*)::integer from pg_proc routine
+              join pg_namespace namespace on namespace.oid = routine.pronamespace
+             where namespace.nspname not in ('pg_catalog', 'information_schema')
+               and namespace.nspname !~ '^pg_(toast|temp)'
+               and has_schema_privilege(current_user, namespace.oid, 'usage')
+               and has_function_privilege(current_user, routine.oid, 'execute')
+            ) as callable_functions,
+            (select count(*)::integer from pg_class relation
+              join pg_namespace namespace on namespace.oid = relation.relnamespace
+             where namespace.nspname not in ('pg_catalog', 'information_schema')
+               and namespace.nspname !~ '^pg_(toast|temp)'
+               and has_schema_privilege(current_user, namespace.oid, 'usage')
+               and case
+                 when relation.relkind = 'S' then has_sequence_privilege(
+                   current_user, relation.oid, 'usage,select,update'
+                 )
+                 when relation.relkind in ('r','p','v','m','f') then
+                   has_table_privilege(
+                     current_user, relation.oid,
+                     'select,insert,update,delete,truncate,references,trigger,maintain'
+                   ) or has_any_column_privilege(
+                     current_user, relation.oid, 'select,insert,update,references'
+                   )
+                 else false
+               end
+            ) as relation_privileges
+        `);
+        expect(runtimeSurface.rows).toEqual([{ callable_functions: 1, relation_privileges: 0 }]);
         const command = leaseCommand(policy.accountId);
         const first = await execute(runtime, certificate, command);
         expect(first.result).toBeNull();
@@ -325,7 +376,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
       }
     });
 
-    it('leases one eligible non-pilot job without a v2 approval and preserves one-use replay', async () => {
+    it('leases and reconciles one non-pilot job without a v2 approval or Transfer retry', async () => {
       const client = getClient();
       const originalModes = await client.query<{ feature_key: string; mode: string }>(
         `select feature_key, mode::text from app.feature_switches
@@ -391,6 +442,93 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         );
         expect(leased.rows).toHaveLength(1);
         expect(leased.rows[0]).toMatchObject({ status: 'leased', owner_approvals: 0 });
+        const binding = {
+          jobId: deposit.jobId,
+          intentId: deposit.depositIntentId,
+          attemptId: leased.rows[0]!.attempt_id,
+          paymentClaimId: deposit.claimId,
+          platformAgentAccountId: policy.accountId,
+          playerId: deposit.playerId,
+          amountMinor: 2501,
+          currencyCode: 'ETB',
+        };
+        const fenced = await execute(runtime, certificate, boundCommand(command, 'fence', binding));
+        expect(fenced.result).toMatchObject({ ...binding, firstFenceAcquired: true });
+        const fenceTimes = fenced.result as { issuedAtMs: number; validUntilMs: number };
+        expect(fenceTimes.validUntilMs - fenceTimes.issuedAtMs).toBe(10_000);
+
+        const dispatched = await execute(
+          runtime,
+          certificate,
+          boundCommand(command, 'record_dispatch', binding, {
+            dispatch: {
+              outcome: 'submission_attempted',
+              providerResponseDigest: digest(),
+              exactPlayerCreditMatch: true,
+            },
+          }),
+        );
+        expect(dispatched.result).toEqual(binding);
+        expect(
+          (await execute(runtime, certificate, boundCommand(command, 'reconcile', binding))).result,
+        ).toEqual({ outcome: 'pending' });
+
+        const reconciliationLease = await client.query<{
+          reconciliation_job_id: string;
+          lease_token: string;
+        }>(
+          `select reconciliation_job_id, lease_token::text
+              from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
+          [randomUUID()],
+        );
+        expect(reconciliationLease.rows).toHaveLength(1);
+        const matchedHistory = await client.query<{ matched_at: string }>(
+          `select (attempt.final_action_fenced_at
+              + (attempt.reconciliation_required_at - attempt.final_action_fenced_at) / 2
+              )::text as matched_at
+             from app.deposit_execution_attempts attempt where attempt.id = $1::uuid`,
+          [binding.attemptId],
+        );
+        expect(matchedHistory.rows).toHaveLength(1);
+        const settled = await client.query<{ outcome: string; attempt_status: string }>(
+          `select outcome, attempt_status
+             from app.record_deposit_execution_reconciliation(
+               $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
+               'deposit', $4::timestamptz, true, true, true, true
+             )`,
+          [
+            reconciliationLease.rows[0]!.reconciliation_job_id,
+            reconciliationLease.rows[0]!.lease_token,
+            `hmac-sha256-v1:${'c'.repeat(64)}`,
+            matchedHistory.rows[0]!.matched_at,
+          ],
+        );
+        expect(settled.rows).toEqual([
+          { outcome: 'confirmed_executed', attempt_status: 'confirmed_executed' },
+        ]);
+        const confirmed = await execute(
+          runtime,
+          certificate,
+          boundCommand(command, 'reconcile', binding),
+        );
+        expect(confirmed.result).toMatchObject({
+          ...binding,
+          outcome: 'confirmed_executed',
+          exactHistoryMatchCount: 1,
+          playerCreditConfirmed: true,
+          reconciliationId: expect.any(String),
+        });
+        const reconciliationId = (confirmed.result as { reconciliationId: string })
+          .reconciliationId;
+        expect(
+          (
+            await execute(
+              runtime,
+              certificate,
+              boundCommand(command, 'complete', binding, { reconciliationId }),
+            )
+          ).result,
+        ).toEqual(binding);
         await client.query(
           `select app.disable_routine_telebirr_execution_transport($1::uuid, 'operator_requested')`,
           [randomUUID()],

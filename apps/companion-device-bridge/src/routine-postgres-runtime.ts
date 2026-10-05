@@ -71,19 +71,19 @@ export const ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL = `
        where namespace.nspname not in ('pg_catalog', 'information_schema')
          and namespace.nspname !~ '^pg_(toast|temp)'
          and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'usage')
-         and (
-           (relation.relkind = 'S' and pg_catalog.has_sequence_privilege(
+         and case
+           when relation.relkind = 'S' then pg_catalog.has_sequence_privilege(
              current_user, relation.oid, 'usage,select,update'
-           )) or
-           (relation.relkind in ('r','p','v','m','f') and (
+           )
+           when relation.relkind in ('r','p','v','m','f') then
              pg_catalog.has_table_privilege(
                current_user, relation.oid,
                'select,insert,update,delete,truncate,references,trigger,maintain'
              ) or pg_catalog.has_any_column_privilege(
                current_user, relation.oid, 'select,insert,update,references'
              )
-           ))
-         )
+           else false
+         end
     ) as no_app_relation_privileges,
     exists (
       select 1

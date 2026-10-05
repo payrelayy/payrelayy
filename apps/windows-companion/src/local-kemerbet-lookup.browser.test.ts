@@ -94,8 +94,8 @@ describe.skipIf(process.platform !== 'win32')(
     let context: BrowserContext | undefined;
 
     beforeAll(async () => {
-      browser = await chromium.launch({ channel: 'chrome', headless: true });
-    }, 30_000);
+      browser = await chromium.launch({ channel: 'chrome', headless: true, timeout: 90_000 });
+    }, 90_000);
 
     afterEach(async () => {
       await context?.close();

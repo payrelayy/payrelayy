@@ -387,6 +387,7 @@ export async function runWindowsCompanion(): Promise<void> {
     void session.stop();
   };
   process.once('disconnect', onParentDisconnect);
+  if (config.routineDepositsEnabled && !process.connected) onParentDisconnect();
   let stopping = false;
   const stop = () => {
     if (stopping) return;

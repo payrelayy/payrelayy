@@ -1,4 +1,11 @@
 \set ON_ERROR_STOP on
+-- The database contains only the bounded live-pilot verification lineage. The separate
+-- non-pilot customer proof -> official observation -> one-use claim -> verified job path is
+-- not implemented yet. Keep this operator procedure non-executable until a later reviewed
+-- release replaces this stop gate and proves that complete path with no-money tests.
+\warn 'Routine deposit activation is blocked: non-pilot verified-job lineage is not implemented.'
+select 1 / 0 as nonpilot_lineage_not_ready;
+
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv owner_auth_user_id FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID
 \getenv certificate_id FETANAGENT_ROUTINE_COMPANION_CERTIFICATE_ID

@@ -10,6 +10,8 @@ verified-job path is not implemented end to end. The dormant table in
 Do not run this activation procedure, install its runtime credential or release marker, or start
 the Automatic Deposits launcher until a later reviewed release proves the whole path with
 disposable SQL and no-money end-to-end tests.
+The checked-in activation SQL now stops before reading activation inputs; a later release must
+remove that stop only after the non-pilot lineage has passed those tests.
 
 Do not use this procedure to test whether KemerBet Transfer works. Do not create a synthetic paid
 job, reuse a payment claim, or submit a live payment as an activation check. A pre-existing fenced

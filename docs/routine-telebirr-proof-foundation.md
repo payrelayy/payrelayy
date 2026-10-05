@@ -11,7 +11,8 @@ runtime, customer web, Android verifier, routine broker, executor, `anon`, `auth
 validates an admitted private Telegram origin, current KemerBet Player eligibility, a protected
 TeleBirr reference, an active protected receiver, no-money switches, event exclusivity, exact
 replay, and per-identity storage abuse bounds. It is **not granted to any application role** and
-has no API/Bot route or reader; it is exercised only in disposable SQL tests. It cannot create a
+has no deployed API/Bot route or reader; its SQL boundary is exercised in disposable SQL tests,
+while the default-off routing code is covered by unit tests. It cannot create a
 provider observation, payment claim, deposit intent, verification or execution job, settlement,
 or KemerBet action. No financial switch, role login, device enrollment, or production overlay is
 changed.
@@ -24,12 +25,16 @@ official receipt and its occurrence time. Candidate fingerprints are **not globa
 intake**; only an authoritative verified payment may win the one-use claim. The table cannot be
 interpreted as proof of payment.
 
-The dormant TypeScript candidate adapter accepts only synthetic `FETANTEST...` references in
-staging dry-run configuration. It prepares encrypted/fingerprinted input and a domain-separated
-semantic HMAC for the private RPC, then returns a token-free, explicitly no-money projection.
-This adapter is **not imported by the Player-action runtime**, and the runtime role still has no
-EXECUTE grant on the RPC. The Bot knows how to render that projection but cannot receive it from
-the live route. These pieces are preparatory code, not a customer intake or payment test.
+The TypeScript candidate adapter accepts only synthetic `FETANTEST...` references in staging
+dry-run configuration. It prepares encrypted/fingerprinted input and a domain-separated semantic
+HMAC for the private RPC, then returns a token-free, explicitly no-money projection. The
+Player-action runtime selects this path only with the explicit, default-off
+`TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED` gate. When selected, a rejected candidate
+never falls back to the shadow or live proof path. The runtime role still has **no EXECUTE grant**
+on the RPC, so this code-only route cannot yet store a candidate in a deployed environment. If
+the gate is enabled prematurely, the exact-function catalog preflight fails readiness. The Bot
+knows how to render the projection, but no deployed route can produce it. This is a guarded
+integration slice, not a customer intake or payment test.
 
 ## Untrusted-candidate active-database retention
 
@@ -53,10 +58,11 @@ days; do not call this an exact seven-day erasure guarantee.
 
 The next reviewed slices must, in order:
 
-1. Verify scheduled purge health and the backup caveat, then wire the gated API/Bot adapter to
-   the separate Telegram capture RPC. Grant only the exact RPC after no-money integration proves
-   the route, without table or financial grants. Customer web can follow under its own
-   authenticated receipt.
+1. Verify scheduled purge health and the backup caveat, restore staging database connectivity,
+   and prove the gated API/Bot route against disposable PostgreSQL before granting only the exact
+   RPC in staging. The route gate must stay off until that grant and readiness checks are
+   reviewed; production keeps the RPC ungranted. No table or financial grant is authorized. Customer web
+   can follow under its own authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
    domain-separated from every pilot certificate and manifest. Keep the phone observation-only.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision

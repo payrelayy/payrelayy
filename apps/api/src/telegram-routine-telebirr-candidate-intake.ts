@@ -10,7 +10,7 @@ import { createTelegramActionSemanticHmac } from './telegram-action-capability.j
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SYNTHETIC_REFERENCE_PATTERN = /^FETANTEST[A-Z0-9]{4,20}$/u;
 
-/** Not wired into the Player-action runtime and not granted to its database role. */
+/** Not granted to the Player-action database role. The staging route is default-off. */
 export const CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL = `
   select proof_request_id, provider_code, proof_status, submitted_at, request_replayed
   from app.capture_telegram_routine_telebirr_untrusted_proof(
@@ -49,6 +49,7 @@ async function captureInternal(
     config.financialActionsMode !== 'dry_run' ||
     !config.telegramActionCapability.enabled ||
     !config.telegramPlayerActionRuntime.enabled ||
+    !config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
     config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
     config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled ||
     config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion !== 2 ||

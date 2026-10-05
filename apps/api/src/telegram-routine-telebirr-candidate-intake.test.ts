@@ -29,6 +29,7 @@ const config = loadApiConfig({
   INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
   INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
   INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true',
+  TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED: 'true',
   PLAYER_ACTION_DEPLOYMENT_TARGET: 'staging',
   BOT_TO_API_ACTION_HMAC_SECRET: 'a'.repeat(64),
   API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
@@ -54,6 +55,7 @@ const config = loadApiConfig({
 if (!config.telegramPlayerActionRuntime.enabled) {
   throw new Error('Expected the staging Player-action test fixture to be enabled.');
 }
+const enabledCandidateRuntime = config.telegramPlayerActionRuntime;
 const productionConfig: ApiConfig = {
   ...config,
   telegramPlayerActionRuntime: {
@@ -153,6 +155,16 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
   it('never calls SQL for production, live mode, or real-looking references', async () => {
     const database = { query: vi.fn() } as unknown as TelegramRoutineTelebirrCandidateDatabase;
     const denied = [
+      {
+        action,
+        config: {
+          ...config,
+          telegramPlayerActionRuntime: {
+            ...enabledCandidateRuntime,
+            routineTelebirrCandidateStagingEnabled: false,
+          },
+        },
+      },
       { action, config: productionConfig },
       { action, config: { ...config, financialActionsMode: 'live' as const } },
       { action: { ...action, transactionReference: 'SYNTB1234567890' }, config },

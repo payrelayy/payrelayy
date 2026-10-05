@@ -686,8 +686,8 @@ begin
       end if;
       result := authoritative_binding || pg_catalog.jsonb_build_object(
         'firstFenceAcquired', true,
-        'issuedAtMs', pg_catalog.floor(pg_catalog.extract(epoch from fence.final_action_fenced_at) * 1000)::bigint,
-        'validUntilMs', pg_catalog.floor(pg_catalog.extract(epoch from fence.final_action_fenced_at + interval '10 seconds') * 1000)::bigint
+        'issuedAtMs', pg_catalog.floor(extract(epoch from fence.final_action_fenced_at) * 1000)::bigint,
+        'validUntilMs', pg_catalog.floor(extract(epoch from fence.final_action_fenced_at + interval '10 seconds') * 1000)::bigint
       );
     elsif operation = 'record_dispatch' then
       if p_command #>> '{dispatch,outcome}' <> 'submission_attempted'

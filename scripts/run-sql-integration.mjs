@@ -101,6 +101,14 @@ async function assertStaticComposeBoundary() {
   }
 
   if (
+    !composeSource.includes(
+      'sql_integration_staging_rehearsal_postgres_host: staging-ledger-postgres',
+    )
+  ) {
+    throw new Error('Staging rehearsal Compose file must use only its internal postgres hostname.');
+  }
+
+  if (
     composeSource.includes('postgres_host_auth_method: trust') ||
     !composeSource.includes('postgres_host_auth_method: scram-sha-256') ||
     !composeSource.includes('postgres_initdb_args: --auth-host=scram-sha-256') ||

@@ -52,17 +52,9 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     [...olderMissingVersions].sort(),
   );
 
-  // The disposable Compose project provides this server on an internal-only network.
-  // A separate database avoids interference with the full clean-replay suite.
-  const administrator = createSqlIntegrationClient(environment);
-  await administrator.connect();
-  try {
-    await administrator.query('create database staging_ledger_rehearsal');
-  } finally {
-    await administrator.end();
-  }
-
-  const client = createSqlIntegrationClient(environment, 'staging_ledger_rehearsal');
+  // PostgreSQL roles are cluster-wide, so use a separate one-use server rather
+  // than another database on the full clean-replay suite's server.
+  const client = createSqlIntegrationClient(environment, environment.stagingRehearsalHost);
   await client.connect();
   try {
     await applySyntheticSupabaseBootstrap(client);
@@ -90,6 +82,6 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     expect(moneyRows.rows).toEqual([{ intents: 0, attempts: 0 }]);
   } finally {
     await client.end();
-    // The one-use Compose project removes this entire database after the suite.
+    // The one-use Compose project removes this entire server after the suite.
   }
 }, 180_000);

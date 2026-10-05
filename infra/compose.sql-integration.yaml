@@ -24,6 +24,23 @@ services:
     networks:
       - sql_integration
 
+  staging-ledger-postgres:
+    image: postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    platform: linux/amd64
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: TEST-ONLY-NOT-A-SECRET-fetanagent-sql-admin-v1
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready --dbname=postgres --username=postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    networks:
+      - sql_integration
+
   sql-integration:
     platform: linux/amd64
     build:
@@ -33,9 +50,13 @@ services:
       postgres:
         condition: service_healthy
         required: true
+      staging-ledger-postgres:
+        condition: service_healthy
+        required: true
     environment:
       SQL_INTEGRATION_MODE: local-disposable
       SQL_INTEGRATION_POSTGRES_HOST: postgres
+      SQL_INTEGRATION_STAGING_REHEARSAL_POSTGRES_HOST: staging-ledger-postgres
       SQL_INTEGRATION_POSTGRES_PASSWORD: TEST-ONLY-NOT-A-SECRET-fetanagent-sql-admin-v1
       SQL_INTEGRATION_MIGRATIONS_DIRECTORY: /workspace/supabase/migrations
     networks:

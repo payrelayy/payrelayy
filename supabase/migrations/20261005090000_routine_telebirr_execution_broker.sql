@@ -11,7 +11,8 @@ create role fetanagent_routine_deposit_broker
 create role fetanagent_routine_deposit_broker_runtime
   nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls
   connection limit 1 valid until 'infinity';
-grant fetanagent_routine_deposit_broker to postgres with inherit false, set false, admin true;
+-- PostgreSQL 17 automatically gives the non-superuser CREATEROLE creator an ADMIN-only
+-- membership in each new role. Re-granting that option to the grantor fails on Supabase.
 
 create table app.routine_telebirr_runtime_events (
   id uuid primary key default gen_random_uuid(),

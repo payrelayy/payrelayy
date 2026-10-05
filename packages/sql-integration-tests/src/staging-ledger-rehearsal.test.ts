@@ -30,6 +30,9 @@ async function applyMigrationFiles(
     if (sql.trim() === '') throw new Error(`${phase} contains an empty migration: ${name}`);
     try {
       await client.query(sql);
+      await client.query('insert into sql_integration.applied_migrations (filename) values ($1)', [
+        name,
+      ]);
     } catch (error) {
       throw new Error(`${phase} failed at ${name}`, { cause: error });
     }
@@ -58,6 +61,15 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
   await client.connect();
   try {
     await applySyntheticSupabaseBootstrap(client);
+    // Match the existing disposable runner's marker and applied-file ledger.
+    // Some production-only migrations use this marker to omit hosted pg_cron setup.
+    await client.query('create schema sql_integration');
+    await client.query(`
+      create table sql_integration.applied_migrations (
+        filename text primary key,
+        applied_at timestamptz not null default clock_timestamp()
+      )
+    `);
     await applyMigrationFiles(
       client,
       environment.migrationsDirectory,
@@ -65,6 +77,11 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       'staging-ledger baseline',
     );
     await applyMigrationFiles(client, environment.migrationsDirectory, pending, 'pending catch-up');
+
+    const applied = await client.query<{ count: number }>(`
+      select count(*)::integer as count from sql_integration.applied_migrations
+    `);
+    expect(applied.rows).toEqual([{ count: 193 }]);
 
     const switches = await client.query<{ feature_key: string; mode: string }>(`
       select feature_key, mode::text

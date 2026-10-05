@@ -23,7 +23,12 @@ async function runPlayerActionDatabasePreflight(): Promise<void> {
     client = await pool.connect();
     await client.query('begin read only');
     await client.query("set local search_path = 'pg_catalog'");
-    if (!(await playerActionCatalogPreflightPassed({ query: (query) => client!.query(query) }))) {
+    if (
+      !(await playerActionCatalogPreflightPassed(
+        { query: (query) => client!.query(query) },
+        config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
+      ))
+    ) {
       throw new Error('The Player-ID action catalog contract did not pass.');
     }
     await client.query('rollback');

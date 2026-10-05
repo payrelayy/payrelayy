@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
   PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
   playerActionCatalogPreflightPassed,
 } from './player-action-catalog-preflight.js';
@@ -105,5 +106,31 @@ describe('Player-ID action catalog preflight', () => {
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 16');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).not.toContain(
+      'app.capture_telegram_routine_telebirr_untrusted_proof',
+    );
+  });
+
+  it('requires the exact private candidate RPC only when the staging route is selected', async () => {
+    const queries: string[] = [];
+    await expect(
+      playerActionCatalogPreflightPassed(
+        {
+          async query(query) {
+            queries.push(query);
+            return { rows: [passingRow] };
+          },
+        },
+        true,
+      ),
+    ).resolves.toBe(true);
+    expect(queries).toEqual([PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL]);
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 17');
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
+      "then array['search_path=pg_catalog']::text[]",
+    );
   });
 });

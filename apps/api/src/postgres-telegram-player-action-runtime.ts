@@ -24,6 +24,7 @@ import {
 } from './telegram-action-capability.js';
 import { PostgresTelegramPrivateActionNonceStore } from './postgres-telegram-private-action-nonce-store.js';
 import { playerActionCatalogPreflightPassed } from './player-action-catalog-preflight.js';
+import { captureTelegramRoutineTelebirrCandidate } from './telegram-routine-telebirr-candidate-intake.js';
 import { captureTelegramLiveTelebirrProof } from './telegram-telebirr-live-proof-intake.js';
 import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
@@ -619,6 +620,15 @@ async function handleDepositProof(
       return captureTelegramLiveTelebirrProof(database, originInboundEventId, action, config);
     }
     if (config.financialActionsMode === 'dry_run') {
+      if (config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled) {
+        // The adapter accepts only synthetic staging references. Never fall back to shadow/live.
+        return captureTelegramRoutineTelebirrCandidate(
+          database,
+          originInboundEventId,
+          action,
+          config,
+        );
+      }
       return captureTelegramTelebirrShadowProof(database, originInboundEventId, action, config);
     }
     return { version: 1, outcome: 'deposit_unavailable' };
@@ -895,7 +905,10 @@ export function createPostgresTelegramPlayerActionRuntime(
     },
     async ready() {
       try {
-        return await playerActionCatalogPreflightPassed(pool);
+        return await playerActionCatalogPreflightPassed(
+          pool,
+          config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
+        );
       } catch {
         return false;
       }

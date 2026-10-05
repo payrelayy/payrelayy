@@ -90,6 +90,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly depositProofReferenceFingerprintMasterSecret: undefined;
       readonly depositProofReferenceProfileVersion: undefined;
       readonly telebirrReceiverReviewEnabled: false;
+      readonly routineTelebirrCandidateStagingEnabled: false;
       readonly tlsMode: undefined;
     }
   | {
@@ -115,6 +116,8 @@ export type ApiTelegramPlayerActionRuntimeConfig =
        * message only. PostgreSQL must still confirm the exact live activation epoch.
        */
       readonly telebirrReceiverReviewEnabled: boolean;
+      /** Staging-only synthetic, amount-free candidate routing; default off. */
+      readonly routineTelebirrCandidateStagingEnabled: boolean;
       readonly tlsMode: 'verify-full';
     };
 
@@ -497,7 +500,17 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     false,
     'INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED',
   );
+  const routineTelebirrCandidateStagingEnabled = booleanFromEnv(
+    environment.TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED,
+    false,
+    'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED',
+  );
   if (!enabled) {
+    if (routineTelebirrCandidateStagingEnabled) {
+      throw new Error(
+        'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED requires the Player-action runtime.',
+      );
+    }
     return {
       enabled: false,
       deploymentTarget: undefined,
@@ -511,6 +524,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       depositProofReferenceFingerprintMasterSecret: undefined,
       depositProofReferenceProfileVersion: undefined,
       telebirrReceiverReviewEnabled: false,
+      routineTelebirrCandidateStagingEnabled: false,
       tlsMode: undefined,
     };
   }
@@ -530,6 +544,11 @@ function loadApiTelegramPlayerActionRuntimeConfig(
   if (telebirrReceiverReviewEnabled && deploymentTarget !== 'production') {
     throw new Error(
       'TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED is restricted to the production Player-action target.',
+    );
+  }
+  if (routineTelebirrCandidateStagingEnabled && deploymentTarget !== 'staging') {
+    throw new Error(
+      'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED is restricted to the staging Player-action target.',
     );
   }
 
@@ -677,6 +696,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     depositProofReferenceFingerprintMasterSecret,
     depositProofReferenceProfileVersion: depositProofReferenceProfile.version,
     telebirrReceiverReviewEnabled,
+    routineTelebirrCandidateStagingEnabled,
     tlsMode: 'verify-full',
   };
 }
@@ -782,6 +802,15 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       'TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
     );
   }
+  if (
+    telegramPlayerActionRuntime.enabled &&
+    telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled &&
+    financialActionsMode !== 'dry_run'
+  ) {
+    throw new Error(
+      'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
+    );
+  }
   assertDistinctApiTelegramHmacSecrets(
     telegramIngress,
     telegramActionCapability,
@@ -839,6 +868,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly depositProofReferenceProfileVersion: 2 | undefined;
     readonly payloadHmacConfigured: boolean;
     readonly telebirrReceiverReviewEnabled: boolean;
+    readonly routineTelebirrCandidateStagingEnabled: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
 } {
@@ -880,6 +910,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
       payloadHmacConfigured: config.telegramPlayerActionRuntime.enabled,
       telebirrReceiverReviewEnabled:
         config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled,
+      routineTelebirrCandidateStagingEnabled:
+        config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },
   };

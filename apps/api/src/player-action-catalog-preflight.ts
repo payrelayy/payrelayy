@@ -20,12 +20,19 @@ const ALLOWED_FUNCTIONS = [
   'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
 ] as const;
 
-const ALLOWED_FUNCTION_SQL = ALLOWED_FUNCTIONS.map(
-  (signature) => `pg_catalog.to_regprocedure('${signature}')`,
-).join(',\n        ');
+const ROUTINE_CANDIDATE_FUNCTION =
+  'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)';
 
-/** Catalog-only and row-data-free. Every boolean must be true or readiness fails closed. */
-export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
+function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean): string {
+  const allowedFunctions = routineCandidateEnabled
+    ? [...ALLOWED_FUNCTIONS, ROUTINE_CANDIDATE_FUNCTION]
+    : ALLOWED_FUNCTIONS;
+  const allowedFunctionSql = allowedFunctions
+    .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
+    .join(',\n        ');
+
+  /** Catalog-only and row-data-free. Every boolean must be true or readiness fails closed. */
+  return `
   select
     current_user = '${RUNTIME_ROLE}' and session_user = current_user
       as runtime_login_identity_allowed,
@@ -87,22 +94,22 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       )
     ) as no_app_base_object_access,
     (
-      select count(*) = ${ALLOWED_FUNCTIONS.length}
+      select count(*) = ${allowedFunctions.length}
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-        and routine.oid in (${ALLOWED_FUNCTION_SQL})
+        and routine.oid in (${allowedFunctionSql})
     ) and not exists (
       select 1
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
       where namespace.nspname = 'app'
         and pg_catalog.has_function_privilege(current_user, routine.oid, 'EXECUTE')
-        and routine.oid not in (${ALLOWED_FUNCTION_SQL})
+        and routine.oid not in (${allowedFunctionSql})
     ) as exact_function_surface_allowed,
     (
-      select count(*) = ${ALLOWED_FUNCTIONS.length} and pg_catalog.bool_and(
+      select count(*) = ${allowedFunctions.length} and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = case
           when routine.oid in (
@@ -117,7 +124,14 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
             ),
             pg_catalog.to_regprocedure(
               'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)'
-            )
+            )${
+              routineCandidateEnabled
+                ? `,
+            pg_catalog.to_regprocedure(
+              '${ROUTINE_CANDIDATE_FUNCTION}'
+            )`
+                : ''
+            }
           ) then array['search_path=pg_catalog']::text[]
           else array['search_path=pg_catalog, app, pg_temp']::text[]
         end
@@ -125,7 +139,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       )
       from pg_catalog.pg_proc as routine
       join pg_catalog.pg_roles as owner on owner.oid = routine.proowner
-      where routine.oid in (${ALLOWED_FUNCTION_SQL})
+      where routine.oid in (${allowedFunctionSql})
     ) as allowed_functions_hardened,
     not exists (
       select 1
@@ -133,7 +147,7 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
       cross join lateral pg_catalog.aclexplode(
         coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
       ) as privilege
-      where routine.oid in (${ALLOWED_FUNCTION_SQL})
+      where routine.oid in (${allowedFunctionSql})
         and privilege.privilege_type = 'EXECUTE'
         and privilege.grantee not in (
           routine.proowner,
@@ -166,6 +180,11 @@ export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = `
         )
     ) as default_function_execution_private
 `;
+}
+
+export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = buildPlayerActionCatalogPreflightSql(false);
+export const PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL =
+  buildPlayerActionCatalogPreflightSql(true);
 
 export interface PlayerActionCatalogDatabase {
   query(query: string, values: readonly unknown[]): Promise<{ readonly rows: readonly unknown[] }>;
@@ -173,8 +192,14 @@ export interface PlayerActionCatalogDatabase {
 
 export async function playerActionCatalogPreflightPassed(
   database: PlayerActionCatalogDatabase,
+  routineCandidateEnabled = false,
 ): Promise<boolean> {
-  const result = await database.query(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL, []);
+  const result = await database.query(
+    routineCandidateEnabled
+      ? PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL
+      : PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
+    [],
+  );
   if (result.rows.length !== 1 || !result.rows[0] || typeof result.rows[0] !== 'object')
     return false;
   const values = Object.values(result.rows[0] as Record<string, unknown>);

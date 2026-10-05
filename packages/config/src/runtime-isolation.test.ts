@@ -120,6 +120,7 @@ describe('runtime configuration isolation', () => {
         user: 'fetanagent_player_actions_runtime',
       },
       telebirrReceiverReviewEnabled: false,
+      routineTelebirrCandidateStagingEnabled: false,
     });
     const redacted = JSON.stringify(redactedApiConfigForLog(config));
     expect(redacted).not.toContain('password');
@@ -201,6 +202,39 @@ describe('runtime configuration isolation', () => {
           'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
       }),
     ).toThrow('restricted to the production Player-action target');
+  });
+
+  it('keeps synthetic routine candidate routing default-off and staging-only', () => {
+    const staging = loadApiConfig({
+      ...playerActionEnvironment,
+      TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED: 'true',
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+    });
+    expect(staging.telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'staging',
+      routineTelebirrCandidateStagingEnabled: true,
+    });
+    expect(
+      redactedApiConfigForLog(staging).telegramPlayerActionRuntime
+        .routineTelebirrCandidateStagingEnabled,
+    ).toBe(true);
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED: 'true',
+      }),
+    ).toThrow('requires the Player-action runtime');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED: 'true',
+        PLAYER_ACTION_DEPLOYMENT_TARGET: 'production',
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('restricted to the staging Player-action target');
   });
 
   it('rejects target drift, a generic role, and shared Player-ID action HMACs', () => {

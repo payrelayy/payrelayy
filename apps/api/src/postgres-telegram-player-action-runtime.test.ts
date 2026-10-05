@@ -55,6 +55,7 @@ const actionConfig = loadApiConfig({
 if (!actionConfig.telegramPlayerActionRuntime.enabled) {
   throw new Error('The Player-action test runtime must be enabled.');
 }
+const enabledActionRuntime = actionConfig.telegramPlayerActionRuntime;
 const receiverReviewActionConfig = {
   ...actionConfig,
   telegramPlayerActionRuntime: {
@@ -889,6 +890,145 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls[1]?.query).toContain('capture_telegram_telebirr_shadow_proof');
     expect(calls[1]?.query).not.toContain('capture_telegram_dry_run_deposit_proof');
     expect(JSON.stringify(calls)).not.toContain(transactionReference);
+  });
+
+  it('routes only synthetic staging TeleBirr input to the separate no-money candidate RPC', async () => {
+    const transactionReference = 'FETANTESTREF7890';
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-10-05T19:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('capture_telegram_routine_telebirr_untrusted_proof')) {
+          return {
+            rows: [
+              {
+                proof_request_id: depositProofRequestId,
+                provider_code: 'telebirr',
+                proof_status: 'untrusted_received',
+                submitted_at: new Date('2026-10-05T19:00:00.000Z'),
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference,
+    };
+    const stagingCandidateConfig = {
+      ...actionConfig,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        routineTelebirrCandidateStagingEnabled: true,
+      },
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(stagingCandidateConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_recorded_no_money',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'untrusted_received',
+      verificationMode: 'not_started_no_money',
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.query).toContain('capture_telegram_routine_telebirr_untrusted_proof');
+    expect(calls[1]!.query).not.toContain('shadow_proof');
+    expect(JSON.stringify(calls)).not.toContain(transactionReference);
+  });
+
+  it('does not fall back to shadow intake for a non-synthetic routine candidate', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-10-05T19:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'REALLOOKINGREF7890',
+    };
+    const stagingCandidateConfig = {
+      ...actionConfig,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        routineTelebirrCandidateStagingEnabled: true,
+      },
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(stagingCandidateConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).rejects.toThrow('The Telegram Player-ID action runtime is unavailable.');
+    expect(calls).toHaveLength(1);
+    expect(calls.join('\n')).not.toContain('capture_telegram_telebirr_shadow_proof');
+    expect(calls.join('\n')).not.toContain('capture_telegram_routine_telebirr_untrusted_proof');
+  });
+
+  it('requires the candidate-specific catalog preflight before a staging route is ready', async () => {
+    const queries: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        queries.push(query);
+        return { rows: [] };
+      },
+      async end() {},
+    };
+    const stagingCandidateConfig = {
+      ...actionConfig,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        routineTelebirrCandidateStagingEnabled: true,
+      },
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(stagingCandidateConfig, database).ready(),
+    ).resolves.toBe(false);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
+    expect(queries[0]).toContain('select count(*) = 17');
   });
 
   it('disables payment-proof submission while receiver review is enabled', async () => {

@@ -144,6 +144,16 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'telebirr_routine_candidate_recorded_no_money' &&
+    keys.length === 6 &&
+    value.providerCode === 'telebirr' &&
+    value.providerName === 'TeleBirr' &&
+    value.proofStatus === 'untrusted_received' &&
+    value.verificationMode === 'not_started_no_money'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'telebirr_live_verification_queued' &&
     keys.length === 7 &&
     isTelegramDepositProofToken(value.proofToken) &&

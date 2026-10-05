@@ -270,6 +270,27 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
   });
 
+  it('renders a token-free synthetic candidate acknowledgement without claiming verification', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_recorded_no_money',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'untrusted_received',
+      verificationMode: 'not_started_no_money',
+    });
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: [
+        '🧪 Simulation only — test transaction number recorded.',
+        'No payment was checked or verified. No KemerBet deposit or credit will be made.',
+        'Do not send money. This is not a payment-status confirmation.',
+      ].join('\n'),
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|FETANTEST|uuid|token|amount/iu);
+  });
+
   it('renders a live verifier acknowledgement with one opaque tracking button', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,

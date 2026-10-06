@@ -695,8 +695,10 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         await client.query('release savepoint revoked_signer');
         await client.query('savepoint stale_player');
         await client.query(
-          `update app.customer_platform_players set validation_status = 'unverified'
-            where player_id = $1::text`,
+          `insert into app.player_deposit_eligibility_decisions (
+             player_account_id, decision_version, decision, reason_code, actor_kind
+           ) select id, 2, 'revoked', 'financial_eligibility_revoked', 'system'
+               from app.customer_platform_players where player_id = $1::text`,
           [playerId],
         );
         await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);

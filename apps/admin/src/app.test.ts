@@ -203,6 +203,16 @@ function telebirrDevicePairingMutationHeaders(requestId = pilotRequestId) {
   };
 }
 
+function routineTelebirrPairingMutationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
 function kemerbetAgentProfileMutationHeaders(requestId = pilotRequestId) {
   return {
     authorization: `Bearer ${bearer}`,
@@ -4765,6 +4775,101 @@ describe('Owner-control HTTP boundary', () => {
       [authUserId, pilotRequestId],
     ]);
     expect(replay.body).not.toContain('assignment_signer');
+    await app.close();
+  });
+
+  it('issues an authenticated routine-only challenge with exact replay and no enrollment', async () => {
+    const calls: Array<readonly string[]> = [];
+    const receipt = {
+      alreadyIssued: false,
+      assignmentPollingAllowed: false as const,
+      challengePackage: 'fetanagent-routine-pairing-v1.synthetic',
+      enrollmentAllowed: false as const,
+      expiresAt: '2026-10-06T12:10:00.000Z',
+      moneyMovementAllowed: false as const,
+      pairingOnly: true as const,
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineTelebirrPairing: {
+          issue: async (actor, requestId) => {
+            calls.push([actor, requestId]);
+            return { ...receipt, alreadyIssued: calls.length > 1 };
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_routine_pairing_challenge_only_no_money',
+      requestId: pilotRequestId,
+    };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-challenge',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual(receipt);
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-challenge',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual({ ...receipt, alreadyIssued: true });
+    expect(calls).toEqual([
+      [authUserId, pilotRequestId],
+      [authUserId, pilotRequestId],
+    ]);
+    await app.close();
+  });
+
+  it('rejects browser-supplied routine pairing authority and invalid CSRF before authentication', async () => {
+    let authCalls = 0;
+    const app = buildOwnerControlApp(config(), {
+      fetch: (async () => {
+        authCalls += 1;
+        throw new Error('must not authenticate an invalid request');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    for (const payload of [
+      {
+        confirmation: 'owner_confirmed_routine_pairing_challenge_only_no_money',
+        requestId: pilotRequestId,
+        receiverRevisionId: pilotRequestId,
+      },
+      {
+        confirmation: 'owner_confirmed_routine_pairing_challenge_only_no_money',
+        requestId: pilotRequestId,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/routine-telebirr-pairing-challenge',
+        headers: routineTelebirrPairingMutationHeaders(),
+        payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    const badCsrf = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-challenge',
+      headers: {
+        ...routineTelebirrPairingMutationHeaders(),
+        'x-fetanagent-owner-csrf': 'owner-telebirr-device-pairing-v1',
+      },
+      payload: {
+        confirmation: 'owner_confirmed_routine_pairing_challenge_only_no_money',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(badCsrf.statusCode).toBe(400);
+    expect(authCalls).toBe(0);
     await app.close();
   });
 

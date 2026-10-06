@@ -194,6 +194,11 @@ internal object RoutineDevicePairingProofFactory {
 
 /** Bounded, duplicate-key-rejecting no-money proof wire shape. No network call is made here. */
 internal object RoutineDevicePairingJsonCodec {
+  private const val CHALLENGE_PACKAGE_PREFIX = "fetanagent-routine-pairing-v1."
+  private val challengeKeys =
+    setOf("contractVersion", "providerCode", "protocolMode", "pairingId", "pairingNonceDigest",
+      "receiverRevisionId", "receiverVersion", "receiverProfileDigest", "expectedReceiverNameDigest",
+      "issuedAt", "expiresAt")
   private val envelopeKeys =
     setOf("contractVersion", "providerCode", "protocolMode", "transcriptVersion",
       "bodyDigestAlgorithm", "bodyDigest", "signatureAlgorithm", "signatureEncoding", "body", "signature")
@@ -201,6 +206,32 @@ internal object RoutineDevicePairingJsonCodec {
     setOf("contractVersion", "providerCode", "protocolMode", "pairingId", "pairingNonceDigest",
       "receiverRevisionId", "receiverVersion", "receiverProfileDigest", "expectedReceiverNameDigest",
       "deviceId", "keyId", "devicePublicKeySpki", "devicePublicKeySpkiSha256", "issuedAt", "expiresAt")
+
+  /** Decoding is structural only: the server must independently authenticate this challenge. */
+  fun decodeChallengePackage(value: String): RoutineDevicePairingChallenge? =
+    runCatching {
+      require(value.length in (CHALLENGE_PACKAGE_PREFIX.length + 1)..1_024)
+      require(value.startsWith(CHALLENGE_PACKAGE_PREFIX))
+      val encoded = value.removePrefix(CHALLENGE_PACKAGE_PREFIX)
+      require(Regex("^[A-Za-z0-9_-]+$").matches(encoded))
+      val bytes = Base64.getUrlDecoder().decode(encoded)
+      require(bytes.size in 1..768)
+      require(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes) == encoded)
+      val challenge = StrictJson.parse(bytes).requireObject(challengeKeys)
+      RoutineDevicePairingChallenge(
+        contractVersion = challenge.int("contractVersion"),
+        providerCode = challenge.string("providerCode"),
+        protocolMode = challenge.string("protocolMode"),
+        pairingId = challenge.string("pairingId"),
+        pairingNonceDigest = challenge.string("pairingNonceDigest"),
+        receiverRevisionId = challenge.string("receiverRevisionId"),
+        receiverVersion = challenge.int("receiverVersion"),
+        receiverProfileDigest = challenge.string("receiverProfileDigest"),
+        expectedReceiverNameDigest = challenge.string("expectedReceiverNameDigest"),
+        issuedAt = challenge.string("issuedAt"),
+        expiresAt = challenge.string("expiresAt"),
+      )
+    }.getOrNull()
 
   fun encode(proof: RoutineSignedDevicePairingProof): ByteArray {
     require(proof.bodyDigest == RoutineDevicePairingCanonical.bodyDigest(proof.body))

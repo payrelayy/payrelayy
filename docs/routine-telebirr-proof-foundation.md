@@ -64,7 +64,12 @@ The next reviewed slices must, in order:
    reviewed; production keeps the RPC ungranted. No table or financial grant is authorized. Customer web
    can follow under its own authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
-   domain-separated from every pilot certificate and manifest. Keep the phone observation-only.
+   domain-separated from every pilot certificate and manifest. The Android/TypeScript routine
+   pairing proof now signs and verifies device key possession against a separately trusted,
+   short-lived challenge; it cannot consume a challenge, enroll a phone, or call a provider. The
+   remaining work is authenticated Owner issuance, a protected one-use verifier/transport, a
+   routine-only signed enrollment receipt and durable phone state, plus guarded signer enrollment.
+   Keep the phone observation-only and the financial switches disabled.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision
    match, amount, global one-use claim, settlement, and a queued routine execution job in one
    guarded transaction. Recheck destination eligibility and all live gates at each boundary.

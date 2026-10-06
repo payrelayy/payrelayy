@@ -54,6 +54,16 @@ before any lookup. It is not connected to the live-pilot bridge or the
 foreground runtime, and it has no routine enrollment, assignment issuer, upload endpoint, database
 claim, or financial authority. Do not install a debug build as an operational routine verifier.
 
+A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
+short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,
+and expected receiver-name digest. It has its own mode and signing domain, strict bounded JSON
+codec, and shared Kotlin/TypeScript digest vector. The TypeScript assessor checks P-256 possession
+against an independently supplied challenge but deliberately does not consume that challenge or
+create an enrollment. There is no routine Owner issuer, protected exchange, signed enrollment
+certificate, or device provisioning call yet. The pilot pairing package and certificate must never
+be accepted as routine trust; a future operational composition must use a separate routine
+Android Keystore alias and independently authorized pairing path.
+
 The app has no database, Supabase, KemerBet, claim, settlement, enqueue, execution, or financial-action authority. A signed observation is evidence for a trusted server to assess; it cannot authorize SQL, credit a player, or move money. There are no customer-entered secrets, provider credentials, raw receipt/reference/name/URL logs, or embedded API keys.
 
 The live-pilot coordinator now performs the safe in-process sequence: check the three explicit

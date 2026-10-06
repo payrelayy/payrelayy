@@ -225,7 +225,7 @@ internal object RoutineLookupCanonicalTranscripts {
         .digest(bytes)
         .joinToString(separator = "") { byte -> "%02x".format(byte) }
 
-  private fun encode(domain: String, fields: List<Pair<String, Any>>): ByteArray {
+  fun encode(domain: String, fields: List<Pair<String, Any>>): ByteArray {
     val values = mutableListOf(domain, fields.size.toString())
     for ((name, value) in fields) {
       values += name

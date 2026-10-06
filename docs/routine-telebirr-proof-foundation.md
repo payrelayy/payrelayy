@@ -127,9 +127,11 @@ confirmation, and an exact enrollment UUID. It does not require the receipt sign
 enables a financial switch or creates a deposit job.
 
 The initial Owner page exposes this stop only after retrieving the current signed no-money
-enrollment receipt, so its button is unavailable if that receipt cannot be retrieved. This is
-not yet a complete emergency-control UI: an independent Owner-only enrollment status/selection
-path is still needed before live activation. Do not revoke the currently enrolled production
-phone merely to test the UI. Apply this migration only after the compatible Owner image is
-healthy and disposable SQL integration is green; no production financial activation follows
-from this slice.
+enrollment receipt. The follow-on active-phone inventory adds an independent Owner-only path:
+the protected Owner runtime can list its current, unrevoked routine enrollments without the
+receipt signer, and the page can select one exact enrollment for the existing confirmed
+revocation route. The inventory returns no phone secret, certificate, provider observation, or
+payment authority. It is read-only and has no application table grants. Neither loading nor
+selecting a phone revokes it. Do not revoke the currently enrolled production phone merely to
+test the UI. Deploy the compatible Owner image before applying the inventory-function grant;
+no production financial activation follows from this slice.

@@ -16,6 +16,8 @@ const RECEIPT_MATERIAL =
   'select * from app.get_owner_routine_telebirr_enrollment_receipt_material($1::uuid,$2::text,$3::text)';
 const REVOKE_ENROLLMENT =
   'select * from app.revoke_owner_routine_telebirr_device_enrollment($1::uuid,$2::uuid)';
+const LIST_ACTIVE_PHONES =
+  'select * from app.list_owner_routine_telebirr_active_phone_enrollments($1::uuid)';
 
 async function rollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
   await client.query('begin');
@@ -423,8 +425,12 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
       const grants = await client.query(`
         select has_function_privilege('fetanagent_owner_control_runtime',
           'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as owner_revoke,
+          has_function_privilege('fetanagent_owner_control_runtime',
+            'app.list_owner_routine_telebirr_active_phone_enrollments(uuid)', 'execute') as owner_list,
           not has_function_privilege('service_role',
             'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as service_denied,
+          not has_function_privilege('service_role',
+            'app.list_owner_routine_telebirr_active_phone_enrollments(uuid)', 'execute') as service_list_denied,
           not has_function_privilege('authenticated',
             'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as customer_denied,
           not has_table_privilege('fetanagent_owner_control_runtime',
@@ -434,7 +440,9 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
       expect(grants.rows).toEqual([
         {
           owner_revoke: true,
+          owner_list: true,
           service_denied: true,
+          service_list_denied: true,
           customer_denied: true,
           direct_table_denied: true,
         },
@@ -462,6 +470,16 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
             new Date(requestIssued.getTime() + 300_000),
           ]);
           enrollmentId = enrolled.rows[0]!.enrollment_id as string;
+          await rejected(client, LIST_ACTIVE_PHONES, [randomUUID()]);
+          const active = await client.query(LIST_ACTIVE_PHONES, [getOwnerAuthUserId()]);
+          expect(active.rows).toEqual([
+            {
+              enrollment_id: enrollmentId,
+              device_id: 'routine-device-revoke',
+              device_key_id: 'routine-key-revoke',
+              valid_until: expect.any(Date),
+            },
+          ]);
           await rejected(client, REVOKE_ENROLLMENT, [randomUUID(), enrollmentId]);
           await rejected(client, REVOKE_ENROLLMENT, [getOwnerAuthUserId(), randomUUID()]);
           const first = (
@@ -476,6 +494,7 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
             await client.query(REVOKE_ENROLLMENT, [getOwnerAuthUserId(), enrollmentId])
           ).rows[0]!;
           expect(replay).toEqual({ ...first, already_revoked: true });
+          expect((await client.query(LIST_ACTIVE_PHONES, [getOwnerAuthUserId()])).rows).toEqual([]);
           await rejected(client, ENROLL, [
             getOwnerAuthUserId(),
             issued.pairing_id,

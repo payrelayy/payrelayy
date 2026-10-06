@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.text.InputFilter
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
@@ -24,6 +25,7 @@ import java.util.concurrent.Executors
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.io.File
+import java.time.format.DateTimeFormatterBuilder
 
 class MainActivity : Activity() {
   private lateinit var stateStore: VerifierOperationalStateStore
@@ -32,6 +34,8 @@ class MainActivity : Activity() {
   private var routineProofInProgress = false
   private var routineProofValue: String? = null
   private var routineProofExpiresAt = 0L
+  private var routineReceiptInProgress = false
+  private var routineReceiptValidUntil: String? = null
   private var removeStateObserver: (() -> Unit)? = null
   private val stateRefreshHandler = Handler(Looper.getMainLooper())
   private val refreshOperationalState = Runnable {
@@ -46,7 +50,10 @@ class MainActivity : Activity() {
         Thread(runnable, "fetanagent-device-pairing").apply { isDaemon = true }
       }
     render()
-    if (BuildConfig.VERIFIER_ENABLED) restoreRoutineProof()
+    if (BuildConfig.VERIFIER_ENABLED) {
+      restoreRoutineProof()
+      restoreRoutineReceipt()
+    }
   }
 
   override fun onDestroy() {
@@ -100,6 +107,9 @@ class MainActivity : Activity() {
 
   private fun render() {
     if (routineProofExpiresAt <= System.currentTimeMillis()) clearRoutineProof()
+    if (routineReceiptValidUntil?.let { Instant.parse(it).toEpochMilli() <= System.currentTimeMillis() } == true) {
+      routineReceiptValidUntil = null
+    }
     val snapshot = stateStore.snapshot()
     val enrolled =
       BuildConfig.VERIFIER_ENABLED &&
@@ -217,6 +227,8 @@ class MainActivity : Activity() {
       setText(R.string.routine_pairing_instructions)
       textSize = 14f
     })
+    if (routineReceiptTrust() != null) addRoutineReceiptControls()
+    if (routineReceiptValidUntil != null) return
     val availableProof = routineProofValue
     if (availableProof != null) {
       addView(Button(context).apply {
@@ -272,6 +284,128 @@ class MainActivity : Activity() {
           .show()
       }
     })
+  }
+
+  private fun routineReceiptTrust(): RoutineEnrollmentTrustedSigner? = runCatching {
+    if (!BuildConfig.VERIFIER_ENABLED || BuildConfig.ROUTINE_RECEIPT_SIGNER_KEY_ID !=
+      "telebirr-routine-enrollment-${BuildConfig.VERIFIER_DEPLOYMENT_TARGET}-v1" ||
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256 ==
+        BuildConfig.SERVER_SIGNER_PUBLIC_KEY_SPKI_SHA256 ||
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256 ==
+        BuildConfig.ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI_SHA256) return null
+    RoutineEnrollmentTrustedSigner(
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_KEY_ID,
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI,
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256,
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_VALID_FROM,
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_VALID_UNTIL,
+      "active",
+    )
+  }.getOrNull()
+
+  private fun currentCanonicalUtc(): String =
+    DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(Instant.now())
+
+  private fun LinearLayout.addRoutineReceiptControls() {
+    addView(TextView(context).apply {
+      setText(R.string.routine_receipt_heading)
+      textSize = 18f
+      setPadding(0, 36, 0, 12)
+    })
+    val validUntil = routineReceiptValidUntil
+    if (validUntil != null) {
+      addView(TextView(context).apply {
+        text = getString(R.string.routine_receipt_stored_until, validUntil)
+        textSize = 14f
+      })
+      return
+    }
+    addView(TextView(context).apply {
+      setText(R.string.routine_receipt_instructions)
+      textSize = 14f
+    })
+    val packageInput = EditText(context).apply {
+      setHint(R.string.routine_receipt_package_hint)
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or
+        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+      importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+      isSaveEnabled = false
+      filters = arrayOf(InputFilter.LengthFilter(4_096))
+      maxLines = 3
+    }
+    addView(packageInput, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+    ))
+    addView(Button(context).apply {
+      setText(if (routineReceiptInProgress) R.string.routine_receipt_importing else R.string.routine_receipt_import)
+      isEnabled = !routineReceiptInProgress
+      setOnClickListener {
+        val packageValue = packageInput.text?.toString()?.trim().orEmpty()
+        if (RoutineEnrollmentReceiptJsonCodec.decodePackage(packageValue) == null) {
+          AlertDialog.Builder(this@MainActivity)
+            .setMessage(R.string.routine_receipt_invalid)
+            .setPositiveButton(android.R.string.ok, null).show()
+          return@setOnClickListener
+        }
+        AlertDialog.Builder(this@MainActivity)
+          .setTitle(R.string.routine_receipt_confirm_title)
+          .setMessage(R.string.routine_receipt_confirm_message)
+          .setNegativeButton(android.R.string.cancel, null)
+          .setPositiveButton(R.string.routine_receipt_import) { _, _ ->
+            packageInput.text?.clear()
+            importRoutineReceipt(packageValue)
+          }.show()
+      }
+    })
+  }
+
+  private fun importRoutineReceipt(packageValue: String) {
+    if (routineReceiptInProgress) return
+    routineReceiptInProgress = true
+    render()
+    pairingExecutor.execute {
+      val result = runCatching {
+        val signer = requireNotNull(routineReceiptTrust())
+        val receipt = requireNotNull(RoutineEnrollmentReceiptJsonCodec.decodePackage(packageValue))
+        val identity = routineIdentity()
+        val assessedAt = currentCanonicalUtc()
+        EncryptedRoutineEnrollmentStore.forApplication(applicationContext)
+          .acceptSignedReceipt(receipt, signer, identity, assessedAt)
+        receipt.body.validUntil
+      }
+      runOnUiThread {
+        routineReceiptInProgress = false
+        if (result.isSuccess) {
+          routineReceiptValidUntil = result.getOrThrow()
+          clearMatchingClipboard(packageValue)
+          clearRoutineProof()
+        } else {
+          AlertDialog.Builder(this@MainActivity)
+            .setMessage(R.string.routine_receipt_invalid)
+            .setPositiveButton(android.R.string.ok, null).show()
+        }
+        render()
+      }
+    }
+  }
+
+  private fun restoreRoutineReceipt() {
+    val signer = routineReceiptTrust() ?: return
+    val directory = File(applicationContext.noBackupFilesDir, "routine-enrollment-v1")
+    if (!directory.isDirectory) return
+    pairingExecutor.execute {
+      val receipt = runCatching {
+        EncryptedRoutineEnrollmentStore.forApplication(applicationContext)
+          .loadEnrolled(signer, routineIdentity(), currentCanonicalUtc())
+      }.getOrNull()
+      if (receipt != null) runOnUiThread {
+        if (!isFinishing && !isDestroyed) {
+          routineReceiptValidUntil = receipt.body.validUntil
+          clearRoutineProof()
+          render()
+        }
+      }
+    }
   }
 
   private fun createRoutineProof(packageValue: String) {

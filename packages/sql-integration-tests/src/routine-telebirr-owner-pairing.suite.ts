@@ -12,6 +12,8 @@ const ENROLL = `select * from app.enroll_owner_routine_telebirr_device_pairing_p
   $1::uuid,$2::uuid,$3::text,$4::uuid,$5::integer,$6::text,$7::text,
   $8::text,$9::text,$10::text,$11::text,$12::timestamptz,$13::timestamptz)`;
 const TABLE = 'app.routine_telebirr_device_pairing_challenges';
+const RECEIPT_MATERIAL =
+  'select * from app.get_owner_routine_telebirr_enrollment_receipt_material($1::uuid,$2::text,$3::text)';
 
 async function rollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
   await client.query('begin');
@@ -248,6 +250,46 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
       ]);
     });
 
+    it('keeps the routine receipt signer registry private and receipt material Owner-only', async () => {
+      const client = getClient();
+      const grants = await client.query(`
+        select signer.relrowsecurity as signer_rls,
+          signer.relforcerowsecurity as signer_forced_rls,
+          revocation.relrowsecurity as revocation_rls,
+          revocation.relforcerowsecurity as revocation_forced_rls,
+          not has_table_privilege('fetanagent_owner_control_runtime', signer.oid,
+            'select,insert,update,delete,truncate') as runtime_signer_table_denied,
+          not has_table_privilege('service_role', signer.oid,
+            'select,insert,update,delete,truncate') as service_signer_table_denied,
+          has_function_privilege('fetanagent_owner_control_runtime',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
+            'execute') as owner_receipt_allowed,
+          not has_function_privilege('service_role',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
+            'execute') as service_receipt_denied,
+          not has_function_privilege('authenticated',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
+            'execute') as authenticated_receipt_denied
+          from pg_class signer, pg_class revocation
+          where signer.oid = 'app.routine_telebirr_enrollment_receipt_signers'::regclass
+            and revocation.oid =
+              'app.routine_telebirr_enrollment_receipt_signer_revocations'::regclass
+      `);
+      expect(grants.rows).toEqual([
+        {
+          signer_rls: true,
+          signer_forced_rls: true,
+          revocation_rls: true,
+          revocation_forced_rls: true,
+          runtime_signer_table_denied: true,
+          service_signer_table_denied: true,
+          owner_receipt_allowed: true,
+          service_receipt_denied: true,
+          authenticated_receipt_denied: true,
+        },
+      ]);
+    });
+
     it('atomically enrolls one no-money routine key after the trusted service verifies its proof', async () => {
       const client = getClient();
       await rollback(client, async () => {
@@ -325,6 +367,44 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           [`sha256:${'e'.repeat(64)}`],
         );
         expect(rows.rows).toEqual([{ count: '1' }]);
+        const signerKeyId = 'telebirr-routine-enrollment-staging-v1';
+        const signerDigest = `sha256:${'9'.repeat(64)}`;
+        await client.query(
+          `insert into app.routine_telebirr_enrollment_receipt_signers
+          (signer_key_id, public_key_spki_sha256, valid_from, valid_until)
+          values ($1::text, $2::text, clock_timestamp() - interval '1 minute',
+            clock_timestamp() + interval '29 days')`,
+          [signerKeyId, signerDigest],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          await rejected(client, 'select * from app.routine_telebirr_enrollment_receipt_signers');
+          await rejected(client, RECEIPT_MATERIAL, [randomUUID(), signerKeyId, signerDigest]);
+          await rejected(client, RECEIPT_MATERIAL, [
+            getOwnerAuthUserId(),
+            signerKeyId,
+            `sha256:${'0'.repeat(64)}`,
+          ]);
+          const material = await client.query(RECEIPT_MATERIAL, [
+            getOwnerAuthUserId(),
+            signerKeyId,
+            signerDigest,
+          ]);
+          expect(material.rows).toHaveLength(1);
+          expect(material.rows[0]).toMatchObject({
+            enrollment_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+            pairing_evidence_digest: `sha256:${'e'.repeat(64)}`,
+            device_id: 'routine-device-0001',
+            device_key_id: 'routine-key-0001',
+            device_public_key_spki_sha256: `sha256:${'f'.repeat(64)}`,
+            receiver_revision_id: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+            receiver_version: expect.any(Number),
+            receiver_profile_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+            expected_receiver_name_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+          });
+        } finally {
+          await client.query('reset session authorization');
+        }
         const switches = await client.query<{ count: string }>(`
           select count(*)::text as count from app.feature_switches
           where feature_key in ('deposit_execution', 'payment_verification',

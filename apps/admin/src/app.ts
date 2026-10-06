@@ -105,6 +105,11 @@ import {
   OwnerRoutineTelebirrPairingUnavailableError,
 } from './owner-routine-telebirr-pairing.js';
 import {
+  OwnerRoutineTelebirrReceiptNotReadyError,
+  OwnerRoutineTelebirrReceiptRejectedError,
+  OwnerRoutineTelebirrReceiptUnavailableError,
+} from './owner-routine-telebirr-receipt.js';
+import {
   OwnerTelebirrShadowVerificationStatusRejectedError,
   OwnerTelebirrShadowVerificationStatusUnavailableError,
 } from './owner-telebirr-shadow-verification-status.js';
@@ -1982,6 +1987,44 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.post('/v1/owner/routine-telebirr-enrollment-receipt', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      if (
+        body?.confirmation !==
+          'owner_confirmed_existing_routine_enrollment_receipt_only_no_money' ||
+        !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId)
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (!runtimeConfig.routineEnrollmentReceiptSigner.configured) {
+        return reply.code(409).send({ error: 'routine_receipt_signer_not_configured' });
+      }
+      if (!dependencies.runtime.routineTelebirrReceipt) {
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const receipt = await dependencies.runtime.routineTelebirrReceipt.issue(authUserId);
+      return reply.code(200).send(receipt);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerRoutineTelebirrReceiptRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (error instanceof OwnerRoutineTelebirrReceiptNotReadyError) {
+        return reply.code(409).send({ error: 'routine_receipt_not_ready' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerRoutineTelebirrReceiptUnavailableError
+      ) {
+        request.log.warn('Owner routine TeleBirr enrollment receipt is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
     try {

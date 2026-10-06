@@ -311,6 +311,7 @@ function config(
   devicePairingConfigured = false,
   companionDevicePairingConfigured = false,
   deploymentTarget: OwnerControlDeploymentTarget = 'staging',
+  routineReceiptSignerConfigured = false,
 ) {
   const target = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   return loadOwnerControlConfig({
@@ -329,6 +330,9 @@ function config(
       : {}),
     ...(companionDevicePairingConfigured
       ? { OWNER_COMPANION_SERVER_SIGNER_KEY_ID: `companion-server-${deploymentTarget}-v1` }
+      : {}),
+    ...(routineReceiptSignerConfigured
+      ? { OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: 'A'.repeat(180) }
       : {}),
   });
 }
@@ -4896,6 +4900,72 @@ describe('Owner-control HTTP boundary', () => {
       [authUserId, payload.proof],
       [authUserId, payload.proof],
     ]);
+    await app.close();
+  });
+
+  it('retrieves only the existing Owner-linked signed routine receipt when a separate signer is configured', async () => {
+    const calls: string[] = [];
+    const receipt = {
+      assignmentPollingAllowed: false as const,
+      financialActionAllowed: false as const,
+      moneyMovementAllowed: false as const,
+      receiptPackage: 'fetanagent-routine-enrollment-receipt-v1.synthetic',
+      validUntil: '2026-10-28T00:00:00.000Z',
+    };
+    const unconfigured = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({ routineTelebirrReceipt: { issue: async () => receipt } }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_existing_routine_enrollment_receipt_only_no_money',
+      requestId: pilotRequestId,
+    };
+    const disabled = await unconfigured.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-enrollment-receipt',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(disabled.statusCode).toBe(409);
+    await unconfigured.close();
+
+    const app = buildOwnerControlApp(config(false, false, 'staging', true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineTelebirrReceipt: {
+          issue: async (actor) => {
+            calls.push(actor);
+            return receipt;
+          },
+        },
+      }),
+    });
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-enrollment-receipt',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload: { ...payload, deviceId: 'browser-chosen-device' },
+    });
+    expect(bad.statusCode).toBe(400);
+    const noAuthHeaders = routineTelebirrPairingMutationHeaders();
+    delete (noAuthHeaders as { authorization?: string }).authorization;
+    const noAuth = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-enrollment-receipt',
+      headers: noAuthHeaders,
+      payload,
+    });
+    expect(noAuth.statusCode).toBe(403);
+    expect(calls).toHaveLength(0);
+    const ok = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-enrollment-receipt',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual(receipt);
+    expect(calls).toEqual([authUserId]);
     await app.close();
   });
 

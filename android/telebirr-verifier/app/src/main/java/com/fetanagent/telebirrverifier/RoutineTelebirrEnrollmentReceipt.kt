@@ -213,10 +213,36 @@ internal object RoutineEnrollmentReceiptProtocol {
     )
     }.getOrDefault(false)
   }
+
+  /** Recovery for a phone paired before pending-proof storage existed. No action authority follows. */
+  fun verifyExistingLocalKey(
+    receipt: RoutineSignedEnrollmentReceipt,
+    signer: RoutineEnrollmentTrustedSigner,
+    localPublicMaterial: IdentityPublicMaterial,
+    assessedAt: String,
+  ): Boolean = runCatching {
+    RoutineTelebirrLookupProtocol.requireUtc(assessedAt)
+    val body = receipt.body
+    if (signer.state != "active" || signer.signerKeyId != receipt.signerKeyId ||
+      assessedAt < signer.validFrom || assessedAt >= signer.validUntil ||
+      body.issuedAt < signer.validFrom || body.issuedAt >= signer.validUntil ||
+      assessedAt < body.validFrom || assessedAt >= body.validUntil ||
+      body.keyId != localPublicMaterial.keyId ||
+      body.devicePublicKeySpkiSha256 != localPublicMaterial.publicKeySpkiSha256 ||
+      bodyDigest(body) != receipt.bodyDigest) return false
+    val localSpki = DeviceBridgeCrypto.parseP256SpkiBase64Url(
+      localPublicMaterial.publicKeySpkiBase64Url)
+    if (RoutineLookupCanonicalTranscripts.sha256(localSpki) != body.devicePublicKeySpkiSha256) return false
+    DeviceBridgeCrypto.verifyP1363(
+      Base64.getUrlDecoder().decode(signer.publicKeySpki),
+      signatureBytes(body, receipt.signerKeyId), receipt.signature,
+    )
+  }.getOrDefault(false)
 }
 
 /** Strict, duplicate-key-rejecting receipt wire codec; it does not authenticate a receipt. */
 internal object RoutineEnrollmentReceiptJsonCodec {
+  private const val PACKAGE_PREFIX = "fetanagent-routine-enrollment-receipt-v1."
   private val envelopeKeys = setOf("contractVersion", "providerCode", "protocolMode",
     "transcriptVersion", "bodyDigestAlgorithm", "bodyDigest", "signatureAlgorithm",
     "signatureEncoding", "signerKeyId", "body", "signature")
@@ -225,6 +251,15 @@ internal object RoutineEnrollmentReceiptJsonCodec {
     "devicePublicKeySpkiSha256", "receiverRevisionId", "receiverVersion",
     "receiverProfileDigest", "expectedReceiverNameDigest", "validFrom", "validUntil",
     "issuedAt", "assignmentPollingAllowed", "financialActionAllowed", "moneyMovementAllowed")
+
+  fun decodePackage(value: String): RoutineSignedEnrollmentReceipt? = runCatching {
+    require(value.length in (PACKAGE_PREFIX.length + 1)..4_096 && value.startsWith(PACKAGE_PREFIX))
+    val encoded = value.removePrefix(PACKAGE_PREFIX)
+    require(Regex("^[A-Za-z0-9_-]+$").matches(encoded))
+    val bytes = Base64.getUrlDecoder().decode(encoded)
+    require(Base64.getUrlEncoder().withoutPadding().encodeToString(bytes) == encoded)
+    decode(bytes)
+  }.getOrNull()
 
   fun decode(bytes: ByteArray): RoutineSignedEnrollmentReceipt? = runCatching {
     require(bytes.size in 1..4_096)

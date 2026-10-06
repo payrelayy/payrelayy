@@ -293,3 +293,67 @@ describe('Owner routine TeleBirr proof enrollment adapter', () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('Owner routine TeleBirr phone revocation adapter', () => {
+  const enrollmentId = '55555555-5555-4555-8555-555555555555';
+  const revokedAt = new Date('2026-10-06T20:00:00.000Z');
+
+  it('targets only the exact Owner-linked enrollment and returns an idempotent no-money receipt', async () => {
+    const calls: Array<{ sql: string; values: readonly string[] }> = [];
+    let count = 0;
+    const adapter = new PostgresOwnerRoutineTelebirrPairing({
+      query: async (sql, values) => {
+        calls.push({ sql, values });
+        return {
+          rows: [
+            { enrollment_id: enrollmentId, revoked_at: revokedAt, already_revoked: count++ > 0 },
+          ],
+        };
+      },
+    });
+    expect(await adapter.revoke(actor, enrollmentId)).toEqual({
+      alreadyRevoked: false,
+      assignmentPollingAllowed: false,
+      enrollmentId,
+      moneyMovementAllowed: false,
+      revokedAt: revokedAt.toISOString(),
+    });
+    expect((await adapter.revoke(actor, enrollmentId)).alreadyRevoked).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.sql).toContain('app.revoke_owner_routine_telebirr_device_enrollment');
+    expect(calls[0]!.values).toEqual([actor, enrollmentId]);
+  });
+
+  it('rejects malformed identities, mismatched SQL rows, and non-Owner authority', async () => {
+    let calls = 0;
+    const adapter = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => {
+        calls += 1;
+        return { rows: [] };
+      },
+    });
+    await expect(adapter.revoke(actor, 'bad')).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingRejectedError,
+    );
+    expect(calls).toBe(0);
+    await expect(adapter.revoke(actor, enrollmentId)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingUnavailableError,
+    );
+    const mismatched = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => ({
+        rows: [{ enrollment_id: requestId, revoked_at: revokedAt, already_revoked: false }],
+      }),
+    });
+    await expect(mismatched.revoke(actor, enrollmentId)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingUnavailableError,
+    );
+    const denied = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => {
+        throw Object.assign(new Error('redacted'), { code: '42501' });
+      },
+    });
+    await expect(denied.revoke(actor, enrollmentId)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingRejectedError,
+    );
+  });
+});

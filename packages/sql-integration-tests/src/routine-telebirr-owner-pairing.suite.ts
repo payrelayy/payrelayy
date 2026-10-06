@@ -14,6 +14,8 @@ const ENROLL = `select * from app.enroll_owner_routine_telebirr_device_pairing_p
 const TABLE = 'app.routine_telebirr_device_pairing_challenges';
 const RECEIPT_MATERIAL =
   'select * from app.get_owner_routine_telebirr_enrollment_receipt_material($1::uuid,$2::text,$3::text)';
+const REVOKE_ENROLLMENT =
+  'select * from app.revoke_owner_routine_telebirr_device_enrollment($1::uuid,$2::uuid)';
 
 async function rollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
   await client.query('begin');
@@ -413,6 +415,100 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
             'withdrawal_validation') and mode = 'disabled'
         `);
         expect(switches.rows).toEqual([{ count: '7' }]);
+      });
+    });
+
+    it('revokes only an exact Owner-linked phone once and denies all direct trust-table access', async () => {
+      const client = getClient();
+      const grants = await client.query(`
+        select has_function_privilege('fetanagent_owner_control_runtime',
+          'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as owner_revoke,
+          not has_function_privilege('service_role',
+            'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as service_denied,
+          not has_function_privilege('authenticated',
+            'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)', 'execute') as customer_denied,
+          not has_table_privilege('fetanagent_owner_control_runtime',
+            'app.routine_telebirr_device_enrollment_revocations',
+            'select,insert,update,delete,truncate') as direct_table_denied
+      `);
+      expect(grants.rows).toEqual([
+        {
+          owner_revoke: true,
+          service_denied: true,
+          customer_denied: true,
+          direct_table_denied: true,
+        },
+      ]);
+      await rollback(client, async () => {
+        await fixtureReceiver(client);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        let enrollmentId: string;
+        try {
+          const issued = (await client.query(ISSUE, [getOwnerAuthUserId(), randomUUID()])).rows[0]!;
+          const requestIssued = issued.issued_at as Date;
+          const enrolled = await client.query(ENROLL, [
+            getOwnerAuthUserId(),
+            issued.pairing_id,
+            issued.pairing_nonce_digest,
+            issued.receiver_revision_id,
+            issued.receiver_version,
+            issued.receiver_profile_digest,
+            issued.expected_receiver_name_digest,
+            `sha256:${'6'.repeat(64)}`,
+            'routine-device-revoke',
+            'routine-key-revoke',
+            `sha256:${'7'.repeat(64)}`,
+            requestIssued,
+            new Date(requestIssued.getTime() + 300_000),
+          ]);
+          enrollmentId = enrolled.rows[0]!.enrollment_id as string;
+          await rejected(client, REVOKE_ENROLLMENT, [randomUUID(), enrollmentId]);
+          await rejected(client, REVOKE_ENROLLMENT, [getOwnerAuthUserId(), randomUUID()]);
+          const first = (
+            await client.query(REVOKE_ENROLLMENT, [getOwnerAuthUserId(), enrollmentId])
+          ).rows[0]!;
+          expect(first).toEqual({
+            enrollment_id: enrollmentId,
+            revoked_at: expect.any(Date),
+            already_revoked: false,
+          });
+          const replay = (
+            await client.query(REVOKE_ENROLLMENT, [getOwnerAuthUserId(), enrollmentId])
+          ).rows[0]!;
+          expect(replay).toEqual({ ...first, already_revoked: true });
+          await rejected(client, ENROLL, [
+            getOwnerAuthUserId(),
+            issued.pairing_id,
+            issued.pairing_nonce_digest,
+            issued.receiver_revision_id,
+            issued.receiver_version,
+            issued.receiver_profile_digest,
+            issued.expected_receiver_name_digest,
+            `sha256:${'6'.repeat(64)}`,
+            'routine-device-revoke',
+            'routine-key-revoke',
+            `sha256:${'7'.repeat(64)}`,
+            requestIssued,
+            new Date(requestIssued.getTime() + 300_000),
+          ]);
+          await rejected(
+            client,
+            'select * from app.routine_telebirr_device_enrollment_revocations',
+          );
+        } finally {
+          await client.query('reset session authorization');
+        }
+        const revocations = await client.query<{ count: string }>(
+          `
+          select count(*)::text as count from app.routine_telebirr_device_enrollment_revocations
+          where enrollment_id = $1::uuid`,
+          [enrollmentId!],
+        );
+        expect(revocations.rows).toEqual([{ count: '1' }]);
+        const enabled = await client.query<{ count: string }>(
+          `select count(*)::text as count from app.feature_switches where mode <> 'disabled'`,
+        );
+        expect(enabled.rows).toEqual([{ count: '0' }]);
       });
     });
   });

@@ -4969,6 +4969,84 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('revokes only an exact routine phone enrollment through an authenticated Owner, even without a receipt signer', async () => {
+    const enrollmentId = '55555555-5555-4555-8555-555555555555';
+    const calls: Array<readonly string[]> = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineTelebirrPairing: {
+          issue: async () => {
+            throw new Error('Unexpected pairing issue.');
+          },
+          enroll: async () => {
+            throw new Error('Unexpected pairing enrollment.');
+          },
+          revoke: async (actor, target) => {
+            calls.push([actor, target]);
+            return {
+              alreadyRevoked: calls.length > 1,
+              assignmentPollingAllowed: false,
+              enrollmentId: target,
+              moneyMovementAllowed: false,
+              revokedAt: '2026-10-06T20:00:00.000Z',
+            };
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_exact_routine_phone_revocation',
+      enrollmentId,
+      requestId: pilotRequestId,
+    };
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-phone:revoke',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload: { ...payload, providerCode: 'telebirr' },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const noAuthHeaders = routineTelebirrPairingMutationHeaders();
+    delete (noAuthHeaders as { authorization?: string }).authorization;
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-phone:revoke',
+      headers: noAuthHeaders,
+      payload,
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    expect(calls).toHaveLength(0);
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-phone:revoke',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['cache-control']).toContain('no-store');
+    expect(first.json()).toEqual({
+      alreadyRevoked: false,
+      assignmentPollingAllowed: false,
+      enrollmentId,
+      moneyMovementAllowed: false,
+      revokedAt: '2026-10-06T20:00:00.000Z',
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-phone:revoke',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toMatchObject({ alreadyRevoked: true });
+    expect(calls).toEqual([
+      [authUserId, enrollmentId],
+      [authUserId, enrollmentId],
+    ]);
+    await app.close();
+  });
+
   it('rejects browser-supplied routine pairing authority and invalid CSRF before authentication', async () => {
     let authCalls = 0;
     const app = buildOwnerControlApp(config(), {

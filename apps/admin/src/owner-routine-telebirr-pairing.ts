@@ -19,6 +19,14 @@ export interface OwnerRoutineTelebirrEnrollmentReceipt {
   readonly validUntil: string;
 }
 
+export interface OwnerRoutineTelebirrRevocationReceipt {
+  readonly alreadyRevoked: boolean;
+  readonly assignmentPollingAllowed: false;
+  readonly enrollmentId: string;
+  readonly moneyMovementAllowed: false;
+  readonly revokedAt: string;
+}
+
 export interface OwnerRoutineTelebirrPairingDatabase {
   query(sql: string, values: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
@@ -64,6 +72,10 @@ const ENROLL_SQL = `
       $1::uuid, $2::uuid, $3::text, $4::uuid, $5::integer,
       $6::text, $7::text, $8::text, $9::text, $10::text,
       $11::text, $12::timestamptz, $13::timestamptz)
+`;
+const REVOKE_SQL = `
+  select enrollment_id, revoked_at, already_revoked
+    from app.revoke_owner_routine_telebirr_device_enrollment($1::uuid, $2::uuid)
 `;
 
 function databaseErrorCode(error: unknown): string | undefined {
@@ -294,6 +306,49 @@ export class PostgresOwnerRoutineTelebirrPairing {
       }
       if (databaseErrorCode(error) === 'P0001') {
         throw new OwnerRoutineTelebirrPairingNotReadyError();
+      }
+      throw new OwnerRoutineTelebirrPairingUnavailableError();
+    }
+  }
+
+  /** Stops one exact Owner-linked routine enrollment; never selects a replacement phone. */
+  async revoke(
+    authUserId: string,
+    enrollmentId: string,
+  ): Promise<OwnerRoutineTelebirrRevocationReceipt> {
+    if (!UUID_V4.test(authUserId) || !UUID_V4.test(enrollmentId)) {
+      throw new OwnerRoutineTelebirrPairingRejectedError();
+    }
+    try {
+      const revoked = await this.database.query(REVOKE_SQL, [authUserId, enrollmentId]);
+      const row = revoked.rows.length === 1 ? revoked.rows[0] : undefined;
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        throw new OwnerRoutineTelebirrPairingUnavailableError();
+      }
+      const value = row as Record<string, unknown>;
+      if (
+        value.enrollment_id !== enrollmentId ||
+        !(value.revoked_at instanceof Date) ||
+        !Number.isFinite(value.revoked_at.getTime()) ||
+        typeof value.already_revoked !== 'boolean'
+      ) {
+        throw new OwnerRoutineTelebirrPairingUnavailableError();
+      }
+      return {
+        alreadyRevoked: value.already_revoked,
+        assignmentPollingAllowed: false,
+        enrollmentId,
+        moneyMovementAllowed: false,
+        revokedAt: value.revoked_at.toISOString(),
+      };
+    } catch (error) {
+      if (
+        error instanceof OwnerRoutineTelebirrPairingRejectedError ||
+        error instanceof OwnerRoutineTelebirrPairingUnavailableError
+      )
+        throw error;
+      if (databaseErrorCode(error) === '42501') {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
       }
       throw new OwnerRoutineTelebirrPairingUnavailableError();
     }

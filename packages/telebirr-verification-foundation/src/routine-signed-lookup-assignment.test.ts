@@ -21,6 +21,8 @@ const challengeId = '328535af-2636-44cd-84be-6effdfe9cac1';
 function fixture() {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const spki = pair.publicKey.export({ type: 'spki', format: 'der' });
+  const devicePair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const deviceSpki = devicePair.publicKey.export({ type: 'spki', format: 'der' });
   const header = {
     contractVersion: 1,
     providerCode: 'telebirr',
@@ -60,7 +62,7 @@ function fixture() {
     ...header,
     deviceId: body.deviceId,
     keyId: body.keyId,
-    publicKeySpkiSha256: sha('e'),
+    publicKeySpkiSha256: `sha256:${createHash('sha256').update(deviceSpki).digest('hex')}`,
     state: 'active',
     validFrom: '2026-10-05T17:00:00.000Z',
     validUntil: '2026-10-06T17:00:00.000Z',
@@ -88,6 +90,7 @@ function fixture() {
       assessedAt: '2026-10-05T18:03:00.000Z',
       trustedSigner,
       deviceEnrollment,
+      localDevicePublicKeySpkiDer: deviceSpki,
       signedAssignment,
     },
   };
@@ -120,7 +123,7 @@ describe('routine TeleBirr signed lookup assignment', () => {
     expect(digestRoutineTelebirrReceiverName('bad\u0000name')).toBeUndefined();
   });
 
-  it('rejects unsigned changes, a different signer key, and a bad signature', () => {
+  it('rejects unsigned changes, different signer or local device keys, and a bad signature', () => {
     const { input, spki } = fixture();
     expect(
       verifyRoutineTelebirrSignedLookupAssignment(
@@ -141,6 +144,12 @@ describe('routine TeleBirr signed lookup assignment', () => {
     expect(verifyRoutineTelebirrSignedLookupAssignment(input, other).reasonCode).toBe(
       'signer_key_mismatch',
     );
+    expect(
+      verifyRoutineTelebirrSignedLookupAssignment(
+        { ...input, localDevicePublicKeySpkiDer: other },
+        spki,
+      ).reasonCode,
+    ).toBe('device_key_mismatch');
     expect(
       verifyRoutineTelebirrSignedLookupAssignment(
         {

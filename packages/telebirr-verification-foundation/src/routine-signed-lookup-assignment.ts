@@ -94,7 +94,13 @@ const enrollmentKeys = [
   'receiverVersion',
   'receiverProfileDigest',
 ] as const;
-const inputKeys = ['assessedAt', 'trustedSigner', 'deviceEnrollment', 'signedAssignment'] as const;
+const inputKeys = [
+  'assessedAt',
+  'trustedSigner',
+  'deviceEnrollment',
+  'localDevicePublicKeySpkiDer',
+  'signedAssignment',
+] as const;
 
 type AssignmentBody = { readonly [K in (typeof bodyKeys)[number]]: unknown };
 type Scalar = string | number;
@@ -115,6 +121,7 @@ export interface RoutineTelebirrLookupAssignmentResult {
     | 'invalid_request'
     | 'signer_revoked_or_expired'
     | 'signer_key_mismatch'
+    | 'device_key_mismatch'
     | 'device_revoked_or_expired'
     | 'device_binding_mismatch'
     | 'lookup_expired'
@@ -286,7 +293,7 @@ function parsePublicKey(candidate: unknown): { key: KeyObject; der: Buffer } | u
 }
 
 /**
- * Checks a server signature and routine enrollment binding, never the provider or database truth.
+ * Checks a server signature and local routine enrollment binding, never the provider or database truth.
  * The signer key and enrollment must come from separate protected trust stores. The server must
  * separately bind the decrypted candidate, raw reference, receiver revision, and one-use challenge
  * to trusted database rows before issuing an assignment. No pilot enrollment can be substituted.
@@ -364,6 +371,10 @@ export function verifyRoutineTelebirrSignedLookupAssignment(
     const publicKey = parsePublicKey(trustedSignerSpkiDerCandidate);
     if (!publicKey || digest(publicKey.der) !== signer.publicKeySpkiSha256) {
       return result('would_review', 'signer_key_mismatch');
+    }
+    const localDeviceKey = parsePublicKey(input.localDevicePublicKeySpkiDer);
+    if (!localDeviceKey || digest(localDeviceKey.der) !== enrollment.publicKeySpkiSha256) {
+      return result('would_review', 'device_key_mismatch');
     }
     if (
       signer.signerKeyId !== envelope.signerKeyId ||

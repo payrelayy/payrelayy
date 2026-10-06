@@ -85,6 +85,7 @@ function fixture() {
     }).toString('base64url'),
   };
   return {
+    body,
     spki,
     input: {
       assessedAt: '2026-10-05T18:03:00.000Z',
@@ -97,6 +98,13 @@ function fixture() {
 }
 
 describe('routine TeleBirr signed lookup assignment', () => {
+  it('pins the Android assignment-body digest transcript', () => {
+    const { body } = fixture();
+    expect(digestRoutineTelebirrLookupAssignmentBody(body)).toBe(
+      'sha256:6a602dad56e2ac5ea6929b8be6dc1943ba8089340a6e6f519194bc5f9b986790',
+    );
+  });
+
   it('verifies a routine server signature without asserting database or financial authority', () => {
     const { input, spki } = fixture();
     expect(verifyRoutineTelebirrSignedLookupAssignment(input, spki)).toEqual({

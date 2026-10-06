@@ -199,10 +199,15 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
         },
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
+        {
+          signature:
+            'app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone)',
+        },
         { signature: 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_owner_companion_connection_status(uuid)' },
         { signature: 'app.get_owner_companion_execution_readiness(uuid)' },
+        { signature: 'app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)' },
         { signature: 'app.get_owner_routine_telebirr_processing(uuid)' },
         { signature: 'app.get_owner_support_contact(uuid)' },
         { signature: 'app.get_owner_telebirr_shadow_verification_status(uuid)' },

@@ -4797,6 +4797,9 @@ describe('Owner-control HTTP boundary', () => {
             calls.push([actor, requestId]);
             return { ...receipt, alreadyIssued: calls.length > 1 };
           },
+          enroll: async () => {
+            throw new Error('Pairing proof was not expected in this challenge test.');
+          },
         },
       }),
     });
@@ -4823,6 +4826,75 @@ describe('Owner-control HTTP boundary', () => {
     expect(calls).toEqual([
       [authUserId, pilotRequestId],
       [authUserId, pilotRequestId],
+    ]);
+    await app.close();
+  });
+
+  it('requires Owner authentication and exact mutation headers for a no-money proof receipt', async () => {
+    const calls: Array<readonly unknown[]> = [];
+    const receipt = {
+      alreadyEnrolled: false,
+      assignmentPollingAllowed: false as const,
+      enrollmentId: '33333333-3333-4333-8333-333333333333',
+      moneyMovementAllowed: false as const,
+      pairingOnly: true as const,
+      validUntil: '2026-11-05T12:00:00.000Z',
+    };
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineTelebirrPairing: {
+          issue: async () => {
+            throw new Error('No challenge issuance expected in proof test.');
+          },
+          enroll: async (actor, proof) => {
+            calls.push([actor, proof]);
+            return { ...receipt, alreadyEnrolled: calls.length > 1 };
+          },
+        },
+      }),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_routine_pairing_proof_only_no_money',
+      proof: { synthetic: true },
+      requestId: pilotRequestId,
+    };
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-proof',
+      headers: { ...routineTelebirrPairingMutationHeaders(), 'x-fetanagent-owner-csrf': 'wrong' },
+      payload,
+    });
+    expect(invalid.statusCode).toBe(400);
+    const headersWithoutBearer = routineTelebirrPairingMutationHeaders();
+    delete (headersWithoutBearer as { authorization?: string }).authorization;
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-proof',
+      headers: headersWithoutBearer,
+      payload,
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    expect(calls).toHaveLength(0);
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-proof',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    expect(first.json()).toEqual(receipt);
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-pairing-proof',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual({ ...receipt, alreadyEnrolled: true });
+    expect(calls).toEqual([
+      [authUserId, payload.proof],
+      [authUserId, payload.proof],
     ]);
     await app.close();
   });

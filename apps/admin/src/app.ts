@@ -1941,6 +1941,48 @@ export function buildOwnerControlApp(
     }
   });
 
+  app.post(
+    '/v1/owner/routine-telebirr-pairing-proof',
+    { bodyLimit: 8_192 },
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['confirmation', 'proof', 'requestId']);
+        if (
+          body?.confirmation !== 'owner_confirmed_routine_pairing_proof_only_no_money' ||
+          !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        if (!dependencies.runtime.routineTelebirrPairing) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receipt = await dependencies.runtime.routineTelebirrPairing.enroll(
+          authUserId,
+          body.proof,
+        );
+        return reply.code(receipt.alreadyEnrolled ? 200 : 201).send(receipt);
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerRoutineTelebirrPairingRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerRoutineTelebirrPairingNotReadyError) {
+          return reply.code(409).send({ error: 'routine_pairing_not_ready' });
+        }
+        if (
+          error instanceof OwnerAuthenticationUnavailableError ||
+          error instanceof OwnerRoutineTelebirrPairingUnavailableError
+        ) {
+          request.log.warn('Owner routine TeleBirr pairing proof is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
   app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
     try {
       const body = exactObject(request.body, [

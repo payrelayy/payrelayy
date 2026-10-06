@@ -67,18 +67,24 @@ The next reviewed slices must, in order:
    domain-separated from every pilot certificate and manifest. The Android/TypeScript routine
    pairing proof now signs and verifies device key possession against a separately trusted,
    short-lived challenge. An authenticated Owner-only API can issue the routine challenge against
-   the active protected receiver while every financial switch is disabled. The private one-use
-   database marker is callable only by postgres after a future independent verifier checks the
-   phone signature; it does not itself verify signatures or enroll a device. The Owner page does
-   not yet expose this package because the protected phone exchange is absent. The remaining work
-   is that protected verifier/transport, a routine-only signed enrollment receipt and durable
-   phone state, plus guarded signer enrollment. Neither issuer nor marker can call a provider.
+   the active protected receiver while every financial switch is disabled. The Owner-mediated
+   proof endpoint independently reads that challenge, verifies the Android P-256 signature and
+   exact receiver binding, then invokes a private transaction that consumes the challenge and
+   inserts one routine-only enrollment. The database transaction rechecks Owner status, proof
+   window, active receiver, one-use evidence identity, and all seven disabled money switches.
+   The private SQL function does **not** verify ECDSA by itself: only the trusted Owner service
+   may call it, and its database credential must never be exposed to the phone or browser.
+   A successfully consumed challenge cannot be fetched again through the Owner proof endpoint;
+   a duplicate submission should be treated as needing status review, not as a new enrollment.
+   The Owner page does not yet expose this package because the protected phone exchange is absent.
+   The remaining work is protected phone transport, a routine-only signed enrollment receipt and
+   durable phone state, plus guarded signer enrollment. Neither issuer nor enrollment can call a provider.
    Keep the phone observation-only and the financial switches disabled.
    If releasing this slice to production, deploy the updated Owner image first in a reviewed
    no-money runtime mode compatible with the current deployment: its catalog preflight tolerates
-   the issuer function being absent. Only after that image is healthy should the canonical
-   migration grant the new Owner function. The previous Owner image has an exact function-count
-   preflight and must not see the new grant first. The route returns unavailable until the
+   the new proof functions being absent. Only after that image is healthy should the canonical
+   migration grant the new Owner functions. The previous Owner image has an exact function-count
+   preflight and must not see the new grants first. The proof route returns unavailable until the
    migration exists; do not use a direct SQL grant or enable a money switch to make it pass.
 3. Convert an exact fresh official observation into immutable receipt facts, receiver-revision
    match, amount, global one-use claim, settlement, and a queued routine execution job in one

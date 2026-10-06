@@ -1,3 +1,5 @@
+import { assessRoutineTelebirrDevicePairingProof } from '@fetanagent/telebirr-verification-foundation';
+
 export interface OwnerRoutineTelebirrPairingReceipt {
   readonly alreadyIssued: boolean;
   readonly assignmentPollingAllowed: false;
@@ -6,6 +8,15 @@ export interface OwnerRoutineTelebirrPairingReceipt {
   readonly expiresAt: string;
   readonly moneyMovementAllowed: false;
   readonly pairingOnly: true;
+}
+
+export interface OwnerRoutineTelebirrEnrollmentReceipt {
+  readonly alreadyEnrolled: boolean;
+  readonly assignmentPollingAllowed: false;
+  readonly enrollmentId: string;
+  readonly moneyMovementAllowed: false;
+  readonly pairingOnly: true;
+  readonly validUntil: string;
 }
 
 export interface OwnerRoutineTelebirrPairingDatabase {
@@ -42,6 +53,18 @@ const ISSUE_SQL = `
          issued_at, expires_at, replayed
     from app.issue_owner_routine_telebirr_device_pairing_challenge($1::uuid, $2::uuid)
 `;
+const TRUSTED_CHALLENGE_SQL = `
+  select pairing_id, pairing_nonce_digest, receiver_revision_id, receiver_version,
+         receiver_profile_digest, expected_receiver_name_digest, issued_at, expires_at
+    from app.get_owner_routine_telebirr_device_pairing_challenge($1::uuid, $2::uuid)
+`;
+const ENROLL_SQL = `
+  select enrollment_id, valid_from, valid_until, replayed
+    from app.enroll_owner_routine_telebirr_device_pairing_proof(
+      $1::uuid, $2::uuid, $3::text, $4::uuid, $5::integer,
+      $6::text, $7::text, $8::text, $9::text, $10::text,
+      $11::text, $12::timestamptz, $13::timestamptz)
+`;
 
 function databaseErrorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
@@ -51,7 +74,10 @@ function databaseErrorCode(error: unknown): string | undefined {
 
 /** Builds only the untrusted phone-facing challenge shape, never a certificate. */
 export class PostgresOwnerRoutineTelebirrPairing {
-  constructor(private readonly database: OwnerRoutineTelebirrPairingDatabase) {}
+  constructor(
+    private readonly database: OwnerRoutineTelebirrPairingDatabase,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
 
   async issue(authUserId: string, requestId: string): Promise<OwnerRoutineTelebirrPairingReceipt> {
     if (!UUID_V4.test(authUserId) || !UUID_V4.test(requestId)) {
@@ -125,6 +151,144 @@ export class PostgresOwnerRoutineTelebirrPairing {
       ) {
         throw error;
       }
+      if (databaseErrorCode(error) === '42501') {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      if (databaseErrorCode(error) === 'P0001') {
+        throw new OwnerRoutineTelebirrPairingNotReadyError();
+      }
+      throw new OwnerRoutineTelebirrPairingUnavailableError();
+    }
+  }
+
+  /** Owner-mediated proof transfer only; no pilot certificate or financial action is accepted. */
+  async enroll(
+    authUserId: string,
+    signedRequest: unknown,
+  ): Promise<OwnerRoutineTelebirrEnrollmentReceipt> {
+    if (!UUID_V4.test(authUserId)) throw new OwnerRoutineTelebirrPairingRejectedError();
+    try {
+      if (
+        typeof signedRequest !== 'object' ||
+        signedRequest === null ||
+        Array.isArray(signedRequest) ||
+        Buffer.byteLength(JSON.stringify(signedRequest), 'utf8') > 4_096
+      ) {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      const envelope = signedRequest as Record<string, unknown>;
+      const candidateBody = envelope.body;
+      if (
+        typeof candidateBody !== 'object' ||
+        candidateBody === null ||
+        Array.isArray(candidateBody)
+      ) {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      const body = candidateBody as Record<string, unknown>;
+      if (typeof body.pairingId !== 'string' || !UUID_V4.test(body.pairingId)) {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      const trusted = await this.database.query(TRUSTED_CHALLENGE_SQL, [
+        authUserId,
+        body.pairingId,
+      ]);
+      const row = trusted.rows.length === 1 ? trusted.rows[0] : undefined;
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) {
+        throw new OwnerRoutineTelebirrPairingNotReadyError();
+      }
+      const challenge = row as Record<string, unknown>;
+      if (
+        challenge.pairing_id !== body.pairingId ||
+        typeof challenge.pairing_nonce_digest !== 'string' ||
+        !DIGEST.test(challenge.pairing_nonce_digest) ||
+        typeof challenge.receiver_revision_id !== 'string' ||
+        !UUID_V4.test(challenge.receiver_revision_id) ||
+        typeof challenge.receiver_version !== 'number' ||
+        !Number.isInteger(challenge.receiver_version) ||
+        challenge.receiver_version < 1 ||
+        typeof challenge.receiver_profile_digest !== 'string' ||
+        !DIGEST.test(challenge.receiver_profile_digest) ||
+        typeof challenge.expected_receiver_name_digest !== 'string' ||
+        !DIGEST.test(challenge.expected_receiver_name_digest) ||
+        !(challenge.issued_at instanceof Date) ||
+        !(challenge.expires_at instanceof Date) ||
+        !Number.isFinite(challenge.issued_at.getTime()) ||
+        !Number.isFinite(challenge.expires_at.getTime())
+      ) {
+        throw new OwnerRoutineTelebirrPairingUnavailableError();
+      }
+      const assessedAt = this.now().toISOString();
+      const assessment = assessRoutineTelebirrDevicePairingProof({
+        assessedAt,
+        trustedChallenge: {
+          contractVersion: 1,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_device_pairing_v1',
+          pairingId: challenge.pairing_id,
+          pairingNonceDigest: challenge.pairing_nonce_digest,
+          receiverRevisionId: challenge.receiver_revision_id,
+          receiverVersion: challenge.receiver_version,
+          receiverProfileDigest: challenge.receiver_profile_digest,
+          expectedReceiverNameDigest: challenge.expected_receiver_name_digest,
+          issuedAt: challenge.issued_at.toISOString(),
+          expiresAt: challenge.expires_at.toISOString(),
+          state: 'issued',
+        },
+        signedRequest,
+      });
+      if (!assessment.deviceSignatureVerified || !assessment.pairingEvidenceDigest) {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      const values = [
+        authUserId,
+        body.pairingId as string,
+        body.pairingNonceDigest as string,
+        body.receiverRevisionId as string,
+        String(body.receiverVersion),
+        body.receiverProfileDigest as string,
+        body.expectedReceiverNameDigest as string,
+        assessment.pairingEvidenceDigest,
+        body.deviceId as string,
+        body.keyId as string,
+        body.devicePublicKeySpkiSha256 as string,
+        body.issuedAt as string,
+        body.expiresAt as string,
+      ];
+      const enrolled = await this.database.query(ENROLL_SQL, values);
+      const receipt = enrolled.rows.length === 1 ? enrolled.rows[0] : undefined;
+      if (typeof receipt !== 'object' || receipt === null || Array.isArray(receipt)) {
+        throw new OwnerRoutineTelebirrPairingUnavailableError();
+      }
+      const result = receipt as Record<string, unknown>;
+      if (
+        typeof result.enrollment_id !== 'string' ||
+        !UUID_V4.test(result.enrollment_id) ||
+        !(result.valid_from instanceof Date) ||
+        !(result.valid_until instanceof Date) ||
+        !Number.isFinite(result.valid_from.getTime()) ||
+        !Number.isFinite(result.valid_until.getTime()) ||
+        result.valid_until.getTime() <= result.valid_from.getTime() ||
+        result.valid_until.getTime() - result.valid_from.getTime() > 30 * 86_400_000 ||
+        typeof result.replayed !== 'boolean'
+      ) {
+        throw new OwnerRoutineTelebirrPairingUnavailableError();
+      }
+      return {
+        alreadyEnrolled: result.replayed,
+        assignmentPollingAllowed: false,
+        enrollmentId: result.enrollment_id,
+        moneyMovementAllowed: false,
+        pairingOnly: true,
+        validUntil: result.valid_until.toISOString(),
+      };
+    } catch (error) {
+      if (
+        error instanceof OwnerRoutineTelebirrPairingRejectedError ||
+        error instanceof OwnerRoutineTelebirrPairingNotReadyError ||
+        error instanceof OwnerRoutineTelebirrPairingUnavailableError
+      )
+        throw error;
       if (databaseErrorCode(error) === '42501') {
         throw new OwnerRoutineTelebirrPairingRejectedError();
       }

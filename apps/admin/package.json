@@ -9,6 +9,7 @@
     "@fetanagent/config": "workspace:*",
     "@fetanagent/contracts": "workspace:*",
     "@fetanagent/deposit-reference-protection": "workspace:*",
+    "@fetanagent/telebirr-verification-foundation": "workspace:*",
     "fastify": "5.12.5",
     "pg": "8.22.0"
   },

@@ -114,6 +114,28 @@ function fixture() {
 }
 
 describe('routine TeleBirr paired-device observation', () => {
+  it('pins the Android routine facts and body digest transcripts', () => {
+    const { input } = fixture();
+    const facts = {
+      ...input.signedObservation.body.facts,
+      creditedPartyNameDigest:
+        'sha256:6f4b944f412c74330943d7cedb2a1b96906fe1b3d19f493551bead5d29ce03bd',
+      occurredAt: '2026-10-05T18:01:45.000Z',
+    };
+    expect(digestRoutineTelebirrObservationFacts(facts)).toBe(
+      'sha256:e3a4bd12da42132a07bf3fbcefc0ce16e2ab20a4e2068797645d96b241c78b6f',
+    );
+    const body = {
+      ...input.signedObservation.body,
+      expectedReceiverNameDigest: facts.creditedPartyNameDigest,
+      normalizedFactsDigest: digestRoutineTelebirrObservationFacts(facts)!,
+      facts,
+    };
+    expect(digestRoutineTelebirrObservationBody(body)).toBe(
+      'sha256:a314d72dbfd5efc47b9575e393ba4453930e24aa5978311a082b437016e447ba',
+    );
+  });
+
   it('verifies the device signature and matching policy, but grants no financial authority', () => {
     const { input, spki } = fixture();
     const result = verifyRoutineTelebirrSignedObservation(input, spki);

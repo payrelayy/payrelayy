@@ -9,6 +9,8 @@ import {
 } from '../../../apps/api/src/telegram-routine-telebirr-candidate-intake.js';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
+const LOOKUP_TABLE = 'app.routine_telebirr_lookup_challenges';
+const OBSERVATION_TABLE = 'app.routine_telebirr_observation_receipts';
 const CAPTURE = `
   select * from app.capture_telegram_routine_telebirr_untrusted_proof(
     $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
@@ -353,6 +355,271 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           player_allowed: false,
         },
       ]);
+    });
+
+    it('keeps the routine lookup and observation ledgers private and non-financial', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        name: string;
+        rls: boolean;
+        force_rls: boolean;
+        policies: string;
+        accessible_roles: string;
+        forbidden_columns: string;
+      }>(`
+        select class.relname as name, class.relrowsecurity as rls,
+               class.relforcerowsecurity as force_rls,
+               (select count(*)::text from pg_catalog.pg_policies policy
+                 where policy.schemaname = 'app' and policy.tablename = class.relname) as policies,
+               (select count(*)::text from pg_catalog.pg_roles role
+                 where role.rolname in (
+                   'anon', 'authenticated', 'service_role',
+                   'fetanagent_player_actions', 'fetanagent_player_actions_runtime',
+                   'fetanagent_customer_web', 'fetanagent_customer_web_runtime',
+                   'fetanagent_telebirr_assignment_broker_runtime',
+                   'fetanagent_telebirr_device_state_runtime',
+                   'fetanagent_routine_deposit_broker_runtime',
+                   'fetanagent_trusted_telebirr_verifier_runtime',
+                   'fetanagent_deposit_executor_runtime'
+                 ) and pg_catalog.has_table_privilege(role.rolname, class.oid,
+                   'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')) as accessible_roles,
+               (select count(*)::text from information_schema.columns column_info
+                 where column_info.table_schema = 'app'
+                   and column_info.table_name = class.relname
+                   and (column_info.column_name like '%amount%'
+                     or column_info.column_name like '%raw%'
+                     or column_info.column_name like '%claim%'
+                     or column_info.column_name like '%job%')) as forbidden_columns
+          from pg_catalog.pg_class class
+         where class.oid in (
+           '${LOOKUP_TABLE}'::pg_catalog.regclass,
+           '${OBSERVATION_TABLE}'::pg_catalog.regclass
+         ) order by class.relname
+      `);
+      expect(catalog.rows).toEqual([
+        {
+          name: 'routine_telebirr_lookup_challenges',
+          rls: true,
+          force_rls: true,
+          policies: '0',
+          accessible_roles: '0',
+          forbidden_columns: '0',
+        },
+        {
+          name: 'routine_telebirr_observation_receipts',
+          rls: true,
+          force_rls: true,
+          policies: '0',
+          accessible_roles: '0',
+          forbidden_columns: '0',
+        },
+      ]);
+      const lineage = await client.query<{
+        candidate_cascade: boolean;
+        observation_cascade: boolean;
+        candidate_snapshot_columns: number;
+      }>(`
+        select
+          exists (select 1 from pg_catalog.pg_constraint constraint
+            where constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
+              and constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey'
+              and constraint.confdeltype = 'c') as candidate_cascade,
+          exists (select 1 from pg_catalog.pg_constraint constraint
+            where constraint.conrelid = '${OBSERVATION_TABLE}'::pg_catalog.regclass
+              and constraint.conname = 'routine_telebirr_observation_receipts_challenge_id_fkey'
+              and constraint.confdeltype = 'c') as observation_cascade,
+          (select pg_catalog.array_length(constraint.conkey, 1)
+             from pg_catalog.pg_constraint constraint
+            where constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
+              and constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey')
+            as candidate_snapshot_columns
+      `);
+      expect(lineage.rows).toEqual([
+        { candidate_cascade: true, observation_cascade: true, candidate_snapshot_columns: 5 },
+      ]);
+    });
+
+    it('pins a candidate snapshot, allows one receipt per challenge, and follows 7-day purge', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const challengeId = randomUUID();
+        const challengeDigest = `sha256:${digest()}`;
+        const insert = `
+          insert into ${LOOKUP_TABLE} (
+            challenge_id, candidate_id, receiver_account_id, receiver_account_version,
+            candidate_reference_fingerprint, candidate_submitted_at,
+            device_id, device_key_id, device_public_key_spki_sha256,
+            challenge_digest, issued_at, expires_at
+          ) select $1::uuid, candidate.id, candidate.receiver_account_id,
+                   candidate.receiver_account_version + $3::integer,
+                   coalesce($4::text, candidate.candidate_reference_fingerprint),
+                   candidate.submitted_at,
+                   'routine-test-device-0001', 'routine-test-key-0001', $5::text,
+                   $6::text, issued.now_at,
+                   issued.now_at + $7::integer * interval '1 minute'
+              from ${TABLE} candidate
+              cross join lateral (
+                select date_trunc('milliseconds', clock_timestamp()) as now_at
+              ) issued
+             where candidate.id = $2::uuid
+          returning challenge_id
+        `;
+        const keyDigest = `sha256:${digest()}`;
+        const args = [challengeId, candidateId, 0, null, keyDigest, challengeDigest, 5];
+        expect((await client.query(insert, args)).rows).toEqual([{ challenge_id: challengeId }]);
+        await client.query('set local role fetanagent_routine_deposit_broker');
+        await rejected(client, `select * from ${LOOKUP_TABLE}`);
+        await rejected(client, `select * from ${OBSERVATION_TABLE}`);
+        await client.query('reset role');
+        await rejected(client, insert, [
+          randomUUID(),
+          candidateId,
+          1,
+          null,
+          keyDigest,
+          `sha256:${digest()}`,
+          5,
+        ]);
+        await rejected(client, insert, [
+          randomUUID(),
+          candidateId,
+          0,
+          'f'.repeat(64),
+          keyDigest,
+          `sha256:${digest()}`,
+          5,
+        ]);
+        await rejected(client, insert, [
+          challengeId,
+          candidateId,
+          0,
+          null,
+          keyDigest,
+          `sha256:${digest()}`,
+          5,
+        ]);
+        await rejected(client, insert, [
+          randomUUID(),
+          candidateId,
+          0,
+          null,
+          keyDigest,
+          challengeDigest,
+          5,
+        ]);
+        await rejected(client, insert, [
+          randomUUID(),
+          candidateId,
+          0,
+          null,
+          keyDigest,
+          `sha256:${digest()}`,
+          6,
+        ]);
+        await rejected(client, insert, [
+          randomUUID(),
+          candidateId,
+          0,
+          null,
+          'not-a-key-digest',
+          `sha256:${digest()}`,
+          5,
+        ]);
+        await rejected(
+          client,
+          `insert into ${LOOKUP_TABLE} (
+            candidate_id, receiver_account_id, receiver_account_version,
+            candidate_reference_fingerprint, candidate_submitted_at,
+            device_id, device_key_id, device_public_key_spki_sha256,
+            challenge_digest, issued_at, expires_at
+          ) select id, receiver_account_id, receiver_account_version,
+                   candidate_reference_fingerprint, submitted_at,
+                   'routine-test-device-0001', 'routine-test-key-0001', $2::text,
+                   $3::text, submitted_at + interval '6 days 23 hours 59 minutes',
+                   submitted_at + interval '7 days 4 minutes'
+              from ${TABLE} where id = $1::uuid`,
+          [candidateId, keyDigest, `sha256:${digest()}`],
+        );
+        const receipt = `insert into ${OBSERVATION_TABLE}
+          (challenge_id, observation_body_digest, observation_signature_digest)
+          values ($1::uuid, $2::text, $3::text) returning challenge_id`;
+        expect(
+          (await client.query(receipt, [challengeId, `sha256:${digest()}`, `sha256:${digest()}`]))
+            .rows,
+        ).toEqual([{ challenge_id: challengeId }]);
+        await rejected(client, receipt, [challengeId, `sha256:${digest()}`, `sha256:${digest()}`]);
+        await rejected(client, receipt, [randomUUID(), `sha256:${digest()}`, `sha256:${digest()}`]);
+
+        // Expired candidate cleanup must also remove its digest-only descendants.
+        const oldCandidate = await client.query<{ id: string }>(
+          `
+          insert into ${TABLE} (
+            submitting_customer_id, origin_identity_id, origin_channel,
+            origin_request_key, semantic_input_hmac, platform_id, player_account_id,
+            player_deposit_eligibility_decision_id, payment_provider_id, provider_code,
+            candidate_reference_ciphertext, candidate_reference_fingerprint,
+            candidate_reference_masked, reference_encryption_key_version,
+            reference_profile_version, submitted_at
+          ) select submitting_customer_id, origin_identity_id, origin_channel,
+                   pg_catalog.gen_random_uuid(), $2::text, platform_id, player_account_id,
+                   player_deposit_eligibility_decision_id, payment_provider_id, provider_code,
+                   candidate_reference_ciphertext, candidate_reference_fingerprint,
+                   candidate_reference_masked, reference_encryption_key_version,
+                   reference_profile_version, statement_timestamp() - interval '8 days'
+              from ${TABLE} where id = $1::uuid returning id
+        `,
+          [candidateId, semanticHmac()],
+        );
+        const oldChallengeId = randomUUID();
+        await client.query(
+          `
+          insert into ${LOOKUP_TABLE} (
+            challenge_id, candidate_id, receiver_account_id, receiver_account_version,
+            candidate_reference_fingerprint, candidate_submitted_at,
+            device_id, device_key_id, device_public_key_spki_sha256,
+            challenge_digest, issued_at, expires_at
+          ) select $1::uuid, id, receiver_account_id, receiver_account_version,
+                   candidate_reference_fingerprint, submitted_at,
+                   'routine-test-device-0001', 'routine-test-key-0001', $3::text,
+                   $4::text, submitted_at + interval '1 hour',
+                   submitted_at + interval '1 hour 5 minutes'
+              from ${TABLE} where id = $2::uuid
+        `,
+          [oldChallengeId, oldCandidate.rows[0]!.id, keyDigest, `sha256:${digest()}`],
+        );
+        await client.query(receipt, [oldChallengeId, `sha256:${digest()}`, `sha256:${digest()}`]);
+        const purged = await client.query<{ deleted_count: number }>(
+          'select app.purge_expired_routine_telebirr_untrusted_proofs() as deleted_count',
+        );
+        expect(purged.rows[0]!.deleted_count).toBe(1);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${LOOKUP_TABLE}
+          where challenge_id = $1::uuid`,
+              [oldChallengeId],
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${OBSERVATION_TABLE}
+          where challenge_id = $1::uuid`,
+              [oldChallengeId],
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+        expect(await snapshot(client)).toBe(before);
+      });
     });
 
     it('retains separate untrusted candidates without creating financial lineage', async () => {

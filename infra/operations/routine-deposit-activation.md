@@ -8,9 +8,11 @@ operator hosts, after the non-financial verification and disposable SQL suite pa
 verified-job path is not implemented end to end. The dormant table in
 `20261005165930_routine_telebirr_untrusted_proof_foundation.sql` does not satisfy that path.
 The `routine-signed-observation` library verifies a paired-device signature and receipt-policy
-facts in isolation, but has no production caller, authenticated official-source adapter, durable
-challenge/replay ledger, or atomic one-use payment claim. Its advisory result does not satisfy
-this activation gate.
+facts in isolation, but has no production caller, authenticated official-source adapter, or
+atomic one-use payment claim. A private digest-only challenge/observation ledger now pins the
+candidate snapshot and permits one observation receipt per challenge, but no trusted issuer or
+upload caller can use it. It is not a provider-payment replay claim. The advisory result and
+dormant ledger do not satisfy this activation gate.
 The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and
 routine device/receiver binding in isolation. It does not issue assignments, establish trusted
 candidate database binding, authenticate TeleBirr, or activate the Android routine lookup. The

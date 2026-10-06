@@ -2026,6 +2026,42 @@ export function buildOwnerControlApp(
     }
   });
 
+  app.post('/v1/owner/routine-telebirr-phone:revoke', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, ['confirmation', 'enrollmentId', 'requestId']);
+      if (
+        body?.confirmation !== 'owner_confirmed_exact_routine_phone_revocation' ||
+        !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId) ||
+        typeof body.enrollmentId !== 'string'
+      ) {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      if (!dependencies.runtime.routineTelebirrPairing?.revoke) {
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const receipt = await dependencies.runtime.routineTelebirrPairing.revoke(
+        authUserId,
+        body.enrollmentId,
+      );
+      return reply.header('cache-control', 'no-store').code(200).send(receipt);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerRoutineTelebirrPairingRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerRoutineTelebirrPairingUnavailableError
+      ) {
+        request.log.warn('Owner routine TeleBirr phone revocation is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
   app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
     try {
       const body = exactObject(request.body, [

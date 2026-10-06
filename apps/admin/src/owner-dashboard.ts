@@ -533,6 +533,13 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
                 <output class="pairing-package" id="routine-receipt-package"></output>
                 <button id="routine-receipt-copy" type="button">Copy receipt to phone</button>
               </div>
+              <label class="confirmation-row" for="routine-revoke-confirmation">
+                <input id="routine-revoke-confirmation" type="checkbox" />
+                I approve permanently revoking this exact routine phone enrollment. This cannot
+                be undone by retrieving the receipt again; this action never enables deposits.
+              </label>
+              <button id="routine-revoke-button" type="button" disabled>Revoke this routine phone</button>
+              <p class="request-meta" id="routine-revoke-status" role="status"></p>
             </div>
           </div>
         </section>
@@ -808,6 +815,9 @@ const routineReceiptStatus = document.querySelector('#routine-receipt-status');
 const routineReceiptPackageWrap = document.querySelector('#routine-receipt-package-wrap');
 const routineReceiptPackage = document.querySelector('#routine-receipt-package');
 const routineReceiptCopy = document.querySelector('#routine-receipt-copy');
+const routineRevokeConfirmation = document.querySelector('#routine-revoke-confirmation');
+const routineRevokeButton = document.querySelector('#routine-revoke-button');
+const routineRevokeStatus = document.querySelector('#routine-revoke-status');
 let routineProcessingLoaded = false;
 let routineProcessingBusy = false;
 let routineProcessingState;
@@ -817,6 +827,7 @@ let routinePhoneProofBusy = false;
 let routinePhonePairingExpiryTimer;
 let routineEnrollmentReceipt;
 let routineReceiptBusy = false;
+let routineRevokeBusy = false;
 let pendingRoutinePhoneChallengeRequestId;
 let pendingRoutinePhoneProofRequestId;
 const pilotReadiness = document.querySelector('#pilot-readiness');
@@ -1747,14 +1758,19 @@ function clearRoutineReceipt() {
   routineReceiptPackageWrap.hidden = true;
   routineReceiptStatus.textContent = '';
   routineReceiptButton.disabled = !accessToken || !routineReceiptConfirmation.checked;
+  routineRevokeConfirmation.checked = false;
+  routineRevokeButton.disabled = true;
+  routineRevokeStatus.textContent = '';
 }
 
 function updateRoutineReceiptAvailability() {
   if (routineEnrollmentReceipt && Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {
     clearRoutineReceipt();
   }
-  routineReceiptButton.disabled = !accessToken || routineReceiptBusy ||
+  routineReceiptButton.disabled = !accessToken || routineReceiptBusy || routineRevokeBusy ||
     !routineReceiptConfirmation.checked;
+  routineRevokeButton.disabled = !accessToken || routineReceiptBusy || routineRevokeBusy ||
+    !routineEnrollmentReceipt || !routineRevokeConfirmation.checked;
 }
 
 function validRoutineSignedReceipt(value) {
@@ -1777,13 +1793,17 @@ function validRoutineSignedReceipt(value) {
         receipt?.body?.validUntil !== value.validUntil ||
         receipt?.body?.assignmentPollingAllowed !== false ||
         receipt?.body?.financialActionAllowed !== false ||
-        receipt?.body?.moneyMovementAllowed !== false) return undefined;
-    return value;
+        receipt?.body?.moneyMovementAllowed !== false ||
+        typeof receipt?.body?.enrollmentId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          receipt.body.enrollmentId)) return undefined;
+    return { ...value, enrollmentId: receipt.body.enrollmentId };
   } catch { return undefined; }
 }
 
 async function retrieveRoutineReceipt() {
-  if (!accessToken || routineReceiptBusy || !routineReceiptConfirmation.checked) return;
+  if (!accessToken || routineReceiptBusy || routineRevokeBusy ||
+      !routineReceiptConfirmation.checked) return;
   if (!window.confirm('Retrieve the signed receipt for your existing no-money phone enrollment? This does not enable TeleBirr polling or deposits.')) return;
   const generation = ownerAuthGeneration;
   const requestId = crypto.randomUUID();
@@ -1824,6 +1844,54 @@ async function retrieveRoutineReceipt() {
   } finally {
     if (ownerAuthGeneration === generation) {
       routineReceiptBusy = false;
+      updateRoutineReceiptAvailability();
+    }
+  }
+}
+
+async function revokeRoutinePhoneEnrollment() {
+  if (!accessToken || routineReceiptBusy || routineRevokeBusy ||
+      !routineEnrollmentReceipt || !routineRevokeConfirmation.checked) return;
+  if (!window.confirm('Permanently revoke this exact routine phone enrollment? The server will reject new routine lookup issuance for it. No deposit or money action will start.')) return;
+  const generation = ownerAuthGeneration;
+  const enrollmentId = routineEnrollmentReceipt.enrollmentId;
+  const requestId = crypto.randomUUID();
+  routineRevokeBusy = true;
+  routineRevokeStatus.textContent = 'Revoking this routine phone enrollment…';
+  updateRoutineReceiptAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-phone:revoke', {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1', 'x-idempotency-key': requestId },
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_exact_routine_phone_revocation', enrollmentId, requestId,
+      }),
+    });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 200) {
+      routineRevokeStatus.textContent = 'Phone revocation could not be confirmed. Retry with the same phone receipt; no money action occurred.';
+      return;
+    }
+    const result = await response.json();
+    if (!result || typeof result !== 'object' || Array.isArray(result) ||
+        Object.keys(result).sort().join(',') !==
+          'alreadyRevoked,assignmentPollingAllowed,enrollmentId,moneyMovementAllowed,revokedAt' ||
+        typeof result.alreadyRevoked !== 'boolean' || result.assignmentPollingAllowed !== false ||
+        result.moneyMovementAllowed !== false || result.enrollmentId !== enrollmentId ||
+        typeof result.revokedAt !== 'string' || !Number.isFinite(Date.parse(result.revokedAt))) {
+      routineRevokeStatus.textContent = 'Revocation response was invalid. Stop and verify before trying another phone.';
+      return;
+    }
+    clearRoutineReceipt();
+    routineRevokeStatus.textContent = 'This routine phone enrollment was revoked at ' +
+      new Date(result.revokedAt).toLocaleString() + '. No deposit or money action occurred.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
+      routineRevokeStatus.textContent = 'Phone revocation could not be confirmed. Retry with the same phone receipt; no money action occurred.';
+    }
+  } finally {
+    if (ownerAuthGeneration === generation) {
+      routineRevokeBusy = false;
       updateRoutineReceiptAvailability();
     }
   }
@@ -5771,6 +5839,8 @@ routineProcessingRefresh.addEventListener('click', loadRoutineProcessing);
 routinePhoneChallengeConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
 routineReceiptConfirmation.addEventListener('change', updateRoutineReceiptAvailability);
 routineReceiptButton.addEventListener('click', retrieveRoutineReceipt);
+routineRevokeConfirmation.addEventListener('change', updateRoutineReceiptAvailability);
+routineRevokeButton.addEventListener('click', revokeRoutinePhoneEnrollment);
 routineReceiptCopy.addEventListener('click', async () => {
   if (!accessToken || !routineEnrollmentReceipt ||
       Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {

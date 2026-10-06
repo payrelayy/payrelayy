@@ -114,3 +114,22 @@ The next reviewed slices must, in order:
 Until these slices pass, the production routine endpoint stays dormant, its login remains
 `NOLOGIN`, and the old pilot remains stopped. A connected phone or merged execution code does not
 substitute for this missing proof-to-job lineage.
+
+## Exact phone revocation follow-on
+
+The Owner-only revocation slice provides an idempotent, append-only stop for one exact routine
+phone enrollment. The SQL function verifies the active Owner and the enrollment's consumed
+Owner-linked pairing challenge, locks the enrollment against concurrent lookup issuance, and
+records `owner_revoked`. Its sole application `EXECUTE` grant is to the protected Owner-control
+role; no application role receives direct access to the enrollment or revocation tables. The
+Owner route requires the authenticated Owner, the existing mutation headers, an explicit
+confirmation, and an exact enrollment UUID. It does not require the receipt signer and never
+enables a financial switch or creates a deposit job.
+
+The initial Owner page exposes this stop only after retrieving the current signed no-money
+enrollment receipt, so its button is unavailable if that receipt cannot be retrieved. This is
+not yet a complete emergency-control UI: an independent Owner-only enrollment status/selection
+path is still needed before live activation. Do not revoke the currently enrolled production
+phone merely to test the UI. Apply this migration only after the compatible Owner image is
+healthy and disposable SQL integration is green; no production financial activation follows
+from this slice.

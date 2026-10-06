@@ -7,7 +7,6 @@ import {
   captureTelegramRoutineTelebirrCandidate,
   type TelegramRoutineTelebirrCandidateDatabase,
 } from '../../../apps/api/src/telegram-routine-telebirr-candidate-intake.js';
-import { digestRoutineTelebirrReceiverName } from '../../../packages/telebirr-verification-foundation/src/routine-signed-lookup-assignment.js';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
 const LOOKUP_TABLE = 'app.routine_telebirr_lookup_challenges';
@@ -576,7 +575,10 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         'select app.routine_telebirr_receiver_name_digest($1::text) as value',
         [name],
       );
-      expect(digestRow.rows[0]!.value).toBe(digestRoutineTelebirrReceiverName(name));
+      // Fixed by the TypeScript/Android routine contract's independent vector.
+      expect(digestRow.rows[0]!.value).toBe(
+        'sha256:6f4b944f412c74330943d7cedb2a1b96906fe1b3d19f493551bead5d29ce03bd',
+      );
     });
 
     it('issues only a five-minute no-money lookup for a current candidate and separate routine trust', async () => {

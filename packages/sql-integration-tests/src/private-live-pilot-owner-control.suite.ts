@@ -236,6 +236,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         },
         { signature: 'app.list_owner_player_registration_requests(uuid,integer)' },
         { signature: 'app.list_owner_receiver_accounts(uuid)' },
+        { signature: 'app.list_owner_routine_telebirr_active_phone_enrollments(uuid)' },
         {
           signature:
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',

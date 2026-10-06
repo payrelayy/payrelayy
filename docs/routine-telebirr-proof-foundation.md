@@ -86,9 +86,17 @@ The next reviewed slices must, in order:
    only when its exact enrollment exists; it re-verifies the same Android signature and the atomic
    SQL enrollment function returns only the exact replay. A different proof or device is rejected.
    The Owner page keeps the proof only in memory until success or expiry and never stores it in
-   browser session storage. A phone proof is not an enrollment certificate. The remaining work is
-   a routine-only signed enrollment receipt, durable phone state, guarded signer enrollment and
-   a protected observation transport. Neither issuer nor enrollment can call a provider.
+   browser session storage. A phone proof is not an enrollment certificate. A follow-on
+   contract-only slice defines a domain-separated, server-signed routine enrollment receipt and
+   verifies the exact enrollment, phone key, receiver revision, no-money flags, signer, and
+   validity window in both TypeScript and Android. The Android app seals its exact pending proof
+   in a separate Keystore-protected, no-backup record so an app restart can recover the same
+   still-fresh proof; it can store a signed receipt only after cryptographic verification against
+   independently trusted signer material and that pending proof. This slice provisions no signer,
+   issues no receipt, accepts no receipt in the UI, and adds no polling or network call. The
+   remaining work is guarded signer enrollment and issuance, Owner-to-phone receipt delivery,
+   revocation handling, and a protected observation transport. Neither issuer nor enrollment
+   can call a provider.
    Keep the phone observation-only and the financial switches disabled.
    If releasing this slice to production, deploy the updated Owner image first in a reviewed
    no-money runtime mode compatible with the current deployment: its catalog preflight tolerates

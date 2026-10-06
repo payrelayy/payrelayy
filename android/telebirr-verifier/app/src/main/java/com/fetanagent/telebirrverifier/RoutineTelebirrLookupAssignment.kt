@@ -233,6 +233,7 @@ internal object RoutineLookupCanonicalTranscripts {
         when (value) {
           is String -> "string:$value"
           is Int -> "number:$value"
+          is Boolean -> "boolean:$value"
           else -> error("Unsupported routine transcript scalar")
         }
     }

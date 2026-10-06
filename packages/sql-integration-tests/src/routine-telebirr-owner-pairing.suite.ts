@@ -161,7 +161,7 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           expect(issued.receiver_profile_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
           expect(issued.expected_receiver_name_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
           expect((issued.expires_at as Date).getTime() - (issued.issued_at as Date).getTime()).toBe(
-            600_000,
+            43_200_000,
           );
           const replay = await client.query(ISSUE, [getOwnerAuthUserId(), requestId]);
           expect(replay.rows).toEqual([{ ...issued, replayed: true }]);

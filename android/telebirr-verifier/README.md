@@ -59,7 +59,7 @@ short-lived Owner challenge binding: pairing ID and nonce digest, receiver revis
 and expected receiver-name digest. It has its own mode and signing domain, strict bounded JSON
 codec, and shared Kotlin/TypeScript digest vector. The TypeScript assessor checks P-256 possession
 against an independently supplied challenge; it does not itself enroll or consume anything. The
-authenticated Owner issuer creates a ten-minute challenge. In a stopped, signed operational build,
+authenticated Owner issuer creates a twelve-hour challenge. In a stopped, signed operational build,
 the app uses a separate routine Android Keystore alias to sign a four-minute proof and copies it
 only after an explicit tap. The Owner page verifies that proof against its own challenge record and
 a private atomic SQL function consumes the challenge and creates a routine-only enrollment. A
@@ -198,6 +198,11 @@ earlier than the enrollment's validity start, the signed request window remains 
 seconds, and local enrollment expiry is assessed against the actual clock before preparing any
 request. Signatures, replay checks, server expiry checks, receipt parsing, pairing storage, and
 all financial boundaries are unchanged.
+
+Version `0.5.14` accepts a one-use routine Owner challenge for up to twelve hours so the Owner
+can complete the manual phone handoff without rushing. The signed phone proof itself still expires
+within four minutes and must return to the same Owner tab promptly. This does not add polling,
+provider lookup, execution, or money authority.
 
 Version `0.5.13` adds the stopped-phone, no-money routine pairing proof handoff. It never starts
 the foreground verifier and uses a Keystore alias separate from the pilot key. The phone has no

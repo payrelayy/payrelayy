@@ -36,7 +36,7 @@ function fixture() {
     ...header,
     ...binding,
     issuedAt: '2026-10-06T11:59:00.000Z',
-    expiresAt: '2026-10-06T12:09:00.000Z',
+    expiresAt: '2026-10-06T23:59:00.000Z',
     state: 'issued',
   };
   const body = {
@@ -183,7 +183,13 @@ describe('routine-only TeleBirr device pairing proof', () => {
     expect(
       assessRoutineTelebirrDevicePairingProof({
         ...input,
-        assessedAt: '2026-10-06T12:10:00.000Z',
+        trustedChallenge: { ...trustedChallenge, expiresAt: '2026-10-07T00:00:00.000Z' },
+      }).reasonCode,
+    ).toBe('challenge_expired');
+    expect(
+      assessRoutineTelebirrDevicePairingProof({
+        ...input,
+        assessedAt: '2026-10-07T00:00:00.000Z',
       }).reasonCode,
     ).toBe('challenge_expired');
     expect(

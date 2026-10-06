@@ -18,7 +18,7 @@ const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const BASE64URL = /^[A-Za-z0-9_-]+$/u;
 const P1363 = /^[A-Za-z0-9_-]{86}$/u;
-const MAX_CHALLENGE_MS = 10 * 60_000;
+const MAX_CHALLENGE_MS = 12 * 60 * 60_000;
 const MAX_REQUEST_MS = 5 * 60_000;
 
 const bindingKeys = [

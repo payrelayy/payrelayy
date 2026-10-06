@@ -18,7 +18,7 @@ class RoutineTelebirrDevicePairingTest {
       receiverProfileDigest = repeatedDigest('b'),
       expectedReceiverNameDigest = repeatedDigest('c'),
       issuedAt = "2026-10-06T11:59:00.000Z",
-      expiresAt = "2026-10-06T12:09:00.000Z",
+      expiresAt = "2026-10-06T23:59:00.000Z",
     )
   private val identity = JvmP256Identity("routine-device-key-0001")
 
@@ -94,6 +94,7 @@ class RoutineTelebirrDevicePairingTest {
       "fetanagent-routine-pairing-v1." + Base64.getUrlEncoder().withoutPadding()
         .encodeToString(duplicate.toByteArray(StandardCharsets.UTF_8)),
     ))
+    assertTrue(runCatching { challenge.copy(expiresAt = "2026-10-07T00:00:00.000Z") }.isFailure)
   }
 
   @Test
@@ -135,8 +136,8 @@ class RoutineTelebirrDevicePairingTest {
             challenge = challenge,
             deviceId = "routine-device-0001",
             identity = identity,
-            issuedAt = "2026-10-06T12:10:00.000Z",
-            expiresAt = "2026-10-06T12:11:00.000Z",
+            issuedAt = "2026-10-07T00:00:00.000Z",
+            expiresAt = "2026-10-07T00:01:00.000Z",
           )
         }.isFailure,
     )

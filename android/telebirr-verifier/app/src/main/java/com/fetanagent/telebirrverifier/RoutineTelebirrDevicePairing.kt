@@ -27,7 +27,7 @@ internal data class RoutineDevicePairingChallenge(
     )
     RoutineTelebirrLookupProtocol.requireUtc(issuedAt)
     RoutineTelebirrLookupProtocol.requireUtc(expiresAt)
-    require(Instant.parse(expiresAt).toEpochMilli() - Instant.parse(issuedAt).toEpochMilli() in 1..600_000)
+    require(Instant.parse(expiresAt).toEpochMilli() - Instant.parse(issuedAt).toEpochMilli() in 1..43_200_000)
   }
 
   override fun toString(): String = "RoutineDevicePairingChallenge(<redacted>)"

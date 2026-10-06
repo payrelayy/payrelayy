@@ -155,6 +155,10 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)',
     );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('routine_telebirr_pairing_consume_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('internal_telebirr_device_pairing_issue_denied');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',

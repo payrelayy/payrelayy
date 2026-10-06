@@ -215,6 +215,9 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)',
         },
+        {
+          signature: 'app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)',
+        },
         { signature: 'app.issue_telegram_beta_invite(uuid,text,timestamp with time zone)' },
         { signature: 'app.list_owner_cbe_birr_shadow_verifications(uuid,integer)' },
         { signature: 'app.list_owner_dry_run_deposit_intake(uuid,integer)' },

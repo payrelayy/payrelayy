@@ -75,6 +75,21 @@ class RoutineTelebirrDevicePairingTest {
   }
 
   @Test
+  fun `decodes the exact Owner challenge package but never treats it as an enrollment`() {
+    val json =
+      """{"contractVersion":1,"providerCode":"telebirr","protocolMode":"routine_device_pairing_v1","pairingId":"${challenge.pairingId}","pairingNonceDigest":"${challenge.pairingNonceDigest}","receiverRevisionId":"${challenge.receiverRevisionId}","receiverVersion":${challenge.receiverVersion},"receiverProfileDigest":"${challenge.receiverProfileDigest}","expectedReceiverNameDigest":"${challenge.expectedReceiverNameDigest}","issuedAt":"${challenge.issuedAt}","expiresAt":"${challenge.expiresAt}"}"""
+    val packageValue = "fetanagent-routine-pairing-v1." +
+      Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray(StandardCharsets.UTF_8))
+    assertEquals(challenge, RoutineDevicePairingJsonCodec.decodeChallengePackage(packageValue))
+    assertNull(RoutineDevicePairingJsonCodec.decodeChallengePackage(packageValue.replaceFirst("routine-pairing", "pairing")))
+    val duplicate = json.replaceFirst("\"pairingId\":", "\"pairingId\":\"${challenge.pairingId}\",\"pairingId\":")
+    assertNull(RoutineDevicePairingJsonCodec.decodeChallengePackage(
+      "fetanagent-routine-pairing-v1." + Base64.getUrlEncoder().withoutPadding()
+        .encodeToString(duplicate.toByteArray(StandardCharsets.UTF_8)),
+    ))
+  }
+
+  @Test
   fun `rejects pilot relabeling, duplicate keys, stale digest, and noncanonical input`() {
     val signed = proof()
     val wire = String(RoutineDevicePairingJsonCodec.encode(signed), StandardCharsets.UTF_8)

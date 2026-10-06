@@ -59,9 +59,11 @@ short-lived Owner challenge binding: pairing ID and nonce digest, receiver revis
 and expected receiver-name digest. It has its own mode and signing domain, strict bounded JSON
 codec, and shared Kotlin/TypeScript digest vector. The TypeScript assessor checks P-256 possession
 against an independently supplied challenge but deliberately does not consume that challenge or
-create an enrollment. There is no routine Owner issuer, protected exchange, signed enrollment
-certificate, or device provisioning call yet. The pilot pairing package and certificate must never
-be accepted as routine trust; a future operational composition must use a separate routine
+create an enrollment. The authenticated Owner issuer can now create a ten-minute challenge and the
+Android codec can strictly decode its routine-only package. Only a postgres-only function may mark
+a challenge consumed; no protected proof exchange invokes it yet. There is still no signed routine
+enrollment certificate or device provisioning call. The pilot pairing package and certificate must
+never be accepted as routine trust; a future operational composition must use a separate routine
 Android Keystore alias and independently authorized pairing path.
 
 The app has no database, Supabase, KemerBet, claim, settlement, enqueue, execution, or financial-action authority. A signed observation is evidence for a trusted server to assess; it cannot authorize SQL, credit a player, or move money. There are no customer-entered secrets, provider credentials, raw receipt/reference/name/URL logs, or embedded API keys.

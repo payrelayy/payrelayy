@@ -355,6 +355,7 @@ jobs:
           DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
           DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
@@ -374,6 +375,7 @@ jobs:
           TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
           TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
+          TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
         run: |
           set -euo pipefail
@@ -474,6 +476,30 @@ jobs:
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PKCS8_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-server-signer.pkcs8.der"
           printf '%s' "$TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge.spki.der"
           printf '%s' "$TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64" | base64 --decode >"$secret_dir/telebirr-bridge-runtime-manifest.v1.json"
+          SECRET_DIR="$secret_dir" node --input-type=module <<'NODE'
+          import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+
+          const encoded = process.env.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL;
+          const expectedDigest = process.env.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256;
+          if (!/^[A-Za-z0-9_-]{150,1024}$/u.test(encoded ?? '') ||
+              !/^sha256:[0-9a-f]{64}$/u.test(expectedDigest ?? '') ||
+              Buffer.from(encoded, 'base64url').toString('base64url') !== encoded) {
+            throw new Error('The dedicated routine receipt signer is absent or malformed.');
+          }
+          const privateKey = createPrivateKey({ key: Buffer.from(encoded, 'base64url'), format: 'der', type: 'pkcs8' });
+          if (privateKey.asymmetricKeyType !== 'ec' || privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+            throw new Error('The dedicated routine receipt signer is not P-256.');
+          }
+          const publicSpki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+          const actualDigest = `sha256:${createHash('sha256').update(publicSpki).digest('hex')}`;
+          if (publicSpki.length !== 91 || actualDigest !== expectedDigest ||
+              actualDigest === process.env.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256 ||
+              actualDigest === process.env.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256) {
+            throw new Error('The dedicated routine receipt signer does not match its independent public key.');
+          }
+          writeFileSync(`${process.env.SECRET_DIR}/owner-routine-enrollment-signer-pkcs8`, encoded, { mode: 0o600 });
+          NODE
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$OWNER_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/owner-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
@@ -817,7 +843,7 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
           )
           case "$REQUESTED_MODE" in
             deploy|deploy-shadow|deploy-shadow-intake)

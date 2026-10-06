@@ -7,6 +7,10 @@ operator hosts, after the non-financial verification and disposable SQL suite pa
 **Current stop gate:** The non-pilot customer proof-to-official-observation-to-one-use-claim-to-
 verified-job path is not implemented end to end. The dormant table in
 `20261005165930_routine_telebirr_untrusted_proof_foundation.sql` does not satisfy that path.
+The `routine-signed-observation` library verifies a paired-device signature and receipt-policy
+facts in isolation, but has no production caller, authenticated official-source adapter, durable
+challenge/replay ledger, or atomic one-use payment claim. Its advisory result does not satisfy
+this activation gate.
 Do not run this activation procedure, install its runtime credential or release marker, or start
 the Automatic Deposits launcher until a later reviewed release proves the whole path with
 disposable SQL and no-money end-to-end tests.

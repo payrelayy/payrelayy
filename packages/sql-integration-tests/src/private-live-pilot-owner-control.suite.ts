@@ -208,6 +208,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.get_owner_companion_connection_status(uuid)' },
         { signature: 'app.get_owner_companion_execution_readiness(uuid)' },
         { signature: 'app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)' },
+        { signature: 'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)' },
         { signature: 'app.get_owner_routine_telebirr_processing(uuid)' },
         { signature: 'app.get_owner_support_contact(uuid)' },
         { signature: 'app.get_owner_telebirr_shadow_verification_status(uuid)' },

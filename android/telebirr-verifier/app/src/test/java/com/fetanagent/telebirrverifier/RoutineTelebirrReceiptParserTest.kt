@@ -13,7 +13,7 @@ class RoutineTelebirrReceiptParserTest {
       referenceFingerprint = "a".repeat(64),
       expectedReceiverNameNormalized = PILOT_RECEIVER_NAME,
       expectedReceiverNameDigest =
-        requireNotNull(LivePilotCanonicalTranscripts.receiverNameDigest(PILOT_RECEIVER_NAME)),
+        requireNotNull(RoutineTelebirrReceiverName.digest(PILOT_RECEIVER_NAME)),
       receiverRevisionId = "53d119fa-69d4-4d75-8676-88eaf7a93ab2",
       receiverVersion = 1,
     )
@@ -109,6 +109,22 @@ class RoutineTelebirrReceiptParserTest {
     assertFails { lookup.copy(expectedReceiverNameDigest = repeatedDigest('9')) }
     assertFails { lookup.copy(receiverRevisionId = "pilot-revision-0001") }
     assertFails { lookup.copy(receiverVersion = 0) }
+  }
+
+  @Test
+  fun `routine name digest is distinct from pilot and normalizes the same full name`() {
+    assertEquals(
+      "sha256:6f4b944f412c74330943d7cedb2a1b96906fe1b3d19f493551bead5d29ce03bd",
+      RoutineTelebirrReceiverName.digest(PILOT_RECEIVER_NAME),
+    )
+    assertEquals(
+      RoutineTelebirrReceiverName.digest("  PILOT\tRECEIVER  "),
+      RoutineTelebirrReceiverName.digest(PILOT_RECEIVER_NAME),
+    )
+    assertFalse(
+      RoutineTelebirrReceiverName.digest(PILOT_RECEIVER_NAME) ==
+        LivePilotCanonicalTranscripts.receiverNameDigest(PILOT_RECEIVER_NAME),
+    )
   }
 
   private fun assertFails(block: () -> Unit) {

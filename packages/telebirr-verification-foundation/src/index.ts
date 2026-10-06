@@ -141,3 +141,15 @@ export {
   verifyRoutineTelebirrSignedObservation,
   type RoutineTelebirrSignedObservationResult,
 } from './routine-signed-observation.js';
+export {
+  ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_CONTRACT_VERSION,
+  ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_PROTOCOL_MODE,
+  ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_TRANSCRIPT_VERSION,
+  ROUTINE_TELEBIRR_RECEIVER_NAME_NORMALIZER_VERSION,
+  canonicalRoutineTelebirrLookupAssignmentBodyBytes,
+  canonicalRoutineTelebirrLookupAssignmentSignatureBytes,
+  digestRoutineTelebirrLookupAssignmentBody,
+  digestRoutineTelebirrReceiverName,
+  verifyRoutineTelebirrSignedLookupAssignment,
+  type RoutineTelebirrLookupAssignmentResult,
+} from './routine-signed-lookup-assignment.js';

@@ -1,5 +1,44 @@
 package com.fetanagent.telebirrverifier
 
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
+/** Routine-only receiver-name digest transcript, separate from private-pilot name identities. */
+internal object RoutineTelebirrReceiverName {
+  const val NORMALIZER_VERSION = "telebirr-credited-party-name-normalizer-v1"
+
+  fun digest(value: String): String? {
+    val normalized = LivePilotNameNormalizer.normalize(value) ?: return null
+    val fields =
+      listOf(
+        "fetanagent:telebirr:routine:receiver-name:v1",
+        "2",
+        "normalizerVersion",
+        "string:$NORMALIZER_VERSION",
+        "normalizedName",
+        "string:$normalized",
+      )
+    val bytes =
+      ByteArrayOutputStream().use { buffer ->
+        DataOutputStream(buffer).use { output ->
+          fields.forEach { field ->
+            val encoded = field.toByteArray(StandardCharsets.UTF_8)
+            output.writeInt(encoded.size)
+            output.write(encoded)
+          }
+        }
+        buffer.toByteArray()
+      }
+    val hex =
+      MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString(separator = "") { byte -> "%02x".format(byte) }
+    return "sha256:$hex"
+  }
+}
+
 /**
  * A parsed routine receipt is evidence only. This module performs no network request, enrollment,
  * signature, database write, claim, or financial action. A future routine assignment verifier must
@@ -23,7 +62,7 @@ internal data class RoutineReceiptLookupExpectation(
         expectedReceiverNameNormalized
     )
     require(
-      LivePilotCanonicalTranscripts.receiverNameDigest(expectedReceiverNameNormalized) ==
+      RoutineTelebirrReceiverName.digest(expectedReceiverNameNormalized) ==
         expectedReceiverNameDigest
     )
     require(UUID_V4.matches(receiverRevisionId))
@@ -85,6 +124,7 @@ internal class RoutineTelebirrReceiptParser(
       document,
       lookup.rawReference,
       lookup.expectedReceiverNameNormalized,
+      RoutineTelebirrReceiverName::digest,
     )
     val facts = parsed.facts
     if (facts is LivePilotReviewRequiredFacts) {

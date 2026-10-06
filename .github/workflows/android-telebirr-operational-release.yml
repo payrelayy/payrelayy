@@ -87,6 +87,10 @@ jobs:
           BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
           BRIDGE_SIGNER_SPKI_BASE64: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_BASE64 }}
           BRIDGE_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
+          ROUTINE_RECEIPT_SIGNER_SPKI_BASE64: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_BASE64 }}
+          ROUTINE_RECEIPT_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          ROUTINE_RECEIPT_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_FROM }}
+          ROUTINE_RECEIPT_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_UNTIL }}
         run: |
           set -euo pipefail
           [[ "$ANDROID_KEY_ALIAS" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]
@@ -99,6 +103,11 @@ jobs:
           [[ "$ASSIGNMENT_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$BRIDGE_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$ASSIGNMENT_SIGNER_SPKI_SHA256" != "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+          [[ "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" != "$ASSIGNMENT_SIGNER_SPKI_SHA256" ]]
+          [[ "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" != "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+          [[ "$ROUTINE_RECEIPT_SIGNER_VALID_FROM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$ ]]
+          [[ "$ROUTINE_RECEIPT_SIGNER_VALID_UNTIL" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$ ]]
           [[ -n "$ANDROID_KEYSTORE_BASE64" ]]
 
           protected="$RUNNER_TEMP/fetanagent-android-telebirr-operational"
@@ -108,12 +117,15 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$protected/release.p12"
           printf '%s' "$ASSIGNMENT_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/assignment.spki.der"
           printf '%s' "$BRIDGE_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/bridge.spki.der"
+          printf '%s' "$ROUTINE_RECEIPT_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/routine-receipt.spki.der"
           chmod 0600 "$protected"/*
           [[ -s "$protected/release.p12" ]]
           [[ "$(stat -c %s "$protected/assignment.spki.der")" -eq 91 ]]
           [[ "$(stat -c %s "$protected/bridge.spki.der")" -eq 91 ]]
+          [[ "$(stat -c %s "$protected/routine-receipt.spki.der")" -eq 91 ]]
           [[ "sha256:$(sha256sum "$protected/assignment.spki.der" | cut -d ' ' -f 1)" == "$ASSIGNMENT_SIGNER_SPKI_SHA256" ]]
           [[ "sha256:$(sha256sum "$protected/bridge.spki.der" | cut -d ' ' -f 1)" == "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+          [[ "sha256:$(sha256sum "$protected/routine-receipt.spki.der" | cut -d ' ' -f 1)" == "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" ]]
           echo "protected=$protected" >> "$GITHUB_OUTPUT"
 
       - name: Test, lint, and build the signed pairing-only APK
@@ -122,6 +134,8 @@ jobs:
         env:
           FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_TELEBIRR_SIGNING_KEY_PASSWORD }}
           FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_TELEBIRR_SIGNING_STORE_PASSWORD }}
+          ROUTINE_RECEIPT_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_FROM }}
+          ROUTINE_RECEIPT_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_UNTIL }}
         run: |
           set -euo pipefail
           protected='${{ steps.protected.outputs.protected }}'
@@ -132,6 +146,9 @@ jobs:
             -PfetanagentVerifierServerSignerSpkiFile="$protected/bridge.spki.der" \
             -PfetanagentVerifierAssignmentSignerKeyId='${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}' \
             -PfetanagentVerifierAssignmentSignerSpkiFile="$protected/assignment.spki.der" \
+            -PfetanagentRoutineReceiptSignerSpkiFile="$protected/routine-receipt.spki.der" \
+            -PfetanagentRoutineReceiptSignerValidFrom="$ROUTINE_RECEIPT_SIGNER_VALID_FROM" \
+            -PfetanagentRoutineReceiptSignerValidUntil="$ROUTINE_RECEIPT_SIGNER_VALID_UNTIL" \
             -PfetanagentVerifierSigningStoreFile="$protected/release.p12" \
             -PfetanagentVerifierSigningKeyAlias='${{ vars.ANDROID_TELEBIRR_SIGNING_KEY_ALIAS }}' \
             -PfetanagentVerifierSigningCertSha256='${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}' \
@@ -148,6 +165,7 @@ jobs:
           ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}
           ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
+          ROUTINE_RECEIPT_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
         run: |
           set -euo pipefail
           build_config='app/build/generated/source/buildConfig/release/com/fetanagent/telebirrverifier/BuildConfig.java'
@@ -155,9 +173,11 @@ jobs:
           grep -Fq 'VERIFIER_ENABLED = true' "$build_config"
           grep -Fq "VERIFIER_DEPLOYMENT_TARGET = \"$DEPLOYMENT_TARGET\"" "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "pairing_only"' "$build_config"
-          grep -Fq 'VERSION_NAME = "0.5.14-secure-pairing"' "$build_config"
+          grep -Fq 'VERSION_NAME = "0.5.15-secure-pairing"' "$build_config"
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
+          grep -Fq "ROUTINE_RECEIPT_SIGNER_KEY_ID = \"telebirr-routine-enrollment-$DEPLOYMENT_TARGET-v1\"" "$build_config"
+          grep -Fq "ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256\"" "$build_config"
 
           mapfile -t apksigners < <(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V)
           [[ "${#apksigners[@]}" -ge 1 ]]
@@ -172,7 +192,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-artifact"
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
-          artifact_name="FetanAgent-TeleBirr-Verifier-0.5.14-$DEPLOYMENT_TARGET-pairing-only.apk"
+          artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-pairing-only.apk"
           install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
           (
             cd "$artifact_dir"

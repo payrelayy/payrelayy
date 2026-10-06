@@ -18,7 +18,7 @@ internal sealed interface RoutineEnrollmentState {
     override fun toString(): String = "RoutineEnrollmentState.Pending(<redacted>)"
   }
   data class Enrolled(
-    val proof: RoutineSignedDevicePairingProof,
+    val proof: RoutineSignedDevicePairingProof?,
     val receipt: RoutineSignedEnrollmentReceipt,
   ) : RoutineEnrollmentState {
     override fun toString(): String = "RoutineEnrollmentState.Enrolled(<redacted>)"
@@ -77,6 +77,46 @@ internal class EncryptedRoutineEnrollmentStore(
     write(RoutineEnrollmentState.Enrolled(pending.proof, receipt))
   }
 
+  /** Recovers an already Owner-enrolled phone that has no locally staged pending proof. */
+  @Synchronized
+  fun recoverExisting(
+    receipt: RoutineSignedEnrollmentReceipt,
+    signer: RoutineEnrollmentTrustedSigner,
+    identity: P256Identity,
+    assessedAt: String,
+  ) {
+    require(RoutineEnrollmentReceiptProtocol.verifyExistingLocalKey(
+      receipt, signer, identity.publicMaterial(), assessedAt,
+    )) { "Routine enrollment receipt is not authenticated for this phone" }
+    when (val existing = read()) {
+      is RoutineEnrollmentState.Pending -> error("A pending routine proof must be completed normally")
+      is RoutineEnrollmentState.Enrolled -> {
+        require(existing.receipt.body.enrollmentId == receipt.body.enrollmentId &&
+          existing.receipt.body.pairingEvidenceDigest == receipt.body.pairingEvidenceDigest &&
+          existing.receipt.body.keyId == receipt.body.keyId) {
+          "A different routine enrollment already exists"
+        }
+        if (existing.receipt == receipt) return
+      }
+      null -> Unit
+    }
+    write(RoutineEnrollmentState.Enrolled(null, receipt))
+  }
+
+  @Synchronized
+  fun acceptSignedReceipt(
+    receipt: RoutineSignedEnrollmentReceipt,
+    signer: RoutineEnrollmentTrustedSigner,
+    identity: P256Identity,
+    assessedAt: String,
+  ) {
+    if (read() is RoutineEnrollmentState.Pending) {
+      complete(receipt, signer, identity, assessedAt)
+    } else {
+      recoverExisting(receipt, signer, identity, assessedAt)
+    }
+  }
+
   @Synchronized
   fun loadEnrolled(
     signer: RoutineEnrollmentTrustedSigner,
@@ -84,11 +124,13 @@ internal class EncryptedRoutineEnrollmentStore(
     assessedAt: String,
   ): RoutineSignedEnrollmentReceipt? {
     val enrolled = read() as? RoutineEnrollmentState.Enrolled ?: return null
-    requireValidLocalProof(enrolled.proof, identity)
+    enrolled.proof?.let { requireValidLocalProof(it, identity) }
     return enrolled.receipt.takeIf {
-      RoutineEnrollmentReceiptProtocol.verify(
+      if (enrolled.proof != null) RoutineEnrollmentReceiptProtocol.verify(
         it, signer, RoutineEnrollmentExpectedBinding.fromPairingProof(enrolled.proof),
         identity.publicMaterial(), assessedAt,
+      ) else RoutineEnrollmentReceiptProtocol.verifyExistingLocalKey(
+        it, signer, identity.publicMaterial(), assessedAt,
       )
     }
   }
@@ -144,22 +186,28 @@ internal class EncryptedRoutineEnrollmentStore(
         require(magic.contentEquals(MAGIC))
         val stateCode = input.readUnsignedByte()
         val proofLength = input.readInt()
-        require(proofLength in 1..MAX_COMPONENT_BYTES)
+        require(proofLength in 0..MAX_COMPONENT_BYTES)
         val proof = ByteArray(proofLength).also(input::readFully)
         val receiptLength = input.readInt()
         require(receiptLength in 0..MAX_COMPONENT_BYTES)
         val receipt = ByteArray(receiptLength).also(input::readFully)
         require(input.read() == -1)
-        val parsedProof = requireNotNull(RoutineDevicePairingJsonCodec.decode(proof))
         return when (stateCode) {
           1 -> {
-            require(receipt.isEmpty())
-            RoutineEnrollmentState.Pending(parsedProof)
+            require(proof.isNotEmpty() && receipt.isEmpty())
+            RoutineEnrollmentState.Pending(requireNotNull(RoutineDevicePairingJsonCodec.decode(proof)))
           }
           2 -> {
-            require(receipt.isNotEmpty())
+            require(proof.isNotEmpty() && receipt.isNotEmpty())
             RoutineEnrollmentState.Enrolled(
-              parsedProof, requireNotNull(RoutineEnrollmentReceiptJsonCodec.decode(receipt)),
+              requireNotNull(RoutineDevicePairingJsonCodec.decode(proof)),
+              requireNotNull(RoutineEnrollmentReceiptJsonCodec.decode(receipt)),
+            )
+          }
+          3 -> {
+            require(proof.isEmpty() && receipt.isNotEmpty())
+            RoutineEnrollmentState.Enrolled(
+              null, requireNotNull(RoutineEnrollmentReceiptJsonCodec.decode(receipt)),
             )
           }
           else -> error("Unknown routine enrollment state")
@@ -172,10 +220,10 @@ internal class EncryptedRoutineEnrollmentStore(
   }
 
   private fun write(state: RoutineEnrollmentState) {
-    val proof = RoutineDevicePairingJsonCodec.encode(when (state) {
+    val proof = (when (state) {
       is RoutineEnrollmentState.Pending -> state.proof
       is RoutineEnrollmentState.Enrolled -> state.proof
-    })
+    })?.let(RoutineDevicePairingJsonCodec::encode) ?: ByteArray(0)
     val receipt = when (state) {
       is RoutineEnrollmentState.Pending -> ByteArray(0)
       is RoutineEnrollmentState.Enrolled -> RoutineEnrollmentReceiptJsonCodec.encode(state.receipt)
@@ -183,7 +231,10 @@ internal class EncryptedRoutineEnrollmentStore(
     val plaintext = ByteArrayOutputStream().use { bytes ->
       DataOutputStream(bytes).use { output ->
         output.write(MAGIC)
-        output.writeByte(if (state is RoutineEnrollmentState.Pending) 1 else 2)
+        output.writeByte(when (state) {
+          is RoutineEnrollmentState.Pending -> 1
+          is RoutineEnrollmentState.Enrolled -> if (state.proof == null) 3 else 2
+        })
         output.writeInt(proof.size)
         output.write(proof)
         output.writeInt(receipt.size)

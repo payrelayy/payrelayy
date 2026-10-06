@@ -204,12 +204,21 @@ can complete the manual phone handoff without rushing. The signed phone proof it
 within four minutes and must return to the same Owner tab promptly. This does not add polling,
 provider lookup, execution, or money authority.
 
-The next unreleased source slice seals the exact pending routine proof in separate Android
-Keystore-protected no-backup storage and restores it after an app restart only while it remains
-fresh. It also defines and tests a separate server-signed routine enrollment receipt and an
-encrypted store that accepts it only against a separately trusted signer, the exact pending proof,
-and the local phone key. No production routine signer or receipt is provisioned, no receipt-import
-control is shown, and the app still cannot poll or submit routine observations.
+Version `0.5.15` seals the exact pending routine proof in separate Android Keystore-protected
+no-backup storage and restores it after an app restart only while it remains fresh. When an
+independent routine receipt signer is pinned in a protected release build, the phone can verify
+and seal an Owner-signed no-money enrollment receipt. It accepts either the exact locally pending
+proof or, for a phone paired before proof storage existed, the already-enrolled phone's same
+non-exportable local key. The latter never infers a provider observation or grants polling.
+The signer must be provisioned separately; absent signer trust hides receipt import. No receipt,
+including a valid one, enables assignment polling, deposit execution, or money movement.
+The protected operational-release workflows require four public signer bindings before building
+`0.5.15`: `TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_BASE64`,
+`TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256`,
+`TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_FROM`, and
+`TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_UNTIL`. They must match the independent private signer
+mounted only in the Owner service and its private database registry. Never put that private key
+in GitHub variables, the APK, or an issue comment.
 
 Version `0.5.13` adds the stopped-phone, no-money routine pairing proof handoff. It never starts
 the foreground verifier and uses a Keystore alias separate from the pilot key. The phone has no

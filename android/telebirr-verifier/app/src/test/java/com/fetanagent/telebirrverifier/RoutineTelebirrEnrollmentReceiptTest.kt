@@ -157,6 +157,38 @@ class RoutineTelebirrEnrollmentReceiptTest {
     assertTrue(runCatching { completed.stagePending(pending, phone, now) }.isFailure)
   }
 
+  @Test fun `recovers existing Owner enrollment without a pending proof or polling authority`() {
+    val signed = receipt(body(proof()))
+    val packageValue = "fetanagent-routine-enrollment-receipt-v1." +
+      Base64.getUrlEncoder().withoutPadding().encodeToString(
+        RoutineEnrollmentReceiptJsonCodec.encode(signed))
+    assertEquals(signed, RoutineEnrollmentReceiptJsonCodec.decodePackage(packageValue))
+    assertNull(RoutineEnrollmentReceiptJsonCodec.decodePackage(packageValue + "="))
+    assertTrue(RoutineEnrollmentReceiptProtocol.verifyExistingLocalKey(
+      signed, signer(), phone.publicMaterial(), "2026-10-07T12:00:00.000Z"))
+    assertFalse(RoutineEnrollmentReceiptProtocol.verifyExistingLocalKey(
+      signed, signer().copy(state = "revoked"), phone.publicMaterial(),
+      "2026-10-07T12:00:00.000Z"))
+    assertFalse(RoutineEnrollmentReceiptProtocol.verifyExistingLocalKey(
+      signed, signer(), JvmP256Identity("another-routine-device-key").publicMaterial(),
+      "2026-10-07T12:00:00.000Z"))
+    val root = Files.createTempDirectory("routine-recovery-test-").toFile().also(roots::add)
+    val directory = File(root, "routine-enrollment")
+    val cipher = TestCipher()
+    val store = EncryptedRoutineEnrollmentStore(directory, cipher)
+    assertTrue(runCatching { store.recoverExisting(
+      signed.copy(signature = "A".repeat(86)), signer(), phone,
+      "2026-10-07T12:00:00.000Z") }.isFailure)
+    store.recoverExisting(signed, signer(), phone, "2026-10-07T12:00:00.000Z")
+    val restored = EncryptedRoutineEnrollmentStore(directory, cipher)
+    assertEquals(signed, restored.loadEnrolled(signer(), phone, "2026-10-07T12:00:00.000Z"))
+    assertNull(restored.loadEnrolled(signer(), phone, signed.body.validUntil))
+    assertNull(restored.loadPending(phone, Instant.parse("2026-10-07T12:00:00.000Z").toEpochMilli()))
+    assertTrue(runCatching { restored.recoverExisting(
+      signed, signer(), JvmP256Identity("another-routine-device-key"),
+      "2026-10-07T12:00:00.000Z") }.isFailure)
+  }
+
   private class TestCipher : LivePilotQueueCipher {
     private val key = SecretKeySpec(ByteArray(32) { index -> (index * 5 + 17).toByte() }, "AES")
     private val random = SecureRandom()

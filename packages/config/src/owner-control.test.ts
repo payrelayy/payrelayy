@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
@@ -221,6 +221,33 @@ describe('Owner-control configuration', () => {
     ).toThrow('OWNER_COMPANION_SERVER_SIGNER_KEY_ID is malformed');
   });
 
+  it('keeps the independent routine receipt signer optional and never logs its private key', () => {
+    const key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+      .privateKey.export({ format: 'der', type: 'pkcs8' })
+      .toString('base64url');
+    expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
+      routineEnrollmentReceiptSigner: { configured: false },
+    });
+    const configured = loadOwnerControlConfig({
+      ...enabledEnvironment(),
+      OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: key,
+    });
+    expect(configured.runtime).toMatchObject({
+      routineEnrollmentReceiptSigner: {
+        configured: true,
+        signerKeyId: 'telebirr-routine-enrollment-staging-v1',
+        privateKeyPkcs8: key,
+      },
+    });
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(configured))).not.toContain(key);
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: 'short',
+      }),
+    ).toThrow('OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY is malformed');
+  });
+
   it('requires exact production secret mounts and never logs credentials', () => {
     const config = loadOwnerControlConfig(enabledEnvironment());
     const serialized = JSON.stringify(redactedOwnerControlConfigForLog(config));
@@ -251,11 +278,15 @@ describe('Owner-control configuration', () => {
   });
 
   it('reads one newline-terminated value from each approved production file', () => {
+    const routineSignerKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+      .privateKey.export({ format: 'der', type: 'pkcs8' })
+      .toString('base64url');
     const values: Record<string, string> = {
       '/run/secrets/owner_control_database_url': `${databaseUrl}\n`,
       '/run/secrets/owner_control_supabase_publishable_key': `${publishableKey}\n`,
       '/run/secrets/owner_receiver_reference_encryption_master': `${receiverReferenceEncryptionMaster}\n`,
       '/run/secrets/owner_receiver_reference_fingerprint_master': `${receiverReferenceFingerprintMaster}\n`,
+      '/run/secrets/owner_routine_enrollment_signer_pkcs8': `${routineSignerKey}\n`,
       '/etc/fetanagent/deposit-proof-reference-profile.v2.json': receiverReferenceProfile,
     };
     const config = loadOwnerControlConfig(
@@ -271,12 +302,20 @@ describe('Owner-control configuration', () => {
           '/run/secrets/owner_receiver_reference_encryption_master',
         OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE:
           '/run/secrets/owner_receiver_reference_fingerprint_master',
+        OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY_FILE:
+          '/run/secrets/owner_routine_enrollment_signer_pkcs8',
         OWNER_RECEIVER_REFERENCE_PROFILE_FILE:
           '/etc/fetanagent/deposit-proof-reference-profile.v2.json',
       },
       { readSecretFile: (path) => values[path] ?? '' },
     );
     expect(config.runtime.enabled && config.runtime.publishableKey).toBe(publishableKey);
+    expect(config.runtime.enabled && config.runtime.routineEnrollmentReceiptSigner.configured).toBe(
+      true,
+    );
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(config))).not.toContain(
+      routineSignerKey,
+    );
     expect(
       config.runtime.enabled && config.runtime.receiverReferenceProtection.masterProfile.version,
     ).toBe(2);

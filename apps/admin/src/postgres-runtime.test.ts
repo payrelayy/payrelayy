@@ -21,6 +21,11 @@ const config = {
   },
   companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
+  routineEnrollmentReceiptSigner: {
+    signerKeyId: undefined,
+    privateKeyPkcs8: undefined,
+    configured: false,
+  },
   publishableKey: 'sb_publishable_test_key_for_staging_only',
   receiverReferenceProtection: {
     encryptionSecret: 'c'.repeat(64),

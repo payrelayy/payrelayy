@@ -10,6 +10,9 @@ import java.security.cert.X509Certificate
 import java.nio.file.Files
 import java.nio.file.StandardOpenOption
 import java.util.Base64
+import java.time.Instant
+import java.time.Duration
+import java.time.format.DateTimeFormatterBuilder
 
 plugins {
   id("com.android.application")
@@ -32,6 +35,14 @@ data class OperationalVerifierSigning(
   val keyPassword: String,
   val storeFile: File,
   val storePassword: String,
+)
+
+data class RoutineReceiptTrust(
+  val keyId: String,
+  val publicKeySpki: String,
+  val publicKeySpkiSha256: String,
+  val validFrom: String,
+  val validUntil: String,
 )
 
 fun quotedBuildConfig(value: String): String =
@@ -115,6 +126,34 @@ val operationalTrust =
       assignmentSignerPublicKeySpkiSha256 = assignmentKey.second,
     )
   }
+
+val routineReceiptTrust = run {
+  val spkiPath = providers.gradleProperty("fetanagentRoutineReceiptSignerSpkiFile").orNull
+  val validFrom = providers.gradleProperty("fetanagentRoutineReceiptSignerValidFrom").orNull
+  val validUntil = providers.gradleProperty("fetanagentRoutineReceiptSignerValidUntil").orNull
+  if (spkiPath == null && validFrom == null && validUntil == null) null
+  else {
+    require(operationalTrust != null && spkiPath != null && validFrom != null && validUntil != null) {
+      "Routine receipt trust requires an operational target, public key, and bounded validity."
+    }
+    val from = Instant.parse(validFrom)
+    val until = Instant.parse(validUntil)
+    val canonicalUtc = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
+    require(canonicalUtc.format(from) == validFrom && canonicalUtc.format(until) == validUntil &&
+      until.isAfter(from) && Duration.between(from, until) <= Duration.ofDays(90)) {
+      "Routine receipt signer validity must be canonical UTC and no longer than 90 days."
+    }
+    val key = readP256PublicKey("fetanagentRoutineReceiptSignerSpkiFile")
+    require(key.second != operationalTrust.serverSignerPublicKeySpkiSha256 &&
+      key.second != operationalTrust.assignmentSignerPublicKeySpkiSha256) {
+      "Routine receipt signer must be independent of bridge and assignment signers."
+    }
+    RoutineReceiptTrust(
+      "telebirr-routine-enrollment-$requestedDeploymentTarget-v1",
+      key.first, key.second, validFrom, validUntil,
+    )
+  }
+}
 
 val operationalSigning =
   if (operationalTrust == null) {
@@ -224,9 +263,9 @@ val operationalSigning =
 
 val verifierVersionName =
   when (requestedRuntimeMode) {
-    "pairing_only" -> "0.5.14-secure-pairing"
-    "evidence_only" -> "0.5.14-evidence-only"
-    else -> "0.5.14-secure-provisioning-inert"
+    "pairing_only" -> "0.5.15-secure-pairing"
+    "evidence_only" -> "0.5.15-evidence-only"
+    else -> "0.5.15-secure-provisioning-inert"
   }
 
 android {
@@ -237,7 +276,7 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = 19
+    versionCode = 20
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
@@ -249,6 +288,11 @@ android {
     buildConfigField("String", "ASSIGNMENT_SIGNER_KEY_ID", quotedBuildConfig(""))
     buildConfigField("String", "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
     buildConfigField("String", "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
+    buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_KEY_ID", quotedBuildConfig(""))
+    buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
+    buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
+    buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_FROM", quotedBuildConfig(""))
+    buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_UNTIL", quotedBuildConfig(""))
     testInstrumentationRunner = "android.test.InstrumentationTestRunner"
   }
 
@@ -309,6 +353,13 @@ android {
           "ASSIGNMENT_SIGNER_PUBLIC_KEY_SPKI_SHA256",
           quotedBuildConfig(trust.assignmentSignerPublicKeySpkiSha256),
         )
+        routineReceiptTrust?.let { receipt ->
+          buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_KEY_ID", quotedBuildConfig(receipt.keyId))
+          buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(receipt.publicKeySpki))
+          buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(receipt.publicKeySpkiSha256))
+          buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_FROM", quotedBuildConfig(receipt.validFrom))
+          buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_UNTIL", quotedBuildConfig(receipt.validUntil))
+        }
       }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }

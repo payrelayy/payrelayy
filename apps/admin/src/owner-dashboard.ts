@@ -518,6 +518,22 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <button id="routine-phone-proof-button" type="submit" disabled>Verify and enroll phone</button>
             </form>
             <p class="request-meta" id="routine-phone-enrollment-status" role="status"></p>
+            <div class="pairing-receipt" aria-labelledby="routine-receipt-title">
+              <h4 id="routine-receipt-title">Existing phone: signed no-money receipt</h4>
+              <p class="receipt-label">Retrieve a receipt for the phone already enrolled above. This does not
+                create a challenge, pair another phone, poll TeleBirr, or enable deposits.
+                The receipt is available only after a separate signer is provisioned.</p>
+              <label class="confirmation-row" for="routine-receipt-confirmation">
+                <input id="routine-receipt-confirmation" type="checkbox" />
+                I want the signed receipt for my existing no-money phone enrollment.
+              </label>
+              <button id="routine-receipt-button" type="button" disabled>Retrieve signed receipt</button>
+              <p class="request-meta" id="routine-receipt-status" role="status"></p>
+              <div id="routine-receipt-package-wrap" hidden>
+                <output class="pairing-package" id="routine-receipt-package"></output>
+                <button id="routine-receipt-copy" type="button">Copy receipt to phone</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -786,6 +802,12 @@ const routinePhoneProofInput = document.querySelector('#routine-phone-proof-inpu
 const routinePhoneProofConfirmation = document.querySelector('#routine-phone-proof-confirmation');
 const routinePhoneProofButton = document.querySelector('#routine-phone-proof-button');
 const routinePhoneEnrollmentStatus = document.querySelector('#routine-phone-enrollment-status');
+const routineReceiptConfirmation = document.querySelector('#routine-receipt-confirmation');
+const routineReceiptButton = document.querySelector('#routine-receipt-button');
+const routineReceiptStatus = document.querySelector('#routine-receipt-status');
+const routineReceiptPackageWrap = document.querySelector('#routine-receipt-package-wrap');
+const routineReceiptPackage = document.querySelector('#routine-receipt-package');
+const routineReceiptCopy = document.querySelector('#routine-receipt-copy');
 let routineProcessingLoaded = false;
 let routineProcessingBusy = false;
 let routineProcessingState;
@@ -793,6 +815,8 @@ let routinePhonePairing;
 let routinePhonePairingBusy = false;
 let routinePhoneProofBusy = false;
 let routinePhonePairingExpiryTimer;
+let routineEnrollmentReceipt;
+let routineReceiptBusy = false;
 let pendingRoutinePhoneChallengeRequestId;
 let pendingRoutinePhoneProofRequestId;
 const pilotReadiness = document.querySelector('#pilot-readiness');
@@ -1717,6 +1741,94 @@ function updateRoutinePhonePairingAvailability() {
         : 'Ready for a no-money routine phone challenge. No provider lookup or deposit will start.';
 }
 
+function clearRoutineReceipt() {
+  routineEnrollmentReceipt = undefined;
+  routineReceiptPackage.textContent = '';
+  routineReceiptPackageWrap.hidden = true;
+  routineReceiptStatus.textContent = '';
+  routineReceiptButton.disabled = !accessToken || !routineReceiptConfirmation.checked;
+}
+
+function updateRoutineReceiptAvailability() {
+  if (routineEnrollmentReceipt && Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {
+    clearRoutineReceipt();
+  }
+  routineReceiptButton.disabled = !accessToken || routineReceiptBusy ||
+    !routineReceiptConfirmation.checked;
+}
+
+function validRoutineSignedReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'assignmentPollingAllowed,financialActionAllowed,moneyMovementAllowed,receiptPackage,validUntil' ||
+      value.assignmentPollingAllowed !== false || value.financialActionAllowed !== false ||
+      value.moneyMovementAllowed !== false || typeof value.receiptPackage !== 'string' ||
+      value.receiptPackage.length > 4096 ||
+      !value.receiptPackage.startsWith('fetanagent-routine-enrollment-receipt-v1.') ||
+      typeof value.validUntil !== 'string' || !Number.isFinite(Date.parse(value.validUntil)) ||
+      new Date(value.validUntil).toISOString() !== value.validUntil) return undefined;
+  const decoded = strictBase64UrlText(value.receiptPackage.slice(
+    'fetanagent-routine-enrollment-receipt-v1.'.length));
+  if (!decoded) return undefined;
+  try {
+    const receipt = JSON.parse(decoded);
+    if (receipt?.protocolMode !== 'routine_enrollment_receipt_v1' ||
+        receipt?.body?.protocolMode !== 'routine_enrollment_receipt_v1' ||
+        receipt?.body?.validUntil !== value.validUntil ||
+        receipt?.body?.assignmentPollingAllowed !== false ||
+        receipt?.body?.financialActionAllowed !== false ||
+        receipt?.body?.moneyMovementAllowed !== false) return undefined;
+    return value;
+  } catch { return undefined; }
+}
+
+async function retrieveRoutineReceipt() {
+  if (!accessToken || routineReceiptBusy || !routineReceiptConfirmation.checked) return;
+  if (!window.confirm('Retrieve the signed receipt for your existing no-money phone enrollment? This does not enable TeleBirr polling or deposits.')) return;
+  const generation = ownerAuthGeneration;
+  const requestId = crypto.randomUUID();
+  routineReceiptBusy = true;
+  clearRoutineReceipt();
+  updateRoutineReceiptAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-enrollment-receipt', {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1', 'x-idempotency-key': requestId },
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_existing_routine_enrollment_receipt_only_no_money',
+        requestId,
+      }),
+    });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 200) {
+      routineReceiptStatus.textContent = response.status === 409
+        ? 'The receipt signer or active phone enrollment is not ready yet. No money action occurred.'
+        : 'Receipt retrieval is unavailable. No money action occurred.';
+      return;
+    }
+    const receipt = validRoutineSignedReceipt(await response.json());
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (!receipt || Date.parse(receipt.validUntil) <= Date.now()) {
+      routineReceiptStatus.textContent = 'The receipt response was invalid or expired. Do not use it.';
+      return;
+    }
+    routineEnrollmentReceipt = receipt;
+    routineReceiptPackage.textContent = receipt.receiptPackage;
+    routineReceiptPackageWrap.hidden = false;
+    routineReceiptStatus.textContent = 'Signed no-money receipt ready until ' +
+      new Date(receipt.validUntil).toLocaleString() + '. Transfer it directly to the paired phone.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
+      routineReceiptStatus.textContent = 'Receipt retrieval could not be confirmed. Retry safely; no money moved.';
+    }
+  } finally {
+    if (ownerAuthGeneration === generation) {
+      routineReceiptBusy = false;
+      updateRoutineReceiptAvailability();
+    }
+  }
+}
+
 function validRoutinePhoneChallengeReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !==
@@ -2509,6 +2621,9 @@ function signOut(message = 'Signed out.') {
   clearRoutinePhoneChallenge();
   routinePhoneChallengeConfirmation.checked = false;
   routinePhoneEnrollmentStatus.textContent = '';
+  routineReceiptBusy = false;
+  routineReceiptConfirmation.checked = false;
+  clearRoutineReceipt();
   clearExecutionReadiness();
   clearExecutionApprovals();
   clearDepositIntake();
@@ -5382,6 +5497,7 @@ async function loadOwnerDashboardAfterAuthentication(successNotice) {
   loginPanel.hidden = true;
   invitePanel.hidden = false;
   updateRoutinePhonePairingAvailability();
+  updateRoutineReceiptAvailability();
   setNotice(successNotice);
   try {
     await Promise.all([loadOwnerPlayerQueues(), loadSupportContact()]);
@@ -5653,6 +5769,20 @@ executionReadinessRefresh.addEventListener('click', loadExecutionReadiness);
 executionApprovalsRefresh.addEventListener('click', loadExecutionApprovals);
 routineProcessingRefresh.addEventListener('click', loadRoutineProcessing);
 routinePhoneChallengeConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
+routineReceiptConfirmation.addEventListener('change', updateRoutineReceiptAvailability);
+routineReceiptButton.addEventListener('click', retrieveRoutineReceipt);
+routineReceiptCopy.addEventListener('click', async () => {
+  if (!accessToken || !routineEnrollmentReceipt ||
+      Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {
+    clearRoutineReceipt(); return;
+  }
+  try {
+    await navigator.clipboard.writeText(routineEnrollmentReceipt.receiptPackage);
+    setNotice('Signed no-money receipt copied. Paste it directly into the paired phone app.');
+  } catch {
+    setNotice('Copy unavailable. Select the displayed receipt and transfer it directly to the paired phone.');
+  }
+});
 routinePhoneProofConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
 routinePhoneProofInput.addEventListener('input', updateRoutinePhonePairingAvailability);
 routinePhoneChallengeForm.addEventListener('submit', async (event) => {

@@ -26,6 +26,15 @@
   <string name="routine_pairing_proof_copied">The short-lived signed proof was copied. Paste it into the routine proof field on the authenticated Owner page before it expires. The phone is not enrolled until Owner confirms it.</string>
   <string name="routine_pairing_proof_expires">Proof expires at %1$s. The phone is not enrolled until the Owner page accepts it.</string>
   <string name="routine_pairing_signing_failed">The routine proof could not be signed. Check the phone clock and create a fresh Owner package. No enrollment occurred.</string>
+  <string name="routine_receipt_heading">Existing phone: signed no-money receipt</string>
+  <string name="routine_receipt_instructions">On the authenticated Owner page, retrieve the signed receipt for this already-paired phone and paste it here directly. This only stores proof of enrollment; it cannot poll assignments or move money.</string>
+  <string name="routine_receipt_package_hint">Signed routine enrollment receipt package</string>
+  <string name="routine_receipt_import">Verify and store receipt</string>
+  <string name="routine_receipt_importing">Verifying receipt…</string>
+  <string name="routine_receipt_invalid">The signed receipt is invalid, expired, or belongs to a different phone. Nothing was enabled.</string>
+  <string name="routine_receipt_confirm_title">Store no-money receipt?</string>
+  <string name="routine_receipt_confirm_message">Continue only if this receipt came directly from the authenticated Owner page. Storing it does not enable TeleBirr polling, deposits, or money movement.</string>
+  <string name="routine_receipt_stored_until">Signed no-money receipt stored until %1$s. TeleBirr polling and all money actions remain disabled.</string>
   <string name="start_automatic_verification">Start automatic verification</string>
   <string name="stop">Stop</string>
   <string name="version_value">%1$s: %2$s</string>

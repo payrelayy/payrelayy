@@ -55,6 +55,7 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
   OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER:
     '/run/secrets/owner_receiver_reference_fingerprint_master',
   OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: '/run/secrets/owner_control_supabase_publishable_key',
+  OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: '/run/secrets/owner_routine_enrollment_signer_pkcs8',
 };
 
 export interface OwnerControlDatabaseConnection {
@@ -79,6 +80,7 @@ export type OwnerControlRuntimeConfig =
       readonly projectReference: undefined;
       readonly publishableKey: undefined;
       readonly receiverReferenceProtection: undefined;
+      readonly routineEnrollmentReceiptSigner: undefined;
       readonly stage: undefined;
       readonly supabaseUrl: undefined;
       readonly tlsMode: undefined;
@@ -112,6 +114,17 @@ export type OwnerControlRuntimeConfig =
         readonly fingerprintSecret: string;
         readonly masterProfile: DepositProofReferenceProfile;
       };
+      readonly routineEnrollmentReceiptSigner:
+        | {
+            readonly configured: false;
+            readonly privateKeyPkcs8: undefined;
+            readonly signerKeyId: undefined;
+          }
+        | {
+            readonly configured: true;
+            readonly privateKeyPkcs8: string;
+            readonly signerKeyId: string;
+          };
       readonly stage: OwnerControlDeploymentTarget;
       readonly supabaseUrl: (typeof OWNER_CONTROL_DATABASE_TARGETS)[OwnerControlDeploymentTarget]['supabaseUrl'];
       readonly tlsMode: 'verify-full';
@@ -265,6 +278,7 @@ export function loadOwnerControlConfig(
         projectReference: undefined,
         publishableKey: undefined,
         receiverReferenceProtection: undefined,
+        routineEnrollmentReceiptSigner: undefined,
         stage: undefined,
         supabaseUrl: undefined,
         tlsMode: undefined,
@@ -291,6 +305,11 @@ export function loadOwnerControlConfig(
   const receiverReferenceFingerprintMaster = readSecret(
     environment,
     'OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER',
+    dependencies,
+  );
+  const routineEnrollmentSignerPrivateKey = readSecret(
+    environment,
+    'OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY',
     dependencies,
   );
   if (!databaseUrl) throw new Error('OWNER_CONTROL_DATABASE_URL is required.');
@@ -341,6 +360,14 @@ export function loadOwnerControlConfig(
   ) {
     throw new Error('OWNER_COMPANION_SERVER_SIGNER_KEY_ID is malformed.');
   }
+  if (
+    routineEnrollmentSignerPrivateKey !== undefined &&
+    (!/^[A-Za-z0-9_-]{150,1024}$/u.test(routineEnrollmentSignerPrivateKey) ||
+      Buffer.from(routineEnrollmentSignerPrivateKey, 'base64url').toString('base64url') !==
+        routineEnrollmentSignerPrivateKey)
+  ) {
+    throw new Error('OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY is malformed.');
+  }
 
   return {
     ...common,
@@ -363,6 +390,14 @@ export function loadOwnerControlConfig(
         fingerprintSecret: receiverReferenceFingerprintMaster,
         masterProfile: receiverReferenceMasterProfile,
       },
+      routineEnrollmentReceiptSigner:
+        routineEnrollmentSignerPrivateKey === undefined
+          ? { configured: false, privateKeyPkcs8: undefined, signerKeyId: undefined }
+          : {
+              configured: true,
+              privateKeyPkcs8: routineEnrollmentSignerPrivateKey,
+              signerKeyId: `telebirr-routine-enrollment-${deploymentTarget}-v1`,
+            },
       stage: deploymentTarget,
       supabaseUrl: databaseTarget.supabaseUrl,
       tlsMode: 'verify-full',
@@ -389,6 +424,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
         config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,
       receiverReferenceProtectionConfigured: config.runtime.enabled,
+      routineEnrollmentReceiptSignerConfigured:
+        config.runtime.enabled && config.runtime.routineEnrollmentReceiptSigner.configured,
       receiverReferenceMasterProfileVersion: config.runtime.enabled
         ? config.runtime.receiverReferenceProtection.masterProfile.version
         : undefined,

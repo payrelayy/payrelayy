@@ -420,18 +420,18 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         candidate_snapshot_columns: number;
       }>(`
         select
-          exists (select 1 from pg_catalog.pg_constraint constraint
-            where constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
-              and constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey'
-              and constraint.confdeltype = 'c') as candidate_cascade,
-          exists (select 1 from pg_catalog.pg_constraint constraint
-            where constraint.conrelid = '${OBSERVATION_TABLE}'::pg_catalog.regclass
-              and constraint.conname = 'routine_telebirr_observation_receipts_challenge_id_fkey'
-              and constraint.confdeltype = 'c') as observation_cascade,
-          (select pg_catalog.array_length(constraint.conkey, 1)
-             from pg_catalog.pg_constraint constraint
-            where constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
-              and constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey')
+          exists (select 1 from pg_catalog.pg_constraint relation_constraint
+            where relation_constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
+              and relation_constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey'
+              and relation_constraint.confdeltype = 'c') as candidate_cascade,
+          exists (select 1 from pg_catalog.pg_constraint relation_constraint
+            where relation_constraint.conrelid = '${OBSERVATION_TABLE}'::pg_catalog.regclass
+              and relation_constraint.conname = 'routine_telebirr_observation_receipts_challenge_id_fkey'
+              and relation_constraint.confdeltype = 'c') as observation_cascade,
+          (select pg_catalog.array_length(relation_constraint.conkey, 1)
+             from pg_catalog.pg_constraint relation_constraint
+            where relation_constraint.conrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
+              and relation_constraint.conname = 'routine_telebirr_lookup_candidate_snapshot_fkey')
             as candidate_snapshot_columns
       `);
       expect(lineage.rows).toEqual([

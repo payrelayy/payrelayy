@@ -1,10 +1,12 @@
 package com.fetanagent.telebirrverifier
 
 import java.util.Base64
+import java.security.Signature
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RoutineTelebirrLookupAssignmentTest {
@@ -131,6 +133,57 @@ class RoutineTelebirrLookupAssignmentTest {
     assertFalse(assessment.toString().contains(PILOT_REFERENCE))
     assertFalse(authenticated.toString().contains(PILOT_REFERENCE))
     assertFalse(body.toString().contains(PILOT_RECEIVER_NAME))
+  }
+
+  @Test
+  fun `signs only a parsed observation bound to the authenticated routine assignment`() {
+    val authenticated = requireNotNull(verify().authenticatedAssignment)
+    val html =
+      livePilotHtml().replace("20-08-2026 21:01:45", "05-10-2026 21:01:45")
+    val document =
+      livePilotProviderFound(html).copy(retrievedAt = "2026-10-05T18:03:00.000Z")
+    val parsed =
+      RoutineTelebirrReceiptParser().parse(document, authenticated.receiptExpectation())
+        as RoutineTelebirrParsedReceipt.Observed
+    val observation =
+      RoutineTelebirrSignedObservationFactory.create(authenticated, enrollment, parsed, device)
+
+    assertEquals(body.candidateId, observation.body.candidateId)
+    assertEquals(body.challengeDigest, observation.body.challengeDigest)
+    assertEquals(parsed.facts.retrievedAt, observation.body.observedAt)
+    assertEquals(
+      RoutineTelebirrObservationCanonical.factsDigest(parsed.facts),
+      observation.body.normalizedFactsDigest,
+    )
+    assertEquals(
+      RoutineTelebirrObservationCanonical.bodyDigest(observation.body),
+      observation.bodyDigest,
+    )
+    val verifier = Signature.getInstance("SHA256withECDSA")
+    verifier.initVerify(device.keyPair.public)
+    verifier.update(RoutineTelebirrObservationCanonical.signatureBytes(observation.body))
+    assertTrue(
+      verifier.verify(EcdsaP1363.p1363ToDer(Base64.getUrlDecoder().decode(observation.signature))),
+    )
+    assertFalse(observation.toString().contains(PILOT_REFERENCE))
+    assertFalse(observation.body.toString().contains(PILOT_RECEIVER_NAME))
+
+    assertFails {
+      RoutineTelebirrSignedObservationFactory.create(
+        authenticated,
+        enrollment,
+        parsed,
+        JvmP256Identity(device.keyId),
+      )
+    }
+    assertFails {
+      RoutineTelebirrSignedObservationFactory.create(
+        authenticated,
+        enrollment,
+        parsed.copy(facts = parsed.facts.copy(retrievedAt = body.expiresAt)),
+        device,
+      )
+    }
   }
 
   @Test

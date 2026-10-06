@@ -17,7 +17,8 @@ candidate database binding, authenticate TeleBirr, or activate the Android routi
 phone's routine receiver-name digest is domain-separated from the private pilot, but the routine
 phone path is still dormant. The Android routine lookup verifier can check that same assignment
 transcript against a local device key and yields only a guarded parsing expectation; it has no
-routine wire codec, enrollment lifecycle, production caller, or observation upload.
+routine wire codec, enrollment lifecycle, production caller, or observation upload. The Android
+routine observation factory can sign locally parsed facts, but no runtime calls or transmits it.
 Do not run this activation procedure, install its runtime credential or release marker, or start
 the Automatic Deposits launcher until a later reviewed release proves the whole path with
 disposable SQL and no-money end-to-end tests.

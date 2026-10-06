@@ -5047,6 +5047,65 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('lists current routine phones for the authenticated Owner without receipt-signing authority', async () => {
+    const enrollmentId = '55555555-5555-4555-8555-555555555555';
+    const calls: string[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        routineTelebirrPairing: {
+          issue: async () => {
+            throw new Error('Unexpected pairing issue.');
+          },
+          enroll: async () => {
+            throw new Error('Unexpected pairing enrollment.');
+          },
+          listActivePhones: async (actor) => {
+            calls.push(actor);
+            return {
+              assignmentPollingAllowed: false,
+              moneyMovementAllowed: false,
+              phones: [
+                {
+                  deviceId: 'routine-device-a',
+                  deviceKeyId: 'routine-key-a',
+                  enrollmentId,
+                  validUntil: '2026-11-05T20:00:00.000Z',
+                },
+              ],
+            };
+          },
+        },
+      }),
+    });
+    const unauthorized = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/routine-telebirr-phones',
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/routine-telebirr-phones',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers['cache-control']).toContain('no-store');
+    expect(listed.json()).toEqual({
+      assignmentPollingAllowed: false,
+      moneyMovementAllowed: false,
+      phones: [
+        {
+          deviceId: 'routine-device-a',
+          deviceKeyId: 'routine-key-a',
+          enrollmentId,
+          validUntil: '2026-11-05T20:00:00.000Z',
+        },
+      ],
+    });
+    expect(calls).toEqual([authUserId]);
+    await app.close();
+  });
+
   it('rejects browser-supplied routine pairing authority and invalid CSRF before authentication', async () => {
     let authCalls = 0;
     const app = buildOwnerControlApp(config(), {

@@ -1696,8 +1696,8 @@ function clearRoutinePhoneChallenge() {
 
 function updateRoutinePhonePairingAvailability() {
   if (routinePhonePairing && Date.parse(routinePhonePairing.expiresAt) <= Date.now()) {
-    clearRoutinePhoneChallenge();
     clearPendingRoutinePhoneChallengeRequestId();
+    clearRoutinePhoneChallenge();
     return;
   }
   const ready = Boolean(accessToken) && !routinePhonePairingBusy && !routinePhoneProofBusy;
@@ -1787,13 +1787,14 @@ async function issueRoutinePhoneChallenge() {
       throw new Error('routine_phone_challenge');
     }
     const receipt = validRoutinePhoneChallengeReceipt(await response.json());
+    if (!accessToken || ownerAuthGeneration !== generation) return;
     if (!receipt || (response.status === 200) !== receipt.alreadyIssued ||
         Date.parse(receipt.expiresAt) <= Date.now()) throw new Error('routine_phone_challenge_receipt');
     routinePhonePairing = receipt;
     routinePhoneChallengePackage.textContent = receipt.challengePackage;
     routinePhoneChallengeReceipt.hidden = false;
     routinePhonePairingExpiryTimer = window.setTimeout(() => {
-      clearRoutinePhoneChallenge(); clearPendingRoutinePhoneChallengeRequestId();
+      clearPendingRoutinePhoneChallengeRequestId(); clearRoutinePhoneChallenge();
     }, Date.parse(receipt.expiresAt) - Date.now());
     routinePhoneEnrollmentStatus.textContent = 'Challenge ready. The phone is not yet enrolled.';
   } catch (error) {
@@ -1841,11 +1842,12 @@ async function submitRoutinePhoneProof() {
       throw new Error('routine_phone_proof');
     }
     const receipt = validRoutinePhoneEnrollmentReceipt(await response.json());
+    if (!accessToken || ownerAuthGeneration !== generation) return;
     if (!receipt || (response.status === 200) !== receipt.alreadyEnrolled) {
       throw new Error('routine_phone_enrollment_receipt');
     }
-    clearRoutinePhoneChallenge();
     clearPendingRoutinePhoneChallengeRequestId();
+    clearRoutinePhoneChallenge();
     routinePhoneChallengeConfirmation.checked = false;
     routinePhoneEnrollmentStatus.textContent = 'Routine-only phone enrollment confirmed until ' +
       new Date(receipt.validUntil).toLocaleString() + '. Enrollment ID: ' + receipt.enrollmentId +

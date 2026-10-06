@@ -150,6 +150,7 @@ export {
   canonicalRoutineTelebirrLookupAssignmentSignatureBytes,
   digestRoutineTelebirrLookupAssignmentBody,
   digestRoutineTelebirrReceiverName,
+  digestRoutineTelebirrReceiverProfile,
   verifyRoutineTelebirrSignedLookupAssignment,
   type RoutineTelebirrLookupAssignmentResult,
 } from './routine-signed-lookup-assignment.js';

@@ -13,10 +13,13 @@ atomic one-use payment claim. A private digest-only challenge/observation ledger
 candidate snapshot and permits one observation receipt per challenge. An administrator-only
 database issuer can reserve a five-minute challenge against a current candidate, receiving-account
 revision, separate routine enrollment, and signer. The routine trust stores are empty and have no
-application provisioning path; the issuer has no runtime grant or transport. It does not open a
-reference, sign an assignment, authenticate an official TeleBirr source, accept an observation, or
-claim a payment. Pilot pairing cannot substitute for routine enrollment. The advisory result and
-dormant ledger do not satisfy this activation gate.
+application provisioning path; the issuer has no runtime grant or transport. A second admin-only
+function can return the exact encrypted candidate and trust material in the same transaction as
+challenge issuance, while rejecting a signer that is also the device key. A dormant protected-process
+builder can open that reference and sign the routine assignment in isolation, but has no deployed
+caller or signed-assignment persistence. It does not authenticate an official TeleBirr source,
+accept an observation, or claim a payment. Pilot pairing cannot substitute for routine enrollment.
+The advisory result and dormant ledger do not satisfy this activation gate.
 The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and
 routine device/receiver binding in isolation. It does not issue signed assignments, verify the
 database reservation, authenticate TeleBirr, or activate the Android routine lookup. The

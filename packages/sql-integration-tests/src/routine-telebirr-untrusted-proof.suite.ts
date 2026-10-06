@@ -15,6 +15,8 @@ const ENROLLMENT_TABLE = 'app.routine_telebirr_device_enrollments';
 const SIGNER_TABLE = 'app.routine_telebirr_lookup_signers';
 const ISSUE =
   'select * from app.issue_routine_telebirr_lookup_challenge($1::uuid, $2::uuid, $3::uuid)';
+const ISSUE_MATERIAL =
+  'select * from app.issue_routine_telebirr_lookup_assignment_material($1::uuid, $2::uuid, $3::uuid)';
 const CAPTURE = `
   select * from app.capture_telegram_routine_telebirr_untrusted_proof(
     $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
@@ -579,6 +581,135 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       expect(digestRow.rows[0]!.value).toBe(
         'sha256:6f4b944f412c74330943d7cedb2a1b96906fe1b3d19f493551bead5d29ce03bd',
       );
+      const profileDigestRow = await client.query<{ value: string }>(
+        `select app.routine_telebirr_receiver_profile_digest(
+           '33333333-3333-4333-8333-333333333333'::uuid, 3, $1::text, $2::text
+         ) as value`,
+        ['c'.repeat(64), '  ROUTINE\tRECEIVER  '],
+      );
+      expect(profileDigestRow.rows[0]!.value).toBe(
+        'sha256:15041ad5b0e4c4527f10cf34c9180d51bb867905b79ce97407592aeb74142699',
+      );
+    });
+
+    it('returns exact encrypted assignment material only to postgres and rejects shared keys', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        service_allowed: boolean;
+        broker_allowed: boolean;
+        pilot_broker_allowed: boolean;
+        key_separation_trigger: boolean;
+      }>(`
+        select routine.proowner::pg_catalog.regrole::text as owner,
+               routine.prosecdef as security_definer,
+               pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                 as public_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'EXECUTE')
+                 as service_allowed,
+               pg_catalog.has_function_privilege('fetanagent_routine_deposit_broker_runtime',
+                 routine.oid, 'EXECUTE') as broker_allowed,
+               pg_catalog.has_function_privilege('fetanagent_telebirr_assignment_broker_runtime',
+                 routine.oid, 'EXECUTE') as pilot_broker_allowed,
+               exists (select 1 from pg_catalog.pg_trigger trigger_row
+                 where trigger_row.tgrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
+                   and trigger_row.tgname = 'routine_telebirr_lookup_distinct_keys'
+                   and not trigger_row.tgisinternal) as key_separation_trigger
+          from pg_catalog.pg_proc routine
+         where routine.oid =
+           'app.issue_routine_telebirr_lookup_assignment_material(uuid,uuid,uuid)'::pg_catalog.regprocedure
+      `);
+      expect(catalog.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: true,
+          public_allowed: false,
+          service_allowed: false,
+          broker_allowed: false,
+          pilot_broker_allowed: false,
+          key_separation_trigger: true,
+        },
+      ]);
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        await client.query('set local role fetanagent_routine_deposit_broker');
+        await rejected(client, ISSUE_MATERIAL, [candidateId, trust.enrollmentId, trust.signerId]);
+        await client.query('reset role');
+
+        const material = await client.query<{
+          challenge_id: string;
+          challenge_digest: string;
+          issued_at: Date;
+          expires_at: Date;
+          candidate_id: string;
+          candidate_reference_ciphertext: string;
+          candidate_reference_fingerprint: string;
+          receiver_revision_id: string;
+          receiver_profile_digest: string;
+          expected_receiver_name_digest: string;
+          device_enrollment_id: string;
+          device_id: string;
+          device_key_id: string;
+          assignment_signer_id: string;
+          source_profile: string;
+        }>(ISSUE_MATERIAL, [candidateId, trust.enrollmentId, trust.signerId]);
+        expect(material.rows).toHaveLength(1);
+        const row = material.rows[0]!;
+        expect(row.challenge_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(row.expires_at.getTime() - row.issued_at.getTime()).toBe(300_000);
+        expect(row.candidate_id).toBe(candidateId);
+        expect(row.candidate_reference_ciphertext).toMatch(/^v2\.telebirr\./u);
+        expect(row.candidate_reference_ciphertext).not.toContain('FTAN12345678');
+        expect(row.candidate_reference_fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+        expect(row.receiver_profile_digest).toBe(trust.receiverProfileDigest);
+        expect(row.expected_receiver_name_digest).toBe(trust.expectedReceiverNameDigest);
+        expect(row.device_enrollment_id).toBe(trust.enrollmentId);
+        expect(row.device_id).toBe(trust.deviceId);
+        expect(row.device_key_id).toBe(trust.deviceKeyId);
+        expect(row.assignment_signer_id).toBe(trust.signerId);
+        expect(row.source_profile).toBe('telebirr_official_receipt_v1');
+        const pinned = await client.query<{ exact: boolean }>(
+          `select challenge.candidate_id = $2::uuid
+                    and challenge.device_enrollment_id = $3::uuid
+                    and challenge.assignment_signer_id = $4::uuid
+                    and challenge.receiver_account_id = $5::uuid
+                    and challenge.challenge_digest = $6::text as exact
+             from ${LOOKUP_TABLE} challenge where challenge.challenge_id = $1::uuid`,
+          [
+            row.challenge_id,
+            candidateId,
+            trust.enrollmentId,
+            trust.signerId,
+            row.receiver_revision_id,
+            row.challenge_digest,
+          ],
+        );
+        expect(pinned.rows).toEqual([{ exact: true }]);
+
+        const sharedSigner = await client.query<{ id: string }>(
+          `insert into ${SIGNER_TABLE} (
+             signer_key_id, public_key_spki_sha256, valid_from, valid_until
+           ) values ($1::text, $2::text, clock_timestamp() - interval '1 hour',
+             clock_timestamp() + interval '1 day') returning id`,
+          [trust.deviceKeyId, trust.deviceKeyDigest],
+        );
+        await rejected(client, ISSUE_MATERIAL, [
+          candidateId,
+          trust.enrollmentId,
+          sharedSigner.rows[0]!.id,
+        ]);
+        expect(await snapshot(client)).toBe(before);
+      });
     });
 
     it('issues only a five-minute no-money lookup for a current candidate and separate routine trust', async () => {

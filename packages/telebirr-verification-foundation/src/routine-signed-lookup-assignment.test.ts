@@ -10,6 +10,7 @@ import {
   canonicalRoutineTelebirrLookupAssignmentSignatureBytes,
   digestRoutineTelebirrLookupAssignmentBody,
   digestRoutineTelebirrReceiverName,
+  digestRoutineTelebirrReceiverProfile,
   verifyRoutineTelebirrSignedLookupAssignment,
 } from './routine-signed-lookup-assignment.js';
 
@@ -98,6 +99,24 @@ function fixture() {
 }
 
 describe('routine TeleBirr signed lookup assignment', () => {
+  it('pins the independent database receiver-profile digest transcript', () => {
+    const input = {
+      receiverRevisionId: '33333333-3333-4333-8333-333333333333',
+      receiverVersion: 3,
+      receiverReferenceFingerprint: 'c'.repeat(64),
+      receiverName: '  ROUTINE\tRECEIVER  ',
+    };
+    expect(digestRoutineTelebirrReceiverProfile(input)).toBe(
+      'sha256:15041ad5b0e4c4527f10cf34c9180d51bb867905b79ce97407592aeb74142699',
+    );
+    expect(digestRoutineTelebirrReceiverProfile({ ...input, receiverVersion: 4 })).not.toBe(
+      digestRoutineTelebirrReceiverProfile(input),
+    );
+    expect(
+      digestRoutineTelebirrReceiverProfile({ ...input, receiverName: '\u0001bad' }),
+    ).toBeUndefined();
+  });
+
   it('pins the Android assignment-body digest transcript', () => {
     const { body } = fixture();
     expect(digestRoutineTelebirrLookupAssignmentBody(body)).toBe(

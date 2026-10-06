@@ -168,11 +168,7 @@ function header(value: UnknownRecord): boolean {
 }
 
 /** Length-prefixed UTF-8 fields, including each scalar's type, for cross-runtime signing. */
-function encodeFields(domain: string, fields: readonly Field[]): Buffer {
-  const values = [domain, String(fields.length)];
-  for (const [name, value] of fields) {
-    values.push(name, `${typeof value}:${value}`);
-  }
+function encodeLengthPrefixedValues(values: readonly string[]): Buffer {
   const chunks: Buffer[] = [];
   for (const value of values) {
     const bytes = Buffer.from(value, 'utf8');
@@ -181,6 +177,14 @@ function encodeFields(domain: string, fields: readonly Field[]): Buffer {
     chunks.push(length, bytes);
   }
   return Buffer.concat(chunks);
+}
+
+function encodeFields(domain: string, fields: readonly Field[]): Buffer {
+  const values = [domain, String(fields.length)];
+  for (const [name, value] of fields) {
+    values.push(name, `${typeof value}:${value}`);
+  }
+  return encodeLengthPrefixedValues(values);
 }
 
 function digest(bytes: Uint8Array): string {
@@ -198,6 +202,44 @@ export function digestRoutineTelebirrReceiverName(value: unknown): string | unde
         ]),
       )
     : undefined;
+}
+
+/** Matches the database's five-field routine receiver-revision digest exactly. */
+export function digestRoutineTelebirrReceiverProfile(inputCandidate: unknown): string | undefined {
+  try {
+    const value = record(inputCandidate, [
+      'receiverRevisionId',
+      'receiverVersion',
+      'receiverReferenceFingerprint',
+      'receiverName',
+    ]);
+    if (
+      !value ||
+      typeof value.receiverRevisionId !== 'string' ||
+      !UUID_V4.test(value.receiverRevisionId) ||
+      typeof value.receiverVersion !== 'number' ||
+      !Number.isSafeInteger(value.receiverVersion) ||
+      value.receiverVersion < 1 ||
+      typeof value.receiverReferenceFingerprint !== 'string' ||
+      !FINGERPRINT.test(value.receiverReferenceFingerprint)
+    ) {
+      return undefined;
+    }
+    const nameDigest = digestRoutineTelebirrReceiverName(value.receiverName);
+    return nameDigest
+      ? digest(
+          encodeLengthPrefixedValues([
+            'fetanagent:telebirr:routine:receiver-profile:v1',
+            value.receiverRevisionId,
+            String(value.receiverVersion),
+            value.receiverReferenceFingerprint,
+            nameDigest,
+          ]),
+        )
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseBody(value: unknown): AssignmentBody | undefined {

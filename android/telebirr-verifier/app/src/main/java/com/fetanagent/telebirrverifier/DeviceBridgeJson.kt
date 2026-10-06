@@ -1049,7 +1049,7 @@ object DeviceBridgeJsonCodec {
     )
 }
 
-private sealed interface JsonValue {
+internal sealed interface JsonValue {
   data class Object(val fields: LinkedHashMap<String, JsonValue>) : JsonValue {
     fun value(name: String): JsonValue = requireNotNull(fields[name]) { "Missing $name" }
 
@@ -1090,30 +1090,30 @@ private sealed interface JsonValue {
 
 private val INTEGER_PATTERN = Regex("-?(?:0|[1-9][0-9]*)")
 
-private fun JsonValue.requireObject(expectedKeys: Set<String>): JsonValue.Object {
+internal fun JsonValue.requireObject(expectedKeys: Set<String>): JsonValue.Object {
   val value = this as? JsonValue.Object ?: error("Expected object")
   require(value.fields.keys == expectedKeys) { "Unexpected object keys" }
   return value
 }
 
-private fun obj(vararg fields: Pair<String, JsonValue>): JsonValue.Object =
+internal fun obj(vararg fields: Pair<String, JsonValue>): JsonValue.Object =
   JsonValue.Object(
     linkedMapOf<String, JsonValue>().apply {
       for ((name, value) in fields) require(put(name, value) == null) { "Duplicate $name" }
     },
   )
 
-private fun text(value: String): JsonValue.Text = JsonValue.Text(value)
+internal fun text(value: String): JsonValue.Text = JsonValue.Text(value)
 
 private fun nullableText(value: String?): JsonValue = value?.let(::text) ?: JsonValue.Null
 
-private fun number(value: Long): JsonValue.NumberValue = JsonValue.NumberValue(value.toString())
+internal fun number(value: Long): JsonValue.NumberValue = JsonValue.NumberValue(value.toString())
 
 private fun nullableNumber(value: Long?): JsonValue = value?.let(::number) ?: JsonValue.Null
 
-private fun bool(value: Boolean): JsonValue.BooleanValue = JsonValue.BooleanValue(value)
+internal fun bool(value: Boolean): JsonValue.BooleanValue = JsonValue.BooleanValue(value)
 
-private object StrictJson {
+internal object StrictJson {
   private const val MAX_DEPTH = 16
   private const val MAX_FIELDS_PER_OBJECT = 128
   private const val MAX_STRING_CODE_UNITS = 32 * 1_024

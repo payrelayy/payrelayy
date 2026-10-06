@@ -46,6 +46,14 @@ The transport does not interpret a bare HTTP `404` as proof that a transaction i
 exact provider negative-response contract is independently attested and reviewed, a `404` is provider
 uncertainty and must go to review.
 
+The separate routine TeleBirr path now has an evidence-only, strict JSON codec for a signed lookup
+assignment and a normalized signed observation. It rejects duplicate/extra fields, malformed UTF-8,
+stale digests, and pilot protocol substitution. The codec itself does not authenticate signatures;
+the separate routine verifier must check the server signature and independently trusted enrollment
+before any lookup. It is not connected to the live-pilot bridge or the
+foreground runtime, and it has no routine enrollment, assignment issuer, upload endpoint, database
+claim, or financial authority. Do not install a debug build as an operational routine verifier.
+
 The app has no database, Supabase, KemerBet, claim, settlement, enqueue, execution, or financial-action authority. A signed observation is evidence for a trusted server to assess; it cannot authorize SQL, credit a player, or move money. There are no customer-entered secrets, provider credentials, raw receipt/reference/name/URL logs, or embedded API keys.
 
 The live-pilot coordinator now performs the safe in-process sequence: check the three explicit

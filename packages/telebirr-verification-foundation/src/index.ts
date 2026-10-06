@@ -163,3 +163,15 @@ export {
   assessRoutineTelebirrDevicePairingProof,
   type RoutineTelebirrDevicePairingAssessment,
 } from './routine-device-pairing.js';
+export {
+  ROUTINE_TELEBIRR_ENROLLMENT_RECEIPT_MODE,
+  ROUTINE_TELEBIRR_ENROLLMENT_RECEIPT_TRANSCRIPT,
+  canonicalRoutineTelebirrEnrollmentReceiptBodyBytes,
+  canonicalRoutineTelebirrEnrollmentReceiptSignatureBytes,
+  decodeRoutineTelebirrEnrollmentReceiptBody,
+  decodeSignedRoutineTelebirrEnrollmentReceipt,
+  digestRoutineTelebirrEnrollmentReceiptBody,
+  verifySignedRoutineTelebirrEnrollmentReceipt,
+  type RoutineTelebirrEnrollmentReceiptBody,
+  type SignedRoutineTelebirrEnrollmentReceipt,
+} from './routine-enrollment-receipt.js';

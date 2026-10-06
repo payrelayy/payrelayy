@@ -23,6 +23,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.io.File
 
 class MainActivity : Activity() {
   private lateinit var stateStore: VerifierOperationalStateStore
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
         Thread(runnable, "fetanagent-device-pairing").apply { isDaemon = true }
       }
     render()
+    if (BuildConfig.VERIFIER_ENABLED) restoreRoutineProof()
   }
 
   override fun onDestroy() {
@@ -278,14 +280,14 @@ class MainActivity : Activity() {
     render()
     pairingExecutor.execute {
       val result = runCatching {
-        val alias = "fetanagent_telebirr_routine_pairing_p256_v1"
-        val bootstrap = AndroidKeystoreP256Identity("routine_key_bootstrap_v1", alias)
-        val fingerprint = bootstrap.publicMaterial().publicKeySpkiSha256.removePrefix("sha256:")
-        val identity = AndroidKeystoreP256Identity("routine_key_$fingerprint", alias)
+        val identity = routineIdentity()
+        val nowMillis = System.currentTimeMillis()
         val proof = RoutineDevicePairingHandoff.createProof(
-          packageValue, identity, System.currentTimeMillis(),
+          packageValue, identity, nowMillis,
         )
         val decoded = RoutineDevicePairingJsonCodec.decode(proof) ?: error("Invalid local proof")
+        EncryptedRoutineEnrollmentStore.forApplication(applicationContext)
+          .stagePending(decoded, identity, System.currentTimeMillis())
         String(proof, StandardCharsets.UTF_8) to Instant.parse(decoded.body.expiresAt).toEpochMilli()
       }
       runOnUiThread {
@@ -308,6 +310,32 @@ class MainActivity : Activity() {
             .show()
         }
         render()
+      }
+    }
+  }
+
+  private fun routineIdentity(): P256Identity {
+    val alias = "fetanagent_telebirr_routine_pairing_p256_v1"
+    val bootstrap = AndroidKeystoreP256Identity("routine_key_bootstrap_v1", alias)
+    val fingerprint = bootstrap.publicMaterial().publicKeySpkiSha256.removePrefix("sha256:")
+    return AndroidKeystoreP256Identity("routine_key_$fingerprint", alias)
+  }
+
+  private fun restoreRoutineProof() {
+    val directory = File(applicationContext.noBackupFilesDir, "routine-enrollment-v1")
+    if (!directory.isDirectory) return
+    pairingExecutor.execute {
+      val restored = runCatching {
+        val identity = routineIdentity()
+        EncryptedRoutineEnrollmentStore.forApplication(applicationContext)
+          .loadPending(identity, System.currentTimeMillis())
+      }.getOrNull()
+      if (restored != null) runOnUiThread {
+        if (!routineProofInProgress && routineProofValue == null && !isFinishing && !isDestroyed) {
+          routineProofValue = String(RoutineDevicePairingJsonCodec.encode(restored), StandardCharsets.UTF_8)
+          routineProofExpiresAt = Instant.parse(restored.body.expiresAt).toEpochMilli()
+          render()
+        }
       }
     }
   }

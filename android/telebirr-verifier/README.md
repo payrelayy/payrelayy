@@ -204,6 +204,13 @@ can complete the manual phone handoff without rushing. The signed phone proof it
 within four minutes and must return to the same Owner tab promptly. This does not add polling,
 provider lookup, execution, or money authority.
 
+The next unreleased source slice seals the exact pending routine proof in separate Android
+Keystore-protected no-backup storage and restores it after an app restart only while it remains
+fresh. It also defines and tests a separate server-signed routine enrollment receipt and an
+encrypted store that accepts it only against a separately trusted signer, the exact pending proof,
+and the local phone key. No production routine signer or receipt is provisioned, no receipt-import
+control is shown, and the app still cannot poll or submit routine observations.
+
 Version `0.5.13` adds the stopped-phone, no-money routine pairing proof handoff. It never starts
 the foreground verifier and uses a Keystore alias separate from the pilot key. The phone has no
 routine server URL, bearer token, enrollment certificate, assignment polling, or financial

@@ -3,6 +3,7 @@ package com.fetanagent.telebirrverifier
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -20,11 +21,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.nio.charset.StandardCharsets
+import java.time.Instant
 
 class MainActivity : Activity() {
   private lateinit var stateStore: VerifierOperationalStateStore
   private lateinit var pairingExecutor: ExecutorService
   private var pairingInProgress = false
+  private var routineProofInProgress = false
+  private var routineProofValue: String? = null
+  private var routineProofExpiresAt = 0L
   private var removeStateObserver: (() -> Unit)? = null
   private val stateRefreshHandler = Handler(Looper.getMainLooper())
   private val refreshOperationalState = Runnable {
@@ -42,6 +48,7 @@ class MainActivity : Activity() {
   }
 
   override fun onDestroy() {
+    clearRoutineProof()
     pairingExecutor.shutdownNow()
     super.onDestroy()
   }
@@ -90,6 +97,7 @@ class MainActivity : Activity() {
   }
 
   private fun render() {
+    if (routineProofExpiresAt <= System.currentTimeMillis()) clearRoutineProof()
     val snapshot = stateStore.snapshot()
     val enrolled =
       BuildConfig.VERIFIER_ENABLED &&
@@ -194,7 +202,121 @@ class MainActivity : Activity() {
       } else if (BuildConfig.VERIFIER_ENABLED) {
         addOperationalControls(snapshot.operatorEnabled)
       }
+      if (BuildConfig.VERIFIER_ENABLED && !snapshot.operatorEnabled) addRoutinePairingControls()
     }
+
+  private fun LinearLayout.addRoutinePairingControls() {
+    addView(TextView(context).apply {
+      setText(R.string.routine_pairing_heading)
+      textSize = 20f
+      setPadding(0, 48, 0, 16)
+    })
+    addView(TextView(context).apply {
+      setText(R.string.routine_pairing_instructions)
+      textSize = 14f
+    })
+    val availableProof = routineProofValue
+    if (availableProof != null) {
+      addView(Button(context).apply {
+        setText(R.string.routine_pairing_copy_proof)
+        setOnClickListener {
+          if (routineProofValue != availableProof || System.currentTimeMillis() >= routineProofExpiresAt) {
+            clearRoutineProof()
+            render()
+            return@setOnClickListener
+          }
+          val clipboard = getSystemService(ClipboardManager::class.java)
+          clipboard.setPrimaryClip(ClipData.newPlainText("Routine pairing proof", availableProof))
+          AlertDialog.Builder(this@MainActivity)
+            .setMessage(R.string.routine_pairing_proof_copied)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+        }
+      })
+      addView(TextView(context).apply {
+        text = getString(R.string.routine_pairing_proof_expires, Instant.ofEpochMilli(routineProofExpiresAt).toString())
+        textSize = 13f
+      })
+      return
+    }
+    val packageInput = EditText(context).apply {
+      setHint(R.string.routine_pairing_package_hint)
+      inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or
+        InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+      importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+      isSaveEnabled = false
+      maxLines = 3
+    }
+    addView(packageInput, LinearLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+    ))
+    addView(Button(context).apply {
+      setText(if (routineProofInProgress) R.string.routine_pairing_signing else R.string.routine_pairing_create_proof)
+      isEnabled = !routineProofInProgress
+      setOnClickListener {
+        val packageValue = packageInput.text?.toString()?.trim().orEmpty()
+        if (RoutineDevicePairingJsonCodec.decodeChallengePackage(packageValue) == null) {
+          AlertDialog.Builder(this@MainActivity)
+            .setMessage(R.string.routine_pairing_invalid)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+          return@setOnClickListener
+        }
+        AlertDialog.Builder(this@MainActivity)
+          .setTitle(R.string.routine_pairing_confirm_title)
+          .setMessage(R.string.routine_pairing_confirm_message)
+          .setNegativeButton(android.R.string.cancel, null)
+          .setPositiveButton(R.string.routine_pairing_create_proof) { _, _ -> createRoutineProof(packageValue) }
+          .show()
+      }
+    })
+  }
+
+  private fun createRoutineProof(packageValue: String) {
+    if (routineProofInProgress) return
+    routineProofInProgress = true
+    render()
+    pairingExecutor.execute {
+      val result = runCatching {
+        val alias = "fetanagent_telebirr_routine_pairing_p256_v1"
+        val bootstrap = AndroidKeystoreP256Identity("routine_key_bootstrap_v1", alias)
+        val fingerprint = bootstrap.publicMaterial().publicKeySpkiSha256.removePrefix("sha256:")
+        val identity = AndroidKeystoreP256Identity("routine_key_$fingerprint", alias)
+        val proof = RoutineDevicePairingHandoff.createProof(
+          packageValue, identity, System.currentTimeMillis(),
+        )
+        val decoded = RoutineDevicePairingJsonCodec.decode(proof) ?: error("Invalid local proof")
+        String(proof, StandardCharsets.UTF_8) to Instant.parse(decoded.body.expiresAt).toEpochMilli()
+      }
+      runOnUiThread {
+        routineProofInProgress = false
+        if (result.isSuccess) {
+          val (proof, expiresAt) = result.getOrThrow()
+          routineProofValue = proof
+          routineProofExpiresAt = expiresAt
+          clearMatchingClipboard(packageValue)
+          stateRefreshHandler.postDelayed({
+            if (routineProofExpiresAt <= System.currentTimeMillis()) {
+              clearRoutineProof()
+              if (!isFinishing && !isDestroyed) render()
+            }
+          }, (expiresAt - System.currentTimeMillis()).coerceAtLeast(1L))
+        } else {
+          AlertDialog.Builder(this@MainActivity)
+            .setMessage(R.string.routine_pairing_signing_failed)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+        }
+        render()
+      }
+    }
+  }
+
+  private fun clearRoutineProof() {
+    routineProofValue?.let(::clearMatchingClipboard)
+    routineProofValue = null
+    routineProofExpiresAt = 0L
+  }
 
   private fun LinearLayout.addPairingControls() {
     addView(

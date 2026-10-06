@@ -181,6 +181,10 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
         await client.query('set session authorization fetanagent_owner_control_runtime');
         try {
           await rejected(client, ISSUE, [getOwnerAuthUserId(), requestId]);
+          expect(
+            (await client.query(READ_PROOF_CHALLENGE, [getOwnerAuthUserId(), issued!.pairing_id]))
+              .rows,
+          ).toHaveLength(0);
         } finally {
           await client.query('reset session authorization');
         }
@@ -309,7 +313,7 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           await rejected(client, 'select * from app.routine_telebirr_device_enrollments');
           expect(
             (await client.query(READ_PROOF_CHALLENGE, [getOwnerAuthUserId(), pairingId])).rows,
-          ).toHaveLength(0);
+          ).toEqual(trusted.rows);
         } finally {
           await client.query('reset session authorization');
         }

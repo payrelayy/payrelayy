@@ -51,20 +51,22 @@ assignment and a normalized signed observation. It rejects duplicate/extra field
 stale digests, and pilot protocol substitution. The codec itself does not authenticate signatures;
 the separate routine verifier must check the server signature and independently trusted enrollment
 before any lookup. It is not connected to the live-pilot bridge or the
-foreground runtime, and it has no routine enrollment, assignment issuer, upload endpoint, database
-claim, or financial authority. Do not install a debug build as an operational routine verifier.
+foreground runtime, and it has no routine assignment issuer, upload endpoint, database claim, or
+financial authority. Do not install a debug build as an operational routine verifier.
 
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
 short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,
 and expected receiver-name digest. It has its own mode and signing domain, strict bounded JSON
 codec, and shared Kotlin/TypeScript digest vector. The TypeScript assessor checks P-256 possession
-against an independently supplied challenge but deliberately does not consume that challenge or
-create an enrollment. The authenticated Owner issuer can now create a ten-minute challenge and the
-Android codec can strictly decode its routine-only package. Only a postgres-only function may mark
-a challenge consumed; no protected proof exchange invokes it yet. There is still no signed routine
-enrollment certificate or device provisioning call. The pilot pairing package and certificate must
-never be accepted as routine trust; a future operational composition must use a separate routine
-Android Keystore alias and independently authorized pairing path.
+against an independently supplied challenge; it does not itself enroll or consume anything. The
+authenticated Owner issuer creates a ten-minute challenge. In a stopped, signed operational build,
+the app uses a separate routine Android Keystore alias to sign a four-minute proof and copies it
+only after an explicit tap. The Owner page verifies that proof against its own challenge record and
+a private atomic SQL function consumes the challenge and creates a routine-only enrollment. A
+retry of the identical proof can recover the same enrollment while the challenge is fresh. The
+phone does not receive a signed routine enrollment certificate or poll routine assignments yet;
+no routine provider lookup or money action is enabled. The pilot pairing package and certificate
+are never accepted as routine trust.
 
 The app has no database, Supabase, KemerBet, claim, settlement, enqueue, execution, or financial-action authority. A signed observation is evidence for a trusted server to assess; it cannot authorize SQL, credit a player, or move money. There are no customer-entered secrets, provider credentials, raw receipt/reference/name/URL logs, or embedded API keys.
 
@@ -196,6 +198,11 @@ earlier than the enrollment's validity start, the signed request window remains 
 seconds, and local enrollment expiry is assessed against the actual clock before preparing any
 request. Signatures, replay checks, server expiry checks, receipt parsing, pairing storage, and
 all financial boundaries are unchanged.
+
+Version `0.5.13` adds the stopped-phone, no-money routine pairing proof handoff. It never starts
+the foreground verifier and uses a Keystore alias separate from the pilot key. The phone has no
+routine server URL, bearer token, enrollment certificate, assignment polling, or financial
+authority. An authenticated Owner must submit the proof before the short challenge expires.
 
 Version `0.5.10` extends only the bounded official-receipt network deadline from five to fifteen
 seconds after intermittent header-read timeouts. The fixed host, public-address policy, TLS

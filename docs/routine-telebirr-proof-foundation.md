@@ -74,11 +74,18 @@ The next reviewed slices must, in order:
    window, active receiver, one-use evidence identity, and all seven disabled money switches.
    The private SQL function does **not** verify ECDSA by itself: only the trusted Owner service
    may call it, and its database credential must never be exposed to the phone or browser.
-   A successfully consumed challenge cannot be fetched again through the Owner proof endpoint;
-   a duplicate submission should be treated as needing status review, not as a new enrollment.
-   The Owner page does not yet expose this package because the protected phone exchange is absent.
-   The remaining work is protected phone transport, a routine-only signed enrollment receipt and
-   durable phone state, plus guarded signer enrollment. Neither issuer nor enrollment can call a provider.
+   The Owner page now exposes an authenticated manual challenge/proof handoff. The dedicated
+   Android app, while its existing operational build is stopped, signs with a separate routine
+   Keystore key and puts a four-minute proof on the clipboard only after an explicit tap. The
+   phone makes no routine network request and cannot enroll itself. Transfer both values directly
+   between the Owner page and phone, never through Telegram, email, chat, screenshots, or logs.
+   If an enrollment response is lost, the Owner service may reread a still-fresh consumed challenge
+   only when its exact enrollment exists; it re-verifies the same Android signature and the atomic
+   SQL enrollment function returns only the exact replay. A different proof or device is rejected.
+   The Owner page keeps the proof only in memory until success or expiry and never stores it in
+   browser session storage. A phone proof is not an enrollment certificate. The remaining work is
+   a routine-only signed enrollment receipt, durable phone state, guarded signer enrollment and
+   a protected observation transport. Neither issuer nor enrollment can call a provider.
    Keep the phone observation-only and the financial switches disabled.
    If releasing this slice to production, deploy the updated Owner image first in a reviewed
    no-money runtime mode compatible with the current deployment: its catalog preflight tolerates

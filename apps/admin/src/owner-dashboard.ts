@@ -484,6 +484,40 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <button id="routine-processing-save" type="button" disabled>Save persistent routine policy</button>
             <button class="danger" id="routine-processing-stop" type="button" disabled>Stop routine policy</button>
           </div>
+          <div class="device-pairing" aria-labelledby="routine-phone-pairing-title">
+            <h3 id="routine-phone-pairing-title">Routine TeleBirr phone proof — no money</h3>
+            <p class="receipt-label">This is separate from the five-Player pilot. Create a ten-minute
+              challenge, paste it directly into the dedicated Android app, then paste its signed
+              proof back here. Enrollment only records phone key possession; it cannot poll
+              assignments, verify payments, execute deposits, or move money.</p>
+            <p class="pilot-warning">Do not send the challenge or proof through Telegram, email,
+              chat, screenshots, or issue comments. Keep the phone clock set automatically.
+              If a submission is uncertain, retry the exact same proof before expiry.</p>
+            <p class="request-meta" id="routine-phone-pairing-status" role="status">Sign in to prepare routine pairing.</p>
+            <form id="routine-phone-challenge-form">
+              <label class="confirmation-row" for="routine-phone-challenge-confirmation">
+                <input id="routine-phone-challenge-confirmation" type="checkbox" />
+                I approve a routine-only phone challenge while all financial switches remain off.
+              </label>
+              <button id="routine-phone-challenge-button" type="submit" disabled>Create routine challenge</button>
+            </form>
+            <div class="pairing-receipt" id="routine-phone-challenge-receipt" hidden>
+              <p class="receipt-label">Short-lived challenge package</p>
+              <output class="pairing-package" id="routine-phone-challenge-package"></output>
+              <button id="routine-phone-challenge-copy" type="button">Copy challenge to phone</button>
+            </div>
+            <form id="routine-phone-proof-form">
+              <label for="routine-phone-proof-input">Signed proof from the phone</label>
+              <input id="routine-phone-proof-input" type="password" autocomplete="off"
+                spellcheck="false" maxlength="4096" disabled />
+              <label class="confirmation-row" for="routine-phone-proof-confirmation">
+                <input id="routine-phone-proof-confirmation" type="checkbox" />
+                I confirm this proof came directly from my dedicated phone. Enrollment is no-money only.
+              </label>
+              <button id="routine-phone-proof-button" type="submit" disabled>Verify and enroll phone</button>
+            </form>
+            <p class="request-meta" id="routine-phone-enrollment-status" role="status"></p>
+          </div>
         </section>
 
         <section class="review-section" aria-labelledby="execution-approvals-title">
@@ -739,9 +773,27 @@ const routineProcessingRefresh = document.querySelector('#routine-processing-ref
 const routineProcessingSave = document.querySelector('#routine-processing-save');
 const routineProcessingStop = document.querySelector('#routine-processing-stop');
 const routineProcessingStatus = document.querySelector('#routine-processing-status');
+const routinePhonePairingStatus = document.querySelector('#routine-phone-pairing-status');
+const routinePhoneChallengeForm = document.querySelector('#routine-phone-challenge-form');
+const routinePhoneChallengeConfirmation = document.querySelector('#routine-phone-challenge-confirmation');
+const routinePhoneChallengeButton = document.querySelector('#routine-phone-challenge-button');
+const routinePhoneChallengeReceipt = document.querySelector('#routine-phone-challenge-receipt');
+const routinePhoneChallengePackage = document.querySelector('#routine-phone-challenge-package');
+const routinePhoneChallengeCopy = document.querySelector('#routine-phone-challenge-copy');
+const routinePhoneProofForm = document.querySelector('#routine-phone-proof-form');
+const routinePhoneProofInput = document.querySelector('#routine-phone-proof-input');
+const routinePhoneProofConfirmation = document.querySelector('#routine-phone-proof-confirmation');
+const routinePhoneProofButton = document.querySelector('#routine-phone-proof-button');
+const routinePhoneEnrollmentStatus = document.querySelector('#routine-phone-enrollment-status');
 let routineProcessingLoaded = false;
 let routineProcessingBusy = false;
 let routineProcessingState;
+let routinePhonePairing;
+let routinePhonePairingBusy = false;
+let routinePhoneProofBusy = false;
+let routinePhonePairingExpiryTimer;
+let pendingRoutinePhoneChallengeRequestId;
+let pendingRoutinePhoneProofRequestId;
 const pilotReadiness = document.querySelector('#pilot-readiness');
 const pilotPrepareForm = document.querySelector('#pilot-prepare-form');
 const pilotConfirmation = document.querySelector('#pilot-confirmation');
@@ -851,6 +903,8 @@ const KEMERBET_AGENT_PROFILE_REQUEST_STORAGE_KEY =
   'fetanagent.owner.kemerbet-agent-profile-request.v1';
 const TELEBIRR_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
   'fetanagent.owner.telebirr-device-pairing-request.v1';
+const ROUTINE_PHONE_CHALLENGE_REQUEST_STORAGE_KEY =
+  'fetanagent.owner.routine-phone-challenge-request.v1';
 const COMPANION_DEVICE_PAIRING_REQUEST_STORAGE_KEY =
   'fetanagent.owner.companion-device-pairing-request.v1';
 const COMPANION_LOOKUP_REQUEST_STORAGE_KEY =
@@ -1607,6 +1661,210 @@ function updateRoutineProcessingAvailability() {
     routineProcessingBusy || routineProcessingState?.configurationState !== 'authorized';
 }
 
+function readPendingRoutinePhoneChallengeRequestId() {
+  if (pendingRoutinePhoneChallengeRequestId) return pendingRoutinePhoneChallengeRequestId;
+  try {
+    const stored = window.sessionStorage.getItem(ROUTINE_PHONE_CHALLENGE_REQUEST_STORAGE_KEY);
+    if (validOwnerMutationRequestId(stored)) {
+      pendingRoutinePhoneChallengeRequestId = stored;
+      return stored;
+    }
+    window.sessionStorage.removeItem(ROUTINE_PHONE_CHALLENGE_REQUEST_STORAGE_KEY);
+  } catch {
+    // The in-memory request remains usable if browser storage is unavailable.
+  }
+  return undefined;
+}
+
+function clearPendingRoutinePhoneChallengeRequestId() {
+  pendingRoutinePhoneChallengeRequestId = undefined;
+  try { window.sessionStorage.removeItem(ROUTINE_PHONE_CHALLENGE_REQUEST_STORAGE_KEY); }
+  catch { /* No persisted request is usable. */ }
+}
+
+function clearRoutinePhoneChallenge() {
+  if (routinePhonePairingExpiryTimer !== undefined) window.clearTimeout(routinePhonePairingExpiryTimer);
+  routinePhonePairingExpiryTimer = undefined;
+  routinePhonePairing = undefined;
+  routinePhoneChallengePackage.textContent = '';
+  routinePhoneChallengeReceipt.hidden = true;
+  routinePhoneProofInput.value = '';
+  routinePhoneProofConfirmation.checked = false;
+  pendingRoutinePhoneProofRequestId = undefined;
+  updateRoutinePhonePairingAvailability();
+}
+
+function updateRoutinePhonePairingAvailability() {
+  if (routinePhonePairing && Date.parse(routinePhonePairing.expiresAt) <= Date.now()) {
+    clearPendingRoutinePhoneChallengeRequestId();
+    clearRoutinePhoneChallenge();
+    return;
+  }
+  const ready = Boolean(accessToken) && !routinePhonePairingBusy && !routinePhoneProofBusy;
+  routinePhoneChallengeButton.disabled = !ready || !routinePhoneChallengeConfirmation.checked ||
+    Boolean(routinePhonePairing);
+  routinePhoneProofInput.disabled = !ready || !routinePhonePairing;
+  routinePhoneProofButton.disabled = !ready || !routinePhonePairing ||
+    !routinePhoneProofConfirmation.checked || routinePhoneProofInput.value.length === 0;
+  routinePhonePairingStatus.textContent = !accessToken
+    ? 'Sign in to prepare routine pairing.'
+    : routinePhonePairing
+      ? 'Routine challenge expires at ' + new Date(routinePhonePairing.expiresAt).toLocaleString() +
+        '. This has not enrolled the phone.'
+      : readPendingRoutinePhoneChallengeRequestId()
+        ? 'An earlier challenge request may be pending. Create recovers that exact request only.'
+        : 'Ready for a no-money routine phone challenge. No provider lookup or deposit will start.';
+}
+
+function validRoutinePhoneChallengeReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'alreadyIssued,assignmentPollingAllowed,challengePackage,enrollmentAllowed,expiresAt,moneyMovementAllowed,pairingOnly' ||
+      typeof value.alreadyIssued !== 'boolean' || value.assignmentPollingAllowed !== false ||
+      value.enrollmentAllowed !== false || value.moneyMovementAllowed !== false ||
+      value.pairingOnly !== true || typeof value.challengePackage !== 'string' ||
+      value.challengePackage.length > 1_024 ||
+      !value.challengePackage.startsWith('fetanagent-routine-pairing-v1.') ||
+      typeof value.expiresAt !== 'string' || !Number.isFinite(Date.parse(value.expiresAt)) ||
+      new Date(value.expiresAt).toISOString() !== value.expiresAt) return undefined;
+  const encoded = value.challengePackage.slice('fetanagent-routine-pairing-v1.'.length);
+  const decoded = strictBase64UrlText(encoded);
+  if (!decoded) return undefined;
+  try {
+    const challenge = JSON.parse(decoded);
+    if (!challenge || typeof challenge !== 'object' || Array.isArray(challenge) ||
+        Object.keys(challenge).sort().join(',') !==
+          'contractVersion,expectedReceiverNameDigest,expiresAt,issuedAt,pairingId,pairingNonceDigest,protocolMode,providerCode,receiverProfileDigest,receiverRevisionId,receiverVersion' ||
+        challenge.contractVersion !== 1 || challenge.providerCode !== 'telebirr' ||
+        challenge.protocolMode !== 'routine_device_pairing_v1' ||
+        !validOwnerMutationRequestId(challenge.pairingId) ||
+        !validOwnerMutationRequestId(challenge.receiverRevisionId) ||
+        !Number.isInteger(challenge.receiverVersion) || challenge.receiverVersion < 1 ||
+        ![challenge.pairingNonceDigest, challenge.receiverProfileDigest,
+          challenge.expectedReceiverNameDigest].every((digest) =>
+            typeof digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(digest)) ||
+        challenge.expiresAt !== value.expiresAt ||
+        typeof challenge.issuedAt !== 'string' ||
+        Date.parse(challenge.expiresAt) - Date.parse(challenge.issuedAt) > 600_000 ||
+        Date.parse(challenge.expiresAt) <= Date.parse(challenge.issuedAt)) return undefined;
+    return { challengePackage: value.challengePackage, expiresAt: value.expiresAt,
+      pairingId: challenge.pairingId, alreadyIssued: value.alreadyIssued };
+  } catch { return undefined; }
+}
+
+function validRoutinePhoneEnrollmentReceipt(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !==
+        'alreadyEnrolled,assignmentPollingAllowed,enrollmentId,moneyMovementAllowed,pairingOnly,validUntil' ||
+      typeof value.alreadyEnrolled !== 'boolean' || value.assignmentPollingAllowed !== false ||
+      value.moneyMovementAllowed !== false || value.pairingOnly !== true ||
+      !validOwnerMutationRequestId(value.enrollmentId) ||
+      typeof value.validUntil !== 'string' || !Number.isFinite(Date.parse(value.validUntil)) ||
+      new Date(value.validUntil).toISOString() !== value.validUntil) return undefined;
+  return value;
+}
+
+async function issueRoutinePhoneChallenge() {
+  if (!accessToken || routinePhonePairing || routinePhonePairingBusy ||
+      !routinePhoneChallengeConfirmation.checked) return;
+  if (!window.confirm('Create a ten-minute routine-only phone challenge? This does not permit polling, provider lookup, deposits, or money movement.')) return;
+  const generation = ownerAuthGeneration;
+  const requestId = readPendingRoutinePhoneChallengeRequestId() ?? crypto.randomUUID();
+  pendingRoutinePhoneChallengeRequestId = requestId;
+  try { window.sessionStorage.setItem(ROUTINE_PHONE_CHALLENGE_REQUEST_STORAGE_KEY, requestId); }
+  catch { /* Keep the exact request in memory. */ }
+  routinePhonePairingBusy = true;
+  updateRoutinePhonePairingAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-pairing-challenge', {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1', 'x-idempotency-key': requestId },
+      body: JSON.stringify({ confirmation: 'owner_confirmed_routine_pairing_challenge_only_no_money', requestId }),
+    });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 200 && response.status !== 201) {
+      if ([400, 403, 409].includes(response.status)) clearPendingRoutinePhoneChallengeRequestId();
+      throw new Error('routine_phone_challenge');
+    }
+    const receipt = validRoutinePhoneChallengeReceipt(await response.json());
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (!receipt || (response.status === 200) !== receipt.alreadyIssued ||
+        Date.parse(receipt.expiresAt) <= Date.now()) throw new Error('routine_phone_challenge_receipt');
+    routinePhonePairing = receipt;
+    routinePhoneChallengePackage.textContent = receipt.challengePackage;
+    routinePhoneChallengeReceipt.hidden = false;
+    routinePhonePairingExpiryTimer = window.setTimeout(() => {
+      clearPendingRoutinePhoneChallengeRequestId(); clearRoutinePhoneChallenge();
+    }, Date.parse(receipt.expiresAt) - Date.now());
+    routinePhoneEnrollmentStatus.textContent = 'Challenge ready. The phone is not yet enrolled.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
+      routinePhoneEnrollmentStatus.textContent =
+        'Challenge was not confirmed. If the request was interrupted, create again to recover the same challenge; no money moved.';
+    }
+  } finally {
+    if (ownerAuthGeneration === generation) {
+      routinePhonePairingBusy = false;
+      updateRoutinePhonePairingAvailability();
+    }
+  }
+}
+
+async function submitRoutinePhoneProof() {
+  if (!accessToken || !routinePhonePairing || routinePhoneProofBusy ||
+      !routinePhoneProofConfirmation.checked) return;
+  const raw = routinePhoneProofInput.value.trim();
+  if (raw.length < 1 || raw.length > 4_096) return;
+  let proof;
+  try {
+    proof = JSON.parse(raw);
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof) ||
+        proof.body?.pairingId !== routinePhonePairing.pairingId) throw new Error('proof_mismatch');
+  } catch {
+    routinePhoneEnrollmentStatus.textContent = 'The proof is invalid or belongs to another challenge. No request was sent.';
+    return;
+  }
+  if (!window.confirm('Verify this signed proof and enroll only this phone key for routine TeleBirr observation? Assignment polling and all money actions remain disabled.')) return;
+  const generation = ownerAuthGeneration;
+  const requestId = pendingRoutinePhoneProofRequestId ?? crypto.randomUUID();
+  pendingRoutinePhoneProofRequestId = requestId;
+  routinePhoneProofBusy = true;
+  updateRoutinePhonePairingAvailability();
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-pairing-proof', {
+      method: 'POST', headers: { 'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1', 'x-idempotency-key': requestId },
+      body: JSON.stringify({ confirmation: 'owner_confirmed_routine_pairing_proof_only_no_money', proof, requestId }),
+    });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 200 && response.status !== 201) {
+      if ([400, 403].includes(response.status)) pendingRoutinePhoneProofRequestId = undefined;
+      throw new Error('routine_phone_proof');
+    }
+    const receipt = validRoutinePhoneEnrollmentReceipt(await response.json());
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (!receipt || (response.status === 200) !== receipt.alreadyEnrolled) {
+      throw new Error('routine_phone_enrollment_receipt');
+    }
+    clearPendingRoutinePhoneChallengeRequestId();
+    clearRoutinePhoneChallenge();
+    routinePhoneChallengeConfirmation.checked = false;
+    routinePhoneEnrollmentStatus.textContent = 'Routine-only phone enrollment confirmed until ' +
+      new Date(receipt.validUntil).toLocaleString() + '. Enrollment ID: ' + receipt.enrollmentId +
+      '. Assignment polling, deposits, and money movement remain disabled.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
+      routinePhoneEnrollmentStatus.textContent =
+        'Proof submission could not be confirmed. Retry the exact same proof before this challenge expires; do not create another challenge to guess the result.';
+    }
+  } finally {
+    if (ownerAuthGeneration === generation) {
+      routinePhoneProofBusy = false;
+      updateRoutinePhonePairingAvailability();
+    }
+  }
+}
+
 function renderRoutineProcessing(value) {
   const expectedPolicy = {
     mode: 'routine_production', version: 1, provider: 'telebirr', platformCode: 'kemerbet',
@@ -2245,6 +2503,11 @@ function signOut(message = 'Signed out.') {
   companionLookupStatus.textContent = 'Sign in to check lookup readiness.';
   companionLookupButton.disabled = true;
   clearPilot();
+  routinePhonePairingBusy = false;
+  routinePhoneProofBusy = false;
+  clearRoutinePhoneChallenge();
+  routinePhoneChallengeConfirmation.checked = false;
+  routinePhoneEnrollmentStatus.textContent = '';
   clearExecutionReadiness();
   clearExecutionApprovals();
   clearDepositIntake();
@@ -5117,6 +5380,7 @@ async function loadOwnerPlayerQueues() {
 async function loadOwnerDashboardAfterAuthentication(successNotice) {
   loginPanel.hidden = true;
   invitePanel.hidden = false;
+  updateRoutinePhonePairingAvailability();
   setNotice(successNotice);
   try {
     await Promise.all([loadOwnerPlayerQueues(), loadSupportContact()]);
@@ -5387,6 +5651,26 @@ pilotRefreshButton.addEventListener('click', loadCurrentPilot);
 executionReadinessRefresh.addEventListener('click', loadExecutionReadiness);
 executionApprovalsRefresh.addEventListener('click', loadExecutionApprovals);
 routineProcessingRefresh.addEventListener('click', loadRoutineProcessing);
+routinePhoneChallengeConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
+routinePhoneProofConfirmation.addEventListener('change', updateRoutinePhonePairingAvailability);
+routinePhoneProofInput.addEventListener('input', updateRoutinePhonePairingAvailability);
+routinePhoneChallengeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await issueRoutinePhoneChallenge();
+});
+routinePhoneProofForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await submitRoutinePhoneProof();
+});
+routinePhoneChallengeCopy.addEventListener('click', async () => {
+  if (!routinePhonePairing || Date.parse(routinePhonePairing.expiresAt) <= Date.now()) return;
+  try {
+    await navigator.clipboard.writeText(routinePhonePairing.challengePackage);
+    setNotice('Routine challenge copied. Paste it directly into the dedicated phone app before expiry.');
+  } catch {
+    setNotice('Copy unavailable. Select the displayed challenge and transfer it directly to the phone.');
+  }
+});
 routineProcessingSave.addEventListener('click', () => mutateRoutineProcessing('save'));
 routineProcessingStop.addEventListener('click', () => mutateRoutineProcessing('stop'));
 pilotArmButton.addEventListener('click', armFixedPilot);

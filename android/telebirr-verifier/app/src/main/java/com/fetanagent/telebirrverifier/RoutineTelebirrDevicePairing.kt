@@ -2,6 +2,7 @@ package com.fetanagent.telebirrverifier
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.time.format.DateTimeFormatterBuilder
 import java.util.Base64
 
 /** An untrusted Owner-package shape; the future server must authenticate it from its own store. */
@@ -189,6 +190,37 @@ internal object RoutineDevicePairingProofFactory {
       body = body,
       signature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature),
     )
+  }
+}
+
+/** Offline Owner-to-phone-to-Owner handoff. This neither enrolls nor starts the verifier. */
+internal object RoutineDevicePairingHandoff {
+  private val utcFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
+  private const val MAX_REQUEST_MILLIS = 300_000L
+  private const val HANDOFF_MILLIS = 240_000L
+  private const val CLOCK_MARGIN_MILLIS = 30_000L
+
+  fun createProof(packageValue: String, identity: P256Identity, nowMillis: Long): ByteArray {
+    val challenge = RoutineDevicePairingJsonCodec.decodeChallengePackage(packageValue)
+      ?: throw IllegalArgumentException("routine_pairing_package_invalid")
+    val issued = Instant.parse(challenge.issuedAt).toEpochMilli()
+    val expires = Instant.parse(challenge.expiresAt).toEpochMilli()
+    require(nowMillis in issued until expires) { "routine_pairing_challenge_expired" }
+    val requestIssued = maxOf(issued, nowMillis - CLOCK_MARGIN_MILLIS)
+    val proofExpires = minOf(expires, nowMillis + HANDOFF_MILLIS, requestIssued + MAX_REQUEST_MILLIS)
+    require(proofExpires > nowMillis && proofExpires > requestIssued)
+    val material = identity.publicMaterial()
+    require(material.keyId == identity.keyId)
+    val fingerprint = material.publicKeySpkiSha256.removePrefix("sha256:")
+    require(fingerprint.length == 64 && fingerprint.all { it in '0'..'9' || it in 'a'..'f' })
+    val proof = RoutineDevicePairingProofFactory.create(
+      challenge = challenge,
+      deviceId = "routine_device_$fingerprint",
+      identity = identity,
+      issuedAt = utcFormatter.format(Instant.ofEpochMilli(requestIssued)),
+      expiresAt = utcFormatter.format(Instant.ofEpochMilli(proofExpires)),
+    )
+    return RoutineDevicePairingJsonCodec.encode(proof)
   }
 }
 

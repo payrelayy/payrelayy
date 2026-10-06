@@ -53,7 +53,8 @@ export interface OwnerControlPostgresRuntime {
   >;
   readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
-  readonly routineTelebirrPairing?: Pick<PostgresOwnerRoutineTelebirrPairing, 'issue'> | undefined;
+  readonly routineTelebirrPairing?:
+    Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> | undefined;
   readonly telebirrShadowVerification: Pick<
     PostgresOwnerTelebirrShadowVerificationStatus,
     'status'
@@ -194,6 +195,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)', 'execute') as internal_companion_lookup_result_denied,
     has_function_privilege(current_user, 'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)', 'execute') as telebirr_device_pairing_issue_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 'execute'), true) as routine_telebirr_pairing_issue_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 'execute'), true) as routine_telebirr_pairing_read_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 'execute'), true) as routine_telebirr_pairing_enroll_allowed,
     coalesce(not has_function_privilege(current_user, to_regprocedure('app.consume_routine_telebirr_device_pairing_challenge(uuid,text)')::oid, 'execute'), true) as routine_telebirr_pairing_consume_denied,
     not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
@@ -239,6 +242,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
+        + (to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
+        + (to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
         + (to_regprocedure('app.set_owner_support_contact(uuid,text,integer)') is not null)::integer
         + (to_regprocedure('app.get_public_support_contact()') is not null)::integer
@@ -287,6 +292,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.
           ,coalesce(to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.set_owner_support_contact(uuid,text,integer)')::oid, 0::oid)

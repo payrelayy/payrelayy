@@ -6,6 +6,11 @@ const ISSUE =
   'select * from app.issue_owner_routine_telebirr_device_pairing_challenge($1::uuid,$2::uuid)';
 const CONSUME =
   'select * from app.consume_routine_telebirr_device_pairing_challenge($1::uuid,$2::text)';
+const READ_PROOF_CHALLENGE =
+  'select * from app.get_owner_routine_telebirr_device_pairing_challenge($1::uuid,$2::uuid)';
+const ENROLL = `select * from app.enroll_owner_routine_telebirr_device_pairing_proof(
+  $1::uuid,$2::uuid,$3::text,$4::uuid,$5::integer,$6::text,$7::text,
+  $8::text,$9::text,$10::text,$11::text,$12::timestamptz,$13::timestamptz)`;
 const TABLE = 'app.routine_telebirr_device_pairing_challenges';
 
 async function rollback<T>(client: Client, body: () => Promise<T>): Promise<T> {
@@ -190,6 +195,140 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           'select count(*)::text as count from app.routine_telebirr_device_enrollments',
         );
         expect(afterTrust.rows).toEqual(initialTrust.rows);
+      });
+    });
+
+    it('exposes only Owner proof RPCs, not the private challenge or enrollment tables', async () => {
+      const client = getClient();
+      const grants = await client.query<{
+        owner_read: boolean;
+        owner_enroll: boolean;
+        service_read: boolean;
+        service_enroll: boolean;
+        owner_challenge_table: boolean;
+        owner_enrollment_table: boolean;
+        enrollment_rls: boolean;
+        enrollment_forced_rls: boolean;
+      }>(`
+        select
+          has_function_privilege('fetanagent_owner_control_runtime',
+            'app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)', 'execute') as owner_read,
+          has_function_privilege('fetanagent_owner_control_runtime',
+            'app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)',
+            'execute') as owner_enroll,
+          has_function_privilege('service_role',
+            'app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)', 'execute') as service_read,
+          has_function_privilege('service_role',
+            'app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)',
+            'execute') as service_enroll,
+          has_table_privilege('fetanagent_owner_control_runtime',
+            'app.routine_telebirr_device_pairing_challenges', 'select,insert,update,delete') as owner_challenge_table,
+          has_table_privilege('fetanagent_owner_control_runtime',
+            'app.routine_telebirr_device_enrollments', 'select,insert,update,delete') as owner_enrollment_table,
+          relation.relrowsecurity as enrollment_rls,
+          relation.relforcerowsecurity as enrollment_forced_rls
+        from pg_class relation
+        where relation.oid = 'app.routine_telebirr_device_enrollments'::regclass
+      `);
+      expect(grants.rows).toEqual([
+        {
+          owner_read: true,
+          owner_enroll: true,
+          service_read: false,
+          service_enroll: false,
+          owner_challenge_table: false,
+          owner_enrollment_table: false,
+          enrollment_rls: true,
+          enrollment_forced_rls: true,
+        },
+      ]);
+    });
+
+    it('atomically enrolls one no-money routine key after the trusted service verifies its proof', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await fixtureReceiver(client);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const issued = (await client.query(ISSUE, [getOwnerAuthUserId(), randomUUID()])).rows[0]!;
+          const pairingId = issued.pairing_id as string;
+          const trusted = await client.query(READ_PROOF_CHALLENGE, [
+            getOwnerAuthUserId(),
+            pairingId,
+          ]);
+          expect(trusted.rows).toHaveLength(1);
+          expect(trusted.rows[0]!.pairing_nonce_digest).toBe(issued.pairing_nonce_digest);
+          const requestIssued = issued.issued_at as Date;
+          const requestExpires = new Date(requestIssued.getTime() + 300_000);
+          const inputs = [
+            getOwnerAuthUserId(),
+            pairingId,
+            issued.pairing_nonce_digest,
+            issued.receiver_revision_id,
+            issued.receiver_version,
+            issued.receiver_profile_digest,
+            issued.expected_receiver_name_digest,
+            `sha256:${'e'.repeat(64)}`,
+            'routine-device-0001',
+            'routine-key-0001',
+            `sha256:${'f'.repeat(64)}`,
+            requestIssued,
+            requestExpires,
+          ];
+          await rejected(client, ENROLL, [
+            ...inputs.slice(0, 2),
+            `sha256:${'0'.repeat(64)}`,
+            ...inputs.slice(3),
+          ]);
+          await rejected(client, ENROLL, [
+            ...inputs.slice(0, 7),
+            `sha256:${'1'.repeat(64)}`,
+            ...inputs.slice(8, 12),
+            new Date(requestIssued.getTime() - 1),
+          ]);
+          const first = await client.query(ENROLL, inputs);
+          expect(first.rows).toHaveLength(1);
+          expect(first.rows[0]!.replayed).toBe(false);
+          expect(first.rows[0]!.enrollment_id).toMatch(/^[0-9a-f-]{36}$/u);
+          expect(
+            (first.rows[0]!.valid_until as Date).getTime() -
+              (first.rows[0]!.valid_from as Date).getTime(),
+          ).toBe(30 * 86_400_000);
+          const replay = await client.query(ENROLL, inputs);
+          expect(replay.rows).toEqual([{ ...first.rows[0], replayed: true }]);
+          await rejected(client, ENROLL, [
+            ...inputs.slice(0, 7),
+            `sha256:${'2'.repeat(64)}`,
+            ...inputs.slice(8),
+          ]);
+          await rejected(client, ENROLL, [
+            ...inputs.slice(0, 8),
+            'routine-device-9999',
+            ...inputs.slice(9),
+          ]);
+          await rejected(client, 'select * from app.routine_telebirr_device_enrollments');
+          expect(
+            (await client.query(READ_PROOF_CHALLENGE, [getOwnerAuthUserId(), pairingId])).rows,
+          ).toHaveLength(0);
+        } finally {
+          await client.query('reset session authorization');
+        }
+        const rows = await client.query<{ count: string }>(
+          `
+          select count(*)::text as count from app.routine_telebirr_device_enrollments
+          where pairing_evidence_digest = $1::text
+        `,
+          [`sha256:${'e'.repeat(64)}`],
+        );
+        expect(rows.rows).toEqual([{ count: '1' }]);
+        const switches = await client.query<{ count: string }>(`
+          select count(*)::text as count from app.feature_switches
+          where feature_key in ('deposit_execution', 'payment_verification',
+            'private_live_deposit_pilot', 'telebirr_authoritative_verification',
+            'cbe_birr_authoritative_verification', 'withdrawal_collection',
+            'withdrawal_validation') and mode = 'disabled'
+        `);
+        expect(switches.rows).toEqual([{ count: '7' }]);
       });
     });
   });

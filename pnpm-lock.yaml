@@ -41,6 +41,9 @@ importers:
       '@fetanagent/deposit-reference-protection':
         specifier: workspace:*
         version: link:../../packages/deposit-reference-protection
+      '@fetanagent/telebirr-verification-foundation':
+        specifier: workspace:*
+        version: link:../../packages/telebirr-verification-foundation
       fastify:
         specifier: 5.12.5
         version: 5.12.5

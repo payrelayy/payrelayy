@@ -11,6 +11,11 @@ The `routine-signed-observation` library verifies a paired-device signature and 
 facts in isolation, but has no production caller, authenticated official-source adapter, durable
 challenge/replay ledger, or atomic one-use payment claim. Its advisory result does not satisfy
 this activation gate.
+The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and
+routine device/receiver binding in isolation. It does not issue assignments, establish trusted
+candidate database binding, authenticate TeleBirr, or activate the Android routine lookup. The
+phone's routine receiver-name digest is domain-separated from the private pilot, but the routine
+phone path is still dormant.
 Do not run this activation procedure, install its runtime credential or release marker, or start
 the Automatic Deposits launcher until a later reviewed release proves the whole path with
 disposable SQL and no-money end-to-end tests.

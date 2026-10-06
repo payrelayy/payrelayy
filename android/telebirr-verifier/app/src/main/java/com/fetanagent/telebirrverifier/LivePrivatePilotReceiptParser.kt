@@ -46,6 +46,7 @@ class LivePrivatePilotReceiptParser {
       document,
       assignment.body.rawReference,
       assignment.body.expectedReceiverNameNormalized,
+      LivePilotCanonicalTranscripts::receiverNameDigest,
     )
 
   /** Shared official-layout parser; callers must authenticate their own lookup assignment first. */
@@ -53,6 +54,7 @@ class LivePrivatePilotReceiptParser {
     document: ProviderDocument,
     rawReference: String,
     expectedReceiverNameNormalized: String,
+    receiverNameDigest: (String) -> String?,
   ): LivePilotParsedProviderObservation =
     when (document) {
       is ProviderDocument.NotFound ->
@@ -74,7 +76,9 @@ class LivePrivatePilotReceiptParser {
           retrievedAt = null,
         )
       is ProviderDocument.Found ->
-        runCatching { parseFound(document, rawReference, expectedReceiverNameNormalized) }
+        runCatching {
+          parseFound(document, rawReference, expectedReceiverNameNormalized, receiverNameDigest)
+        }
           .getOrElse {
             review(document.sourceDocumentDigest, "parser_uncertain", document.retrievedAt)
           }
@@ -84,6 +88,7 @@ class LivePrivatePilotReceiptParser {
     document: ProviderDocument.Found,
     rawReference: String,
     expectedReceiverNameNormalized: String,
+    receiverNameDigest: (String) -> String?,
   ): LivePilotParsedProviderObservation {
     val rows = parseRows(document.utf8Body)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
@@ -150,7 +155,7 @@ class LivePrivatePilotReceiptParser {
     val normalizedReceiver = LivePilotNameNormalizer.normalize(receiverName)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
     val creditedPartyNameDigest =
-      LivePilotCanonicalTranscripts.receiverNameDigest(normalizedReceiver)
+      receiverNameDigest(normalizedReceiver)
         ?: return review(document.sourceDocumentDigest, "parser_uncertain", document.retrievedAt)
     val amountMinor = parseMinorUnits(amount)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)

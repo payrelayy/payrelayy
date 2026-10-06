@@ -130,3 +130,14 @@ export {
   type RoutineTelebirrReceiptAssessment,
   type RoutineTelebirrReceiptAssessmentReason,
 } from './routine-receipt-assessment.js';
+export {
+  ROUTINE_TELEBIRR_OBSERVATION_CONTRACT_VERSION,
+  ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE,
+  ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+  canonicalRoutineTelebirrObservationBodyBytes,
+  canonicalRoutineTelebirrObservationSignatureBytes,
+  digestRoutineTelebirrObservationBody,
+  digestRoutineTelebirrObservationFacts,
+  verifyRoutineTelebirrSignedObservation,
+  type RoutineTelebirrSignedObservationResult,
+} from './routine-signed-observation.js';

@@ -600,6 +600,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         public_allowed: boolean;
         service_allowed: boolean;
         broker_allowed: boolean;
+        pilot_broker_allowed: boolean;
         key_separation_trigger: boolean;
       }>(`
         select routine.proowner::pg_catalog.regrole::text as owner,
@@ -610,6 +611,8 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
                  as service_allowed,
                pg_catalog.has_function_privilege('fetanagent_routine_deposit_broker_runtime',
                  routine.oid, 'EXECUTE') as broker_allowed,
+               pg_catalog.has_function_privilege('fetanagent_telebirr_assignment_broker_runtime',
+                 routine.oid, 'EXECUTE') as pilot_broker_allowed,
                exists (select 1 from pg_catalog.pg_trigger trigger_row
                  where trigger_row.tgrelid = '${LOOKUP_TABLE}'::pg_catalog.regclass
                    and trigger_row.tgname = 'routine_telebirr_lookup_distinct_keys'
@@ -625,6 +628,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           public_allowed: false,
           service_allowed: false,
           broker_allowed: false,
+          pilot_broker_allowed: false,
           key_separation_trigger: true,
         },
       ]);

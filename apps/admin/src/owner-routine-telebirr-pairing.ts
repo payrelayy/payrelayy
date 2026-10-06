@@ -109,7 +109,7 @@ export class PostgresOwnerRoutineTelebirrPairing {
         !(value.expires_at instanceof Date) ||
         !Number.isFinite(value.expires_at.getTime()) ||
         value.expires_at.getTime() <= value.issued_at.getTime() ||
-        value.expires_at.getTime() - value.issued_at.getTime() > 600_000 ||
+        value.expires_at.getTime() - value.issued_at.getTime() > 43_200_000 ||
         typeof value.replayed !== 'boolean'
       ) {
         throw new OwnerRoutineTelebirrPairingUnavailableError();

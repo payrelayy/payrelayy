@@ -23,7 +23,7 @@ const row = {
   receiver_profile_digest: `sha256:${'b'.repeat(64)}`,
   expected_receiver_name_digest: `sha256:${'c'.repeat(64)}`,
   issued_at: new Date('2026-10-06T12:00:00.000Z'),
-  expires_at: new Date('2026-10-06T12:10:00.000Z'),
+  expires_at: new Date('2026-10-07T00:00:00.000Z'),
   replayed: false,
 };
 
@@ -124,6 +124,12 @@ describe('Owner routine TeleBirr pairing challenge adapter', () => {
       query: async () => ({ rows: [{ ...row, receiver_version: 0 }] }),
     });
     await expect(malformed.issue(actor, requestId)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingUnavailableError,
+    );
+    const beyondTwelveHours = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => ({ rows: [{ ...row, expires_at: new Date('2026-10-07T00:00:00.001Z') }] }),
+    });
+    await expect(beyondTwelveHours.issue(actor, requestId)).rejects.toBeInstanceOf(
       OwnerRoutineTelebirrPairingUnavailableError,
     );
     const denied = new PostgresOwnerRoutineTelebirrPairing({
@@ -266,7 +272,7 @@ describe('Owner routine TeleBirr proof enrollment adapter', () => {
     }
     const stale = new PostgresOwnerRoutineTelebirrPairing(
       { query: async () => ({ rows: [row] }) },
-      () => new Date('2026-10-06T12:11:00.000Z'),
+      () => new Date('2026-10-07T00:01:00.000Z'),
     );
     await expect(stale.enroll(actor, proof)).rejects.toBeInstanceOf(
       OwnerRoutineTelebirrPairingRejectedError,

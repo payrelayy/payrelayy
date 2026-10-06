@@ -486,9 +486,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
           <div class="device-pairing" aria-labelledby="routine-phone-pairing-title">
             <h3 id="routine-phone-pairing-title">Routine TeleBirr phone proof — no money</h3>
-            <p class="receipt-label">This is separate from the five-Player pilot. Create a ten-minute
+            <p class="receipt-label">This is separate from the five-Player pilot. Create a twelve-hour
               challenge, paste it directly into the dedicated Android app, then paste its signed
-              proof back here. Enrollment only records phone key possession; it cannot poll
+              proof back to this same Owner tab promptly. Sign in before creating the challenge;
+              its twelve-hour timer starts only when you create it. Enrollment only records phone key possession; it cannot poll
               assignments, verify payments, execute deposits, or move money.</p>
             <p class="pilot-warning">Do not send the challenge or proof through Telegram, email,
               chat, screenshots, or issue comments. Keep the phone clock set automatically.
@@ -502,7 +503,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <button id="routine-phone-challenge-button" type="submit" disabled>Create routine challenge</button>
             </form>
             <div class="pairing-receipt" id="routine-phone-challenge-receipt" hidden>
-              <p class="receipt-label">Short-lived challenge package</p>
+              <p class="receipt-label">One-use challenge package (twelve hours)</p>
               <output class="pairing-package" id="routine-phone-challenge-package"></output>
               <button id="routine-phone-challenge-copy" type="button">Copy challenge to phone</button>
             </div>
@@ -1745,7 +1746,7 @@ function validRoutinePhoneChallengeReceipt(value) {
             typeof digest === 'string' && /^sha256:[0-9a-f]{64}$/.test(digest)) ||
         challenge.expiresAt !== value.expiresAt ||
         typeof challenge.issuedAt !== 'string' ||
-        Date.parse(challenge.expiresAt) - Date.parse(challenge.issuedAt) > 600_000 ||
+        Date.parse(challenge.expiresAt) - Date.parse(challenge.issuedAt) > 43_200_000 ||
         Date.parse(challenge.expiresAt) <= Date.parse(challenge.issuedAt)) return undefined;
     return { challengePackage: value.challengePackage, expiresAt: value.expiresAt,
       pairingId: challenge.pairingId, alreadyIssued: value.alreadyIssued };
@@ -1767,7 +1768,7 @@ function validRoutinePhoneEnrollmentReceipt(value) {
 async function issueRoutinePhoneChallenge() {
   if (!accessToken || routinePhonePairing || routinePhonePairingBusy ||
       !routinePhoneChallengeConfirmation.checked) return;
-  if (!window.confirm('Create a ten-minute routine-only phone challenge? This does not permit polling, provider lookup, deposits, or money movement.')) return;
+  if (!window.confirm('Create a twelve-hour routine-only phone challenge? This does not permit polling, provider lookup, deposits, or money movement.')) return;
   const generation = ownerAuthGeneration;
   const requestId = readPendingRoutinePhoneChallengeRequestId() ?? crypto.randomUUID();
   pendingRoutinePhoneChallengeRequestId = requestId;

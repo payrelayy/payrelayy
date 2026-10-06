@@ -576,8 +576,8 @@ describe('persistent routine TeleBirr policy controls', () => {
 describe('routine phone proof handoff', () => {
   const pairingId = '22222222-2222-4222-8222-222222222222';
   const enrollmentId = '33333333-3333-4333-8333-333333333333';
-  const expiresAt = new Date(Date.now() + 600_000).toISOString();
-  const issuedAt = new Date(Date.parse(expiresAt) - 600_000).toISOString();
+  const expiresAt = new Date(Date.now() + 43_200_000).toISOString();
+  const issuedAt = new Date(Date.parse(expiresAt) - 43_200_000).toISOString();
   const challengePackage =
     'fetanagent-routine-pairing-v1.' +
     Buffer.from(

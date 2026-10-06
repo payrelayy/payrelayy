@@ -77,7 +77,10 @@ The next reviewed slices must, in order:
    The Owner page now exposes an authenticated manual challenge/proof handoff. The dedicated
    Android app, while its existing operational build is stopped, signs with a separate routine
    Keystore key and puts a four-minute proof on the clipboard only after an explicit tap. The
-   phone makes no routine network request and cannot enroll itself. Transfer both values directly
+   phone makes no routine network request and cannot enroll itself. The Owner challenge remains
+   one-use and may stay fresh for twelve hours, giving the Owner time to complete the direct
+   handoff. The proof must return to the same Owner tab before its own short expiry; a longer
+   challenge does not extend the proof or grant any authority. Transfer both values directly
    between the Owner page and phone, never through Telegram, email, chat, screenshots, or logs.
    If an enrollment response is lost, the Owner service may reread a still-fresh consumed challenge
    only when its exact enrollment exists; it re-verifies the same Android signature and the atomic

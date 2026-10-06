@@ -380,6 +380,7 @@ verify_release_files() {
     deposit-proof-reference-fingerprint-master
     deposit-proof-reference-profile.v2.json
     owner-database-url
+    owner-routine-enrollment-signer-pkcs8
     player-action-database-url
     publishable-key
     supabase-ca.crt
@@ -689,7 +690,7 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=33
+    expected_count=34
     if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]]; then
       expected_count=$((expected_count + 4))
       for name in \

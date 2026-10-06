@@ -236,6 +236,14 @@ assert.match(
   /OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: \$\{FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:\?/u,
 );
 assert.match(owner, /OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1/u);
+assert.match(
+  owner,
+  /OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY_FILE: \/run\/secrets\/owner_routine_enrollment_signer_pkcs8/u,
+);
+assert.match(
+  owner,
+  /source: owner_routine_enrollment_signer\s+target: owner_routine_enrollment_signer_pkcs8\s+uid: '10001'\s+gid: '10001'\s+mode: 0400/u,
+);
 
 const customer = childBlock(services, 'customer-web');
 assert.match(customer, /CUSTOMER_WEB_DEPLOYMENT_TARGET: production/u);
@@ -392,8 +400,12 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 27);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 27);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 28);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 28);
+assert.match(
+  secrets,
+  /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
+);
 assert.doesNotMatch(secrets, /sb_publishable_|postgresql:\/\/|[0-9a-f]{64}/u);
 
 assert.match(workflow, /^name: Production application runtime$/mu);
@@ -405,6 +417,15 @@ assert.match(
   /concurrency:\s*\r?\n  group: fetanagent-production-runtime\s*\r?\n  cancel-in-progress: false/u,
 );
 assert.match(workflow, /environment: production/u);
+assert.match(
+  workflow,
+  /OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: \$\{\{ secrets\.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL \}\}/u,
+);
+assert.match(
+  workflow,
+  /TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256: \$\{\{ vars\.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 \}\}/u,
+);
+assert.match(workflow, /owner-routine-enrollment-signer-pkcs8/u);
 assert.match(
   workflow,
   /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u,
@@ -800,7 +821,8 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=33/u);
+assert.match(helper, /expected_count=34/u);
+assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);

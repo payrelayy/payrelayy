@@ -45,6 +45,7 @@ services:
       INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'
       OWNER_CONTROL_DATABASE_URL_FILE: /run/secrets/owner_control_database_url
       OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/owner_control_supabase_publishable_key
+      OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY_FILE: /run/secrets/owner_routine_enrollment_signer_pkcs8
       OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
       OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
       OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
@@ -70,6 +71,11 @@ services:
         mode: 0400
       - source: production_supabase_publishable_key
         target: owner_control_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: owner_routine_enrollment_signer
+        target: owner_routine_enrollment_signer_pkcs8
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -772,6 +778,8 @@ configs:
 secrets:
   owner_control_database_url:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-database-url
+  owner_routine_enrollment_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-routine-enrollment-signer-pkcs8
   production_supabase_publishable_key:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/publishable-key
   customer_web_database_url:

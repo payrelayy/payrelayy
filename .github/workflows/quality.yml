@@ -90,6 +90,7 @@ jobs:
           node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-production-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-helper-rotation-v2.sh
           node infra/verify-production-helper-rotation.mjs
           bash -n infra/operations/fetanagent-production-operator-ssh-bootstrap.sh
           bash -n infra/operations/fetanagent-telebirr-device-pilot-helper.sh

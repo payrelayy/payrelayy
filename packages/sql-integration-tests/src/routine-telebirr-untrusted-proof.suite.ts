@@ -7,10 +7,15 @@ import {
   captureTelegramRoutineTelebirrCandidate,
   type TelegramRoutineTelebirrCandidateDatabase,
 } from '../../../apps/api/src/telegram-routine-telebirr-candidate-intake.js';
+import { digestRoutineTelebirrReceiverName } from '../../../packages/telebirr-verification-foundation/src/routine-signed-lookup-assignment.js';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
 const LOOKUP_TABLE = 'app.routine_telebirr_lookup_challenges';
 const OBSERVATION_TABLE = 'app.routine_telebirr_observation_receipts';
+const ENROLLMENT_TABLE = 'app.routine_telebirr_device_enrollments';
+const SIGNER_TABLE = 'app.routine_telebirr_lookup_signers';
+const ISSUE =
+  'select * from app.issue_routine_telebirr_lookup_challenge($1::uuid, $2::uuid, $3::uuid)';
 const CAPTURE = `
   select * from app.capture_telegram_routine_telebirr_untrusted_proof(
     $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
@@ -242,6 +247,62 @@ function captureArguments(eventId: string, playerId: string): readonly string[] 
   ];
 }
 
+async function fixtureRoutineLookupTrust(
+  client: Client,
+  candidateId: string,
+): Promise<{
+  enrollmentId: string;
+  signerId: string;
+  deviceId: string;
+  deviceKeyId: string;
+  deviceKeyDigest: string;
+  receiverProfileDigest: string;
+  expectedReceiverNameDigest: string;
+}> {
+  const signer = await client.query<{ id: string }>(
+    `insert into ${SIGNER_TABLE} (
+       signer_key_id, public_key_spki_sha256, valid_from, valid_until
+     ) values ($1::text, $2::text, clock_timestamp() - interval '1 hour',
+       clock_timestamp() + interval '1 day') returning id`,
+    [`routine-signer-${randomUUID()}`, `sha256:${digest()}`],
+  );
+  const deviceId = `routine-device-${randomUUID()}`;
+  const deviceKeyId = `routine-key-${randomUUID()}`;
+  const deviceKeyDigest = `sha256:${digest()}`;
+  const enrollment = await client.query<{
+    id: string;
+    receiver_profile_digest: string;
+    expected_receiver_name_digest: string;
+  }>(
+    `insert into ${ENROLLMENT_TABLE} (
+       pairing_evidence_digest, device_id, device_key_id,
+       device_public_key_spki_sha256, receiver_account_id, receiver_account_version,
+       receiver_profile_digest, expected_receiver_name_digest, valid_from, valid_until
+     ) select $2::text, $3::text, $4::text, $5::text,
+              receiver.id, receiver.version,
+              app.routine_telebirr_receiver_profile_digest(
+                receiver.id, receiver.version, receiver.account_reference_fingerprint,
+                receiver.account_holder_name),
+              app.routine_telebirr_receiver_name_digest(receiver.account_holder_name),
+              clock_timestamp() - interval '1 hour', clock_timestamp() + interval '1 day'
+         from ${TABLE} candidate
+         join app.receiver_accounts receiver on receiver.id = candidate.receiver_account_id
+        where candidate.id = $1::uuid
+     returning id, receiver_profile_digest, expected_receiver_name_digest`,
+    [candidateId, `sha256:${digest()}`, deviceId, deviceKeyId, deviceKeyDigest],
+  );
+  expect(enrollment.rows).toHaveLength(1);
+  return {
+    enrollmentId: enrollment.rows[0]!.id,
+    signerId: signer.rows[0]!.id,
+    deviceId,
+    deviceKeyId,
+    deviceKeyDigest,
+    receiverProfileDigest: enrollment.rows[0]!.receiver_profile_digest,
+    expectedReceiverNameDigest: enrollment.rows[0]!.expected_receiver_name_digest,
+  };
+}
+
 async function snapshot(client: Client): Promise<string> {
   const result = await client.query<{ state: string }>(`
     select jsonb_build_object(
@@ -439,6 +500,214 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       ]);
     });
 
+    it('keeps routine signer, enrollment, and issuer authority private and pilot-independent', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        name: string;
+        rls: boolean;
+        force_rls: boolean;
+        policies: string;
+        runtime_grants: string;
+      }>(`
+        select class.relname as name, class.relrowsecurity as rls,
+               class.relforcerowsecurity as force_rls,
+               (select count(*)::text from pg_catalog.pg_policies policy
+                 where policy.schemaname = 'app' and policy.tablename = class.relname) as policies,
+               (select count(*)::text from pg_catalog.pg_roles role
+                 where role.rolname in ('anon', 'authenticated', 'service_role',
+                   'fetanagent_routine_deposit_broker',
+                   'fetanagent_routine_deposit_broker_runtime',
+                   'fetanagent_telebirr_assignment_broker_runtime',
+                   'fetanagent_telebirr_device_state_runtime')
+                   and pg_catalog.has_table_privilege(role.rolname, class.oid,
+                     'SELECT,INSERT,UPDATE,DELETE,TRUNCATE')) as runtime_grants
+          from pg_catalog.pg_class class
+         where class.oid in (
+           '${SIGNER_TABLE}'::pg_catalog.regclass,
+           'app.routine_telebirr_lookup_signer_revocations'::pg_catalog.regclass,
+           '${ENROLLMENT_TABLE}'::pg_catalog.regclass,
+           'app.routine_telebirr_device_enrollment_revocations'::pg_catalog.regclass
+         ) order by class.relname
+      `);
+      expect(catalog.rows).toEqual(
+        [
+          'routine_telebirr_device_enrollment_revocations',
+          'routine_telebirr_device_enrollments',
+          'routine_telebirr_lookup_signer_revocations',
+          'routine_telebirr_lookup_signers',
+        ].map((name) => ({
+          name,
+          rls: true,
+          force_rls: true,
+          policies: '0',
+          runtime_grants: '0',
+        })),
+      );
+      const issuer = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        service_allowed: boolean;
+        broker_allowed: boolean;
+      }>(`
+        select routine.proowner::pg_catalog.regrole::text as owner,
+               routine.prosecdef as security_definer,
+               pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                 as public_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'EXECUTE')
+                 as service_allowed,
+               pg_catalog.has_function_privilege('fetanagent_routine_deposit_broker_runtime',
+                 routine.oid, 'EXECUTE') as broker_allowed
+          from pg_catalog.pg_proc routine
+         where routine.oid =
+           'app.issue_routine_telebirr_lookup_challenge(uuid,uuid,uuid)'::pg_catalog.regprocedure
+      `);
+      expect(issuer.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: true,
+          public_allowed: false,
+          service_allowed: false,
+          broker_allowed: false,
+        },
+      ]);
+      const name = '  PILOT\tRECEIVER  ';
+      const digestRow = await client.query<{ value: string }>(
+        'select app.routine_telebirr_receiver_name_digest($1::text) as value',
+        [name],
+      );
+      expect(digestRow.rows[0]!.value).toBe(digestRoutineTelebirrReceiverName(name));
+    });
+
+    it('issues only a five-minute no-money lookup for a current candidate and separate routine trust', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        await rejected(client, ISSUE, [candidateId, randomUUID(), randomUUID()]);
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const mismatchedEnrollment = await client.query<{ id: string }>(
+          `insert into ${ENROLLMENT_TABLE} (
+             pairing_evidence_digest, device_id, device_key_id,
+             device_public_key_spki_sha256, receiver_account_id, receiver_account_version,
+             receiver_profile_digest, expected_receiver_name_digest, valid_from, valid_until
+           ) select $2::text, $3::text, $4::text, $5::text,
+                    receiver_account_id, receiver_account_version,
+                    $6::text, $7::text,
+                    clock_timestamp() - interval '1 hour', clock_timestamp() + interval '1 day'
+               from ${TABLE} where id = $1::uuid returning id`,
+          [
+            candidateId,
+            `sha256:${digest()}`,
+            `routine-device-${randomUUID()}`,
+            `routine-key-${randomUUID()}`,
+            `sha256:${digest()}`,
+            `sha256:${digest()}`,
+            trust.expectedReceiverNameDigest,
+          ],
+        );
+        await rejected(client, ISSUE, [
+          candidateId,
+          mismatchedEnrollment.rows[0]!.id,
+          trust.signerId,
+        ]);
+        await client.query('set local role fetanagent_routine_deposit_broker');
+        await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        await client.query('reset role');
+
+        const issued = await client.query<{
+          challenge_id: string;
+          challenge_digest: string;
+          issued_at: Date;
+          expires_at: Date;
+          receiver_profile_digest: string;
+          expected_receiver_name_digest: string;
+        }>(ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        expect(issued.rows).toHaveLength(1);
+        const first = issued.rows[0]!;
+        expect(first.challenge_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(first.expires_at.getTime() - first.issued_at.getTime()).toBe(300_000);
+        expect(first.receiver_profile_digest).toBe(trust.receiverProfileDigest);
+        expect(first.expected_receiver_name_digest).toBe(trust.expectedReceiverNameDigest);
+        const bound = await client.query<{
+          exact_candidate: boolean;
+          exact_device: boolean;
+          exact_signer: boolean;
+          exact_receiver: boolean;
+        }>(
+          `
+          select challenge.candidate_id = candidate.id
+                   and challenge.candidate_reference_fingerprint =
+                     candidate.candidate_reference_fingerprint
+                   and challenge.candidate_submitted_at = candidate.submitted_at
+                     as exact_candidate,
+                 challenge.device_enrollment_id = enrollment.id
+                   and challenge.device_id = enrollment.device_id
+                   and challenge.device_key_id = enrollment.device_key_id
+                   and challenge.device_public_key_spki_sha256 =
+                     enrollment.device_public_key_spki_sha256 as exact_device,
+                 challenge.assignment_signer_id = signer.id as exact_signer,
+                 challenge.receiver_account_id = candidate.receiver_account_id
+                   and challenge.receiver_account_version = candidate.receiver_account_version
+                   and challenge.receiver_profile_digest = enrollment.receiver_profile_digest
+                   and challenge.expected_receiver_name_digest =
+                     enrollment.expected_receiver_name_digest as exact_receiver
+            from ${LOOKUP_TABLE} challenge
+            join ${TABLE} candidate on candidate.id = challenge.candidate_id
+            join ${ENROLLMENT_TABLE} enrollment on enrollment.id = challenge.device_enrollment_id
+            join ${SIGNER_TABLE} signer on signer.id = challenge.assignment_signer_id
+           where challenge.challenge_id = $1::uuid`,
+          [first.challenge_id],
+        );
+        expect(bound.rows).toEqual([
+          {
+            exact_candidate: true,
+            exact_device: true,
+            exact_signer: true,
+            exact_receiver: true,
+          },
+        ]);
+        await client.query('savepoint revoked_enrollment');
+        await client.query(
+          `insert into app.routine_telebirr_device_enrollment_revocations
+             (enrollment_id, reason_code) values ($1::uuid, 'device_lost')`,
+          [trust.enrollmentId],
+        );
+        await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        await client.query('rollback to savepoint revoked_enrollment');
+        await client.query('release savepoint revoked_enrollment');
+        await client.query('savepoint revoked_signer');
+        await client.query(
+          `insert into app.routine_telebirr_lookup_signer_revocations
+             (signer_id, reason_code) values ($1::uuid, 'key_compromise')`,
+          [trust.signerId],
+        );
+        await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        await client.query('rollback to savepoint revoked_signer');
+        await client.query('release savepoint revoked_signer');
+        await client.query('savepoint stale_player');
+        await client.query(
+          `update app.customer_platform_players set validation_status = 'unverified'
+            where player_id = $1::text`,
+          [playerId],
+        );
+        await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        await client.query('rollback to savepoint stale_player');
+        await client.query('release savepoint stale_player');
+        for (let remaining = 0; remaining < 4; remaining += 1) {
+          await client.query(ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        }
+        await rejected(client, ISSUE, [candidateId, trust.enrollmentId, trust.signerId]);
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
     it('pins a candidate snapshot, allows one receipt per challenge, and follows 7-day purge', async () => {
       const client = getClient();
       await rollback(client, async () => {
@@ -450,6 +719,12 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
         ]);
         const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const withTrust = (values: readonly unknown[]): unknown[] => [
+          ...values,
+          trust.enrollmentId,
+          trust.signerId,
+        ];
         const challengeId = randomUUID();
         const challengeDigest = `sha256:${digest()}`;
         const insert = `
@@ -457,96 +732,106 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             challenge_id, candidate_id, receiver_account_id, receiver_account_version,
             candidate_reference_fingerprint, candidate_submitted_at,
             device_id, device_key_id, device_public_key_spki_sha256,
+            device_enrollment_id, assignment_signer_id,
+            receiver_profile_digest, expected_receiver_name_digest,
             challenge_digest, issued_at, expires_at
           ) select $1::uuid, candidate.id, candidate.receiver_account_id,
                    candidate.receiver_account_version + $3::integer,
                    coalesce($4::text, candidate.candidate_reference_fingerprint),
                    candidate.submitted_at,
-                   'routine-test-device-0001', 'routine-test-key-0001', $5::text,
+                   enrollment.device_id, enrollment.device_key_id, $5::text,
+                   enrollment.id, signer.id,
+                   enrollment.receiver_profile_digest, enrollment.expected_receiver_name_digest,
                    $6::text, issued.now_at,
                    issued.now_at + $7::integer * interval '1 minute'
               from ${TABLE} candidate
+              cross join ${ENROLLMENT_TABLE} enrollment
+              cross join ${SIGNER_TABLE} signer
               cross join lateral (
                 select date_trunc('milliseconds', clock_timestamp()) as now_at
               ) issued
-             where candidate.id = $2::uuid
+             where candidate.id = $2::uuid and enrollment.id = $8::uuid
+               and signer.id = $9::uuid
           returning challenge_id
         `;
         const keyDigest = `sha256:${digest()}`;
         const args = [challengeId, candidateId, 0, null, keyDigest, challengeDigest, 5];
-        expect((await client.query(insert, args)).rows).toEqual([{ challenge_id: challengeId }]);
+        expect((await client.query(insert, withTrust(args))).rows).toEqual([
+          { challenge_id: challengeId },
+        ]);
         await client.query('set local role fetanagent_routine_deposit_broker');
         await rejected(client, `select * from ${LOOKUP_TABLE}`);
         await rejected(client, `select * from ${OBSERVATION_TABLE}`);
         await client.query('reset role');
-        await rejected(client, insert, [
-          randomUUID(),
-          candidateId,
-          1,
-          null,
-          keyDigest,
-          `sha256:${digest()}`,
-          5,
-        ]);
-        await rejected(client, insert, [
-          randomUUID(),
-          candidateId,
-          0,
-          'f'.repeat(64),
-          keyDigest,
-          `sha256:${digest()}`,
-          5,
-        ]);
-        await rejected(client, insert, [
-          challengeId,
-          candidateId,
-          0,
-          null,
-          keyDigest,
-          `sha256:${digest()}`,
-          5,
-        ]);
-        await rejected(client, insert, [
-          randomUUID(),
-          candidateId,
-          0,
-          null,
-          keyDigest,
-          challengeDigest,
-          5,
-        ]);
-        await rejected(client, insert, [
-          randomUUID(),
-          candidateId,
-          0,
-          null,
-          keyDigest,
-          `sha256:${digest()}`,
-          6,
-        ]);
-        await rejected(client, insert, [
-          randomUUID(),
-          candidateId,
-          0,
-          null,
-          'not-a-key-digest',
-          `sha256:${digest()}`,
-          5,
-        ]);
+        await rejected(
+          client,
+          insert,
+          withTrust([randomUUID(), candidateId, 1, null, keyDigest, `sha256:${digest()}`, 5]),
+        );
+        await rejected(
+          client,
+          insert,
+          withTrust([
+            randomUUID(),
+            candidateId,
+            0,
+            'f'.repeat(64),
+            keyDigest,
+            `sha256:${digest()}`,
+            5,
+          ]),
+        );
+        await rejected(
+          client,
+          insert,
+          withTrust([challengeId, candidateId, 0, null, keyDigest, `sha256:${digest()}`, 5]),
+        );
+        await rejected(
+          client,
+          insert,
+          withTrust([randomUUID(), candidateId, 0, null, keyDigest, challengeDigest, 5]),
+        );
+        await rejected(
+          client,
+          insert,
+          withTrust([randomUUID(), candidateId, 0, null, keyDigest, `sha256:${digest()}`, 6]),
+        );
+        await rejected(
+          client,
+          insert,
+          withTrust([
+            randomUUID(),
+            candidateId,
+            0,
+            null,
+            'not-a-key-digest',
+            `sha256:${digest()}`,
+            5,
+          ]),
+        );
         await rejected(
           client,
           `insert into ${LOOKUP_TABLE} (
             candidate_id, receiver_account_id, receiver_account_version,
             candidate_reference_fingerprint, candidate_submitted_at,
             device_id, device_key_id, device_public_key_spki_sha256,
+            device_enrollment_id, assignment_signer_id,
+            receiver_profile_digest, expected_receiver_name_digest,
             challenge_digest, issued_at, expires_at
-          ) select id, receiver_account_id, receiver_account_version,
-                   candidate_reference_fingerprint, submitted_at,
-                   'routine-test-device-0001', 'routine-test-key-0001', $2::text,
-                   $3::text, submitted_at + interval '6 days 23 hours 59 minutes',
-                   submitted_at + interval '7 days 4 minutes'
-              from ${TABLE} where id = $1::uuid`,
-          [candidateId, keyDigest, `sha256:${digest()}`],
+          ) select candidate.id, candidate.receiver_account_id,
+                   candidate.receiver_account_version,
+                   candidate.candidate_reference_fingerprint, candidate.submitted_at,
+                   enrollment.device_id, enrollment.device_key_id, $2::text,
+                   enrollment.id, signer.id,
+                   enrollment.receiver_profile_digest, enrollment.expected_receiver_name_digest,
+                   $3::text, candidate.submitted_at + interval '6 days 23 hours 59 minutes',
+                   candidate.submitted_at + interval '7 days 4 minutes'
+              from ${TABLE} candidate
+              cross join ${ENROLLMENT_TABLE} enrollment
+              cross join ${SIGNER_TABLE} signer
+             where candidate.id = $1::uuid and enrollment.id = $4::uuid
+               and signer.id = $5::uuid`,
+          [candidateId, keyDigest, `sha256:${digest()}`, trust.enrollmentId, trust.signerId],
         );
         const receipt = `insert into ${OBSERVATION_TABLE}
           (challenge_id, observation_body_digest, observation_signature_digest)
@@ -585,15 +870,31 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             challenge_id, candidate_id, receiver_account_id, receiver_account_version,
             candidate_reference_fingerprint, candidate_submitted_at,
             device_id, device_key_id, device_public_key_spki_sha256,
+            device_enrollment_id, assignment_signer_id,
+            receiver_profile_digest, expected_receiver_name_digest,
             challenge_digest, issued_at, expires_at
-          ) select $1::uuid, id, receiver_account_id, receiver_account_version,
-                   candidate_reference_fingerprint, submitted_at,
-                   'routine-test-device-0001', 'routine-test-key-0001', $3::text,
-                   $4::text, submitted_at + interval '1 hour',
-                   submitted_at + interval '1 hour 5 minutes'
-              from ${TABLE} where id = $2::uuid
+          ) select $1::uuid, candidate.id, candidate.receiver_account_id,
+                   candidate.receiver_account_version,
+                   candidate.candidate_reference_fingerprint, candidate.submitted_at,
+                   enrollment.device_id, enrollment.device_key_id, $3::text,
+                   enrollment.id, signer.id,
+                   enrollment.receiver_profile_digest, enrollment.expected_receiver_name_digest,
+                   $4::text, candidate.submitted_at + interval '1 hour',
+                   candidate.submitted_at + interval '1 hour 5 minutes'
+              from ${TABLE} candidate
+              cross join ${ENROLLMENT_TABLE} enrollment
+              cross join ${SIGNER_TABLE} signer
+             where candidate.id = $2::uuid and enrollment.id = $5::uuid
+               and signer.id = $6::uuid
         `,
-          [oldChallengeId, oldCandidate.rows[0]!.id, keyDigest, `sha256:${digest()}`],
+          [
+            oldChallengeId,
+            oldCandidate.rows[0]!.id,
+            keyDigest,
+            `sha256:${digest()}`,
+            trust.enrollmentId,
+            trust.signerId,
+          ],
         );
         await client.query(receipt, [oldChallengeId, `sha256:${digest()}`, `sha256:${digest()}`]);
         const purged = await client.query<{ deleted_count: number }>(

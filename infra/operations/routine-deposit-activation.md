@@ -9,13 +9,17 @@ verified-job path is not implemented end to end. The dormant table in
 `20261005165930_routine_telebirr_untrusted_proof_foundation.sql` does not satisfy that path.
 The `routine-signed-observation` library verifies a paired-device signature and receipt-policy
 facts in isolation, but has no production caller, authenticated official-source adapter, or
-atomic one-use payment claim. A private digest-only challenge/observation ledger now pins the
-candidate snapshot and permits one observation receipt per challenge, but no trusted issuer or
-upload caller can use it. It is not a provider-payment replay claim. The advisory result and
+atomic one-use payment claim. A private digest-only challenge/observation ledger pins the
+candidate snapshot and permits one observation receipt per challenge. An administrator-only
+database issuer can reserve a five-minute challenge against a current candidate, receiving-account
+revision, separate routine enrollment, and signer. The routine trust stores are empty and have no
+application provisioning path; the issuer has no runtime grant or transport. It does not open a
+reference, sign an assignment, authenticate an official TeleBirr source, accept an observation, or
+claim a payment. Pilot pairing cannot substitute for routine enrollment. The advisory result and
 dormant ledger do not satisfy this activation gate.
 The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and
-routine device/receiver binding in isolation. It does not issue assignments, establish trusted
-candidate database binding, authenticate TeleBirr, or activate the Android routine lookup. The
+routine device/receiver binding in isolation. It does not issue signed assignments, verify the
+database reservation, authenticate TeleBirr, or activate the Android routine lookup. The
 phone's routine receiver-name digest is domain-separated from the private pilot, but the routine
 phone path is still dormant. The Android routine lookup verifier can check that same assignment
 transcript against a local device key and yields only a guarded parsing expectation. Its strict

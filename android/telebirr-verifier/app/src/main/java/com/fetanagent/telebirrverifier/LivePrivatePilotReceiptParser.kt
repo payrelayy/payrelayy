@@ -42,6 +42,18 @@ class LivePrivatePilotReceiptParser {
     document: ProviderDocument,
     assignment: AuthenticatedLivePilotAssignment,
   ): LivePilotParsedProviderObservation =
+    parseForExpectedReceipt(
+      document,
+      assignment.body.rawReference,
+      assignment.body.expectedReceiverNameNormalized,
+    )
+
+  /** Shared official-layout parser; callers must authenticate their own lookup assignment first. */
+  internal fun parseForExpectedReceipt(
+    document: ProviderDocument,
+    rawReference: String,
+    expectedReceiverNameNormalized: String,
+  ): LivePilotParsedProviderObservation =
     when (document) {
       is ProviderDocument.NotFound ->
         review(
@@ -62,7 +74,7 @@ class LivePrivatePilotReceiptParser {
           retrievedAt = null,
         )
       is ProviderDocument.Found ->
-        runCatching { parseFound(document, assignment.body) }
+        runCatching { parseFound(document, rawReference, expectedReceiverNameNormalized) }
           .getOrElse {
             review(document.sourceDocumentDigest, "parser_uncertain", document.retrievedAt)
           }
@@ -70,7 +82,8 @@ class LivePrivatePilotReceiptParser {
 
   private fun parseFound(
     document: ProviderDocument.Found,
-    assignment: LivePilotAssignmentBody,
+    rawReference: String,
+    expectedReceiverNameNormalized: String,
   ): LivePilotParsedProviderObservation {
     val rows = parseRows(document.utf8Body)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
@@ -86,7 +99,7 @@ class LivePrivatePilotReceiptParser {
         document.sourceDocumentDigest,
         "unknown_layout_invoice_number",
         document.retrievedAt,
-        invoiceShapeDiagnostic = invoiceShapeDiagnostic(document.utf8Body, rows, assignment.rawReference),
+        invoiceShapeDiagnostic = invoiceShapeDiagnostic(document.utf8Body, rows, rawReference),
       )
     val status = unique(rows, "transaction status")
       ?: return review(
@@ -151,11 +164,11 @@ class LivePrivatePilotReceiptParser {
           layoutAttestation = "recognized_layout_v1",
           providerFinalStatus = strictStatus(status),
           canonicalReferencePresent = true,
-          referenceMatch = if (invoiceNumber == assignment.rawReference) "matched" else "mismatched",
+          referenceMatch = if (invoiceNumber == rawReference) "matched" else "mismatched",
           amountMinor = amountMinor,
           currencyCode = "ETB",
           receiverMatch =
-            if (normalizedReceiver == assignment.expectedReceiverNameNormalized) {
+            if (normalizedReceiver == expectedReceiverNameNormalized) {
               "matched"
             } else {
               "mismatched"

@@ -260,6 +260,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.review_owner_player_registration_request(uuid,uuid,text,text)',
         },
         { signature: 'app.revoke_agent_platform_companion_device(uuid,uuid,uuid,text)' },
+        { signature: 'app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)' },
         { signature: 'app.revoke_telegram_beta_invite(uuid,uuid,text)' },
         {
           signature:

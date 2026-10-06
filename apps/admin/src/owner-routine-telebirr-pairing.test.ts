@@ -146,6 +146,32 @@ describe('Owner routine TeleBirr pairing challenge adapter', () => {
 });
 
 describe('Owner routine TeleBirr proof enrollment adapter', () => {
+  it('re-verifies the exact proof on retry and accepts only the SQL replay receipt', async () => {
+    const proof = signedProof();
+    let enrollmentCalls = 0;
+    const adapter = new PostgresOwnerRoutineTelebirrPairing(
+      {
+        query: async (sql) =>
+          sql.includes('get_owner_routine_telebirr_device_pairing_challenge')
+            ? { rows: [row] }
+            : {
+                rows: [
+                  {
+                    enrollment_id: '55555555-5555-4555-8555-555555555555',
+                    valid_from: new Date('2026-10-06T12:02:00.000Z'),
+                    valid_until: new Date('2026-11-05T12:02:00.000Z'),
+                    replayed: enrollmentCalls++ > 0,
+                  },
+                ],
+              },
+      },
+      () => new Date('2026-10-06T12:02:00.000Z'),
+    );
+    expect((await adapter.enroll(actor, proof)).alreadyEnrolled).toBe(false);
+    expect((await adapter.enroll(actor, proof)).alreadyEnrolled).toBe(true);
+    expect(enrollmentCalls).toBe(2);
+  });
+
   it('verifies the signed phone proof before the only enrollment write and returns no-money receipt', async () => {
     const proof = signedProof();
     const calls: Array<{ sql: string; values: readonly string[] }> = [];

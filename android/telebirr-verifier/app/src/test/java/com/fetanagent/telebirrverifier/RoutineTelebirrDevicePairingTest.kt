@@ -22,6 +22,13 @@ class RoutineTelebirrDevicePairingTest {
     )
   private val identity = JvmP256Identity("routine-device-key-0001")
 
+  private fun challengePackage(): String {
+    val json =
+      """{"contractVersion":1,"providerCode":"telebirr","protocolMode":"routine_device_pairing_v1","pairingId":"${challenge.pairingId}","pairingNonceDigest":"${challenge.pairingNonceDigest}","receiverRevisionId":"${challenge.receiverRevisionId}","receiverVersion":${challenge.receiverVersion},"receiverProfileDigest":"${challenge.receiverProfileDigest}","expectedReceiverNameDigest":"${challenge.expectedReceiverNameDigest}","issuedAt":"${challenge.issuedAt}","expiresAt":"${challenge.expiresAt}"}"""
+    return "fetanagent-routine-pairing-v1." + Base64.getUrlEncoder().withoutPadding()
+      .encodeToString(json.toByteArray(StandardCharsets.UTF_8))
+  }
+
   private fun proof(): RoutineSignedDevicePairingProof =
     RoutineDevicePairingProofFactory.create(
       challenge = challenge,
@@ -87,6 +94,26 @@ class RoutineTelebirrDevicePairingTest {
       "fetanagent-routine-pairing-v1." + Base64.getUrlEncoder().withoutPadding()
         .encodeToString(duplicate.toByteArray(StandardCharsets.UTF_8)),
     ))
+  }
+
+  @Test
+  fun `offline handoff creates bounded routine proof without enrolling or polling`() {
+    val now = java.time.Instant.parse("2026-10-06T12:00:00.000Z").toEpochMilli()
+    val bytes = RoutineDevicePairingHandoff.createProof(challengePackage(), identity, now)
+    val proof = RoutineDevicePairingJsonCodec.decode(bytes)!!
+    val fingerprint = identity.publicMaterial().publicKeySpkiSha256.removePrefix("sha256:")
+    assertEquals("routine_device_$fingerprint", proof.body.deviceId)
+    assertEquals("2026-10-06T11:59:30.000Z", proof.body.issuedAt)
+    assertEquals("2026-10-06T12:04:00.000Z", proof.body.expiresAt)
+    assertEquals(challenge.pairingId, proof.body.pairingId)
+    assertTrue(DeviceBridgeCrypto.verifyP1363(
+      identity.keyPair.public.encoded,
+      RoutineDevicePairingCanonical.signatureBytes(proof.body),
+      proof.signature,
+    ))
+    assertTrue(runCatching { RoutineDevicePairingHandoff.createProof(challengePackage(), identity,
+      java.time.Instant.parse(challenge.expiresAt).toEpochMilli()) }.isFailure)
+    assertTrue(runCatching { RoutineDevicePairingHandoff.createProof("fetanagent-pairing-v1.fake", identity, now) }.isFailure)
   }
 
   @Test

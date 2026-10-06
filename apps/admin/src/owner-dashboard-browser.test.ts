@@ -573,6 +573,158 @@ describe('persistent routine TeleBirr policy controls', () => {
   });
 });
 
+describe('routine phone proof handoff', () => {
+  const pairingId = '22222222-2222-4222-8222-222222222222';
+  const enrollmentId = '33333333-3333-4333-8333-333333333333';
+  const expiresAt = new Date(Date.now() + 600_000).toISOString();
+  const issuedAt = new Date(Date.parse(expiresAt) - 600_000).toISOString();
+  const challengePackage =
+    'fetanagent-routine-pairing-v1.' +
+    Buffer.from(
+      JSON.stringify({
+        contractVersion: 1,
+        providerCode: 'telebirr',
+        protocolMode: 'routine_device_pairing_v1',
+        pairingId,
+        pairingNonceDigest: `sha256:${'a'.repeat(64)}`,
+        receiverRevisionId: '44444444-4444-4444-8444-444444444444',
+        receiverVersion: 1,
+        receiverProfileDigest: `sha256:${'b'.repeat(64)}`,
+        expectedReceiverNameDigest: `sha256:${'c'.repeat(64)}`,
+        issuedAt,
+        expiresAt,
+      }),
+      'utf8',
+    ).toString('base64url');
+  const challengeReceipt = {
+    alreadyIssued: false,
+    assignmentPollingAllowed: false,
+    challengePackage,
+    enrollmentAllowed: false,
+    expiresAt,
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+  } as const;
+  const enrollmentReceipt = {
+    alreadyEnrolled: false,
+    assignmentPollingAllowed: false,
+    enrollmentId,
+    moneyMovementAllowed: false,
+    pairingOnly: true,
+    validUntil: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+  } as const;
+
+  it('exchanges the exact challenge and phone proof without any financial request', async () => {
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-pairing-challenge'
+          ? response(201, challengeReceipt)
+          : url === '/v1/owner/routine-telebirr-pairing-proof'
+            ? response(201, enrollmentReceipt)
+            : undefined,
+    });
+    await browser.signIn();
+    browser.element('#routine-phone-challenge-confirmation').checked = true;
+    await browser.call('issueRoutinePhoneChallenge');
+    expect(browser.element('#routine-phone-challenge-package').textContent).toBe(challengePackage);
+    expect(browser.element('#routine-phone-challenge-receipt').hidden).toBe(false);
+    const proof = { body: { pairingId }, signature: 'synthetic-signed-proof' };
+    browser.element('#routine-phone-proof-input').value = JSON.stringify(proof);
+    browser.element('#routine-phone-proof-confirmation').checked = true;
+    await browser.call('submitRoutinePhoneProof');
+    const posts = browser.fetchCalls.filter(({ url }) =>
+      url.startsWith('/v1/owner/routine-telebirr-pairing-'),
+    );
+    expect(posts.map(({ url }) => url)).toEqual([
+      '/v1/owner/routine-telebirr-pairing-challenge',
+      '/v1/owner/routine-telebirr-pairing-proof',
+    ]);
+    expect(posts[0]!.init.headers).toMatchObject({
+      'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1',
+      'x-idempotency-key': '11111111-1111-4111-8111-111111111111',
+    });
+    expect(JSON.parse(String(posts[1]!.init.body))).toEqual({
+      confirmation: 'owner_confirmed_routine_pairing_proof_only_no_money',
+      proof,
+      requestId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(browser.element('#routine-phone-proof-input').value).toBe('');
+    expect(browser.element('#routine-phone-enrollment-status').textContent).toContain(enrollmentId);
+    expect(browser.element('#routine-phone-enrollment-status').textContent).toContain('disabled');
+  });
+
+  it('rejects mismatched proof locally and retries an uncertain response with the same proof', async () => {
+    let proofAttempts = 0;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-pairing-challenge'
+          ? response(201, challengeReceipt)
+          : url === '/v1/owner/routine-telebirr-pairing-proof'
+            ? ++proofAttempts === 1
+              ? response(503, {})
+              : response(200, {
+                  ...enrollmentReceipt,
+                  alreadyEnrolled: true,
+                })
+            : undefined,
+    });
+    await browser.signIn();
+    browser.element('#routine-phone-challenge-confirmation').checked = true;
+    await browser.call('issueRoutinePhoneChallenge');
+    const input = browser.element('#routine-phone-proof-input');
+    browser.element('#routine-phone-proof-confirmation').checked = true;
+    input.value = JSON.stringify({ body: { pairingId: enrollmentId } });
+    await browser.call('submitRoutinePhoneProof');
+    expect(proofAttempts).toBe(0);
+    const original = JSON.stringify({ body: { pairingId }, signature: 'same-proof' });
+    input.value = original;
+    await browser.call('submitRoutinePhoneProof');
+    expect(proofAttempts).toBe(1);
+    expect(input.value).toBe(original);
+    await browser.call('submitRoutinePhoneProof');
+    expect(proofAttempts).toBe(2);
+    expect(browser.element('#routine-phone-enrollment-status').textContent).toContain(enrollmentId);
+    expect(browser.element('#routine-phone-challenge-receipt').hidden).toBe(true);
+  });
+
+  it('clears phone proof on sign-out and ignores a late enrollment response', async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-pairing-challenge'
+          ? response(201, challengeReceipt)
+          : url === '/v1/owner/routine-telebirr-pairing-proof'
+            ? pending.promise
+            : undefined,
+    });
+    await browser.signIn();
+    browser.element('#routine-phone-challenge-confirmation').checked = true;
+    await browser.call('issueRoutinePhoneChallenge');
+    browser.element('#routine-phone-proof-input').value = JSON.stringify({
+      body: { pairingId },
+      signature: 'synthetic',
+    });
+    browser.element('#routine-phone-proof-confirmation').checked = true;
+    const mutation = browser.call('submitRoutinePhoneProof');
+    await vi.waitFor(() =>
+      expect(
+        browser.fetchCalls.some(({ url }) => url === '/v1/owner/routine-telebirr-pairing-proof'),
+      ).toBe(true),
+    );
+    await browser.call('signOut');
+    expect(browser.element('#routine-phone-proof-input').value).toBe('');
+    expect(browser.element('#routine-phone-challenge-package').textContent).toBe('');
+    pending.resolve(response(201, enrollmentReceipt));
+    await mutation;
+    expect(browser.element('#routine-phone-enrollment-status').textContent).not.toContain(
+      enrollmentId,
+    );
+  });
+});
+
 describe('Owner execution readiness preview', () => {
   const readiness = {
     activationAvailable: false,

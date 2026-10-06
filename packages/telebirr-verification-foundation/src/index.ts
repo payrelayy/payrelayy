@@ -154,3 +154,12 @@ export {
   verifyRoutineTelebirrSignedLookupAssignment,
   type RoutineTelebirrLookupAssignmentResult,
 } from './routine-signed-lookup-assignment.js';
+export {
+  ROUTINE_TELEBIRR_DEVICE_PAIRING_PROTOCOL_MODE,
+  ROUTINE_TELEBIRR_DEVICE_PAIRING_TRANSCRIPT_VERSION,
+  canonicalRoutineTelebirrDevicePairingBodyBytes,
+  canonicalRoutineTelebirrDevicePairingSignatureBytes,
+  digestRoutineTelebirrDevicePairingBody,
+  assessRoutineTelebirrDevicePairingProof,
+  type RoutineTelebirrDevicePairingAssessment,
+} from './routine-device-pairing.js';

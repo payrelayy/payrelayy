@@ -357,3 +357,76 @@ describe('Owner routine TeleBirr phone revocation adapter', () => {
     );
   });
 });
+
+describe('Owner routine TeleBirr active phone inventory adapter', () => {
+  const enrollmentId = '55555555-5555-4555-8555-555555555555';
+  const validUntil = new Date('2026-11-05T20:00:00.000Z');
+
+  it('lists exact active phones without a receipt signer or any money authority', async () => {
+    const calls: Array<readonly string[]> = [];
+    const adapter = new PostgresOwnerRoutineTelebirrPairing({
+      query: async (sql, values) => {
+        expect(sql).toContain('app.list_owner_routine_telebirr_active_phone_enrollments');
+        calls.push(values);
+        return {
+          rows: [
+            {
+              enrollment_id: enrollmentId,
+              device_id: 'routine-device-a',
+              device_key_id: 'routine-key-a',
+              valid_until: validUntil,
+            },
+          ],
+        };
+      },
+    });
+    expect(await adapter.listActivePhones(actor)).toEqual({
+      assignmentPollingAllowed: false,
+      moneyMovementAllowed: false,
+      phones: [
+        {
+          deviceId: 'routine-device-a',
+          deviceKeyId: 'routine-key-a',
+          enrollmentId,
+          validUntil: validUntil.toISOString(),
+        },
+      ],
+    });
+    expect(calls).toEqual([[actor]]);
+  });
+
+  it('fails closed on malformed Owner IDs, duplicate rows, and database denials', async () => {
+    const duplicate = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => ({
+        rows: [
+          {
+            enrollment_id: enrollmentId,
+            device_id: 'routine-device-a',
+            device_key_id: 'routine-key-a',
+            valid_until: validUntil,
+          },
+          {
+            enrollment_id: enrollmentId,
+            device_id: 'routine-device-a',
+            device_key_id: 'routine-key-a',
+            valid_until: validUntil,
+          },
+        ],
+      }),
+    });
+    await expect(duplicate.listActivePhones('bad')).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingRejectedError,
+    );
+    await expect(duplicate.listActivePhones(actor)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingUnavailableError,
+    );
+    const denied = new PostgresOwnerRoutineTelebirrPairing({
+      query: async () => {
+        throw Object.assign(new Error('redacted'), { code: '42501' });
+      },
+    });
+    await expect(denied.listActivePhones(actor)).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrPairingRejectedError,
+    );
+  });
+});

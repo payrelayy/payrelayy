@@ -27,6 +27,17 @@ export interface OwnerRoutineTelebirrRevocationReceipt {
   readonly revokedAt: string;
 }
 
+export interface OwnerRoutineTelebirrActivePhoneInventory {
+  readonly assignmentPollingAllowed: false;
+  readonly moneyMovementAllowed: false;
+  readonly phones: readonly {
+    readonly deviceId: string;
+    readonly deviceKeyId: string;
+    readonly enrollmentId: string;
+    readonly validUntil: string;
+  }[];
+}
+
 export interface OwnerRoutineTelebirrPairingDatabase {
   query(sql: string, values: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
@@ -76,6 +87,10 @@ const ENROLL_SQL = `
 const REVOKE_SQL = `
   select enrollment_id, revoked_at, already_revoked
     from app.revoke_owner_routine_telebirr_device_enrollment($1::uuid, $2::uuid)
+`;
+const LIST_ACTIVE_PHONES_SQL = `
+  select enrollment_id, device_id, device_key_id, valid_until
+    from app.list_owner_routine_telebirr_active_phone_enrollments($1::uuid)
 `;
 
 function databaseErrorCode(error: unknown): string | undefined {
@@ -341,6 +356,53 @@ export class PostgresOwnerRoutineTelebirrPairing {
         moneyMovementAllowed: false,
         revokedAt: value.revoked_at.toISOString(),
       };
+    } catch (error) {
+      if (
+        error instanceof OwnerRoutineTelebirrPairingRejectedError ||
+        error instanceof OwnerRoutineTelebirrPairingUnavailableError
+      )
+        throw error;
+      if (databaseErrorCode(error) === '42501') {
+        throw new OwnerRoutineTelebirrPairingRejectedError();
+      }
+      throw new OwnerRoutineTelebirrPairingUnavailableError();
+    }
+  }
+
+  /** Lists only current Owner-linked routine phones, without requiring a receipt signer. */
+  async listActivePhones(authUserId: string): Promise<OwnerRoutineTelebirrActivePhoneInventory> {
+    if (!UUID_V4.test(authUserId)) throw new OwnerRoutineTelebirrPairingRejectedError();
+    try {
+      const result = await this.database.query(LIST_ACTIVE_PHONES_SQL, [authUserId]);
+      if (result.rows.length > 100) throw new OwnerRoutineTelebirrPairingUnavailableError();
+      const seen = new Set<string>();
+      const phones = result.rows.map((row) => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+          throw new OwnerRoutineTelebirrPairingUnavailableError();
+        }
+        const value = row as Record<string, unknown>;
+        if (
+          typeof value.enrollment_id !== 'string' ||
+          !UUID_V4.test(value.enrollment_id) ||
+          typeof value.device_id !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(value.device_id) ||
+          typeof value.device_key_id !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u.test(value.device_key_id) ||
+          !(value.valid_until instanceof Date) ||
+          !Number.isFinite(value.valid_until.getTime()) ||
+          seen.has(value.enrollment_id)
+        ) {
+          throw new OwnerRoutineTelebirrPairingUnavailableError();
+        }
+        seen.add(value.enrollment_id);
+        return {
+          deviceId: value.device_id,
+          deviceKeyId: value.device_key_id,
+          enrollmentId: value.enrollment_id,
+          validUntil: value.valid_until.toISOString(),
+        };
+      });
+      return { assignmentPollingAllowed: false, moneyMovementAllowed: false, phones };
     } catch (error) {
       if (
         error instanceof OwnerRoutineTelebirrPairingRejectedError ||

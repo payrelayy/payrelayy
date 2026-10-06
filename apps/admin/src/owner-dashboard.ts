@@ -533,6 +533,15 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
                 <output class="pairing-package" id="routine-receipt-package"></output>
                 <button id="routine-receipt-copy" type="button">Copy receipt to phone</button>
               </div>
+              <p class="receipt-label">If receipt signing is unavailable, load the current Owner-linked
+                phones directly. Select the exact enrollment before revoking it; loading does not
+                contact TeleBirr or enable deposits.</p>
+              <button id="routine-phones-load" type="button" disabled>Load active routine phones</button>
+              <p class="request-meta" id="routine-phones-status" role="status"></p>
+              <label for="routine-phones-select" id="routine-phones-select-label" hidden>
+                Exact active phone enrollment
+                <select id="routine-phones-select"></select>
+              </label>
               <label class="confirmation-row" for="routine-revoke-confirmation">
                 <input id="routine-revoke-confirmation" type="checkbox" />
                 I approve permanently revoking this exact routine phone enrollment. This cannot
@@ -818,6 +827,10 @@ const routineReceiptCopy = document.querySelector('#routine-receipt-copy');
 const routineRevokeConfirmation = document.querySelector('#routine-revoke-confirmation');
 const routineRevokeButton = document.querySelector('#routine-revoke-button');
 const routineRevokeStatus = document.querySelector('#routine-revoke-status');
+const routinePhonesLoadButton = document.querySelector('#routine-phones-load');
+const routinePhonesStatus = document.querySelector('#routine-phones-status');
+const routinePhonesSelectLabel = document.querySelector('#routine-phones-select-label');
+const routinePhonesSelect = document.querySelector('#routine-phones-select');
 let routineProcessingLoaded = false;
 let routineProcessingBusy = false;
 let routineProcessingState;
@@ -828,6 +841,8 @@ let routinePhonePairingExpiryTimer;
 let routineEnrollmentReceipt;
 let routineReceiptBusy = false;
 let routineRevokeBusy = false;
+let routinePhonesBusy = false;
+let routineActivePhones = [];
 let pendingRoutinePhoneChallengeRequestId;
 let pendingRoutinePhoneProofRequestId;
 const pilotReadiness = document.querySelector('#pilot-readiness');
@@ -1763,14 +1778,96 @@ function clearRoutineReceipt() {
   routineRevokeStatus.textContent = '';
 }
 
+function clearRoutinePhones() {
+  routineActivePhones = [];
+  routinePhonesSelect.replaceChildren();
+  routinePhonesSelect.value = '';
+  routinePhonesSelectLabel.hidden = true;
+  routinePhonesStatus.textContent = '';
+  routineRevokeConfirmation.checked = false;
+  updateRoutineReceiptAvailability();
+}
+
 function updateRoutineReceiptAvailability() {
   if (routineEnrollmentReceipt && Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {
     clearRoutineReceipt();
   }
   routineReceiptButton.disabled = !accessToken || routineReceiptBusy || routineRevokeBusy ||
     !routineReceiptConfirmation.checked;
-  routineRevokeButton.disabled = !accessToken || routineReceiptBusy || routineRevokeBusy ||
-    !routineEnrollmentReceipt || !routineRevokeConfirmation.checked;
+  routinePhonesLoadButton.disabled = !accessToken || routinePhonesBusy || routineRevokeBusy;
+  const selectedPhone = routineActivePhones.find((phone) =>
+    phone.enrollmentId === routinePhonesSelect.value);
+  routineRevokeButton.disabled = !accessToken || routineReceiptBusy || routinePhonesBusy ||
+    routineRevokeBusy || !(selectedPhone || routineEnrollmentReceipt) ||
+    !routineRevokeConfirmation.checked;
+}
+
+async function loadRoutinePhones() {
+  if (!accessToken || routinePhonesBusy || routineRevokeBusy) return;
+  const generation = ownerAuthGeneration;
+  routinePhonesBusy = true;
+  clearRoutinePhones();
+  routinePhonesStatus.textContent = 'Loading active routine phones…';
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-phones', { method: 'GET' });
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    if (response.status !== 200) {
+      routinePhonesStatus.textContent = 'Active phone inventory is unavailable. No phone was changed.';
+      return;
+    }
+    const inventory = await response.json();
+    if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory) ||
+        Object.keys(inventory).sort().join(',') !==
+          'assignmentPollingAllowed,moneyMovementAllowed,phones' ||
+        inventory.assignmentPollingAllowed !== false ||
+        inventory.moneyMovementAllowed !== false || !Array.isArray(inventory.phones) ||
+        inventory.phones.length > 100 || inventory.phones.some((phone) =>
+          !phone || typeof phone !== 'object' || Array.isArray(phone) ||
+          Object.keys(phone).sort().join(',') !==
+            'deviceId,deviceKeyId,enrollmentId,validUntil' ||
+          typeof phone.deviceId !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(phone.deviceId) ||
+          typeof phone.deviceKeyId !== 'string' ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/.test(phone.deviceKeyId) ||
+          typeof phone.enrollmentId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(phone.enrollmentId) ||
+          typeof phone.validUntil !== 'string' ||
+          !/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[.][0-9]{3}Z$/.test(phone.validUntil) ||
+          !Number.isFinite(Date.parse(phone.validUntil)) ||
+          Date.parse(phone.validUntil) <= Date.now())) {
+      routinePhonesStatus.textContent = 'Phone inventory response was invalid. No phone was changed.';
+      return;
+    }
+    if (new Set(inventory.phones.map((phone) => phone.enrollmentId)).size !==
+        inventory.phones.length) {
+      routinePhonesStatus.textContent = 'Phone inventory response was invalid. No phone was changed.';
+      return;
+    }
+    if (!accessToken || ownerAuthGeneration !== generation) return;
+    routineActivePhones = inventory.phones;
+    const options = inventory.phones.map((phone) => {
+      const option = document.createElement('option');
+      option.value = phone.enrollmentId;
+      option.textContent = phone.deviceId + ' · ' + phone.deviceKeyId + ' · ' +
+        phone.enrollmentId + ' · until ' + new Date(phone.validUntil).toLocaleString();
+      return option;
+    });
+    routinePhonesSelect.replaceChildren(...options);
+    routinePhonesSelect.value = inventory.phones[0]?.enrollmentId || '';
+    routinePhonesSelectLabel.hidden = inventory.phones.length === 0;
+    routinePhonesStatus.textContent = inventory.phones.length === 0
+      ? 'No active Owner-linked routine phone enrollment was found.'
+      : inventory.phones.length + ' active routine phone enrollment(s) found. Select the exact one before revocation.';
+  } catch (error) {
+    if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
+      routinePhonesStatus.textContent = 'Active phone inventory is unavailable. No phone was changed.';
+    }
+  } finally {
+    if (ownerAuthGeneration === generation) {
+      routinePhonesBusy = false;
+      updateRoutineReceiptAvailability();
+    }
+  }
 }
 
 function validRoutineSignedReceipt(value) {
@@ -1850,11 +1947,14 @@ async function retrieveRoutineReceipt() {
 }
 
 async function revokeRoutinePhoneEnrollment() {
+  const selectedPhone = routineActivePhones.find((phone) =>
+    phone.enrollmentId === routinePhonesSelect.value);
   if (!accessToken || routineReceiptBusy || routineRevokeBusy ||
-      !routineEnrollmentReceipt || !routineRevokeConfirmation.checked) return;
+      routinePhonesBusy || !(selectedPhone || routineEnrollmentReceipt) ||
+      !routineRevokeConfirmation.checked) return;
   if (!window.confirm('Permanently revoke this exact routine phone enrollment? The server will reject new routine lookup issuance for it. No deposit or money action will start.')) return;
   const generation = ownerAuthGeneration;
-  const enrollmentId = routineEnrollmentReceipt.enrollmentId;
+  const enrollmentId = selectedPhone?.enrollmentId || routineEnrollmentReceipt.enrollmentId;
   const requestId = crypto.randomUUID();
   routineRevokeBusy = true;
   routineRevokeStatus.textContent = 'Revoking this routine phone enrollment…';
@@ -1883,6 +1983,7 @@ async function revokeRoutinePhoneEnrollment() {
       return;
     }
     clearRoutineReceipt();
+    clearRoutinePhones();
     routineRevokeStatus.textContent = 'This routine phone enrollment was revoked at ' +
       new Date(result.revokedAt).toLocaleString() + '. No deposit or money action occurred.';
   } catch (error) {
@@ -2692,6 +2793,8 @@ function signOut(message = 'Signed out.') {
   routineReceiptBusy = false;
   routineReceiptConfirmation.checked = false;
   clearRoutineReceipt();
+  routinePhonesBusy = false;
+  clearRoutinePhones();
   clearExecutionReadiness();
   clearExecutionApprovals();
   clearDepositIntake();
@@ -5841,6 +5944,11 @@ routineReceiptConfirmation.addEventListener('change', updateRoutineReceiptAvaila
 routineReceiptButton.addEventListener('click', retrieveRoutineReceipt);
 routineRevokeConfirmation.addEventListener('change', updateRoutineReceiptAvailability);
 routineRevokeButton.addEventListener('click', revokeRoutinePhoneEnrollment);
+routinePhonesLoadButton.addEventListener('click', loadRoutinePhones);
+routinePhonesSelect.addEventListener('change', () => {
+  routineRevokeConfirmation.checked = false;
+  updateRoutineReceiptAvailability();
+});
 routineReceiptCopy.addEventListener('click', async () => {
   if (!accessToken || !routineEnrollmentReceipt ||
       Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {

@@ -790,6 +790,67 @@ describe('routine phone proof handoff', () => {
     expect(browser.element('#routine-revoke-button').disabled).toBe(true);
     expect(browser.element('#routine-revoke-status').textContent).toContain('revoked');
   });
+
+  it('selects an exact active phone for revocation without retrieving a signed receipt', async () => {
+    const firstId = '55555555-5555-4555-8555-555555555555';
+    const secondId = '66666666-6666-4666-8666-666666666666';
+    const validUntil = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-phones'
+          ? response(200, {
+              assignmentPollingAllowed: false,
+              moneyMovementAllowed: false,
+              phones: [
+                {
+                  deviceId: 'routine-device-a',
+                  deviceKeyId: 'routine-key-a',
+                  enrollmentId: firstId,
+                  validUntil,
+                },
+                {
+                  deviceId: 'routine-device-b',
+                  deviceKeyId: 'routine-key-b',
+                  enrollmentId: secondId,
+                  validUntil,
+                },
+              ],
+            })
+          : url === '/v1/owner/routine-telebirr-phone:revoke'
+            ? response(200, {
+                alreadyRevoked: false,
+                assignmentPollingAllowed: false,
+                enrollmentId: secondId,
+                moneyMovementAllowed: false,
+                revokedAt: new Date().toISOString(),
+              })
+            : undefined,
+    });
+    await browser.signIn();
+    expect(browser.element('#routine-revoke-button').disabled).toBe(true);
+    await browser.call('loadRoutinePhones');
+    expect(browser.element('#routine-phones-status').textContent).toContain('2 active');
+    expect(browser.element('#routine-phones-select').children).toHaveLength(2);
+    expect(browser.element('#routine-phones-select-label').hidden).toBe(false);
+    browser.element('#routine-phones-select').value = secondId;
+    browser.element('#routine-revoke-confirmation').checked = true;
+    await browser.call('updateRoutineReceiptAvailability');
+    expect(browser.element('#routine-revoke-button').disabled).toBe(false);
+    await browser.call('revokeRoutinePhoneEnrollment');
+    const calls = browser.fetchCalls.filter(
+      ({ url }) =>
+        url === '/v1/owner/routine-telebirr-phones' ||
+        url === '/v1/owner/routine-telebirr-phone:revoke',
+    );
+    expect(calls.map(({ url }) => url)).toEqual([
+      '/v1/owner/routine-telebirr-phones',
+      '/v1/owner/routine-telebirr-phone:revoke',
+    ]);
+    expect(JSON.parse(String(calls[1]!.init.body)).enrollmentId).toBe(secondId);
+    expect(browser.element('#routine-phones-select-label').hidden).toBe(true);
+    expect(browser.element('#routine-revoke-status').textContent).toContain('revoked');
+  });
 });
 
 describe('Owner execution readiness preview', () => {

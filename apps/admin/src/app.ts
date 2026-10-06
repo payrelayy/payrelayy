@@ -2062,6 +2062,32 @@ export function buildOwnerControlApp(
     }
   });
 
+  app.get('/v1/owner/routine-telebirr-phones', async (request, reply) => {
+    try {
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.routineTelebirrPairing?.listActivePhones) {
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+      const inventory =
+        await dependencies.runtime.routineTelebirrPairing.listActivePhones(authUserId);
+      return reply.header('cache-control', 'no-store').code(200).send(inventory);
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerRoutineTelebirrPairingRejectedError
+      ) {
+        return reply.code(403).send({ error: 'forbidden' });
+      }
+      if (
+        error instanceof OwnerAuthenticationUnavailableError ||
+        error instanceof OwnerRoutineTelebirrPairingUnavailableError
+      ) {
+        request.log.warn('Owner routine TeleBirr phone inventory is unavailable.');
+      }
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
   app.post('/v1/owner/private-live-deposit-pilots/prepare', async (request, reply) => {
     try {
       const body = exactObject(request.body, [

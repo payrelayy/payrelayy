@@ -63,6 +63,16 @@ const productionConfig: ApiConfig = {
     deploymentTarget: 'production',
   },
 };
+const enabledProductionConfig: ApiConfig = {
+  ...productionConfig,
+  financialActionsMode: 'live',
+  telegramPlayerActionRuntime: {
+    ...enabledCandidateRuntime,
+    deploymentTarget: 'production',
+    routineTelebirrCandidateStagingEnabled: false,
+    routineTelebirrCandidateProductionEnabled: true,
+  },
+};
 const action: Extract<TelegramPrivateActionEnvelope, { kind: 'deposit_proof_command' }> = {
   version: 1,
   kind: 'deposit_proof_command',
@@ -152,7 +162,32 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     );
   });
 
-  it('never calls SQL for production, live mode, or real-looking references', async () => {
+  it('protects a real-format production reference without sending plaintext or an amount to SQL', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    const realAction = { ...action, transactionReference: 'AB12CD34EF' };
+
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls),
+        inboundEventId,
+        realAction,
+        enabledProductionConfig,
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'telebirr_routine_candidate_recorded_no_money',
+      proofStatus: 'untrusted_received',
+      verificationMode: 'not_started_no_money',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.query).toBe(CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL);
+    expect(calls[0]!.values).toHaveLength(9);
+    expect(calls[0]!.values[3]).toMatch(/^v2\.telebirr\./u);
+    expect(calls[0]!.values[5]).toBe('***34EF');
+    expect(JSON.stringify(calls)).not.toContain(realAction.transactionReference);
+    expect(calls[0]!.query).not.toMatch(/execute|settle|transfer|verification_job/iu);
+  });
+
+  it('never calls SQL for an unenabled target, staging/live mismatch, or mismatched reference', async () => {
     const database = { query: vi.fn() } as unknown as TelegramRoutineTelebirrCandidateDatabase;
     const denied = [
       {
@@ -170,6 +205,19 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
       { action: { ...action, transactionReference: 'SYNTB1234567890' }, config },
       { action: { ...action, transactionReference: 'fetanTESTREF7890' }, config },
       { action: { ...action, providerCode: 'cbe_birr' as const }, config },
+      { action, config: enabledProductionConfig },
+      {
+        action: { ...action, transactionReference: 'ab12CD34EF' },
+        config: enabledProductionConfig,
+      },
+      {
+        action: { ...action, transactionReference: 'A'.repeat(33) },
+        config: enabledProductionConfig,
+      },
+      {
+        action: { ...action, transactionReference: 'AB12CD34ÉF' },
+        config: enabledProductionConfig,
+      },
     ];
     for (const attempt of denied) {
       await expect(

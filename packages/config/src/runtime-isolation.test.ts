@@ -237,6 +237,45 @@ describe('runtime configuration isolation', () => {
     ).toThrow('restricted to the staging Player-action target');
   });
 
+  it('keeps real-reference routine candidate routing default-off and production-only', () => {
+    expect(
+      loadApiConfig({
+        ...playerActionEnvironment,
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }).telegramPlayerActionRuntime,
+    ).toMatchObject({ routineTelebirrCandidateProductionEnabled: false });
+    const production = loadApiConfig({
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DEPLOYMENT_TARGET: 'production',
+      TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true',
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+    });
+    expect(production.telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'production',
+      routineTelebirrCandidateStagingEnabled: false,
+      routineTelebirrCandidateProductionEnabled: true,
+    });
+    expect(
+      redactedApiConfigForLog(production).telegramPlayerActionRuntime
+        .routineTelebirrCandidateProductionEnabled,
+    ).toBe(true);
+
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true',
+      }),
+    ).toThrow('requires the Player-action runtime');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true',
+      }),
+    ).toThrow('restricted to the production Player-action target');
+  });
+
   it('rejects target drift, a generic role, and shared Player-ID action HMACs', () => {
     expect(() =>
       loadApiConfig({

@@ -385,7 +385,8 @@ async function handleTelebirrDestination(
 ): Promise<TelegramPrivateActionResult> {
   const livePaymentPresentation =
     config.financialActionsMode === 'live' &&
-    !config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
+    !config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled &&
+    !config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled;
   const semanticHmac = validateSemanticHmac(
     createTelegramActionSemanticHmac({
       consumer: livePaymentPresentation
@@ -616,6 +617,16 @@ async function handleDepositProof(
   }
 
   if (action.providerCode === 'telebirr') {
+    if (config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled) {
+      // The amount-free candidate route takes precedence over the pilot/live proof path.
+      // Its database function independently requires every financial switch to be disabled.
+      return captureTelegramRoutineTelebirrCandidate(
+        database,
+        originInboundEventId,
+        action,
+        config,
+      );
+    }
     if (config.financialActionsMode === 'live') {
       return captureTelegramLiveTelebirrProof(database, originInboundEventId, action, config);
     }
@@ -907,7 +918,8 @@ export function createPostgresTelegramPlayerActionRuntime(
       try {
         return await playerActionCatalogPreflightPassed(
           pool,
-          config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
+          config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
+            config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
         );
       } catch {
         return false;

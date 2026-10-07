@@ -25,16 +25,23 @@ official receipt and its occurrence time. Candidate fingerprints are **not globa
 intake**; only an authoritative verified payment may win the one-use claim. The table cannot be
 interpreted as proof of payment.
 
-The TypeScript candidate adapter accepts only synthetic `FETANTEST...` references in staging
-dry-run configuration. It prepares encrypted/fingerprinted input and a domain-separated semantic
-HMAC for the private RPC, then returns a token-free, explicitly no-money projection. The
-Player-action runtime selects this path only with the explicit, default-off
-`TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED` gate. When selected, a rejected candidate
-never falls back to the shadow or live proof path. The runtime role still has **no EXECUTE grant**
-on the RPC, so this code-only route cannot yet store a candidate in a deployed environment. If
-the gate is enabled prematurely, the exact-function catalog preflight fails readiness. The Bot
-knows how to render the projection, but no deployed route can produce it. This is a guarded
-integration slice, not a customer intake or payment test.
+The TypeScript candidate adapter accepts only synthetic `FETANTEST...` references behind the
+staging dry-run gate. A separate, default-off
+`TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED` gate permits only one already-normalized
+8–32-character ASCII alphanumeric reference on the production Player-action target; synthetic
+references are excluded. It prepares encrypted/fingerprinted input and a domain-separated
+semantic HMAC for the private RPC, then returns a token-free, explicitly no-money projection.
+The production candidate path takes precedence over the old live-pilot proof path and suppresses
+payable TeleBirr destination presentation, even though the deployed API currently uses
+`FINANCIAL_ACTIONS_MODE=live`. The database function independently requires all seven financial
+switches to be disabled. When either candidate gate is selected, a rejected candidate never
+falls back to the shadow or live proof path. The runtime role still has **no EXECUTE grant** on
+the RPC and the production gate is not set in Compose, so this code-only route cannot yet store
+a candidate in a deployed environment. Enabling the gate before its exact grant fails catalog
+readiness. The Bot knows how to render the projection, but no deployed route can produce it.
+Deploy compatible code first; a later, reviewed activation must sequence the exact grant and
+gate without exposing an extra function to an old exact-count preflight. No financial switch or
+phone poll is enabled by this slice.
 
 ## Untrusted-candidate active-database retention
 

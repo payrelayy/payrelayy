@@ -46,11 +46,18 @@ begin
        where revoked.enrollment_id = enrollment.id)
      and receiver.status = 'active' and receiver.retired_at is null
      and receiver.active_from <= v_now
-     and app.routine_telebirr_receiver_name_digest(receiver.account_holder_name) =
-       enrollment.expected_receiver_name_digest
-     and app.routine_telebirr_receiver_profile_digest(
-       receiver.id, receiver.version, receiver.account_reference_fingerprint,
-       receiver.account_holder_name) = enrollment.receiver_profile_digest;
+     and case
+       when receiver.account_reference_fingerprint ~ '^[0-9a-f]{64}$'
+         and receiver.account_holder_name is not null
+         and pg_catalog.char_length(receiver.account_holder_name) between 2 and 160
+         and receiver.account_holder_name !~ '[[:cntrl:]]'
+       then app.routine_telebirr_receiver_name_digest(receiver.account_holder_name) =
+         enrollment.expected_receiver_name_digest
+         and app.routine_telebirr_receiver_profile_digest(
+           receiver.id, receiver.version, receiver.account_reference_fingerprint,
+           receiver.account_holder_name) = enrollment.receiver_profile_digest
+       else false
+     end;
 end;
 $$;
 
@@ -184,11 +191,18 @@ begin
      and candidate.submitted_at + interval '7 days' > v_now
      and receiver.status = 'active' and receiver.retired_at is null
      and receiver.active_from <= v_now
-     and app.routine_telebirr_receiver_name_digest(receiver.account_holder_name) =
-       challenge.expected_receiver_name_digest
-     and app.routine_telebirr_receiver_profile_digest(
-       receiver.id, receiver.version, receiver.account_reference_fingerprint,
-       receiver.account_holder_name) = challenge.receiver_profile_digest
+     and case
+       when receiver.account_reference_fingerprint ~ '^[0-9a-f]{64}$'
+         and receiver.account_holder_name is not null
+         and pg_catalog.char_length(receiver.account_holder_name) between 2 and 160
+         and receiver.account_holder_name !~ '[[:cntrl:]]'
+       then app.routine_telebirr_receiver_name_digest(receiver.account_holder_name) =
+         challenge.expected_receiver_name_digest
+         and app.routine_telebirr_receiver_profile_digest(
+           receiver.id, receiver.version, receiver.account_reference_fingerprint,
+           receiver.account_holder_name) = challenge.receiver_profile_digest
+       else false
+     end
      and enrollment.valid_from <= v_now and enrollment.valid_until > v_now
      and not exists (select 1 from app.routine_telebirr_device_enrollment_revocations revoked
        where revoked.enrollment_id = enrollment.id)

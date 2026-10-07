@@ -202,6 +202,9 @@ class RoutineNoMoneyBridgeClientTest {
       when (path) {
         RoutineNoMoneyBridgeProtocol.POLL_PATH -> {
           assertFalse(String(bytes, StandardCharsets.UTF_8).contains(PILOT_REFERENCE))
+          val frame = StrictJson.parse(bytes).requireObject(setOf("publicKeySpki", "signedRequest"))
+          assertEquals(device.publicMaterial().publicKeySpkiBase64Url, frame.string("publicKeySpki"))
+          assertTrue(frame.value("signedRequest") is JsonValue.Object)
           DeviceBridgeRawResponse(200, contentType, pollResponse(assignment()))
         }
         RoutineNoMoneyBridgeProtocol.UPLOAD_PATH -> {
@@ -222,7 +225,9 @@ class RoutineNoMoneyBridgeClientTest {
     assertEquals(1, providerCalls)
     assertEquals(listOf(RoutineNoMoneyBridgeProtocol.POLL_PATH,
       RoutineNoMoneyBridgeProtocol.UPLOAD_PATH), paths)
-    val frame = StrictJson.parse(upload).requireObject(setOf("signedAssignment", "signedObservation"))
+    val frame = StrictJson.parse(upload).requireObject(
+      setOf("publicKeySpki", "signedAssignment", "signedObservation"))
+    assertEquals(device.publicMaterial().publicKeySpkiBase64Url, frame.string("publicKeySpki"))
     assertTrue(frame.value("signedAssignment") is JsonValue.Object)
     assertTrue(frame.value("signedObservation") is JsonValue.Object)
     val observation = frame.value("signedObservation").requireObject(setOf(

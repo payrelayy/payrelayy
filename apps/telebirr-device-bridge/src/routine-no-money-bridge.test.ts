@@ -214,11 +214,11 @@ function fixture() {
     trustedSigner,
     deviceEnrollment,
     trustedSignerSpkiDer: signerSpki,
-    enrolledDeviceSpkiDer: deviceSpki,
   };
   return {
     pollEnrollment,
     deviceSpki,
+    publicKeySpki: deviceSpki.toString('base64url'),
     pollRequest,
     signedAssignment,
     makeObservation,
@@ -249,7 +249,6 @@ describe('dormant routine no-money bridge handler', () => {
       now: () => '2026-10-05T18:02:30.000Z',
       loadEnrollment: async () => ({
         enrollment: f.pollEnrollment,
-        publicKeySpkiDer: f.deviceSpki,
       }),
       claimAndIssuePoll: async (input) => {
         claimed += 1;
@@ -264,7 +263,12 @@ describe('dormant routine no-money bridge handler', () => {
       stageObservationDigest: async () => 'retry',
     };
     const handler = createRoutineNoMoneyBridgeHandler(dependencies);
-    const response = await handler(http(ROUTINE_NO_MONEY_POLL_PATH, f.pollRequest));
+    const response = await handler(
+      http(ROUTINE_NO_MONEY_POLL_PATH, {
+        publicKeySpki: f.publicKeySpki,
+        signedRequest: f.pollRequest,
+      }),
+    );
     expect(response.statusCode).toBe(200);
     expect(decoded(response.body)).toMatchObject({
       outcome: 'assignment',
@@ -275,8 +279,8 @@ describe('dormant routine no-money bridge handler', () => {
     expect(claimed).toBe(1);
     const invalid = await handler(
       http(ROUTINE_NO_MONEY_POLL_PATH, {
-        ...f.pollRequest,
-        signature: 'A'.repeat(86),
+        publicKeySpki: f.publicKeySpki,
+        signedRequest: { ...f.pollRequest, signature: 'A'.repeat(86) },
       }),
     );
     expect(invalid.statusCode).toBe(401);
@@ -289,7 +293,6 @@ describe('dormant routine no-money bridge handler', () => {
       now: () => '2026-10-05T18:02:30.000Z',
       loadEnrollment: async () => ({
         enrollment: f.pollEnrollment,
-        publicKeySpkiDer: f.deviceSpki,
       }),
       claimAndIssuePoll: async () => ({
         kind: 'assignment',
@@ -302,10 +305,53 @@ describe('dormant routine no-money bridge handler', () => {
       loadObservation: async () => undefined,
       stageObservationDigest: async () => 'retry',
     });
-    const response = await handler(http(ROUTINE_NO_MONEY_POLL_PATH, f.pollRequest));
+    const response = await handler(
+      http(ROUTINE_NO_MONEY_POLL_PATH, {
+        publicKeySpki: f.publicKeySpki,
+        signedRequest: f.pollRequest,
+      }),
+    );
     expect(response.statusCode).toBe(503);
     expect(decoded(response.body)).toEqual({ code: 'temporarily_unavailable' });
     expect(Buffer.from(response.body).toString('utf8')).not.toContain(f.rawReference);
+  });
+
+  it('treats the supplied public key as a hint, never as enrollment authority', async () => {
+    const f = fixture();
+    let claims = 0;
+    const handler = createRoutineNoMoneyBridgeHandler({
+      now: () => '2026-10-05T18:02:30.000Z',
+      loadEnrollment: async () => ({ enrollment: f.pollEnrollment }),
+      claimAndIssuePoll: async () => {
+        claims += 1;
+        return { kind: 'none' };
+      },
+      loadObservation: async () => undefined,
+      stageObservationDigest: async () => 'retry',
+    });
+    const wrongKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+      .publicKey.export({ format: 'der', type: 'spki' })
+      .toString('base64url');
+    expect(
+      (
+        await handler(
+          http(ROUTINE_NO_MONEY_POLL_PATH, {
+            publicKeySpki: wrongKey,
+            signedRequest: f.pollRequest,
+          }),
+        )
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await handler(
+          http(ROUTINE_NO_MONEY_POLL_PATH, {
+            signedRequest: f.pollRequest,
+          }),
+        )
+      ).statusCode,
+    ).toBe(400);
+    expect(claims).toBe(0);
   });
 
   it('records only validated signed-observation digests, never a payment claim', async () => {
@@ -328,6 +374,7 @@ describe('dormant routine no-money bridge handler', () => {
     const signedObservation = f.makeObservation(f.facts);
     const response = await handler(
       http(ROUTINE_NO_MONEY_UPLOAD_PATH, {
+        publicKeySpki: f.publicKeySpki,
         signedAssignment: f.signedAssignment,
         signedObservation,
       }),
@@ -350,6 +397,7 @@ describe('dormant routine no-money bridge handler', () => {
     staged = undefined;
     const reversed = await handler(
       http(ROUTINE_NO_MONEY_UPLOAD_PATH, {
+        publicKeySpki: f.publicKeySpki,
         signedAssignment: f.signedAssignment,
         signedObservation: f.makeObservation({ ...f.facts, providerFinalStatus: 'reversed' }),
       }),
@@ -373,6 +421,7 @@ describe('dormant routine no-money bridge handler', () => {
       },
     });
     const duplicate = http(ROUTINE_NO_MONEY_UPLOAD_PATH, {
+      publicKeySpki: f.publicKeySpki,
       signedAssignment: f.signedAssignment,
       signedObservation: f.makeObservation(f.facts),
     });
@@ -387,6 +436,7 @@ describe('dormant routine no-money bridge handler', () => {
       (
         await handler(
           http(ROUTINE_NO_MONEY_UPLOAD_PATH, {
+            publicKeySpki: f.publicKeySpki,
             signedAssignment: f.signedAssignment,
             signedObservation: { ...tampered, signature: 'A'.repeat(86) },
           }),

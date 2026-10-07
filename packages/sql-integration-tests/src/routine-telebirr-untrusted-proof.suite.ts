@@ -11,6 +11,7 @@ import {
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
 const LOOKUP_TABLE = 'app.routine_telebirr_lookup_challenges';
 const OBSERVATION_TABLE = 'app.routine_telebirr_observation_receipts';
+const POLL_CLAIMS_TABLE = 'app.routine_telebirr_no_money_poll_claims';
 const ENROLLMENT_TABLE = 'app.routine_telebirr_device_enrollments';
 const SIGNER_TABLE = 'app.routine_telebirr_lookup_signers';
 const ISSUE =
@@ -1055,6 +1056,134 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           ).rows,
         ).toEqual([{ count: '0' }]);
         expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('claims signed no-money polls once and stages only exact observation replays', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const requestId = randomUUID();
+        const replayIdentity = `sha256:${digest()}`;
+        const claim = `select app.claim_routine_telebirr_no_money_poll(
+          $1::uuid, $2::uuid, $3::text, $4::timestamptz) as claimed`;
+        const expiresAt = new Date(Date.now() + 40_000).toISOString();
+        expect(
+          (await client.query(claim, [trust.enrollmentId, requestId, replayIdentity, expiresAt]))
+            .rows,
+        ).toEqual([{ claimed: true }]);
+        expect(
+          (await client.query(claim, [trust.enrollmentId, requestId, replayIdentity, expiresAt]))
+            .rows,
+        ).toEqual([{ claimed: false }]);
+        expect(
+          (await client.query(claim, [trust.enrollmentId, randomUUID(), replayIdentity, expiresAt]))
+            .rows,
+        ).toEqual([{ claimed: false }]);
+        await rejected(client, claim, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 120_000).toISOString(),
+        ]);
+
+        const issued = await client.query<{ challenge_id: string }>(ISSUE, [
+          candidateId,
+          trust.enrollmentId,
+          trust.signerId,
+        ]);
+        const challengeId = issued.rows[0]!.challenge_id;
+        const stage = `select app.stage_routine_telebirr_no_money_observation_digest(
+          $1::uuid, $2::text, $3::text, $4::text, $5::text) as status`;
+        const digests = [
+          challengeId,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+        ];
+        expect((await client.query(stage, digests)).rows).toEqual([{ status: 'recorded' }]);
+        expect((await client.query(stage, digests)).rows).toEqual([{ status: 'exact_replay' }]);
+        expect(
+          (
+            await client.query(stage, [
+              digests[0],
+              digests[1],
+              `sha256:${digest()}`,
+              digests[3],
+              digests[4],
+            ])
+          ).rows,
+        ).toEqual([{ status: 'conflict' }]);
+        expect(
+          (
+            await client.query(
+              `select assignment_body_digest, observation_body_digest,
+          observation_signature_digest, replay_identity from ${OBSERVATION_TABLE}
+          where challenge_id = $1::uuid`,
+              [challengeId],
+            )
+          ).rows,
+        ).toEqual([
+          {
+            assignment_body_digest: digests[1],
+            observation_body_digest: digests[2],
+            observation_signature_digest: digests[3],
+            replay_identity: digests[4],
+          },
+        ]);
+
+        await client.query('set local role service_role');
+        await rejected(client, claim, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+        ]);
+        await rejected(client, stage, digests);
+        await rejected(client, `select * from ${POLL_CLAIMS_TABLE}`);
+        await client.query('reset role');
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('removes expired no-money poll identifiers through the existing retention job', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const trust = await fixtureRoutineLookupTrust(client, captured.rows[0]!.proof_request_id);
+        const requestId = randomUUID();
+        await client.query(
+          `insert into ${POLL_CLAIMS_TABLE}
+          (enrollment_id, request_id, replay_identity, claimed_at, request_expires_at)
+          values ($1::uuid, $2::uuid, $3::text,
+            statement_timestamp() - interval '8 days',
+            statement_timestamp() - interval '8 days' + interval '30 seconds')`,
+          [trust.enrollmentId, requestId, `sha256:${digest()}`],
+        );
+        await client.query('select app.purge_expired_routine_telebirr_untrusted_proofs()');
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${POLL_CLAIMS_TABLE}
+          where request_id = $1::uuid`,
+              [requestId],
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
       });
     });
 

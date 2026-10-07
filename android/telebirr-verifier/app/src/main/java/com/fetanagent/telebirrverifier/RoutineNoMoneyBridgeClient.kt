@@ -106,8 +106,12 @@ internal class RoutineNoMoneyPhoneRehearsal(
       )
     }
     val pollResponse = try {
+      val pollBytes = StrictJson.encode(obj(
+        "publicKeySpki" to text(deviceIdentity.publicMaterial().publicKeySpkiBase64Url),
+        "signedRequest" to StrictJson.parse(RoutineNoMoneyPollProtocol.encode(poll)),
+      )).toByteArray(StandardCharsets.UTF_8)
       exchange.post(RoutineNoMoneyBridgeProtocol.POLL_PATH, RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
-        RoutineNoMoneyPollProtocol.encode(poll))
+        pollBytes)
     } catch (_: Exception) {
       return RoutineNoMoneyPhoneResult.Retry
     }
@@ -148,6 +152,7 @@ internal class RoutineNoMoneyPhoneRehearsal(
     val uploadBytes = try {
       val observationBytes = RoutineTelebirrJsonCodec.encodeSignedObservation(observation)
       StrictJson.encode(obj(
+        "publicKeySpki" to text(deviceIdentity.publicMaterial().publicKeySpkiBase64Url),
         "signedAssignment" to StrictJson.parse(assignmentBytes),
         "signedObservation" to StrictJson.parse(observationBytes),
       )).toByteArray(StandardCharsets.UTF_8).also {

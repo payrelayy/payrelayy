@@ -146,7 +146,8 @@ internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
       deploymentTarget == FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET ||
         deploymentTarget == FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET,
     )
-    require(contentType == DeviceBridgeProtocol.CONTENT_TYPE)
+    require(contentType == DeviceBridgeProtocol.CONTENT_TYPE ||
+      contentType == RoutineNoMoneyBridgeProtocol.CONTENT_TYPE)
     require(body.isNotEmpty() && body.size <= FixedDeviceBridgeHttpsExchange.MAX_REQUEST_BYTES)
 
     val connection =
@@ -161,7 +162,7 @@ internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
       connection.doInput = true
       connection.doOutput = true
       connection.setFixedLengthStreamingMode(body.size)
-      connection.setRequestProperty("Accept", DeviceBridgeProtocol.CONTENT_TYPE)
+      connection.setRequestProperty("Accept", contentType)
       connection.setRequestProperty("Accept-Encoding", "identity")
       connection.setRequestProperty("Content-Type", contentType)
       connection.setRequestProperty(

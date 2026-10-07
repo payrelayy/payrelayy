@@ -1,17 +1,29 @@
 package com.fetanagent.telebirrverifier
 
 import com.google.gson.Gson
+import java.io.File
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.security.SecureRandom
 import java.time.Instant
 import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class RoutineNoMoneyBridgeClientTest {
+  @get:Rule val temporary = TemporaryFolder()
+  private val workCipher = TestCipher()
+  private val workDirectory by lazy { File(temporary.root, "routine-no-money") }
+  private val workStore by lazy { EncryptedRoutineNoMoneyWorkStore(workDirectory, workCipher) }
   private val device = JvmP256Identity("routine-device-key-0001")
   private val receiptSigner = JvmP256Identity("routine-receipt-key-0001")
   private val lookupSigner = JvmP256Identity("routine-server-key-0001")
@@ -113,10 +125,12 @@ class RoutineNoMoneyBridgeClientTest {
     },
   )
 
-  private fun rehearsal(exchange: FixedRoutineNoMoneyHttpsExchange, transport: ProviderTransport) =
+  private fun rehearsal(exchange: FixedRoutineNoMoneyHttpsExchange, transport: ProviderTransport,
+    store: RoutineNoMoneyWorkStore = workStore) =
     RoutineNoMoneyPhoneRehearsal(
       exchange,
       RoutineTelebirrObservationCollector(transport, clock = MillisClock { now }),
+      store,
       MillisClock { now },
     )
 
@@ -272,5 +286,132 @@ class RoutineNoMoneyBridgeClientTest {
     }))
     assertEquals(RoutineNoMoneyPhoneResult.Review("invalid_assignment_response"), result)
     assertEquals(0, providerCalls)
+  }
+
+  @Test fun `interrupted lookup resumes sealed assignment without another poll`() {
+    val paths = mutableListOf<String>()
+    val exchange = fixedExchange { path, contentType, _ ->
+      paths += path
+      when (path) {
+        RoutineNoMoneyBridgeProtocol.POLL_PATH ->
+          DeviceBridgeRawResponse(200, contentType, pollResponse(assignment()))
+        RoutineNoMoneyBridgeProtocol.UPLOAD_PATH -> DeviceBridgeRawResponse(202, contentType,
+          """{"outcome":"signed_evidence_received_for_review","advisoryOnly":true,"sourceAuthenticationPerformed":false,"financialActionAllowed":false}"""
+            .toByteArray(StandardCharsets.UTF_8))
+        else -> error("Unexpected route")
+      }
+    }
+    assertEquals(RoutineNoMoneyPhoneResult.Review("transport_unavailable"),
+      run(rehearsal(exchange, ProviderTransport { _ -> error("offline") })))
+    assertTrue(workStore.load() is RoutineNoMoneyPendingWork.Assignment)
+    val sealed = File(workDirectory, "routine-no-money.sealed").readBytes()
+    assertFalse(String(sealed, StandardCharsets.ISO_8859_1).contains(PILOT_REFERENCE))
+    val resumed = EncryptedRoutineNoMoneyWorkStore(workDirectory, workCipher)
+    assertEquals(RoutineNoMoneyPhoneResult.SubmittedForReview,
+      run(rehearsal(exchange, ProviderTransport { _ -> observedReceipt() }, resumed)))
+    assertEquals(listOf(RoutineNoMoneyBridgeProtocol.POLL_PATH,
+      RoutineNoMoneyBridgeProtocol.UPLOAD_PATH), paths)
+    assertNull(resumed.load())
+  }
+
+  @Test fun `lost upload acknowledgement resends identical signed bytes after restart`() {
+    val paths = mutableListOf<String>()
+    val uploads = mutableListOf<ByteArray>()
+    val exchange = fixedExchange { path, contentType, bytes ->
+      paths += path
+      when (path) {
+        RoutineNoMoneyBridgeProtocol.POLL_PATH ->
+          DeviceBridgeRawResponse(200, contentType, pollResponse(assignment()))
+        RoutineNoMoneyBridgeProtocol.UPLOAD_PATH -> {
+          uploads += bytes.copyOf()
+          if (uploads.size == 1) error("connection lost after upload")
+          DeviceBridgeRawResponse(202, contentType,
+            """{"outcome":"signed_evidence_received_for_review","advisoryOnly":true,"sourceAuthenticationPerformed":false,"financialActionAllowed":false}"""
+              .toByteArray(StandardCharsets.UTF_8))
+        }
+        else -> error("Unexpected route")
+      }
+    }
+    assertEquals(RoutineNoMoneyPhoneResult.Retry,
+      run(rehearsal(exchange, ProviderTransport { _ -> observedReceipt() })))
+    assertTrue(workStore.load() is RoutineNoMoneyPendingWork.Upload)
+    val resumed = EncryptedRoutineNoMoneyWorkStore(workDirectory, workCipher)
+    assertEquals(RoutineNoMoneyPhoneResult.SubmittedForReview,
+      run(rehearsal(exchange, ProviderTransport { _ -> error("Do not look up twice") }, resumed)))
+    assertTrue(uploads[0].contentEquals(uploads[1]))
+    assertEquals(listOf(RoutineNoMoneyBridgeProtocol.POLL_PATH,
+      RoutineNoMoneyBridgeProtocol.UPLOAD_PATH,
+      RoutineNoMoneyBridgeProtocol.UPLOAD_PATH), paths)
+    assertNull(resumed.load())
+  }
+
+  @Test fun `failed durable stage never opens official receipt`() {
+    val failedStore = EncryptedRoutineNoMoneyWorkStore(File(temporary.root, "failed-work"),
+      object : LivePilotQueueCipher {
+        override fun seal(plaintext: ByteArray, associatedData: ByteArray): ByteArray =
+          error("Keystore unavailable")
+        override fun open(sealed: ByteArray, associatedData: ByteArray): ByteArray =
+          error("Keystore unavailable")
+      })
+    var providerCalls = 0
+    val exchange = fixedExchange { _, contentType, _ ->
+      DeviceBridgeRawResponse(200, contentType, pollResponse(assignment()))
+    }
+    assertEquals(RoutineNoMoneyPhoneResult.Review("local_work_unavailable"),
+      run(rehearsal(exchange, ProviderTransport { _ ->
+        providerCalls++
+        observedReceipt()
+      }, failedStore)))
+    assertEquals(0, providerCalls)
+  }
+
+  @Test fun `expired sealed assignment is discarded without lookup upload or poll`() {
+    val bytes = StrictJson.encode(StrictJson.parse(Gson().toJson(assignment())
+      .toByteArray(StandardCharsets.UTF_8)))
+      .toByteArray(StandardCharsets.UTF_8)
+    workStore.stageAssignment(bytes)
+    val afterExpiry = Instant.parse("2026-10-05T18:06:00.000Z").toEpochMilli()
+    val exchange = fixedExchange { _, _, _ -> error("Expired work must not make a network request") }
+    val rehearsal = RoutineNoMoneyPhoneRehearsal(exchange,
+      RoutineTelebirrObservationCollector(ProviderTransport { _ ->
+        error("Expired work must not contact provider")
+      }, clock = MillisClock { afterExpiry }), workStore, MillisClock { afterExpiry })
+    assertEquals(RoutineNoMoneyPhoneResult.Review("lookup_expired"), run(rehearsal))
+    assertNull(workStore.load())
+  }
+
+  @Test fun `tampered sealed work fails closed before another poll`() {
+    val bytes = StrictJson.encode(StrictJson.parse(Gson().toJson(assignment())
+      .toByteArray(StandardCharsets.UTF_8)))
+      .toByteArray(StandardCharsets.UTF_8)
+    workStore.stageAssignment(bytes)
+    val file = File(workDirectory, "routine-no-money.sealed")
+    val sealed = file.readBytes()
+    sealed[sealed.lastIndex] = (sealed.last().toInt() xor 1).toByte()
+    file.writeBytes(sealed)
+    val exchange = fixedExchange { _, _, _ -> error("Tampered work must not poll") }
+    assertEquals(RoutineNoMoneyPhoneResult.Review("local_work_unavailable"),
+      run(rehearsal(exchange, ProviderTransport { _ -> error("No lookup") })))
+  }
+
+  private class TestCipher : LivePilotQueueCipher {
+    private val key = SecretKeySpec(ByteArray(32) { index -> (index * 5 + 31).toByte() }, "AES")
+    private val random = SecureRandom()
+
+    override fun seal(plaintext: ByteArray, associatedData: ByteArray): ByteArray {
+      val nonce = ByteArray(12).also(random::nextBytes)
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+      cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(128, nonce))
+      cipher.updateAAD(associatedData)
+      return nonce + cipher.doFinal(plaintext)
+    }
+
+    override fun open(sealed: ByteArray, associatedData: ByteArray): ByteArray {
+      require(sealed.size > 28)
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+      cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, sealed.copyOfRange(0, 12)))
+      cipher.updateAAD(associatedData)
+      return cipher.doFinal(sealed.copyOfRange(12, sealed.size))
+    }
   }
 }

@@ -4,6 +4,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.format.DateTimeFormatterBuilder
 
 /** Separate from the pilot bridge: these two paths cannot be used by its operational client. */
 internal object RoutineNoMoneyBridgeProtocol {
@@ -72,14 +74,17 @@ internal sealed interface RoutineNoMoneyPhoneResult {
 
 /**
  * One-shot no-money rehearsal. It is deliberately not called by the UI or foreground service.
- * A future runtime must durably stage the exact signed pair before upload and enforce replay
- * recovery. This class has no database, payment claim, Player credit or money capability.
+ * The encrypted work store preserves the assignment before lookup and the exact signed upload
+ * before transport, so a restart resumes rather than spending a second one-use poll. This class
+ * has no database, payment claim, Player credit or money capability.
  */
 internal class RoutineNoMoneyPhoneRehearsal(
   private val exchange: FixedRoutineNoMoneyHttpsExchange,
   private val collector: RoutineTelebirrObservationCollector,
+  private val workStore: RoutineNoMoneyWorkStore,
   private val clock: MillisClock = MillisClock(System::currentTimeMillis),
 ) {
+  @Synchronized
   fun run(
     receipt: RoutineSignedEnrollmentReceipt,
     receiptSigner: RoutineEnrollmentTrustedSigner,
@@ -105,61 +110,104 @@ internal class RoutineNoMoneyPhoneRehearsal(
         receiverProfileDigest = body.receiverProfileDigest,
       )
     }
-    val pollResponse = try {
-      val pollBytes = StrictJson.encode(obj(
-        "publicKeySpki" to text(deviceIdentity.publicMaterial().publicKeySpkiBase64Url),
-        "signedRequest" to StrictJson.parse(RoutineNoMoneyPollProtocol.encode(poll)),
-      )).toByteArray(StandardCharsets.UTF_8)
-      exchange.post(RoutineNoMoneyBridgeProtocol.POLL_PATH, RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
-        pollBytes)
-    } catch (_: Exception) {
-      return RoutineNoMoneyPhoneResult.Retry
+    val devicePublicMaterial = try { deviceIdentity.publicMaterial() } catch (_: Exception) {
+      return RoutineNoMoneyPhoneResult.Review("device_key_unavailable")
     }
-    if (pollResponse.contentType != RoutineNoMoneyBridgeProtocol.CONTENT_TYPE) {
-      return RoutineNoMoneyPhoneResult.Retry
+    val pending = try { workStore.load() } catch (_: Exception) {
+      return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
     }
-    if (pollResponse.statusCode == HttpURLConnection.HTTP_UNAVAILABLE) {
-      return RoutineNoMoneyPhoneResult.Retry
-    }
-    if (pollResponse.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED ||
-      pollResponse.statusCode == HttpURLConnection.HTTP_FORBIDDEN) {
-      return RoutineNoMoneyPhoneResult.Review("server_rejected")
-    }
-    if (pollResponse.statusCode != HttpURLConnection.HTTP_OK) {
-      return RoutineNoMoneyPhoneResult.Retry
-    }
-    val assignmentBytes = try {
-      val value = StrictJson.parse(pollResponse.body).requireObject(
-        setOf("outcome", "advisoryOnly", "financialActionAllowed", "signedAssignment"))
-      require(value.string("outcome") == "assignment" && value.boolean("advisoryOnly") &&
-        !value.boolean("financialActionAllowed"))
-      StrictJson.encode(value.value("signedAssignment"))
-        .toByteArray(StandardCharsets.UTF_8)
-    } catch (_: Exception) {
-      if (isNoAssignment(pollResponse.body)) return RoutineNoMoneyPhoneResult.NoAssignment
-      return RoutineNoMoneyPhoneResult.Review("invalid_assignment_response")
-    }
-    if (RoutineTelebirrJsonCodec.decodeSignedAssignment(assignmentBytes) == null) {
-      return RoutineNoMoneyPhoneResult.Review("invalid_assignment_response")
-    }
-    val collected = collector.collect(
-      assignmentBytes, assignmentSigner, assignmentSignerSpkiDer, enrollment, deviceIdentity,
-    )
-    if (collected is RoutineTelebirrObservationCollection.Review) {
-      return RoutineNoMoneyPhoneResult.Review(collected.reasonCode)
-    }
-    val observation = (collected as RoutineTelebirrObservationCollection.WouldForward).observation
-    val uploadBytes = try {
-      val observationBytes = RoutineTelebirrJsonCodec.encodeSignedObservation(observation)
-      StrictJson.encode(obj(
-        "publicKeySpki" to text(deviceIdentity.publicMaterial().publicKeySpkiBase64Url),
-        "signedAssignment" to StrictJson.parse(assignmentBytes),
-        "signedObservation" to StrictJson.parse(observationBytes),
-      )).toByteArray(StandardCharsets.UTF_8).also {
-        require(it.size in 1..RoutineNoMoneyBridgeProtocol.MAX_UPLOAD_BYTES)
+    val assignmentBytes = if (pending != null) pending.assignmentBytes else {
+      val pollResponse = try {
+        val pollBytes = StrictJson.encode(obj(
+          "publicKeySpki" to text(devicePublicMaterial.publicKeySpkiBase64Url),
+          "signedRequest" to StrictJson.parse(RoutineNoMoneyPollProtocol.encode(poll)),
+        )).toByteArray(StandardCharsets.UTF_8)
+        exchange.post(RoutineNoMoneyBridgeProtocol.POLL_PATH, RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
+          pollBytes)
+      } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Retry
       }
+      if (pollResponse.contentType != RoutineNoMoneyBridgeProtocol.CONTENT_TYPE ||
+        pollResponse.statusCode == HttpURLConnection.HTTP_UNAVAILABLE) {
+        return RoutineNoMoneyPhoneResult.Retry
+      }
+      if (pollResponse.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED ||
+        pollResponse.statusCode == HttpURLConnection.HTTP_FORBIDDEN) {
+        return RoutineNoMoneyPhoneResult.Review("server_rejected")
+      }
+      if (pollResponse.statusCode != HttpURLConnection.HTTP_OK) {
+        return RoutineNoMoneyPhoneResult.Retry
+      }
+      try {
+        val value = StrictJson.parse(pollResponse.body).requireObject(
+          setOf("outcome", "advisoryOnly", "financialActionAllowed", "signedAssignment"))
+        require(value.string("outcome") == "assignment" && value.boolean("advisoryOnly") &&
+          !value.boolean("financialActionAllowed"))
+        StrictJson.encode(value.value("signedAssignment"))
+          .toByteArray(StandardCharsets.UTF_8)
+      } catch (_: Exception) {
+        if (isNoAssignment(pollResponse.body)) return RoutineNoMoneyPhoneResult.NoAssignment
+        return RoutineNoMoneyPhoneResult.Review("invalid_assignment_response")
+      }
+    }
+    val signedAssignment = RoutineTelebirrJsonCodec.decodeSignedAssignment(assignmentBytes)
+      ?: return RoutineNoMoneyPhoneResult.Review("invalid_assignment_response")
+    val assessedAt = try {
+      DateTimeFormatterBuilder().appendInstant(3).toFormatter()
+        .format(Instant.ofEpochMilli(clock.nowMillis()))
     } catch (_: Exception) {
-      return RoutineNoMoneyPhoneResult.Review("observation_invalid")
+      return RoutineNoMoneyPhoneResult.Review("clock_unavailable")
+    }
+    val assessment = RoutineLookupAssignmentVerifier.verify(
+      assignmentSigner, enrollment, signedAssignment, assignmentSignerSpkiDer,
+      devicePublicMaterial, assessedAt,
+    )
+    if (assessment.authenticatedAssignment == null) {
+      if (assessment.reasonCode == "lookup_expired" && pending != null) {
+        try { workStore.discardExpired(clock.nowMillis()) } catch (_: Exception) {
+          return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
+        }
+      }
+      return RoutineNoMoneyPhoneResult.Review(assessment.reasonCode)
+    }
+    if (pending == null) {
+      try { workStore.stageAssignment(assignmentBytes) } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
+      }
+    }
+    val uploadBytes = if (pending is RoutineNoMoneyPendingWork.Upload) {
+      try {
+        val saved = StrictJson.parse(pending.uploadBytes).requireObject(
+          setOf("publicKeySpki", "signedAssignment", "signedObservation"))
+        require(saved.string("publicKeySpki") == devicePublicMaterial.publicKeySpkiBase64Url)
+      } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
+      }
+      pending.uploadBytes
+    } else {
+      val collected = collector.collect(
+        assignmentBytes, assignmentSigner, assignmentSignerSpkiDer, enrollment, deviceIdentity,
+      )
+      if (collected is RoutineTelebirrObservationCollection.Review) {
+        return RoutineNoMoneyPhoneResult.Review(collected.reasonCode)
+      }
+      val observation = (collected as RoutineTelebirrObservationCollection.WouldForward).observation
+      val encoded = try {
+        val observationBytes = RoutineTelebirrJsonCodec.encodeSignedObservation(observation)
+        StrictJson.encode(obj(
+          "publicKeySpki" to text(devicePublicMaterial.publicKeySpkiBase64Url),
+          "signedAssignment" to StrictJson.parse(assignmentBytes),
+          "signedObservation" to StrictJson.parse(observationBytes),
+        )).toByteArray(StandardCharsets.UTF_8).also {
+          require(it.size in 1..RoutineNoMoneyBridgeProtocol.MAX_UPLOAD_BYTES)
+        }
+      } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Review("observation_invalid")
+      }
+      try { workStore.stageUpload(assignmentBytes, encoded) } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
+      }
+      encoded
     }
     val uploadResponse = try {
       exchange.post(RoutineNoMoneyBridgeProtocol.UPLOAD_PATH, RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
@@ -174,7 +222,7 @@ internal class RoutineNoMoneyPhoneRehearsal(
     if (uploadResponse.statusCode != HttpURLConnection.HTTP_ACCEPTED) {
       return RoutineNoMoneyPhoneResult.Review("upload_rejected")
     }
-    return try {
+    val result = try {
       val value = StrictJson.parse(uploadResponse.body).requireObject(
         setOf("outcome", "advisoryOnly", "sourceAuthenticationPerformed", "financialActionAllowed"))
       require(value.boolean("advisoryOnly") && !value.boolean("sourceAuthenticationPerformed") &&
@@ -187,6 +235,12 @@ internal class RoutineNoMoneyPhoneRehearsal(
     } catch (_: Exception) {
       RoutineNoMoneyPhoneResult.Review("invalid_upload_response")
     }
+    if (result == RoutineNoMoneyPhoneResult.SubmittedForReview) {
+      try { workStore.acknowledge(uploadBytes) } catch (_: Exception) {
+        return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
+      }
+    }
+    return result
   }
 
   private fun isNoAssignment(body: ByteArray): Boolean = try {

@@ -47,9 +47,12 @@ export interface TelebirrDeviceBridgeApplicationDependencies {
   readonly createHandler?: (
     dependencies: TelebirrDeviceBridgeDependencies,
   ) => TelebirrDeviceBridgeHandler;
+  /** Dormant until a separate private no-money broker supplies authenticated dependencies. */
+  readonly createRoutineHandler?: () => TelebirrDeviceBridgeHandler;
   readonly createHttpServer?: (
     handler: TelebirrDeviceBridgeHandler,
     options: Pick<EnabledConfig, 'host' | 'port'>,
+    routineHandler?: TelebirrDeviceBridgeHandler,
   ) => TelebirrDeviceBridgeHttpServerRuntime;
   readonly effectiveUserId?: number;
   readonly fileSystem?: TelebirrDeviceBridgeLocalFileSystem;
@@ -172,7 +175,11 @@ export async function startTelebirrDeviceBridgeApplication(
       ...state,
       pollAssignment: createPollAssignment(),
     });
-    server = createHttpServer(handler, { host: config.host, port: config.port });
+    const routineHandler = dependencies.createRoutineHandler?.();
+    if (dependencies.createRoutineHandler !== undefined && typeof routineHandler !== 'function') {
+      throw new Error();
+    }
+    server = createHttpServer(handler, { host: config.host, port: config.port }, routineHandler);
     await server.listen();
     if (!server.ready()) throw new Error();
     await assertPrivateBrokers(dependencies);

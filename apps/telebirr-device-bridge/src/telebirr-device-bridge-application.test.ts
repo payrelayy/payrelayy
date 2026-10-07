@@ -207,6 +207,11 @@ describe('TeleBirr device bridge application', () => {
     expect(listen).toBeGreaterThan(firstComposition);
     expect(lastPathCheck).toBeGreaterThan(listen);
     expect(fixture.events).toContain('server.create:0.0.0.0:8084');
+    expect(fixture.dependencies.createHttpServer).toHaveBeenCalledWith(
+      expect.any(Function),
+      { host: '0.0.0.0', port: 8084 },
+      undefined,
+    );
     expect(fixture.captured.bridge?.serverSigner).toBe(enabledConfig.serverSigner);
     expect(fixture.captured.bridge?.claimReplay).toBeDefined();
     expect(fixture.captured.bridge?.stageEvidenceOnly).toBeDefined();
@@ -217,6 +222,35 @@ describe('TeleBirr device bridge application', () => {
     );
     await expect(application.ready()).resolves.toBe(true);
     await application.close();
+  });
+
+  it('composes a routine handler only when an explicit private adapter supplies one', async () => {
+    const fixture = runtimeFixture();
+    const routine: TelebirrDeviceBridgeHandler = vi.fn(async () => ({
+      statusCode: 503,
+      headers: {},
+      body: Buffer.from('{}'),
+    }));
+    let selected: TelebirrDeviceBridgeHandler | undefined;
+    const application = await startTelebirrDeviceBridgeApplication(config(), {
+      ...fixture.dependencies,
+      createRoutineHandler: () => routine,
+      createHttpServer: (_pilot, _options, routineHandler) => {
+        selected = routineHandler;
+        return fixture.server;
+      },
+    });
+    expect(selected).toBe(routine);
+    await application.close();
+
+    const invalid = runtimeFixture();
+    await expect(
+      startTelebirrDeviceBridgeApplication(config(), {
+        ...invalid.dependencies,
+        createRoutineHandler: () => undefined as unknown as TelebirrDeviceBridgeHandler,
+      }),
+    ).rejects.toThrow(TelebirrDeviceBridgeApplicationError);
+    expect(invalid.server.listen).not.toHaveBeenCalled();
   });
 
   it('fails before composing a public handler when either private broker is absent', async () => {

@@ -14,6 +14,11 @@ import {
   createTelebirrDeviceBridgeHttpServer,
   type TelebirrDeviceBridgeHttpServerRuntime,
 } from './telebirr-device-bridge-server.js';
+import {
+  ROUTINE_NO_MONEY_CONTENT_TYPE,
+  ROUTINE_NO_MONEY_POLL_PATH,
+  ROUTINE_NO_MONEY_UPLOAD_PATH,
+} from './routine-no-money-bridge.js';
 
 interface NetworkResponse {
   readonly statusCode: number;
@@ -98,6 +103,153 @@ describe('TeleBirr device bridge HTTP server', () => {
       path: TELEBIRR_DEVICE_BRIDGE_PAIRING_PATH,
       body,
     });
+  });
+
+  it('keeps both routine routes closed when no private handler is composed', async () => {
+    const pilot = vi.fn();
+    runtime = createTelebirrDeviceBridgeHttpServer(pilot, {
+      host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST,
+      port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
+    });
+    await runtime.listen();
+    for (const path of [ROUTINE_NO_MONEY_POLL_PATH, ROUTINE_NO_MONEY_UPLOAD_PATH]) {
+      const response = await exchange({
+        path,
+        headers: { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(pilot).not.toHaveBeenCalled();
+  });
+
+  it('dispatches only exact bounded vendor requests to an explicitly composed routine handler', async () => {
+    const pilot = vi.fn();
+    const routine = vi.fn(async () => ({
+      statusCode: 200,
+      headers: {
+        'cache-control': 'no-store',
+        'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE,
+      },
+      body: Buffer.from(
+        '{"outcome":"no_assignment","advisoryOnly":true,"financialActionAllowed":false}',
+      ),
+    }));
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      pilot,
+      {
+        host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST,
+        port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
+      },
+      routine,
+    );
+    await runtime.listen();
+    for (const path of [ROUTINE_NO_MONEY_POLL_PATH, ROUTINE_NO_MONEY_UPLOAD_PATH]) {
+      const response = await exchange({
+        path,
+        headers: { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toBe(ROUTINE_NO_MONEY_CONTENT_TYPE);
+    }
+    expect(routine).toHaveBeenCalledTimes(2);
+    expect(pilot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'pilot media type',
+      ROUTINE_NO_MONEY_POLL_PATH,
+      { 'content-length': '2', 'content-type': TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE },
+    ],
+    [
+      'duplicate routine media type',
+      ROUTINE_NO_MONEY_POLL_PATH,
+      {
+        'content-length': '2',
+        'content-type': [ROUTINE_NO_MONEY_CONTENT_TYPE, ROUTINE_NO_MONEY_CONTENT_TYPE],
+      },
+    ],
+    [
+      'query-bearing route',
+      `${ROUTINE_NO_MONEY_POLL_PATH}?retry=1`,
+      { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+    ],
+    [
+      'oversized poll',
+      ROUTINE_NO_MONEY_POLL_PATH,
+      { 'content-length': String(4_097), 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+    ],
+    [
+      'oversized upload',
+      ROUTINE_NO_MONEY_UPLOAD_PATH,
+      { 'content-length': String(48 * 1_024 + 1), 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+    ],
+    [
+      'compressed poll',
+      ROUTINE_NO_MONEY_POLL_PATH,
+      {
+        'content-length': '2',
+        'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE,
+        'content-encoding': 'gzip',
+      },
+    ],
+  ])('rejects %s before either route handler', async (_name, path, headers) => {
+    const pilot = vi.fn();
+    const routine = vi.fn();
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      pilot,
+      {
+        host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST,
+        port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
+      },
+      routine,
+    );
+    await runtime.listen();
+    const response = await exchange({ path, headers });
+    expect(response.statusCode).toBe(400);
+    expect(pilot).not.toHaveBeenCalled();
+    expect(routine).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      { 'cache-control': 'no-store', 'content-type': 'application/json' },
+      '{"outcome":"no_assignment","advisoryOnly":true,"financialActionAllowed":false}',
+      200,
+    ],
+    [
+      { 'cache-control': 'no-store', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      '{"outcome":"no_assignment","advisoryOnly":true,"financialActionAllowed":true}',
+      200,
+    ],
+    [
+      { 'cache-control': 'no-store', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      '{"outcome":"review","advisoryOnly":true,"sourceAuthenticationPerformed":true,"financialActionAllowed":false}',
+      202,
+    ],
+    [
+      { 'cache-control': 'no-store', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      '{"code":"invalid_request","rawReference":"SAMPLE9ABC1234"}',
+      401,
+    ],
+  ])('reduces an unsafe routine response to an opaque 503', async (headers, body, statusCode) => {
+    const routine = vi.fn(async () => ({ statusCode, headers, body: Buffer.from(body) }));
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      vi.fn(),
+      {
+        host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST,
+        port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
+      },
+      routine,
+    );
+    await runtime.listen();
+    const response = await exchange({
+      path: ROUTINE_NO_MONEY_POLL_PATH,
+      headers: { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.body.toString('utf8')).toBe('{"code":"temporarily_unavailable"}');
+    expect(routine).toHaveBeenCalledOnce();
   });
 
   it.each([

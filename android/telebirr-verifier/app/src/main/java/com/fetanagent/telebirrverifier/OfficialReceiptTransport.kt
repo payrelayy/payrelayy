@@ -23,10 +23,10 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
-import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLParameters
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -380,6 +380,14 @@ object BoundedSystemHostResolver : HostResolver {
 }
 
 object PlatformHttpsExchange : HttpsExchange {
+  internal fun pinnedTlsParameters(base: SSLParameters, host: String): SSLParameters {
+    require(host == OfficialReceiptRoute.OFFICIAL_HOST)
+    return base.apply {
+      endpointIdentificationAlgorithm = "HTTPS"
+      serverNames = listOf(SNIHostName(host))
+    }
+  }
+
   override fun execute(
     url: URL,
     resolvedAddresses: List<InetAddress>,
@@ -422,16 +430,16 @@ object PlatformHttpsExchange : HttpsExchange {
         factory.createSocket(plainSocket, url.host, HTTPS_PORT, true) as? SSLSocket
           ?: throw SSLHandshakeException("Platform TLS socket unavailable")
       tlsSocket.use { socket ->
-        val parameters = socket.sslParameters
-        parameters.endpointIdentificationAlgorithm = "HTTPS"
-        parameters.serverNames = listOf(SNIHostName(url.host))
-        socket.sslParameters = parameters
+        socket.sslParameters = pinnedTlsParameters(socket.sslParameters, url.host)
+        if (socket.sslParameters.endpointIdentificationAlgorithm != "HTTPS") {
+          throw SSLHandshakeException("Official provider endpoint identification unavailable")
+        }
         socket.soTimeout = remainingMillis(deadlineNanos)
+        // HTTPS endpoint identification validates the certificate name during this handshake.
+        // HttpsURLConnection's default verifier is not a second check for a raw SSLSocket:
+        // on some runtimes it rejects a session that already passed endpoint identification.
         socket.startHandshake()
         trace.advance(ReceiptTransportPhase.HOSTNAME)
-        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(url.host, socket.session)) {
-          throw SSLHandshakeException("Official provider hostname verification failed")
-        }
 
         trace.advance(ReceiptTransportPhase.REQUEST)
         val request =

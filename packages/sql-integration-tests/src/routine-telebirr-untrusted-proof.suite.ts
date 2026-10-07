@@ -18,6 +18,9 @@ const ISSUE =
   'select * from app.issue_routine_telebirr_lookup_challenge($1::uuid, $2::uuid, $3::uuid)';
 const ISSUE_MATERIAL =
   'select * from app.issue_routine_telebirr_lookup_assignment_material($1::uuid, $2::uuid, $3::uuid)';
+const LOAD_ENROLLMENT = 'select * from app.load_routine_telebirr_no_money_enrollment($1::uuid)';
+const LOAD_OBSERVATION_MATERIAL =
+  'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)';
 const CAPTURE = `
   select * from app.capture_telegram_routine_telebirr_untrusted_proof(
     $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
@@ -709,6 +712,95 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           trust.enrollmentId,
           sharedSigner.rows[0]!.id,
         ]);
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('reads back only the active encrypted challenge snapshot for no-money upload review', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        function_name: string;
+        owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        service_allowed: boolean;
+        pilot_broker_allowed: boolean;
+        routine_broker_allowed: boolean;
+      }>(`
+        select routine.proname as function_name,
+               routine.proowner::pg_catalog.regrole::text as owner,
+               routine.prosecdef as security_definer,
+               pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                 as public_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'EXECUTE')
+                 as service_allowed,
+               pg_catalog.has_function_privilege('fetanagent_telebirr_assignment_broker_runtime',
+                 routine.oid, 'EXECUTE') as pilot_broker_allowed,
+               pg_catalog.has_function_privilege('fetanagent_routine_deposit_broker_runtime',
+                 routine.oid, 'EXECUTE') as routine_broker_allowed
+          from pg_catalog.pg_proc routine
+         where routine.oid in (
+           'app.load_routine_telebirr_no_money_enrollment(uuid)'::pg_catalog.regprocedure,
+           'app.load_routine_telebirr_no_money_observation_material(uuid)'::pg_catalog.regprocedure)
+         order by routine.proname
+      `);
+      expect(catalog.rows).toEqual(
+        [
+          'load_routine_telebirr_no_money_enrollment',
+          'load_routine_telebirr_no_money_observation_material',
+        ].map((functionName) => ({
+          function_name: functionName,
+          owner: 'postgres',
+          security_definer: true,
+          public_allowed: false,
+          service_allowed: false,
+          pilot_broker_allowed: false,
+          routine_broker_allowed: false,
+        })),
+      );
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const enrollment = await client.query(LOAD_ENROLLMENT, [trust.enrollmentId]);
+        expect(enrollment.rows).toHaveLength(1);
+        expect(enrollment.rows[0]!.enrollment_id).toBe(trust.enrollmentId);
+        expect(enrollment.rows[0]!.receiver_profile_digest).toBe(trust.receiverProfileDigest);
+        const issued = await client.query(ISSUE_MATERIAL, [
+          candidateId,
+          trust.enrollmentId,
+          trust.signerId,
+        ]);
+        expect(issued.rows).toHaveLength(1);
+        const challengeId = issued.rows[0]!.challenge_id as string;
+        expect((await client.query(LOAD_OBSERVATION_MATERIAL, [challengeId])).rows).toEqual(
+          issued.rows,
+        );
+        expect((await client.query(LOAD_OBSERVATION_MATERIAL, [randomUUID()])).rows).toEqual([]);
+
+        await client.query('set local role service_role');
+        await rejected(client, LOAD_ENROLLMENT, [trust.enrollmentId]);
+        await rejected(client, LOAD_OBSERVATION_MATERIAL, [challengeId]);
+        await client.query('reset role');
+
+        await client.query(
+          `insert into app.routine_telebirr_lookup_signer_revocations
+             (signer_id, reason_code) values ($1::uuid, 'rotation')`,
+          [trust.signerId],
+        );
+        expect((await client.query(LOAD_OBSERVATION_MATERIAL, [challengeId])).rows).toEqual([]);
+        await client.query(
+          `insert into app.routine_telebirr_device_enrollment_revocations
+             (enrollment_id, reason_code) values ($1::uuid, 'owner_revoked')`,
+          [trust.enrollmentId],
+        );
+        expect((await client.query(LOAD_ENROLLMENT, [trust.enrollmentId])).rows).toEqual([]);
         expect(await snapshot(client)).toBe(before);
       });
     });

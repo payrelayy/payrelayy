@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { TextDecoder } from 'node:util';
 
 import {
   TELEBIRR_DEVICE_BRIDGE_ASSIGNMENT_POLL_PATH,
@@ -12,6 +13,11 @@ import type {
   TelebirrDeviceBridgeHttpRequest,
   TelebirrDeviceBridgeHttpResponse,
 } from './telebirr-device-bridge.js';
+import {
+  ROUTINE_NO_MONEY_CONTENT_TYPE,
+  ROUTINE_NO_MONEY_POLL_PATH,
+  ROUTINE_NO_MONEY_UPLOAD_PATH,
+} from './routine-no-money-bridge.js';
 
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST = '0.0.0.0' as const;
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT = 8084 as const;
@@ -23,6 +29,20 @@ const paths = new Set<string>([
   TELEBIRR_DEVICE_BRIDGE_ASSIGNMENT_POLL_PATH,
   TELEBIRR_DEVICE_BRIDGE_HEARTBEAT_PATH,
   TELEBIRR_DEVICE_BRIDGE_OBSERVATION_UPLOAD_PATH,
+]);
+const routineRequestLimits = new Map<string, number>([
+  [ROUTINE_NO_MONEY_POLL_PATH, 4_096],
+  [ROUTINE_NO_MONEY_UPLOAD_PATH, 48 * 1_024],
+]);
+const ROUTINE_MAX_RESPONSE_BYTES = 16 * 1_024;
+const routineStatuses = new Set([200, 202, 400, 401, 403, 409, 503]);
+const routineErrorCodes = new Set([
+  'invalid_request',
+  'device_unavailable',
+  'observation_unavailable',
+  'no_money_poll_stopped',
+  'observation_conflict',
+  'temporarily_unavailable',
 ]);
 
 const errorHeaders = Object.freeze({
@@ -87,18 +107,25 @@ function declaredBodyLength(
   method: string | undefined,
   path: string | undefined,
   headers: readonly (readonly [string, string])[],
+  routineAvailable: boolean,
 ): number | undefined {
   const contentTypes = headerValues(headers, 'content-type');
   const contentLengths = headerValues(headers, 'content-length');
   const contentEncodings = headerValues(headers, 'content-encoding');
   const transferEncodings = headerValues(headers, 'transfer-encoding');
   const expects = headerValues(headers, 'expect');
+  const routineLimit =
+    routineAvailable && path !== undefined ? routineRequestLimits.get(path) : undefined;
+  const expectedContentType =
+    routineLimit === undefined
+      ? TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE
+      : ROUTINE_NO_MONEY_CONTENT_TYPE;
   if (
     method !== 'POST' ||
     typeof path !== 'string' ||
-    !paths.has(path) ||
+    (!paths.has(path) && routineLimit === undefined) ||
     contentTypes?.length !== 1 ||
-    contentTypes[0] !== TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE ||
+    contentTypes[0] !== expectedContentType ||
     contentLengths?.length !== 1 ||
     !/^[1-9][0-9]{0,5}$/u.test(contentLengths[0] ?? '') ||
     contentEncodings?.length !== 0 ||
@@ -110,7 +137,7 @@ function declaredBodyLength(
   const parsed = Number(contentLengths[0]);
   return Number.isSafeInteger(parsed) &&
     parsed > 0 &&
-    parsed <= TELEBIRR_DEVICE_BRIDGE_MAX_REQUEST_BYTES
+    parsed <= (routineLimit ?? TELEBIRR_DEVICE_BRIDGE_MAX_REQUEST_BYTES)
     ? parsed
     : undefined;
 }
@@ -137,6 +164,7 @@ function opaqueError(statusCode: 400 | 503, code: 'invalid_request' | 'temporari
 
 function safeResponse(
   candidate: TelebirrDeviceBridgeHttpResponse,
+  routine: boolean,
 ): TelebirrDeviceBridgeHttpResponse {
   if (
     typeof candidate !== 'object' ||
@@ -148,7 +176,8 @@ function safeResponse(
     candidate.headers === null ||
     !(candidate.body instanceof Uint8Array) ||
     candidate.body.byteLength === 0 ||
-    candidate.body.byteLength > TELEBIRR_DEVICE_BRIDGE_MAX_RESPONSE_BYTES
+    candidate.body.byteLength >
+      (routine ? ROUTINE_MAX_RESPONSE_BYTES : TELEBIRR_DEVICE_BRIDGE_MAX_RESPONSE_BYTES)
   ) {
     return opaqueError(503, 'temporarily_unavailable');
   }
@@ -168,6 +197,50 @@ function safeResponse(
     }
     headers[normalized] = value;
   }
+  if (routine) {
+    if (
+      !routineStatuses.has(candidate.statusCode) ||
+      headers['content-type'] !== ROUTINE_NO_MONEY_CONTENT_TYPE ||
+      headers['cache-control'] !== 'no-store'
+    ) {
+      return opaqueError(503, 'temporarily_unavailable');
+    }
+    try {
+      const decoded = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(
+        candidate.body,
+      );
+      if (decoded.charCodeAt(0) === 0xfeff) throw new Error();
+      const parsed: unknown = JSON.parse(decoded);
+      if (
+        JSON.stringify(parsed) !== decoded ||
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        Array.isArray(parsed)
+      )
+        throw new Error();
+      if (candidate.statusCode === 200 || candidate.statusCode === 202) {
+        if (
+          !('advisoryOnly' in parsed) ||
+          parsed.advisoryOnly !== true ||
+          !('financialActionAllowed' in parsed) ||
+          parsed.financialActionAllowed !== false ||
+          (candidate.statusCode === 202 &&
+            (!('sourceAuthenticationPerformed' in parsed) ||
+              parsed.sourceAuthenticationPerformed !== false))
+        )
+          throw new Error();
+      } else {
+        if (
+          Object.keys(parsed).length !== 1 ||
+          !('code' in parsed) ||
+          !routineErrorCodes.has(parsed.code as string)
+        )
+          throw new Error();
+      }
+    } catch {
+      return opaqueError(503, 'temporarily_unavailable');
+    }
+  }
   return Object.freeze({
     statusCode: candidate.statusCode,
     headers: Object.freeze(headers),
@@ -175,8 +248,12 @@ function safeResponse(
   });
 }
 
-function writeResponse(target: ServerResponse, source: TelebirrDeviceBridgeHttpResponse): void {
-  const selected = safeResponse(source);
+function writeResponse(
+  target: ServerResponse,
+  source: TelebirrDeviceBridgeHttpResponse,
+  routine = false,
+): void {
+  const selected = safeResponse(source, routine);
   target.writeHead(selected.statusCode, {
     ...selected.headers,
     connection: 'close',
@@ -202,11 +279,13 @@ export function createTelebirrDeviceBridgeHttpServer(
     readonly host: typeof TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST;
     readonly port: typeof TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT;
   },
+  routineHandler?: TelebirrDeviceBridgeHandler,
 ): TelebirrDeviceBridgeHttpServerRuntime {
   if (
     typeof handler !== 'function' ||
     options.host !== TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST ||
-    options.port !== TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT
+    options.port !== TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT ||
+    (routineHandler !== undefined && typeof routineHandler !== 'function')
   ) {
     throw new TelebirrDeviceBridgeHttpServerError();
   }
@@ -216,7 +295,10 @@ export function createTelebirrDeviceBridgeHttpServer(
     void (async () => {
       try {
         const headers = rawHeaders(request);
-        const expectedBytes = headers && declaredBodyLength(request.method, request.url, headers);
+        const routine = routineHandler !== undefined && routineRequestLimits.has(request.url ?? '');
+        const expectedBytes =
+          headers &&
+          declaredBodyLength(request.method, request.url, headers, routineHandler !== undefined);
         if (headers === undefined || expectedBytes === undefined) {
           request.resume();
           writeResponse(target, opaqueError(400, 'invalid_request'));
@@ -230,7 +312,13 @@ export function createTelebirrDeviceBridgeHttpServer(
         }
         writeResponse(
           target,
-          await handler({ method: request.method ?? '', path: request.url ?? '', headers, body }),
+          await (routine ? routineHandler : handler)({
+            method: request.method ?? '',
+            path: request.url ?? '',
+            headers,
+            body,
+          }),
+          routine,
         );
       } catch {
         if (!target.headersSent) {

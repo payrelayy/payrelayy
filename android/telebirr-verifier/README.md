@@ -69,11 +69,13 @@ as an operational routine verifier.
 
 The phone and TypeScript now share a separate, one-minute signed **no-money poll request**. The
 phone rechecks its signed routine enrollment receipt before composing it; the server-side verifier
-checks the enrolled phone signature but explicitly grants no poll. The reviewed route handler and
-phone rehearsal client are still unmounted. The database has a private replay ledger and an atomic
-no-money assignment issuer, but there is no production bridge adapter, automatic assignment
-delivery, or foreground polling for this routine path. Neither the
-enrollment receipt nor this request silently starts automatic verification.
+checks the enrolled phone signature but explicitly grants no poll. The bridge listener now accepts
+the two exact routine paths and their smaller vendor-media bounds only when a separate routine
+handler is explicitly composed; the production application composes none. The reviewed route
+handler and phone rehearsal client are still unmounted. The database has a private replay ledger
+and an atomic no-money assignment issuer, but there is no production bridge adapter, automatic
+assignment delivery, or foreground polling for this routine path. Neither the enrollment receipt
+nor this request silently starts automatic verification.
 
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
 short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,

@@ -30,6 +30,9 @@ routine JSON codec can decode an assignment and encode a signed, normalized obse
 has no protected routine transport, enrollment lifecycle, production caller, or upload endpoint.
 The Android routine observation factory can sign locally parsed facts, but no runtime calls or
 transmits it.
+An administrator-only no-money handoff can now consume one verified signed-poll replay ID and
+reserve at most one encrypted candidate in one transaction. It has no application grant, signing
+key, mounted route, or phone caller, and does not satisfy the live activation gate.
 Do not run this activation procedure, install its runtime credential or release marker, or start
 the Automatic Deposits launcher until a later reviewed release proves the whole path with
 disposable SQL and no-money end-to-end tests.

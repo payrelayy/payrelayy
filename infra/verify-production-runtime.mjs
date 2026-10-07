@@ -254,6 +254,7 @@ assert.match(customer, /INTERNAL_CUSTOMER_WEB_DEPOSIT_RUNTIME_ENABLED: 'false'/u
 assert.match(customer, /INTERNAL_CUSTOMER_WEB_DRY_RUN_DEPOSIT_PROOF_RUNTIME_ENABLED: 'false'/u);
 
 const api = childBlock(services, 'api');
+assert.doesNotMatch(compose, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED/u);
 assert.match(api, /PLAYER_ACTION_DEPLOYMENT_TARGET: production/u);
 assert.match(api, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
@@ -320,6 +321,14 @@ for (const expression of [
 assert.equal(count(telebirrAssignment, /- source: /gu), 5);
 assert.doesNotMatch(telebirrAssignment, /ENROLLMENT_ONLY|network_mode: none/u);
 assert.match(inertCompose, /^services:\s*$/mu);
+const inertApi = childBlock(topLevelSection(inertCompose, 'services'), 'api');
+assert.match(inertApi, /^\s+environment:\s*$/mu);
+assert.match(inertApi, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true'/u);
+assert.equal(
+  count(inertCompose, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true'/gu),
+  1,
+);
+assert.doesNotMatch(inertApi, /FINANCIAL_ACTIONS_MODE|KEMERBET_|secrets:|configs:|networks:/u);
 assert.match(inertCompose, /^  telebirr-assignment-broker:\s*$/mu);
 assert.match(inertCompose, /environment: !override/u);
 assert.match(inertCompose, /TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'/u);
@@ -335,7 +344,7 @@ assert.doesNotMatch(
   inertCompose,
   /DATABASE_URL_FILE|REFERENCE_OPENING_KEY_FILE|RUNTIME_MANIFEST_FILE|SIGNER_PRIVATE_KEY_FILE|NODE_EXTRA_CA_CERTS/u,
 );
-assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 1);
+assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 2);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -996,6 +1005,19 @@ assert.match(inertPreflightSql, /authority\.authority_state = 'active'/u);
 assert.match(inertPreflightSql, /authority\.revoked_at is null/u);
 assert.match(inertPreflightSql, /authority\.expires_at > pg_catalog\.clock_timestamp\(\)/u);
 assert.doesNotMatch(inertPreflightSql, /current_private_trusted_telebirr_activation_epoch/u);
+assert.match(inertPreflightSql, /count\(\*\) = 7 as exact_inert_feature_switches/u);
+assert.match(
+  inertPreflightSql,
+  /feature_switch\.mode = 'disabled'\s+and feature_switch\.settings = '\{\}'::jsonb/u,
+);
+assert.doesNotMatch(inertPreflightSql, /feature_switch\.mode in \('disabled', 'dry_run'\)/u);
+assert.match(inertPreflightSql, /exact_routine_candidate_grant/u);
+assert.match(
+  inertPreflightSql,
+  /capture_telegram_routine_telebirr_untrusted_proof\(uuid,text,text,text,text,text,smallint,smallint,text\)/u,
+);
+assert.match(inertPreflightSql, /has_function_privilege\(/u);
+assert.match(inertPreflightSql, /pg_catalog\.aclexplode\(/u);
 for (const feature of [
   'cbe_birr_authoritative_verification',
   'deposit_execution',
@@ -1015,13 +1037,14 @@ assert.match(inertPreflightSql, /not pg_catalog\.bool_or\(role\.rolcanlogin\)/u)
 assert.match(inertPreflightSql, /pg_catalog\.pg_stat_activity/u);
 assert.match(inertPreflightSql, /rollback;/u);
 assert.doesNotMatch(
-  inertPreflightSql,
+  inertPreflightSql.replace(/'[^']*'/gu, ''),
   /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,
 );
 
 assert.match(packageJson, /node infra\/verify-production-runtime\.mjs/u);
 assert.match(quality, /bash -n infra\/operations\/fetanagent-production-deploy-helper\.sh/u);
 assert.match(quality, /--file infra\/compose\.production\.yaml/u);
+assert.match(quality, /--file infra\/compose\.production\.inert-maintenance\.yaml/u);
 assert.match(quality, /--profile production config --quiet/u);
 assert.match(
   quality,

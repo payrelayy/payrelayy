@@ -178,6 +178,12 @@ jobs:
           FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID=telebirr-assignment-production-v1 \
             docker compose --env-file /dev/null --file infra/compose.production.yaml \
               --profile production config --quiet
+          FETANAGENT_IMAGE_TAG=ci \
+          FETANAGENT_PRODUCTION_SECRET_DIR="$production_contract_dir" \
+          FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID=telebirr-assignment-production-v1 \
+            docker compose --env-file /dev/null --file infra/compose.production.yaml \
+              --file infra/compose.production.inert-maintenance.yaml \
+              --profile production config --quiet
 
       - name: Build and validate the public HTTPS gateway
         shell: bash

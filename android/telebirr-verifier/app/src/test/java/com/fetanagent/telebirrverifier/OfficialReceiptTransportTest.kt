@@ -3,7 +3,9 @@ package com.fetanagent.telebirrverifier
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLHandshakeException
+import javax.net.ssl.SSLParameters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -12,6 +14,20 @@ import org.junit.Test
 
 class OfficialReceiptTransportTest {
   private val publicResolver = HostResolver { _, _ -> listOf(InetAddress.getByName("8.8.8.8")) }
+
+  @Test
+  fun `pins the official hostname for verification during TLS handshake`() {
+    val parameters = PlatformHttpsExchange.pinnedTlsParameters(
+      SSLParameters(),
+      OfficialReceiptRoute.OFFICIAL_HOST,
+    )
+
+    assertEquals("HTTPS", parameters.endpointIdentificationAlgorithm)
+    assertEquals(listOf(SNIHostName(OfficialReceiptRoute.OFFICIAL_HOST)), parameters.serverNames)
+    assertThrows(IllegalArgumentException::class.java) {
+      PlatformHttpsExchange.pinnedTlsParameters(SSLParameters(), "untrusted.example")
+    }
+  }
 
   @Test
   fun `builds only the fixed official HTTPS route from a canonical reference`() {

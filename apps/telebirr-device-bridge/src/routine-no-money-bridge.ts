@@ -36,7 +36,6 @@ export interface RoutineNoMoneyAssignmentContext {
   readonly trustedSigner: unknown;
   readonly deviceEnrollment: unknown;
   readonly trustedSignerSpkiDer: Uint8Array;
-  readonly enrolledDeviceSpkiDer: Uint8Array;
   readonly signedAssignment: unknown;
 }
 
@@ -47,14 +46,8 @@ export interface RoutineNoMoneyObservationContext extends Omit<
 
 export interface RoutineNoMoneyBridgeDependencies {
   readonly now: () => string;
-  /** Must load an unrevoked enrollment and its public key from protected storage. */
-  loadEnrollment(enrollmentId: string): Promise<
-    | {
-        readonly enrollment: unknown;
-        readonly publicKeySpkiDer: Uint8Array;
-      }
-    | undefined
-  >;
+  /** Must load an unrevoked enrollment independently of the caller's public-key hint. */
+  loadEnrollment(enrollmentId: string): Promise<{ readonly enrollment: unknown } | undefined>;
   /** Must atomically check the no-money gate, replay ID, and candidate before issuing one lookup. */
   claimAndIssuePoll(input: {
     readonly enrollmentId: string;
@@ -124,6 +117,15 @@ function parseCanonicalJson(bytes: Uint8Array): unknown {
   }
 }
 
+/** Public key bytes are untrusted until their digest and signature match the enrollment. */
+function publicKeyHint(value: unknown): Uint8Array | undefined {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{86,684}$/u.test(value)) return undefined;
+  const bytes = Buffer.from(value, 'base64url');
+  return bytes.byteLength >= 64 && bytes.byteLength <= 512 && bytes.toString('base64url') === value
+    ? bytes
+    : undefined;
+}
+
 function validHttpRequest(request: TelebirrDeviceBridgeHttpRequest): boolean {
   if (
     request.method !== 'POST' ||
@@ -172,7 +174,13 @@ async function handlePoll(
   value: unknown,
   dependencies: RoutineNoMoneyBridgeDependencies,
 ): Promise<TelebirrDeviceBridgeHttpResponse> {
-  const body = isRecord(value) && own(value, 'body');
+  if (!isRecord(value) || !hasKeys(value, ['publicKeySpki', 'signedRequest'])) {
+    return error(400, 'invalid_request');
+  }
+  const publicKeySpkiDer = publicKeyHint(own(value, 'publicKeySpki'));
+  const signedRequest = own(value, 'signedRequest');
+  if (!publicKeySpkiDer) return error(400, 'invalid_request');
+  const body = isRecord(signedRequest) && own(signedRequest, 'body');
   const enrollmentId = isRecord(body) && own(body, 'enrollmentId');
   if (typeof enrollmentId !== 'string' || !UUID_V4.test(enrollmentId)) {
     return error(400, 'invalid_request');
@@ -181,9 +189,9 @@ async function handlePoll(
   const assessedAt = dependencies.now();
   if (!loaded || !canonicalUtc(assessedAt)) return error(401, 'device_unavailable');
   const assessment = verifyRoutineNoMoneyPollRequest(
-    value,
+    signedRequest,
     loaded.enrollment,
-    loaded.publicKeySpkiDer,
+    publicKeySpkiDer,
     assessedAt,
   );
   if (assessment.disposition !== 'would_consider_no_money_poll' || !assessment.replayIdentity) {
@@ -230,7 +238,7 @@ async function handlePoll(
       signedAssignment: context.signedAssignment,
     },
     context.trustedSignerSpkiDer,
-    context.enrolledDeviceSpkiDer,
+    publicKeySpkiDer,
   );
   if (assignmentAssessment.disposition !== 'would_forward_signed_lookup') {
     return error(503, 'temporarily_unavailable');
@@ -247,9 +255,14 @@ async function handleUpload(
   value: unknown,
   dependencies: RoutineNoMoneyBridgeDependencies,
 ): Promise<TelebirrDeviceBridgeHttpResponse> {
-  if (!isRecord(value) || !hasKeys(value, ['signedAssignment', 'signedObservation'])) {
+  if (
+    !isRecord(value) ||
+    !hasKeys(value, ['publicKeySpki', 'signedAssignment', 'signedObservation'])
+  ) {
     return error(400, 'invalid_request');
   }
+  const publicKeySpkiDer = publicKeyHint(own(value, 'publicKeySpki'));
+  if (!publicKeySpkiDer) return error(400, 'invalid_request');
   const signedAssignment = own(value, 'signedAssignment');
   const signedObservation = own(value, 'signedObservation');
   const observationBody = isRecord(signedObservation) && own(signedObservation, 'body');
@@ -271,7 +284,7 @@ async function handleUpload(
       signedObservation,
     },
     context.trustedSignerSpkiDer,
-    context.enrolledDeviceSpkiDer,
+    publicKeySpkiDer,
   );
   if (!assessment.deviceSignatureVerified || !assessment.providedSnapshotMatched) {
     return error(401, 'invalid_request');

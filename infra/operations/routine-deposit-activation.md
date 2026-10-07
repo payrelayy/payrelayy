@@ -16,8 +16,9 @@ revision, separate routine enrollment, and signer. The routine trust stores are 
 application provisioning path; the issuer has no runtime grant or transport. A second admin-only
 function can return the exact encrypted candidate and trust material in the same transaction as
 challenge issuance, while rejecting a signer that is also the device key. A dormant protected-process
-builder can open that reference and sign the routine assignment in isolation, but has no deployed
-caller or signed-assignment persistence. It does not authenticate an official TeleBirr source,
+builder and private no-money broker core can open that reference and sign the routine assignment
+in isolation, but have no database runtime grant, deployed caller, protected transport, or
+signed-assignment persistence. They do not authenticate an official TeleBirr source,
 accept an observation, or claim a payment. Pilot pairing cannot substitute for routine enrollment.
 The advisory result and dormant ledger do not satisfy this activation gate.
 The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and

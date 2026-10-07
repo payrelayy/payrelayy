@@ -71,3 +71,18 @@ No credential, runtime `LOGIN`, receiver value, child key, signer, or bridge dep
 provisioned by this source change. No fixed calendar date stops the broker; only explicit gates,
 database pilot/enrollment/key state, target-exact runtime-role validity, and short lease validity
 windows can deny an assignment.
+
+## Separate routine no-money core (not deployed)
+
+`routine-no-money-broker.ts` composes the administrator-only routine enrollment, atomic poll,
+observation-snapshot, and digest-only staging operations with a separately scoped opening key and
+lookup signer. The SQL adapter contains only four parameterized calls to those exact functions.
+It rejects malformed or extra-column rows before returning trust material, checks that the
+protected candidate and signer match the reservation, and signs only a five-minute advisory phone
+assignment. A returned phone observation remains review evidence; it is not provider authentication
+or a payment claim.
+
+This is a private library core, not a second mode of the operational pilot broker. It has no
+database login, signer secret, Unix listener, compose service, public route, or production caller.
+The SQL functions still permit only administrator sessions. A later release must add a separate
+least-privilege no-money role, protected transport, and production wiring before any phone rehearsal.

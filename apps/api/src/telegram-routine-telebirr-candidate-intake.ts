@@ -9,8 +9,9 @@ import { createTelegramActionSemanticHmac } from './telegram-action-capability.j
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SYNTHETIC_REFERENCE_PATTERN = /^FETANTEST[A-Z0-9]{4,20}$/u;
+const REAL_REFERENCE_PATTERN = /^[A-Z0-9]{8,32}$/u;
 
-/** Not granted to the Player-action database role. The staging route is default-off. */
+/** Not granted to the Player-action database role. Both candidate routes are default-off. */
 export const CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL = `
   select proof_request_id, provider_code, proof_status, submitted_at, request_replayed
   from app.capture_telegram_routine_telebirr_untrusted_proof(
@@ -45,18 +46,29 @@ async function captureInternal(
   action: CandidateAction,
   config: ApiConfig,
 ): Promise<TelegramPrivateActionResult> {
+  const runtime = config.telegramPlayerActionRuntime;
+  const stagingCandidate =
+    config.financialActionsMode === 'dry_run' &&
+    runtime.enabled &&
+    runtime.routineTelebirrCandidateStagingEnabled &&
+    runtime.deploymentTarget === 'staging' &&
+    SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference);
+  const productionCandidate =
+    runtime.enabled &&
+    runtime.routineTelebirrCandidateProductionEnabled &&
+    runtime.deploymentTarget === 'production' &&
+    (config.financialActionsMode === 'dry_run' || config.financialActionsMode === 'live') &&
+    REAL_REFERENCE_PATTERN.test(action.transactionReference) &&
+    !SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference);
   if (
-    config.financialActionsMode !== 'dry_run' ||
     !config.telegramActionCapability.enabled ||
-    !config.telegramPlayerActionRuntime.enabled ||
-    !config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
-    config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
-    config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled ||
-    config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion !== 2 ||
+    !runtime.enabled ||
+    (!stagingCandidate && !productionCandidate) ||
+    runtime.telebirrReceiverReviewEnabled ||
+    runtime.depositProofReferenceProfileVersion !== 2 ||
     !UUID_PATTERN.test(originInboundEventId) ||
     action.kind !== 'deposit_proof_command' ||
-    action.providerCode !== 'telebirr' ||
-    !SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference)
+    action.providerCode !== 'telebirr'
   ) {
     throw new TelegramRoutineTelebirrCandidateUnavailableError();
   }
@@ -65,10 +77,8 @@ async function captureInternal(
     provider: 'telebirr',
     reference: action.transactionReference,
     secrets: {
-      encryptionSecret:
-        config.telegramPlayerActionRuntime.depositProofReferenceEncryptionMasterSecret,
-      fingerprintSecret:
-        config.telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
+      encryptionSecret: runtime.depositProofReferenceEncryptionMasterSecret,
+      fingerprintSecret: runtime.depositProofReferenceFingerprintMasterSecret,
     },
   });
   const semanticHmac = createTelegramActionSemanticHmac({
@@ -79,7 +89,7 @@ async function captureInternal(
     referenceFingerprint: protectedReference.fingerprint,
     referenceMasked: protectedReference.masked,
     keyVersion: protectedReference.keyVersion,
-    profileVersion: config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
+    profileVersion: runtime.depositProofReferenceProfileVersion,
     semanticHmacSecret: config.telegramActionCapability.semanticHmacSecret,
   });
   const result = await database.query(CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL, [
@@ -90,7 +100,7 @@ async function captureInternal(
     protectedReference.fingerprint,
     protectedReference.masked,
     protectedReference.keyVersion,
-    config.telegramPlayerActionRuntime.depositProofReferenceProfileVersion,
+    runtime.depositProofReferenceProfileVersion,
     semanticHmac,
   ]);
   if (result.rows.length !== 1 || !isRecord(result.rows[0])) {

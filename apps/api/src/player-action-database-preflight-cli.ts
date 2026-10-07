@@ -26,7 +26,8 @@ async function runPlayerActionDatabasePreflight(): Promise<void> {
     if (
       !(await playerActionCatalogPreflightPassed(
         { query: (query) => client!.query(query) },
-        config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
+        config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
+          config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
       ))
     ) {
       throw new Error('The Player-ID action catalog contract did not pass.');
@@ -52,7 +53,7 @@ try {
   console.info('Player-ID action database preflight passed.');
 } catch {
   console.error(
-    'FetanAgent Player-ID action database preflight did not complete. Check the restricted staging runtime configuration.',
+    'FetanAgent Player-ID action database preflight did not complete. Check the restricted runtime configuration.',
   );
   process.exitCode = 1;
 }

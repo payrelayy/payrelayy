@@ -18,6 +18,8 @@ const ISSUE =
   'select * from app.issue_routine_telebirr_lookup_challenge($1::uuid, $2::uuid, $3::uuid)';
 const ISSUE_MATERIAL =
   'select * from app.issue_routine_telebirr_lookup_assignment_material($1::uuid, $2::uuid, $3::uuid)';
+const ISSUE_NO_MONEY_POLL =
+  'select * from app.issue_routine_telebirr_no_money_poll_assignment($1::uuid, $2::uuid, $3::text, $4::timestamptz, $5::uuid)';
 const LOAD_ENROLLMENT = 'select * from app.load_routine_telebirr_no_money_enrollment($1::uuid)';
 const LOAD_OBSERVATION_MATERIAL =
   'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)';
@@ -1244,6 +1246,140 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         await rejected(client, `select * from ${POLL_CLAIMS_TABLE}`);
         await client.query('reset role');
         expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('atomically spends a signed no-money poll and reserves only one encrypted lookup', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        public_allowed: boolean;
+        service_allowed: boolean;
+        routine_broker_allowed: boolean;
+      }>(`
+        select routine.proowner::pg_catalog.regrole::text as owner,
+               routine.prosecdef as security_definer,
+               pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                 as public_allowed,
+               pg_catalog.has_function_privilege('service_role', routine.oid, 'EXECUTE')
+                 as service_allowed,
+               pg_catalog.has_function_privilege('fetanagent_routine_deposit_broker_runtime',
+                 routine.oid, 'EXECUTE') as routine_broker_allowed
+          from pg_catalog.pg_proc routine
+         where routine.oid =
+           'app.issue_routine_telebirr_no_money_poll_assignment(uuid,uuid,text,timestamptz,uuid)'::pg_catalog.regprocedure
+      `);
+      expect(catalog.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: true,
+          public_allowed: false,
+          service_allowed: false,
+          routine_broker_allowed: false,
+        },
+      ]);
+      await rollback(client, async () => {
+        const financialBefore = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const sharedSigner = await client.query<{ id: string }>(
+          `insert into ${SIGNER_TABLE} (
+             signer_key_id, public_key_spki_sha256, valid_from, valid_until
+           ) values ($1::text, $2::text, clock_timestamp() - interval '1 hour',
+             clock_timestamp() + interval '1 day') returning id`,
+          [trust.deviceKeyId, trust.deviceKeyDigest],
+        );
+        const rejectedRequestId = randomUUID();
+        await rejected(client, ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          rejectedRequestId,
+          `sha256:${digest()}`,
+          new Date(Date.now() + 40_000).toISOString(),
+          sharedSigner.rows[0]!.id,
+        ]);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${POLL_CLAIMS_TABLE}
+                where enrollment_id = $1::uuid and request_id = $2::uuid`,
+              [trust.enrollmentId, rejectedRequestId],
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+        const requestId = randomUUID();
+        const replayIdentity = `sha256:${digest()}`;
+        const expiresAt = new Date(Date.now() + 40_000).toISOString();
+        const input = [trust.enrollmentId, requestId, replayIdentity, expiresAt, trust.signerId];
+
+        const issued = await client.query<{
+          challenge_id: string;
+          candidate_id: string;
+          candidate_reference_ciphertext: string;
+          device_enrollment_id: string;
+          assignment_signer_id: string;
+        }>(ISSUE_NO_MONEY_POLL, input);
+        expect(issued.rows).toHaveLength(1);
+        expect(issued.rows[0]).toMatchObject({
+          candidate_id: candidateId,
+          device_enrollment_id: trust.enrollmentId,
+          assignment_signer_id: trust.signerId,
+        });
+        expect(issued.rows[0]!.candidate_reference_ciphertext).toMatch(/^v2\.telebirr\./u);
+        expect(issued.rows[0]!.candidate_reference_ciphertext).not.toContain('FTAN12345678');
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${POLL_CLAIMS_TABLE}
+            where enrollment_id = $1::uuid`,
+              [trust.enrollmentId],
+            )
+          ).rows,
+        ).toEqual([{ count: '1' }]);
+
+        await rejected(client, ISSUE_NO_MONEY_POLL, input);
+        const second = await client.query(ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+          trust.signerId,
+        ]);
+        expect(second.rows).toEqual([]);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${LOOKUP_TABLE} where candidate_id = $1::uuid`,
+              [candidateId],
+            )
+          ).rows,
+        ).toEqual([{ count: '1' }]);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from ${POLL_CLAIMS_TABLE}
+            where enrollment_id = $1::uuid`,
+              [trust.enrollmentId],
+            )
+          ).rows,
+        ).toEqual([{ count: '2' }]);
+
+        await client.query('set local role service_role');
+        await rejected(client, ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+          trust.signerId,
+        ]);
+        await client.query('reset role');
+        expect(await snapshot(client)).toBe(financialBefore);
       });
     });
 

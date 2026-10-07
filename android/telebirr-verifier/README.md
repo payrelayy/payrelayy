@@ -57,15 +57,22 @@ The collector is connected only through an unmounted one-shot no-money rehearsal
 live-pilot bridge or foreground runtime. That client uses an immutable HTTPS origin and two exact
 routine routes, verifies the signed assignment before the official receipt lookup, and uploads the
 signed assignment/observation pair for review. The assignment still carries the protected reference;
-the observation does not. It has no durable replay/acknowledgement store, candidate database binding,
-server-side source authentication, payment claim, or financial authority. Do not install a debug
-build as an operational routine verifier.
+the observation does not. Before an official lookup it seals the signed assignment into a separate
+Keystore-backed no-backup work file; before upload it replaces that file with the exact signed upload.
+A retry or app restart resumes a saved assignment without a second poll; once the signed upload is
+saved, it resends those exact bytes without another provider lookup. A valid review-only
+acknowledgement removes the file. An interruption between the server consuming the poll and
+the phone sealing its response can still lose the short-lived assignment; server-side idempotent
+redelivery is a separate requirement. The client remains unmounted, and server-side source
+authentication, payment claims, and financial authority remain absent. Do not install a debug build
+as an operational routine verifier.
 
 The phone and TypeScript now share a separate, one-minute signed **no-money poll request**. The
 phone rechecks its signed routine enrollment receipt before composing it; the server-side verifier
 checks the enrolled phone signature but explicitly grants no poll. The reviewed route handler and
-phone rehearsal client are still unmounted. There is no production database adapter, replay
-ledger, automatic assignment delivery, or foreground polling for this routine path. Neither the
+phone rehearsal client are still unmounted. The database has a private replay ledger and an atomic
+no-money assignment issuer, but there is no production bridge adapter, automatic assignment
+delivery, or foreground polling for this routine path. Neither the
 enrollment receipt nor this request silently starts automatic verification.
 
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,

@@ -82,7 +82,9 @@ protected candidate and signer match the reservation, and signs only a five-minu
 assignment. A returned phone observation remains review evidence; it is not provider authentication
 or a payment claim.
 
-This is a private library core, not a second mode of the operational pilot broker. It has no
-database login, signer secret, Unix listener, compose service, public route, or production caller.
-The SQL functions still permit only administrator sessions. A later release must add a separate
-least-privilege no-money role, protected transport, and production wiring before any phone rehearsal.
+This is a private library core, not a second mode of the operational pilot broker. A separate
+NOLOGIN/no-password role scaffold now inherits EXECUTE on only the four external no-money SQL
+functions. Their operation-time guard refuses it until a short-lived credential is explicitly
+provisioned; the nested issuers remain owner-only. The core still has no signer secret, Unix
+listener, compose service, public route, or production caller. A later release must add the
+protected transport and production wiring before any phone rehearsal.

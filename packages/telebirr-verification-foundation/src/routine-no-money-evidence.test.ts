@@ -16,7 +16,10 @@ import {
   digestRoutineTelebirrObservationBody,
   digestRoutineTelebirrObservationFacts,
 } from './routine-signed-observation.js';
-import { assessRoutineTelebirrNoMoneyEvidence } from './routine-no-money-evidence.js';
+import {
+  assessRoutineTelebirrNoMoneyAssignment,
+  assessRoutineTelebirrNoMoneyEvidence,
+} from './routine-no-money-evidence.js';
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const hash = (bytes: Uint8Array): string =>
@@ -179,6 +182,16 @@ function fixture() {
 describe('routine TeleBirr no-money evidence boundary', () => {
   it('binds both signatures to one supplied lookup snapshot without enabling any money action', () => {
     const { input, signerSpki, deviceSpki } = fixture();
+    const { signedObservation: _observation, ...assignmentInput } = input;
+    expect(
+      assessRoutineTelebirrNoMoneyAssignment(assignmentInput, signerSpki, deviceSpki),
+    ).toMatchObject({
+      serverSignatureVerified: true,
+      providedSnapshotMatched: true,
+      pollAuthorized: false,
+      financialActionAllowed: false,
+      disposition: 'would_forward_signed_lookup',
+    });
     const result = assessRoutineTelebirrNoMoneyEvidence(input, signerSpki, deviceSpki);
     expect(result).toMatchObject({
       advisoryOnly: true,

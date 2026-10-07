@@ -46,26 +46,53 @@ select not exists (
 
 select count(*) = 7 as exact_inert_feature_switches
 from app.feature_switches feature_switch
-where (
-    feature_switch.feature_key in (
+where feature_switch.feature_key in (
       'cbe_birr_authoritative_verification',
       'deposit_execution',
       'payment_verification',
+      'private_live_deposit_pilot',
       'telebirr_authoritative_verification',
       'withdrawal_collection',
       'withdrawal_validation'
     )
-    and feature_switch.mode = 'disabled'
-    and feature_switch.settings = '{}'::jsonb
-  )
-  or (
-    feature_switch.feature_key = 'private_live_deposit_pilot'
-    and feature_switch.mode in ('disabled', 'dry_run')
-  )
+  and feature_switch.mode = 'disabled'
+  and feature_switch.settings = '{}'::jsonb
 \gset
 \if :exact_inert_feature_switches
 \else
   \warn 'The complete inert production feature-switch boundary is unavailable.'
+  select 1 / 0 as rejected;
+\endif
+
+select count(*) = 1 and pg_catalog.bool_and(
+    owner.rolname = 'postgres'
+    and routine.prosecdef
+    and routine.prokind = 'f'
+    and routine.proconfig = array['search_path=pg_catalog']::text[]
+    and pg_catalog.has_function_privilege(
+      'fetanagent_player_actions_runtime', routine.oid, 'EXECUTE'
+    )
+    and not exists (
+      select 1
+      from pg_catalog.aclexplode(
+        coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+      ) privilege
+      where privilege.privilege_type = 'EXECUTE'
+        and privilege.grantee not in (
+          routine.proowner,
+          (select oid from pg_catalog.pg_roles where rolname = 'fetanagent_player_actions')
+        )
+    )
+  ) as exact_routine_candidate_grant
+from pg_catalog.pg_proc routine
+join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+where routine.oid = pg_catalog.to_regprocedure(
+  'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)'
+)
+\gset
+\if :exact_routine_candidate_grant
+\else
+  \warn 'The private no-money TeleBirr candidate grant is unavailable.'
   select 1 / 0 as rejected;
 \endif
 

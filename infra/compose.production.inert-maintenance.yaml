@@ -4,6 +4,11 @@
 # deployed before a fresh pilot exists. A later operational deployment must omit this overlay and
 # bind the broker to one exact active pilot manifest.
 services:
+  api:
+    environment:
+      # Only the no-money inert release accepts real TeleBirr references as untrusted candidates.
+      # The database independently requires all seven financial switches to remain disabled.
+      TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true'
   telebirr-assignment-broker:
     environment: !override
       NODE_ENV: production

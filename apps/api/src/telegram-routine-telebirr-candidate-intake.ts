@@ -11,7 +11,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 const SYNTHETIC_REFERENCE_PATTERN = /^FETANTEST[A-Z0-9]{4,20}$/u;
 const REAL_REFERENCE_PATTERN = /^[A-Z0-9]{8,32}$/u;
 
-/** Not granted to the Player-action database role. Both candidate routes are default-off. */
+/** Requires a separate private grant; both candidate routes remain default-off in base config. */
 export const CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL = `
   select proof_request_id, provider_code, proof_status, submitted_at, request_replayed
   from app.capture_telegram_routine_telebirr_untrusted_proof(

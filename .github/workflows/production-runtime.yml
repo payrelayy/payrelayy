@@ -915,7 +915,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
-            echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and no financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"
+            echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. Telegram may store real TeleBirr references only as untrusted, amount-free candidates. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and all seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
             echo 'Production web and Telegram are live in receiver-review-only mode. The exact pilot-bound destination may be reviewed, proof submission is unavailable, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow-intake' ]]; then

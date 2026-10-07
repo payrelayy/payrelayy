@@ -12,15 +12,15 @@ import { verifyRoutineTelebirrSignedObservation } from './routine-signed-observa
  * This is only a no-money review boundary: a signed phone report is not proof that
  * TeleBirr issued the receipt, and this function has no database or payment capability.
  */
-const INPUT_KEYS = [
+const ASSIGNMENT_INPUT_KEYS = [
   'assessedAt',
   'trustedLookup',
   'trustedRawReference',
   'trustedSigner',
   'deviceEnrollment',
   'signedAssignment',
-  'signedObservation',
 ] as const;
+const INPUT_KEYS = [...ASSIGNMENT_INPUT_KEYS, 'signedObservation'] as const;
 const LOOKUP_KEYS = [
   'contractVersion',
   'providerCode',
@@ -124,6 +124,37 @@ export interface RoutineNoMoneyEvidenceAssessment {
   readonly replayIdentity: string | null;
 }
 
+export interface RoutineNoMoneyAssignmentAssessment {
+  readonly advisoryOnly: true;
+  readonly serverSignatureVerified: boolean;
+  readonly providedSnapshotMatched: boolean;
+  readonly pollAuthorized: false;
+  readonly financialActionAllowed: false;
+  readonly disposition: 'would_review' | 'would_forward_signed_lookup';
+  readonly reasonCode:
+    | 'invalid_request'
+    | 'assignment_invalid'
+    | 'lookup_snapshot_mismatch'
+    | 'signed_assignment_matches_snapshot';
+}
+
+function assignmentResult(
+  disposition: RoutineNoMoneyAssignmentAssessment['disposition'],
+  reasonCode: RoutineNoMoneyAssignmentAssessment['reasonCode'],
+  serverSignatureVerified = false,
+  providedSnapshotMatched = false,
+): RoutineNoMoneyAssignmentAssessment {
+  return Object.freeze({
+    advisoryOnly: true,
+    serverSignatureVerified,
+    providedSnapshotMatched,
+    pollAuthorized: false,
+    financialActionAllowed: false,
+    disposition,
+    reasonCode,
+  });
+}
+
 function result(
   disposition: RoutineNoMoneyEvidenceAssessment['disposition'],
   reasonCode: RoutineNoMoneyEvidenceAssessment['reasonCode'],
@@ -155,6 +186,58 @@ function record(value: unknown, keys: readonly string[]): UnknownRecord | undefi
   return Object.fromEntries(keys.map((key) => [key, ownDataValue(value, key)]));
 }
 
+/** A signed assignment is checked against an independently loaded candidate snapshot. */
+export function assessRoutineTelebirrNoMoneyAssignment(
+  inputCandidate: unknown,
+  trustedSignerSpkiDer: unknown,
+  enrolledDeviceSpkiDer: unknown,
+): RoutineNoMoneyAssignmentAssessment {
+  try {
+    const input = record(inputCandidate, ASSIGNMENT_INPUT_KEYS);
+    const lookup = input && record(input.trustedLookup, LOOKUP_KEYS);
+    const assignment = input && record(input.signedAssignment, ASSIGNMENT_KEYS);
+    const assignmentBody = assignment && record(assignment.body, ASSIGNMENT_BODY_KEYS);
+    if (
+      !input ||
+      !lookup ||
+      !assignmentBody ||
+      typeof input.trustedRawReference !== 'string' ||
+      !/^[A-Z0-9]{8,32}$/u.test(input.trustedRawReference)
+    )
+      return assignmentResult('would_review', 'invalid_request');
+    const assignmentCheck = verifyRoutineTelebirrSignedLookupAssignment(
+      {
+        assessedAt: input.assessedAt,
+        trustedSigner: input.trustedSigner,
+        deviceEnrollment: input.deviceEnrollment,
+        localDevicePublicKeySpkiDer: enrolledDeviceSpkiDer,
+        signedAssignment: input.signedAssignment,
+      },
+      trustedSignerSpkiDer,
+    );
+    if (assignmentCheck.disposition !== 'would_accept_signed_assignment') {
+      return assignmentResult(
+        'would_review',
+        'assignment_invalid',
+        assignmentCheck.serverSignatureVerified,
+      );
+    }
+    if (
+      assignmentBody.rawReference !== input.trustedRawReference ||
+      LOOKUP_BINDINGS.some((key) => assignmentBody[key] !== lookup[key])
+    )
+      return assignmentResult('would_review', 'lookup_snapshot_mismatch', true);
+    return assignmentResult(
+      'would_forward_signed_lookup',
+      'signed_assignment_matches_snapshot',
+      true,
+      true,
+    );
+  } catch {
+    return assignmentResult('would_review', 'invalid_request');
+  }
+}
+
 /**
  * The caller must load trustedLookup and trustedRawReference from the same protected
  * candidate/challenge transaction, and load both public keys from independent trust stores.
@@ -167,37 +250,24 @@ export function assessRoutineTelebirrNoMoneyEvidence(
 ): RoutineNoMoneyEvidenceAssessment {
   try {
     const input = record(inputCandidate, INPUT_KEYS);
-    const lookup = input && record(input.trustedLookup, LOOKUP_KEYS);
-    const assignment = input && record(input.signedAssignment, ASSIGNMENT_KEYS);
-    const assignmentBody = assignment && record(assignment.body, ASSIGNMENT_BODY_KEYS);
-    if (
-      !input ||
-      !lookup ||
-      !assignmentBody ||
-      typeof input.trustedRawReference !== 'string' ||
-      !/^[A-Z0-9]{8,32}$/u.test(input.trustedRawReference)
-    ) {
-      return result('would_review', 'invalid_request');
-    }
-
-    const assignmentCheck = verifyRoutineTelebirrSignedLookupAssignment(
-      {
-        assessedAt: input.assessedAt,
-        trustedSigner: input.trustedSigner,
-        deviceEnrollment: input.deviceEnrollment,
-        localDevicePublicKeySpkiDer: enrolledDeviceSpkiDer,
-        signedAssignment: input.signedAssignment,
-      },
+    if (!input) return result('would_review', 'invalid_request');
+    const assignmentCheck = assessRoutineTelebirrNoMoneyAssignment(
+      Object.fromEntries(ASSIGNMENT_INPUT_KEYS.map((key) => [key, input[key]])),
       trustedSignerSpkiDer,
+      enrolledDeviceSpkiDer,
     );
-    if (assignmentCheck.disposition !== 'would_accept_signed_assignment') {
-      return result('would_review', 'assignment_invalid', assignmentCheck.serverSignatureVerified);
-    }
-    if (
-      assignmentBody.rawReference !== input.trustedRawReference ||
-      LOOKUP_BINDINGS.some((key) => assignmentBody[key] !== lookup[key])
-    ) {
-      return result('would_review', 'lookup_snapshot_mismatch', true);
+    if (assignmentCheck.disposition !== 'would_forward_signed_lookup') {
+      const reasonCode =
+        assignmentCheck.reasonCode === 'signed_assignment_matches_snapshot'
+          ? 'invalid_request'
+          : assignmentCheck.reasonCode;
+      return result(
+        'would_review',
+        reasonCode,
+        assignmentCheck.serverSignatureVerified,
+        false,
+        assignmentCheck.providedSnapshotMatched,
+      );
     }
 
     const observationCheck = verifyRoutineTelebirrSignedObservation(

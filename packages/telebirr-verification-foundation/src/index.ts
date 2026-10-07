@@ -142,7 +142,9 @@ export {
   type RoutineTelebirrSignedObservationResult,
 } from './routine-signed-observation.js';
 export {
+  assessRoutineTelebirrNoMoneyAssignment,
   assessRoutineTelebirrNoMoneyEvidence,
+  type RoutineNoMoneyAssignmentAssessment,
   type RoutineNoMoneyEvidenceAssessment,
 } from './routine-no-money-evidence.js';
 export {

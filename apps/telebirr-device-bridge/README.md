@@ -13,6 +13,10 @@ The four exact version-1 routes are:
 - `POST /v1/telebirr/device/heartbeat`
 - `POST /v1/telebirr/device/observations:upload`
 
+The separate routine no-money poll/upload handler is currently **not mounted** on this listener.
+It has no production database adapter or phone network client; adding those requires a separate
+review before any routine lookup can run. It cannot credit a Player or move money.
+
 Every route requires the exact vendor content type and an uncompressed bounded UTF-8 JSON body.
 Duplicate `Content-Type`, content encoding, query-bearing paths, extra JSON keys, malformed public
 keys, wrong command paths, altered payloads, and capability escalation fail closed.

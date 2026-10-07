@@ -58,6 +58,12 @@ upload endpoint. It has no durable replay/acknowledgement store, candidate datab
 server-side source authentication, payment claim, or financial authority. Do not install a debug
 build as an operational routine verifier.
 
+The phone and TypeScript now share a separate, one-minute signed **no-money poll request**. The
+phone rechecks its signed routine enrollment receipt before composing it; the server-side verifier
+checks the enrolled phone signature but explicitly grants no poll. There is still no HTTP caller,
+server route, replay ledger, assignment delivery, or observation upload for this routine path.
+Neither the enrollment receipt nor this request silently starts automatic verification.
+
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
 short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,
 and expected receiver-name digest. It has its own mode and signing domain, strict bounded JSON

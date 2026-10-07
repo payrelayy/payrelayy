@@ -1507,7 +1507,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       ]);
     });
 
-    it('keeps the private capture RPC outside every application role', async () => {
+    it('grants only the private no-money capture RPC to Player actions', async () => {
       const client = getClient();
       const catalog = await client.query<{
         readonly owner: string;
@@ -1515,7 +1515,11 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         readonly search_path: string[];
         readonly public_allowed: boolean;
         readonly player_allowed: boolean;
+        readonly runtime_allowed: boolean;
+        readonly anon_allowed: boolean;
+        readonly authenticated_allowed: boolean;
         readonly service_allowed: boolean;
+        readonly unexpected_grants: number;
       }>(`
         select owner.rolname as owner,
                routine.prosecdef as security_definer,
@@ -1528,8 +1532,27 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
                ) as public_allowed,
                pg_catalog.has_function_privilege('fetanagent_player_actions', routine.oid, 'execute')
                  as player_allowed,
+               pg_catalog.has_function_privilege(
+                 'fetanagent_player_actions_runtime', routine.oid, 'execute'
+               ) as runtime_allowed,
+               pg_catalog.has_function_privilege('anon', routine.oid, 'execute')
+                 as anon_allowed,
+               pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute')
+                 as authenticated_allowed,
                pg_catalog.has_function_privilege('service_role', routine.oid, 'execute')
-                 as service_allowed
+                 as service_allowed,
+               (
+                 select count(*)::integer
+                   from pg_catalog.aclexplode(
+                     coalesce(routine.proacl, pg_catalog.acldefault('f', routine.proowner))
+                   ) privilege
+                  where privilege.privilege_type = 'EXECUTE'
+                    and privilege.grantee not in (
+                      routine.proowner,
+                      (select oid from pg_catalog.pg_roles
+                        where rolname = 'fetanagent_player_actions')
+                    )
+               ) as unexpected_grants
           from pg_catalog.pg_proc routine
           join pg_catalog.pg_roles owner on owner.oid = routine.proowner
          where routine.oid = 'app.capture_telegram_routine_telebirr_untrusted_proof(
@@ -1542,8 +1565,12 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           security_definer: true,
           search_path: ['search_path=pg_catalog'],
           public_allowed: false,
-          player_allowed: false,
+          player_allowed: true,
+          runtime_allowed: true,
+          anon_allowed: false,
+          authenticated_allowed: false,
           service_allowed: false,
+          unexpected_grants: 0,
         },
       ]);
     });
@@ -1559,7 +1586,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         const eventId = await fixtureInboundEvent(client, actor.identityId);
         const args = captureArguments(eventId, playerId);
 
-        await client.query('set local role fetanagent_player_actions');
+        await client.query('set local role anon');
         await rejected(client, CAPTURE, args);
         await client.query('reset role');
 
@@ -1641,7 +1668,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
-    it('runs the staging API adapter against PostgreSQL with only a rolled-back role grant', async () => {
+    it('runs the staging API adapter with the exact durable Player-action grant', async () => {
       const client = getClient();
       await rollback(client, async () => {
         const before = await snapshot(client);
@@ -1666,12 +1693,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           },
         };
 
-        await client.query(`
-          grant execute on function app.capture_telegram_routine_telebirr_untrusted_proof(
-            uuid, text, text, text, text, text, smallint, smallint, text
-          ) to fetanagent_player_actions
-        `);
-        const temporaryPrivilege = await client.query<{ allowed: boolean }>(`
+        const exactPrivilege = await client.query<{ allowed: boolean }>(`
           select pg_catalog.has_function_privilege(
             'fetanagent_player_actions_runtime',
             'app.capture_telegram_routine_telebirr_untrusted_proof(
@@ -1679,7 +1701,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             )', 'EXECUTE'
           ) as allowed
         `);
-        expect(temporaryPrivilege.rows[0]!.allowed).toBe(true);
+        expect(exactPrivilege.rows[0]!.allowed).toBe(true);
         await client.query('set local role fetanagent_player_actions_runtime');
         const first = await captureTelegramRoutineTelebirrCandidate(
           database,
@@ -1741,7 +1763,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           )', 'EXECUTE'
         ) as allowed
       `);
-      expect(privilege.rows[0]!.allowed).toBe(false);
+      expect(privilege.rows[0]!.allowed).toBe(true);
     });
 
     it('rejects an inactive identity, processed event, and any armed financial switch', async () => {

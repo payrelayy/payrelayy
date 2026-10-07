@@ -7,12 +7,13 @@ shadow-verifier jobs, or the routine execution broker's verified-job binding.
 
 The table has forced RLS, no policies, and no table grant to the API, Telegram Player-actions
 runtime, customer web, Android verifier, routine broker, executor, `anon`, `authenticated`, or
-`service_role`. The follow-on private `capture_telegram_routine_telebirr_untrusted_proof` RPC
+`service_role`. The private `capture_telegram_routine_telebirr_untrusted_proof` RPC
 validates an admitted private Telegram origin, current KemerBet Player eligibility, a protected
 TeleBirr reference, an active protected receiver, no-money switches, event exclusivity, exact
-replay, and per-identity storage abuse bounds. It is **not granted to any application role** and
-has no deployed API/Bot route or reader; its SQL boundary is exercised in disposable SQL tests,
-while the default-off routing code is covered by unit tests. It cannot create a
+replay, and per-identity storage abuse bounds. Its initial migration grants no application role;
+the later exact-grant migration gives `EXECUTE` only to the private Player-action group role,
+inherited by its runtime. The production route gate remains off, so this is not an active
+customer intake. Its SQL boundary is exercised in disposable SQL tests. It cannot create a
 provider observation, payment claim, deposit intent, verification or execution job, settlement,
 or KemerBet action. No financial switch, role login, device enrollment, or production overlay is
 changed.
@@ -35,15 +36,14 @@ The production candidate path takes precedence over the old live-pilot proof pat
 payable TeleBirr destination presentation, even though the deployed API currently uses
 `FINANCIAL_ACTIONS_MODE=live`. The database function independently requires all seven financial
 switches to be disabled. When either candidate gate is selected, a rejected candidate never
-falls back to the shadow or live proof path. The runtime role still has **no EXECUTE grant** on
-the RPC and the production gate is not set in Compose, so this code-only route cannot yet store
-a candidate in a deployed environment. Enabling the gate before its exact grant fails catalog
-readiness. The Bot knows how to render the projection, but no deployed route can produce it.
-Deploy compatible code first. Its gate-off Player-action catalog preflight accepts either the
+falls back to the shadow or live proof path. The production gate is not set in Compose, so the
+deployed route cannot yet store a candidate. The Bot knows how to render the projection, but no
+deployed route can produce it. The compatible code must be deployed before the exact grant. Its
+gate-off Player-action catalog preflight accepts either the
 original exact 16-function set or the exact 17-function set containing only this candidate RPC;
 it still rejects any other function grant, unsafe owner/ACL, or base-object access. Once that
-code is deployed, a later reviewed migration may grant only this RPC while the gate stays off;
-the following release can enable the production gate after the 17-function preflight passes.
+code is deployed, the reviewed migration grants only this RPC while the gate stays off;
+a following release can enable the production gate after the 17-function preflight passes.
 With the gate on, the original 16-function set no longer passes readiness. No financial switch
 or phone poll is enabled by this transitional preflight slice.
 
@@ -69,11 +69,10 @@ days; do not call this an exact seven-day erasure guarantee.
 
 The next reviewed slices must, in order:
 
-1. Verify scheduled purge health and the backup caveat, restore staging database connectivity,
-   and prove the gated API/Bot route against disposable PostgreSQL before granting only the exact
-   RPC in staging. The route gate must stay off until that grant and readiness checks are
-   reviewed; production keeps the RPC ungranted. No table or financial grant is authorized. Customer web
-   can follow under its own authenticated receipt.
+1. Verify scheduled purge health and the backup caveat, then deploy the compatible Player-action
+   code before applying the reviewed exact RPC grant. Keep the route gate off through the grant
+   and verify the resulting 17-function catalog. No table or financial grant is authorized.
+   Customer web can follow under its own authenticated receipt.
 2. Introduce a non-pilot Android enrollment, assignment, and signed-observation protocol that is
    domain-separated from every pilot certificate and manifest. The Android/TypeScript routine
    pairing proof now signs and verifies device key possession against a separately trusted,

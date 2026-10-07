@@ -28,6 +28,8 @@ async function runPlayerActionDatabasePreflight(): Promise<void> {
         { query: (query) => client!.query(query) },
         config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
           config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
+        // The route stays off while only the exact candidate grant is applied.
+        true,
       ))
     ) {
       throw new Error('The Player-ID action catalog contract did not pass.');

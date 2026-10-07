@@ -133,4 +133,46 @@ describe('Player-ID action catalog preflight', () => {
       "then array['search_path=pg_catalog']::text[]",
     );
   });
+
+  it('accepts only the exact optional candidate grant while the route remains off', async () => {
+    const queries: string[] = [];
+    const database = {
+      async query(query: string) {
+        queries.push(query);
+        return {
+          rows: [
+            query === PLAYER_ACTION_CATALOG_PREFLIGHT_SQL
+              ? { ...passingRow, exact_function_surface_allowed: false }
+              : passingRow,
+          ],
+        };
+      },
+    };
+    await expect(playerActionCatalogPreflightPassed(database, false, true)).resolves.toBe(true);
+    expect(queries).toEqual([
+      PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
+    ]);
+    queries.length = 0;
+    await expect(playerActionCatalogPreflightPassed(database)).resolves.toBe(false);
+    expect(queries).toEqual([PLAYER_ACTION_CATALOG_PREFLIGHT_SQL]);
+  });
+
+  it('does not use the transition fallback when candidate routing is on or either catalog is unsafe', async () => {
+    const queries: string[] = [];
+    const database = {
+      async query(query: string) {
+        queries.push(query);
+        return { rows: [{ ...passingRow, exact_function_surface_allowed: false }] };
+      },
+    };
+    await expect(playerActionCatalogPreflightPassed(database, true, true)).resolves.toBe(false);
+    expect(queries).toEqual([PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL]);
+    queries.length = 0;
+    await expect(playerActionCatalogPreflightPassed(database, false, true)).resolves.toBe(false);
+    expect(queries).toEqual([
+      PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
+    ]);
+  });
 });

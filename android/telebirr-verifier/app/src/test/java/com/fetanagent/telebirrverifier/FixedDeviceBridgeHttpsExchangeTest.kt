@@ -93,6 +93,10 @@ class FixedDeviceBridgeHttpsExchangeTest {
     assertThrows(IllegalArgumentException::class.java) {
       exchange.post("/v1/other", DeviceBridgeProtocol.CONTENT_TYPE, byteArrayOf(1))
     }
+    assertThrows(IllegalArgumentException::class.java) {
+      exchange.post(RoutineNoMoneyBridgeProtocol.POLL_PATH,
+        DeviceBridgeProtocol.CONTENT_TYPE, byteArrayOf(1))
+    }
   }
 
   @Test

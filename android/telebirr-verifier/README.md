@@ -53,16 +53,20 @@ and independently trusted enrollment checks, a fixed official receipt route, con
 and device signing. It rechecks the short assignment lease after retrieval and returns only local
 signed evidence or a review reason. Its injected transport must be the reviewed official HTTPS
 transport when a future runtime uses it; an arbitrary transport could falsely claim source origin.
-The collector is not connected to polling, the live-pilot bridge, the foreground runtime, or an
-upload endpoint. It has no durable replay/acknowledgement store, candidate database binding,
+The collector is connected only through an unmounted one-shot no-money rehearsal client, not the
+live-pilot bridge or foreground runtime. That client uses an immutable HTTPS origin and two exact
+routine routes, verifies the signed assignment before the official receipt lookup, and uploads the
+signed assignment/observation pair for review. The assignment still carries the protected reference;
+the observation does not. It has no durable replay/acknowledgement store, candidate database binding,
 server-side source authentication, payment claim, or financial authority. Do not install a debug
 build as an operational routine verifier.
 
 The phone and TypeScript now share a separate, one-minute signed **no-money poll request**. The
 phone rechecks its signed routine enrollment receipt before composing it; the server-side verifier
-checks the enrolled phone signature but explicitly grants no poll. There is still no HTTP caller,
-server route, replay ledger, assignment delivery, or observation upload for this routine path.
-Neither the enrollment receipt nor this request silently starts automatic verification.
+checks the enrolled phone signature but explicitly grants no poll. The reviewed route handler and
+phone rehearsal client are still unmounted. There is no production database adapter, replay
+ledger, automatic assignment delivery, or foreground polling for this routine path. Neither the
+enrollment receipt nor this request silently starts automatic verification.
 
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
 short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,

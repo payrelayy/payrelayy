@@ -46,13 +46,17 @@ The transport does not interpret a bare HTTP `404` as proof that a transaction i
 exact provider negative-response contract is independently attested and reviewed, a `404` is provider
 uncertainty and must go to review.
 
-The separate routine TeleBirr path now has an evidence-only, strict JSON codec for a signed lookup
+The separate routine TeleBirr path has an evidence-only, strict JSON codec for a signed lookup
 assignment and a normalized signed observation. It rejects duplicate/extra fields, malformed UTF-8,
-stale digests, and pilot protocol substitution. The codec itself does not authenticate signatures;
-the separate routine verifier must check the server signature and independently trusted enrollment
-before any lookup. It is not connected to the live-pilot bridge or the
-foreground runtime, and it has no routine assignment issuer, upload endpoint, database claim, or
-financial authority. Do not install a debug build as an operational routine verifier.
+stale digests, and pilot protocol substitution. A local collector now composes the routine signature
+and independently trusted enrollment checks, a fixed official receipt route, conservative parsing,
+and device signing. It rechecks the short assignment lease after retrieval and returns only local
+signed evidence or a review reason. Its injected transport must be the reviewed official HTTPS
+transport when a future runtime uses it; an arbitrary transport could falsely claim source origin.
+The collector is not connected to polling, the live-pilot bridge, the foreground runtime, or an
+upload endpoint. It has no durable replay/acknowledgement store, candidate database binding,
+server-side source authentication, payment claim, or financial authority. Do not install a debug
+build as an operational routine verifier.
 
 A separate routine-only pairing-proof shape now lets an Android P-256 identity sign an exact,
 short-lived Owner challenge binding: pairing ID and nonce digest, receiver revision/version/profile,
@@ -64,9 +68,9 @@ the app uses a separate routine Android Keystore alias to sign a four-minute pro
 only after an explicit tap. The Owner page verifies that proof against its own challenge record and
 a private atomic SQL function consumes the challenge and creates a routine-only enrollment. A
 retry of the identical proof can recover the same enrollment while the challenge is fresh. The
-phone does not receive a signed routine enrollment certificate or poll routine assignments yet;
-no routine provider lookup or money action is enabled. The pilot pairing package and certificate
-are never accepted as routine trust.
+phone can import and locally verify its signed, no-money routine enrollment receipt, but still does
+not poll routine assignments; no routine provider lookup or money action is enabled. The pilot
+pairing package and certificate are never accepted as routine trust.
 
 The app has no database, Supabase, KemerBet, claim, settlement, enqueue, execution, or financial-action authority. A signed observation is evidence for a trusted server to assess; it cannot authorize SQL, credit a player, or move money. There are no customer-entered secrets, provider credentials, raw receipt/reference/name/URL logs, or embedded API keys.
 

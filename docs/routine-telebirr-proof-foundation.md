@@ -39,9 +39,13 @@ falls back to the shadow or live proof path. The runtime role still has **no EXE
 the RPC and the production gate is not set in Compose, so this code-only route cannot yet store
 a candidate in a deployed environment. Enabling the gate before its exact grant fails catalog
 readiness. The Bot knows how to render the projection, but no deployed route can produce it.
-Deploy compatible code first; a later, reviewed activation must sequence the exact grant and
-gate without exposing an extra function to an old exact-count preflight. No financial switch or
-phone poll is enabled by this slice.
+Deploy compatible code first. Its gate-off Player-action catalog preflight accepts either the
+original exact 16-function set or the exact 17-function set containing only this candidate RPC;
+it still rejects any other function grant, unsafe owner/ACL, or base-object access. Once that
+code is deployed, a later reviewed migration may grant only this RPC while the gate stays off;
+the following release can enable the production gate after the 17-function preflight passes.
+With the gate on, the original 16-function set no longer passes readiness. No financial switch
+or phone poll is enabled by this transitional preflight slice.
 
 ## Untrusted-candidate active-database retention
 

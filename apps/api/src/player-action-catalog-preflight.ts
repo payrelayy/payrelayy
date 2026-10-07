@@ -190,9 +190,16 @@ export interface PlayerActionCatalogDatabase {
   query(query: string, values: readonly unknown[]): Promise<{ readonly rows: readonly unknown[] }>;
 }
 
+function catalogRowPassed(rows: readonly unknown[]): boolean {
+  if (rows.length !== 1 || !rows[0] || typeof rows[0] !== 'object') return false;
+  const values = Object.values(rows[0] as Record<string, unknown>);
+  return values.length === 12 && values.every((value) => value === true);
+}
+
 export async function playerActionCatalogPreflightPassed(
   database: PlayerActionCatalogDatabase,
   routineCandidateEnabled = false,
+  allowInactiveCandidateGrant = false,
 ): Promise<boolean> {
   const result = await database.query(
     routineCandidateEnabled
@@ -200,8 +207,10 @@ export async function playerActionCatalogPreflightPassed(
       : PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
     [],
   );
-  if (result.rows.length !== 1 || !result.rows[0] || typeof result.rows[0] !== 'object')
-    return false;
-  const values = Object.values(result.rows[0] as Record<string, unknown>);
-  return values.length === 12 && values.every((value) => value === true);
+  if (catalogRowPassed(result.rows)) return true;
+  if (routineCandidateEnabled || !allowInactiveCandidateGrant) return false;
+  // During a code-first rollout, the gate stays off while the exact candidate RPC grant is
+  // applied. Accept only that second complete catalog shape; never accept another extra grant.
+  const prepared = await database.query(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL, []);
+  return catalogRowPassed(prepared.rows);
 }

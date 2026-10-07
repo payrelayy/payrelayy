@@ -920,6 +920,8 @@ export function createPostgresTelegramPlayerActionRuntime(
           pool,
           config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled ||
             config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
+          // Permit only the exact candidate grant during the gate-off handoff.
+          true,
         );
       } catch {
         return false;

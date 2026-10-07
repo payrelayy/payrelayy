@@ -1112,6 +1112,28 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(queries[0]).toContain('select count(*) = 17');
   });
 
+  it('keeps an inactive candidate route ready across only the exact grant handoff', async () => {
+    const queries: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        queries.push(query);
+        const row = Object.fromEntries(
+          Array.from({ length: 12 }, (_, index) => [`catalog_${index}`, true]),
+        );
+        if (query.includes('select count(*) = 16')) row.catalog_7 = false;
+        return { rows: [row] };
+      },
+      async end() {},
+    };
+
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).ready(),
+    ).resolves.toBe(true);
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toContain('select count(*) = 16');
+    expect(queries[1]).toContain('select count(*) = 17');
+  });
+
   it('does not fall back to shadow intake for a non-synthetic routine candidate', async () => {
     const calls: string[] = [];
     const database: TelegramPlayerActionDatabase = {

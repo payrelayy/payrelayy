@@ -14,6 +14,7 @@ import {
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_ROOT,
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_SOCKET,
   ROUTINE_NO_MONEY_LOCAL_PATH,
+  ROUTINE_PAID_POLL_LOCAL_PATH,
   decodeTelebirrAssignmentBrokerLocalPollRequestBytes,
   encodeTelebirrAssignmentBrokerLocalPollResponse,
 } from '@fetanagent/telebirr-verification-foundation';
@@ -40,7 +41,7 @@ export type TelebirrAssignmentBrokerPoll = (
   input: TelebirrAssignmentBrokerPollInput,
 ) => Promise<TelebirrAssignmentBrokerPollResult>;
 
-export type RoutineNoMoneyLocalHandler = (
+export type RoutineLocalHandler = (
   request: TelebirrAssignmentBrokerLocalHttpRequest,
 ) => Promise<TelebirrAssignmentBrokerLocalHttpResponse>;
 
@@ -131,7 +132,8 @@ function errorResponse(
 
 export function createTelebirrAssignmentBrokerLocalHandler(
   poll: TelebirrAssignmentBrokerPoll,
-  routineHandler?: RoutineNoMoneyLocalHandler,
+  routineHandler?: RoutineLocalHandler,
+  paidPollHandler?: RoutineLocalHandler,
 ): (
   request: TelebirrAssignmentBrokerLocalHttpRequest,
 ) => Promise<TelebirrAssignmentBrokerLocalHttpResponse> {
@@ -142,6 +144,11 @@ export function createTelebirrAssignmentBrokerLocalHandler(
         return routineHandler === undefined
           ? errorResponse(400, 'invalid_request')
           : await routineHandler(request);
+      }
+      if (request.path === ROUTINE_PAID_POLL_LOCAL_PATH) {
+        return paidPollHandler === undefined
+          ? errorResponse(400, 'invalid_request')
+          : await paidPollHandler(request);
       }
       if (!hasValidHttpEnvelope(request)) return errorResponse(400, 'invalid_request');
       const decoded = decodeTelebirrAssignmentBrokerLocalPollRequestBytes(request.body);
@@ -298,13 +305,14 @@ async function closeServer(server: Server): Promise<void> {
  */
 export function createTelebirrAssignmentBrokerLocalUnixServer(
   poll: TelebirrAssignmentBrokerPoll,
-  routineHandler?: RoutineNoMoneyLocalHandler,
+  routineHandler?: RoutineLocalHandler,
+  paidPollHandler?: RoutineLocalHandler,
 ): {
   readonly server: Server;
   readonly listen: () => Promise<void>;
   readonly close: () => Promise<void>;
 } {
-  const handler = createTelebirrAssignmentBrokerLocalHandler(poll, routineHandler);
+  const handler = createTelebirrAssignmentBrokerLocalHandler(poll, routineHandler, paidPollHandler);
   const server = createServer({ maxHeaderSize: 8_192 }, (request, target) => {
     void (async () => {
       try {

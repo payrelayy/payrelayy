@@ -19,6 +19,10 @@ import {
   ROUTINE_NO_MONEY_POLL_PATH,
   ROUTINE_NO_MONEY_UPLOAD_PATH,
 } from './routine-no-money-bridge.js';
+import {
+  ROUTINE_PAID_POLL_CONTENT_TYPE,
+  ROUTINE_PAID_POLL_PATH,
+} from './routine-paid-poll-bridge.js';
 
 interface NetworkResponse {
   readonly statusCode: number;
@@ -112,14 +116,80 @@ describe('TeleBirr device bridge HTTP server', () => {
       port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT,
     });
     await runtime.listen();
-    for (const path of [ROUTINE_NO_MONEY_POLL_PATH, ROUTINE_NO_MONEY_UPLOAD_PATH]) {
+    for (const path of [
+      ROUTINE_NO_MONEY_POLL_PATH,
+      ROUTINE_NO_MONEY_UPLOAD_PATH,
+      ROUTINE_PAID_POLL_PATH,
+    ]) {
       const response = await exchange({
         path,
-        headers: { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+        headers: {
+          'content-length': '2',
+          'content-type':
+            path === ROUTINE_PAID_POLL_PATH
+              ? ROUTINE_PAID_POLL_CONTENT_TYPE
+              : ROUTINE_NO_MONEY_CONTENT_TYPE,
+        },
       });
       expect(response.statusCode).toBe(400);
     }
     expect(pilot).not.toHaveBeenCalled();
+  });
+
+  it('isolates the paid poll path and media type from no-money and pilot handlers', async () => {
+    const pilot = vi.fn();
+    const noMoney = vi.fn();
+    const paid = vi.fn(async () => ({
+      statusCode: 200,
+      headers: { 'cache-control': 'no-store', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+      body: Buffer.from(
+        '{"outcome":"no_assignment","advisoryOnly":true,"paymentVerificationRequested":true,"financialActionAllowed":false}',
+      ),
+    }));
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      pilot,
+      { host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST, port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT },
+      noMoney,
+      paid,
+    );
+    await runtime.listen();
+    const valid = await exchange({
+      path: ROUTINE_PAID_POLL_PATH,
+      headers: { 'content-length': '2', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.headers['content-type']).toBe(ROUTINE_PAID_POLL_CONTENT_TYPE);
+    expect(paid).toHaveBeenCalledOnce();
+    for (const headers of [
+      { 'content-length': '2', 'content-type': ROUTINE_NO_MONEY_CONTENT_TYPE },
+      { 'content-length': '4097', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+    ]) {
+      expect((await exchange({ path: ROUTINE_PAID_POLL_PATH, headers })).statusCode).toBe(400);
+    }
+    expect(paid).toHaveBeenCalledOnce();
+    expect(noMoney).not.toHaveBeenCalled();
+    expect(pilot).not.toHaveBeenCalled();
+  });
+
+  it('does not emit a paid success response without the verification-requested marker', async () => {
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      vi.fn(),
+      { host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST, port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT },
+      undefined,
+      vi.fn(async () => ({
+        statusCode: 200,
+        headers: { 'cache-control': 'no-store', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+        body: Buffer.from(
+          '{"outcome":"assignment","advisoryOnly":true,"financialActionAllowed":false}',
+        ),
+      })),
+    );
+    await runtime.listen();
+    const response = await exchange({
+      path: ROUTINE_PAID_POLL_PATH,
+      headers: { 'content-length': '2', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+    });
+    expect(response.statusCode).toBe(503);
   });
 
   it('dispatches only exact bounded vendor requests to an explicitly composed routine handler', async () => {

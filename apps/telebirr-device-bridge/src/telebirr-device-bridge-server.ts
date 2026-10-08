@@ -18,6 +18,11 @@ import {
   ROUTINE_NO_MONEY_POLL_PATH,
   ROUTINE_NO_MONEY_UPLOAD_PATH,
 } from './routine-no-money-bridge.js';
+import {
+  ROUTINE_PAID_POLL_CONTENT_TYPE,
+  ROUTINE_PAID_POLL_MAX_REQUEST_BYTES,
+  ROUTINE_PAID_POLL_PATH,
+} from './routine-paid-poll-bridge.js';
 
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST = '0.0.0.0' as const;
 export const TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT = 8084 as const;
@@ -41,6 +46,7 @@ const routineErrorCodes = new Set([
   'device_unavailable',
   'observation_unavailable',
   'no_money_poll_stopped',
+  'paid_poll_stopped',
   'observation_conflict',
   'temporarily_unavailable',
 ]);
@@ -108,6 +114,7 @@ function declaredBodyLength(
   path: string | undefined,
   headers: readonly (readonly [string, string])[],
   routineAvailable: boolean,
+  paidPollAvailable: boolean,
 ): number | undefined {
   const contentTypes = headerValues(headers, 'content-type');
   const contentLengths = headerValues(headers, 'content-length');
@@ -116,14 +123,16 @@ function declaredBodyLength(
   const expects = headerValues(headers, 'expect');
   const routineLimit =
     routineAvailable && path !== undefined ? routineRequestLimits.get(path) : undefined;
-  const expectedContentType =
-    routineLimit === undefined
+  const paidPoll = paidPollAvailable && path === ROUTINE_PAID_POLL_PATH;
+  const expectedContentType = paidPoll
+    ? ROUTINE_PAID_POLL_CONTENT_TYPE
+    : routineLimit === undefined
       ? TELEBIRR_DEVICE_BRIDGE_CONTENT_TYPE
       : ROUTINE_NO_MONEY_CONTENT_TYPE;
   if (
     method !== 'POST' ||
     typeof path !== 'string' ||
-    (!paths.has(path) && routineLimit === undefined) ||
+    (!paths.has(path) && routineLimit === undefined && !paidPoll) ||
     contentTypes?.length !== 1 ||
     contentTypes[0] !== expectedContentType ||
     contentLengths?.length !== 1 ||
@@ -137,7 +146,10 @@ function declaredBodyLength(
   const parsed = Number(contentLengths[0]);
   return Number.isSafeInteger(parsed) &&
     parsed > 0 &&
-    parsed <= (routineLimit ?? TELEBIRR_DEVICE_BRIDGE_MAX_REQUEST_BYTES)
+    parsed <=
+      (paidPoll
+        ? ROUTINE_PAID_POLL_MAX_REQUEST_BYTES
+        : (routineLimit ?? TELEBIRR_DEVICE_BRIDGE_MAX_REQUEST_BYTES))
     ? parsed
     : undefined;
 }
@@ -164,8 +176,9 @@ function opaqueError(statusCode: 400 | 503, code: 'invalid_request' | 'temporari
 
 function safeResponse(
   candidate: TelebirrDeviceBridgeHttpResponse,
-  routine: boolean,
+  routineType?: typeof ROUTINE_NO_MONEY_CONTENT_TYPE | typeof ROUTINE_PAID_POLL_CONTENT_TYPE,
 ): TelebirrDeviceBridgeHttpResponse {
+  const routine = routineType !== undefined;
   if (
     typeof candidate !== 'object' ||
     candidate === null ||
@@ -200,7 +213,7 @@ function safeResponse(
   if (routine) {
     if (
       !routineStatuses.has(candidate.statusCode) ||
-      headers['content-type'] !== ROUTINE_NO_MONEY_CONTENT_TYPE ||
+      headers['content-type'] !== routineType ||
       headers['cache-control'] !== 'no-store'
     ) {
       return opaqueError(503, 'temporarily_unavailable');
@@ -224,11 +237,45 @@ function safeResponse(
           parsed.advisoryOnly !== true ||
           !('financialActionAllowed' in parsed) ||
           parsed.financialActionAllowed !== false ||
+          (routineType === ROUTINE_PAID_POLL_CONTENT_TYPE &&
+            (candidate.statusCode !== 200 ||
+              !('paymentVerificationRequested' in parsed) ||
+              parsed.paymentVerificationRequested !== true ||
+              !('outcome' in parsed) ||
+              (parsed.outcome !== 'no_assignment' && parsed.outcome !== 'assignment'))) ||
           (candidate.statusCode === 202 &&
             (!('sourceAuthenticationPerformed' in parsed) ||
               parsed.sourceAuthenticationPerformed !== false))
         )
           throw new Error();
+        if (routineType === ROUTINE_PAID_POLL_CONTENT_TYPE) {
+          const paidValue = parsed as Record<string, unknown>;
+          const expected =
+            paidValue.outcome === 'assignment'
+              ? [
+                  'outcome',
+                  'advisoryOnly',
+                  'paymentVerificationRequested',
+                  'financialActionAllowed',
+                  'signedAssignment',
+                ]
+              : [
+                  'outcome',
+                  'advisoryOnly',
+                  'paymentVerificationRequested',
+                  'financialActionAllowed',
+                ];
+          const actual = Object.keys(parsed);
+          if (
+            actual.length !== expected.length ||
+            actual.some((key) => !expected.includes(key)) ||
+            (paidValue.outcome === 'assignment' &&
+              (typeof paidValue.signedAssignment !== 'object' ||
+                paidValue.signedAssignment === null ||
+                Array.isArray(paidValue.signedAssignment)))
+          )
+            throw new Error();
+        }
       } else {
         if (
           Object.keys(parsed).length !== 1 ||
@@ -251,9 +298,9 @@ function safeResponse(
 function writeResponse(
   target: ServerResponse,
   source: TelebirrDeviceBridgeHttpResponse,
-  routine = false,
+  routineType?: typeof ROUTINE_NO_MONEY_CONTENT_TYPE | typeof ROUTINE_PAID_POLL_CONTENT_TYPE,
 ): void {
-  const selected = safeResponse(source, routine);
+  const selected = safeResponse(source, routineType);
   target.writeHead(selected.statusCode, {
     ...selected.headers,
     connection: 'close',
@@ -280,12 +327,14 @@ export function createTelebirrDeviceBridgeHttpServer(
     readonly port: typeof TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT;
   },
   routineHandler?: TelebirrDeviceBridgeHandler,
+  paidPollHandler?: TelebirrDeviceBridgeHandler,
 ): TelebirrDeviceBridgeHttpServerRuntime {
   if (
     typeof handler !== 'function' ||
     options.host !== TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST ||
     options.port !== TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT ||
-    (routineHandler !== undefined && typeof routineHandler !== 'function')
+    (routineHandler !== undefined && typeof routineHandler !== 'function') ||
+    (paidPollHandler !== undefined && typeof paidPollHandler !== 'function')
   ) {
     throw new TelebirrDeviceBridgeHttpServerError();
   }
@@ -296,9 +345,16 @@ export function createTelebirrDeviceBridgeHttpServer(
       try {
         const headers = rawHeaders(request);
         const routine = routineHandler !== undefined && routineRequestLimits.has(request.url ?? '');
+        const paidPoll = paidPollHandler !== undefined && request.url === ROUTINE_PAID_POLL_PATH;
         const expectedBytes =
           headers &&
-          declaredBodyLength(request.method, request.url, headers, routineHandler !== undefined);
+          declaredBodyLength(
+            request.method,
+            request.url,
+            headers,
+            routineHandler !== undefined,
+            paidPollHandler !== undefined,
+          );
         if (headers === undefined || expectedBytes === undefined) {
           request.resume();
           writeResponse(target, opaqueError(400, 'invalid_request'));
@@ -312,13 +368,17 @@ export function createTelebirrDeviceBridgeHttpServer(
         }
         writeResponse(
           target,
-          await (routine ? routineHandler : handler)({
+          await (paidPoll ? paidPollHandler : routine ? routineHandler : handler)({
             method: request.method ?? '',
             path: request.url ?? '',
             headers,
             body,
           }),
-          routine,
+          paidPoll
+            ? ROUTINE_PAID_POLL_CONTENT_TYPE
+            : routine
+              ? ROUTINE_NO_MONEY_CONTENT_TYPE
+              : undefined,
         );
       } catch {
         if (!target.headersSent) {

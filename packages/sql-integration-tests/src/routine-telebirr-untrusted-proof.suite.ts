@@ -7,6 +7,7 @@ import {
   captureTelegramRoutineTelebirrCandidate,
   type TelegramRoutineTelebirrCandidateDatabase,
 } from '../../../apps/api/src/telegram-routine-telebirr-candidate-intake.js';
+import { persistentPolicyFixture } from './routine-telebirr-processing-policy.suite.js';
 
 const TABLE = 'app.routine_telebirr_untrusted_proof_requests';
 const LOOKUP_TABLE = 'app.routine_telebirr_lookup_challenges';
@@ -2080,6 +2081,168 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         );
         expect(count.rows[0]!.count).toBe('5');
       });
+    });
+
+    it('isolates historical no-money references from privately issued paid challenges', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const eventId = await fixtureInboundEvent(client, actor.identityId);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(eventId, playerId),
+        ]);
+        const noMoneyId = captured.rows[0]!.proof_request_id;
+        const noMoneyTrust = await fixtureRoutineLookupTrust(client, noMoneyId);
+        const noMoneyChallenge = await client.query<{ challenge_id: string }>(ISSUE, [
+          noMoneyId,
+          noMoneyTrust.enrollmentId,
+          noMoneyTrust.signerId,
+        ]);
+        const storedNoMoney = await client.query<{
+          intake_mode: string;
+          issuance_mode: string;
+        }>(
+          `select candidate.intake_mode, challenge.issuance_mode
+             from ${TABLE} candidate join ${LOOKUP_TABLE} challenge
+               on challenge.candidate_id = candidate.id
+            where challenge.challenge_id = $1::uuid`,
+          [noMoneyChallenge.rows[0]!.challenge_id],
+        );
+        expect(storedNoMoney.rows).toEqual([
+          { intake_mode: 'no_money', issuance_mode: 'no_money' },
+        ]);
+
+        await rejected(
+          client,
+          `insert into ${LOOKUP_TABLE} (
+             challenge_id, candidate_id, receiver_account_id, receiver_account_version,
+             candidate_reference_fingerprint, candidate_submitted_at,
+             device_id, device_key_id, device_public_key_spki_sha256,
+             challenge_digest, source_profile, issued_at, expires_at,
+             device_enrollment_id, assignment_signer_id,
+             receiver_profile_digest, expected_receiver_name_digest, issuance_mode
+           ) select $2::uuid, candidate_id, receiver_account_id, receiver_account_version,
+               candidate_reference_fingerprint, candidate_submitted_at,
+               device_id, device_key_id, device_public_key_spki_sha256,
+               $3::text, source_profile, issued_at, expires_at,
+               device_enrollment_id, assignment_signer_id,
+               receiver_profile_digest, expected_receiver_name_digest, 'paid'
+             from ${LOOKUP_TABLE} where challenge_id = $1::uuid`,
+          [noMoneyChallenge.rows[0]!.challenge_id, randomUUID(), `sha256:${digest()}`],
+        );
+
+        const auth = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        await persistentPolicyFixture(client, auth.rows[0]!.auth_user_id);
+        const paidEventId = await fixtureInboundEvent(client, actor.identityId);
+        const paidSubmittedAt = await client.query<{ submitted_at: Date }>(
+          `update app.inbound_events
+              set processed_at = date_trunc('milliseconds', clock_timestamp())
+            where id = $1::uuid returning processed_at as submitted_at`,
+          [paidEventId],
+        );
+        const paidCandidate = await client.query<{ id: string }>(
+          `insert into ${TABLE} (
+             submitting_customer_id, origin_identity_id, origin_channel,
+             origin_request_key, semantic_input_hmac, platform_id,
+             player_account_id, player_deposit_eligibility_decision_id,
+             payment_provider_id, provider_code, candidate_reference_ciphertext,
+             candidate_reference_fingerprint, candidate_reference_masked,
+             reference_encryption_key_version, reference_profile_version,
+             receiver_account_id, receiver_account_version, submitted_at, intake_mode
+           ) select submitting_customer_id, origin_identity_id, origin_channel,
+               $2::uuid, semantic_input_hmac, platform_id,
+               player_account_id, player_deposit_eligibility_decision_id,
+               payment_provider_id, provider_code, candidate_reference_ciphertext,
+               candidate_reference_fingerprint, candidate_reference_masked,
+               reference_encryption_key_version, reference_profile_version,
+               receiver_account_id, receiver_account_version,
+               $3::timestamptz, 'paid'
+             from ${TABLE} where id = $1::uuid returning id`,
+          [noMoneyId, paidEventId, paidSubmittedAt.rows[0]!.submitted_at],
+        );
+        const paidId = paidCandidate.rows[0]!.id;
+        const paidTrust = await fixtureRoutineLookupTrust(client, paidId);
+        await rejected(client, ISSUE, [paidId, paidTrust.enrollmentId, paidTrust.signerId]);
+        await rejected(
+          client,
+          'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
+          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
+        );
+
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in (
+            'payment_verification', 'deposit_execution')`);
+        await rejected(
+          client,
+          'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
+          [noMoneyId, noMoneyTrust.enrollmentId, noMoneyTrust.signerId],
+        );
+        const paid = await client.query<{
+          challenge_id: string;
+          candidate_id: string;
+          issuance_mode: string;
+        }>(
+          `with issued as (
+             select * from app.issue_routine_telebirr_paid_lookup_assignment_material(
+               $1::uuid, $2::uuid, $3::uuid)
+           ) select issued.challenge_id, challenge.candidate_id, challenge.issuance_mode
+               from issued join ${LOOKUP_TABLE} challenge
+                 on challenge.challenge_id = issued.challenge_id`,
+          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
+        );
+        expect(paid.rows).toEqual([
+          { challenge_id: expect.any(String), candidate_id: paidId, issuance_mode: 'paid' },
+        ]);
+        await rejected(
+          client,
+          `insert into ${OBSERVATION_TABLE} (
+             challenge_id, assignment_body_digest, observation_body_digest,
+             observation_signature_digest, replay_identity
+           ) values ($1::uuid, $2::text, $3::text, $4::text, $5::text)`,
+          [
+            paid.rows[0]!.challenge_id,
+            `sha256:${digest()}`,
+            `sha256:${digest()}`,
+            `sha256:${digest()}`,
+            `sha256:${digest()}`,
+          ],
+        );
+        await client.query(
+          `select app.stop_owner_routine_telebirr_processing($1::uuid, $2::uuid)`,
+          [auth.rows[0]!.auth_user_id, randomUUID()],
+        );
+        await rejected(
+          client,
+          'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
+          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
+        );
+      });
+    });
+
+    it('does not grant the private paid issuer to application runtimes', async () => {
+      const client = getClient();
+      const access = await client.query<{
+        runtime_can_issue: boolean;
+        public_can_issue: boolean;
+        broker_can_issue: boolean;
+      }>(`select
+          has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+            'app.issue_routine_telebirr_paid_lookup_challenge(uuid,uuid,uuid)',
+            'EXECUTE') as runtime_can_issue,
+          has_function_privilege('public',
+            'app.issue_routine_telebirr_paid_lookup_challenge(uuid,uuid,uuid)',
+            'EXECUTE') as public_can_issue,
+          has_function_privilege('fetanagent_telebirr_assignment_broker_runtime',
+            'app.issue_routine_telebirr_paid_lookup_assignment_material(uuid,uuid,uuid)',
+            'EXECUTE') as broker_can_issue`);
+      expect(access.rows).toEqual([
+        { runtime_can_issue: false, public_can_issue: false, broker_can_issue: false },
+      ]);
     });
   });
 }

@@ -1943,15 +1943,19 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         await fixtureTelebirrReceiver(client);
         const eventId = await fixtureInboundEvent(client, actor.identityId);
         const args = captureArguments(eventId, ownedPlayerId);
+        const auth = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        await client.query(
+          `select app.stop_owner_routine_telebirr_processing($1::uuid, $2::uuid)`,
+          [auth.rows[0]!.auth_user_id, randomUUID()],
+        );
         await client.query(`update app.feature_switches set mode = 'live'
           where feature_key in ('payment_verification', 'deposit_execution')`);
         const before = await snapshot(client);
 
         await rejected(client, CAPTURE, args);
-        const auth = await client.query<{ auth_user_id: string }>(
-          `select auth_user_id from app.admin_users where id = $1::uuid`,
-          [getOwnerAdminId()],
-        );
         await persistentPolicyFixture(client, auth.rows[0]!.auth_user_id);
         await rejected(client, CAPTURE, captureArguments(eventId, otherCustomerPlayerId));
         await client.query(`update app.feature_switches set mode = 'disabled'

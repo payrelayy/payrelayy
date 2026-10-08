@@ -114,11 +114,11 @@ begin
     or p_signed_observation ->> 'providerCode' is distinct from 'telebirr'
     or p_signed_observation ->> 'protocolMode'
          is distinct from 'routine_signed_observation_v1'
-    or pg_catalog.coalesce(p_signed_observation #>> '{body,sourceDocumentDigest}', '')
+    or coalesce(p_signed_observation #>> '{body,sourceDocumentDigest}', '')
          !~ '^sha256:[0-9a-f]{64}$'
-    or pg_catalog.coalesce(p_signed_observation #>> '{body,normalizedFactsDigest}', '')
+    or coalesce(p_signed_observation #>> '{body,normalizedFactsDigest}', '')
          !~ '^sha256:[0-9a-f]{64}$'
-    or pg_catalog.coalesce(p_signed_observation ->> 'signature', '')
+    or coalesce(p_signed_observation ->> 'signature', '')
          !~ '^[A-Za-z0-9_-]{86}$'
     or 'sha256:' || pg_catalog.encode(pg_catalog.sha256(pg_catalog.decode(
          pg_catalog.translate(p_signed_observation ->> 'signature', '-_', '+/') || '==',

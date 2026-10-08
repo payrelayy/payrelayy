@@ -101,6 +101,51 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
             digest(randomUUID()),
           ],
         );
+        const readiness = await client.query<Record<string, boolean>>(
+          `select
+             player.status = 'active' and player.validation_status = 'valid'
+               as player_active,
+             platform.status = 'active' as platform_active,
+             provider.status = 'active' and provider.code = 'telebirr'
+               as provider_active,
+             receiver.status = 'active' and receiver.retired_at is null
+               and receiver.active_from <= opening.occurred_at as receiver_active,
+             policy.freshness_window_seconds = 3600
+               and opening.amount_minor between policy.minimum_amount_minor
+                                            and policy.maximum_amount_minor as policy_active,
+             authority.deposit_policy_version_id = policy.id
+               and authority.minimum_amount_minor = policy.minimum_amount_minor
+               and authority.maximum_amount_minor = policy.maximum_amount_minor
+               and authority.freshness_window_seconds = policy.freshness_window_seconds
+               as authority_policy_matches,
+             opening.occurred_at >= authority.authorized_at
+               and opening.submitted_at >= authority.authorized_at
+               as authorized_time,
+             exists (select 1 from app.routine_telebirr_processing_events event
+               where event.authorization_id = authority.id
+                 and event.event_kind = 'authorize'
+                 and event.event_sequence = (
+                   select max(latest.event_sequence)
+                   from app.routine_telebirr_processing_events latest)) as latest_authorize,
+             owner_user.role = 'owner' and owner_user.status = 'active'
+               as owner_active,
+             agent.status = 'active' and agent.platform_id = platform.id
+               as agent_active
+           from app.routine_telebirr_paid_intent_openings opening
+           join app.customer_platform_players player on player.id = opening.player_account_id
+           join app.platforms platform on platform.id = player.platform_id
+           join app.payment_providers provider on provider.id = opening.payment_provider_id
+           join app.receiver_accounts receiver on receiver.id = opening.receiver_account_id
+           join app.deposit_policy_versions policy on policy.status = 'active'
+           join app.routine_telebirr_processing_authorizations authority
+             on authority.id = opening.authorization_id
+           join app.admin_users owner_user on owner_user.id = authority.authorized_by_admin_id
+           join app.platform_agent_accounts agent on agent.id = authority.platform_agent_account_id
+           where opening.challenge_id = $1::uuid`,
+          [challengeId],
+        );
+        expect(readiness.rows).toHaveLength(1);
+        expect(Object.entries(readiness.rows[0]!).filter(([, okay]) => !okay)).toEqual([]);
         const intent = await client.query<{
           opened_at: Date;
           payment_deadline_at: Date;

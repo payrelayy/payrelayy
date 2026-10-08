@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { createVerifiedDepositFixture } from './deposit-execution-commands.suite.js';
@@ -81,6 +81,7 @@ export async function paidJob(
   client: Client,
   amountMinor = 2500,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
+  withPaidLineage = true,
 ) {
   if (providerCode === 'telebirr') {
     // The shared catalog seeds CBE Birr only. Use the same synthetic TeleBirr receiver mask
@@ -116,6 +117,95 @@ export async function paidJob(
     [fixture.depositIntentId, fixture.verificationAttemptId, fixture.evidenceId],
   );
   expect(settled.rows).toHaveLength(1);
+  if (providerCode === 'telebirr' && withPaidLineage) {
+    // Privileged, rollback-only DB fixture. A production producer must independently
+    // verify the paired signature and official source before creating this lineage.
+    const snapshot = await client.query<{
+      payment_provider_id: string;
+      receiver_account_id: string;
+      receiver_account_version: number;
+      submission_id: string;
+      reference_fingerprint: string;
+      observed_at: Date;
+      occurred_at: Date;
+    }>(
+      `select intent.payment_provider_id, intent.receiver_account_id,
+              intent.receiver_account_version, submission.id as submission_id,
+              evidence.canonical_reference_fingerprint as reference_fingerprint,
+              greatest(submission.submitted_at, evidence.occurred_at) as observed_at,
+              evidence.occurred_at
+         from app.deposit_intents intent
+         join app.deposit_verification_attempts verification on verification.deposit_intent_id = intent.id
+         join app.deposit_submissions submission on submission.id = verification.deposit_submission_id
+         join app.provider_payment_evidence evidence on evidence.id = verification.provider_payment_evidence_id
+        where intent.id = $1::uuid and verification.id = $2::uuid`,
+      [fixture.depositIntentId, fixture.verificationAttemptId],
+    );
+    const exact = snapshot.rows[0]!;
+    const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+    const challengeId = randomUUID();
+    const candidateId = randomUUID();
+    const bodyDigest = sha(randomUUID());
+    const sourceDocumentDigest = sha(randomUUID());
+    const observedAt = exact.observed_at.toISOString();
+    const signedObservation = {
+      contractVersion: 1,
+      providerCode: 'telebirr',
+      protocolMode: 'routine_signed_observation_v1',
+      bodyDigest,
+      body: {
+        candidateId,
+        challengeId,
+        referenceFingerprint: exact.reference_fingerprint,
+        sourceDocumentDigest,
+        receiverRevisionId: exact.receiver_account_id,
+        receiverVersion: exact.receiver_account_version,
+        observedAt,
+        facts: {
+          amountMinor,
+          currencyCode: 'ETB',
+          evidenceSource: 'provider_receipt_lookup',
+          occurredAt: exact.occurred_at.toISOString(),
+          providerFinalStatus: 'completed',
+          providerIdentity: 'matched',
+          receiverMatch: 'matched',
+          referenceMatch: 'matched',
+        },
+      },
+      signature: 'A'.repeat(86),
+    };
+    await client.query(
+      `insert into app.routine_telebirr_paid_observation_lineages (
+        challenge_id, candidate_id, payment_provider_id, reference_fingerprint,
+        observation_body_digest, source_document_digest, signed_observation,
+        submitted_at, challenge_issued_at, observed_at, occurred_at, amount_minor,
+        provider_payment_evidence_id, deposit_intent_id, deposit_submission_id,
+        deposit_payment_claim_id, execution_job_id
+      ) select
+        $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::jsonb,
+        submission.submitted_at, submission.submitted_at,
+        greatest(submission.submitted_at, evidence.occurred_at), evidence.occurred_at, $8::bigint,
+        evidence.id, $10::uuid, submission.id, $12::uuid, $13::uuid
+        from app.deposit_submissions submission
+        join app.provider_payment_evidence evidence on evidence.id = $9::uuid
+        where submission.id = $11::uuid`,
+      [
+        challengeId,
+        candidateId,
+        exact.payment_provider_id,
+        exact.reference_fingerprint,
+        bodyDigest,
+        sourceDocumentDigest,
+        JSON.stringify(signedObservation),
+        amountMinor,
+        fixture.evidenceId,
+        fixture.depositIntentId,
+        exact.submission_id,
+        settled.rows[0]!.payment_claim_id,
+        settled.rows[0]!.execution_job_id,
+      ],
+    );
+  }
   return {
     ...fixture,
     jobId: settled.rows[0]!.execution_job_id,
@@ -134,6 +224,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         'routine_telebirr_processing_authorizations',
         'routine_telebirr_processing_events',
         'routine_telebirr_execution_bindings',
+        'routine_telebirr_paid_observation_lineages',
       ];
       const rows = await client.query<{
         relname: string;
@@ -146,7 +237,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       `,
         [tables],
       );
-      expect(rows.rows).toHaveLength(3);
+      expect(rows.rows).toHaveLength(4);
       expect(rows.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity)).toBe(true);
       const columns = await client.query<{ attname: string }>(`
         select attname from pg_attribute where attrelid = 'app.routine_telebirr_processing_authorizations'::regclass
@@ -375,6 +466,39 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         await rollback(client, async () => {
           const policy = await persistentPolicyFixture(client, getOwner());
           const deposit = await paidJob(client, amountMinor);
+          const provenance = await client.query<Record<string, boolean>>(
+            `select
+                submission.submitted_at >= authority.authorized_at as submission_after_authorization,
+                submission.submitted_at <= submission.created_at as submission_before_creation,
+                evidence.occurred_at between submission.submitted_at - interval '1 hour'
+                  and submission.submitted_at + interval '5 minutes' as occurrence_within_submission_window,
+                lineage.challenge_issued_at >= authority.authorized_at as challenge_after_authorization,
+                lineage.recorded_at >= authority.authorized_at as recording_after_authorization,
+                lineage.submitted_at = submission.submitted_at as exact_submission_time,
+                lineage.occurred_at = evidence.occurred_at as exact_occurrence_time,
+                lineage.amount_minor = evidence.amount_minor as exact_amount,
+                (lineage.signed_observation #>> '{body,observedAt}')::timestamptz =
+                  date_trunc('milliseconds', lineage.observed_at) as signed_observed_time,
+                (lineage.signed_observation #>> '{body,facts,occurredAt}')::timestamptz =
+                  date_trunc('milliseconds', evidence.occurred_at) as signed_occurrence_time,
+                lineage.signed_observation #>> '{body,receiverRevisionId}' = receiver.id::text
+                  as signed_receiver
+               from app.routine_telebirr_paid_observation_lineages lineage
+               join app.deposit_jobs job on job.id = lineage.execution_job_id
+               join app.deposit_intents intent on intent.id = job.deposit_intent_id
+               join app.deposit_submissions submission on submission.id = lineage.deposit_submission_id
+               join app.provider_payment_evidence evidence on evidence.id = lineage.provider_payment_evidence_id
+               join app.receiver_accounts receiver on receiver.id = intent.receiver_account_id
+               join app.routine_telebirr_processing_authorizations authority on authority.id = $2::uuid
+              where job.id = $1::uuid`,
+            [deposit.jobId, policy.authorityId],
+          );
+          expect(provenance.rows).toHaveLength(1);
+          expect(
+            Object.entries(provenance.rows[0]!)
+              .filter(([, passed]) => !passed)
+              .map(([name]) => name),
+          ).toEqual([]);
           const assessed = await client.query(
             `select * from app.assess_routine_telebirr_execution_job($1::uuid)`,
             [deposit.jobId],
@@ -429,6 +553,53 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         });
       },
     );
+
+    it('does not adopt a generic verified TeleBirr job without paid phone lineage', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await persistentPolicyFixture(client, getOwner());
+        const deposit = await paidJob(client, 2500, 'telebirr', false);
+        expect(
+          (
+            await client.query(
+              `select * from app.assess_routine_telebirr_execution_job($1::uuid)`,
+              [deposit.jobId],
+            )
+          ).rows,
+        ).toHaveLength(0);
+        await rejected(client, `select app.admit_routine_telebirr_execution_job($1::uuid)`, [
+          deposit.jobId,
+        ]);
+      });
+    });
+
+    it('retains paid phone lineage without allowing edits or deletion', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await persistentPolicyFixture(client, getOwner());
+        const deposit = await paidJob(client);
+        const lineage = await client.query(
+          `select challenge_id, deposit_submission_id, provider_payment_evidence_id,
+                  deposit_payment_claim_id, execution_job_id
+             from app.routine_telebirr_paid_observation_lineages
+            where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        expect(lineage.rows).toHaveLength(1);
+        await rejected(
+          client,
+          `update app.routine_telebirr_paid_observation_lineages
+              set amount_minor = amount_minor + 1 where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        await rejected(
+          client,
+          `delete from app.routine_telebirr_paid_observation_lineages where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        await rejected(client, `truncate app.routine_telebirr_paid_observation_lineages`);
+      });
+    });
 
     it('admits more than five distinct eligible deposits without a pilot or quota', async () => {
       const client = getClient();

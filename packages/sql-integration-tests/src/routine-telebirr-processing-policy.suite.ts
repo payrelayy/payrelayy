@@ -126,11 +126,13 @@ export async function paidJob(
       receiver_account_version: number;
       submission_id: string;
       reference_fingerprint: string;
+      observed_at: Date;
       occurred_at: Date;
     }>(
       `select intent.payment_provider_id, intent.receiver_account_id,
               intent.receiver_account_version, submission.id as submission_id,
               evidence.canonical_reference_fingerprint as reference_fingerprint,
+              greatest(submission.submitted_at, evidence.occurred_at) as observed_at,
               evidence.occurred_at
          from app.deposit_intents intent
          join app.deposit_verification_attempts verification on verification.deposit_intent_id = intent.id
@@ -145,7 +147,7 @@ export async function paidJob(
     const candidateId = randomUUID();
     const bodyDigest = sha(randomUUID());
     const sourceDocumentDigest = sha(randomUUID());
-    const observedAt = exact.occurred_at.toISOString();
+    const observedAt = exact.observed_at.toISOString();
     const signedObservation = {
       contractVersion: 1,
       providerCode: 'telebirr',
@@ -163,7 +165,7 @@ export async function paidJob(
           amountMinor,
           currencyCode: 'ETB',
           evidenceSource: 'provider_receipt_lookup',
-          occurredAt: observedAt,
+          occurredAt: exact.occurred_at.toISOString(),
           providerFinalStatus: 'completed',
           providerIdentity: 'matched',
           receiverMatch: 'matched',
@@ -182,7 +184,7 @@ export async function paidJob(
       ) select
         $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::jsonb,
         submission.submitted_at, submission.submitted_at,
-        evidence.occurred_at, evidence.occurred_at, $8::bigint,
+        greatest(submission.submitted_at, evidence.occurred_at), evidence.occurred_at, $8::bigint,
         evidence.id, $10::uuid, submission.id, $12::uuid, $13::uuid
         from app.deposit_submissions submission
         join app.provider_payment_evidence evidence on evidence.id = $9::uuid

@@ -8,6 +8,8 @@ import {
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_POLL_PATH,
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_PROTOCOL_MODE,
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_PROVIDER_CODE,
+  ROUTINE_NO_MONEY_LOCAL_PATH,
+  ROUTINE_PAID_POLL_LOCAL_PATH,
   decodeTelebirrAssignmentBrokerLocalPollResponseBytes,
   encodeTelebirrAssignmentBrokerLocalPollRequest,
   type TelebirrDeviceBridgeEnrollmentCertificateBody,
@@ -90,6 +92,27 @@ function httpRequest(
 }
 
 describe('local TeleBirr assignment broker server', () => {
+  it('keeps paid and no-money Unix operations on distinct exact paths', async () => {
+    const poll = vi.fn();
+    const noMoney = vi.fn(async () => ({ statusCode: 200, headers: {}, body: Buffer.from('{}') }));
+    const paid = vi.fn(async () => ({ statusCode: 200, headers: {}, body: Buffer.from('{}') }));
+    const handler = createTelebirrAssignmentBrokerLocalHandler(poll, noMoney, paid);
+    const body = Buffer.from('{}');
+    expect(
+      (await handler(httpRequest(body, { path: ROUTINE_PAID_POLL_LOCAL_PATH }))).statusCode,
+    ).toBe(200);
+    expect(
+      (await handler(httpRequest(body, { path: ROUTINE_NO_MONEY_LOCAL_PATH }))).statusCode,
+    ).toBe(200);
+    expect(paid).toHaveBeenCalledOnce();
+    expect(noMoney).toHaveBeenCalledOnce();
+    expect(poll).not.toHaveBeenCalled();
+    const closed = createTelebirrAssignmentBrokerLocalHandler(poll, noMoney);
+    expect(
+      (await closed(httpRequest(body, { path: ROUTINE_PAID_POLL_LOCAL_PATH }))).statusCode,
+    ).toBe(400);
+  });
+
   it('maps one exact canonical request into one private broker poll', async () => {
     const poll = vi.fn(async (_input: TelebirrAssignmentBrokerPollInput) => ({
       kind: 'no_assignment' as const,

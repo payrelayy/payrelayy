@@ -7,6 +7,7 @@ import {
 
 const id = '44444444-4444-4444-8444-444444444444';
 const digest = `sha256:${'a'.repeat(64)}`;
+const signedObservation = { bodyDigest: digest, body: { challengeId: id } };
 
 describe('private routine no-money SQL adapter', () => {
   it('calls only the four allowlisted functions with positional parameters', async () => {
@@ -30,13 +31,15 @@ describe('private routine no-money SQL adapter', () => {
         observationBodyDigest: digest,
         observationSignatureDigest: digest,
         replayIdentity: digest,
+        signedObservation,
+        serverPolicyResult: 'signed_evidence_matches_policy',
       }),
     ).toBe('recorded');
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([
       'select * from app.load_routine_telebirr_no_money_enrollment($1::uuid)',
       'select * from app.issue_routine_telebirr_no_money_poll_assignment($1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::uuid)',
       'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)',
-      'select app.stage_routine_telebirr_no_money_observation_digest($1::uuid,$2::text,$3::text,$4::text,$5::text) as status',
+      'select app.stage_routine_telebirr_no_money_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb,$7::text) as status',
     ]);
     expect(query.mock.calls[1]?.[1]).toEqual([id, id, digest, '2026-10-06T13:03:30.000Z', id]);
   });
@@ -58,6 +61,8 @@ describe('private routine no-money SQL adapter', () => {
         observationBodyDigest: digest,
         observationSignatureDigest: digest,
         replayIdentity: digest,
+        signedObservation,
+        serverPolicyResult: 'signed_evidence_matches_policy',
       }),
     ).rejects.toBeInstanceOf(RoutineNoMoneySqlUnavailableError);
     const accessor = createRoutineNoMoneyPostgresDatabase({
@@ -72,6 +77,8 @@ describe('private routine no-money SQL adapter', () => {
         observationBodyDigest: digest,
         observationSignatureDigest: digest,
         replayIdentity: digest,
+        signedObservation,
+        serverPolicyResult: 'signed_evidence_matches_policy',
       }),
     ).rejects.toBeInstanceOf(RoutineNoMoneySqlUnavailableError);
     const failed = createRoutineNoMoneyPostgresDatabase({

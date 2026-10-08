@@ -1249,6 +1249,107 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
+    it('archives one signed observation for independent review without financial authority', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const before = await snapshot(client);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const trust = await fixtureRoutineLookupTrust(client, captured.rows[0]!.proof_request_id);
+        const issued = await client.query<{ challenge_id: string }>(ISSUE, [
+          captured.rows[0]!.proof_request_id,
+          trust.enrollmentId,
+          trust.signerId,
+        ]);
+        const challengeId = issued.rows[0]!.challenge_id;
+        const challenge = await client.query<{
+          candidate_id: string;
+          candidate_reference_fingerprint: string;
+          challenge_digest: string;
+          device_id: string;
+          device_key_id: string;
+          receiver_account_id: string;
+          receiver_account_version: number;
+          receiver_profile_digest: string;
+          expected_receiver_name_digest: string;
+        }>(
+          `select candidate_id, candidate_reference_fingerprint, challenge_digest,
+                   device_id, device_key_id, receiver_account_id, receiver_account_version,
+                   receiver_profile_digest, expected_receiver_name_digest
+              from ${LOOKUP_TABLE} where challenge_id = $1::uuid`,
+          [challengeId],
+        );
+        const row = challenge.rows[0]!;
+        const bodyDigest = `sha256:${digest()}`;
+        const signedObservation = {
+          contractVersion: 1,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v1',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v1',
+          bodyDigestAlgorithm: 'sha256',
+          bodyDigest,
+          signatureAlgorithm: 'ecdsa-p256-sha256',
+          signatureEncoding: 'ieee-p1363-base64url',
+          body: {
+            candidateId: row.candidate_id,
+            referenceFingerprint: row.candidate_reference_fingerprint,
+            receiverRevisionId: row.receiver_account_id,
+            receiverVersion: row.receiver_account_version,
+            receiverProfileDigest: row.receiver_profile_digest,
+            expectedReceiverNameDigest: row.expected_receiver_name_digest,
+            deviceId: row.device_id,
+            keyId: row.device_key_id,
+            challengeId,
+            challengeDigest: row.challenge_digest,
+            sourceDocumentDigest: `sha256:${digest()}`,
+            normalizedFactsDigest: `sha256:${digest()}`,
+            facts: { amountMinor: 2500 },
+          },
+          signature: 'A'.repeat(86),
+        };
+        const archive = `select app.stage_routine_telebirr_no_money_signed_observation(
+          $1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb,$7::text) as status`;
+        const args = [
+          challengeId,
+          `sha256:${digest()}`,
+          bodyDigest,
+          `sha256:${createHash('sha256').update(Buffer.from(signedObservation.signature, 'base64url')).digest('hex')}`,
+          `sha256:${digest()}`,
+          JSON.stringify(signedObservation),
+          'signed_evidence_matches_policy',
+        ];
+        expect((await client.query(archive, args)).rows).toEqual([{ status: 'recorded' }]);
+        expect((await client.query(archive, args)).rows).toEqual([{ status: 'exact_replay' }]);
+        expect(
+          (
+            await client.query(
+              `select count(*)::text from
+          app.routine_telebirr_signed_observation_payloads where challenge_id = $1::uuid`,
+              [challengeId],
+            )
+          ).rows,
+        ).toEqual([{ count: '1' }]);
+        expect(
+          (
+            await client.query(archive, [
+              ...args.slice(0, 5),
+              JSON.stringify({ ...signedObservation, signature: 'B'.repeat(86) }),
+              args[6],
+            ])
+          ).rows,
+        ).toEqual([{ status: 'conflict' }]);
+        await client.query('set local role service_role');
+        await rejected(client, archive, args);
+        await rejected(client, 'select * from app.routine_telebirr_signed_observation_payloads');
+        await client.query('reset role');
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
     it('atomically spends a signed no-money poll and reserves only one encrypted lookup', async () => {
       const client = getClient();
       const catalog = await client.query<{

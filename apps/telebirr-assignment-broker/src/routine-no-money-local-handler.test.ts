@@ -98,6 +98,19 @@ describe('private routine no-money local handler', () => {
         observationBodyDigest: digest,
         observationSignatureDigest: digest,
         replayIdentity: digest,
+        signedObservation: {
+          contractVersion: 1,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v1',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v1',
+          bodyDigestAlgorithm: 'sha256',
+          bodyDigest: digest,
+          signatureAlgorithm: 'ecdsa-p256-sha256',
+          signatureEncoding: 'ieee-p1363-base64url',
+          body: { challengeId },
+          signature: 'A'.repeat(86),
+        },
+        serverPolicyResult: 'signed_evidence_matches_policy',
       }),
     );
     expect(staged.statusCode).toBe(200);

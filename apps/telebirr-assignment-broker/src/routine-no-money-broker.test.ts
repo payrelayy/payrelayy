@@ -231,6 +231,19 @@ describe('private routine no-money broker core', () => {
       observationBodyDigest: `sha256:${'2'.repeat(64)}`,
       observationSignatureDigest: `sha256:${'3'.repeat(64)}`,
       replayIdentity: `sha256:${'4'.repeat(64)}`,
+      signedObservation: {
+        contractVersion: 1,
+        providerCode: 'telebirr',
+        protocolMode: 'routine_signed_observation_v1',
+        transcriptVersion: 'telebirr-routine-observation-transcript-v1',
+        bodyDigestAlgorithm: 'sha256',
+        bodyDigest: `sha256:${'2'.repeat(64)}`,
+        signatureAlgorithm: 'ecdsa-p256-sha256',
+        signatureEncoding: 'ieee-p1363-base64url',
+        body: { challengeId: ids.challenge },
+        signature: 'A'.repeat(86),
+      },
+      serverPolicyResult: 'signed_evidence_matches_policy' as const,
     };
     expect(await f.broker.stageObservationDigest(digestInput)).toBe('recorded');
     expect(f.database.stageObservationDigest).toHaveBeenCalledWith(digestInput);
@@ -267,6 +280,19 @@ describe('private routine no-money broker core', () => {
         observationBodyDigest: `sha256:${'2'.repeat(64)}`,
         observationSignatureDigest: `sha256:${'3'.repeat(64)}`,
         replayIdentity: `sha256:${'4'.repeat(64)}`,
+        signedObservation: {
+          contractVersion: 1,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v1',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v1',
+          bodyDigestAlgorithm: 'sha256',
+          bodyDigest: `sha256:${'2'.repeat(64)}`,
+          signatureAlgorithm: 'ecdsa-p256-sha256',
+          signatureEncoding: 'ieee-p1363-base64url',
+          body: { challengeId: ids.challenge },
+          signature: 'A'.repeat(86),
+        },
+        serverPolicyResult: 'signed_evidence_matches_policy',
       }),
     ).rejects.toBeInstanceOf(RoutineNoMoneyBrokerUnavailableError);
   });

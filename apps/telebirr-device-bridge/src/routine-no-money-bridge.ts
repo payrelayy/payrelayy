@@ -62,13 +62,15 @@ export interface RoutineNoMoneyBridgeDependencies {
   >;
   /** Must load the exact candidate/challenge, signer, and enrollment in one protected snapshot. */
   loadObservation(challengeId: string): Promise<RoutineNoMoneyObservationContext | undefined>;
-  /** Only digest-only, one-observation-per-challenge review storage; never a payment claim. */
+  /** Seven-day signed-observation review storage; never a payment claim. */
   stageObservationDigest(input: {
     readonly challengeId: string;
     readonly assignmentBodyDigest: string;
     readonly observationBodyDigest: string;
     readonly observationSignatureDigest: string;
     readonly replayIdentity: string;
+    readonly signedObservation: unknown;
+    readonly serverPolicyResult: 'signed_evidence_matches_policy' | 'receipt_policy_review';
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
 }
 
@@ -330,6 +332,8 @@ async function handleUpload(
     observationBodyDigest,
     observationSignatureDigest,
     replayIdentity: assessment.replayIdentity,
+    signedObservation,
+    serverPolicyResult: policyReview ? 'receipt_policy_review' : 'signed_evidence_matches_policy',
   });
   if (staged === 'retry') return error(503, 'temporarily_unavailable');
   if (staged === 'conflict') return error(409, 'observation_conflict');

@@ -390,6 +390,8 @@ describe('dormant routine no-money bridge handler', () => {
       challengeId: f.context.trustedLookup.challengeId,
       assignmentBodyDigest: f.signedAssignment.bodyDigest,
       observationBodyDigest: signedObservation.bodyDigest,
+      signedObservation,
+      serverPolicyResult: 'signed_evidence_matches_policy',
     });
     expect(JSON.stringify(staged)).not.toContain(f.rawReference);
     expect(Buffer.from(response.body).toString('utf8')).not.toContain(f.rawReference);
@@ -412,6 +414,7 @@ describe('dormant routine no-money bridge handler', () => {
     expect(staged).toMatchObject({
       challengeId: f.context.trustedLookup.challengeId,
       assignmentBodyDigest: f.signedAssignment.bodyDigest,
+      serverPolicyResult: 'receipt_policy_review',
     });
     expect(JSON.stringify(staged)).not.toContain(f.rawReference);
   });

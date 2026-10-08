@@ -40,6 +40,8 @@ export interface RoutineNoMoneyBrokerDatabase {
     readonly observationBodyDigest: string;
     readonly observationSignatureDigest: string;
     readonly replayIdentity: string;
+    readonly signedObservation: unknown;
+    readonly serverPolicyResult: 'signed_evidence_matches_policy' | 'receipt_policy_review';
   }): Promise<unknown>;
 }
 
@@ -321,6 +323,8 @@ export function createRoutineNoMoneyBroker(dependencies: RoutineNoMoneyBrokerDep
       readonly observationBodyDigest: string;
       readonly observationSignatureDigest: string;
       readonly replayIdentity: string;
+      readonly signedObservation: unknown;
+      readonly serverPolicyResult: 'signed_evidence_matches_policy' | 'receipt_policy_review';
     }) {
       try {
         if (
@@ -328,7 +332,25 @@ export function createRoutineNoMoneyBroker(dependencies: RoutineNoMoneyBrokerDep
           !DIGEST.test(input.assignmentBodyDigest) ||
           !DIGEST.test(input.observationBodyDigest) ||
           !DIGEST.test(input.observationSignatureDigest) ||
-          !DIGEST.test(input.replayIdentity)
+          !DIGEST.test(input.replayIdentity) ||
+          !['signed_evidence_matches_policy', 'receipt_policy_review'].includes(
+            input.serverPolicyResult,
+          ) ||
+          !exactRow(input.signedObservation, [
+            'contractVersion',
+            'providerCode',
+            'protocolMode',
+            'transcriptVersion',
+            'bodyDigestAlgorithm',
+            'bodyDigest',
+            'signatureAlgorithm',
+            'signatureEncoding',
+            'body',
+            'signature',
+          ]) ||
+          (input.signedObservation as Record<string, unknown>).bodyDigest !==
+            input.observationBodyDigest ||
+          JSON.stringify(input.signedObservation).length > 16384
         )
           throw new Error();
         const result = await database.stageObservationDigest(input);

@@ -195,6 +195,8 @@ export function createRoutineNoMoneyLocalHandler(broker: Broker) {
               'observationBodyDigest',
               'observationSignatureDigest',
               'replayIdentity',
+              'signedObservation',
+              'serverPolicyResult',
             ]) ||
             typeof input.challengeId !== 'string' ||
             !UUID.test(input.challengeId) ||
@@ -205,7 +207,22 @@ export function createRoutineNoMoneyLocalHandler(broker: Broker) {
             typeof input.observationSignatureDigest !== 'string' ||
             !DIGEST.test(input.observationSignatureDigest) ||
             typeof input.replayIdentity !== 'string' ||
-            !DIGEST.test(input.replayIdentity)
+            !DIGEST.test(input.replayIdentity) ||
+            !exact(input.signedObservation, [
+              'contractVersion',
+              'providerCode',
+              'protocolMode',
+              'transcriptVersion',
+              'bodyDigestAlgorithm',
+              'bodyDigest',
+              'signatureAlgorithm',
+              'signatureEncoding',
+              'body',
+              'signature',
+            ]) ||
+            input.signedObservation.bodyDigest !== input.observationBodyDigest ||
+            (input.serverPolicyResult !== 'signed_evidence_matches_policy' &&
+              input.serverPolicyResult !== 'receipt_policy_review')
           )
             break;
           const kind = await broker.stageObservationDigest({
@@ -214,6 +231,8 @@ export function createRoutineNoMoneyLocalHandler(broker: Broker) {
             observationBodyDigest: input.observationBodyDigest,
             observationSignatureDigest: input.observationSignatureDigest,
             replayIdentity: input.replayIdentity,
+            signedObservation: input.signedObservation,
+            serverPolicyResult: input.serverPolicyResult,
           });
           return response(200, { kind });
         }

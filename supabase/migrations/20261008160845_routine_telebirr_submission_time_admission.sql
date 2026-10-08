@@ -189,9 +189,8 @@ as $$
     and lineage.signed_observation #>> '{body,facts,providerIdentity}' = 'matched'
     and lineage.signed_observation #>> '{body,facts,receiverMatch}' = 'matched'
     and lineage.signed_observation #>> '{body,facts,referenceMatch}' = 'matched'
-    and lineage.signed_observation #>> '{body,observedAt}' = to_char(
-      lineage.observed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-    )
+    and (lineage.signed_observation #>> '{body,observedAt}')::timestamptz =
+      pg_catalog.date_trunc('milliseconds', lineage.observed_at)
     and (lineage.signed_observation #>> '{body,facts,occurredAt}')::timestamptz =
       pg_catalog.date_trunc('milliseconds', evidence.occurred_at)
   where event.event_sequence = (

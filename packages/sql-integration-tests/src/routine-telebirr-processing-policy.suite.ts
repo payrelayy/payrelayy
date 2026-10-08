@@ -464,6 +464,39 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         await rollback(client, async () => {
           const policy = await persistentPolicyFixture(client, getOwner());
           const deposit = await paidJob(client, amountMinor);
+          const provenance = await client.query<Record<string, boolean>>(
+            `select
+                submission.submitted_at >= authority.authorized_at as submission_after_authorization,
+                submission.submitted_at <= submission.created_at as submission_before_creation,
+                evidence.occurred_at between submission.submitted_at - interval '1 hour'
+                  and submission.submitted_at + interval '5 minutes' as occurrence_within_submission_window,
+                lineage.challenge_issued_at >= authority.authorized_at as challenge_after_authorization,
+                lineage.recorded_at >= authority.authorized_at as recording_after_authorization,
+                lineage.submitted_at = submission.submitted_at as exact_submission_time,
+                lineage.occurred_at = evidence.occurred_at as exact_occurrence_time,
+                lineage.amount_minor = evidence.amount_minor as exact_amount,
+                (lineage.signed_observation #>> '{body,observedAt}')::timestamptz =
+                  date_trunc('milliseconds', lineage.observed_at) as signed_observed_time,
+                (lineage.signed_observation #>> '{body,facts,occurredAt}')::timestamptz =
+                  date_trunc('milliseconds', evidence.occurred_at) as signed_occurrence_time,
+                lineage.signed_observation #>> '{body,receiverRevisionId}' = receiver.id::text
+                  as signed_receiver
+               from app.routine_telebirr_paid_observation_lineages lineage
+               join app.deposit_jobs job on job.id = lineage.execution_job_id
+               join app.deposit_intents intent on intent.id = job.deposit_intent_id
+               join app.deposit_submissions submission on submission.id = lineage.deposit_submission_id
+               join app.provider_payment_evidence evidence on evidence.id = lineage.provider_payment_evidence_id
+               join app.receiver_accounts receiver on receiver.id = intent.receiver_account_id
+               join app.routine_telebirr_processing_authorizations authority on authority.id = $2::uuid
+              where job.id = $1::uuid`,
+            [deposit.jobId, policy.authorityId],
+          );
+          expect(provenance.rows).toHaveLength(1);
+          expect(
+            Object.entries(provenance.rows[0]!)
+              .filter(([, passed]) => !passed)
+              .map(([name]) => name),
+          ).toEqual([]);
           const assessed = await client.query(
             `select * from app.assess_routine_telebirr_execution_job($1::uuid)`,
             [deposit.jobId],

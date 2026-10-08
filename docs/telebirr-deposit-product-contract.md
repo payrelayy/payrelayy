@@ -187,6 +187,13 @@ fingerprint, device identity, source profile, and parser version. Invalid signat
 wrong-job or wrong-reference results, expired leases, and results arriving after reassignment fail
 closed to manual review. Re-delivery of the same valid result is idempotent.
 
+For TeleBirr ordinary transfers, the Owner selected the paired phone's reading of the public
+Ethiotelecom receipt as the source authority. The paid protocol therefore requires a version-2
+device signature over `sourceOriginAttestation: official_tls_origin`, produced only by the reviewed
+fixed-host HTTPS transport and parser. The server verifies the enrolled signature and exact lease;
+version-1 reports remain review-only. This is a phone-origin attestation, not an independent server
+fetch or a merchant API response. The phone still has no claim, database, or credit capability.
+
 The phone must not hold a Supabase `service_role` key, database password, KemerBet credentials,
 financial command, customer session, or unrestricted queue access. It cannot create evidence,
 claim a transaction, settle a deposit, or enqueue/execute KemerBet credit directly. A least-privilege

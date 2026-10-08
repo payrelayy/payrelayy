@@ -87,6 +87,8 @@ internal object RoutineTelebirrJsonCodec {
     RoutineTelebirrLookupProtocol.requireUtc(facts.retrievedAt)
     require(facts.retrievedAt == body.observedAt)
     require(facts.sourceProfile == RoutineTelebirrLookupProtocol.SOURCE_PROFILE)
+    require((body.contractVersion == 2) ==
+      (facts.sourceOriginAttestation == "official_tls_origin"))
     require(facts.currencyCode in setOf("ETB", "unknown"))
     require(facts.evidenceSource in setOf("provider_receipt_lookup", "unknown"))
     require(facts.paymentMode in setOf("telebirr", "other", "unknown"))
@@ -99,6 +101,25 @@ internal object RoutineTelebirrJsonCodec {
     require(body.normalizedFactsDigest == RoutineTelebirrObservationCanonical.factsDigest(facts))
     require(observation.bodyDigest == RoutineTelebirrObservationCanonical.bodyDigest(body))
 
+    val factFields = arrayOf(
+      "amountMinor" to number(facts.amountMinor),
+      "canonicalReferencePresent" to bool(facts.canonicalReferencePresent),
+      "creditedPartyNameDigest" to text(facts.creditedPartyNameDigest),
+      "currencyCode" to text(facts.currencyCode),
+      "evidenceSource" to text(facts.evidenceSource),
+      "occurredAt" to text(facts.occurredAt),
+      "paymentChannel" to text(facts.paymentChannel),
+      "paymentMode" to text(facts.paymentMode),
+      "paymentReason" to text(facts.paymentReason),
+      "providerFinalStatus" to text(facts.providerFinalStatus),
+      "providerIdentity" to text(facts.providerIdentity),
+      "receiverMatch" to text(facts.receiverMatch),
+      "referenceMatch" to text(facts.referenceMatch),
+      "retrievedAt" to text(facts.retrievedAt),
+      "sourceProfile" to text(facts.sourceProfile),
+    ) + (facts.sourceOriginAttestation?.let {
+      arrayOf("sourceOriginAttestation" to text(it))
+    } ?: emptyArray())
     val bytes =
       StrictJson.encode(
           obj(
@@ -128,24 +149,7 @@ internal object RoutineTelebirrJsonCodec {
                 "sourceDocumentDigest" to text(body.sourceDocumentDigest),
                 "normalizedFactsDigest" to text(body.normalizedFactsDigest),
                 "observedAt" to text(body.observedAt),
-                "facts" to
-                  obj(
-                    "amountMinor" to number(facts.amountMinor),
-                    "canonicalReferencePresent" to bool(facts.canonicalReferencePresent),
-                    "creditedPartyNameDigest" to text(facts.creditedPartyNameDigest),
-                    "currencyCode" to text(facts.currencyCode),
-                    "evidenceSource" to text(facts.evidenceSource),
-                    "occurredAt" to text(facts.occurredAt),
-                    "paymentChannel" to text(facts.paymentChannel),
-                    "paymentMode" to text(facts.paymentMode),
-                    "paymentReason" to text(facts.paymentReason),
-                    "providerFinalStatus" to text(facts.providerFinalStatus),
-                    "providerIdentity" to text(facts.providerIdentity),
-                    "receiverMatch" to text(facts.receiverMatch),
-                    "referenceMatch" to text(facts.referenceMatch),
-                    "retrievedAt" to text(facts.retrievedAt),
-                    "sourceProfile" to text(facts.sourceProfile),
-                  ),
+                "facts" to obj(*factFields),
               ),
             "signature" to text(observation.signature),
           ),

@@ -149,11 +149,14 @@ export async function paidJob(
     const sourceDocumentDigest = sha(randomUUID());
     const observedAt = exact.observed_at.toISOString();
     const signedObservation = {
-      contractVersion: 1,
+      contractVersion: 2,
       providerCode: 'telebirr',
-      protocolMode: 'routine_signed_observation_v1',
+      protocolMode: 'routine_signed_observation_v2',
+      transcriptVersion: 'telebirr-routine-observation-transcript-v2',
       bodyDigest,
       body: {
+        contractVersion: 2,
+        protocolMode: 'routine_signed_observation_v2',
         candidateId,
         challengeId,
         referenceFingerprint: exact.reference_fingerprint,
@@ -170,6 +173,7 @@ export async function paidJob(
           providerIdentity: 'matched',
           receiverMatch: 'matched',
           referenceMatch: 'matched',
+          sourceOriginAttestation: 'official_tls_origin',
         },
       },
       signature: 'A'.repeat(86),

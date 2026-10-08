@@ -2,6 +2,7 @@ package com.fetanagent.telebirrverifier
 
 import com.google.gson.Gson
 import java.nio.charset.StandardCharsets
+import java.net.InetAddress
 import java.time.Instant
 import java.util.Base64
 import org.junit.Assert.assertEquals
@@ -107,6 +108,33 @@ class RoutineTelebirrObservationCollectorTest {
     assertFalse(result.enqueueAllowed)
     assertFalse(result.executionAllowed)
     assertFalse(result.financialActionAllowed)
+  }
+
+  @Test
+  fun `reviewed safe transport signs a distinct official origin observation`() {
+    val moment = Instant.parse("2026-10-05T18:03:00.000Z").toEpochMilli()
+    val safe = SafeOfficialReceiptTransport(
+      resolver = HostResolver { _, _ -> listOf(InetAddress.getByName("1.1.1.1")) },
+      exchange = HttpsExchange { _, _, _, _, _ ->
+        RawHttpsResponse(
+          200,
+          "text/html; charset=utf-8",
+          null,
+          livePilotHtml().replace("20-08-2026 21:01:45", "05-10-2026 21:01:45")
+            .toByteArray(StandardCharsets.UTF_8),
+        )
+      },
+      clock = MillisClock { moment },
+    )
+    val collected = collect(safe)
+    assertTrue(collected is RoutineTelebirrObservationCollection.WouldForward)
+    val observation = (collected as RoutineTelebirrObservationCollection.WouldForward).observation
+    assertEquals(2, observation.contractVersion)
+    assertEquals("routine_signed_observation_v2", observation.protocolMode)
+    assertEquals("official_tls_origin", observation.body.facts.sourceOriginAttestation)
+    assertTrue(String(RoutineTelebirrJsonCodec.encodeSignedObservation(observation),
+      StandardCharsets.UTF_8).contains("\"sourceOriginAttestation\":\"official_tls_origin\""))
+    assertFalse(collected.financialActionAllowed)
   }
 
   @Test

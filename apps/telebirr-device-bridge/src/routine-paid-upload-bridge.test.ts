@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_TRANSCRIPT_VERSION,
-  ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+  ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION,
   ROUTINE_TELEBIRR_RECEIVER_NAME_NORMALIZER_VERSION,
   canonicalRoutineTelebirrLookupAssignmentSignatureBytes,
   canonicalRoutineTelebirrObservationSignatureBytes,
@@ -28,6 +28,11 @@ const header = {
   contractVersion: 1,
   providerCode: 'telebirr',
   protocolMode: 'routine_signed_observation_v1',
+};
+const originHeader = {
+  contractVersion: 2,
+  providerCode: 'telebirr',
+  protocolMode: 'routine_signed_observation_v2',
 };
 
 function fixture() {
@@ -130,9 +135,10 @@ function fixture() {
     referenceMatch: 'matched',
     retrievedAt: '2026-10-05T18:03:00.000Z',
     sourceProfile: 'telebirr_official_receipt_v1',
+    sourceOriginAttestation: 'official_tls_origin',
   };
   const observationBody = {
-    ...header,
+    ...originHeader,
     candidateId: trustedLookup.candidateId,
     referenceFingerprint: trustedLookup.referenceFingerprint,
     receiverRevisionId: trustedLookup.receiverRevisionId,
@@ -149,8 +155,8 @@ function fixture() {
     facts,
   };
   const signedObservation = {
-    ...header,
-    transcriptVersion: ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+    ...originHeader,
+    transcriptVersion: ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION,
     bodyDigestAlgorithm: 'sha256',
     bodyDigest: digestRoutineTelebirrObservationBody(observationBody)!,
     signatureAlgorithm: 'ecdsa-p256-sha256',

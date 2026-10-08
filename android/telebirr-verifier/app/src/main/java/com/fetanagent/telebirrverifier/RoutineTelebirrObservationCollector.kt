@@ -8,9 +8,10 @@ import java.time.format.DateTimeFormatterBuilder
  * signature contracts. Nothing calls this from the operational service or UI. In particular,
  * this class does not poll for assignments, upload observations, write to a database, or act on a
  * payment. Its signer and enrollment inputs must come from independently trusted material; its
- * transport must be the reviewed official HTTPS transport before any operational use. A fake
- * ProviderTransport can claim false source-origin attestation, so this result is never financial
- * authority and a future server must authenticate the source again.
+ * transport must be the reviewed official HTTPS transport before any operational use. Only that
+ * transport can make this collector sign a version-2 phone-origin assertion. A test transport
+ * can claim false origin but produces only version-1 review evidence. Neither version authorizes
+ * a financial action on the phone; the server must verify the enrollment and signed transcript.
  */
 internal class RoutineTelebirrObservationCollector(
   private val transport: ProviderTransport,
@@ -76,6 +77,9 @@ internal class RoutineTelebirrObservationCollector(
         trustedEnrollment,
         parsed as RoutineTelebirrParsedReceipt.Observed,
         deviceIdentity,
+        officialOriginFromSafeTransport = transport is SafeOfficialReceiptTransport &&
+          document is ProviderDocument.Found &&
+          document.originAttestation == ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
       )
     } catch (_: Exception) {
       return RoutineTelebirrObservationCollection.Review("observation_invalid")

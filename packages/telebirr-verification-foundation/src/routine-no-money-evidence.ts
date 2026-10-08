@@ -9,8 +9,9 @@ import { verifyRoutineTelebirrSignedObservation } from './routine-signed-observa
 
 /**
  * Composes the two routine signatures against one independently loaded lookup snapshot.
- * This is only a no-money review boundary: a signed phone report is not proof that
- * TeleBirr issued the receipt, and this function has no database or payment capability.
+ * This is only a no-money review boundary. Version 2 can attest the paired
+ * phone's official TLS reading, not an independent server fetch. This function
+ * has no database or payment capability.
  */
 const ASSIGNMENT_INPUT_KEYS = [
   'assessedAt',
@@ -104,6 +105,7 @@ export interface RoutineNoMoneyEvidenceAssessment {
   readonly advisoryOnly: true;
   readonly serverSignatureVerified: boolean;
   readonly deviceSignatureVerified: boolean;
+  readonly phoneOfficialOriginAttested: boolean;
   readonly providedSnapshotMatched: boolean;
   readonly sourceAuthenticationPerformed: false;
   readonly databaseWriteAllowed: false;
@@ -162,11 +164,13 @@ function result(
   deviceSignatureVerified = false,
   providedSnapshotMatched = false,
   replayIdentity: string | null = null,
+  phoneOfficialOriginAttested = false,
 ): RoutineNoMoneyEvidenceAssessment {
   return Object.freeze({
     advisoryOnly: true,
     serverSignatureVerified,
     deviceSignatureVerified,
+    phoneOfficialOriginAttested,
     providedSnapshotMatched,
     sourceAuthenticationPerformed: false,
     databaseWriteAllowed: false,
@@ -287,6 +291,7 @@ export function assessRoutineTelebirrNoMoneyEvidence(
         observationCheck.deviceSignatureVerified,
         true,
         observationCheck.replayIdentity,
+        observationCheck.phoneOfficialOriginAttested,
       );
     }
     return result(
@@ -296,6 +301,7 @@ export function assessRoutineTelebirrNoMoneyEvidence(
       true,
       true,
       observationCheck.replayIdentity,
+      observationCheck.phoneOfficialOriginAttested,
     );
   } catch {
     return result('would_review', 'invalid_request');

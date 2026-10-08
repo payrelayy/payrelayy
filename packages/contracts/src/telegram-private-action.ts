@@ -218,6 +218,15 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      /** A real reference is untrusted until the paired phone verifies its official receipt. */
+      readonly outcome: 'telebirr_routine_candidate_recorded_paid_pending';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly proofStatus: 'pending_verification';
+      readonly verificationMode: 'phone_receipt_pending';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'telebirr_live_verification_queued';
       /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
       readonly proofToken: string;

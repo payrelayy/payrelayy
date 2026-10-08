@@ -291,6 +291,27 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|FETANTEST|uuid|token|amount/iu);
   });
 
+  it('renders a paid candidate acknowledgment without claiming verification or credit', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_recorded_paid_pending',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'pending_verification',
+      verificationMode: 'phone_receipt_pending',
+    });
+
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: [
+        '✅ TeleBirr transaction number received.',
+        'Status: Pending official receipt verification.',
+        'No KemerBet deposit or credit has been made. Credit requires a matching receipt checked by the paired phone.',
+      ].join('\n'),
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|AB12CD34EF|uuid|token|amount/iu);
+  });
+
   it('renders a live verifier acknowledgement with one opaque tracking button', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,

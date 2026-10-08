@@ -155,6 +155,15 @@ export function presentTelegramPlayerIdFlowResult(
           'Do not send money. This is not a payment-status confirmation.',
         ].join('\n'),
       };
+    case 'telebirr_routine_candidate_recorded_paid_pending':
+      return {
+        kind: 'message',
+        text: [
+          '✅ TeleBirr transaction number received.',
+          'Status: Pending official receipt verification.',
+          'No KemerBet deposit or credit has been made. Credit requires a matching receipt checked by the paired phone.',
+        ].join('\n'),
+      };
     case 'telebirr_live_verification_queued':
       return {
         kind: 'menu',

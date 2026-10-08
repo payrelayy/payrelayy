@@ -2182,18 +2182,24 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
           [noMoneyId, noMoneyTrust.enrollmentId, noMoneyTrust.signerId],
         );
+        const issued = await client.query<{
+          challenge_id: string;
+          candidate_id: string;
+        }>(
+          `select challenge_id, candidate_id
+             from app.issue_routine_telebirr_paid_lookup_assignment_material(
+               $1::uuid, $2::uuid, $3::uuid)`,
+          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
+        );
+        expect(issued.rows).toEqual([{ challenge_id: expect.any(String), candidate_id: paidId }]);
         const paid = await client.query<{
           challenge_id: string;
           candidate_id: string;
           issuance_mode: string;
         }>(
-          `with issued as (
-             select * from app.issue_routine_telebirr_paid_lookup_assignment_material(
-               $1::uuid, $2::uuid, $3::uuid)
-           ) select issued.challenge_id, challenge.candidate_id, challenge.issuance_mode
-               from issued join ${LOOKUP_TABLE} challenge
-                 on challenge.challenge_id = issued.challenge_id`,
-          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
+          `select challenge_id, candidate_id, issuance_mode
+             from ${LOOKUP_TABLE} where challenge_id = $1::uuid`,
+          [issued.rows[0]!.challenge_id],
         );
         expect(paid.rows).toEqual([
           { challenge_id: expect.any(String), candidate_id: paidId, issuance_mode: 'paid' },

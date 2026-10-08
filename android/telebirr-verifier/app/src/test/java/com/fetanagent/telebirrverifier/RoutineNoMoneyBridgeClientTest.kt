@@ -345,6 +345,26 @@ class RoutineNoMoneyBridgeClientTest {
     assertNull(resumed.load())
   }
 
+  @Test fun `durably recorded policy review stops repeating the same signed upload`() {
+    val paths = mutableListOf<String>()
+    val exchange = fixedExchange { path, contentType, _ ->
+      paths += path
+      when (path) {
+        RoutineNoMoneyBridgeProtocol.POLL_PATH ->
+          DeviceBridgeRawResponse(200, contentType, pollResponse(assignment()))
+        RoutineNoMoneyBridgeProtocol.UPLOAD_PATH -> DeviceBridgeRawResponse(202, contentType,
+          """{"outcome":"signed_evidence_recorded_for_policy_review","advisoryOnly":true,"sourceAuthenticationPerformed":false,"financialActionAllowed":false}"""
+            .toByteArray(StandardCharsets.UTF_8))
+        else -> error("Unexpected route")
+      }
+    }
+    assertEquals(RoutineNoMoneyPhoneResult.RecordedPolicyReview,
+      run(rehearsal(exchange, ProviderTransport { _ -> observedReceipt() })))
+    assertEquals(listOf(RoutineNoMoneyBridgeProtocol.POLL_PATH,
+      RoutineNoMoneyBridgeProtocol.UPLOAD_PATH), paths)
+    assertNull(workStore.load())
+  }
+
   @Test fun `failed durable stage never opens official receipt`() {
     val failedStore = EncryptedRoutineNoMoneyWorkStore(File(temporary.root, "failed-work"),
       object : LivePilotQueueCipher {

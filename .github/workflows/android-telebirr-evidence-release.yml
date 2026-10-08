@@ -208,7 +208,7 @@ jobs:
           grep -Fq "VERIFIER_DEPLOYMENT_TARGET = \"$DEPLOYMENT_TARGET\"" "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "evidence_only"' "$build_config"
           if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            grep -Fq 'VERSION_NAME = "0.5.16-routine-no-money"' "$build_config"
+            grep -Fq 'VERSION_NAME = "0.5.17-routine-no-money"' "$build_config"
             grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
             grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
             grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
@@ -235,7 +235,7 @@ jobs:
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
           if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            artifact_name='FetanAgent-TeleBirr-Verifier-0.5.16-production-routine-no-money.apk'
+            artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
           else
             artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-evidence-only.apk"
           fi

@@ -88,6 +88,8 @@ internal object RoutineNoMoneyRuntimeComposition {
             LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "routine_retry")
           RoutineNoMoneyPhoneResult.SubmittedForReview ->
             LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_assignment")
+          RoutineNoMoneyPhoneResult.RecordedPolicyReview ->
+            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "server_review")
           is RoutineNoMoneyPhoneResult.Review ->
             LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
               result.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }

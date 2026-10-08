@@ -208,9 +208,9 @@ assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"
 assert.match(androidBuild, /"pairing_only" -> "0\.5\.15-secure-pairing"/);
 assert.match(
   androidBuild,
-  /"evidence_only" -> if \(routineLookupTrust != null\) "0\.5\.16-routine-no-money" else "0\.5\.15-evidence-only"/,
+  /"evidence_only" -> if \(routineLookupTrust != null\) "0\.5\.17-routine-no-money" else "0\.5\.15-evidence-only"/,
 );
-assert.match(androidBuild, /versionCode = if \(routineLookupTrust != null\) 21 else 20/);
+assert.match(androidBuild, /versionCode = if \(routineLookupTrust != null\) 22 else 20/);
 assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /requestedDeploymentTarget in setOf\("staging", "production"\)/);
 assert.match(androidBuild, /serverSignerKeyId == "telebirr-bridge-\$requestedDeploymentTarget-v1"/);

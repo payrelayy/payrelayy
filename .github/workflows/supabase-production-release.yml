@@ -182,7 +182,7 @@ jobs:
           database_url="$(node --input-type=module -e '
             const { PRODUCTION_PROJECT_REF: projectRef, PRODUCTION_DATABASE_POOLER_HOST: poolerHost, SUPABASE_DB_PASSWORD: password } = process.env;
             const url = new URL(`postgresql://postgres.${projectRef}@${poolerHost}:5432/postgres`);
-            url.password = encodeURIComponent(password).replace(/[!'()*]/g, character =>
+            url.password = encodeURIComponent(password).replace(/[!()*\x27]/g, character =>
               `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
             url.searchParams.set("sslmode", "require");
             process.stdout.write(url.toString());

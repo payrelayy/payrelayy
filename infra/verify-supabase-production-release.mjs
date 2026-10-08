@@ -90,6 +90,11 @@ const urlBuilder =
     protectedJob,
   )?.[1];
 assert.ok(urlBuilder, 'The session-pooler URL builder must remain present.');
+assert.equal(
+  urlBuilder.includes("'"),
+  false,
+  'The Bash single-quoted Node script must not contain apostrophes.',
+);
 const syntheticPassword = "private:@/%? #&!'()*";
 const databaseUrl = execFileSync(process.execPath, ['--input-type=module', '-e', urlBuilder], {
   encoding: 'utf8',

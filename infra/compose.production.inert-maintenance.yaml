@@ -1,7 +1,8 @@
 # This overlay is used only for a reviewed runtime-maintenance deployment while PostgreSQL proves
 # that no trusted TeleBirr activation epoch or money authority is active. It deliberately restores
-# the assignment broker's enrollment-only shape before a fresh pilot exists. Its independent
-# routine no-money login can issue signed review assignments, but has no claim or settlement role.
+# the assignment broker's enrollment-only shape before a fresh pilot exists. Its separate
+# routine logins can issue review assignments and stage signed receipts, but have no claim,
+# settlement, or Player-credit role.
 # A later operational deployment must omit this overlay and bind the pilot to an active manifest.
 services:
   api:
@@ -18,15 +19,27 @@ services:
       TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
       TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
       INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'
+      # Paid means a real public receipt is read and signed by the paired phone.
+      # The inbox remains review-only: this broker has no claim, job, or credit grant.
+      INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'
       ROUTINE_NO_MONEY_DATABASE_URL_FILE: /run/secrets/routine_no_money_database_url
+      ROUTINE_PAID_POLL_DATABASE_URL_FILE: /run/secrets/routine_paid_poll_database_url
       ROUTINE_NO_MONEY_REFERENCE_OPENING_KEY_FILE: /run/secrets/routine_no_money_reference_opening_key.v1.json
+      ROUTINE_PAID_POLL_REFERENCE_OPENING_KEY_FILE: /run/secrets/routine_no_money_reference_opening_key.v1.json
       ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE: /run/secrets/routine_no_money_lookup_signer.pkcs8.der
+      ROUTINE_PAID_POLL_SIGNER_PRIVATE_KEY_FILE: /run/secrets/routine_no_money_lookup_signer.pkcs8.der
       ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE: /run/secrets/routine_no_money_lookup_signer.v1.json
+      ROUTINE_PAID_POLL_SIGNER_MANIFEST_FILE: /run/secrets/routine_no_money_lookup_signer.v1.json
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
     secrets: !override
       - source: routine_no_money_database_url
         target: routine_no_money_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: routine_paid_poll_database_url
+        target: routine_paid_poll_database_url
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -56,3 +69,5 @@ services:
   telebirr-device-bridge:
     environment:
       INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'
+      INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED: 'true'
+      INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED: 'true'

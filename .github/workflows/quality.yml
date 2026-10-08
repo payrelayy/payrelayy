@@ -89,6 +89,7 @@ jobs:
           node infra/verify-production-telebirr-receipt-shape-retry-preflight.mjs
           node --test infra/operations/prepare-production-companion-bundle.test.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
+          bash -n infra/operations/fetanagent-production-helper-rotation-v5.sh
           bash -n infra/operations/fetanagent-production-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-helper-rotation-v2.sh
           node infra/verify-production-helper-rotation.mjs
@@ -169,6 +170,8 @@ jobs:
             telebirr-assignment-signer.pkcs8.der telebirr-assignment.spki.der \
             telebirr-reference-opening-key.v1.json telebirr-bridge-runtime-manifest.v1.json \
             telebirr-bridge-server-signer.pkcs8.der telebirr-device-state-database-url \
+            routine-no-money-database-url routine-paid-poll-database-url \
+            routine-no-money-lookup-signer.pkcs8.der routine-no-money-lookup-signer.v1.json \
             companion-device-database-url companion-bridge-server-signer.pkcs8.der \
             companion-bridge-runtime-manifest.v2.json; do
             install -m 0600 /dev/null "$production_contract_dir/$file"

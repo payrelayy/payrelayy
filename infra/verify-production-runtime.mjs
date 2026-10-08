@@ -22,6 +22,8 @@ const [
   assignmentRuntimeInputSql,
   shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
+  paidPollActivateSql,
+  paidPollDisableSql,
   assignmentBrokerContinuousRuntimeMigration,
   assignmentBrokerConfig,
   assignmentBrokerPostgres,
@@ -45,6 +47,8 @@ const [
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
   read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
+  read('infra/sql/production-routine-paid-poll-activate.sql'),
+  read('infra/sql/production-routine-paid-poll-disable.sql'),
   read('supabase/migrations/20260916142230_telebirr_assignment_broker_continuous_runtime.sql'),
   read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
@@ -338,6 +342,14 @@ assert.match(inertCompose, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
 assert.match(inertCompose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
 assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'/u);
 assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED: 'true'/u);
+assert.match(
+  inertCompose,
+  /ROUTINE_PAID_POLL_DATABASE_URL_FILE: \/run\/secrets\/routine_paid_poll_database_url/u,
+);
+assert.match(inertCompose, /- source: routine_paid_poll_database_url/u);
 assert.match(inertCompose, /secrets: !override/u);
 assert.match(inertCompose, /configs: !override/u);
 assert.match(inertCompose, /networks: !override/u);
@@ -412,8 +424,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 31);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 31);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 32);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 32);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -445,7 +457,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  8,
+  10,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -842,6 +854,26 @@ assert.match(
   /elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'"[\s\S]*?routine-no-money-database-url[\s\S]*?routine-no-money-lookup-signer\.pkcs8\.der[\s\S]*?routine-no-money-lookup-signer\.v1\.json[\s\S]*?telebirr-reference-opening-key\.v1\.json/u,
 );
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
+assert.match(helper, /expected_count=\$\(\(expected_count \+ 1\)\)/u);
+assert.match(helper, /routine-paid-poll-database-url/u);
+assert.match(
+  workflow,
+  /ROUTINE_PAID_POLL_RUNTIME_PASSWORD: \$\{\{ secrets\.ROUTINE_PAID_POLL_RUNTIME_PASSWORD \}\}/u,
+);
+assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-activate\.sql/u);
+assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-disable\.sql/u);
+assert.match(workflow, /"\$SECRET_DIR"\/routine-paid-poll-database-url/u);
+assert.match(
+  paidPollActivateSql,
+  /alter role fetanagent_routine_telebirr_paid_poll_runtime\s+login password :'runtime_password' valid until :'valid_until'/u,
+);
+assert.match(paidPollActivateSql, /count\(\*\) = 7 as financial_switches_disabled/u);
+assert.match(paidPollActivateSql, /count\(\*\) = 4 and pg_catalog\.bool_and/u);
+assert.doesNotMatch(
+  paidPollActivateSql,
+  /\b(?:insert|update|delete|truncate)\s+(?:into\s+|from\s+)?app\./iu,
+);
+assert.match(paidPollDisableSql, /nologin password null valid until '1970-01-01 00:00:00\+00'/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
 assert.match(helper, /runtime-deployment-mode/u);
 assert.match(helper, /compose\.production\.shadow-review\.yaml/u);

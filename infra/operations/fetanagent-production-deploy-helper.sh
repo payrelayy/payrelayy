@@ -415,6 +415,15 @@ verify_release_files() {
         die 'the routine no-money database egress is missing'
       ! grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
         die 'the routine no-money broker cannot use isolated network mode'
+      if grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml"; then
+        grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED: 'true'" \
+          "$release/compose.production.inert-maintenance.yaml" ||
+          die 'the routine paid poll bridge is not mounted'
+        grep -Fq "INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED: 'true'" \
+          "$release/compose.production.inert-maintenance.yaml" ||
+          die 'the routine paid upload bridge is not mounted'
+      fi
     else
       grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
         die 'the inert-maintenance production overlay is malformed'
@@ -439,6 +448,10 @@ verify_release_files() {
       routine-no-money-lookup-signer.v1.json
       telebirr-reference-opening-key.v1.json
     )
+    if grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+      required+=(routine-paid-poll-database-url)
+    fi
   fi
   if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
     required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json companion-bridge-runtime-manifest.v3.json)
@@ -736,6 +749,18 @@ case "${1:-}" in
         [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
           die "the routine no-money bundle is missing $name"
       done
+      if grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
+        "$incoming/compose.production.inert-maintenance.yaml"; then
+        expected_count=$((expected_count + 1))
+        [[ ! -L "$incoming/routine-paid-poll-database-url" &&
+          -f "$incoming/routine-paid-poll-database-url" &&
+          -s "$incoming/routine-paid-poll-database-url" ]] ||
+          die 'the routine paid poll database URL is missing'
+      else
+        [[ ! -e "$incoming/routine-paid-poll-database-url" &&
+          ! -L "$incoming/routine-paid-poll-database-url" ]] ||
+          die 'the inert bundle unexpectedly contains a paid poll credential'
+      fi
       for name in \
         telebirr-assignment-database-url \
         telebirr-assignment-runtime-manifest.v1.json \

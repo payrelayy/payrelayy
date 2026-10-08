@@ -109,6 +109,8 @@ function fixture() {
   const database: RoutinePaidPollBrokerDatabase = {
     loadEnrollment: vi.fn(async () => enrollmentRow),
     issuePollAssignment: vi.fn(async () => row),
+    loadObservationMaterial: vi.fn(async () => row),
+    stageObservation: vi.fn(async () => 'recorded'),
   };
   const signer = {
     assignmentSignerId: ids.signer,
@@ -133,6 +135,37 @@ const pollInput = {
 };
 
 describe('private routine paid poll broker core', () => {
+  it('opens only the paid observation material and stages no financial action', async () => {
+    const f = fixture();
+    const context = await f.broker.loadObservation(ids.challenge);
+    expect(context?.trustedIssuanceMode).toBe('paid');
+    expect(context?.trustedRawReference).toBe('FTAN12345678');
+    expect(f.database.loadObservationMaterial).toHaveBeenCalledWith(ids.challenge);
+    const staged = await f.broker.stageObservation({
+      evidence: {
+        providerCode: 'telebirr',
+        candidateId: ids.candidate,
+        challengeId: ids.challenge,
+        referenceFingerprint: f.row.candidate_reference_fingerprint,
+        receiverRevisionId: ids.receiver,
+        receiverVersion: 3,
+        submittedAt: '2026-10-06T13:00:00.000Z',
+        observedAt: now,
+        occurredAt: now,
+        retrievedAt: now,
+        amountMinor: 2500,
+        currencyCode: 'ETB',
+        sourceDocumentDigest: sha(Buffer.from('document')),
+        observationBodyDigest: sha(Buffer.from('observation')),
+        replayIdentity: sha(Buffer.from('replay')),
+      },
+      assignmentBodyDigest: sha(Buffer.from('assignment')),
+      observationSignatureDigest: sha(Buffer.from('signature')),
+      signedObservation: {},
+    });
+    expect(staged).toBe('recorded');
+    expect(f.database.stageObservation).toHaveBeenCalledOnce();
+  });
   it('maps the active SQL enrollment and signs only the atomically reserved snapshot', async () => {
     const f = fixture();
     const loaded = await f.broker.loadEnrollment(ids.enrollment);

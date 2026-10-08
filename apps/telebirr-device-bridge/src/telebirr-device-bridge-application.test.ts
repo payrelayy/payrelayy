@@ -212,6 +212,7 @@ describe('TeleBirr device bridge application', () => {
       { host: '0.0.0.0', port: 8084 },
       undefined,
       undefined,
+      undefined,
     );
     expect(fixture.captured.bridge?.serverSigner).toBe(enabledConfig.serverSigner);
     expect(fixture.captured.bridge?.claimReplay).toBeDefined();

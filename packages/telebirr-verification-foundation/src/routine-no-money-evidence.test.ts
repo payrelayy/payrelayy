@@ -346,7 +346,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     expect(JSON.stringify(result)).not.toContain(input.signedObservation.signature);
   });
 
-  it('keeps tampered, stale, and non-completed paid observations in review', () => {
+  it('allows a bounded upload retry but reviews tampered, late, and non-completed evidence', () => {
     const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
       fixture();
     const paid = { ...input, trustedIssuanceMode: 'paid' };
@@ -363,7 +363,14 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         signerSpki,
         deviceSpki,
       ),
-    ).toMatchObject({ disposition: 'review', evidence: null });
+    ).toMatchObject({ disposition: 'paid_phone_observation_matches_policy' });
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, assessedAt: '2026-10-05T18:18:00.000Z' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', reasonCode: 'upload_expired', evidence: null });
     const reversed = signedObservation(
       observationBody({ ...facts, providerFinalStatus: 'reversed' }),
       deviceKey.privateKey,

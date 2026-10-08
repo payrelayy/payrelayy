@@ -181,5 +181,27 @@ device.fetanagent.com {
 	}
 	# END exact routine paid-poll routing contract
 
+	# BEGIN exact routine paid-observation routing contract
+	# The bridge keeps this path closed unless the separately gated paid upload
+	# handler is composed. A signed observation is not a payment claim or credit.
+	@production_telebirr_routine_paid_upload {
+		method POST
+		path /v1/telebirr/routine/paid/observations:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-routine-paid-observation.v1+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+
+	handle @production_telebirr_routine_paid_upload {
+		request_body {
+			max_size 48KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+	# END exact routine paid-observation routing contract
+
 	respond 404
 }

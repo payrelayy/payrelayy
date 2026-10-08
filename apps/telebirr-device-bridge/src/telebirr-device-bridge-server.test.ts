@@ -23,6 +23,10 @@ import {
   ROUTINE_PAID_POLL_CONTENT_TYPE,
   ROUTINE_PAID_POLL_PATH,
 } from './routine-paid-poll-bridge.js';
+import {
+  ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+  ROUTINE_PAID_UPLOAD_PATH,
+} from './routine-paid-upload-bridge.js';
 
 interface NetworkResponse {
   readonly statusCode: number;
@@ -120,19 +124,62 @@ describe('TeleBirr device bridge HTTP server', () => {
       ROUTINE_NO_MONEY_POLL_PATH,
       ROUTINE_NO_MONEY_UPLOAD_PATH,
       ROUTINE_PAID_POLL_PATH,
+      ROUTINE_PAID_UPLOAD_PATH,
     ]) {
       const response = await exchange({
         path,
         headers: {
           'content-length': '2',
           'content-type':
-            path === ROUTINE_PAID_POLL_PATH
-              ? ROUTINE_PAID_POLL_CONTENT_TYPE
-              : ROUTINE_NO_MONEY_CONTENT_TYPE,
+            path === ROUTINE_PAID_UPLOAD_PATH
+              ? ROUTINE_PAID_UPLOAD_CONTENT_TYPE
+              : path === ROUTINE_PAID_POLL_PATH
+                ? ROUTINE_PAID_POLL_CONTENT_TYPE
+                : ROUTINE_NO_MONEY_CONTENT_TYPE,
         },
       });
       expect(response.statusCode).toBe(400);
     }
+    expect(pilot).not.toHaveBeenCalled();
+  });
+
+  it('dispatches paid upload only to its explicit handler and preserves no-credit responses', async () => {
+    const pilot = vi.fn();
+    const paidUpload = vi.fn(async () => ({
+      statusCode: 202,
+      headers: { 'cache-control': 'no-store', 'content-type': ROUTINE_PAID_UPLOAD_CONTENT_TYPE },
+      body: Buffer.from(
+        JSON.stringify({
+          outcome: 'signed_paid_observation_staged',
+          advisoryOnly: true,
+          paymentVerificationRequested: true,
+          pairedPhoneEvidenceVerified: true,
+          sourceAuthenticationPerformed: false,
+          financialActionAllowed: false,
+        }),
+      ),
+    }));
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      pilot,
+      { host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST, port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT },
+      undefined,
+      undefined,
+      paidUpload,
+    );
+    await runtime.listen();
+    const valid = await exchange({
+      path: ROUTINE_PAID_UPLOAD_PATH,
+      headers: { 'content-length': '2', 'content-type': ROUTINE_PAID_UPLOAD_CONTENT_TYPE },
+    });
+    expect(valid.statusCode).toBe(202);
+    expect(valid.headers['content-type']).toBe(ROUTINE_PAID_UPLOAD_CONTENT_TYPE);
+    expect(paidUpload).toHaveBeenCalledOnce();
+    for (const headers of [
+      { 'content-length': '2', 'content-type': ROUTINE_PAID_POLL_CONTENT_TYPE },
+      { 'content-length': '49153', 'content-type': ROUTINE_PAID_UPLOAD_CONTENT_TYPE },
+    ])
+      expect((await exchange({ path: ROUTINE_PAID_UPLOAD_PATH, headers })).statusCode).toBe(400);
+    expect(paidUpload).toHaveBeenCalledOnce();
     expect(pilot).not.toHaveBeenCalled();
   });
 

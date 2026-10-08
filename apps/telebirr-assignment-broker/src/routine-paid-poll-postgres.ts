@@ -1,3 +1,5 @@
+import { isProxy } from 'node:util/types';
+
 import type { RoutinePaidPollBrokerDatabase } from './routine-paid-poll-broker.js';
 
 export interface RoutinePaidPollSqlClient {
@@ -7,6 +9,9 @@ export interface RoutinePaidPollSqlClient {
 const LOAD = 'select * from app.load_routine_telebirr_paid_poll_enrollment($1::uuid)';
 const ISSUE =
   'select * from app.issue_routine_telebirr_paid_poll_assignment($1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::uuid)';
+const OBSERVATION = 'select * from app.load_routine_telebirr_paid_observation_material($1::uuid)';
+const STAGE =
+  'select app.stage_routine_telebirr_paid_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb) as status';
 
 export class RoutinePaidPollSqlUnavailableError extends Error {
   constructor() {
@@ -25,7 +30,7 @@ async function oneRow(client: RoutinePaidPollSqlClient, sql: string, values: unk
   }
 }
 
-/** Exact parameterized paid calls, with no observation or financial SQL surface. */
+/** Exact parameterized paid calls, with no direct table or financial SQL surface. */
 export function createRoutinePaidPollPostgresDatabase(
   client: RoutinePaidPollSqlClient,
 ): RoutinePaidPollBrokerDatabase {
@@ -42,5 +47,31 @@ export function createRoutinePaidPollPostgresDatabase(
         input.requestExpiresAt,
         input.signerId,
       ]),
+    loadObservationMaterial: (challengeId: string) => oneRow(client, OBSERVATION, [challengeId]),
+    async stageObservation(
+      input: Parameters<RoutinePaidPollBrokerDatabase['stageObservation']>[0],
+    ) {
+      const row = await oneRow(client, STAGE, [
+        input.challengeId,
+        input.assignmentBodyDigest,
+        input.observationBodyDigest,
+        input.observationSignatureDigest,
+        input.replayIdentity,
+        JSON.stringify(input.signedObservation),
+      ]);
+      if (
+        typeof row !== 'object' ||
+        row === null ||
+        Array.isArray(row) ||
+        isProxy(row) ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        Reflect.ownKeys(row).length !== 1
+      )
+        throw new RoutinePaidPollSqlUnavailableError();
+      const status = Object.getOwnPropertyDescriptor(row, 'status');
+      if (!status?.enumerable || !Object.hasOwn(status, 'value'))
+        throw new RoutinePaidPollSqlUnavailableError();
+      return status.value;
+    },
   });
 }

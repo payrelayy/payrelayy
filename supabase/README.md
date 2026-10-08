@@ -65,10 +65,11 @@ Configure exactly these GitHub `production` environment secrets with production-
 - `SUPABASE_DB_PASSWORD`
 
 The workflow pins the Supabase CLI, verifies the checked-out commit, links only the production
-project, independently checks the CLI linked-project state, lists the migration ledger, applies the
-canonical migrations, and lists the resulting ledger. It does not seed customers, deploy a runtime,
-or start Telegram. It does not enable financial execution. Financial activation remains a separate,
-explicitly authorized production operation after the database and runtimes are verified.
+project, independently checks the CLI linked-project state, then uses the production IPv4 session
+pooler to list the migration ledger, apply the canonical migrations, and list the resulting ledger.
+It does not seed customers, deploy a runtime, or start Telegram. This workflow does not enable financial execution.
+Financial activation remains a separate, explicitly authorized production operation after the
+database and runtimes are verified.
 
 ### Production TeleBirr trust binding
 

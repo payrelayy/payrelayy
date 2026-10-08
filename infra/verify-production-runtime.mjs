@@ -836,6 +836,11 @@ assert.match(
 assert.match(helper, /expected_count=34/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
+assert.equal((helper.match(/expected_count=\$\(\(expected_count \+ 4\)\)/gu) ?? []).length, 2);
+assert.match(
+  helper,
+  /elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'"[\s\S]*?routine-no-money-database-url[\s\S]*?routine-no-money-lookup-signer\.pkcs8\.der[\s\S]*?routine-no-money-lookup-signer\.v1\.json[\s\S]*?telebirr-reference-opening-key\.v1\.json/u,
+);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
 assert.match(helper, /runtime-deployment-mode/u);

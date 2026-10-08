@@ -403,8 +403,42 @@ describe('dormant routine no-money bridge handler', () => {
       }),
     );
     expect(reversed.statusCode).toBe(202);
-    expect(decoded(reversed.body).outcome).toBe('review');
-    expect(staged).toBeUndefined();
+    expect(decoded(reversed.body)).toEqual({
+      outcome: 'signed_evidence_recorded_for_policy_review',
+      advisoryOnly: true,
+      sourceAuthenticationPerformed: false,
+      financialActionAllowed: false,
+    });
+    expect(staged).toMatchObject({
+      challengeId: f.context.trustedLookup.challengeId,
+      assignmentBodyDigest: f.signedAssignment.bodyDigest,
+    });
+    expect(JSON.stringify(staged)).not.toContain(f.rawReference);
+  });
+
+  it('never acknowledges a signed policy review when its durable digest cannot be staged', async () => {
+    const f = fixture();
+    const reversed = f.makeObservation({ ...f.facts, providerFinalStatus: 'reversed' });
+    for (const stageResult of ['retry', 'conflict'] as const) {
+      const handler = createRoutineNoMoneyBridgeHandler({
+        now: () => '2026-10-05T18:04:00.000Z',
+        loadEnrollment: async () => undefined,
+        claimAndIssuePoll: async () => ({ kind: 'none' }),
+        loadObservation: async () => f.context,
+        stageObservationDigest: async () => stageResult,
+      });
+      const result = await handler(
+        http(ROUTINE_NO_MONEY_UPLOAD_PATH, {
+          publicKeySpki: f.publicKeySpki,
+          signedAssignment: f.signedAssignment,
+          signedObservation: reversed,
+        }),
+      );
+      expect(result.statusCode).toBe(stageResult === 'retry' ? 503 : 409);
+      expect(decoded(result.body)).toEqual({
+        code: stageResult === 'retry' ? 'temporarily_unavailable' : 'observation_conflict',
+      });
+    }
   });
 
   it('rejects duplicate JSON keys and unsigned or mismatched uploads without staging', async () => {

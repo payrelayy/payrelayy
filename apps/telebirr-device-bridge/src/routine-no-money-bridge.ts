@@ -289,7 +289,15 @@ async function handleUpload(
   if (!assessment.deviceSignatureVerified || !assessment.providedSnapshotMatched) {
     return error(401, 'invalid_request');
   }
-  if (assessment.disposition !== 'would_forward_signed_evidence' || !assessment.replayIdentity) {
+  // A signed observation that fails only the receipt policy is still useful review evidence.
+  // Persist its digest under the same no-money, one-observation-per-challenge boundary;
+  // it must never be mistaken for an accepted payment or a provider-authenticated source.
+  const policyReview =
+    assessment.disposition === 'would_review' && assessment.reasonCode === 'receipt_policy_review';
+  if (
+    (assessment.disposition !== 'would_forward_signed_evidence' && !policyReview) ||
+    !assessment.replayIdentity
+  ) {
     return response(202, {
       outcome: 'review',
       advisoryOnly: true,
@@ -326,7 +334,9 @@ async function handleUpload(
   if (staged === 'retry') return error(503, 'temporarily_unavailable');
   if (staged === 'conflict') return error(409, 'observation_conflict');
   return response(202, {
-    outcome: 'signed_evidence_received_for_review',
+    outcome: policyReview
+      ? 'signed_evidence_recorded_for_policy_review'
+      : 'signed_evidence_received_for_review',
     advisoryOnly: true,
     sourceAuthenticationPerformed: false,
     financialActionAllowed: false,

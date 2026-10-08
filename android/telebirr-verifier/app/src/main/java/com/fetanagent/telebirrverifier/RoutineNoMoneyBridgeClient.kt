@@ -69,11 +69,12 @@ internal sealed interface RoutineNoMoneyPhoneResult {
   data object NoAssignment : RoutineNoMoneyPhoneResult
   data object Retry : RoutineNoMoneyPhoneResult
   data object SubmittedForReview : RoutineNoMoneyPhoneResult
+  data object RecordedPolicyReview : RoutineNoMoneyPhoneResult
   data class Review(val reasonCode: String) : RoutineNoMoneyPhoneResult
 }
 
 /**
- * One-shot no-money rehearsal. It is deliberately not called by the UI or foreground service.
+ * One-shot no-money rehearsal used by the evidence-only foreground service.
  * The encrypted work store preserves the assignment before lookup and the exact signed upload
  * before transport, so a restart resumes rather than spending a second one-use poll. This class
  * has no database, payment claim, Player credit or money capability.
@@ -229,13 +230,16 @@ internal class RoutineNoMoneyPhoneRehearsal(
         !value.boolean("financialActionAllowed"))
       when (value.string("outcome")) {
         "signed_evidence_received_for_review" -> RoutineNoMoneyPhoneResult.SubmittedForReview
+        "signed_evidence_recorded_for_policy_review" ->
+          RoutineNoMoneyPhoneResult.RecordedPolicyReview
         "review" -> RoutineNoMoneyPhoneResult.Review("server_review")
         else -> RoutineNoMoneyPhoneResult.Review("invalid_upload_response")
       }
     } catch (_: Exception) {
       RoutineNoMoneyPhoneResult.Review("invalid_upload_response")
     }
-    if (result == RoutineNoMoneyPhoneResult.SubmittedForReview) {
+    if (result == RoutineNoMoneyPhoneResult.SubmittedForReview ||
+      result == RoutineNoMoneyPhoneResult.RecordedPolicyReview) {
       try { workStore.acknowledge(uploadBytes) } catch (_: Exception) {
         return RoutineNoMoneyPhoneResult.Review("local_work_unavailable")
       }

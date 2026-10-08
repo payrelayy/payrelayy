@@ -17,7 +17,8 @@ application provisioning path; the issuer has no runtime grant or transport. A s
 function can return the exact encrypted candidate and trust material in the same transaction as
 challenge issuance, while rejecting a signer that is also the device key. A dormant protected-process
 builder and private no-money broker core can open that reference and sign the routine assignment
-in isolation, but have no database runtime grant, deployed caller, protected transport, or
+in isolation. A separate no-password NOLOGIN database scaffold has only four no-money function
+grants, but there is no provisioned login, deployed caller, protected transport, or
 signed-assignment persistence. They do not authenticate an official TeleBirr source,
 accept an observation, or claim a payment. Pilot pairing cannot substitute for routine enrollment.
 The advisory result and dormant ledger do not satisfy this activation gate.

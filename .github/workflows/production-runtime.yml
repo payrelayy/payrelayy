@@ -357,6 +357,7 @@ jobs:
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
           ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
+          ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
@@ -443,7 +444,10 @@ jobs:
           [[ "$(printf '%s\n' "${values[@]}" | sort -u | wc -l)" -eq "${#values[@]}" ]]
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" != "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_NO_MONEY_RUNTIME_PASSWORD "* ]]
+            [[ ! " ${values[*]} " == *" $ROUTINE_PAID_POLL_RUNTIME_PASSWORD "* ]]
           fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -592,6 +596,10 @@ jobs:
               "fetanagent_routine_telebirr_no_money_runtime.$PRODUCTION_PROJECT_REF" \
               "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
               >"$secret_dir/routine-no-money-database-url"
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "fetanagent_routine_telebirr_paid_poll_runtime.$PRODUCTION_PROJECT_REF" \
+              "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              >"$secret_dir/routine-paid-poll-database-url"
           fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
@@ -697,6 +705,32 @@ jobs:
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             -v runtime_password="$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" \
             --file=infra/sql/production-routine-no-money-activate.sql >/dev/null
+
+      - name: Activate the separate review-only paid observation login
+        if: inputs.mode == 'deploy-inert'
+        id: routine_paid_activation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_paid_observation_activation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          psql -X \
+            -v runtime_password="$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
 
       - name: Build the exact active production TeleBirr assignment manifest
         if: inputs.mode == 'deploy'
@@ -948,6 +982,7 @@ jobs:
             deploy-inert)
               transfer_files+=(
                 "$SECRET_DIR"/routine-no-money-database-url
+                "$SECRET_DIR"/routine-paid-poll-database-url
                 "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
                 "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
                 "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
@@ -1013,7 +1048,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
-            echo 'Production web, Telegram, and the routine Android no-money review transport are live. The separate broker login may issue review-only receipt lookups and store signed-observation digests; it cannot create payment claims or credit Players. All seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
+            echo 'Production web, Telegram, and paired-phone receipt observation transport are live. The separate paid-review login may stage signed observations but cannot create payment claims, jobs, or Player credits. All seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
             echo 'Production web and Telegram are live in receiver-review-only mode. The exact pilot-bound destination may be reviewed, proof submission is unavailable, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow-intake' ]]; then
@@ -1082,6 +1117,23 @@ jobs:
           PGSERVICEFILE: /dev/null
           PGPASSFILE: /dev/null
         run: psql -X --file=infra/sql/production-routine-no-money-disable.sql >/dev/null
+
+      - name: Disable paid phone observation after failed deployment
+        if: always() && (failure() || cancelled()) && steps.routine_paid_activation.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_paid_failed_deployment_disable
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: psql -X --file=infra/sql/production-routine-paid-poll-disable.sql >/dev/null
 
   operate:
     name: Inspect or stop production runtime
@@ -1154,3 +1206,4 @@ jobs:
             "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper stop"
           psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql
           psql -X --file=infra/sql/production-routine-no-money-disable.sql
+          psql -X --file=infra/sql/production-routine-paid-poll-disable.sql

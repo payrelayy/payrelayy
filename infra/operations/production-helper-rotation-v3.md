@@ -5,13 +5,13 @@ sudoers grant on production Droplet `593344964`. It does not deploy a release, a
 login, enable a financial switch, or move money. The successor helper admits the separate
 review-only TeleBirr credential and signer files in an inert-maintenance release.
 
-| Reviewed item | Exact value |
-| --- | --- |
+| Reviewed item                        | Exact value                                                        |
+| ------------------------------------ | ------------------------------------------------------------------ |
 | Installed predecessor helper SHA-256 | `4c50500ad040890ca639bac5423a86c7d8c0ee348b33a6999498c6257947bd79` |
-| Successor helper SHA-256 | `cb23a2940f0cb6d523435ff98691b7ed06761e39b2161b1dd2e7e4c86c71c051` |
-| Helper | `/usr/local/sbin/fetanagent-production-deploy-helper` |
-| Sudoers grant | `/etc/sudoers.d/fetanagent-production-deploy-helper` |
-| Rotation script | `infra/operations/fetanagent-production-helper-rotation-v3.sh` |
+| Successor helper SHA-256             | `cb23a2940f0cb6d523435ff98691b7ed06761e39b2161b1dd2e7e4c86c71c051` |
+| Helper                               | `/usr/local/sbin/fetanagent-production-deploy-helper`              |
+| Sudoers grant                        | `/etc/sudoers.d/fetanagent-production-deploy-helper`               |
+| Rotation script                      | `infra/operations/fetanagent-production-helper-rotation-v3.sh`     |
 
 The staged successor must be the exact merged-main Git blob with the successor hash above. Do
 not stage a locally edited helper, signing key, database URL, or password. Before touching the

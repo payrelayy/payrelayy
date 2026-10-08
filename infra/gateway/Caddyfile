@@ -159,5 +159,27 @@ device.fetanagent.com {
 	}
 	# END exact routine no-money routing contract
 
+	# BEGIN exact routine paid-poll routing contract
+	# The paid-work poll has its own path and media type. A production bridge with
+	# the paid handler disabled still rejects it; this route is not a credit API.
+	@production_telebirr_routine_paid_poll {
+		method POST
+		path /v1/telebirr/routine/paid/assignments:poll
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+
+	handle @production_telebirr_routine_paid_poll {
+		request_body {
+			max_size 4KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+	# END exact routine paid-poll routing contract
+
 	respond 404
 }

@@ -26,6 +26,7 @@ concurrency:
 env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
   SUPABASE_CLI_VERSION: 2.113.0
 
 jobs:
@@ -178,6 +179,19 @@ jobs:
             exit 1
           fi
 
-          supabase migration list --linked
-          supabase db push --linked --yes
-          supabase migration list --linked
+          database_url="$(node --input-type=module -e '
+            const { PRODUCTION_PROJECT_REF: projectRef, PRODUCTION_DATABASE_POOLER_HOST: poolerHost, SUPABASE_DB_PASSWORD: password } = process.env;
+            const url = new URL(`postgresql://postgres.${projectRef}@${poolerHost}:5432/postgres`);
+            url.password = encodeURIComponent(password).replace(/[!'()*]/g, character =>
+              `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+            url.searchParams.set("sslmode", "require");
+            process.stdout.write(url.toString());
+          ')"
+          encoded_password="${database_url#*://*:}"
+          encoded_password="${encoded_password%%@*}"
+          printf '::add-mask::%s\n' "$encoded_password"
+          printf '::add-mask::%s\n' "$database_url"
+
+          supabase migration list --db-url "$database_url"
+          supabase db push --db-url "$database_url" --yes
+          supabase migration list --db-url "$database_url"

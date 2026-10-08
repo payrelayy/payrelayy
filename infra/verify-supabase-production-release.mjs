@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -63,17 +64,49 @@ assertInOrder(
     'Link only the production project',
     'Verify the linked production target',
     'Apply canonical migrations to production',
-    'supabase migration list --linked',
-    'supabase db push --linked --yes',
-    'supabase migration list --linked',
+    'supabase migration list --db-url "$database_url"',
+    'supabase db push --db-url "$database_url" --yes',
+    'supabase migration list --db-url "$database_url"',
   ],
   'Commit verification, credential validation, exact linking, and canonical apply must stay ordered',
 );
 assert.match(workflow, /STAGING_PROJECT_REF: spzpiyxheappsfyswewl/u);
 assert.match(workflow, /PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr/u);
+assert.match(workflow, /PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1\.pooler\.supabase\.com/u);
 assert.match(protectedJob, /SUPABASE_ACCESS_TOKEN: \$\{\{ secrets\.SUPABASE_ACCESS_TOKEN \}\}/u);
 assert.match(protectedJob, /SUPABASE_DB_PASSWORD: \$\{\{ secrets\.SUPABASE_DB_PASSWORD \}\}/u);
+assert.match(
+  protectedJob,
+  /new URL\(`postgresql:\/\/postgres\.\$\{projectRef\}@\$\{poolerHost\}:5432\/postgres`\)/u,
+);
+assert.match(protectedJob, /url\.password = encodeURIComponent\(password\)\.replace/u);
+assert.match(protectedJob, /url\.searchParams\.set\("sslmode", "require"\)/u);
+assert.match(protectedJob, /printf '::add-mask::%s\\n' "\$encoded_password"/u);
+assert.match(protectedJob, /printf '::add-mask::%s\\n' "\$database_url"/u);
 assert.doesNotMatch(workflow, /service[_-]?role|seed\.sql|telegram|payment/u);
+
+const urlBuilder =
+  /database_url="\$\(node --input-type=module -e '\n([\s\S]*?)\n          '\)"/u.exec(
+    protectedJob,
+  )?.[1];
+assert.ok(urlBuilder, 'The session-pooler URL builder must remain present.');
+const syntheticPassword = "private:@/%? #&!'()*";
+const databaseUrl = execFileSync(process.execPath, ['--input-type=module', '-e', urlBuilder], {
+  encoding: 'utf8',
+  env: {
+    ...process.env,
+    PRODUCTION_PROJECT_REF: 'xzztugbgtulptnbpoelr',
+    PRODUCTION_DATABASE_POOLER_HOST: 'aws-0-eu-west-1.pooler.supabase.com',
+    SUPABASE_DB_PASSWORD: syntheticPassword,
+  },
+});
+const parsedDatabaseUrl = new URL(databaseUrl);
+assert.equal(parsedDatabaseUrl.hostname, 'aws-0-eu-west-1.pooler.supabase.com');
+assert.equal(parsedDatabaseUrl.username, 'postgres.xzztugbgtulptnbpoelr');
+assert.equal(parsedDatabaseUrl.port, '5432');
+assert.equal(parsedDatabaseUrl.searchParams.get('sslmode'), 'require');
+assert.equal(decodeURIComponent(parsedDatabaseUrl.password), syntheticPassword);
+assert.equal(databaseUrl.includes(syntheticPassword), false);
 
 assert.match(readme, /## Production database release/u);
 assert.match(readme, /confirm_production_project_ref/u);

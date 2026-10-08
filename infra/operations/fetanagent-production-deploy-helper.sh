@@ -724,6 +724,26 @@ case "${1:-}" in
         [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
           die "the operational production bundle is missing $name"
       done
+    elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" \
+      "$incoming/compose.production.inert-maintenance.yaml"; then
+      expected_count=$((expected_count + 4))
+      for name in \
+        routine-no-money-database-url \
+        routine-no-money-lookup-signer.pkcs8.der \
+        routine-no-money-lookup-signer.v1.json \
+        telebirr-reference-opening-key.v1.json
+      do
+        [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
+          die "the routine no-money bundle is missing $name"
+      done
+      for name in \
+        telebirr-assignment-database-url \
+        telebirr-assignment-runtime-manifest.v1.json \
+        telebirr-assignment-signer.pkcs8.der
+      do
+        [[ ! -e "$incoming/$name" && ! -L "$incoming/$name" ]] ||
+          die "the inert production bundle unexpectedly contains $name"
+      done
     else
       for name in \
         telebirr-assignment-database-url \

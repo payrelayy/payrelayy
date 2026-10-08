@@ -21,6 +21,8 @@ const ISSUE_MATERIAL =
   'select * from app.issue_routine_telebirr_lookup_assignment_material($1::uuid, $2::uuid, $3::uuid)';
 const ISSUE_NO_MONEY_POLL =
   'select * from app.issue_routine_telebirr_no_money_poll_assignment($1::uuid, $2::uuid, $3::text, $4::timestamptz, $5::uuid)';
+const ISSUE_PAID_POLL =
+  'select challenge_id, candidate_id from app.issue_routine_telebirr_paid_poll_assignment($1::uuid, $2::uuid, $3::text, $4::timestamptz, $5::uuid)';
 const LOAD_ENROLLMENT = 'select * from app.load_routine_telebirr_no_money_enrollment($1::uuid)';
 const LOAD_OBSERVATION_MATERIAL =
   'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)';
@@ -2279,6 +2281,13 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
           [paidId, paidTrust.enrollmentId, paidTrust.signerId],
         );
+        await rejected(client, ISSUE_PAID_POLL, [
+          paidTrust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          paidTrust.signerId,
+        ]);
 
         await client.query(`update app.feature_switches set mode = 'live'
           where feature_key in (
@@ -2288,16 +2297,32 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
           [noMoneyId, noMoneyTrust.enrollmentId, noMoneyTrust.signerId],
         );
+        const paidPoll = [
+          paidTrust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          paidTrust.signerId,
+        ];
         const issued = await client.query<{
           challenge_id: string;
           candidate_id: string;
-        }>(
-          `select challenge_id, candidate_id
-             from app.issue_routine_telebirr_paid_lookup_assignment_material(
-               $1::uuid, $2::uuid, $3::uuid)`,
-          [paidId, paidTrust.enrollmentId, paidTrust.signerId],
-        );
+        }>(ISSUE_PAID_POLL, paidPoll);
         expect(issued.rows).toEqual([{ challenge_id: expect.any(String), candidate_id: paidId }]);
+        await rejected(client, ISSUE_PAID_POLL, paidPoll);
+        const emptyPoll = await client.query(ISSUE_PAID_POLL, [
+          paidTrust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          paidTrust.signerId,
+        ]);
+        expect(emptyPoll.rows).toEqual([]);
+        const spent = await client.query<{ count: string }>(
+          'select count(*) from app.routine_telebirr_paid_poll_claims where enrollment_id = $1::uuid',
+          [paidTrust.enrollmentId],
+        );
+        expect(spent.rows[0]!.count).toBe('2');
         const paid = await client.query<{
           challenge_id: string;
           candidate_id: string;
@@ -2324,6 +2349,45 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             `sha256:${digest()}`,
           ],
         );
+        const laterEventId = await fixtureInboundEvent(client, actor.identityId);
+        const laterSubmittedAt = await client.query<{ submitted_at: Date }>(
+          `update app.inbound_events
+              set processed_at = date_trunc('milliseconds', clock_timestamp())
+            where id = $1::uuid returning processed_at as submitted_at`,
+          [laterEventId],
+        );
+        await client.query(
+          `insert into ${TABLE} (
+             submitting_customer_id, origin_identity_id, origin_channel,
+             origin_request_key, semantic_input_hmac, platform_id,
+             player_account_id, player_deposit_eligibility_decision_id,
+             payment_provider_id, provider_code, candidate_reference_ciphertext,
+             candidate_reference_fingerprint, candidate_reference_masked,
+             reference_encryption_key_version, reference_profile_version,
+             receiver_account_id, receiver_account_version, submitted_at, intake_mode
+           ) select submitting_customer_id, origin_identity_id, origin_channel,
+               $2::uuid, semantic_input_hmac, platform_id,
+               player_account_id, player_deposit_eligibility_decision_id,
+               payment_provider_id, provider_code, candidate_reference_ciphertext,
+               candidate_reference_fingerprint, candidate_reference_masked,
+               reference_encryption_key_version, reference_profile_version,
+               receiver_account_id, receiver_account_version,
+               $3::timestamptz, 'paid'
+             from ${TABLE} where id = $1::uuid`,
+          [noMoneyId, laterEventId, laterSubmittedAt.rows[0]!.submitted_at],
+        );
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const noMoneyPoll = await client.query(ISSUE_NO_MONEY_POLL, [
+          noMoneyTrust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          noMoneyTrust.signerId,
+        ]);
+        expect(noMoneyPoll.rows).toEqual([]);
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
         await client.query(
           `select app.stop_owner_routine_telebirr_processing($1::uuid, $2::uuid)`,
           [auth.rows[0]!.auth_user_id, randomUUID()],
@@ -2333,6 +2397,13 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
           [paidId, paidTrust.enrollmentId, paidTrust.signerId],
         );
+        await rejected(client, ISSUE_PAID_POLL, [
+          paidTrust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          paidTrust.signerId,
+        ]);
       });
     });
 
@@ -2342,6 +2413,8 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         runtime_can_issue: boolean;
         public_can_issue: boolean;
         broker_can_issue: boolean;
+        paid_poll_public: boolean;
+        paid_poll_no_money_runtime: boolean;
       }>(`select
           has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
             'app.issue_routine_telebirr_paid_lookup_challenge(uuid,uuid,uuid)',
@@ -2351,9 +2424,21 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             'EXECUTE') as public_can_issue,
           has_function_privilege('fetanagent_telebirr_assignment_broker_runtime',
             'app.issue_routine_telebirr_paid_lookup_assignment_material(uuid,uuid,uuid)',
-            'EXECUTE') as broker_can_issue`);
+            'EXECUTE') as broker_can_issue,
+          has_function_privilege('public',
+            'app.issue_routine_telebirr_paid_poll_assignment(uuid,uuid,text,timestamptz,uuid)',
+            'EXECUTE') as paid_poll_public,
+          has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+            'app.issue_routine_telebirr_paid_poll_assignment(uuid,uuid,text,timestamptz,uuid)',
+            'EXECUTE') as paid_poll_no_money_runtime`);
       expect(access.rows).toEqual([
-        { runtime_can_issue: false, public_can_issue: false, broker_can_issue: false },
+        {
+          runtime_can_issue: false,
+          public_can_issue: false,
+          broker_can_issue: false,
+          paid_poll_public: false,
+          paid_poll_no_money_runtime: false,
+        },
       ]);
     });
   });

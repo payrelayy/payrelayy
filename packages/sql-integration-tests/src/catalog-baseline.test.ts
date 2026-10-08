@@ -14,6 +14,7 @@ import { registerCompanionExecutionActivationRequestSqlTests } from './companion
 import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycle-connection.suite.js';
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
+import { registerRoutineTelebirrPaidIntentSnapshotSqlTests } from './routine-telebirr-paid-intent-snapshot.suite.js';
 import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
@@ -6645,6 +6646,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(depositInsertTriggers.rows.map((row) => row.trigger_name)).toEqual([
       'deposit_intents_enforce_player_deposit_eligibility',
+      'deposit_intents_populate_routine_paid_snapshot',
       'deposit_intents_populate_snapshot',
     ]);
 
@@ -9790,6 +9792,10 @@ describe('disposable SQL migration baseline', () => {
 
 registerDepositExecutionCommandSqlTests(() => client);
 registerRoutineTelebirrProcessingPolicySqlTests(
+  () => client,
+  () => ownerAuthUserId,
+);
+registerRoutineTelebirrPaidIntentSnapshotSqlTests(
   () => client,
   () => ownerAuthUserId,
 );

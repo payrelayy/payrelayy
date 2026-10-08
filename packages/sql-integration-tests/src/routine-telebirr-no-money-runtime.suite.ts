@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
+import {
+  ROUTINE_NO_MONEY_CATALOG_PREFLIGHT_SQL,
+  ROUTINE_NO_MONEY_PREFLIGHT_KEYS,
+} from '../../../apps/telebirr-assignment-broker/src/routine-no-money-runtime.js';
+
 const group = 'fetanagent_routine_telebirr_no_money';
 const runtime = 'fetanagent_routine_telebirr_no_money_runtime';
 const allowed = [
@@ -233,6 +238,28 @@ export function registerRoutineTelebirrNoMoneyRuntimeSqlTests(getClient: () => C
         `select rolcanlogin as login from pg_catalog.pg_roles where rolname = '${runtime}'`,
       );
       expect(role.rows).toEqual([{ login: false }]);
+    });
+
+    it('passes the runtime catalog preflight only during a bounded no-money login', async () => {
+      const client = getClient();
+      const validUntil = new Date(Date.now() + 60 * 60_000).toISOString();
+      await client.query('begin');
+      try {
+        await client.query(`alter role ${runtime} login valid until '${validUntil}'`);
+        await asRuntime(client, async () => {
+          const result = await client.query<Record<string, boolean>>(
+            ROUTINE_NO_MONEY_CATALOG_PREFLIGHT_SQL,
+            [],
+          );
+          expect(result.rows).toHaveLength(1);
+          for (const key of ROUTINE_NO_MONEY_PREFLIGHT_KEYS) {
+            expect(result.rows[0]?.[key], key).toBe(true);
+          }
+        });
+      } finally {
+        await client.query('rollback');
+        await client.query('reset session authorization');
+      }
     });
   });
 }

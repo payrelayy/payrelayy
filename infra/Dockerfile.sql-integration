@@ -107,6 +107,10 @@ COPY apps/api/package.json ./apps/api/package.json
 COPY apps/api/src/telegram-action-capability.ts ./apps/api/src/telegram-action-capability.ts
 COPY apps/api/src/telegram-routine-telebirr-candidate-intake.ts \
   ./apps/api/src/telegram-routine-telebirr-candidate-intake.ts
+COPY apps/telebirr-assignment-broker/src/routine-no-money-runtime.ts \
+  ./apps/telebirr-assignment-broker/src/routine-no-money-runtime.ts
+COPY apps/telebirr-assignment-broker/src/routine-no-money-postgres.ts \
+  ./apps/telebirr-assignment-broker/src/routine-no-money-postgres.ts
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts \
   ./packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts

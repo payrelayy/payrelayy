@@ -85,6 +85,12 @@ or a payment claim.
 This is a private library core, not a second mode of the operational pilot broker. A separate
 NOLOGIN/no-password role scaffold now inherits EXECUTE on only the four external no-money SQL
 functions. Their operation-time guard refuses it until a short-lived credential is explicitly
-provisioned; the nested issuers remain owner-only. The core still has no signer secret, Unix
-listener, compose service, public route, or production caller. A later release must add the
-protected transport and production wiring before any phone rehearsal.
+provisioned; the nested issuers remain owner-only. The separate PostgreSQL runtime accepts only
+the matching project-specific direct or session-pooler route over verified TLS, then checks the
+login identity, bounded validity, one-way membership, exact four-function surface, and lack of
+base-object access before every call. It uses one persistent connection, not a transaction pooler.
+Its catalog check was also exercised against the production catalog read-only as the unprivileged
+role remains `NOLOGIN`; only a disposable database test temporarily enables a bounded login and
+rolls it back. The core still has no credential loader, signer secret, Unix listener, compose
+service, public route, or production caller. A later release must add protected transport and
+production wiring before any phone rehearsal.

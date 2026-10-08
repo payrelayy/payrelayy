@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { createVerifiedDepositFixture } from './deposit-execution-commands.suite.js';
@@ -81,6 +81,7 @@ export async function paidJob(
   client: Client,
   amountMinor = 2500,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
+  withPaidLineage = true,
 ) {
   if (providerCode === 'telebirr') {
     // The shared catalog seeds CBE Birr only. Use the same synthetic TeleBirr receiver mask
@@ -116,6 +117,93 @@ export async function paidJob(
     [fixture.depositIntentId, fixture.verificationAttemptId, fixture.evidenceId],
   );
   expect(settled.rows).toHaveLength(1);
+  if (providerCode === 'telebirr' && withPaidLineage) {
+    // Privileged, rollback-only DB fixture. A production producer must independently
+    // verify the paired signature and official source before creating this lineage.
+    const snapshot = await client.query<{
+      payment_provider_id: string;
+      receiver_account_id: string;
+      receiver_account_version: number;
+      submission_id: string;
+      submitted_at: Date;
+      reference_fingerprint: string;
+      occurred_at: Date;
+    }>(
+      `select intent.payment_provider_id, intent.receiver_account_id,
+              intent.receiver_account_version, submission.id as submission_id,
+              submission.submitted_at, evidence.canonical_reference_fingerprint as reference_fingerprint,
+              evidence.occurred_at
+         from app.deposit_intents intent
+         join app.deposit_verification_attempts verification on verification.deposit_intent_id = intent.id
+         join app.deposit_submissions submission on submission.id = verification.deposit_submission_id
+         join app.provider_payment_evidence evidence on evidence.id = verification.provider_payment_evidence_id
+        where intent.id = $1::uuid and verification.id = $2::uuid`,
+      [fixture.depositIntentId, fixture.verificationAttemptId],
+    );
+    const exact = snapshot.rows[0]!;
+    const sha = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+    const challengeId = randomUUID();
+    const candidateId = randomUUID();
+    const bodyDigest = sha(randomUUID());
+    const sourceDocumentDigest = sha(randomUUID());
+    const observedAt = exact.occurred_at.toISOString();
+    const signedObservation = {
+      contractVersion: 1,
+      providerCode: 'telebirr',
+      protocolMode: 'routine_signed_observation_v1',
+      bodyDigest,
+      body: {
+        candidateId,
+        challengeId,
+        referenceFingerprint: exact.reference_fingerprint,
+        sourceDocumentDigest,
+        receiverRevisionId: exact.receiver_account_id,
+        receiverVersion: exact.receiver_account_version,
+        observedAt,
+        facts: {
+          amountMinor,
+          currencyCode: 'ETB',
+          evidenceSource: 'provider_receipt_lookup',
+          occurredAt: observedAt,
+          providerFinalStatus: 'completed',
+          providerIdentity: 'matched',
+          receiverMatch: 'matched',
+          referenceMatch: 'matched',
+        },
+      },
+      signature: 'A'.repeat(86),
+    };
+    await client.query(
+      `insert into app.routine_telebirr_paid_observation_lineages (
+        challenge_id, candidate_id, payment_provider_id, reference_fingerprint,
+        observation_body_digest, source_document_digest, signed_observation,
+        submitted_at, challenge_issued_at, observed_at, occurred_at, amount_minor,
+        provider_payment_evidence_id, deposit_intent_id, deposit_submission_id,
+        deposit_payment_claim_id, execution_job_id
+      ) values (
+        $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::jsonb,
+        $8::timestamptz, $8::timestamptz, $9::timestamptz, $9::timestamptz, $10::bigint,
+        $11::uuid, $12::uuid, $13::uuid, $14::uuid, $15::uuid
+      )`,
+      [
+        challengeId,
+        candidateId,
+        exact.payment_provider_id,
+        exact.reference_fingerprint,
+        bodyDigest,
+        sourceDocumentDigest,
+        JSON.stringify(signedObservation),
+        exact.submitted_at,
+        exact.occurred_at,
+        amountMinor,
+        fixture.evidenceId,
+        fixture.depositIntentId,
+        exact.submission_id,
+        settled.rows[0]!.payment_claim_id,
+        settled.rows[0]!.execution_job_id,
+      ],
+    );
+  }
   return {
     ...fixture,
     jobId: settled.rows[0]!.execution_job_id,
@@ -134,6 +222,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         'routine_telebirr_processing_authorizations',
         'routine_telebirr_processing_events',
         'routine_telebirr_execution_bindings',
+        'routine_telebirr_paid_observation_lineages',
       ];
       const rows = await client.query<{
         relname: string;
@@ -146,7 +235,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       `,
         [tables],
       );
-      expect(rows.rows).toHaveLength(3);
+      expect(rows.rows).toHaveLength(4);
       expect(rows.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity)).toBe(true);
       const columns = await client.query<{ attname: string }>(`
         select attname from pg_attribute where attrelid = 'app.routine_telebirr_processing_authorizations'::regclass
@@ -429,6 +518,53 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
         });
       },
     );
+
+    it('does not adopt a generic verified TeleBirr job without paid phone lineage', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await persistentPolicyFixture(client, getOwner());
+        const deposit = await paidJob(client, 2500, 'telebirr', false);
+        expect(
+          (
+            await client.query(
+              `select * from app.assess_routine_telebirr_execution_job($1::uuid)`,
+              [deposit.jobId],
+            )
+          ).rows,
+        ).toHaveLength(0);
+        await rejected(client, `select app.admit_routine_telebirr_execution_job($1::uuid)`, [
+          deposit.jobId,
+        ]);
+      });
+    });
+
+    it('retains paid phone lineage without allowing edits or deletion', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await persistentPolicyFixture(client, getOwner());
+        const deposit = await paidJob(client);
+        const lineage = await client.query(
+          `select challenge_id, deposit_submission_id, provider_payment_evidence_id,
+                  deposit_payment_claim_id, execution_job_id
+             from app.routine_telebirr_paid_observation_lineages
+            where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        expect(lineage.rows).toHaveLength(1);
+        await rejected(
+          client,
+          `update app.routine_telebirr_paid_observation_lineages
+              set amount_minor = amount_minor + 1 where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        await rejected(
+          client,
+          `delete from app.routine_telebirr_paid_observation_lineages where execution_job_id = $1::uuid`,
+          [deposit.jobId],
+        );
+        await rejected(client, `truncate app.routine_telebirr_paid_observation_lineages`);
+      });
+    });
 
     it('admits more than five distinct eligible deposits without a pilot or quota', async () => {
       const client = getClient();

@@ -149,6 +149,11 @@ export {
   type RoutineNoMoneyEvidenceAssessment,
 } from './routine-no-money-evidence.js';
 export {
+  assessRoutineTelebirrPaidPhoneEvidence,
+  type RoutineTelebirrPaidPhoneAssessment,
+  type RoutineTelebirrPaidPhoneEvidence,
+} from './routine-paid-phone-evidence.js';
+export {
   ROUTINE_NO_MONEY_POLL_MODE,
   ROUTINE_NO_MONEY_POLL_TRANSCRIPT,
   canonicalRoutineNoMoneyPollBodyBytes,

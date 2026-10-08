@@ -377,6 +377,49 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     ).toMatchObject({ disposition: 'review', reasonCode: 'receipt_policy_review', evidence: null });
   });
 
+  it('rejects a valid phone observation once its receipt is one hour old', () => {
+    const {
+      input,
+      signerSpki,
+      deviceSpki,
+      assignmentBody,
+      signedAssignment,
+      facts,
+      observationBody,
+      signedObservation,
+      deviceKey,
+    } = fixture();
+    const submittedAt = '2026-10-05T18:58:00.000Z';
+    const issuedAt = '2026-10-05T18:59:00.000Z';
+    const expiresAt = '2026-10-05T19:04:00.000Z';
+    const receiptFacts = {
+      ...facts,
+      occurredAt: '2026-10-05T18:00:00.000Z',
+      retrievedAt: '2026-10-05T18:59:30.000Z',
+    };
+    const result = assessRoutineTelebirrPaidPhoneEvidence(
+      {
+        ...input,
+        assessedAt: '2026-10-05T19:00:00.000Z',
+        trustedIssuanceMode: 'paid',
+        trustedLookup: { ...input.trustedLookup, submittedAt, issuedAt, expiresAt },
+        signedAssignment: signedAssignment({ ...assignmentBody, submittedAt, issuedAt, expiresAt }),
+        signedObservation: signedObservation(
+          { ...observationBody(receiptFacts), observedAt: receiptFacts.retrievedAt },
+          deviceKey.privateKey,
+        ),
+      },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(result).toMatchObject({
+      disposition: 'review',
+      reasonCode: 'payment_expired',
+      financialActionAllowed: false,
+      evidence: null,
+    });
+  });
+
   it('cannot accept another provider or caller-supplied financial authority', () => {
     const { input, signerSpki, deviceSpki } = fixture();
     expect(

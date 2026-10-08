@@ -115,13 +115,22 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     if (!isPlainNonProxyRecord(facts)) return review('invalid_request');
     const sourceDocumentDigest = ownDataValue(body, 'sourceDocumentDigest');
     const observationBodyDigest = ownDataValue(observation, 'bodyDigest');
+    const assessedAt = ownDataValue(candidate, 'assessedAt');
+    const occurredAt = ownDataValue(facts, 'occurredAt');
     if (
       typeof sourceDocumentDigest !== 'string' ||
       !DIGEST.test(sourceDocumentDigest) ||
       typeof observationBodyDigest !== 'string' ||
-      !DIGEST.test(observationBodyDigest)
+      !DIGEST.test(observationBodyDigest) ||
+      typeof assessedAt !== 'string' ||
+      typeof occurredAt !== 'string'
     ) {
       return review('invalid_request');
+    }
+    // No-money observation review permits a seven-day candidate. A paid claim
+    // must still be within the receipt's one-hour funding window at decision time.
+    if (Date.parse(assessedAt) >= Date.parse(occurredAt) + 3_600_000) {
+      return review('payment_expired');
     }
 
     return Object.freeze({
@@ -137,7 +146,7 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
         receiverVersion: ownDataValue(body, 'receiverVersion') as number,
         submittedAt: ownDataValue(lookup, 'submittedAt') as string,
         observedAt: ownDataValue(body, 'observedAt') as string,
-        occurredAt: ownDataValue(facts, 'occurredAt') as string,
+        occurredAt,
         retrievedAt: ownDataValue(facts, 'retrievedAt') as string,
         amountMinor: ownDataValue(facts, 'amountMinor') as number,
         currencyCode: 'ETB',

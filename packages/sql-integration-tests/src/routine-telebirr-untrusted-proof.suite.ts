@@ -1333,11 +1333,15 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             )
           ).rows,
         ).toEqual([{ count: '1' }]);
-        await rejected(client, archive, [
-          ...args.slice(0, 5),
-          JSON.stringify({ ...signedObservation, signature: 'B'.repeat(86) }),
-          args[6],
-        ]);
+        expect(
+          (
+            await client.query(archive, [
+              ...args.slice(0, 5),
+              JSON.stringify({ ...signedObservation, signature: 'B'.repeat(86) }),
+              args[6],
+            ])
+          ).rows,
+        ).toEqual([{ status: 'conflict' }]);
         await client.query('set local role service_role');
         await rejected(client, archive, args);
         await rejected(client, 'select * from app.routine_telebirr_signed_observation_payloads');

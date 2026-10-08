@@ -178,6 +178,9 @@ begin
          and agent.platform_id = platform.id and agent.status = 'active'
     )
     or assessed_at < opening.recorded_at - interval '5 minutes'
+    or opening.challenge_issued_at > assessed_at
+    or opening.observed_at > assessed_at + interval '5 minutes'
+    or opening.occurred_at > assessed_at + interval '5 minutes'
     or assessed_at >= opening.occurred_at + interval '1 hour'
     or new.customer_id is distinct from player.customer_id
     or new.platform_id is distinct from player.platform_id

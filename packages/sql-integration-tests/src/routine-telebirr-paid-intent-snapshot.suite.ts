@@ -51,21 +51,48 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
       await client.query('begin');
       try {
         const authorization = await persistentPolicyFixture(client, getOwner());
-        const legacy = await paidJob(client);
+        const legacy = await paidJob(client, 2500, 'cbe_birr');
         const snapshot = await client.query<{
           customer_id: string;
           platform_id: string;
           player_account_id: string;
-          payment_provider_id: string;
-          receiver_account_id: string;
-          receiver_account_version: number;
         }>(
-          `select customer_id, platform_id, player_account_id, payment_provider_id,
-                     receiver_account_id, receiver_account_version
+          `select customer_id, platform_id, player_account_id
                 from app.deposit_intents where id = $1::uuid`,
           [legacy.depositIntentId],
         );
         const binding = snapshot.rows[0]!;
+        // Other suites can leave a synthetic TeleBirr receiver scheduled for the
+        // future. Within this rollback-only fixture, use a revision that was
+        // already active when the synthetic receipt occurred.
+        await client.query(`update app.receiver_accounts
+           set status = 'inactive', retired_at = greatest(clock_timestamp(), active_from)
+           where provider_id = (select id from app.payment_providers where code = 'telebirr')
+             and status = 'active'`);
+        const receiver = await client.query<{
+          payment_provider_id: string;
+          receiver_account_id: string;
+          receiver_account_version: number;
+        }>(`insert into app.receiver_accounts (
+             provider_id, version, account_holder_name, account_reference_ciphertext,
+             verification_reference_ciphertext, account_reference_masked, instructions,
+             active_from, rotation_request_id, rotation_reason,
+             account_reference_fingerprint, protection_profile_version,
+             encryption_key_version, fingerprint_key_version
+           ) select provider.id,
+               coalesce((select max(existing.version) + 1 from app.receiver_accounts existing
+                 where existing.provider_id = provider.id), 1),
+               'Synthetic Routine Paid Receiver',
+               'receiver-v1.telebirr.AAAAAAAAAAAAAAAA.BBBBBBBBBBBBBBBBBBBBBB.CCCCCCCCCCCC',
+               'synthetic-routine-paid-verification-ciphertext', '***7002',
+               jsonb_build_object('customer_message', 'Disposable SQL fixture only'),
+               clock_timestamp() - interval '1 minute', gen_random_uuid(),
+               'account_rotation', repeat('5', 64), 1, 1, 1
+             from app.payment_providers provider where provider.code = 'telebirr'
+           returning provider_id as payment_provider_id,
+                     id as receiver_account_id, version as receiver_account_version`);
+        expect(receiver.rows).toHaveLength(1);
+        const telebirr = receiver.rows[0]!;
         const challengeId = randomUUID();
         const candidateId = randomUUID();
         const intentId = randomUUID();
@@ -93,9 +120,9 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
             intentId,
             authorization.authorityId,
             binding.player_account_id,
-            binding.payment_provider_id,
-            binding.receiver_account_id,
-            binding.receiver_account_version,
+            telebirr.payment_provider_id,
+            telebirr.receiver_account_id,
+            telebirr.receiver_account_version,
             fingerprint,
             digest(randomUUID()),
             digest(randomUUID()),
@@ -108,8 +135,9 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
              platform.status = 'active' as platform_active,
              provider.status = 'active' and provider.code = 'telebirr'
                as provider_active,
-             receiver.status = 'active' and receiver.retired_at is null
-               and receiver.active_from <= opening.occurred_at as receiver_active,
+             receiver.status = 'active' as receiver_status_active,
+             receiver.retired_at is null as receiver_not_retired,
+             receiver.active_from <= opening.occurred_at as receiver_active_at_payment,
              policy.freshness_window_seconds = 3600
                and opening.amount_minor between policy.minimum_amount_minor
                                             and policy.maximum_amount_minor as policy_active,
@@ -165,8 +193,8 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
             binding.customer_id,
             binding.platform_id,
             binding.player_account_id,
-            binding.payment_provider_id,
-            binding.receiver_account_id,
+            telebirr.payment_provider_id,
+            telebirr.receiver_account_id,
             challengeId,
           ],
         );
@@ -200,8 +228,8 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
             binding.customer_id,
             binding.platform_id,
             binding.player_account_id,
-            binding.payment_provider_id,
-            binding.receiver_account_id,
+            telebirr.payment_provider_id,
+            telebirr.receiver_account_id,
             challengeId,
           ],
         );

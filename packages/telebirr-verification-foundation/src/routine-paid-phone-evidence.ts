@@ -54,6 +54,13 @@ const INPUT_KEYS = [
   'trustedIssuanceMode',
 ] as const;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
+const UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
+
+function utc(value: unknown): value is string {
+  if (typeof value !== 'string' || !UTC.test(value)) return false;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
+}
 
 function review(reasonCode: string): RoutineTelebirrPaidPhoneAssessment {
   return Object.freeze({
@@ -81,9 +88,21 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     if (ownDataValue(candidate, 'trustedIssuanceMode') !== 'paid') {
       return review('no_money_challenge');
     }
+    const observation = ownDataValue(candidate, 'signedObservation');
+    const body = isPlainNonProxyRecord(observation) && ownDataValue(observation, 'body');
+    const observedAt = isPlainNonProxyRecord(body) && ownDataValue(body, 'observedAt');
+    const assessedAt = ownDataValue(candidate, 'assessedAt');
+    if (!utc(observedAt) || !utc(assessedAt)) return review('invalid_request');
+    const assessedMillis = Date.parse(assessedAt);
+    const observedMillis = Date.parse(observedAt);
+    // A signed phone read may be retried after the five-minute lookup expires.
+    // Authenticate it at its signed observation time, but separately bound the
+    // server upload delay and one-hour funding window at the real server time.
+    if (observedMillis > assessedMillis + 5_000 || assessedMillis >= observedMillis + 15 * 60_000)
+      return review('upload_expired');
     const checked = assessRoutineTelebirrNoMoneyEvidence(
       {
-        assessedAt: ownDataValue(candidate, 'assessedAt'),
+        assessedAt: observedAt,
         trustedLookup: ownDataValue(candidate, 'trustedLookup'),
         trustedRawReference: ownDataValue(candidate, 'trustedRawReference'),
         trustedSigner: ownDataValue(candidate, 'trustedSigner'),
@@ -105,24 +124,20 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     }
 
     const lookup = ownDataValue(candidate, 'trustedLookup');
-    const observation = ownDataValue(candidate, 'signedObservation');
     if (!isPlainNonProxyRecord(lookup) || !isPlainNonProxyRecord(observation)) {
       return review('invalid_request');
     }
-    const body = ownDataValue(observation, 'body');
     if (!isPlainNonProxyRecord(body)) return review('invalid_request');
     const facts = ownDataValue(body, 'facts');
     if (!isPlainNonProxyRecord(facts)) return review('invalid_request');
     const sourceDocumentDigest = ownDataValue(body, 'sourceDocumentDigest');
     const observationBodyDigest = ownDataValue(observation, 'bodyDigest');
-    const assessedAt = ownDataValue(candidate, 'assessedAt');
     const occurredAt = ownDataValue(facts, 'occurredAt');
     if (
       typeof sourceDocumentDigest !== 'string' ||
       !DIGEST.test(sourceDocumentDigest) ||
       typeof observationBodyDigest !== 'string' ||
       !DIGEST.test(observationBodyDigest) ||
-      typeof assessedAt !== 'string' ||
       typeof occurredAt !== 'string'
     ) {
       return review('invalid_request');

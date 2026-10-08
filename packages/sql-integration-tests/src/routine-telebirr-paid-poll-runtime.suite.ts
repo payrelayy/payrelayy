@@ -22,7 +22,7 @@ async function asRuntime<T>(client: Client, work: () => Promise<T>): Promise<T> 
 
 export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => Client): void {
   describe('separate paid TeleBirr phone poll runtime boundary', () => {
-    it('starts without a login or password and inherits only two paid functions', async () => {
+    it('starts without a login or password and inherits only four paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         name: string;
@@ -81,7 +81,9 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       );
       expect(functions.rows.map((row) => row.name)).toEqual([
         'issue_routine_telebirr_paid_poll_assignment',
+        'load_routine_telebirr_paid_observation_material',
         'load_routine_telebirr_paid_poll_enrollment',
+        'stage_routine_telebirr_paid_signed_observation',
       ]);
       const baseAccess = await client.query<{ accessible: string }>(
         `select count(*)::text as accessible from pg_catalog.pg_class relation
@@ -112,7 +114,13 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           'EXECUTE') as no_money_issue,
         pg_catalog.has_function_privilege('${runtime}',
           'app.issue_routine_telebirr_no_money_poll_assignment(uuid,uuid,text,timestamptz,uuid)',
-          'EXECUTE') as paid_can_issue_no_money`);
+          'EXECUTE') as paid_can_issue_no_money,
+        pg_catalog.has_function_privilege('public',
+          'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
+          'EXECUTE') as public_paid_stage,
+        pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+          'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
+          'EXECUTE') as no_money_paid_stage`);
       expect(access.rows).toEqual([
         {
           public_enrollment: false,
@@ -121,6 +129,8 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           no_money_enrollment: false,
           no_money_issue: false,
           paid_can_issue_no_money: false,
+          public_paid_stage: false,
+          no_money_paid_stage: false,
         },
       ]);
       const guards = await client.query<{ name: string; guard_count: number }>(
@@ -137,10 +147,12 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             'issue_routine_telebirr_paid_poll_assignment',
             'issue_routine_telebirr_paid_lookup_assignment_material',
             'issue_routine_telebirr_paid_lookup_challenge',
+            'load_routine_telebirr_paid_observation_material',
+            'stage_routine_telebirr_paid_signed_observation',
           ],
         ],
       );
-      expect(guards.rows).toHaveLength(4);
+      expect(guards.rows).toHaveLength(6);
       expect(guards.rows.every((row) => row.guard_count === 1)).toBe(true);
     });
 
@@ -176,6 +188,34 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         await client.query('rollback');
         await client.query('reset session authorization');
       }
+    });
+
+    it('keeps the paid observation inbox private, immutable, and without settlement access', async () => {
+      const client = getClient();
+      const result = await client.query<Record<string, boolean>>(`select
+        (select relrowsecurity and relforcerowsecurity
+          from pg_catalog.pg_class
+         where oid = 'app.routine_telebirr_paid_observation_staging'::pg_catalog.regclass)
+          as forced_rls,
+        pg_catalog.has_table_privilege('${runtime}',
+          'app.routine_telebirr_paid_observation_staging', 'SELECT') as runtime_select,
+        pg_catalog.has_table_privilege('${runtime}',
+          'app.routine_telebirr_paid_observation_staging', 'INSERT') as runtime_insert,
+        pg_catalog.has_table_privilege('service_role',
+          'app.routine_telebirr_paid_observation_staging', 'SELECT') as service_select`);
+      expect(result.rows).toEqual([
+        {
+          forced_rls: true,
+          runtime_select: false,
+          runtime_insert: false,
+          service_select: false,
+        },
+      ]);
+      const trigger = await client.query<{ enabled: string }>(`select tgenabled as enabled
+        from pg_catalog.pg_trigger where tgrelid =
+          'app.routine_telebirr_paid_observation_staging'::pg_catalog.regclass
+          and tgname = 'routine_paid_staging_no_update'`);
+      expect(trigger.rows).toEqual([{ enabled: 'O' }]);
     });
   });
 }

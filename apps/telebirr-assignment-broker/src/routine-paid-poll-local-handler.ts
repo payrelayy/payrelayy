@@ -5,6 +5,7 @@ import {
   ROUTINE_PAID_POLL_LOCAL_MAX_BYTES,
   ROUTINE_PAID_POLL_LOCAL_PATH,
 } from '@fetanagent/telebirr-verification-foundation';
+import type { RoutineTelebirrPaidPhoneEvidence } from '@fetanagent/telebirr-verification-foundation';
 
 import type { createRoutinePaidPollBroker } from './routine-paid-poll-broker.js';
 import type {
@@ -102,12 +103,14 @@ function response(statusCode: number, value: unknown): TelebirrAssignmentBrokerL
   });
 }
 
-/** Unix-socket-only handler. It cannot load observations or execute deposits. */
+/** Unix-socket-only paid broker handler. It cannot execute deposits. */
 export function createRoutinePaidPollLocalHandler(broker: Broker) {
   if (
     !broker ||
     typeof broker.loadEnrollment !== 'function' ||
-    typeof broker.claimAndIssuePoll !== 'function'
+    typeof broker.claimAndIssuePoll !== 'function' ||
+    typeof broker.loadObservation !== 'function' ||
+    typeof broker.stageObservation !== 'function'
   )
     throw new Error();
   return async (
@@ -163,6 +166,77 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
             trustedSignerSpkiDer: Buffer.from(der).toString('base64url'),
           },
         });
+      }
+      if (value.operation === 'load_observation') {
+        if (
+          !exact(input, ['challengeId']) ||
+          typeof input.challengeId !== 'string' ||
+          !UUID_V4.test(input.challengeId)
+        )
+          return response(400, { code: 'invalid_request' });
+        const loaded = await broker.loadObservation(input.challengeId);
+        if (loaded === undefined) return response(200, { kind: 'missing' });
+        const der = loaded.trustedSignerSpkiDer;
+        if (!(der instanceof Uint8Array) || isProxy(der) || der.byteLength !== 91)
+          throw new Error();
+        return response(200, {
+          kind: 'observation_context',
+          context: { ...loaded, trustedSignerSpkiDer: Buffer.from(der).toString('base64url') },
+        });
+      }
+      if (value.operation === 'stage_observation') {
+        if (
+          !exact(input, [
+            'evidence',
+            'assignmentBodyDigest',
+            'observationSignatureDigest',
+            'signedObservation',
+          ]) ||
+          !exact(input.evidence, [
+            'providerCode',
+            'candidateId',
+            'challengeId',
+            'referenceFingerprint',
+            'receiverRevisionId',
+            'receiverVersion',
+            'submittedAt',
+            'observedAt',
+            'occurredAt',
+            'retrievedAt',
+            'amountMinor',
+            'currencyCode',
+            'sourceDocumentDigest',
+            'observationBodyDigest',
+            'replayIdentity',
+          ]) ||
+          input.evidence.providerCode !== 'telebirr' ||
+          typeof input.evidence.challengeId !== 'string' ||
+          !UUID_V4.test(input.evidence.challengeId) ||
+          typeof input.assignmentBodyDigest !== 'string' ||
+          !DIGEST.test(input.assignmentBodyDigest) ||
+          typeof input.observationSignatureDigest !== 'string' ||
+          !DIGEST.test(input.observationSignatureDigest) ||
+          !exact(input.signedObservation, [
+            'contractVersion',
+            'providerCode',
+            'protocolMode',
+            'transcriptVersion',
+            'bodyDigestAlgorithm',
+            'bodyDigest',
+            'signatureAlgorithm',
+            'signatureEncoding',
+            'body',
+            'signature',
+          ])
+        )
+          return response(400, { code: 'invalid_request' });
+        const staged = await broker.stageObservation({
+          evidence: input.evidence as unknown as RoutineTelebirrPaidPhoneEvidence,
+          assignmentBodyDigest: input.assignmentBodyDigest,
+          observationSignatureDigest: input.observationSignatureDigest,
+          signedObservation: input.signedObservation,
+        });
+        return response(200, { kind: staged });
       }
       return response(400, { code: 'invalid_request' });
     } catch {

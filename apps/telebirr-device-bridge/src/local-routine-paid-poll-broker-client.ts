@@ -11,6 +11,7 @@ import type {
   RoutinePaidPollAssignmentContext,
   RoutinePaidPollBridgeDependencies,
 } from './routine-paid-poll-bridge.js';
+import type { RoutinePaidUploadBridgeDependencies } from './routine-paid-upload-bridge.js';
 
 function record(value: unknown): value is Record<string, unknown> {
   return (
@@ -176,4 +177,66 @@ export function createRoutinePaidPollUnixDependencies(
   now: () => string = () => new Date().toISOString(),
 ): RoutinePaidPollBridgeDependencies {
   return createRoutinePaidPollLocalAdapter(exchange, now);
+}
+
+/** Reuses the broker's private Unix socket; the public bridge never opens the reference itself. */
+export function createRoutinePaidUploadLocalAdapter(
+  wire: (operation: string, input: unknown) => Promise<unknown>,
+  now: () => string,
+): RoutinePaidUploadBridgeDependencies {
+  if (typeof wire !== 'function' || typeof now !== 'function') throw new Error();
+  return Object.freeze({
+    now,
+    async loadObservation(challengeId: string) {
+      const value = await wire('load_observation', { challengeId });
+      if (exact(value, ['kind']) && value.kind === 'missing') return undefined;
+      if (!exact(value, ['kind', 'context']) || value.kind !== 'observation_context')
+        throw new Error();
+      const contextValue = value.context;
+      if (
+        !exact(contextValue, [
+          'enrollmentId',
+          'trustedLookup',
+          'trustedRawReference',
+          'trustedSigner',
+          'deviceEnrollment',
+          'trustedSignerSpkiDer',
+          'trustedIssuanceMode',
+        ]) ||
+        contextValue.trustedIssuanceMode !== 'paid' ||
+        typeof contextValue.trustedRawReference !== 'string' ||
+        typeof contextValue.trustedSignerSpkiDer !== 'string' ||
+        !/^[A-Za-z0-9_-]{122}$/u.test(contextValue.trustedSignerSpkiDer)
+      )
+        throw new Error();
+      const der = Buffer.from(contextValue.trustedSignerSpkiDer, 'base64url');
+      if (der.byteLength !== 91 || der.toString('base64url') !== contextValue.trustedSignerSpkiDer)
+        throw new Error();
+      return {
+        trustedLookup: contextValue.trustedLookup,
+        trustedRawReference: contextValue.trustedRawReference,
+        trustedSigner: contextValue.trustedSigner,
+        deviceEnrollment: contextValue.deviceEnrollment,
+        trustedSignerSpkiDer: der,
+        trustedIssuanceMode: 'paid' as const,
+      };
+    },
+    async stageObservation(
+      input: Parameters<RoutinePaidUploadBridgeDependencies['stageObservation']>[0],
+    ) {
+      const value = await wire('stage_observation', input);
+      if (
+        !exact(value, ['kind']) ||
+        (value.kind !== 'recorded' && value.kind !== 'exact_replay' && value.kind !== 'conflict')
+      )
+        throw new Error();
+      return value.kind;
+    },
+  });
+}
+
+export function createRoutinePaidUploadUnixDependencies(
+  now: () => string = () => new Date().toISOString(),
+): RoutinePaidUploadBridgeDependencies {
+  return createRoutinePaidUploadLocalAdapter(exchange, now);
 }

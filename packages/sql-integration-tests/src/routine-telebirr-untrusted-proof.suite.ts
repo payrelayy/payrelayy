@@ -901,6 +901,21 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             exact_receiver: true,
           },
         ]);
+        const issuance = await client.query<{ issuance_mode: string }>(
+          `select issuance_mode from ${LOOKUP_TABLE} where challenge_id = $1::uuid`,
+          [first.challenge_id],
+        );
+        expect(issuance.rows).toEqual([{ issuance_mode: 'no_money' }]);
+        await rejected(
+          client,
+          `update ${LOOKUP_TABLE} set issuance_mode = 'paid' where challenge_id = $1::uuid`,
+          [first.challenge_id],
+        );
+        await rejected(
+          client,
+          `update ${LOOKUP_TABLE} set challenge_digest = $2::text where challenge_id = $1::uuid`,
+          [first.challenge_id, `sha256:${digest()}`],
+        );
         await client.query('savepoint revoked_enrollment');
         await client.query(
           `insert into app.routine_telebirr_device_enrollment_revocations

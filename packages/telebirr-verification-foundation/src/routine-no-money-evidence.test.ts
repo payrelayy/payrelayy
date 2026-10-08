@@ -20,6 +20,7 @@ import {
   assessRoutineTelebirrNoMoneyAssignment,
   assessRoutineTelebirrNoMoneyEvidence,
 } from './routine-no-money-evidence.js';
+import { assessRoutineTelebirrPaidPhoneEvidence } from './routine-paid-phone-evidence.js';
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const hash = (bytes: Uint8Array): string =>
@@ -298,5 +299,142 @@ describe('routine TeleBirr no-money evidence boundary', () => {
         deviceSpki,
       ).reasonCode,
     ).toBe('invalid_request');
+  });
+});
+
+describe('routine TeleBirr paid-phone evidence adapter', () => {
+  it('rejects a legacy no-money challenge even when both signatures and receipt facts are valid', () => {
+    const { input, signerSpki, deviceSpki } = fixture();
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'no_money' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toEqual({
+      disposition: 'review',
+      reasonCode: 'no_money_challenge',
+      financialActionAllowed: false,
+      evidence: null,
+    });
+  });
+
+  it('returns a redacted TeleBirr-specific candidate for the shared atomic ledger', () => {
+    const { input, signerSpki, deviceSpki } = fixture();
+    const result = assessRoutineTelebirrPaidPhoneEvidence(
+      { ...input, trustedIssuanceMode: 'paid' },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(result).toMatchObject({
+      disposition: 'paid_phone_observation_matches_policy',
+      reasonCode: 'signed_paid_phone_receipt_matches_policy',
+      financialActionAllowed: false,
+      evidence: {
+        providerCode: 'telebirr',
+        candidateId: input.trustedLookup.candidateId,
+        challengeId: input.trustedLookup.challengeId,
+        referenceFingerprint: input.trustedLookup.referenceFingerprint,
+        receiverRevisionId: input.trustedLookup.receiverRevisionId,
+        receiverVersion: input.trustedLookup.receiverVersion,
+        amountMinor: input.signedObservation.body.facts.amountMinor,
+        currencyCode: 'ETB',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(input.trustedRawReference);
+    expect(JSON.stringify(result)).not.toContain(input.signedAssignment.signature);
+    expect(JSON.stringify(result)).not.toContain(input.signedObservation.signature);
+  });
+
+  it('keeps tampered, stale, and non-completed paid observations in review', () => {
+    const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
+      fixture();
+    const paid = { ...input, trustedIssuanceMode: 'paid' };
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: { ...input.signedObservation, signature: 'A'.repeat(86) } },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', evidence: null });
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, assessedAt: '2026-10-05T18:05:00.000Z' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', evidence: null });
+    const reversed = signedObservation(
+      observationBody({ ...facts, providerFinalStatus: 'reversed' }),
+      deviceKey.privateKey,
+    );
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: reversed },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', reasonCode: 'receipt_policy_review', evidence: null });
+  });
+
+  it('rejects a valid phone observation once its receipt is one hour old', () => {
+    const {
+      input,
+      signerSpki,
+      deviceSpki,
+      assignmentBody,
+      signedAssignment,
+      facts,
+      observationBody,
+      signedObservation,
+      deviceKey,
+    } = fixture();
+    const submittedAt = '2026-10-05T18:58:00.000Z';
+    const issuedAt = '2026-10-05T18:59:00.000Z';
+    const expiresAt = '2026-10-05T19:04:00.000Z';
+    const receiptFacts = {
+      ...facts,
+      occurredAt: '2026-10-05T18:00:00.000Z',
+      retrievedAt: '2026-10-05T18:59:30.000Z',
+    };
+    const result = assessRoutineTelebirrPaidPhoneEvidence(
+      {
+        ...input,
+        assessedAt: '2026-10-05T19:00:00.000Z',
+        trustedIssuanceMode: 'paid',
+        trustedLookup: { ...input.trustedLookup, submittedAt, issuedAt, expiresAt },
+        signedAssignment: signedAssignment({ ...assignmentBody, submittedAt, issuedAt, expiresAt }),
+        signedObservation: signedObservation(
+          { ...observationBody(receiptFacts), observedAt: receiptFacts.retrievedAt },
+          deviceKey.privateKey,
+        ),
+      },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(result).toMatchObject({
+      disposition: 'review',
+      reasonCode: 'payment_expired',
+      financialActionAllowed: false,
+      evidence: null,
+    });
+  });
+
+  it('cannot accept another provider or caller-supplied financial authority', () => {
+    const { input, signerSpki, deviceSpki } = fixture();
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'cbe_birr' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', evidence: null });
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'paid', claimAllowed: true },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', reasonCode: 'invalid_request', evidence: null });
   });
 });

@@ -9794,7 +9794,10 @@ registerRoutineTelebirrProcessingPolicySqlTests(
   () => client,
   () => ownerAuthUserId,
 );
-registerRoutineTelebirrPaidIntentSnapshotSqlTests(() => client, () => ownerAuthUserId);
+registerRoutineTelebirrPaidIntentSnapshotSqlTests(
+  () => client,
+  () => ownerAuthUserId,
+);
 registerOperatorLifecycleConnectionSqlTests(() => createSqlIntegrationClient(environment));
 registerCompanionDevicePairingSqlTests(
   () => client,

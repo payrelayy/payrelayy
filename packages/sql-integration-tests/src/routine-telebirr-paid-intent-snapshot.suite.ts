@@ -27,7 +27,10 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
           where oid = 'app.routine_telebirr_paid_intent_openings'::regclass`);
       expect(catalog.rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
       for (const role of [
-        'anon', 'authenticated', 'service_role', 'fetanagent_api_runtime',
+        'anon',
+        'authenticated',
+        'service_role',
+        'fetanagent_api_runtime',
         'fetanagent_routine_telebirr_no_money_runtime',
         'fetanagent_routine_deposit_broker_runtime',
         'fetanagent_deposit_executor_runtime',
@@ -56,15 +59,19 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
           payment_provider_id: string;
           receiver_account_id: string;
           receiver_account_version: number;
-        }>(`select customer_id, platform_id, player_account_id, payment_provider_id,
+        }>(
+          `select customer_id, platform_id, player_account_id, payment_provider_id,
                      receiver_account_id, receiver_account_version
-                from app.deposit_intents where id = $1::uuid`, [legacy.depositIntentId]);
+                from app.deposit_intents where id = $1::uuid`,
+          [legacy.depositIntentId],
+        );
         const binding = snapshot.rows[0]!;
         const challengeId = randomUUID();
         const candidateId = randomUUID();
         const intentId = randomUUID();
         const fingerprint = createHash('sha256').update(randomUUID()).digest('hex');
-        const digest = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+        const digest = (value: string) =>
+          `sha256:${createHash('sha256').update(value).digest('hex')}`;
         const insertedOpening = await client.query<{ occurred_at: Date }>(
           `insert into app.routine_telebirr_paid_intent_openings (
              challenge_id, candidate_id, deposit_intent_id, authorization_id, player_account_id,
@@ -80,10 +87,19 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
              clock_timestamp() - interval '100 milliseconds',
              clock_timestamp() - interval '500 milliseconds', 2500
            ) returning occurred_at`,
-          [challengeId, candidateId, intentId, authorization.authorityId,
-            binding.player_account_id, binding.payment_provider_id,
-            binding.receiver_account_id, binding.receiver_account_version, fingerprint,
-            digest(randomUUID()), digest(randomUUID())],
+          [
+            challengeId,
+            candidateId,
+            intentId,
+            authorization.authorityId,
+            binding.player_account_id,
+            binding.payment_provider_id,
+            binding.receiver_account_id,
+            binding.receiver_account_version,
+            fingerprint,
+            digest(randomUUID()),
+            digest(randomUUID()),
+          ],
         );
         const intent = await client.query<{
           opened_at: Date;
@@ -99,8 +115,15 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
                      $6::uuid, 2500, $7::uuid)
            returning opened_at, payment_deadline_at, expected_amount_minor,
                      routine_telebirr_paid_opening_challenge_id`,
-          [intentId, binding.customer_id, binding.platform_id, binding.player_account_id,
-            binding.payment_provider_id, binding.receiver_account_id, challengeId],
+          [
+            intentId,
+            binding.customer_id,
+            binding.platform_id,
+            binding.player_account_id,
+            binding.payment_provider_id,
+            binding.receiver_account_id,
+            challengeId,
+          ],
         );
         expect(intent.rows[0]!.opened_at).toEqual(insertedOpening.rows[0]!.occurred_at);
         expect(intent.rows[0]!.payment_deadline_at.getTime()).toBe(
@@ -108,22 +131,35 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
         );
         expect(intent.rows[0]!.expected_amount_minor).toBe('2500');
         expect(intent.rows[0]!.routine_telebirr_paid_opening_challenge_id).toBe(challengeId);
-        await rejected(client,
+        await rejected(
+          client,
           `update app.routine_telebirr_paid_intent_openings
-              set amount_minor = 2501 where challenge_id = $1::uuid`, [challengeId]);
-        await rejected(client,
+              set amount_minor = 2501 where challenge_id = $1::uuid`,
+          [challengeId],
+        );
+        await rejected(
+          client,
           `update app.deposit_intents
               set routine_telebirr_paid_opening_challenge_id = null where id = $1::uuid`,
-          [intentId]);
-        await rejected(client,
+          [intentId],
+        );
+        await rejected(
+          client,
           `insert into app.deposit_intents (
              customer_id, platform_id, player_account_id, payment_provider_id,
              receiver_account_id, expected_amount_minor,
              routine_telebirr_paid_opening_challenge_id
            ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
                      $5::uuid, 2501, $6::uuid)`,
-          [binding.customer_id, binding.platform_id, binding.player_account_id,
-            binding.payment_provider_id, binding.receiver_account_id, challengeId]);
+          [
+            binding.customer_id,
+            binding.platform_id,
+            binding.player_account_id,
+            binding.payment_provider_id,
+            binding.receiver_account_id,
+            challengeId,
+          ],
+        );
       } finally {
         await client.query('rollback');
       }

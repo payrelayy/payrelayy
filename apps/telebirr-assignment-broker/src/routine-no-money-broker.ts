@@ -109,7 +109,10 @@ const enrollmentRowKeys = [
   'receiver_profile_digest',
 ] as const;
 
-function enrollmentFromRow(candidate: unknown, now: string): Record<string, unknown> | undefined {
+export function enrollmentFromRow(
+  candidate: unknown,
+  now: string,
+): Record<string, unknown> | undefined {
   const row = exactRow(candidate, enrollmentRowKeys);
   if (!row) return undefined;
   const validFrom = rowTimestamp(row.valid_from);
@@ -146,7 +149,7 @@ function enrollmentFromRow(candidate: unknown, now: string): Record<string, unkn
   });
 }
 
-function contextFromMaterial(
+export function contextFromMaterial(
   material: RoutineTelebirrAssignmentMaterial,
   rawReference: string,
   signerSpkiDer: Uint8Array,
@@ -197,7 +200,7 @@ function contextFromMaterial(
   });
 }
 
-function signerMatches(
+export function signerMatches(
   material: RoutineTelebirrAssignmentMaterial,
   signer: RoutineTelebirrAssignmentSigner,
 ): boolean {

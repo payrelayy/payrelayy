@@ -10,23 +10,26 @@ const scriptPath = 'infra/operations/fetanagent-production-helper-rotation-v1.sh
 const docsPath = 'infra/operations/production-helper-rotation-v1.md';
 const nextScriptPath = 'infra/operations/fetanagent-production-helper-rotation-v2.sh';
 const nextDocsPath = 'infra/operations/production-helper-rotation-v2.md';
+const latestScriptPath = 'infra/operations/fetanagent-production-helper-rotation-v3.sh';
+const latestDocsPath = 'infra/operations/production-helper-rotation-v3.md';
 const sourceCommit = '7d8c930d5a587967664f05c849ebdb85966c0fd3';
 const predecessorCommit = '966efd652a1183b9c9d8b7faf743e1af166a0ef6';
 const predecessor = 'd2f537641dacb1f01d8f6a00f4ab295ee145a1cc31bc27fcaa596f9031a04996';
 const successor = '7d144ca5c7a3524f5b6c17c9608737d70438c7261c2d44d10e6d597c9a902343';
 const nextSuccessor = '4c50500ad040890ca639bac5423a86c7d8c0ee348b33a6999498c6257947bd79';
+const latestSuccessor = 'cb23a2940f0cb6d523435ff98691b7ed06761e39b2161b1dd2e7e4c86c71c051';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const blob = (commit) => execFileSync('git', ['show', `${commit}:${helperPath}`], { cwd: root });
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 
 assert.equal(sha256(blob(predecessorCommit)), predecessor);
 assert.equal(sha256(blob(sourceCommit)), successor);
-assert.equal(sha256(read(helperPath)), nextSuccessor);
+assert.equal(sha256(read(helperPath)), latestSuccessor);
 
 const sudoers = read('infra/operations/fetanagent-production-deploy-helper.sudoers').toString();
 assert.equal(
   sudoers,
-  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${nextSuccessor} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${latestSuccessor} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
 );
 
 const script = read(scriptPath).toString();
@@ -127,5 +130,60 @@ assert.ok(
     nextStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(nextScript, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const latestScript = read(latestScriptPath).toString();
+const latestDocs = read(latestDocsPath).toString();
+for (const value of [
+  nextSuccessor,
+  latestSuccessor,
+  '593344964',
+  'ROTATE EXACT PRODUCTION DEPLOY HELPER V3',
+]) {
+  assert.ok(latestScript.includes(value), `v3 rotation script does not pin ${value}`);
+  assert.ok(latestDocs.includes(value), `v3 rotation runbook does not pin ${value}`);
+}
+for (const value of [
+  '/usr/local/sbin/fetanagent-production-deploy-helper',
+  '/etc/sudoers.d/fetanagent-production-deploy-helper',
+  '/var/lib/fetanagent/production/helper.lock',
+  '/var/lib/fetanagent/production/routine-deposits.release',
+  '/var/lib/fetanagent/production/companion-execution-v2.release',
+  'metadata/v1/id',
+  'routine-no-money-phone-review-v3',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(latestScript.includes(value), `v3 rotation script lost a required boundary: ${value}`);
+}
+const latestRotationStart = latestScript.indexOf('rotate() {');
+const latestRotation = latestScript.slice(latestRotationStart);
+const latestStep = (value) => {
+  const index = latestRotation.indexOf(value);
+  assert.ok(index >= 0, `v3 rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(latestRotationStart > 0);
+assert.ok(latestScript.indexOf('flock --nonblock 9') < latestRotationStart);
+assert.ok(latestStep('acquire_lock') < latestStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  latestStep('install_record "$INTENT" intent_body') <
+    latestStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  latestStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    latestStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  latestStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    latestStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  latestStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    latestStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(latestScript, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

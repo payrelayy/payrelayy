@@ -209,7 +209,8 @@ class MainActivity : Activity() {
           gravity = Gravity.CENTER
         },
       )
-      if (BuildConfig.VERIFIER_ENABLED && !enrolled) {
+      if (BuildConfig.VERIFIER_ENABLED && !enrolled &&
+        !RoutineNoMoneyRuntimeComposition.enabled()) {
         addPairingControls()
       } else if (BuildConfig.VERIFIER_ENABLED) {
         addOperationalControls(snapshot.operatorEnabled)
@@ -449,10 +450,7 @@ class MainActivity : Activity() {
   }
 
   private fun routineIdentity(): P256Identity {
-    val alias = "fetanagent_telebirr_routine_pairing_p256_v1"
-    val bootstrap = AndroidKeystoreP256Identity("routine_key_bootstrap_v1", alias)
-    val fingerprint = bootstrap.publicMaterial().publicKeySpkiSha256.removePrefix("sha256:")
-    return AndroidKeystoreP256Identity("routine_key_$fingerprint", alias)
+    return RoutineNoMoneyRuntimeComposition.identity()
   }
 
   private fun restoreRoutineProof() {

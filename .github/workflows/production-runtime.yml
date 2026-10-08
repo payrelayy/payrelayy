@@ -356,6 +356,7 @@ jobs:
           DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
+          ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
@@ -376,6 +377,12 @@ jobs:
           TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64: ${{ vars.TELEBIRR_DEVICE_BRIDGE_RUNTIME_MANIFEST_V1_BASE64 }}
           TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_PKCS8_BASE64URL: ${{ secrets.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PKCS8_BASE64URL }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_BASE64URL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
           TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
         run: |
           set -euo pipefail
@@ -434,6 +441,10 @@ jobs:
           )
           for value in "${values[@]}"; do [[ "$value" =~ ^[0-9a-f]{64}$ ]]; done
           [[ "$(printf '%s\n' "${values[@]}" | sort -u | wc -l)" -eq "${#values[@]}" ]]
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+            [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ ! " ${values[*]} " == *" $ROUTINE_NO_MONEY_RUNTIME_PASSWORD "* ]]
+          fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
@@ -534,6 +545,54 @@ jobs:
               "$secret_dir/telebirr-reference-opening-key.v1.json"
           )"
           [[ "$telebirr_reference_opening_key_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+            SECRET_DIR="$secret_dir" node --input-type=module <<'NODE'
+          import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          const env = process.env;
+          const id = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID;
+          const encoded = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PKCS8_BASE64URL;
+          const expectedSpki = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_BASE64URL;
+          const expectedDigest = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256;
+          const from = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM;
+          const until = env.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL;
+          const utc = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(id ?? '') ||
+              !/^[A-Za-z0-9_-]{150,1024}$/u.test(encoded ?? '') ||
+              !/^[A-Za-z0-9_-]{122}$/u.test(expectedSpki ?? '') ||
+              !/^sha256:[0-9a-f]{64}$/u.test(expectedDigest ?? '') ||
+              !utc.test(from ?? '') || !utc.test(until ?? '') ||
+              Date.parse(from) > Date.now() || Date.parse(until) < Date.now() + 10 * 60_000 ||
+              Date.parse(until) - Date.parse(from) > 30 * 86_400_000) throw new Error('Routine lookup trust unavailable.');
+          const der = Buffer.from(encoded, 'base64url');
+          if (der.toString('base64url') !== encoded) throw new Error('Routine lookup key noncanonical.');
+          const privateKey = createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
+          const canonical = Buffer.from(privateKey.export({ format: 'der', type: 'pkcs8' }));
+          const spki = Buffer.from(createPublicKey(privateKey).export({ format: 'der', type: 'spki' }));
+          const digest = `sha256:${createHash('sha256').update(spki).digest('hex')}`;
+          if (privateKey.asymmetricKeyType !== 'ec' || privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1' ||
+              !canonical.equals(der) || spki.length !== 91 || spki.toString('base64url') !== expectedSpki ||
+              digest !== expectedDigest ||
+              [env.TELEBIRR_ASSIGNMENT_SIGNER_PUBLIC_SPKI_SHA256,
+               env.TELEBIRR_BRIDGE_SERVER_SIGNER_PUBLIC_SPKI_SHA256,
+               env.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256].includes(digest)) {
+            throw new Error('Routine lookup signer mismatch.');
+          }
+          const root = env.SECRET_DIR;
+          writeFileSync(`${root}/routine-no-money-lookup-signer.pkcs8.der`, der, { mode: 0o600, flag: 'wx' });
+          writeFileSync(`${root}/routine-no-money-lookup-signer.v1.json`, JSON.stringify({
+            contractVersion: 1, providerCode: 'telebirr', assignmentSignerId: id,
+            keyId: 'telebirr-routine-lookup-production-v1', publicKeySpkiSha256: digest,
+          }), { mode: 0o600, flag: 'wx' });
+          der.fill(0);
+          canonical.fill(0);
+          spki.fill(0);
+          NODE
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "fetanagent_routine_telebirr_no_money_runtime.$PRODUCTION_PROJECT_REF" \
+              "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              >"$secret_dir/routine-no-money-database-url"
+          fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
           chmod 0600 "$secret_dir"/*
@@ -606,6 +665,38 @@ jobs:
         run: |
           set -euo pipefail
           psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+
+      - name: Activate the separate no-money phone review login
+        if: inputs.mode == 'deploy-inert'
+        id: routine_review_activation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_no_money_activation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          psql -X \
+            -v signer_id="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID" \
+            -v public_spki_digest="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256" \
+            -v valid_from="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            -v runtime_password="$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" \
+            --file=infra/sql/production-routine-no-money-activate.sql >/dev/null
 
       - name: Build the exact active production TeleBirr assignment manifest
         if: inputs.mode == 'deploy'
@@ -854,7 +945,14 @@ jobs:
                 "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
               )
               ;;
-            deploy-inert) ;;
+            deploy-inert)
+              transfer_files+=(
+                "$SECRET_DIR"/routine-no-money-database-url
+                "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
+                "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
+                "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
+              )
+              ;;
             *)
               echo '::error::The release transfer mode is not a deployment mode.'
               exit 1
@@ -915,7 +1013,7 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
-            echo 'Production web, Telegram, Android pairing transport, and the twelve-hour Owner controls are live. Telegram may store real TeleBirr references only as untrusted, amount-free candidates. TeleBirr assignment authority remains absent, the assignment broker is enrollment-only and network-isolated, and all seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
+            echo 'Production web, Telegram, and the routine Android no-money review transport are live. The separate broker login may issue review-only receipt lookups and store signed-observation digests; it cannot create payment claims or credit Players. All seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
             echo 'Production web and Telegram are live in receiver-review-only mode. The exact pilot-bound destination may be reviewed, proof submission is unavailable, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow-intake' ]]; then
@@ -967,6 +1065,23 @@ jobs:
             psql -X --file=infra/sql/production-companion-runtime-disable.sql || database_status=$?
           fi
           [[ "$rollback_status" -eq 0 && "$database_status" -eq 0 ]]
+
+      - name: Disable no-money phone review after failed deployment
+        if: always() && (failure() || cancelled()) && steps.routine_review_activation.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_no_money_failed_deployment_disable
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: psql -X --file=infra/sql/production-routine-no-money-disable.sql >/dev/null
 
   operate:
     name: Inspect or stop production runtime
@@ -1038,3 +1153,4 @@ jobs:
             'fetanagent-admin@${{ steps.connection.outputs.vm_host }}' \
             "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper stop"
           psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql
+          psql -X --file=infra/sql/production-routine-no-money-disable.sql

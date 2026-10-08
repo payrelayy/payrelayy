@@ -13,6 +13,7 @@ import {
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_PROVIDER_CODE,
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_ROOT,
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_SOCKET,
+  ROUTINE_NO_MONEY_LOCAL_PATH,
   decodeTelebirrAssignmentBrokerLocalPollRequestBytes,
   encodeTelebirrAssignmentBrokerLocalPollResponse,
 } from '@fetanagent/telebirr-verification-foundation';
@@ -38,6 +39,10 @@ export interface TelebirrAssignmentBrokerLocalHttpResponse {
 export type TelebirrAssignmentBrokerPoll = (
   input: TelebirrAssignmentBrokerPollInput,
 ) => Promise<TelebirrAssignmentBrokerPollResult>;
+
+export type RoutineNoMoneyLocalHandler = (
+  request: TelebirrAssignmentBrokerLocalHttpRequest,
+) => Promise<TelebirrAssignmentBrokerLocalHttpResponse>;
 
 export class TelebirrAssignmentBrokerLocalServerError extends Error {
   constructor() {
@@ -126,12 +131,18 @@ function errorResponse(
 
 export function createTelebirrAssignmentBrokerLocalHandler(
   poll: TelebirrAssignmentBrokerPoll,
+  routineHandler?: RoutineNoMoneyLocalHandler,
 ): (
   request: TelebirrAssignmentBrokerLocalHttpRequest,
 ) => Promise<TelebirrAssignmentBrokerLocalHttpResponse> {
   if (typeof poll !== 'function') throw new TelebirrAssignmentBrokerLocalServerError();
   return async (request) => {
     try {
+      if (request.path === ROUTINE_NO_MONEY_LOCAL_PATH) {
+        return routineHandler === undefined
+          ? errorResponse(400, 'invalid_request')
+          : await routineHandler(request);
+      }
       if (!hasValidHttpEnvelope(request)) return errorResponse(400, 'invalid_request');
       const decoded = decodeTelebirrAssignmentBrokerLocalPollRequestBytes(request.body);
       if (decoded === undefined) return errorResponse(400, 'invalid_request');
@@ -285,12 +296,15 @@ async function closeServer(server: Server): Promise<void> {
  * Creates a Unix-domain-socket-only server. The fixed runtime directory must already exist, be
  * owned by this process, resolve to itself, and have mode 0700. No TCP address is accepted.
  */
-export function createTelebirrAssignmentBrokerLocalUnixServer(poll: TelebirrAssignmentBrokerPoll): {
+export function createTelebirrAssignmentBrokerLocalUnixServer(
+  poll: TelebirrAssignmentBrokerPoll,
+  routineHandler?: RoutineNoMoneyLocalHandler,
+): {
   readonly server: Server;
   readonly listen: () => Promise<void>;
   readonly close: () => Promise<void>;
 } {
-  const handler = createTelebirrAssignmentBrokerLocalHandler(poll);
+  const handler = createTelebirrAssignmentBrokerLocalHandler(poll, routineHandler);
   const server = createServer({ maxHeaderSize: 8_192 }, (request, target) => {
     void (async () => {
       try {

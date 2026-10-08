@@ -1,8 +1,8 @@
 # This overlay is used only for a reviewed runtime-maintenance deployment while PostgreSQL proves
 # that no trusted TeleBirr activation epoch or money authority is active. It deliberately restores
-# the assignment broker's enrollment-only, network-isolated shape so a new Owner runtime can be
-# deployed before a fresh pilot exists. A later operational deployment must omit this overlay and
-# bind the broker to one exact active pilot manifest.
+# the assignment broker's enrollment-only shape before a fresh pilot exists. Its independent
+# routine no-money login can issue signed review assignments, but has no claim or settlement role.
+# A later operational deployment must omit this overlay and bind the pilot to an active manifest.
 services:
   api:
     environment:
@@ -17,9 +17,42 @@ services:
       TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
       TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
       TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
+      INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'
+      ROUTINE_NO_MONEY_DATABASE_URL_FILE: /run/secrets/routine_no_money_database_url
+      ROUTINE_NO_MONEY_REFERENCE_OPENING_KEY_FILE: /run/secrets/routine_no_money_reference_opening_key.v1.json
+      ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE: /run/secrets/routine_no_money_lookup_signer.pkcs8.der
+      ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE: /run/secrets/routine_no_money_lookup_signer.v1.json
       KEMERBET_EXECUTOR_ENABLED: 'false'
       KEMERBET_FINAL_ACTION_ENABLED: 'false'
-    secrets: !reset []
-    configs: !reset []
-    networks: !reset []
-    network_mode: none
+    secrets: !override
+      - source: routine_no_money_database_url
+        target: routine_no_money_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: telebirr_assignment_broker_reference_opening_key
+        target: routine_no_money_reference_opening_key.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: routine_no_money_lookup_signer
+        target: routine_no_money_lookup_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: routine_no_money_lookup_manifest
+        target: routine_no_money_lookup_signer.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs: !override
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks: !override
+      - telebirr_assignment_database_egress
+  telebirr-device-bridge:
+    environment:
+      INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'

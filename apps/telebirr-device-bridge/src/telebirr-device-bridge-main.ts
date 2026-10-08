@@ -9,6 +9,8 @@ import {
   loadTelebirrDeviceBridgeConfig,
   type TelebirrDeviceBridgeConfigDependencies,
 } from './telebirr-device-bridge-config.js';
+import { createRoutineNoMoneyBridgeHandler } from './routine-no-money-bridge.js';
+import { createRoutineNoMoneyUnixDependencies } from './local-routine-no-money-broker-client.js';
 
 export async function runTelebirrDeviceBridgeMain(
   environment: NodeJS.ProcessEnv = process.env,
@@ -16,7 +18,26 @@ export async function runTelebirrDeviceBridgeMain(
   applicationDependencies: TelebirrDeviceBridgeApplicationDependencies = {},
 ): Promise<TelebirrDeviceBridgeApplication> {
   const config = loadTelebirrDeviceBridgeConfig(environment, configDependencies);
-  return startTelebirrDeviceBridgeApplication(config, applicationDependencies);
+  const routineMode = environment.INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED;
+  if (routineMode !== undefined && routineMode !== 'false' && routineMode !== 'true') {
+    throw new Error('The routine no-money bridge mode is unavailable.');
+  }
+  if (routineMode !== 'true') {
+    return startTelebirrDeviceBridgeApplication(config, applicationDependencies);
+  }
+  if (
+    !config.enabled ||
+    config.deploymentTarget !== 'production' ||
+    environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
+    applicationDependencies.createRoutineHandler !== undefined
+  ) {
+    throw new Error('The routine no-money bridge mode is unavailable.');
+  }
+  return startTelebirrDeviceBridgeApplication(config, {
+    ...applicationDependencies,
+    createRoutineHandler: () =>
+      createRoutineNoMoneyBridgeHandler(createRoutineNoMoneyUnixDependencies()),
+  });
 }
 
 const entryPath = process.argv[1];

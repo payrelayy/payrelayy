@@ -336,15 +336,18 @@ assert.match(inertCompose, /TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: produc
 assert.match(inertCompose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
 assert.match(inertCompose, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
 assert.match(inertCompose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
-assert.match(inertCompose, /secrets: !reset \[\]/u);
-assert.match(inertCompose, /configs: !reset \[\]/u);
-assert.match(inertCompose, /networks: !reset \[\]/u);
-assert.match(inertCompose, /network_mode: none/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'/u);
+assert.match(inertCompose, /secrets: !override/u);
+assert.match(inertCompose, /configs: !override/u);
+assert.match(inertCompose, /networks: !override/u);
+assert.match(inertCompose, /- telebirr_assignment_database_egress/u);
+assert.doesNotMatch(inertCompose, /network_mode: none/u);
 assert.doesNotMatch(
   inertCompose,
-  /DATABASE_URL_FILE|REFERENCE_OPENING_KEY_FILE|RUNTIME_MANIFEST_FILE|SIGNER_PRIVATE_KEY_FILE|NODE_EXTRA_CA_CERTS/u,
+  /TELEBIRR_ASSIGNMENT_BROKER_(?:DATABASE_URL|REFERENCE_OPENING_KEY|RUNTIME_MANIFEST|SIGNER_PRIVATE_KEY)_FILE|NODE_EXTRA_CA_CERTS/u,
 );
-assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 2);
+assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 3);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -409,8 +412,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 28);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 28);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 31);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 31);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -442,8 +445,8 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  6,
-  'inert preflight, live and shadow manifests, provision, rollback, and stop must share the reviewed administrative pooler route',
+  8,
+  'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
   workflow,

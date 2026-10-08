@@ -27,6 +27,9 @@ class VerifierRuntimeSession(
  */
 object VerifierRuntimeComposition {
   fun create(context: Context): VerifierRuntimeSession {
+    if (RoutineNoMoneyRuntimeComposition.enabled()) {
+      return RoutineNoMoneyRuntimeComposition.create(context)
+    }
     val profile = DeviceBridgeBootstrapProfile.fromBuildConfig()
       ?: return unavailable(LivePilotRuntimeState.ENROLLMENT_REQUIRED, "provisioning_required")
     val provisioning = provisioningStore(context).load()
@@ -69,6 +72,9 @@ object VerifierRuntimeComposition {
 
   fun isEnrolled(context: Context): Boolean {
     if (!BuildConfig.VERIFIER_ENABLED) return false
+    if (RoutineNoMoneyRuntimeComposition.enabled()) {
+      return RoutineNoMoneyRuntimeComposition.isEnrolled(context)
+    }
     val profile = DeviceBridgeBootstrapProfile.fromBuildConfig() ?: return false
     val enrolled = provisioningStore(context).load() as? DeviceProvisioningState.Enrolled
       ?: return false

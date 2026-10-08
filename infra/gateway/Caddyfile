@@ -137,5 +137,27 @@ device.fetanagent.com {
 	}
 	# END exact TeleBirr device routing contract
 
+	# BEGIN exact routine no-money routing contract
+	# The routine phone rehearsal is production-only and review-only. An absent,
+	# staging, repeated, or unexpected target never reaches the bridge.
+	@production_telebirr_routine_no_money {
+		method POST
+		path /v1/telebirr/routine/assignments:poll /v1/telebirr/routine/observations:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.telebirr-routine-no-money.v1+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+
+	handle @production_telebirr_routine_no_money {
+		request_body {
+			max_size 48KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+	# END exact routine no-money routing contract
+
 	respond 404
 }

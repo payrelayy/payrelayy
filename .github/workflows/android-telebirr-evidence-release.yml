@@ -91,6 +91,10 @@ jobs:
           ROUTINE_RECEIPT_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
           ROUTINE_RECEIPT_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_FROM }}
           ROUTINE_RECEIPT_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_UNTIL }}
+          ROUTINE_LOOKUP_SIGNER_SPKI_BASE64URL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_BASE64URL }}
+          ROUTINE_LOOKUP_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
+          ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
+          ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
         run: |
           set -euo pipefail
           [[ "$ANDROID_KEY_ALIAS" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]
@@ -118,6 +122,20 @@ jobs:
           printf '%s' "$ASSIGNMENT_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/assignment.spki.der"
           printf '%s' "$BRIDGE_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/bridge.spki.der"
           printf '%s' "$ROUTINE_RECEIPT_SIGNER_SPKI_BASE64" | base64 --decode > "$protected/routine-receipt.spki.der"
+          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            [[ "$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256" =~ ^sha256:[0-9a-f]{64}$ ]]
+            [[ "$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256" != "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" ]]
+            [[ "$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256" != "$ASSIGNMENT_SIGNER_SPKI_SHA256" ]]
+            [[ "$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256" != "$BRIDGE_SIGNER_SPKI_SHA256" ]]
+            node --input-type=module --eval '
+              import { writeFileSync } from "node:fs";
+              const encoded = process.env.ROUTINE_LOOKUP_SIGNER_SPKI_BASE64URL;
+              if (!/^[A-Za-z0-9_-]{122}$/u.test(encoded ?? "")) process.exit(1);
+              const bytes = Buffer.from(encoded, "base64url");
+              if (bytes.length !== 91 || bytes.toString("base64url") !== encoded) process.exit(1);
+              writeFileSync(process.argv[1], bytes, { flag: "wx", mode: 0o600 });
+            ' "$protected/routine-lookup.spki.der"
+          fi
           chmod 0600 "$protected"/*
           [[ -s "$protected/release.p12" ]]
           [[ "$(stat -c %s "$protected/assignment.spki.der")" -eq 91 ]]
@@ -126,6 +144,9 @@ jobs:
           [[ "sha256:$(sha256sum "$protected/assignment.spki.der" | cut -d ' ' -f 1)" == "$ASSIGNMENT_SIGNER_SPKI_SHA256" ]]
           [[ "sha256:$(sha256sum "$protected/bridge.spki.der" | cut -d ' ' -f 1)" == "$BRIDGE_SIGNER_SPKI_SHA256" ]]
           [[ "sha256:$(sha256sum "$protected/routine-receipt.spki.der" | cut -d ' ' -f 1)" == "$ROUTINE_RECEIPT_SIGNER_SPKI_SHA256" ]]
+          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            [[ "sha256:$(sha256sum "$protected/routine-lookup.spki.der" | cut -d ' ' -f 1)" == "$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256" ]]
+          fi
           echo "protected=$protected" >> "$GITHUB_OUTPUT"
 
       - name: Test, lint, and build the signed evidence-only APK
@@ -136,9 +157,20 @@ jobs:
           FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_TELEBIRR_SIGNING_STORE_PASSWORD }}
           ROUTINE_RECEIPT_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_FROM }}
           ROUTINE_RECEIPT_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_VALID_UNTIL }}
+          ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
+          ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+          DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
         run: |
           set -euo pipefail
           protected='${{ steps.protected.outputs.protected }}'
+          routine_args=()
+          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            routine_args=(
+              -PfetanagentRoutineLookupSignerSpkiFile="$protected/routine-lookup.spki.der"
+              -PfetanagentRoutineLookupSignerValidFrom="$ROUTINE_LOOKUP_SIGNER_VALID_FROM"
+              -PfetanagentRoutineLookupSignerValidUntil="$ROUTINE_LOOKUP_SIGNER_VALID_UNTIL"
+            )
+          fi
           gradle --no-daemon --stacktrace \
             -PfetanagentVerifierRuntimeMode=evidence_only \
             -PfetanagentVerifierDeploymentTarget='${{ inputs.deployment_target }}' \
@@ -149,6 +181,7 @@ jobs:
             -PfetanagentRoutineReceiptSignerSpkiFile="$protected/routine-receipt.spki.der" \
             -PfetanagentRoutineReceiptSignerValidFrom="$ROUTINE_RECEIPT_SIGNER_VALID_FROM" \
             -PfetanagentRoutineReceiptSignerValidUntil="$ROUTINE_RECEIPT_SIGNER_VALID_UNTIL" \
+            "${routine_args[@]}" \
             -PfetanagentVerifierSigningStoreFile="$protected/release.p12" \
             -PfetanagentVerifierSigningKeyAlias='${{ vars.ANDROID_TELEBIRR_SIGNING_KEY_ALIAS }}' \
             -PfetanagentVerifierSigningCertSha256='${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}' \
@@ -166,6 +199,7 @@ jobs:
           ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
           ROUTINE_RECEIPT_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 }}
+          ROUTINE_LOOKUP_SIGNER_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
         run: |
           set -euo pipefail
           build_config='app/build/generated/source/buildConfig/release/com/fetanagent/telebirrverifier/BuildConfig.java'
@@ -173,7 +207,15 @@ jobs:
           grep -Fq 'VERIFIER_ENABLED = true' "$build_config"
           grep -Fq "VERIFIER_DEPLOYMENT_TARGET = \"$DEPLOYMENT_TARGET\"" "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "evidence_only"' "$build_config"
-          grep -Fq 'VERSION_NAME = "0.5.15-evidence-only"' "$build_config"
+          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            grep -Fq 'VERSION_NAME = "0.5.16-routine-no-money"' "$build_config"
+            grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
+            grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
+            grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
+          else
+            grep -Fq 'VERSION_NAME = "0.5.15-evidence-only"' "$build_config"
+            grep -Fq 'ROUTINE_NO_MONEY_ENABLED = false' "$build_config"
+          fi
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ROUTINE_RECEIPT_SIGNER_KEY_ID = \"telebirr-routine-enrollment-$DEPLOYMENT_TARGET-v1\"" "$build_config"
@@ -192,7 +234,11 @@ jobs:
           artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-evidence-artifact"
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
-          artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-evidence-only.apk"
+          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
+            artifact_name='FetanAgent-TeleBirr-Verifier-0.5.16-production-routine-no-money.apk'
+          else
+            artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-evidence-only.apk"
+          fi
           install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
           (
             cd "$artifact_dir"

@@ -19,8 +19,16 @@ on:
         description: Type the exact full reviewed main commit SHA
         required: true
         type: string
-      confirm_evidence_only_no_money:
-        description: Type build-evidence-only-no-money
+      phone_mode:
+        description: Select no-money rehearsal or paid receipt observation upload (neither credits Players)
+        required: true
+        default: no_money
+        type: choice
+        options:
+          - no_money
+          - paid_observation
+      confirm_evidence_only_phone_mode:
+        description: Type build-evidence-only-no-money or build-evidence-only-paid-observation for the selected mode
         required: true
         type: string
 
@@ -46,13 +54,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Require current main and the no-money evidence-only confirmation
+      - name: Require current main and exact evidence-only phone-mode confirmation
         shell: bash
         env:
           DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
           CONFIRMED_DEPLOYMENT_TARGET: ${{ inputs.confirm_deployment_target }}
           CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
-          CONFIRMED_EVIDENCE_ONLY: ${{ inputs.confirm_evidence_only_no_money }}
+          CONFIRMED_EVIDENCE_ONLY: ${{ inputs.confirm_evidence_only_phone_mode }}
+          PHONE_MODE: ${{ inputs.phone_mode }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
@@ -60,7 +69,13 @@ jobs:
           [[ "$CONFIRMED_DEPLOYMENT_TARGET" == "$DEPLOYMENT_TARGET" ]]
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
-          [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-no-money' ]]
+          [[ "$PHONE_MODE" == 'no_money' || "$PHONE_MODE" == 'paid_observation' ]]
+          if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
+            [[ "$DEPLOYMENT_TARGET" == 'production' ]]
+            [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-paid-observation' ]]
+          else
+            [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-no-money' ]]
+          fi
 
       - name: Set up Java 17
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
@@ -160,6 +175,7 @@ jobs:
           ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
           ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
           DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
+          PHONE_MODE: ${{ inputs.phone_mode }}
         run: |
           set -euo pipefail
           protected='${{ steps.protected.outputs.protected }}'
@@ -170,6 +186,9 @@ jobs:
               -PfetanagentRoutineLookupSignerValidFrom="$ROUTINE_LOOKUP_SIGNER_VALID_FROM"
               -PfetanagentRoutineLookupSignerValidUntil="$ROUTINE_LOOKUP_SIGNER_VALID_UNTIL"
             )
+          fi
+          if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
+            routine_args+=( -PfetanagentRoutinePaidPhoneEnabled=true )
           fi
           gradle --no-daemon --stacktrace \
             -PfetanagentVerifierRuntimeMode=evidence_only \
@@ -195,6 +214,7 @@ jobs:
         shell: bash
         env:
           DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
+          PHONE_MODE: ${{ inputs.phone_mode }}
           ANDROID_SIGNING_CERT_SHA256: ${{ vars.ANDROID_TELEBIRR_SIGNING_CERT_SHA256 }}
           ASSIGNMENT_SIGNER_KEY_ID: ${{ vars.TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID }}
           BRIDGE_SIGNER_KEY_ID: ${{ vars.TELEBIRR_BRIDGE_SERVER_SIGNER_KEY_ID }}
@@ -208,13 +228,20 @@ jobs:
           grep -Fq "VERIFIER_DEPLOYMENT_TARGET = \"$DEPLOYMENT_TARGET\"" "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "evidence_only"' "$build_config"
           if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            grep -Fq 'VERSION_NAME = "0.5.17-routine-no-money"' "$build_config"
             grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
             grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
             grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
+            if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
+              grep -Fq 'VERSION_NAME = "0.5.18-routine-paid-observation"' "$build_config"
+              grep -Fq 'ROUTINE_PAID_ENABLED = true' "$build_config"
+            else
+              grep -Fq 'VERSION_NAME = "0.5.17-routine-no-money"' "$build_config"
+              grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
+            fi
           else
             grep -Fq 'VERSION_NAME = "0.5.15-evidence-only"' "$build_config"
             grep -Fq 'ROUTINE_NO_MONEY_ENABLED = false' "$build_config"
+            grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
           fi
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
@@ -235,7 +262,11 @@ jobs:
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
           if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
+            if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
+              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.18-production-routine-paid-observation.apk'
+            else
+              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
+            fi
           else
             artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-evidence-only.apk"
           fi

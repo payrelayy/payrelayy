@@ -136,7 +136,7 @@ class RoutinePaidPhonePreparationTest {
     device,
   )
 
-  @Test fun `paid HTTPS transport cannot call no-money pilot or an upload route`() {
+  @Test fun `paid HTTPS transport permits only exact paid poll and upload pairs`() {
     var calls = 0
     val fixed = FixedRoutinePaidPollHttpsExchange(executor = DeviceBridgeHttpsExecutor {
       url, target, contentType, body, _, _, maximum ->
@@ -144,18 +144,23 @@ class RoutinePaidPhonePreparationTest {
       assertEquals("https", url.protocol)
       assertEquals(FixedDeviceBridgeHttpsExchange.ORIGIN_HOST, url.host)
       assertEquals(443, url.port)
-      assertEquals(RoutinePaidBridgeProtocol.POLL_PATH, url.path)
+      assertTrue(url.path == RoutinePaidBridgeProtocol.POLL_PATH ||
+        url.path == RoutinePaidBridgeProtocol.UPLOAD_PATH)
       assertEquals("production", target)
-      assertEquals(RoutinePaidBridgeProtocol.CONTENT_TYPE, contentType)
+      assertEquals(if (url.path == RoutinePaidBridgeProtocol.POLL_PATH)
+        RoutinePaidBridgeProtocol.CONTENT_TYPE else RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE,
+        contentType)
       assertEquals(RoutinePaidBridgeProtocol.MAX_RESPONSE_BYTES, maximum)
       assertTrue(body.contentEquals(byteArrayOf(1)))
       DeviceBridgeHttpsResponse(200, listOf(contentType), emptyList(), byteArrayOf(1))
     })
     fixed.post(RoutinePaidBridgeProtocol.POLL_PATH, RoutinePaidBridgeProtocol.CONTENT_TYPE,
       byteArrayOf(1))
-    assertEquals(1, calls)
+    fixed.post(RoutinePaidBridgeProtocol.UPLOAD_PATH,
+      RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE, byteArrayOf(1))
+    assertEquals(2, calls)
     listOf(RoutineNoMoneyBridgeProtocol.POLL_PATH, RoutineNoMoneyBridgeProtocol.UPLOAD_PATH,
-      DeviceBridgeProtocol.ASSIGNMENT_POLL_PATH, "/v1/telebirr/routine/paid/observations:upload")
+      DeviceBridgeProtocol.ASSIGNMENT_POLL_PATH, RoutinePaidBridgeProtocol.UPLOAD_PATH)
       .forEach { path ->
         assertThrows(IllegalArgumentException::class.java) {
           fixed.post(path, RoutinePaidBridgeProtocol.CONTENT_TYPE, byteArrayOf(1))
@@ -165,7 +170,11 @@ class RoutinePaidPhonePreparationTest {
       fixed.post(RoutinePaidBridgeProtocol.POLL_PATH,
         RoutineNoMoneyBridgeProtocol.CONTENT_TYPE, byteArrayOf(1))
     }
-    assertEquals(1, calls)
+    assertThrows(IllegalArgumentException::class.java) {
+      fixed.post(RoutinePaidBridgeProtocol.POLL_PATH,
+        RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE, byteArrayOf(1))
+    }
+    assertEquals(2, calls)
   }
 
   @Test fun `paid transport rejects redirects duplicate media type and compression`() {
@@ -207,19 +216,27 @@ class RoutinePaidPhonePreparationTest {
   }
 
   @Test fun `signed paid assignment persists before lookup and observation stays sealed`() {
-    var calls = 0
+    var pollCalls = 0
+    var uploadCalls = 0
     val fixed = exchange { path, contentType, _ ->
-      calls++
-      assertEquals(RoutinePaidBridgeProtocol.POLL_PATH, path)
-      DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH) {
+        pollCalls++
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      } else {
+        assertEquals(RoutinePaidBridgeProtocol.UPLOAD_PATH, path)
+        uploadCalls++
+        DeviceBridgeRawResponse(503, contentType,
+          """{"code":"temporarily_unavailable"}""".toByteArray(StandardCharsets.UTF_8))
+      }
     }
     val result = run(preparation(fixed, ProviderTransport { route ->
       assertTrue(workStore.load() is RoutinePaidPendingWork.Assignment)
       assertEquals(OfficialReceiptRoute.OFFICIAL_HOST, route.host)
       observedReceipt()
     }))
-    assertEquals(RoutinePaidPhonePreparationResult.PendingUpload, result)
-    assertEquals(1, calls)
+    assertEquals(RoutinePaidPhonePreparationResult.Retry, result)
+    assertEquals(1, pollCalls)
+    assertEquals(1, uploadCalls)
     val pending = workStore.load() as RoutinePaidPendingWork.Upload
     val frame = StrictJson.parse(pending.uploadBytes).requireObject(
       setOf("publicKeySpki", "signedAssignment", "signedObservation"))
@@ -228,13 +245,14 @@ class RoutinePaidPhonePreparationTest {
     val sealed = File(workDirectory, "routine-paid.sealed").readBytes()
     assertFalse(String(sealed, StandardCharsets.ISO_8859_1).contains(PILOT_REFERENCE))
     val restarted = EncryptedRoutinePaidWorkStore(workDirectory, workCipher)
-    assertEquals(RoutinePaidPhonePreparationResult.PendingUpload,
+    assertEquals(RoutinePaidPhonePreparationResult.Retry,
       run(preparation(fixed, ProviderTransport { error("No repeat lookup") }, restarted)))
     val afterExpiry = Instant.parse("2026-10-05T18:06:00.000Z").toEpochMilli()
-    assertEquals(RoutinePaidPhonePreparationResult.PendingUpload,
+    assertEquals(RoutinePaidPhonePreparationResult.Retry,
       run(preparation(fixed, ProviderTransport { error("No expired upload lookup") }, restarted,
         at = afterExpiry)))
-    assertEquals(1, calls)
+    assertEquals(1, pollCalls)
+    assertEquals(3, uploadCalls)
     assertTrue((restarted.load() as RoutinePaidPendingWork.Upload).uploadBytes
       .contentEquals(pending.uploadBytes))
   }
@@ -262,17 +280,65 @@ class RoutinePaidPhonePreparationTest {
 
   @Test fun `offline receipt retains assignment and restart does not consume another poll`() {
     var calls = 0
-    val fixed = exchange { _, contentType, _ ->
+    val fixed = exchange { path, contentType, _ ->
       calls++
-      DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH)
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      else DeviceBridgeRawResponse(503, contentType,
+        """{"code":"temporarily_unavailable"}""".toByteArray(StandardCharsets.UTF_8))
     }
     assertEquals(RoutinePaidPhonePreparationResult.Review("transport_unavailable"),
       run(preparation(fixed, ProviderTransport { error("offline") })))
     assertTrue(workStore.load() is RoutinePaidPendingWork.Assignment)
     val restarted = EncryptedRoutinePaidWorkStore(workDirectory, workCipher)
-    assertEquals(RoutinePaidPhonePreparationResult.PendingUpload,
+    assertEquals(RoutinePaidPhonePreparationResult.Retry,
       run(preparation(fixed, ProviderTransport { observedReceipt() }, restarted)))
-    assertEquals(1, calls)
+    assertEquals(2, calls)
+  }
+
+  @Test fun `sealed paid observation retries and clears only after an exact no-credit acknowledgement`() {
+    var pollCalls = 0
+    var uploadCalls = 0
+    var acceptUpload = false
+    val fixed = exchange { path, contentType, bytes ->
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH) {
+        pollCalls++
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      } else {
+        assertEquals(RoutinePaidBridgeProtocol.UPLOAD_PATH, path)
+        assertEquals(RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE, contentType)
+        assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
+        assertTrue(bytes.contentEquals((workStore.load() as RoutinePaidPendingWork.Upload).uploadBytes))
+        uploadCalls++
+        if (acceptUpload) DeviceBridgeRawResponse(202, contentType,
+          """{"outcome":"signed_paid_observation_staged","advisoryOnly":true,"paymentVerificationRequested":true,"pairedPhoneEvidenceVerified":true,"sourceAuthenticationPerformed":false,"financialActionAllowed":false}"""
+            .toByteArray(StandardCharsets.UTF_8))
+        else DeviceBridgeRawResponse(503, contentType,
+          """{"code":"temporarily_unavailable"}""".toByteArray(StandardCharsets.UTF_8))
+      }
+    }
+    assertEquals(RoutinePaidPhonePreparationResult.Retry,
+      run(preparation(fixed, ProviderTransport { observedReceipt() })))
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
+    acceptUpload = true
+    assertEquals(RoutinePaidPhonePreparationResult.SubmittedForReview,
+      run(preparation(fixed, ProviderTransport { error("No second receipt lookup") })))
+    assertNull(workStore.load())
+    assertEquals(1, pollCalls)
+    assertEquals(2, uploadCalls)
+  }
+
+  @Test fun `ambiguous or credit-authorizing upload response cannot clear sealed evidence`() {
+    val fixed = exchange { path, contentType, _ ->
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH)
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      else DeviceBridgeRawResponse(202, contentType,
+        """{"outcome":"signed_paid_observation_staged","advisoryOnly":true,"paymentVerificationRequested":true,"pairedPhoneEvidenceVerified":true,"sourceAuthenticationPerformed":false,"financialActionAllowed":true}"""
+          .toByteArray(StandardCharsets.UTF_8))
+    }
+    assertEquals(RoutinePaidPhonePreparationResult.Review("invalid_upload_response"),
+      run(preparation(fixed, ProviderTransport { observedReceipt() })))
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
   }
 
   @Test fun `failed durable stage prevents public receipt lookup`() {

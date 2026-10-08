@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatterBuilder
 /** The signed production rehearsal is an alternative to, never an extension of, pilot execution. */
 internal object RoutineNoMoneyRuntimeComposition {
   fun enabled(): Boolean = BuildConfig.VERIFIER_ENABLED && BuildConfig.ROUTINE_NO_MONEY_ENABLED &&
+    !BuildConfig.ROUTINE_PAID_ENABLED &&
     BuildConfig.VERIFIER_RUNTIME_MODE == "evidence_only" &&
     BuildConfig.VERIFIER_DEPLOYMENT_TARGET == "production"
 
@@ -18,7 +19,10 @@ internal object RoutineNoMoneyRuntimeComposition {
   }
 
   fun receiptSigner(): RoutineEnrollmentTrustedSigner? = runCatching {
-    if (!enabled() || BuildConfig.ROUTINE_RECEIPT_SIGNER_KEY_ID !=
+    if (!BuildConfig.VERIFIER_ENABLED || !BuildConfig.ROUTINE_NO_MONEY_ENABLED ||
+      BuildConfig.VERIFIER_RUNTIME_MODE != "evidence_only" ||
+      BuildConfig.VERIFIER_DEPLOYMENT_TARGET != "production" ||
+      BuildConfig.ROUTINE_RECEIPT_SIGNER_KEY_ID !=
       "telebirr-routine-enrollment-production-v1") return null
     val spki = DeviceBridgeCrypto.parseP256SpkiBase64Url(
       BuildConfig.ROUTINE_RECEIPT_SIGNER_PUBLIC_KEY_SPKI)
@@ -34,8 +38,11 @@ internal object RoutineNoMoneyRuntimeComposition {
     )
   }.getOrNull()
 
-  private fun lookupSigner(): Pair<RoutineLookupTrustedSigner, ByteArray>? = runCatching {
-    if (!enabled() || BuildConfig.ROUTINE_LOOKUP_SIGNER_KEY_ID !=
+  fun lookupSigner(): Pair<RoutineLookupTrustedSigner, ByteArray>? = runCatching {
+    if (!BuildConfig.VERIFIER_ENABLED || !BuildConfig.ROUTINE_NO_MONEY_ENABLED ||
+      BuildConfig.VERIFIER_RUNTIME_MODE != "evidence_only" ||
+      BuildConfig.VERIFIER_DEPLOYMENT_TARGET != "production" ||
+      BuildConfig.ROUTINE_LOOKUP_SIGNER_KEY_ID !=
       "telebirr-routine-lookup-production-v1") return null
     val spki = DeviceBridgeCrypto.parseP256SpkiBase64Url(
       BuildConfig.ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI)

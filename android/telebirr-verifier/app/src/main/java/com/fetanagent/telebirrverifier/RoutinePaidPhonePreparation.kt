@@ -7,16 +7,19 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
 
-/** Distinct from both the pilot and the no-money phone routes. No upload route exists yet. */
+/** Distinct from both the pilot and the no-money phone routes. */
 internal object RoutinePaidBridgeProtocol {
   const val POLL_PATH = "/v1/telebirr/routine/paid/assignments:poll"
   const val CONTENT_TYPE = "application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json"
+  const val UPLOAD_PATH = "/v1/telebirr/routine/paid/observations:upload"
+  const val UPLOAD_CONTENT_TYPE =
+    "application/vnd.fetanagent.telebirr-routine-paid-observation.v1+json"
   const val MAX_POLL_BYTES = 4_096
   const val MAX_RESPONSE_BYTES = 16 * 1_024
-  const val MAX_FUTURE_UPLOAD_BYTES = 48 * 1_024
+  const val MAX_UPLOAD_BYTES = 48 * 1_024
 }
 
-/** An exact HTTPS paid-poll transport; it cannot contact the no-money or pilot endpoints. */
+/** An exact HTTPS paid transport; it cannot contact the no-money or pilot endpoints. */
 internal class FixedRoutinePaidPollHttpsExchange(
   private val deploymentTarget: String = FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET,
   private val executor: DeviceBridgeHttpsExecutor = PlatformDeviceBridgeHttpsExecutor,
@@ -27,11 +30,20 @@ internal class FixedRoutinePaidPollHttpsExchange(
   }
 
   override fun post(path: String, contentType: String, body: ByteArray): DeviceBridgeRawResponse {
-    require(path == RoutinePaidBridgeProtocol.POLL_PATH)
-    require(contentType == RoutinePaidBridgeProtocol.CONTENT_TYPE)
-    require(body.size in 1..RoutinePaidBridgeProtocol.MAX_POLL_BYTES)
+    val maximum = when (path) {
+      RoutinePaidBridgeProtocol.POLL_PATH -> {
+        require(contentType == RoutinePaidBridgeProtocol.CONTENT_TYPE)
+        RoutinePaidBridgeProtocol.MAX_POLL_BYTES
+      }
+      RoutinePaidBridgeProtocol.UPLOAD_PATH -> {
+        require(contentType == RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE)
+        RoutinePaidBridgeProtocol.MAX_UPLOAD_BYTES
+      }
+      else -> throw IllegalArgumentException("Unsupported paid bridge path")
+    }
+    require(body.size in 1..maximum)
     val url = URI("https", null, FixedDeviceBridgeHttpsExchange.ORIGIN_HOST, 443,
-      RoutinePaidBridgeProtocol.POLL_PATH, null, null).toURL()
+      path, null, null).toURL()
     require(url.protocol == "https" && url.host == FixedDeviceBridgeHttpsExchange.ORIGIN_HOST &&
       url.port == 443 && url.path == path && url.userInfo == null && url.query == null &&
       url.ref == null)
@@ -46,12 +58,12 @@ internal class FixedRoutinePaidPollHttpsExchange(
       throw DeviceBridgeRetryableException()
     }
     if (response.statusCode !in 100..599 || response.statusCode in 300..399 ||
-      response.contentTypes.singleOrNull() != RoutinePaidBridgeProtocol.CONTENT_TYPE ||
+      response.contentTypes.singleOrNull() != contentType ||
       response.contentEncodings.any { !it.equals("identity", ignoreCase = true) } ||
       response.contentEncodings.size > 1 ||
       response.body.size > RoutinePaidBridgeProtocol.MAX_RESPONSE_BYTES
     ) throw DeviceBridgeRetryableException()
-    return DeviceBridgeRawResponse(response.statusCode, RoutinePaidBridgeProtocol.CONTENT_TYPE,
+    return DeviceBridgeRawResponse(response.statusCode, contentType,
       response.body.copyOf())
   }
 
@@ -62,15 +74,14 @@ internal class FixedRoutinePaidPollHttpsExchange(
 internal sealed interface RoutinePaidPhonePreparationResult {
   data object NoAssignment : RoutinePaidPhonePreparationResult
   data object Retry : RoutinePaidPhonePreparationResult
-  /** Keystore-sealed signed evidence awaits a separate, not-yet-implemented paid upload route. */
-  data object PendingUpload : RoutinePaidPhonePreparationResult
+  data object SubmittedForReview : RoutinePaidPhonePreparationResult
   data class Review(val reasonCode: String) : RoutinePaidPhonePreparationResult
 }
 
 /**
- * One-shot paid phone preparation, deliberately not composed into the operational service.
- * The assignment and observation are sealed before further I/O. This does not upload evidence,
- * authenticate a payment on the server, create a claim, or credit a Player.
+ * Paid phone poll, official receipt lookup, and retry-safe signed observation upload.
+ * The assignment and observation are sealed before further I/O. Upload stages evidence for
+ * server review; it does not create a payment claim or credit a Player.
  */
 internal class RoutinePaidPhonePreparation(
   private val exchange: FixedRoutinePaidPollHttpsExchange,
@@ -91,9 +102,6 @@ internal class RoutinePaidPhonePreparation(
     }
     val pending = try { workStore.load() } catch (_: Exception) {
       return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
-    }
-    if (pending is RoutinePaidPendingWork.Upload) {
-      return RoutinePaidPhonePreparationResult.PendingUpload
     }
     if (pending is RoutinePaidPendingWork.Assignment) {
       val staged = RoutineTelebirrJsonCodec.decodeSignedAssignment(pending.assignmentBytes)
@@ -124,6 +132,7 @@ internal class RoutinePaidPhonePreparation(
         receipt, receiptSigner, material, assessedAt)) {
       return RoutinePaidPhonePreparationResult.Review("enrollment_unavailable")
     }
+    if (pending is RoutinePaidPendingWork.Upload) return uploadPending(pending.uploadBytes)
     val assignmentBytes = if (pending is RoutinePaidPendingWork.Assignment) {
       pending.assignmentBytes
     } else {
@@ -209,7 +218,7 @@ internal class RoutinePaidPhonePreparation(
         "signedAssignment" to StrictJson.parse(assignmentBytes),
         "signedObservation" to StrictJson.parse(encoded),
       )).toByteArray(StandardCharsets.UTF_8).also {
-        require(it.size in 1..RoutinePaidBridgeProtocol.MAX_FUTURE_UPLOAD_BYTES)
+        require(it.size in 1..RoutinePaidBridgeProtocol.MAX_UPLOAD_BYTES)
       }
     } catch (_: Exception) {
       return RoutinePaidPhonePreparationResult.Review("observation_invalid")
@@ -217,7 +226,46 @@ internal class RoutinePaidPhonePreparation(
     try { workStore.stageUpload(assignmentBytes, upload) } catch (_: Exception) {
       return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
     }
-    return RoutinePaidPhonePreparationResult.PendingUpload
+    return uploadPending(upload)
+  }
+
+  private fun uploadPending(bytes: ByteArray): RoutinePaidPhonePreparationResult {
+    val response = try {
+      exchange.post(RoutinePaidBridgeProtocol.UPLOAD_PATH,
+        RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE, bytes)
+    } catch (_: Exception) {
+      return RoutinePaidPhonePreparationResult.Retry
+    }
+    if (response.contentType != RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE ||
+      response.statusCode >= 500 || response.statusCode == 429) {
+      return RoutinePaidPhonePreparationResult.Retry
+    }
+    if (response.statusCode == HttpURLConnection.HTTP_CONFLICT) {
+      return RoutinePaidPhonePreparationResult.Review("observation_conflict")
+    }
+    if (response.statusCode == HttpURLConnection.HTTP_UNAUTHORIZED ||
+      response.statusCode == HttpURLConnection.HTTP_FORBIDDEN) {
+      return RoutinePaidPhonePreparationResult.Review("server_rejected")
+    }
+    if (response.statusCode != HttpURLConnection.HTTP_ACCEPTED) {
+      return RoutinePaidPhonePreparationResult.Review("upload_rejected")
+    }
+    val accepted = try {
+      val frame = StrictJson.parse(response.body).requireObject(setOf(
+        "outcome", "advisoryOnly", "paymentVerificationRequested",
+        "pairedPhoneEvidenceVerified", "sourceAuthenticationPerformed",
+        "financialActionAllowed"))
+      frame.string("outcome") == "signed_paid_observation_staged" &&
+        frame.boolean("advisoryOnly") && frame.boolean("paymentVerificationRequested") &&
+        frame.boolean("pairedPhoneEvidenceVerified") &&
+        !frame.boolean("sourceAuthenticationPerformed") &&
+        !frame.boolean("financialActionAllowed")
+    } catch (_: Exception) { false }
+    if (!accepted) return RoutinePaidPhonePreparationResult.Review("invalid_upload_response")
+    try { workStore.acknowledge(bytes) } catch (_: Exception) {
+      return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
+    }
+    return RoutinePaidPhonePreparationResult.SubmittedForReview
   }
 
   private fun isNoAssignment(body: ByteArray): Boolean = try {

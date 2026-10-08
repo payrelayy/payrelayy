@@ -27,6 +27,9 @@ class VerifierRuntimeSession(
  */
 object VerifierRuntimeComposition {
   fun create(context: Context): VerifierRuntimeSession {
+    if (RoutinePaidRuntimeComposition.enabled()) {
+      return RoutinePaidRuntimeComposition.create(context)
+    }
     if (RoutineNoMoneyRuntimeComposition.enabled()) {
       return RoutineNoMoneyRuntimeComposition.create(context)
     }
@@ -72,6 +75,9 @@ object VerifierRuntimeComposition {
 
   fun isEnrolled(context: Context): Boolean {
     if (!BuildConfig.VERIFIER_ENABLED) return false
+    if (RoutinePaidRuntimeComposition.enabled()) {
+      return RoutinePaidRuntimeComposition.isEnrolled(context)
+    }
     if (RoutineNoMoneyRuntimeComposition.enabled()) {
       return RoutineNoMoneyRuntimeComposition.isEnrolled(context)
     }

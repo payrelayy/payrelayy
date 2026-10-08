@@ -26,7 +26,7 @@ const ISSUE_PAID_POLL =
 const LOAD_ENROLLMENT = 'select * from app.load_routine_telebirr_no_money_enrollment($1::uuid)';
 const LOAD_OBSERVATION_MATERIAL =
   'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)';
-const CAPTURE = `
+export const CAPTURE = `
   select * from app.capture_telegram_routine_telebirr_untrusted_proof(
     $1::uuid, $2::text, 'telebirr'::text, $3::text, $4::text, $5::text,
     2::smallint, 2::smallint, $6::text
@@ -120,7 +120,7 @@ async function fixtureIdentity(client: Client): Promise<{
   return { customerId: customer.rows[0]!.id, identityId: identity.rows[0]!.id };
 }
 
-async function fixtureTelegramActor(
+export async function fixtureTelegramActor(
   client: Client,
   ownerAdminId: string,
 ): Promise<{ customerId: string; identityId: string }> {
@@ -168,7 +168,7 @@ async function fixtureTelegramActor(
   return { customerId, identityId };
 }
 
-async function fixtureInboundEvent(client: Client, identityId: string): Promise<string> {
+export async function fixtureInboundEvent(client: Client, identityId: string): Promise<string> {
   const event = await client.query<{ id: string }>(
     `insert into app.inbound_events (
        channel, external_event_id, customer_identity_id, payload_digest
@@ -182,7 +182,10 @@ async function fixtureInboundEvent(client: Client, identityId: string): Promise<
   return event.rows[0]!.id;
 }
 
-async function fixtureEligiblePlayer(client: Client, ownerCustomerId?: string): Promise<string> {
+export async function fixtureEligiblePlayer(
+  client: Client,
+  ownerCustomerId?: string,
+): Promise<string> {
   const customerId =
     ownerCustomerId ??
     (
@@ -220,7 +223,7 @@ async function fixtureEligiblePlayer(client: Client, ownerCustomerId?: string): 
   return playerId;
 }
 
-async function fixtureTelebirrReceiver(client: Client): Promise<{
+export async function fixtureTelebirrReceiver(client: Client): Promise<{
   readonly id: string;
   readonly version: number;
 }> {
@@ -250,7 +253,7 @@ async function fixtureTelebirrReceiver(client: Client): Promise<{
   return inserted.rows[0]!;
 }
 
-function captureArguments(eventId: string, playerId: string): readonly string[] {
+export function captureArguments(eventId: string, playerId: string): readonly string[] {
   return [
     eventId,
     playerId,
@@ -261,7 +264,7 @@ function captureArguments(eventId: string, playerId: string): readonly string[] 
   ];
 }
 
-async function fixtureRoutineLookupTrust(
+export async function fixtureRoutineLookupTrust(
   client: Client,
   candidateId: string,
 ): Promise<{

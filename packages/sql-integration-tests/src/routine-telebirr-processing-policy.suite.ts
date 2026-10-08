@@ -125,13 +125,12 @@ export async function paidJob(
       receiver_account_id: string;
       receiver_account_version: number;
       submission_id: string;
-      submitted_at: Date;
       reference_fingerprint: string;
       occurred_at: Date;
     }>(
       `select intent.payment_provider_id, intent.receiver_account_id,
               intent.receiver_account_version, submission.id as submission_id,
-              submission.submitted_at, evidence.canonical_reference_fingerprint as reference_fingerprint,
+              evidence.canonical_reference_fingerprint as reference_fingerprint,
               evidence.occurred_at
          from app.deposit_intents intent
          join app.deposit_verification_attempts verification on verification.deposit_intent_id = intent.id
@@ -180,11 +179,14 @@ export async function paidJob(
         submitted_at, challenge_issued_at, observed_at, occurred_at, amount_minor,
         provider_payment_evidence_id, deposit_intent_id, deposit_submission_id,
         deposit_payment_claim_id, execution_job_id
-      ) values (
+      ) select
         $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::text, $7::jsonb,
-        $8::timestamptz, $8::timestamptz, $9::timestamptz, $9::timestamptz, $10::bigint,
-        $11::uuid, $12::uuid, $13::uuid, $14::uuid, $15::uuid
-      )`,
+        submission.submitted_at, submission.submitted_at,
+        evidence.occurred_at, evidence.occurred_at, $8::bigint,
+        evidence.id, $10::uuid, submission.id, $12::uuid, $13::uuid
+        from app.deposit_submissions submission
+        join app.provider_payment_evidence evidence on evidence.id = $9::uuid
+        where submission.id = $11::uuid`,
       [
         challengeId,
         candidateId,
@@ -193,8 +195,6 @@ export async function paidJob(
         bodyDigest,
         sourceDocumentDigest,
         JSON.stringify(signedObservation),
-        exact.submitted_at,
-        exact.occurred_at,
         amountMinor,
         fixture.evidenceId,
         fixture.depositIntentId,

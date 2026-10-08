@@ -163,6 +163,15 @@ export {
   type RoutineNoMoneyPollAssessment,
 } from './routine-no-money-poll.js';
 export {
+  ROUTINE_PAID_POLL_MODE,
+  ROUTINE_PAID_POLL_TRANSCRIPT,
+  canonicalRoutinePaidPollBodyBytes,
+  canonicalRoutinePaidPollSignatureBytes,
+  digestRoutinePaidPollBody,
+  verifyRoutinePaidPollRequest,
+  type RoutinePaidPollAssessment,
+} from './routine-paid-poll.js';
+export {
   ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_CONTRACT_VERSION,
   ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_PROTOCOL_MODE,
   ROUTINE_TELEBIRR_LOOKUP_ASSIGNMENT_TRANSCRIPT_VERSION,

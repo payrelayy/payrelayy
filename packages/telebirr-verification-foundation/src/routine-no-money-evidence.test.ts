@@ -11,6 +11,7 @@ import {
   digestRoutineTelebirrReceiverName,
 } from './routine-signed-lookup-assignment.js';
 import {
+  ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION,
   ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
   canonicalRoutineTelebirrObservationSignatureBytes,
   digestRoutineTelebirrObservationBody,
@@ -26,7 +27,7 @@ const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const hash = (bytes: Uint8Array): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
-function fixture() {
+function fixture(origin = false) {
   const signerKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const deviceKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const signerSpki = signerKey.publicKey.export({ type: 'spki', format: 'der' });
@@ -127,9 +128,17 @@ function fixture() {
     referenceMatch: 'matched',
     retrievedAt: '2026-10-05T18:03:00.000Z',
     sourceProfile: 'telebirr_official_receipt_v1',
+    ...(origin ? { sourceOriginAttestation: 'official_tls_origin' } : {}),
   };
+  const observationHeader = origin
+    ? {
+        contractVersion: 2,
+        providerCode: 'telebirr',
+        protocolMode: 'routine_signed_observation_v2',
+      }
+    : header;
   const observationBody = (receiptFacts: typeof facts) => ({
-    ...header,
+    ...observationHeader,
     candidateId: trustedLookup.candidateId,
     referenceFingerprint: trustedLookup.referenceFingerprint,
     receiverRevisionId: trustedLookup.receiverRevisionId,
@@ -146,8 +155,10 @@ function fixture() {
     facts: receiptFacts,
   });
   const signedObservation = (body: ReturnType<typeof observationBody>, key: KeyObject) => ({
-    ...header,
-    transcriptVersion: ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+    ...observationHeader,
+    transcriptVersion: origin
+      ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+      : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
     bodyDigestAlgorithm: 'sha256',
     bodyDigest: digestRoutineTelebirrObservationBody(body)!,
     signatureAlgorithm: 'ecdsa-p256-sha256',
@@ -303,8 +314,42 @@ describe('routine TeleBirr no-money evidence boundary', () => {
 });
 
 describe('routine TeleBirr paid-phone evidence adapter', () => {
-  it('rejects a legacy no-money challenge even when both signatures and receipt facts are valid', () => {
+  it('keeps a valid version-1 signed phone report review-only', () => {
     const { input, signerSpki, deviceSpki } = fixture();
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'paid' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toEqual({
+      disposition: 'review',
+      reasonCode: 'official_origin_attestation_missing',
+      financialActionAllowed: false,
+      evidence: null,
+    });
+  });
+
+  it('rejects a changed or removed origin assertion even with an enrolled phone key', () => {
+    const { input, signerSpki, deviceSpki } = fixture(true);
+    const unsignedOrigin = {
+      ...input.signedObservation,
+      body: {
+        ...input.signedObservation.body,
+        facts: { ...input.signedObservation.body.facts, sourceOriginAttestation: 'unattested' },
+      },
+    };
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'paid', signedObservation: unsignedOrigin },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', evidence: null });
+  });
+
+  it('rejects a legacy no-money challenge even when both signatures and receipt facts are valid', () => {
+    const { input, signerSpki, deviceSpki } = fixture(true);
     expect(
       assessRoutineTelebirrPaidPhoneEvidence(
         { ...input, trustedIssuanceMode: 'no_money' },
@@ -320,7 +365,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
   });
 
   it('returns a redacted TeleBirr-specific candidate for the shared atomic ledger', () => {
-    const { input, signerSpki, deviceSpki } = fixture();
+    const { input, signerSpki, deviceSpki } = fixture(true);
     const result = assessRoutineTelebirrPaidPhoneEvidence(
       { ...input, trustedIssuanceMode: 'paid' },
       signerSpki,
@@ -348,7 +393,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
 
   it('allows a bounded upload retry but reviews tampered, late, and non-completed evidence', () => {
     const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
-      fixture();
+      fixture(true);
     const paid = { ...input, trustedIssuanceMode: 'paid' };
     expect(
       assessRoutineTelebirrPaidPhoneEvidence(
@@ -395,7 +440,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
       observationBody,
       signedObservation,
       deviceKey,
-    } = fixture();
+    } = fixture(true);
     const submittedAt = '2026-10-05T18:58:00.000Z';
     const issuedAt = '2026-10-05T18:59:00.000Z';
     const expiresAt = '2026-10-05T19:04:00.000Z';
@@ -428,7 +473,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
   });
 
   it('cannot accept another provider or caller-supplied financial authority', () => {
-    const { input, signerSpki, deviceSpki } = fixture();
+    const { input, signerSpki, deviceSpki } = fixture(true);
     expect(
       assessRoutineTelebirrPaidPhoneEvidence(
         { ...input, trustedIssuanceMode: 'cbe_birr' },

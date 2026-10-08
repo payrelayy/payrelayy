@@ -27,7 +27,7 @@ internal data class RoutineTelebirrObservationBody(
 ) {
   init {
     val p = RoutineTelebirrLookupProtocol
-    p.requireHeader(contractVersion, providerCode, protocolMode)
+    RoutineTelebirrObservationCanonical.requireHeader(contractVersion, providerCode, protocolMode)
     require(p.UUID_V4.matches(candidateId))
     require(p.FINGERPRINT.matches(referenceFingerprint))
     require(p.UUID_V4.matches(receiverRevisionId) && receiverVersion > 0)
@@ -38,6 +38,7 @@ internal data class RoutineTelebirrObservationBody(
     require(p.DIGEST.matches(sourceDocumentDigest))
     require(p.DIGEST.matches(normalizedFactsDigest))
     p.requireUtc(observedAt)
+    require((contractVersion == 2) == (facts.sourceOriginAttestation == "official_tls_origin"))
   }
 
   override fun toString(): String = "RoutineTelebirrObservationBody(<redacted>)"
@@ -57,8 +58,9 @@ internal data class RoutineTelebirrSignedObservation(
 ) {
   init {
     val p = RoutineTelebirrLookupProtocol
-    p.requireHeader(contractVersion, providerCode, protocolMode)
-    require(transcriptVersion == RoutineTelebirrObservationCanonical.TRANSCRIPT_VERSION)
+    RoutineTelebirrObservationCanonical.requireHeader(contractVersion, providerCode, protocolMode)
+    require(contractVersion == body.contractVersion && protocolMode == body.protocolMode)
+    require(transcriptVersion == RoutineTelebirrObservationCanonical.transcriptVersion(body))
     require(bodyDigestAlgorithm == p.DIGEST_ALGORITHM && p.DIGEST.matches(bodyDigest))
     require(signatureAlgorithm == p.SIGNATURE_ALGORITHM)
     require(signatureEncoding == p.SIGNATURE_ENCODING)
@@ -75,16 +77,30 @@ internal data class RoutineTelebirrSignedObservation(
 /** Canonical ASCII JSON-array transcripts in the exact TypeScript contract field order. */
 internal object RoutineTelebirrObservationCanonical {
   const val TRANSCRIPT_VERSION = "telebirr-routine-observation-transcript-v1"
+  const val ORIGIN_TRANSCRIPT_VERSION = "telebirr-routine-observation-transcript-v2"
+  const val ORIGIN_PROTOCOL_MODE = "routine_signed_observation_v2"
+
+  fun requireHeader(version: Int, providerCode: String, mode: String) {
+    require(providerCode == RoutineTelebirrLookupProtocol.PROVIDER_CODE)
+    require((version == 1 && mode == RoutineTelebirrLookupProtocol.PROTOCOL_MODE) ||
+      (version == 2 && mode == ORIGIN_PROTOCOL_MODE))
+  }
+
+  fun transcriptVersion(body: RoutineTelebirrObservationBody): String =
+    if (body.contractVersion == 2) ORIGIN_TRANSCRIPT_VERSION else TRANSCRIPT_VERSION
 
   fun factsDigest(facts: RoutineTelebirrObservedReceiptFacts): String =
     RoutineLookupCanonicalTranscripts.sha256(
-      jsonArray("telebirr-routine-observation-facts-v1", factsValues(facts)),
+      jsonArray(if (facts.sourceOriginAttestation == null)
+        "telebirr-routine-observation-facts-v1" else
+        "telebirr-routine-observation-facts-v2", factsValues(facts)),
     )
 
   fun bodyDigest(body: RoutineTelebirrObservationBody): String =
     RoutineLookupCanonicalTranscripts.sha256(
       jsonArray(
-        "telebirr-routine-observation-body-v1",
+        if (body.contractVersion == 2) "telebirr-routine-observation-body-v2" else
+          "telebirr-routine-observation-body-v1",
         listOf(
           body.contractVersion,
           body.providerCode,
@@ -108,7 +124,7 @@ internal object RoutineTelebirrObservationCanonical {
     )
 
   fun signatureBytes(body: RoutineTelebirrObservationBody): ByteArray =
-    jsonArray(TRANSCRIPT_VERSION, listOf(bodyDigest(body)))
+    jsonArray(transcriptVersion(body), listOf(bodyDigest(body)))
 
   private fun factsValues(facts: RoutineTelebirrObservedReceiptFacts): List<Any> =
     listOf(
@@ -127,7 +143,7 @@ internal object RoutineTelebirrObservationCanonical {
       facts.referenceMatch,
       facts.retrievedAt,
       facts.sourceProfile,
-    )
+    ) + listOfNotNull(facts.sourceOriginAttestation)
 
   private fun jsonArray(domain: String, values: List<Any>): ByteArray {
     val output = StringWriter()
@@ -164,6 +180,7 @@ internal object RoutineTelebirrSignedObservationFactory {
     enrollment: RoutineLookupDeviceEnrollment,
     parsed: RoutineTelebirrParsedReceipt.Observed,
     identity: P256Identity,
+    officialOriginFromSafeTransport: Boolean = false,
   ): RoutineTelebirrSignedObservation {
     val assigned = assignment.body
     val material = identity.publicMaterial()
@@ -174,13 +191,16 @@ internal object RoutineTelebirrSignedObservationFactory {
     require(enrollment.receiverVersion == assigned.receiverVersion)
     require(enrollment.receiverProfileDigest == assigned.receiverProfileDigest)
     require(enrollment.state == "active")
-    val facts = parsed.facts
+    val facts = parsed.facts.copy(sourceOriginAttestation =
+      if (officialOriginFromSafeTransport) "official_tls_origin" else null)
     require(facts.amountMinor in 0..9_007_199_254_740_991L)
     require(RoutineTelebirrLookupProtocol.DIGEST.matches(facts.creditedPartyNameDigest))
     require(RoutineTelebirrLookupProtocol.DIGEST.matches(parsed.sourceDocumentDigest))
     RoutineTelebirrLookupProtocol.requireUtc(facts.occurredAt)
     RoutineTelebirrLookupProtocol.requireUtc(facts.retrievedAt)
     require(facts.sourceProfile == RoutineTelebirrLookupProtocol.SOURCE_PROFILE)
+    require(facts.sourceOriginAttestation == null ||
+      facts.sourceOriginAttestation == "official_tls_origin")
     require(facts.currencyCode in setOf("ETB", "unknown"))
     require(facts.evidenceSource in setOf("provider_receipt_lookup", "unknown"))
     require(facts.paymentMode in setOf("telebirr", "other", "unknown"))
@@ -193,6 +213,10 @@ internal object RoutineTelebirrSignedObservationFactory {
     require(facts.retrievedAt >= assigned.issuedAt && facts.retrievedAt < assigned.expiresAt)
     val body =
       RoutineTelebirrObservationBody(
+        contractVersion = if (officialOriginFromSafeTransport) 2 else 1,
+        protocolMode = if (officialOriginFromSafeTransport)
+          RoutineTelebirrObservationCanonical.ORIGIN_PROTOCOL_MODE else
+          RoutineTelebirrLookupProtocol.PROTOCOL_MODE,
         candidateId = assigned.candidateId,
         referenceFingerprint = assigned.referenceFingerprint,
         receiverRevisionId = assigned.receiverRevisionId,
@@ -211,6 +235,9 @@ internal object RoutineTelebirrSignedObservationFactory {
     val signature = identity.signP1363(RoutineTelebirrObservationCanonical.signatureBytes(body))
     require(signature.size == 64)
     return RoutineTelebirrSignedObservation(
+      contractVersion = body.contractVersion,
+      protocolMode = body.protocolMode,
+      transcriptVersion = RoutineTelebirrObservationCanonical.transcriptVersion(body),
       bodyDigest = RoutineTelebirrObservationCanonical.bodyDigest(body),
       body = body,
       signature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature),

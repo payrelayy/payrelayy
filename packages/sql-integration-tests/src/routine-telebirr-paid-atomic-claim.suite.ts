@@ -26,9 +26,12 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         owner: string;
         security_definer: boolean;
         config: string[];
+        origin_guard: boolean;
       }>(
         `select owner.rolname as owner, routine.prosecdef as security_definer,
-                 routine.proconfig as config
+                 routine.proconfig as config,
+                 pg_catalog.strpos(routine.prosrc, 'sourceOriginAttestation') > 0
+                   as origin_guard
             from pg_catalog.pg_proc routine
             join pg_catalog.pg_roles owner on owner.oid = routine.proowner
            where routine.oid = $1::pg_catalog.regprocedure`,
@@ -39,6 +42,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           owner: 'postgres',
           security_definer: false,
           config: ['search_path=pg_catalog'],
+          origin_guard: true,
         },
       ]);
       for (const role of [
@@ -186,12 +190,15 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         // Privileged disposable SQL fixture: only the bridge verifies a real phone signature.
         // The settlement function can consume this private inbox but cannot insert into it.
         const signedObservation = {
-          contractVersion: 1,
+          contractVersion: 2,
           providerCode: 'telebirr',
-          protocolMode: 'routine_signed_observation_v1',
+          protocolMode: 'routine_signed_observation_v2',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v2',
           bodyDigest: observationBodyDigest,
           signature: 'A'.repeat(86),
           body: {
+            contractVersion: 2,
+            protocolMode: 'routine_signed_observation_v2',
             candidateId: paidId,
             challengeId,
             challengeDigest: issued.rows[0]!.challenge_digest,
@@ -220,34 +227,50 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
               referenceMatch: 'matched',
               retrievedAt: data.observed_at.toISOString(),
               sourceProfile: 'telebirr_official_receipt_v1',
+              sourceOriginAttestation: 'official_tls_origin',
             },
           },
         };
-        await client.query(
-          `insert into app.routine_telebirr_paid_observation_staging (
+        const stagingSql = `insert into app.routine_telebirr_paid_observation_staging (
              challenge_id, candidate_id, payment_provider_id, reference_fingerprint,
              source_document_digest, assignment_body_digest, observation_body_digest,
              observation_signature_digest, replay_identity, signed_observation,
              observed_at, occurred_at, amount_minor
            ) values ($1::uuid, $2::uuid, $3::uuid, $4::text,
              $5::text, $6::text, $7::text, $8::text, $9::text, $10::jsonb,
-             $11::timestamptz, $12::timestamptz, $13::bigint)`,
-          [
-            challengeId,
-            paidId,
-            data.payment_provider_id,
-            data.reference_fingerprint,
-            sourceDocumentDigest,
-            digest(randomUUID()),
-            observationBodyDigest,
-            digest(randomUUID()),
-            digest(randomUUID()),
-            JSON.stringify(signedObservation),
-            data.observed_at,
-            data.occurred_at,
-            data.amount_minor,
-          ],
-        );
+             $11::timestamptz, $12::timestamptz, $13::bigint)`;
+        const stagingArgs = [
+          challengeId,
+          paidId,
+          data.payment_provider_id,
+          data.reference_fingerprint,
+          sourceDocumentDigest,
+          digest(randomUUID()),
+          observationBodyDigest,
+          digest(randomUUID()),
+          digest(randomUUID()),
+          JSON.stringify(signedObservation),
+          data.observed_at,
+          data.occurred_at,
+          data.amount_minor,
+        ];
+        // New legacy uploads cannot enter the paid inbox. Existing old rows
+        // remain readable during migration, but the finalizer rejects them.
+        await client.query('savepoint reject_legacy_origin');
+        await expect(
+          client.query(stagingSql, [
+            ...stagingArgs.slice(0, 9),
+            JSON.stringify({
+              ...signedObservation,
+              contractVersion: 1,
+              protocolMode: 'routine_signed_observation_v1',
+            }),
+            ...stagingArgs.slice(10),
+          ]),
+        ).rejects.toThrow(/routine_paid_staging_observation_check/iu);
+        await client.query('rollback to savepoint reject_legacy_origin');
+        await client.query('release savepoint reject_legacy_origin');
+        await client.query(stagingSql, stagingArgs);
         const settled = await client.query<{
           deposit_intent_id: string;
           payment_claim_id: string;

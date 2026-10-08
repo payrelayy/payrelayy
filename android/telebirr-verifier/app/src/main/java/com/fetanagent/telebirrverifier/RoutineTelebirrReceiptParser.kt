@@ -92,6 +92,7 @@ internal data class RoutineTelebirrObservedReceiptFacts(
   val referenceMatch: String,
   val retrievedAt: String,
   val sourceProfile: String,
+  val sourceOriginAttestation: String? = null,
 ) {
   override fun toString(): String = "RoutineTelebirrObservedReceiptFacts(<redacted>)"
 }
@@ -157,8 +158,8 @@ internal class RoutineTelebirrReceiptParser(
         paymentMode = facts.paymentMode,
         paymentReason = facts.paymentReason,
         providerFinalStatus = facts.providerFinalStatus,
-        // This reflects only the local transport-origin attestation checked by the parser.
-        // The server-side signed-observation verifier still reports source auth unperformed.
+        // The parser has checked local transport origin. A paid decision additionally
+        // requires the collector's signed version-2 origin assertion and server checks.
         providerIdentity = "matched",
         receiverMatch = facts.receiverMatch,
         referenceMatch = facts.referenceMatch,

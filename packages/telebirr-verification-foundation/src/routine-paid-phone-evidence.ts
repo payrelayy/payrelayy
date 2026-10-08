@@ -122,6 +122,12 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     ) {
       return review(checked.reasonCode);
     }
+    // Version 1 remains usable for no-money review, never for a paid decision.
+    // Version 2 signs the fixed official TLS-origin assertion in the same fact
+    // transcript as the receipt and is accepted only with the enrolled key.
+    if (!checked.phoneOfficialOriginAttested) {
+      return review('official_origin_attestation_missing');
+    }
 
     const lookup = ownDataValue(candidate, 'trustedLookup');
     if (!isPlainNonProxyRecord(lookup) || !isPlainNonProxyRecord(observation)) {

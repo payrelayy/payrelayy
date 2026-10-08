@@ -15,11 +15,16 @@ import {
 import { assessRoutineTelebirrObservedReceiptFacts } from './routine-receipt-assessment.js';
 import { TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE } from './synthetic-official-receipt.js';
 
-/** A device-signature contract only: no provider authentication or financial authority. */
+/** Version 1 is device-signature-only review evidence; neither version grants money authority. */
 export const ROUTINE_TELEBIRR_OBSERVATION_CONTRACT_VERSION = 1 as const;
 export const ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE = 'routine_signed_observation_v1' as const;
 export const ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION =
   'telebirr-routine-observation-transcript-v1' as const;
+export const ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION = 2 as const;
+export const ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_PROTOCOL_MODE =
+  'routine_signed_observation_v2' as const;
+export const ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION =
+  'telebirr-routine-observation-transcript-v2' as const;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
@@ -80,6 +85,7 @@ const factsKeys = [
   'retrievedAt',
   'sourceProfile',
 ] as const;
+const originFactsKeys = [...factsKeys, 'sourceOriginAttestation'] as const;
 const bodyKeys = [
   'contractVersion',
   'providerCode',
@@ -119,6 +125,8 @@ type Body = { readonly [K in (typeof bodyKeys)[number]]: unknown };
 export interface RoutineTelebirrSignedObservationResult {
   readonly advisoryOnly: true;
   readonly deviceSignatureVerified: boolean;
+  /** The reviewed phone contract attests the fixed official TLS transport; not a server fetch. */
+  readonly phoneOfficialOriginAttested: boolean;
   readonly sourceAuthenticationPerformed: false;
   readonly databaseWriteAllowed: false;
   readonly claimAllowed: false;
@@ -148,10 +156,12 @@ function result(
   reasonCode: RoutineTelebirrSignedObservationResult['reasonCode'],
   deviceSignatureVerified = false,
   replayIdentity: string | null = null,
+  phoneOfficialOriginAttested = false,
 ): RoutineTelebirrSignedObservationResult {
   return Object.freeze({
     advisoryOnly: true,
     deviceSignatureVerified,
+    phoneOfficialOriginAttested,
     sourceAuthenticationPerformed: false,
     databaseWriteAllowed: false,
     claimAllowed: false,
@@ -182,6 +192,20 @@ function header(value: UnknownRecord): boolean {
   );
 }
 
+function observationHeader(value: UnknownRecord): boolean {
+  return (
+    value.providerCode === 'telebirr' &&
+    ((value.contractVersion === ROUTINE_TELEBIRR_OBSERVATION_CONTRACT_VERSION &&
+      value.protocolMode === ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE) ||
+      (value.contractVersion === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION &&
+        value.protocolMode === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_PROTOCOL_MODE))
+  );
+}
+
+function originVersion(value: UnknownRecord): boolean {
+  return value.contractVersion === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION;
+}
+
 function digest(value: Uint8Array): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
@@ -194,8 +218,8 @@ function values(value: UnknownRecord, keys: readonly string[]): unknown[] {
   return keys.map((key) => value[key]);
 }
 
-function parseFacts(value: unknown): Facts | undefined {
-  const facts = record(value, factsKeys);
+function parseFacts(value: unknown, origin: boolean): Facts | undefined {
+  const facts = record(value, origin ? originFactsKeys : factsKeys);
   if (
     !facts ||
     typeof facts.amountMinor !== 'number' ||
@@ -226,7 +250,8 @@ function parseFacts(value: unknown): Facts | undefined {
     !['matched', 'mismatched', 'unknown'].includes(facts.receiverMatch) ||
     typeof facts.referenceMatch !== 'string' ||
     !['matched', 'mismatched', 'unknown'].includes(facts.referenceMatch) ||
-    facts.sourceProfile !== TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE
+    facts.sourceProfile !== TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE ||
+    (origin && facts.sourceOriginAttestation !== 'official_tls_origin')
   )
     return undefined;
   return facts as Facts;
@@ -236,7 +261,7 @@ function parseBody(value: unknown): Body | undefined {
   const body = record(value, bodyKeys);
   if (
     !body ||
-    !header(body) ||
+    !observationHeader(body) ||
     typeof body.candidateId !== 'string' ||
     !UUID_V4.test(body.candidateId) ||
     typeof body.referenceFingerprint !== 'string' ||
@@ -263,7 +288,7 @@ function parseBody(value: unknown): Body | undefined {
     typeof body.normalizedFactsDigest !== 'string' ||
     !DIGEST.test(body.normalizedFactsDigest) ||
     !utc(body.observedAt) ||
-    !parseFacts(body.facts)
+    !parseFacts(body.facts, originVersion(body))
   )
     return undefined;
   return body as Body;
@@ -274,10 +299,15 @@ export function canonicalRoutineTelebirrObservationBodyBytes(value: unknown): Bu
   try {
     const body = parseBody(value);
     if (!body) return undefined;
-    return encode('telebirr-routine-observation-body-v1', [
-      ...values(body, bodyKeys.slice(0, -1)),
-      values(body.facts as UnknownRecord, factsKeys),
-    ]);
+    return encode(
+      originVersion(body)
+        ? 'telebirr-routine-observation-body-v2'
+        : 'telebirr-routine-observation-body-v1',
+      [
+        ...values(body, bodyKeys.slice(0, -1)),
+        values(body.facts as UnknownRecord, originVersion(body) ? originFactsKeys : factsKeys),
+      ],
+    );
   } catch {
     return undefined;
   }
@@ -290,9 +320,19 @@ export function digestRoutineTelebirrObservationBody(value: unknown): string | u
 
 export function digestRoutineTelebirrObservationFacts(value: unknown): string | undefined {
   try {
-    const facts = parseFacts(value);
+    const origin =
+      isPlainNonProxyRecord(value) && hasExactEnumerableDataKeys(value, originFactsKeys);
+    const facts = parseFacts(value, origin);
     return (
-      facts && digest(encode('telebirr-routine-observation-facts-v1', values(facts, factsKeys)))
+      facts &&
+      digest(
+        encode(
+          origin
+            ? 'telebirr-routine-observation-facts-v2'
+            : 'telebirr-routine-observation-facts-v1',
+          values(facts, origin ? originFactsKeys : factsKeys),
+        ),
+      )
     );
   } catch {
     return undefined;
@@ -304,7 +344,12 @@ export function canonicalRoutineTelebirrObservationSignatureBytes(
 ): Buffer | undefined {
   const bodyDigest = digestRoutineTelebirrObservationBody(value);
   return bodyDigest
-    ? encode(ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION, [bodyDigest])
+    ? encode(
+        isPlainNonProxyRecord(value) && ownDataValue(value, 'contractVersion') === 2
+          ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+          : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+        [bodyDigest],
+      )
     : undefined;
 }
 
@@ -349,7 +394,9 @@ export function verifyRoutineTelebirrSignedObservation(
       !utc(input.assessedAt) ||
       !header(lookup) ||
       !header(enrollment) ||
-      !header(envelope) ||
+      !observationHeader(envelope) ||
+      envelope.contractVersion !== body.contractVersion ||
+      envelope.protocolMode !== body.protocolMode ||
       typeof lookup.candidateId !== 'string' ||
       !UUID_V4.test(lookup.candidateId) ||
       typeof lookup.referenceFingerprint !== 'string' ||
@@ -393,7 +440,10 @@ export function verifyRoutineTelebirrSignedObservation(
       enrollment.receiverVersion < 1 ||
       typeof enrollment.receiverProfileDigest !== 'string' ||
       !DIGEST.test(enrollment.receiverProfileDigest) ||
-      envelope.transcriptVersion !== ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION ||
+      envelope.transcriptVersion !==
+        (originVersion(body)
+          ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+          : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION) ||
       envelope.bodyDigestAlgorithm !== 'sha256' ||
       typeof envelope.bodyDigest !== 'string' ||
       !DIGEST.test(envelope.bodyDigest) ||
@@ -496,7 +546,7 @@ export function verifyRoutineTelebirrSignedObservation(
       expectedReceiverProfileDigest: lookup.receiverProfileDigest,
       expectedReceiverRevisionId: lookup.receiverRevisionId,
       observation: {
-        ...facts,
+        ...Object.fromEntries(factsKeys.map((key) => [key, facts[key]])),
         providerCode: 'telebirr',
         receiverProfileDigest: body.receiverProfileDigest,
         receiverRevisionId: body.receiverRevisionId,
@@ -505,13 +555,20 @@ export function verifyRoutineTelebirrSignedObservation(
       },
     });
     if (assessment.disposition !== 'would_match_observed_facts') {
-      return result('would_review', 'receipt_policy_review', true, replayIdentity);
+      return result(
+        'would_review',
+        'receipt_policy_review',
+        true,
+        replayIdentity,
+        originVersion(body),
+      );
     }
     return result(
       'would_forward_signed_observation',
       'signed_observation_matches_policy',
       true,
       replayIdentity,
+      originVersion(body),
     );
   } catch {
     return result('would_review', 'invalid_request');

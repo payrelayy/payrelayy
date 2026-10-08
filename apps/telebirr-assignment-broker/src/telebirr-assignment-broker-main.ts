@@ -13,7 +13,14 @@ import { loadRoutineNoMoneyConfig } from './routine-no-money-config.js';
 import { createRoutineNoMoneyPostgresRuntime } from './routine-no-money-runtime.js';
 import { createRoutineNoMoneyBroker } from './routine-no-money-broker.js';
 import { createRoutineNoMoneyLocalHandler } from './routine-no-money-local-handler.js';
-import { createTelebirrAssignmentBrokerLocalUnixServer } from './local-telebirr-assignment-broker-server.js';
+import { loadRoutinePaidPollConfig } from './routine-paid-poll-config.js';
+import { createRoutinePaidPollPostgresRuntime } from './routine-paid-poll-runtime.js';
+import { createRoutinePaidPollBroker } from './routine-paid-poll-broker.js';
+import { createRoutinePaidPollLocalHandler } from './routine-paid-poll-local-handler.js';
+import {
+  createTelebirrAssignmentBrokerLocalUnixServer,
+  type RoutineLocalHandler,
+} from './local-telebirr-assignment-broker-server.js';
 
 export const TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS = 5_000;
 
@@ -96,7 +103,8 @@ export async function runTelebirrAssignmentBrokerMain(
 ): Promise<TelebirrAssignmentBrokerApplication> {
   const config = loadTelebirrAssignmentBrokerConfig(environment, configDependencies);
   const routine = loadRoutineNoMoneyConfig(environment, configDependencies);
-  if (routine === undefined) {
+  const paid = loadRoutinePaidPollConfig(environment, configDependencies);
+  if (routine === undefined && paid === undefined) {
     return startTelebirrAssignmentBrokerApplication(config, applicationDependencies);
   }
   if (
@@ -104,35 +112,61 @@ export async function runTelebirrAssignmentBrokerMain(
     config.mode !== 'enrollment_only' ||
     applicationDependencies.createLocalServer !== undefined
   ) {
-    throw new Error('The private routine no-money broker is unavailable.');
+    throw new Error('The private routine TeleBirr broker is unavailable.');
   }
-  const runtime = await createRoutineNoMoneyPostgresRuntime(routine.connection);
+  const runtimes: Array<{ ready(): Promise<boolean>; close(): Promise<void> }> = [];
   try {
-    const broker = createRoutineNoMoneyBroker({
-      database: runtime.database,
-      openingKey: routine.openingKey,
-      signer: routine.signer,
-      now: () => new Date().toISOString(),
-    });
-    const handler = createRoutineNoMoneyLocalHandler(broker);
+    const now = () => new Date().toISOString();
+    let routineHandler: RoutineLocalHandler | undefined;
+    if (routine !== undefined) {
+      const runtime = await createRoutineNoMoneyPostgresRuntime(routine.connection);
+      runtimes.push(runtime);
+      routineHandler = createRoutineNoMoneyLocalHandler(
+        createRoutineNoMoneyBroker({
+          database: runtime.database,
+          openingKey: routine.openingKey,
+          signer: routine.signer,
+          now,
+        }),
+      );
+    }
+    let paidHandler: RoutineLocalHandler | undefined;
+    if (paid !== undefined) {
+      const runtime = await createRoutinePaidPollPostgresRuntime(paid.connection);
+      runtimes.push(runtime);
+      paidHandler = createRoutinePaidPollLocalHandler(
+        createRoutinePaidPollBroker({
+          database: runtime.database,
+          openingKey: paid.openingKey,
+          signer: paid.signer,
+          now,
+        }),
+      );
+    }
     const application = await startTelebirrAssignmentBrokerApplication(config, {
       ...applicationDependencies,
-      createLocalServer: (poll) => createTelebirrAssignmentBrokerLocalUnixServer(poll, handler),
+      createLocalServer: (poll) =>
+        createTelebirrAssignmentBrokerLocalUnixServer(poll, routineHandler, paidHandler),
     });
     let closePromise: Promise<void> | undefined;
     return Object.freeze({
-      ready: async () => (await application.ready()) && (await runtime.ready()),
+      ready: async () =>
+        (await application.ready()) &&
+        (await Promise.all(runtimes.map((runtime) => runtime.ready()))).every(Boolean),
       close: () => {
         closePromise ??= (async () => {
-          const closed = await Promise.allSettled([application.close(), runtime.close()]);
+          const closed = await Promise.allSettled([
+            application.close(),
+            ...runtimes.map((runtime) => runtime.close()),
+          ]);
           if (closed.some((result) => result.status === 'rejected')) throw new Error();
         })();
         return closePromise;
       },
     });
   } catch {
-    await runtime.close().catch(() => undefined);
-    throw new Error('The private routine no-money broker is unavailable.');
+    await Promise.allSettled(runtimes.map((runtime) => runtime.close()));
+    throw new Error('The private routine TeleBirr broker is unavailable.');
   }
 }
 

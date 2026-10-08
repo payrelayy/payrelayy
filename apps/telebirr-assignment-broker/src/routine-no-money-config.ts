@@ -36,6 +36,11 @@ export interface RoutineNoMoneyConfig {
   readonly signer: RoutineTelebirrAssignmentSigner;
 }
 
+export interface RoutineLookupMaterial {
+  readonly openingKey: TelebirrScopedReferenceOpeningKey;
+  readonly signer: RoutineTelebirrAssignmentSigner;
+}
+
 export class RoutineNoMoneyConfigError extends Error {
   constructor() {
     super('The private routine no-money broker configuration is unavailable.');
@@ -181,6 +186,32 @@ function signerFrom(
   });
 }
 
+/** Shared guarded lookup material; callers must enforce their own mode gate before calling. */
+export function loadRoutineLookupMaterial(
+  dependencies: TelebirrAssignmentBrokerConfigDependencies = {},
+): RoutineLookupMaterial {
+  let privateKeyBytes: Buffer | undefined;
+  try {
+    const openingKey = openingKeyFrom(
+      readGuardedText(ROUTINE_NO_MONEY_REFERENCE_OPENING_KEY_FILE, dependencies, 'secret'),
+    );
+    privateKeyBytes = readGuardedBytes(
+      ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE,
+      dependencies,
+      'secret',
+    );
+    const signer = signerFrom(
+      privateKeyBytes,
+      readGuardedText(ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE, dependencies, 'secret'),
+    );
+    return Object.freeze({ openingKey, signer });
+  } catch {
+    return unavailable();
+  } finally {
+    privateKeyBytes?.fill(0);
+  }
+}
+
 /** Explicit production-only configuration. Absence of the flag never opens a credential file. */
 export function loadRoutineNoMoneyConfig(
   environment: NodeJS.ProcessEnv,
@@ -209,29 +240,14 @@ export function loadRoutineNoMoneyConfig(
   ) {
     return unavailable();
   }
-  let privateKeyBytes: Buffer | undefined;
   try {
     const ca = guardedCa(readGuardedText(ROUTINE_NO_MONEY_CA_FILE, dependencies, 'public_config'));
     const connection = connectionFromUrl(
       readGuardedText(ROUTINE_NO_MONEY_DATABASE_URL_FILE, dependencies, 'secret').trim(),
       ca,
     );
-    const openingKey = openingKeyFrom(
-      readGuardedText(ROUTINE_NO_MONEY_REFERENCE_OPENING_KEY_FILE, dependencies, 'secret'),
-    );
-    privateKeyBytes = readGuardedBytes(
-      ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE,
-      dependencies,
-      'secret',
-    );
-    const signer = signerFrom(
-      privateKeyBytes,
-      readGuardedText(ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE, dependencies, 'secret'),
-    );
-    return Object.freeze({ connection, openingKey, signer });
+    return Object.freeze({ connection, ...loadRoutineLookupMaterial(dependencies) });
   } catch {
     return unavailable();
-  } finally {
-    privateKeyBytes?.fill(0);
   }
 }

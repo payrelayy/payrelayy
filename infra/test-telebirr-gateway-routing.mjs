@@ -17,26 +17,35 @@ if (nativeCaddy) {
 
 const mediaType = 'application/vnd.fetanagent.telebirr-device-bridge+json';
 const routineMediaType = 'application/vnd.fetanagent.telebirr-routine-no-money.v1+json';
+const paidPollMediaType = 'application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json';
 const targetHeader = 'X-FetanAgent-Deployment-Target';
 const routePath = '/v1/telebirr/device/heartbeat';
 const routinePollPath = '/v1/telebirr/routine/assignments:poll';
 const routineUploadPath = '/v1/telebirr/routine/observations:upload';
+const paidPollPath = '/v1/telebirr/routine/paid/assignments:poll';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await readFile(path.join(repositoryRoot, 'infra/gateway/Caddyfile'), 'utf8');
 const beginMarker = '# BEGIN exact TeleBirr device routing contract';
 const endMarker = '# END exact TeleBirr device routing contract';
 const routineBeginMarker = '# BEGIN exact routine no-money routing contract';
 const routineEndMarker = '# END exact routine no-money routing contract';
+const paidBeginMarker = '# BEGIN exact routine paid-poll routing contract';
+const paidEndMarker = '# END exact routine paid-poll routing contract';
 const begin = source.indexOf(beginMarker);
 const end = source.indexOf(endMarker);
 const routineBegin = source.indexOf(routineBeginMarker);
 const routineEnd = source.indexOf(routineEndMarker);
+const paidBegin = source.indexOf(paidBeginMarker);
+const paidEnd = source.indexOf(paidEndMarker);
 assert.ok(begin >= 0 && end > begin, 'the exact TeleBirr routing block is absent');
 assert.ok(routineBegin > end && routineEnd > routineBegin, 'the routine routing block is absent');
+assert.ok(paidBegin > routineEnd && paidEnd > paidBegin, 'the paid poll routing block is absent');
 assert.equal(source.indexOf(beginMarker, begin + 1), -1, 'the routing start marker is ambiguous');
 assert.equal(source.indexOf(endMarker, end + 1), -1, 'the routing end marker is ambiguous');
 assert.equal(source.indexOf(routineBeginMarker, routineBegin + 1), -1);
 assert.equal(source.indexOf(routineEndMarker, routineEnd + 1), -1);
+assert.equal(source.indexOf(paidBeginMarker, paidBegin + 1), -1);
+assert.equal(source.indexOf(paidEndMarker, paidEnd + 1), -1);
 
 const staging = await startUpstream(204);
 const production = await startUpstream(202);
@@ -74,6 +83,12 @@ try {
     'telebirr-device-bridge:8084',
     `127.0.0.1:${production.port}`,
   );
+  let paidRoutingBlock = source.slice(paidBegin, paidEnd + paidEndMarker.length);
+  assert.equal(occurrences(paidRoutingBlock, 'telebirr-device-bridge:8084'), 1);
+  paidRoutingBlock = paidRoutingBlock.replace(
+    'telebirr-device-bridge:8084',
+    `127.0.0.1:${production.port}`,
+  );
   await writeFile(
     testCaddyfile,
     `{
@@ -84,6 +99,7 @@ try {
 http://127.0.0.1:${gatewayPort} {
 ${routingBlock}
 ${routineRoutingBlock}
+${paidRoutingBlock}
 	respond 404
 }
 `,
@@ -184,8 +200,28 @@ ${routineRoutingBlock}
     [1, 4],
     'a rejected routine no-money request reached an upstream',
   );
+  await expectRoute(gatewayPort, ['production'], 202, [], paidPollPath, paidPollMediaType);
+  assert.deepEqual([staging.hits, production.hits], [1, 5]);
+  for (const rejectedTarget of [[], ['staging'], ['PRODUCTION'], ['production', 'production']]) {
+    await expectRoute(gatewayPort, rejectedTarget, 404, [], paidPollPath, paidPollMediaType);
+  }
+  await expectRoute(gatewayPort, ['production'], 404, [], paidPollPath, routineMediaType);
+  await expectRoute(gatewayPort, ['production'], 404, [], paidPollPath, mediaType);
+  await expectRoute(
+    gatewayPort,
+    ['production'],
+    404,
+    ['Content-Type', 'application/json'],
+    paidPollPath,
+    paidPollMediaType,
+  );
+  assert.deepEqual(
+    [staging.hits, production.hits],
+    [1, 5],
+    'a rejected paid poll reached an upstream',
+  );
   console.log(
-    'TeleBirr Caddy routing verified: exact device and production-only routine routes; invalid targets and duplicate headers fail closed.',
+    'TeleBirr Caddy routing verified: exact device, no-money, and paid poll routes; invalid targets and duplicate headers fail closed.',
   );
 } catch (error) {
   if (caddyOutput) {

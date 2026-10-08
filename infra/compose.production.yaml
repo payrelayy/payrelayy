@@ -820,6 +820,12 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-database-url
   telebirr_assignment_broker_reference_opening_key:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-reference-opening-key.v1.json
+  routine_no_money_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-no-money-database-url
+  routine_no_money_lookup_signer:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-no-money-lookup-signer.pkcs8.der
+  routine_no_money_lookup_manifest:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-no-money-lookup-signer.v1.json
   telebirr_assignment_broker_runtime_manifest:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-runtime-manifest.v1.json
   telebirr_assignment_broker_signer:

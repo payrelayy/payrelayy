@@ -405,8 +405,20 @@ verify_release_files() {
     grep -Fq "TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'" \
       "$release/compose.production.inert-maintenance.yaml" ||
       die 'the inert-maintenance production overlay is malformed'
-    grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
-      die 'the inert-maintenance production overlay is malformed'
+    if grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+      grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the routine no-money bridge is not mounted'
+      grep -Fq -- '- telebirr_assignment_database_egress' \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the routine no-money database egress is missing'
+      ! grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the routine no-money broker cannot use isolated network mode'
+    else
+      grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the inert-maintenance production overlay is malformed'
+    fi
   fi
   if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]] ||
     { [[ "$deployment_mode" == 'legacy' ]] &&
@@ -415,6 +427,16 @@ verify_release_files() {
       telebirr-assignment-database-url
       telebirr-assignment-runtime-manifest.v1.json
       telebirr-assignment-signer.pkcs8.der
+      telebirr-reference-opening-key.v1.json
+    )
+  fi
+  if [[ "$deployment_mode" == 'inert-maintenance' ]] &&
+    grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+    required+=(
+      routine-no-money-database-url
+      routine-no-money-lookup-signer.pkcs8.der
+      routine-no-money-lookup-signer.v1.json
       telebirr-reference-opening-key.v1.json
     )
   fi

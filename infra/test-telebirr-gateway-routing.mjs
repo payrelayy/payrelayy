@@ -16,17 +16,27 @@ if (nativeCaddy) {
 }
 
 const mediaType = 'application/vnd.fetanagent.telebirr-device-bridge+json';
+const routineMediaType = 'application/vnd.fetanagent.telebirr-routine-no-money.v1+json';
 const targetHeader = 'X-FetanAgent-Deployment-Target';
 const routePath = '/v1/telebirr/device/heartbeat';
+const routinePollPath = '/v1/telebirr/routine/assignments:poll';
+const routineUploadPath = '/v1/telebirr/routine/observations:upload';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await readFile(path.join(repositoryRoot, 'infra/gateway/Caddyfile'), 'utf8');
 const beginMarker = '# BEGIN exact TeleBirr device routing contract';
 const endMarker = '# END exact TeleBirr device routing contract';
+const routineBeginMarker = '# BEGIN exact routine no-money routing contract';
+const routineEndMarker = '# END exact routine no-money routing contract';
 const begin = source.indexOf(beginMarker);
 const end = source.indexOf(endMarker);
+const routineBegin = source.indexOf(routineBeginMarker);
+const routineEnd = source.indexOf(routineEndMarker);
 assert.ok(begin >= 0 && end > begin, 'the exact TeleBirr routing block is absent');
+assert.ok(routineBegin > end && routineEnd > routineBegin, 'the routine routing block is absent');
 assert.equal(source.indexOf(beginMarker, begin + 1), -1, 'the routing start marker is ambiguous');
 assert.equal(source.indexOf(endMarker, end + 1), -1, 'the routing end marker is ambiguous');
+assert.equal(source.indexOf(routineBeginMarker, routineBegin + 1), -1);
+assert.equal(source.indexOf(routineEndMarker, routineEnd + 1), -1);
 
 const staging = await startUpstream(204);
 const production = await startUpstream(202);
@@ -58,6 +68,12 @@ try {
     'telebirr-device-bridge:8084',
     `127.0.0.1:${production.port}`,
   );
+  let routineRoutingBlock = source.slice(routineBegin, routineEnd + routineEndMarker.length);
+  assert.equal(occurrences(routineRoutingBlock, 'telebirr-device-bridge:8084'), 1);
+  routineRoutingBlock = routineRoutingBlock.replace(
+    'telebirr-device-bridge:8084',
+    `127.0.0.1:${production.port}`,
+  );
   await writeFile(
     testCaddyfile,
     `{
@@ -67,6 +83,7 @@ try {
 
 http://127.0.0.1:${gatewayPort} {
 ${routingBlock}
+${routineRoutingBlock}
 	respond 404
 }
 `,
@@ -147,8 +164,28 @@ ${routingBlock}
     [1, 2],
     'a duplicated Content-Type reached an upstream',
   );
+  await expectRoute(gatewayPort, ['production'], 202, [], routinePollPath, routineMediaType);
+  await expectRoute(gatewayPort, ['production'], 202, [], routineUploadPath, routineMediaType);
+  assert.deepEqual([staging.hits, production.hits], [1, 4]);
+  for (const rejectedTarget of [[], ['staging'], ['PRODUCTION'], ['production', 'production']]) {
+    await expectRoute(gatewayPort, rejectedTarget, 404, [], routinePollPath, routineMediaType);
+  }
+  await expectRoute(gatewayPort, ['production'], 404, [], routinePollPath, mediaType);
+  await expectRoute(
+    gatewayPort,
+    ['production'],
+    404,
+    ['Content-Type', 'application/json'],
+    routinePollPath,
+    routineMediaType,
+  );
+  assert.deepEqual(
+    [staging.hits, production.hits],
+    [1, 4],
+    'a rejected routine no-money request reached an upstream',
+  );
   console.log(
-    'TeleBirr Caddy routing verified: exact staging/production values, legacy absence, and fail-closed duplicate or invalid headers.',
+    'TeleBirr Caddy routing verified: exact device and production-only routine routes; invalid targets and duplicate headers fail closed.',
   );
 } catch (error) {
   if (caddyOutput) {
@@ -258,8 +295,21 @@ function probeRequest(port) {
   });
 }
 
-async function expectRoute(port, targetValues, expectedStatus, extraRawHeaders = []) {
-  const { body, status } = await rawRequest(port, targetValues, extraRawHeaders);
+async function expectRoute(
+  port,
+  targetValues,
+  expectedStatus,
+  extraRawHeaders = [],
+  requestPath = routePath,
+  requestMediaType = mediaType,
+) {
+  const { body, status } = await rawRequest(
+    port,
+    targetValues,
+    extraRawHeaders,
+    requestPath,
+    requestMediaType,
+  );
   assert.equal(
     status,
     expectedStatus,
@@ -267,8 +317,20 @@ async function expectRoute(port, targetValues, expectedStatus, extraRawHeaders =
   );
 }
 
-function rawRequest(port, targetValues, extraRawHeaders = []) {
-  const rawHeaders = ['Host', `127.0.0.1:${port}`, 'Content-Type', mediaType, ...extraRawHeaders];
+function rawRequest(
+  port,
+  targetValues,
+  extraRawHeaders = [],
+  requestPath = routePath,
+  requestMediaType = mediaType,
+) {
+  const rawHeaders = [
+    'Host',
+    `127.0.0.1:${port}`,
+    'Content-Type',
+    requestMediaType,
+    ...extraRawHeaders,
+  ];
   for (const value of targetValues) {
     rawHeaders.push(targetHeader, value);
   }
@@ -279,7 +341,7 @@ function rawRequest(port, targetValues, extraRawHeaders = []) {
         host: '127.0.0.1',
         port,
         method: 'POST',
-        path: routePath,
+        path: requestPath,
         headers: rawHeaders,
       },
       (response) => {

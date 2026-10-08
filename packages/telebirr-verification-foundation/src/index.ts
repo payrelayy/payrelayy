@@ -123,6 +123,7 @@ export {
 export * from './device-bridge-protocol.js';
 export * from './device-state-local-protocol.js';
 export * from './assignment-broker-local-protocol.js';
+export * from './routine-no-money-local-protocol.js';
 export {
   ROUTINE_TELEBIRR_MAXIMUM_AMOUNT_MINOR,
   ROUTINE_TELEBIRR_MINIMUM_AMOUNT_MINOR,

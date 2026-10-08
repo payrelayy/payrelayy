@@ -217,9 +217,14 @@ assert.ok(
   'staging, production, invalid-present rejection, and header-absent legacy routes must stay ordered',
 );
 assert.equal(
-  (caddyfile.match(/reverse_proxy telebirr-device-bridge:8084/gu) ?? []).length,
+  (
+    caddyfile
+      .split('# BEGIN exact TeleBirr device routing contract')[1]
+      ?.split('# END exact TeleBirr device routing contract')[0]
+      ?.match(/reverse_proxy telebirr-device-bridge:8084/gu) ?? []
+  ).length,
   2,
-  'only the exact production-target and header-absent legacy routes use the production alias',
+  'only the exact production-target and header-absent legacy device routes use the production alias',
 );
 assert.doesNotMatch(caddyfile, /@telebirr_device_bridge\s*\{/u);
 assert.match(
@@ -762,13 +767,14 @@ assert.match(deployHelper, /ip -6 route show default/u);
 assert.match(deployHelper, /getent ahostsv6/u);
 assert.match(deployHelper, /query-bearing route/u);
 assert.doesNotMatch(deployHelper, /service.?role|2026-09-04|shutdownAt|stopAt/u);
-const caddyfileSha256 = createHash('sha256')
-  .update(caddyfile.replace(/\r\n/gu, '\n'))
-  .digest('hex');
+// This retired pilot helper remains pinned to the historical dual-route gateway.
+// Production's new review-only route must not silently repin that root boundary.
+const historicalPilotCaddyfileSha256 =
+  '6362371a264c7150b2114f92141ccb760865c24a6b6ecf808a48a8fc6f50a846';
 assert.match(
   deployHelper,
-  new RegExp(`EXPECTED_GATEWAY_CADDYFILE_SHA256='${caddyfileSha256}'`, 'u'),
-  'runtime ingress attestation must pin the exact reviewed dual-route Caddyfile bytes',
+  new RegExp(`EXPECTED_GATEWAY_CADDYFILE_SHA256='${historicalPilotCaddyfileSha256}'`, 'u'),
+  'the historical pilot helper must stay pinned to its reviewed dual-route Caddyfile bytes',
 );
 assert.match(
   deployHelper,

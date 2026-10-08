@@ -9,6 +9,11 @@ import {
   loadTelebirrAssignmentBrokerConfig,
   type TelebirrAssignmentBrokerConfigDependencies,
 } from './telebirr-assignment-broker-config.js';
+import { loadRoutineNoMoneyConfig } from './routine-no-money-config.js';
+import { createRoutineNoMoneyPostgresRuntime } from './routine-no-money-runtime.js';
+import { createRoutineNoMoneyBroker } from './routine-no-money-broker.js';
+import { createRoutineNoMoneyLocalHandler } from './routine-no-money-local-handler.js';
+import { createTelebirrAssignmentBrokerLocalUnixServer } from './local-telebirr-assignment-broker-server.js';
 
 export const TELEBIRR_ASSIGNMENT_BROKER_PROCESS_READINESS_INTERVAL_MILLISECONDS = 5_000;
 
@@ -90,7 +95,45 @@ export async function runTelebirrAssignmentBrokerMain(
   applicationDependencies: TelebirrAssignmentBrokerApplicationDependencies = {},
 ): Promise<TelebirrAssignmentBrokerApplication> {
   const config = loadTelebirrAssignmentBrokerConfig(environment, configDependencies);
-  return startTelebirrAssignmentBrokerApplication(config, applicationDependencies);
+  const routine = loadRoutineNoMoneyConfig(environment, configDependencies);
+  if (routine === undefined) {
+    return startTelebirrAssignmentBrokerApplication(config, applicationDependencies);
+  }
+  if (
+    !config.enabled ||
+    config.mode !== 'enrollment_only' ||
+    applicationDependencies.createLocalServer !== undefined
+  ) {
+    throw new Error('The private routine no-money broker is unavailable.');
+  }
+  const runtime = await createRoutineNoMoneyPostgresRuntime(routine.connection);
+  try {
+    const broker = createRoutineNoMoneyBroker({
+      database: runtime.database,
+      openingKey: routine.openingKey,
+      signer: routine.signer,
+      now: () => new Date().toISOString(),
+    });
+    const handler = createRoutineNoMoneyLocalHandler(broker);
+    const application = await startTelebirrAssignmentBrokerApplication(config, {
+      ...applicationDependencies,
+      createLocalServer: (poll) => createTelebirrAssignmentBrokerLocalUnixServer(poll, handler),
+    });
+    let closePromise: Promise<void> | undefined;
+    return Object.freeze({
+      ready: async () => (await application.ready()) && (await runtime.ready()),
+      close: () => {
+        closePromise ??= (async () => {
+          const closed = await Promise.allSettled([application.close(), runtime.close()]);
+          if (closed.some((result) => result.status === 'rejected')) throw new Error();
+        })();
+        return closePromise;
+      },
+    });
+  } catch {
+    await runtime.close().catch(() => undefined);
+    throw new Error('The private routine no-money broker is unavailable.');
+  }
 }
 
 const entryPath = process.argv[1];

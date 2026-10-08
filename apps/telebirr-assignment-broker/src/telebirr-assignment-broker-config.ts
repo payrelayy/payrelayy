@@ -212,7 +212,7 @@ function assertGuardedFile(
   }
 }
 
-function readGuardedBytes(
+export function readGuardedBytes(
   path: string,
   dependencies: TelebirrAssignmentBrokerConfigDependencies,
   confidentiality: 'public_config' | 'secret',
@@ -265,7 +265,7 @@ function readGuardedBytes(
   }
 }
 
-function readGuardedText(
+export function readGuardedText(
   path: string,
   dependencies: TelebirrAssignmentBrokerConfigDependencies,
   confidentiality: 'public_config' | 'secret',
@@ -376,7 +376,7 @@ function connectionFromUrl(
   });
 }
 
-function guardedCa(value: unknown): string {
+export function guardedCa(value: unknown): string {
   if (
     typeof value !== 'string' ||
     value.length === 0 ||
@@ -391,7 +391,7 @@ function guardedCa(value: unknown): string {
   return value;
 }
 
-function openingKeyFrom(value: string): TelebirrScopedReferenceOpeningKey {
+export function openingKeyFrom(value: string): TelebirrScopedReferenceOpeningKey {
   const record = parseRecord(value, [
     'contractVersion',
     'providerCode',

@@ -181,6 +181,9 @@ assert.match(androidWorkflow, /retention-days: 14/);
 assert.match(androidWorkflow, /Assignment polling and money movement are disabled/);
 
 assert.match(androidEvidenceWorkflow, /build-evidence-only-no-money/);
+assert.match(androidEvidenceWorkflow, /build-evidence-only-paid-observation/);
+assert.match(androidEvidenceWorkflow, /fetanagentRoutinePaidPhoneEnabled=true/);
+assert.match(androidEvidenceWorkflow, /ROUTINE_PAID_ENABLED = true/);
 assert.match(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=evidence_only/);
 assert.doesNotMatch(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=pairing_only/);
 assert.match(androidEvidenceWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
@@ -206,11 +209,13 @@ assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /"pairing_only" -> "0\.5\.15-secure-pairing"/);
+assert.match(androidBuild, /routinePaidPhoneEnabled -> "0\.5\.18-routine-paid-observation"/);
+assert.match(androidBuild, /routineLookupTrust != null -> "0\.5\.17-routine-no-money"/);
 assert.match(
   androidBuild,
-  /"evidence_only" -> if \(routineLookupTrust != null\) "0\.5\.17-routine-no-money" else "0\.5\.15-evidence-only"/,
+  /versionCode = if \(routinePaidPhoneEnabled\) 23 else if \(routineLookupTrust != null\) 22 else 20/,
 );
-assert.match(androidBuild, /versionCode = if \(routineLookupTrust != null\) 22 else 20/);
+assert.match(androidBuild, /buildConfigField\("boolean", "ROUTINE_PAID_ENABLED", "false"\)/);
 assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /requestedDeploymentTarget in setOf\("staging", "production"\)/);
 assert.match(androidBuild, /serverSignerKeyId == "telebirr-bridge-\$requestedDeploymentTarget-v1"/);

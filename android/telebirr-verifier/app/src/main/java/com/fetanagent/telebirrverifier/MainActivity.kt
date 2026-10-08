@@ -210,7 +210,8 @@ class MainActivity : Activity() {
         },
       )
       if (BuildConfig.VERIFIER_ENABLED && !enrolled &&
-        !RoutineNoMoneyRuntimeComposition.enabled()) {
+        !RoutineNoMoneyRuntimeComposition.enabled() &&
+        !RoutinePaidRuntimeComposition.enabled()) {
         addPairingControls()
       } else if (BuildConfig.VERIFIER_ENABLED) {
         addOperationalControls(snapshot.operatorEnabled)

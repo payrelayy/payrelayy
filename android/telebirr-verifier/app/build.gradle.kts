@@ -193,6 +193,20 @@ val routineLookupTrust = run {
   }
 }
 
+val routinePaidPhoneEnabled = run {
+  val requested = providers.gradleProperty("fetanagentRoutinePaidPhoneEnabled").orNull ?: "false"
+  require(requested == "true" || requested == "false") {
+    "fetanagentRoutinePaidPhoneEnabled must be true or false."
+  }
+  if (requested == "true") {
+    require(requestedRuntimeMode == "evidence_only" &&
+      requestedDeploymentTarget == "production" && routineLookupTrust != null) {
+      "Paid phone evidence requires the signed production evidence build and routine lookup trust."
+    }
+  }
+  requested == "true"
+}
+
 val operationalSigning =
   if (operationalTrust == null) {
     null
@@ -302,7 +316,11 @@ val operationalSigning =
 val verifierVersionName =
   when (requestedRuntimeMode) {
     "pairing_only" -> "0.5.15-secure-pairing"
-    "evidence_only" -> if (routineLookupTrust != null) "0.5.17-routine-no-money" else "0.5.15-evidence-only"
+    "evidence_only" -> when {
+      routinePaidPhoneEnabled -> "0.5.18-routine-paid-observation"
+      routineLookupTrust != null -> "0.5.17-routine-no-money"
+      else -> "0.5.15-evidence-only"
+    }
     else -> "0.5.15-secure-provisioning-inert"
   }
 
@@ -314,7 +332,7 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = if (routineLookupTrust != null) 22 else 20
+    versionCode = if (routinePaidPhoneEnabled) 23 else if (routineLookupTrust != null) 22 else 20
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
@@ -332,6 +350,7 @@ android {
     buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_FROM", quotedBuildConfig(""))
     buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_UNTIL", quotedBuildConfig(""))
     buildConfigField("boolean", "ROUTINE_NO_MONEY_ENABLED", "false")
+    buildConfigField("boolean", "ROUTINE_PAID_ENABLED", "false")
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_KEY_ID", quotedBuildConfig(""))
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
@@ -411,6 +430,9 @@ android {
           buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(lookup.publicKeySpkiSha256))
           buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_VALID_FROM", quotedBuildConfig(lookup.validFrom))
           buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_VALID_UNTIL", quotedBuildConfig(lookup.validUntil))
+        }
+        if (routinePaidPhoneEnabled) {
+          buildConfigField("boolean", "ROUTINE_PAID_ENABLED", "true")
         }
       }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

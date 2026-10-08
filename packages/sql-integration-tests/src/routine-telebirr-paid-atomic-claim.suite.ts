@@ -200,6 +200,8 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
             receiverVersion: data.receiver_account_version,
             receiverProfileDigest: trust.receiverProfileDigest,
             expectedReceiverNameDigest: trust.expectedReceiverNameDigest,
+            deviceId: trust.deviceId,
+            keyId: trust.deviceKeyId,
             sourceDocumentDigest,
             observedAt: data.observed_at.toISOString(),
             facts: {

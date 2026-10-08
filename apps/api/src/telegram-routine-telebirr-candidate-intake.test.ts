@@ -87,6 +87,7 @@ const action: Extract<TelegramPrivateActionEnvelope, { kind: 'deposit_proof_comm
 
 function acceptedDatabase(
   calls: Array<{ readonly query: string; readonly values: readonly unknown[] }>,
+  proofStatus: 'untrusted_received' | 'paid_pending' = 'untrusted_received',
 ): TelegramRoutineTelebirrCandidateDatabase {
   return {
     async query(query, values) {
@@ -96,7 +97,7 @@ function acceptedDatabase(
           {
             proof_request_id: proofRequestId,
             provider_code: 'telebirr',
-            proof_status: 'untrusted_received',
+            proof_status: proofStatus,
             submitted_at: new Date('2026-10-05T17:00:00.000Z'),
             request_replayed: false,
           },
@@ -168,15 +169,15 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
 
     await expect(
       captureTelegramRoutineTelebirrCandidate(
-        acceptedDatabase(calls),
+        acceptedDatabase(calls, 'paid_pending'),
         inboundEventId,
         realAction,
         enabledProductionConfig,
       ),
     ).resolves.toMatchObject({
-      outcome: 'telebirr_routine_candidate_recorded_no_money',
-      proofStatus: 'untrusted_received',
-      verificationMode: 'not_started_no_money',
+      outcome: 'telebirr_routine_candidate_recorded_paid_pending',
+      proofStatus: 'pending_verification',
+      verificationMode: 'phone_receipt_pending',
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.query).toBe(CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL);
@@ -243,6 +244,27 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
       ),
     ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
     expect(database.query).not.toHaveBeenCalled();
+  });
+
+  it('rejects database candidate modes that disagree with the configured financial mode', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls),
+        inboundEventId,
+        { ...action, transactionReference: 'AB12CD34EF' },
+        enabledProductionConfig,
+      ),
+    ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls, 'paid_pending'),
+        inboundEventId,
+        action,
+        config,
+      ),
+    ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
+    expect(calls).toHaveLength(2);
   });
 
   it.each([

@@ -331,6 +331,37 @@ describe('Telegram private-action bot client', () => {
     }
   });
 
+  it('accepts only the fully redacted paid-pending routine candidate projection', async () => {
+    const candidateResult = {
+      version: 1,
+      outcome: 'telebirr_routine_candidate_recorded_paid_pending',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'pending_verification',
+      verificationMode: 'phone_receipt_pending',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => candidateResult }),
+      }),
+    ).resolves.toEqual(candidateResult);
+
+    for (const unsafeResult of [
+      { ...candidateResult, providerCode: 'cbe_birr' },
+      { ...candidateResult, proofStatus: 'verified' },
+      { ...candidateResult, verificationMode: 'live' },
+      { ...candidateResult, proofRequestId: 'private' },
+      { ...candidateResult, playerId: 'PLAYER-DEMO-42' },
+      { ...candidateResult, transactionReference: 'AB12CD34EF' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only exact live TeleBirr queue and status projections', async () => {
     const proofToken = `${'B'.repeat(21)}A`;
     const queued = {

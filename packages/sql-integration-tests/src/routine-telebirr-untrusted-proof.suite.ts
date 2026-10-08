@@ -180,10 +180,14 @@ async function fixtureInboundEvent(client: Client, identityId: string): Promise<
   return event.rows[0]!.id;
 }
 
-async function fixtureEligiblePlayer(client: Client): Promise<string> {
-  const customer = await client.query<{ id: string }>(
-    `insert into app.customers (status) values ('active') returning id`,
-  );
+async function fixtureEligiblePlayer(client: Client, ownerCustomerId?: string): Promise<string> {
+  const customerId =
+    ownerCustomerId ??
+    (
+      await client.query<{ id: string }>(
+        `insert into app.customers (status) values ('active') returning id`,
+      )
+    ).rows[0]!.id;
   const platform = await client.query<{ id: string }>(
     `select id from app.platforms where code = 'kemerbet' and status = 'active'`,
   );
@@ -191,7 +195,7 @@ async function fixtureEligiblePlayer(client: Client): Promise<string> {
   const player = await client.query<{ id: string }>(
     `insert into app.customer_platform_players (customer_id, platform_id, player_id)
      values ($1::uuid, $2::uuid, $3::text) returning id`,
-    [customer.rows[0]!.id, platform.rows[0]!.id, playerId],
+    [customerId, platform.rows[0]!.id, playerId],
   );
   await client.query(
     `insert into app.player_validation_attempts (
@@ -1760,7 +1764,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       ]);
     });
 
-    it('grants only the private no-money capture RPC to Player actions', async () => {
+    it('grants only the private candidate capture wrapper to Player actions', async () => {
       const client = getClient();
       const catalog = await client.query<{
         readonly owner: string;
@@ -1826,6 +1830,15 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           unexpected_grants: 0,
         },
       ]);
+      const historicalCore = await client.query<{ runtime_allowed: boolean }>(`
+        select pg_catalog.has_function_privilege(
+          'fetanagent_player_actions_runtime',
+          'app.capture_telegram_routine_telebirr_no_money_core(
+            uuid,text,text,text,text,text,smallint,smallint,text
+          )', 'EXECUTE'
+        ) as runtime_allowed
+      `);
+      expect(historicalCore.rows).toEqual([{ runtime_allowed: false }]);
     });
 
     it('captures only an admitted private Telegram candidate, replays exactly, and never creates money', async () => {
@@ -1918,6 +1931,95 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           },
         ]);
         expect(await snapshot(client)).toBe(before);
+      });
+    });
+
+    it('captures a fresh paid candidate only for its Player owner under current authority, without creating money', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const ownedPlayerId = await fixtureEligiblePlayer(client, actor.customerId);
+        const otherCustomerPlayerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const eventId = await fixtureInboundEvent(client, actor.identityId);
+        const args = captureArguments(eventId, ownedPlayerId);
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const before = await snapshot(client);
+
+        await rejected(client, CAPTURE, args);
+        const auth = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        await persistentPolicyFixture(client, auth.rows[0]!.auth_user_id);
+        await rejected(client, CAPTURE, captureArguments(eventId, otherCustomerPlayerId));
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key = 'deposit_execution'`);
+        await rejected(client, CAPTURE, args);
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'deposit_execution'`);
+
+        await client.query('set local role fetanagent_player_actions_runtime');
+        const first = await client.query<CaptureRow>(CAPTURE, [...args]);
+        expect(first.rows).toMatchObject([
+          { provider_code: 'telebirr', proof_status: 'paid_pending', request_replayed: false },
+        ]);
+        const replay = await client.query<CaptureRow>(CAPTURE, [...args]);
+        expect(replay.rows).toEqual([{ ...first.rows[0], request_replayed: true }]);
+        await client.query('reset role');
+
+        const stored = await client.query<{
+          intake_mode: string;
+          submitting_customer_id: string;
+          player_owner_customer_id: string;
+          processed_at: Date;
+        }>(
+          `select proof.intake_mode, proof.submitting_customer_id,
+                   player.customer_id as player_owner_customer_id, event.processed_at
+              from ${TABLE} proof
+              join app.customer_platform_players player on player.id = proof.player_account_id
+              join app.inbound_events event on event.id = proof.origin_request_key
+             where proof.id = $1::uuid`,
+          [first.rows[0]!.proof_request_id],
+        );
+        expect(stored.rows).toEqual([
+          {
+            intake_mode: 'paid',
+            submitting_customer_id: actor.customerId,
+            player_owner_customer_id: actor.customerId,
+            processed_at: first.rows[0]!.submitted_at,
+          },
+        ]);
+        expect(await snapshot(client)).toBe(before);
+
+        const trust = await fixtureRoutineLookupTrust(client, first.rows[0]!.proof_request_id);
+        const issued = await client.query<{ candidate_id: string; challenge_id: string }>(
+          `select candidate_id, challenge_id
+             from app.issue_routine_telebirr_paid_lookup_assignment_material(
+               $1::uuid, $2::uuid, $3::uuid)`,
+          [first.rows[0]!.proof_request_id, trust.enrollmentId, trust.signerId],
+        );
+        expect(issued.rows).toEqual([
+          {
+            candidate_id: first.rows[0]!.proof_request_id,
+            challenge_id: expect.any(String),
+          },
+        ]);
+        expect(await snapshot(client)).toBe(before);
+
+        await client.query(
+          `select app.stop_owner_routine_telebirr_processing($1::uuid, $2::uuid)`,
+          [auth.rows[0]!.auth_user_id, randomUUID()],
+        );
+        await rejected(
+          client,
+          CAPTURE,
+          captureArguments(await fixtureInboundEvent(client, actor.identityId), ownedPlayerId),
+        );
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        await rejected(client, CAPTURE, args);
       });
     });
 

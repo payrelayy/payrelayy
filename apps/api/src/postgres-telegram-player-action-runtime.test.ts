@@ -1019,7 +1019,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(JSON.stringify(calls)).not.toContain(transactionReference);
   });
 
-  it('routes a production real-format reference to the no-money RPC before the live pilot path', async () => {
+  it('routes a production real-format reference to the paid-pending candidate RPC before the retired pilot path', async () => {
     const transactionReference = 'AB12CD34EF';
     const calls: { query: string; values: readonly unknown[] }[] = [];
     const database: TelegramPlayerActionDatabase = {
@@ -1042,7 +1042,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
               {
                 proof_request_id: depositProofRequestId,
                 provider_code: 'telebirr',
-                proof_status: 'untrusted_received',
+                proof_status: 'paid_pending',
                 submitted_at: new Date('2026-10-07T19:00:00.000Z'),
                 request_replayed: false,
               },
@@ -1076,8 +1076,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         Buffer.from(JSON.stringify(action), 'utf8'),
       ),
     ).resolves.toMatchObject({
-      outcome: 'telebirr_routine_candidate_recorded_no_money',
-      verificationMode: 'not_started_no_money',
+      outcome: 'telebirr_routine_candidate_recorded_paid_pending',
+      verificationMode: 'phone_receipt_pending',
     });
     expect(calls).toHaveLength(2);
     expect(calls[1]!.query).toContain('capture_telegram_routine_telebirr_untrusted_proof');

@@ -15,6 +15,7 @@ const allowed = [
   'issue_routine_telebirr_no_money_poll_assignment',
   'load_routine_telebirr_no_money_observation_material',
   'stage_routine_telebirr_no_money_observation_digest',
+  'stage_routine_telebirr_no_money_signed_observation',
 ] as const;
 const guarded = [
   ...allowed,
@@ -121,7 +122,7 @@ export function registerRoutineTelebirrNoMoneyRuntimeSqlTests(getClient: () => C
       expect(baseAccess.rows).toEqual([{ accessible: '0' }]);
     });
 
-    it('inherits exactly four external function grants and keeps nested issuers owner-only', async () => {
+    it('inherits exactly five external function grants and keeps nested issuers owner-only', async () => {
       const client = getClient();
       const grants = await client.query<{ name: string }>(`
         select routine.proname as name
@@ -155,7 +156,7 @@ export function registerRoutineTelebirrNoMoneyRuntimeSqlTests(getClient: () => C
       `,
         [[...guarded]],
       );
-      expect(functions.rows).toHaveLength(7);
+      expect(functions.rows).toHaveLength(8);
       expect(functions.rows.map((row) => row.name)).toEqual([...guarded].sort());
       for (const row of functions.rows) {
         expect(row).toMatchObject({
@@ -226,6 +227,20 @@ export function registerRoutineTelebirrNoMoneyRuntimeSqlTests(getClient: () => C
                 `select app.stage_routine_telebirr_no_money_observation_digest(
                $1::uuid,$2::text,$2::text,$2::text,$2::text) as status`,
                 [randomUUID(), digest],
+              )
+            ).rows,
+          ).toEqual([{ status: 'conflict' }]);
+          expect(
+            (
+              await client.query<{ status: string }>(
+                `select app.stage_routine_telebirr_no_money_signed_observation(
+               $1::uuid,$2::text,$2::text,$2::text,$2::text,$3::jsonb,$4::text) as status`,
+                [
+                  randomUUID(),
+                  digest,
+                  JSON.stringify({ bodyDigest: digest }),
+                  'receipt_policy_review',
+                ],
               )
             ).rows,
           ).toEqual([{ status: 'conflict' }]);

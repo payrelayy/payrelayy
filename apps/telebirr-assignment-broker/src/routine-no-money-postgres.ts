@@ -13,7 +13,7 @@ const SQL = Object.freeze({
     'select * from app.issue_routine_telebirr_no_money_poll_assignment($1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::uuid)',
   observation: 'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)',
   stage:
-    'select app.stage_routine_telebirr_no_money_observation_digest($1::uuid,$2::text,$3::text,$4::text,$5::text) as status',
+    'select app.stage_routine_telebirr_no_money_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb,$7::text) as status',
 });
 
 export class RoutineNoMoneySqlUnavailableError extends Error {
@@ -65,6 +65,8 @@ export function createRoutineNoMoneyPostgresDatabase(
         input.observationBodyDigest,
         input.observationSignatureDigest,
         input.replayIdentity,
+        JSON.stringify(input.signedObservation),
+        input.serverPolicyResult,
       ]);
       if (
         typeof row !== 'object' ||

@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { writeFileSync } from 'node:fs';
 
 import { loadRoutinePaidSettlementConfig } from './routine-paid-settlement-config.js';
 import {
@@ -11,6 +12,8 @@ import {
 } from './routine-paid-settlement-worker.js';
 
 export const ROUTINE_PAID_SETTLEMENT_INTERVAL_MILLISECONDS = 5_000;
+export const ROUTINE_PAID_SETTLEMENT_HEARTBEAT_FILE =
+  '/tmp/fetanagent-routine-paid-settlement.heartbeat';
 
 export interface RoutinePaidSettlementProcess {
   readonly runtime: RoutinePaidSettlementRuntime;
@@ -44,6 +47,10 @@ export async function runRoutinePaidSettlementMain(
       const pass = await runRoutinePaidSettlementPass(runtime.database, cursor);
       cursor = pass.nextCursor;
       if (!(await runtime.ready())) throw new Error();
+      writeFileSync(ROUTINE_PAID_SETTLEMENT_HEARTBEAT_FILE, `${Date.now()}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
       if (pass.examined > 0)
         console.info({
           component: 'routine_paid_settlement',

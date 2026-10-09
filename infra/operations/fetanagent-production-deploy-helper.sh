@@ -452,6 +452,13 @@ verify_release_files() {
       "$release/compose.production.inert-maintenance.yaml"; then
       required+=(routine-paid-poll-database-url)
     fi
+    if grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+      grep -Fq '  routine-paid-settlement:' \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the isolated paid settlement service is absent'
+      required+=(routine-paid-settlement-database-url)
+    fi
   fi
   if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
     required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json companion-bridge-runtime-manifest.v3.json)
@@ -761,6 +768,18 @@ case "${1:-}" in
           ! -L "$incoming/routine-paid-poll-database-url" ]] ||
           die 'the inert bundle unexpectedly contains a paid poll credential'
       fi
+      if grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+        "$incoming/compose.production.inert-maintenance.yaml"; then
+        expected_count=$((expected_count + 1))
+        [[ ! -L "$incoming/routine-paid-settlement-database-url" &&
+          -f "$incoming/routine-paid-settlement-database-url" &&
+          -s "$incoming/routine-paid-settlement-database-url" ]] ||
+          die 'the isolated paid settlement database URL is missing'
+      else
+        [[ ! -e "$incoming/routine-paid-settlement-database-url" &&
+          ! -L "$incoming/routine-paid-settlement-database-url" ]] ||
+          die 'the inert bundle unexpectedly contains a paid settlement credential'
+      fi
       for name in \
         telebirr-assignment-database-url \
         telebirr-assignment-runtime-manifest.v1.json \
@@ -858,6 +877,11 @@ case "${1:-}" in
     compose_release "$release" config --quiet
     start_release_services_with_session_handoff_retry "$release" \
       owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker
+    if [[ "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] &&
+      grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml"; then
+      start_release_services_with_session_handoff_retry "$release" routine-paid-settlement
+    fi
     verify_api_financial_mode_for_release "$release"
     stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
     if [[ -z "$previous" ]]; then
@@ -897,6 +921,11 @@ case "${1:-}" in
     fi
     if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
       services+=(production-companion-device-bridge)
+    fi
+    if [[ "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] &&
+      grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml"; then
+      services+=(routine-paid-settlement)
     fi
     for service in "${services[@]}"; do
       id="$(container_for "$PROJECT_NAME" "$service")"

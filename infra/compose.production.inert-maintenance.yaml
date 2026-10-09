@@ -1,8 +1,9 @@
 # This overlay is used only for a reviewed runtime-maintenance deployment while PostgreSQL proves
 # that no trusted TeleBirr activation epoch or money authority is active. It deliberately restores
 # the assignment broker's enrollment-only shape before a fresh pilot exists. Its separate
-# routine logins can issue review assignments and stage signed receipts, but have no claim,
-# settlement, or Player-credit role.
+# review logins can issue assignments and stage signed receipts. A separate
+# settlement login has only two guarded functions; with all seven financial
+# switches disabled, it cannot create a claim, execution job, or Player credit.
 # A later operational deployment must omit this overlay and bind the pilot to an active manifest.
 services:
   api:
@@ -71,3 +72,53 @@ services:
       INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'
       INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED: 'true'
       INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED: 'true'
+  routine-paid-settlement:
+    profiles: [production]
+    platform: linux/amd64
+    pull_policy: never
+    init: true
+    image: fetanagent-telebirr-assignment-broker:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
+    command: [node, apps/telebirr-assignment-broker/dist/routine-paid-settlement-main.js]
+    user: '10001:10001'
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: live
+      INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'
+      ROUTINE_PAID_SETTLEMENT_DATABASE_URL_FILE: /run/secrets/routine_paid_settlement_database_url
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets:
+      - source: routine_paid_settlement_database_url
+        target: routine_paid_settlement_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - telebirr_assignment_database_egress
+    healthcheck:
+      test: [CMD, node, apps/telebirr-assignment-broker/dist/routine-paid-settlement-healthcheck.js]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 4

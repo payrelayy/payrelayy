@@ -24,6 +24,8 @@ const [
   inertPreflightSql,
   paidPollActivateSql,
   paidPollDisableSql,
+  paidSettlementActivateSql,
+  paidSettlementDisableSql,
   assignmentBrokerContinuousRuntimeMigration,
   assignmentBrokerConfig,
   assignmentBrokerPostgres,
@@ -49,6 +51,8 @@ const [
   read('infra/sql/production-inert-runtime-preflight.sql'),
   read('infra/sql/production-routine-paid-poll-activate.sql'),
   read('infra/sql/production-routine-paid-poll-disable.sql'),
+  read('infra/sql/production-routine-paid-settlement-activate.sql'),
+  read('infra/sql/production-routine-paid-settlement-disable.sql'),
   read('supabase/migrations/20260916142230_telebirr_assignment_broker_continuous_runtime.sql'),
   read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
@@ -359,7 +363,24 @@ assert.doesNotMatch(
   inertCompose,
   /TELEBIRR_ASSIGNMENT_BROKER_(?:DATABASE_URL|REFERENCE_OPENING_KEY|RUNTIME_MANIFEST|SIGNER_PRIVATE_KEY)_FILE|NODE_EXTRA_CA_CERTS/u,
 );
-assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 3);
+assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 4);
+const inertSettlement = childBlock(
+  topLevelSection(inertCompose, 'services'),
+  'routine-paid-settlement',
+);
+assert.match(inertSettlement, /INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'/u);
+assert.match(inertSettlement, /FINANCIAL_ACTIONS_MODE: live/u);
+assert.match(
+  inertSettlement,
+  /ROUTINE_PAID_SETTLEMENT_DATABASE_URL_FILE: \/run\/secrets\/routine_paid_settlement_database_url/u,
+);
+assert.match(inertSettlement, /- source: routine_paid_settlement_database_url/u);
+assert.match(inertSettlement, /routine-paid-settlement-healthcheck\.js/u);
+assert.match(inertSettlement, /telebirr_assignment_database_egress/u);
+assert.doesNotMatch(
+  inertSettlement,
+  /REFERENCE_OPENING_KEY|SIGNER_PRIVATE_KEY|NODE_EXTRA_CA_CERTS|volumes:|ports:/u,
+);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -424,8 +445,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 32);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 32);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 33);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 33);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -457,7 +478,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  10,
+  12,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -856,6 +877,9 @@ assert.match(
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 1\)\)/u);
 assert.match(helper, /routine-paid-poll-database-url/u);
+assert.match(helper, /routine-paid-settlement-database-url/u);
+assert.match(helper, /services\+=\(routine-paid-settlement\)/u);
+assert.match(helper, /routine-paid-settlement\s*$/mu);
 assert.match(
   workflow,
   /ROUTINE_PAID_POLL_RUNTIME_PASSWORD: \$\{\{ secrets\.ROUTINE_PAID_POLL_RUNTIME_PASSWORD \}\}/u,
@@ -863,6 +887,13 @@ assert.match(
 assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-activate\.sql/u);
 assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-disable\.sql/u);
 assert.match(workflow, /"\$SECRET_DIR"\/routine-paid-poll-database-url/u);
+assert.match(
+  workflow,
+  /ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD: \$\{\{ secrets\.ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD \}\}/u,
+);
+assert.match(workflow, /--file=infra\/sql\/production-routine-paid-settlement-activate\.sql/u);
+assert.match(workflow, /--file=infra\/sql\/production-routine-paid-settlement-disable\.sql/u);
+assert.match(workflow, /"\$SECRET_DIR"\/routine-paid-settlement-database-url/u);
 assert.match(
   paidPollActivateSql,
   /alter role fetanagent_routine_telebirr_paid_poll_runtime\s+login password :'runtime_password' valid until :'valid_until'/u,
@@ -874,6 +905,16 @@ assert.doesNotMatch(
   /\b(?:insert|update|delete|truncate)\s+(?:into\s+|from\s+)?app\./iu,
 );
 assert.match(paidPollDisableSql, /nologin password null valid until '1970-01-01 00:00:00\+00'/u);
+assert.match(
+  paidSettlementActivateSql,
+  /alter role fetanagent_routine_telebirr_paid_settlement_runtime\s+login password :'runtime_password' valid until :'valid_until'/u,
+);
+assert.match(paidSettlementActivateSql, /count\(\*\) = 7 as financial_switches_disabled/u);
+assert.match(paidSettlementActivateSql, /count\(\*\) = 2 and pg_catalog\.bool_and/u);
+assert.match(
+  paidSettlementDisableSql,
+  /nologin password null valid until '1970-01-01 00:00:00\+00'/u,
+);
 assert.match(helper, /the inert production bundle unexpectedly contains \$name/u);
 assert.match(helper, /runtime-deployment-mode/u);
 assert.match(helper, /compose\.production\.shadow-review\.yaml/u);

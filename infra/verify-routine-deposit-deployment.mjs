@@ -32,10 +32,15 @@ const [
   poolerBanRecoveryWorkflow,
   reviewLoginRecoveryWorkflow,
   transportActivationWorkflow,
+  financialActivationWorkflow,
+  financialStopWorkflow,
   qualityWorkflow,
   migration,
+  financialBoundaryMigration,
   activateSql,
   disableSql,
+  financialActivateSql,
+  financialStopSql,
   packageBuilder,
   localPreparation,
   releaseLauncher,
@@ -61,10 +66,15 @@ const [
   read('.github/workflows/production-routine-pooler-ban-recovery.yml'),
   read('.github/workflows/production-routine-review-login-recovery.yml'),
   read('.github/workflows/production-routine-deposit-transport-activation.yml'),
+  read('.github/workflows/production-routine-financial-activate.yml'),
+  read('.github/workflows/production-routine-financial-stop.yml'),
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
+  read('supabase/migrations/20261009200332_routine_telebirr_financial_activation_boundary.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
   read('infra/sql/production-routine-deposit-disable.sql'),
+  read('infra/sql/production-routine-financial-activate.sql'),
+  read('infra/sql/production-routine-financial-stop.sql'),
   read('scripts/build-windows-companion-package.ps1'),
   read('infra/operations/prepare-windows-companion-routine-local.ps1'),
   read('apps/windows-companion/release/Start FetanAgent Automatic Deposits.ps1'),
@@ -236,6 +246,44 @@ assert.doesNotMatch(
   transportActivationWorkflow,
   /production-routine-deposit-disable\.sql|deposit_execution.*enabled/u,
 );
+
+assert.match(
+  financialBoundaryMigration,
+  /create function app\.activate_routine_telebirr_financial_gates/u,
+);
+assert.match(
+  financialBoundaryMigration,
+  /create function app\.stop_routine_telebirr_financial_gates/u,
+);
+assert.match(financialBoundaryMigration, /session_user <> 'postgres'/u);
+assert.match(financialBoundaryMigration, /routine_activate/u);
+assert.match(financialBoundaryMigration, /routine_stop/u);
+assert.match(financialBoundaryMigration, /sourceOriginAttestation/u);
+assert.match(financialBoundaryMigration, /routine_telebirr_runtime_is_active/u);
+assert.match(
+  financialBoundaryMigration,
+  /feature_key in \('payment_verification', 'deposit_execution'\)/u,
+);
+assert.doesNotMatch(
+  financialBoundaryMigration,
+  /select app\.activate_routine_telebirr_financial_gates\(/u,
+);
+assert.match(financialActivateSql, /app\.activate_routine_telebirr_financial_gates/u);
+assert.match(financialActivateSql, /'legacyPilotEnabled', false/u);
+assert.match(financialStopSql, /app\.stop_routine_telebirr_financial_gates/u);
+assert.match(financialStopSql, /'financialGatesDisabled', true/u);
+for (const workflow of [financialActivationWorkflow, financialStopWorkflow]) {
+  assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /PGSSLMODE: verify-full/u);
+  assert.match(workflow, /group: fetanagent-production-runtime/u);
+  assert.doesNotMatch(workflow, /\bpush:/u);
+}
+assert.match(financialActivationWorkflow, /ENABLE LIVE ROUTINE TELEBIRR DEPOSITS/u);
+assert.match(financialActivationWorkflow, /require-production-ci\.mjs/u);
+assert.match(financialActivationWorkflow, /production-routine-financial-activate\.sql/u);
+assert.match(financialStopWorkflow, /STOP ROUTINE TELEBIRR DEPOSITS/u);
+assert.match(financialStopWorkflow, /production-routine-financial-stop\.sql/u);
 
 const generator = fileURLToPath(
   new URL('infra/operations/create-production-routine-deposit-runtime-credential.mjs', root),

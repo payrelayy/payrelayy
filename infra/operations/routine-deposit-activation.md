@@ -167,10 +167,46 @@ Confirm all of the following without creating a test payment:
 - no execution-v2 Windows process or production overlay is active;
 - no raw Player, payment reference, credential, or certificate data appears in logs.
 
+## 6. Enable live routine TeleBirr only after review
+
+The migration `routine_telebirr_financial_activation_boundary` installs a dormant
+postgres-only operator procedure. Applying or deploying it changes **no** financial switch.
+After the exact release is deployed, the current phone has a fresh signed V2
+`official_tls_origin` no-money proof, the paid settlement and poll roles are healthy,
+the Windows worker is connected and idle, and the stop operation is ready, dispatch
+`production-routine-financial-activate.yml` on `main`. Confirm the exact deployed SHA,
+production project ref, authorizing Owner auth-user UUID, and the explicit live
+operation phrase. The workflow requires passing exact-main CI and then calls
+`infra/sql/production-routine-financial-activate.sql` over verify-full TLS.
+
+The database operation holds the Owner/TeleBirr/cohort/switch locks, rejects an
+active legacy pilot or executor, checks all seven switches disabled and the
+current routine transport and phone proof, then changes **only**
+`payment_verification` and `deposit_execution` to `live`. TeleBirr's retired pilot,
+CBE Birr, and both withdrawal switches remain disabled. It performs no test
+transfer, payment claim, or Player credit. Once it succeeds, new eligible Telegram
+TeleBirr references become paid candidates; the phone and settlement service may
+verify them, and the one-connection Windows worker may credit one verified job at
+a time. Do not describe the service as live until this exact operation succeeds.
+
+The existing no-money reference is not a paid activation check. Observe the
+first naturally occurring eligible live deposit through the Owner and protected
+operator channels; never create a synthetic paid job or retry an uncertain
+Transfer to prove the path.
+
 ## Emergency or planned stop
 
-Stopping Windows is not sufficient because the database login is independently authorized. First,
-run the database disable with a fresh UUIDv4 and an allowed reason:
+First dispatch `production-routine-financial-stop.yml` on `main` with the exact
+project ref and `incident_stop` (or `operator_requested` for a planned stop). It
+disables both shared financial gates transactionally and does not erase an
+already-fenced attempt. If GitHub is unavailable, run
+`infra/sql/production-routine-financial-stop.sql` through the protected
+administrator connection with its documented environment inputs. Reconcile any
+uncertain KemerBet Transfer before another activation.
+
+Stopping Windows alone is not sufficient because the database login is
+independently authorized. After the financial gates are off, run the transport
+database disable with a fresh UUIDv4 and an allowed reason:
 
 ```bash
 export PRODUCTION_PROJECT_REF=xzztugbgtulptnbpoelr

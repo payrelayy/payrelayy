@@ -5,7 +5,7 @@
 # Compose network and the entire project is removed by scripts/run-sql-integration.mjs.
 services:
   postgres:
-    image: postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    image: public.ecr.aws/docker/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
     platform: linux/amd64
     environment:
       POSTGRES_DB: postgres
@@ -25,7 +25,7 @@ services:
       - sql_integration
 
   staging-ledger-postgres:
-    image: postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    image: public.ecr.aws/docker/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
     platform: linux/amd64
     environment:
       POSTGRES_DB: postgres

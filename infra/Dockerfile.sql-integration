@@ -2,7 +2,7 @@
 # It contains the test package, migrations, operational SQL, and only the two API adapter
 # modules needed for a no-money integration test. No application entry point, production
 # credential, environment file, or host socket is included.
-FROM --platform=linux/amd64 node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS dependencies
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/node:22.17.1-bookworm-slim@sha256:ffb27ca0f26a231a08930c872631cea70cbb318463d1e712922b5c7cfdc3fcca AS dependencies
 
 WORKDIR /workspace
 
@@ -61,7 +61,7 @@ RUN pnpm --filter @fetanagent/config... \
 
 # This content-addressed stage supplies the exact psql 17.4 client. Its server entrypoint is
 # replaced below; no PostgreSQL daemon or data directory is used by the test runner.
-FROM --platform=linux/amd64 postgres:17.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad AS runner
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/postgres:17.4-bookworm@sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad AS runner
 
 WORKDIR /workspace
 

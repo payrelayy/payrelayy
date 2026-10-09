@@ -13,6 +13,8 @@ import {
 } from './routine-telebirr-untrusted-proof.suite.js';
 
 const procedure = 'app.finalize_routine_telebirr_paid_observation(uuid)';
+const scanProcedure =
+  'app.list_routine_telebirr_paid_settlement_candidates(timestamptz,uuid,integer)';
 
 export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
   getClient: () => Client,
@@ -122,18 +124,19 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
       );
       expect(guard.rows).toEqual([{ permitted: false }]);
       const surface = await client.query<{
-        only_claim_function: boolean;
+        only_settlement_functions: boolean;
         no_base_object_access: boolean;
       }>(
         `select (
-           select count(*) = 1 and pg_catalog.bool_and(routine.oid = $1::pg_catalog.regprocedure)
+           select count(*) = 2 and pg_catalog.bool_and(routine.oid in
+             ($1::pg_catalog.regprocedure, $3::pg_catalog.regprocedure))
              from pg_catalog.pg_proc routine
              join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
             where namespace.nspname not in ('pg_catalog', 'information_schema')
               and namespace.nspname !~ '^pg_(toast|temp)'
               and pg_catalog.has_schema_privilege($2::text, namespace.oid, 'USAGE')
               and pg_catalog.has_function_privilege($2::text, routine.oid, 'EXECUTE')
-         ) as only_claim_function,
+         ) as only_settlement_functions,
          not exists (
            select 1 from pg_catalog.pg_class relation
              join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
@@ -148,9 +151,23 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
                   'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
               end
          ) as no_base_object_access`,
-        [procedure, 'fetanagent_routine_telebirr_paid_settlement_runtime'],
+        [procedure, 'fetanagent_routine_telebirr_paid_settlement_runtime', scanProcedure],
       );
-      expect(surface.rows).toEqual([{ only_claim_function: true, no_base_object_access: true }]);
+      expect(surface.rows).toEqual([
+        { only_settlement_functions: true, no_base_object_access: true },
+      ]);
+      const scanGrants = await client.query<{ role_name: string }>(
+        `select role.rolname as role_name from pg_catalog.pg_roles role
+          where role.rolname like 'fetanagent\\_%' escape '\\'
+            and pg_catalog.has_function_privilege(role.rolname,
+              $1::text, 'EXECUTE')
+          order by role.rolname`,
+        [scanProcedure],
+      );
+      expect(scanGrants.rows).toEqual([
+        { role_name: 'fetanagent_routine_telebirr_paid_settlement' },
+        { role_name: 'fetanagent_routine_telebirr_paid_settlement_runtime' },
+      ]);
     });
 
     it('cannot create a claim while production-style financial gates are off', async () => {
@@ -351,6 +368,14 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         await client.query('rollback to savepoint reject_legacy_origin');
         await client.query('release savepoint reject_legacy_origin');
         await client.query(stagingSql, stagingArgs);
+        const pending = await client.query<{ challenge_id: string; occurred_at_utc: string }>(
+          `select * from app.list_routine_telebirr_paid_settlement_candidates(
+            null::timestamptz, null::uuid, 32)`,
+        );
+        expect(pending.rows).toContainEqual({
+          challenge_id: challengeId,
+          occurred_at_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u),
+        });
         const settled = await client.query<{
           deposit_intent_id: string;
           payment_claim_id: string;
@@ -364,6 +389,12 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [challengeId],
         );
         expect(replay.rows).toEqual([{ ...settled.rows[0]!, already_finalized: true }]);
+        const noLongerPending = await client.query<{ challenge_id: string }>(
+          `select challenge_id from app.list_routine_telebirr_paid_settlement_candidates(
+            null::timestamptz, null::uuid, 32) where challenge_id = $1::uuid`,
+          [challengeId],
+        );
+        expect(noLongerPending.rows).toEqual([]);
         const persisted = await client.query<{
           amount_minor: string;
           claim_count: string;

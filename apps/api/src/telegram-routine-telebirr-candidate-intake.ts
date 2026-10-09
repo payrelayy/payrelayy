@@ -60,7 +60,6 @@ async function captureInternal(
     (config.financialActionsMode === 'dry_run' || config.financialActionsMode === 'live') &&
     REAL_REFERENCE_PATTERN.test(action.transactionReference) &&
     !SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference);
-  const paidCandidate = productionCandidate && config.financialActionsMode === 'live';
   if (
     !config.telegramActionCapability.enabled ||
     !runtime.enabled ||
@@ -108,6 +107,12 @@ async function captureInternal(
     throw new TelegramRoutineTelebirrCandidateUnavailableError();
   }
   const row = result.rows[0];
+  // The PostgreSQL switch set, not this live-capable API process, decides whether
+  // production intake is a no-money rehearsal or a paid pending candidate.
+  const paidCandidate = row.proof_status === 'paid_pending';
+  const responseModeAllowed =
+    row.proof_status === 'untrusted_received' ||
+    (paidCandidate && productionCandidate && config.financialActionsMode === 'live');
   const expectedColumns = [
     'proof_request_id',
     'provider_code',
@@ -121,7 +126,7 @@ async function captureInternal(
     typeof row.proof_request_id !== 'string' ||
     !UUID_PATTERN.test(row.proof_request_id) ||
     row.provider_code !== 'telebirr' ||
-    row.proof_status !== (paidCandidate ? 'paid_pending' : 'untrusted_received') ||
+    !responseModeAllowed ||
     !(row.submitted_at instanceof Date) ||
     Number.isNaN(row.submitted_at.getTime()) ||
     typeof row.request_replayed !== 'boolean'

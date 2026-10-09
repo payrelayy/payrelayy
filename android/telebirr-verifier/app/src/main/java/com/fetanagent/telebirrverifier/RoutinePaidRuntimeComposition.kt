@@ -4,7 +4,7 @@ import android.content.Context
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
 
-/** Explicit paid-phone evidence mode. It can stage receipts, but cannot credit a Player. */
+/** Signed evidence mode. Each server route independently enforces its mutually exclusive gate. */
 internal object RoutinePaidRuntimeComposition {
   fun enabled(): Boolean = BuildConfig.VERIFIER_ENABLED && BuildConfig.ROUTINE_PAID_ENABLED &&
     BuildConfig.ROUTINE_NO_MONEY_ENABLED &&
@@ -31,6 +31,10 @@ internal object RoutinePaidRuntimeComposition {
     val identity = runCatching { RoutineNoMoneyRuntimeComposition.identity() }.getOrNull()
       ?: return unavailable("routine_device_key_unavailable")
     val enrollmentStore = EncryptedRoutineEnrollmentStore.forApplication(context)
+    // Keep the existing no-money encrypted outbox and route available in this newer APK.
+    // The no-money SQL boundary requires all financial switches off; the paid SQL boundary
+    // requires current live authority. Neither phone route can credit a Player.
+    val noMoneySession = RoutineNoMoneyRuntimeComposition.create(context)
     val phones = (0 until RoutinePaidParallelCycle.MAX_LANES).map { lane ->
       RoutinePaidPhonePreparation(
         exchange = FixedRoutinePaidPollHttpsExchange(),
@@ -52,7 +56,7 @@ internal object RoutinePaidRuntimeComposition {
         }
         burst = results.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
         val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
-        when {
+        val paidStatus = when {
           review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
             review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
               ?: "routine_paid_review")
@@ -62,9 +66,14 @@ internal object RoutinePaidRuntimeComposition {
             LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
           else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
         }
+        val noMoneyStatus = noMoneySession.cycle.runOnce()
+        RoutineDualModeStatus.select(noMoneyStatus, paidStatus)
       },
       heartbeat = null,
-      close = parallelCycle::close,
+      close = {
+        parallelCycle.close()
+        noMoneySession.close()
+      },
     )
   }
 
@@ -74,4 +83,19 @@ internal object RoutinePaidRuntimeComposition {
     },
     heartbeat = null,
   )
+}
+
+/** Status presentation only; the server gates, not this choice, authorize an assignment. */
+internal object RoutineDualModeStatus {
+  fun select(noMoney: LivePilotRuntimeStatus, paid: LivePilotRuntimeStatus): LivePilotRuntimeStatus {
+    if (paid.code == "paid_observation_staged") return paid
+    if (paid.code == "server_rejected" && noMoney.code != "server_rejected") return noMoney
+    if (noMoney.code == "server_rejected") return paid
+    if (paid.state == LivePilotRuntimeState.ATTENTION) return paid
+    if (noMoney.state == LivePilotRuntimeState.ATTENTION) return noMoney
+    if (paid.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return paid
+    if (noMoney.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return noMoney
+    if (paid.code == "no_paid_assignment" && noMoney.code != "no_assignment") return noMoney
+    return paid
+  }
 }

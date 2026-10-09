@@ -188,6 +188,26 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     expect(calls[0]!.query).not.toMatch(/execute|settle|transfer|verification_job/iu);
   });
 
+  it('reports a database-authorized no-money capture even when the production API is live-capable', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls, 'untrusted_received'),
+        inboundEventId,
+        { ...action, transactionReference: 'AB12CD34EF' },
+        enabledProductionConfig,
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_recorded_no_money',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'untrusted_received',
+      verificationMode: 'not_started_no_money',
+    });
+    expect(calls).toHaveLength(1);
+  });
+
   it('never calls SQL for an unenabled target, staging/live mismatch, or mismatched reference', async () => {
     const database = { query: vi.fn() } as unknown as TelegramRoutineTelebirrCandidateDatabase;
     const denied = [
@@ -246,16 +266,8 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     expect(database.query).not.toHaveBeenCalled();
   });
 
-  it('rejects database candidate modes that disagree with the configured financial mode', async () => {
+  it('rejects a paid database response outside the live-capable production route', async () => {
     const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
-    await expect(
-      captureTelegramRoutineTelebirrCandidate(
-        acceptedDatabase(calls),
-        inboundEventId,
-        { ...action, transactionReference: 'AB12CD34EF' },
-        enabledProductionConfig,
-      ),
-    ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
     await expect(
       captureTelegramRoutineTelebirrCandidate(
         acceptedDatabase(calls, 'paid_pending'),
@@ -264,7 +276,7 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
         config,
       ),
     ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
   });
 
   it.each([

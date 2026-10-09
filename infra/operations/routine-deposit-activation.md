@@ -4,42 +4,19 @@ This is a money-capable production procedure. It is intentionally not part of mi
 or the normal production composition. Use it only for a reviewed exact release, from protected
 operator hosts, after the non-financial verification and disposable SQL suite pass.
 
-**Current stop gate:** The non-pilot customer proof-to-official-observation-to-one-use-claim-to-
-verified-job path is not implemented end to end. The dormant table in
-`20261005165930_routine_telebirr_untrusted_proof_foundation.sql` does not satisfy that path.
-The `routine-signed-observation` library verifies a paired-device signature and receipt-policy
-facts in isolation, but has no production caller, authenticated official-source adapter, or
-atomic one-use payment claim. A private digest-only challenge/observation ledger pins the
-candidate snapshot and permits one observation receipt per challenge. An administrator-only
-database issuer can reserve a five-minute challenge against a current candidate, receiving-account
-revision, separate routine enrollment, and signer. The routine trust stores are empty and have no
-application provisioning path; the issuer has no runtime grant or transport. A second admin-only
-function can return the exact encrypted candidate and trust material in the same transaction as
-challenge issuance, while rejecting a signer that is also the device key. A dormant protected-process
-builder and private no-money broker core can open that reference and sign the routine assignment
-in isolation. A separate no-password NOLOGIN database scaffold has only four no-money function
-grants, but there is no provisioned login, deployed caller, protected transport, or
-signed-assignment persistence. They do not authenticate an official TeleBirr source,
-accept an observation, or claim a payment. Pilot pairing cannot substitute for routine enrollment.
-The advisory result and dormant ledger do not satisfy this activation gate.
-The `routine-signed-lookup-assignment` contract likewise verifies only a server signature and
-routine device/receiver binding in isolation. It does not issue signed assignments, verify the
-database reservation, authenticate TeleBirr, or activate the Android routine lookup. The
-phone's routine receiver-name digest is domain-separated from the private pilot, but the routine
-phone path is still dormant. The Android routine lookup verifier can check that same assignment
-transcript against a local device key and yields only a guarded parsing expectation. Its strict
-routine JSON codec can decode an assignment and encode a signed, normalized observation, but it
-has no protected routine transport, enrollment lifecycle, production caller, or upload endpoint.
-The Android routine observation factory can sign locally parsed facts, but no runtime calls or
-transmits it.
-An administrator-only no-money handoff can now consume one verified signed-poll replay ID and
-reserve at most one encrypted candidate in one transaction. It has no application grant, signing
-key, mounted route, or phone caller, and does not satisfy the live activation gate.
-Do not run this activation procedure, install its runtime credential or release marker, or start
-the Automatic Deposits launcher until a later reviewed release proves the whole path with
-disposable SQL and no-money end-to-end tests.
-The checked-in activation SQL now stops before reading activation inputs; a later release must
-remove that stop only after the non-pilot lineage has passed those tests.
+The non-pilot path is now implemented: Telegram captures a fresh paid candidate, the paired
+phone verifies the public Ethiotelecom receipt over HTTPS and signs V2 official-origin facts,
+the isolated settlement worker creates one payment claim and queued job, and the Windows worker
+credits only one verified job at a time. The disposable SQL suite tests the claim/job lineage
+and replays. A production no-money phone rehearsal must still show a recent signed V2
+`official_tls_origin` observation matching server policy before transport activation.
+
+The activation SQL checks that observation, the dedicated phone/settlement logins and source
+guard, no unresolved routine execution attempt, and all seven financial switches **disabled**.
+It then provisions only the separate Windows transport login. It does not turn a switch live,
+create a paid claim, start the companion, or perform a credit. Keep the money switches off until
+the installed companion, protected server marker, and emergency stop have been verified for the
+exact release. Do not treat a successful transport activation as permission to submit a payment.
 
 Do not use this procedure to test whether KemerBet Transfer works. Do not create a synthetic paid
 job, reuse a payment claim, or submit a live payment as an activation check. A pre-existing fenced

@@ -1,10 +1,8 @@
 \set ON_ERROR_STOP on
--- The database contains only the bounded live-pilot verification lineage. The separate
--- non-pilot customer proof -> official observation -> one-use claim -> verified job path is
--- not implemented yet. Keep this operator procedure non-executable until a later reviewed
--- release replaces this stop gate and proves that complete path with no-money tests.
-\warn 'Routine deposit activation is blocked: non-pilot verified-job lineage is not implemented.'
-select 1 / 0 as nonpilot_lineage_not_ready;
+-- This operator-only procedure provisions the one-connection Windows execution transport.
+-- It does not enable payment verification or deposit execution, create a paid claim, or
+-- start the Windows worker. The separate, signed-origin paid claim producer and bounded
+-- settlement runtime must already be deployed and verified before this can proceed.
 
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv owner_auth_user_id FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID
@@ -31,6 +29,73 @@ set local search_path = pg_catalog;
 set local statement_timeout = '20s';
 set local lock_timeout = '3s';
 set local idle_in_transaction_session_timeout = '20s';
+
+-- Fail closed on the exact production path, not the retired pilot lineage. A recent
+-- no-money signed V2 official-origin observation proves the paired-phone source route;
+-- disposable SQL tests prove the one-use claim/job path. Keep every financial switch
+-- disabled while provisioning this separate Windows transport credential.
+select (
+  select pg_catalog.count(*) = 7
+    and pg_catalog.bool_and(feature_switch.mode = 'disabled')
+    from app.feature_switches feature_switch
+   where feature_switch.feature_key in (
+     'cbe_birr_authoritative_verification', 'deposit_execution',
+     'payment_verification', 'private_live_deposit_pilot',
+     'telebirr_authoritative_verification', 'withdrawal_collection',
+     'withdrawal_validation'
+   )
+) and exists (
+  select 1 from app.routine_telebirr_signed_observation_payloads observation
+  join app.routine_telebirr_lookup_challenges challenge
+    on challenge.challenge_id = observation.challenge_id
+  join app.routine_telebirr_device_enrollments enrollment
+    on enrollment.id = challenge.device_enrollment_id
+   where observation.recorded_at >= pg_catalog.clock_timestamp() - interval '24 hours'
+     and observation.server_policy_result = 'signed_evidence_matches_policy'
+     and observation.signed_observation ->> 'contractVersion' = '2'
+     and observation.signed_observation #>> '{body,facts,sourceOriginAttestation}'
+       = 'official_tls_origin'
+     and challenge.issuance_mode = 'no_money'
+     and enrollment.valid_until > pg_catalog.clock_timestamp() + interval '1 hour'
+     and not exists (
+       select 1 from app.routine_telebirr_device_enrollment_revocations revocation
+        where revocation.enrollment_id = enrollment.id
+     )
+) and (
+  select pg_catalog.count(*) = 3
+    and pg_catalog.bool_and(runtime.rolcanlogin
+      and runtime.rolvaliduntil > pg_catalog.clock_timestamp() + interval '1 hour')
+    from pg_catalog.pg_roles runtime
+   where runtime.rolname in (
+     'fetanagent_routine_telebirr_no_money_runtime',
+     'fetanagent_routine_telebirr_paid_poll_runtime',
+     'fetanagent_routine_telebirr_paid_settlement_runtime'
+   )
+) and exists (
+  select 1 from pg_catalog.pg_proc routine
+   where routine.oid = pg_catalog.to_regprocedure(
+     'app.finalize_routine_telebirr_paid_observation(uuid)')
+     and routine.proowner = 'postgres'::pg_catalog.regrole
+     and routine.prosecdef
+     and pg_catalog.strpos(routine.prosrc, 'sourceOriginAttestation') > 0
+     and pg_catalog.strpos(routine.prosrc,
+       'routine_telebirr_paid_settlement_session_allowed') > 0
+) and pg_catalog.to_regprocedure(
+  'app.list_routine_telebirr_paid_settlement_candidates(timestamptz,uuid,integer)'
+) is not null and not exists (
+  select 1 from app.routine_telebirr_execution_bindings binding
+  join app.deposit_execution_attempts attempt
+    on attempt.deposit_job_id = binding.execution_job_id
+   where attempt.status in (
+     'prepared', 'final_action_fenced', 'reconciliation_required', 'review_required'
+   )
+) as routine_activation_readiness
+\gset
+\if :routine_activation_readiness
+\else
+  \warn 'Routine deposit activation preflight failed; financial switches and runtime remain unchanged.'
+  select 1 / 0 as routine_activation_preflight_rejected;
+\endif
 
 select app.activate_routine_telebirr_execution_transport(
   :'owner_auth_user_id'::uuid,

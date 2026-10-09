@@ -18,6 +18,8 @@ const paidScriptPath = 'infra/operations/fetanagent-production-helper-rotation-v
 const paidDocsPath = 'infra/operations/production-helper-rotation-v5.md';
 const settlementScriptPath = 'infra/operations/fetanagent-production-helper-rotation-v6.sh';
 const settlementDocsPath = 'infra/operations/production-helper-rotation-v6.md';
+const accessScriptPath = 'infra/operations/fetanagent-production-helper-rotation-v7.sh';
+const accessDocsPath = 'infra/operations/production-helper-rotation-v7.md';
 const sourceCommit = '7d8c930d5a587967664f05c849ebdb85966c0fd3';
 const predecessorCommit = '966efd652a1183b9c9d8b7faf743e1af166a0ef6';
 const predecessor = 'd2f537641dacb1f01d8f6a00f4ab295ee145a1cc31bc27fcaa596f9031a04996';
@@ -27,18 +29,21 @@ const latestSuccessor = 'cb23a2940f0cb6d523435ff98691b7ed06761e39b2161b1dd2e7e4c
 const newestSuccessor = 'd3f8f285e410573e17968830ab5eb85fb9785497c4d58e876cb8a993b68ce792';
 const paidSuccessor = 'ed18df6909769489eb4b3b562dc8f50f4bfb144cce3bc89393bea97ae013aff8';
 const settlementSuccessor = '9cb11c2962d728355cc5884839cb12bde982726260925b2de220605b91673003';
+const accessSuccessor = '38a8f424fa92d39805bfb8d8fe45e94dff547379d1940af976f35c15e1e6b8da';
+const settlementCommit = 'df1126faaf3ac9887e8726a4e3c6b6829a34cf13';
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const blob = (commit) => execFileSync('git', ['show', `${commit}:${helperPath}`], { cwd: root });
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 
 assert.equal(sha256(blob(predecessorCommit)), predecessor);
 assert.equal(sha256(blob(sourceCommit)), successor);
-assert.equal(sha256(read(helperPath)), settlementSuccessor);
+assert.equal(sha256(blob(settlementCommit)), settlementSuccessor);
+assert.equal(sha256(read(helperPath)), accessSuccessor);
 
 const sudoers = read('infra/operations/fetanagent-production-deploy-helper.sudoers').toString();
 assert.equal(
   sudoers,
-  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${settlementSuccessor} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${accessSuccessor} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
 );
 
 const script = read(scriptPath).toString();
@@ -361,5 +366,60 @@ assert.ok(
     settlementStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(settlementScript, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const accessScript = read(accessScriptPath).toString();
+const accessDocs = read(accessDocsPath).toString();
+for (const value of [
+  settlementSuccessor,
+  accessSuccessor,
+  '593344964',
+  'ROTATE EXACT PRODUCTION DEPLOY HELPER V7',
+]) {
+  assert.ok(accessScript.includes(value), `v7 rotation script does not pin ${value}`);
+  assert.ok(accessDocs.includes(value), `v7 rotation runbook does not pin ${value}`);
+}
+for (const value of [
+  '/usr/local/sbin/fetanagent-production-deploy-helper',
+  '/etc/sudoers.d/fetanagent-production-deploy-helper',
+  '/var/lib/fetanagent/production/helper.lock',
+  '/var/lib/fetanagent/production/routine-deposits.release',
+  '/var/lib/fetanagent/production/companion-execution-v2.release',
+  'metadata/v1/id',
+  'routine-container-secret-access-v7',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(accessScript.includes(value), `v7 rotation script lost a required boundary: ${value}`);
+}
+const accessRotationStart = accessScript.indexOf('rotate() {');
+const accessRotation = accessScript.slice(accessRotationStart);
+const accessStep = (value) => {
+  const index = accessRotation.indexOf(value);
+  assert.ok(index >= 0, `v7 rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(accessRotationStart > 0);
+assert.ok(accessScript.indexOf('flock --nonblock 9') < accessRotationStart);
+assert.ok(accessStep('acquire_lock') < accessStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  accessStep('install_record "$INTENT" intent_body') <
+    accessStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  accessStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    accessStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  accessStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    accessStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  accessStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    accessStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(accessScript, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

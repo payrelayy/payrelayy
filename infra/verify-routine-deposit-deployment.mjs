@@ -29,6 +29,8 @@ const [
   routineOverlay,
   deployHelper,
   productionWorkflow,
+  poolerBanRecoveryWorkflow,
+  reviewLoginRecoveryWorkflow,
   transportActivationWorkflow,
   qualityWorkflow,
   migration,
@@ -56,6 +58,8 @@ const [
   read('infra/compose.production.routine-deposits.yaml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('.github/workflows/production-runtime.yml'),
+  read('.github/workflows/production-routine-pooler-ban-recovery.yml'),
+  read('.github/workflows/production-routine-review-login-recovery.yml'),
   read('.github/workflows/production-routine-deposit-transport-activation.yml'),
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
@@ -130,13 +134,46 @@ assert.doesNotMatch(productionCompose, /INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENAB
 assert.match(routineOverlay, /INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true'/u);
 assert.match(routineOverlay, /companion_routine_deposit_database_url/u);
 assert.match(routineOverlay, /companion-bridge-runtime-manifest\.v3\.json/u);
+assert.match(routineOverlay, /production-routine-execution-signer\.pkcs8\.der/u);
+assert.doesNotMatch(
+  routineOverlay,
+  /file: \/etc\/fetanagent\/companion-execution-secrets\/production-execution-signer\.pkcs8\.der/u,
+);
 assert.match(deployHelper, /ROUTINE_DEPOSITS_MARKER/u);
 assert.match(deployHelper, /routine_deposits_enabled_for_release/u);
 assert.match(deployHelper, /routine-deposit markers cannot coexist/u);
 assert.match(deployHelper, /compose\.production\.routine-deposits\.yaml/u);
 assert.match(deployHelper, /production-routine-deposit-database-url/u);
+assert.match(deployHelper, /COMPANION_EXECUTION_SECRETS/u);
+assert.match(deployHelper, /production-routine-execution-signer\.pkcs8\.der/u);
+assert.match(deployHelper, /'0:0:700'/u);
+assert.match(deployHelper, /'10001:10001:400:1'/u);
+assert.match(
+  deployHelper,
+  /cmp --silent -- "\$COMPANION_EXECUTION_V2_KEY" "\$ROUTINE_DEPOSITS_CONTAINER_SIGNER"/u,
+);
 assert.match(deployHelper, /routine_status=503/u);
 assert.match(productionWorkflow, /infra\/compose\.production\.routine-deposits\.yaml/u);
+assert.match(productionWorkflow, /Record existing routine review login states for exact rollback/u);
+for (const role of ['no_money', 'paid_poll', 'paid_settlement']) {
+  assert.match(
+    productionWorkflow,
+    new RegExp(`routine_previous_logins\\.outputs\\.${role} == 'false'`, 'u'),
+  );
+}
+assert.match(poolerBanRecoveryWorkflow, /RECOVER EXACT ROUTINE POOLER BAN/u);
+assert.match(poolerBanRecoveryWorkflow, /2a05:d018:135e:1600:2419:50b5:f859:6ad4/u);
+assert.match(poolerBanRecoveryWorkflow, /repair-diagnostic-database-ban\.py/u);
+assert.match(poolerBanRecoveryWorkflow, /require-production-ci\.mjs/u);
+assert.match(poolerBanRecoveryWorkflow, /environment: production/u);
+assert.doesNotMatch(poolerBanRecoveryWorkflow, /production-routine-deposit-activate\.sql/u);
+assert.match(reviewLoginRecoveryWorkflow, /RESTORE INERT ROUTINE REVIEW LOGINS/u);
+assert.match(reviewLoginRecoveryWorkflow, /production-inert-runtime-preflight\.sql/u);
+assert.match(reviewLoginRecoveryWorkflow, /production-routine-no-money-activate\.sql/u);
+assert.match(reviewLoginRecoveryWorkflow, /production-routine-paid-poll-activate\.sql/u);
+assert.match(reviewLoginRecoveryWorkflow, /production-routine-paid-settlement-activate\.sql/u);
+assert.match(reviewLoginRecoveryWorkflow, /require-production-ci\.mjs/u);
+assert.doesNotMatch(reviewLoginRecoveryWorkflow, /production-routine-deposit-activate\.sql/u);
 assert.match(qualityWorkflow, /pnpm verify:routine-deposits/u);
 assert.match(packageBuilder, /Start FetanAgent Automatic Deposits\.ps1/u);
 assert.match(packageBuilder, /routine-deposit-launcher-cli\.js/u);

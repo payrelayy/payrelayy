@@ -19,7 +19,9 @@ readonly STAGING_BOT_TOKEN='/srv/fetanagent/secrets/staging/bot-token'
 readonly COMPANION_EXECUTION_V2_MARKER="$STATE_ROOT/companion-execution-v2.release"
 readonly COMPANION_EXECUTION_V2_KEY='/etc/fetanagent/companion-execution-secrets/production-execution-signer.pkcs8.der'
 readonly COMPANION_EXECUTION_V2_KEY_SHA256='c7028976e436f39a10634631a9e0e610b2b054d78cc7c89f115d6260371d21e2'
+readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secrets'
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
+readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
 
 die() {
@@ -182,9 +184,21 @@ companion_execution_v2_enabled_for_release() {
 validate_routine_deposit_material() {
   local release="$1" database_url
   validate_companion_execution_v2_material "$release"
+  # File-backed Compose secrets are bind mounts: their declared uid/gid/mode are
+  # not applied. Keep the host directory root-only, and make only these two
+  # container-specific source files readable by the non-root bridge identity.
+  [[ ! -L "$COMPANION_EXECUTION_SECRETS" && -d "$COMPANION_EXECUTION_SECRETS" &&
+    "$(realpath -- "$COMPANION_EXECUTION_SECRETS")" == "$COMPANION_EXECUTION_SECRETS" &&
+    "$(stat --format='%u:%g:%a' "$COMPANION_EXECUTION_SECRETS")" == '0:0:700' ]] ||
+    die 'the protected companion execution secret directory is unsafe'
+  [[ ! -L "$ROUTINE_DEPOSITS_CONTAINER_SIGNER" && -f "$ROUTINE_DEPOSITS_CONTAINER_SIGNER" &&
+    "$(realpath -- "$ROUTINE_DEPOSITS_CONTAINER_SIGNER")" == "$ROUTINE_DEPOSITS_CONTAINER_SIGNER" &&
+    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_CONTAINER_SIGNER")" == '10001:10001:400:1' ]] &&
+    cmp --silent -- "$COMPANION_EXECUTION_V2_KEY" "$ROUTINE_DEPOSITS_CONTAINER_SIGNER" ||
+    die 'the protected routine-deposit container signer is absent or unsafe'
   [[ ! -L "$ROUTINE_DEPOSITS_DATABASE_URL" && -f "$ROUTINE_DEPOSITS_DATABASE_URL" &&
     "$(realpath -- "$ROUTINE_DEPOSITS_DATABASE_URL")" == "$ROUTINE_DEPOSITS_DATABASE_URL" &&
-    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_DATABASE_URL")" == '0:0:400:1' &&
+    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_DATABASE_URL")" == '10001:10001:400:1' &&
     "$(stat --format='%s' "$ROUTINE_DEPOSITS_DATABASE_URL")" -le 1024 ]] ||
     die 'the protected routine-deposit database credential is absent or unsafe'
   database_url="$(<"$ROUTINE_DEPOSITS_DATABASE_URL")"

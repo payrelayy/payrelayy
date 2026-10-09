@@ -1,6 +1,7 @@
 package com.fetanagent.telebirrverifier
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
@@ -44,6 +45,7 @@ internal object RoutinePaidRuntimeComposition {
       )
     }
     val parallelCycle = RoutinePaidParallelCycle(phones.size)
+    val paidRetryPacer = RoutinePaidRetryPacer(SystemClock::elapsedRealtime)
     // Inspect every outbox on restart; after an empty pass, use one idle poll until work arrives.
     var burst = true
     return VerifierRuntimeSession(
@@ -52,12 +54,18 @@ internal object RoutinePaidRuntimeComposition {
           enrollmentStore.loadEnrolled(receiptSigner, identity, currentUtc())
         }.getOrNull() ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
           LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
-        val results = parallelCycle.runOnce(if (burst) phones.size else 1) { lane ->
-          phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
-        }
-        burst = results.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
+        val results = if (paidRetryPacer.shouldAttempt()) {
+          parallelCycle.runOnce(if (burst) phones.size else 1) { lane ->
+            phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
+          }.also { attempted ->
+            paidRetryPacer.record(attempted)
+            burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
+          }
+        } else emptyList()
         val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
         val paidStatus = when {
+          results.isEmpty() && paidRetryPacer.waitingForRetry ->
+            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
           review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
             review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
               ?: "routine_paid_review")
@@ -95,11 +103,42 @@ internal object RoutineDualModeStatus {
     if (paid.code == "paid_observation_staged") return paid
     if (noMoney.code == "server_rejected") return paid
     if (paid.code == "server_rejected") return noMoney
+    // Keep no-money intake responsive while a separate paid poll is cooling down.
+    if (noMoney.state == LivePilotRuntimeState.READY && noMoney.code == "no_assignment" &&
+      paid.code == "paid_observation_retry")
+      return LivePilotRuntimeStatus(LivePilotRuntimeState.READY,
+        "routine_no_money_idle_paid_retry")
     if (noMoney.state == LivePilotRuntimeState.ATTENTION) return noMoney
     if (paid.state == LivePilotRuntimeState.ATTENTION) return paid
     if (paid.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return paid
     if (noMoney.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return noMoney
     if (paid.code == "no_paid_assignment" && noMoney.code != "no_assignment") return noMoney
     return paid
+  }
+}
+
+/** Monotonic, bounded paid retry pacing independent of the no-money polling cadence. */
+internal class RoutinePaidRetryPacer(private val nowMillis: () -> Long) {
+  private var consecutiveRetries = 0
+  private var nextAttemptAtMillis = 0L
+
+  val waitingForRetry: Boolean get() = consecutiveRetries > 0
+
+  fun shouldAttempt(): Boolean = !waitingForRetry || nowMillis() >= nextAttemptAtMillis
+
+  fun record(results: List<RoutinePaidPhonePreparationResult>) {
+    require(results.isNotEmpty())
+    if (results.any { it == RoutinePaidPhonePreparationResult.Retry }) {
+      consecutiveRetries = (consecutiveRetries + 1).coerceAtMost(RETRY_DELAYS_MILLIS.size)
+      val delay = RETRY_DELAYS_MILLIS[consecutiveRetries - 1]
+      nextAttemptAtMillis = nowMillis().coerceAtMost(Long.MAX_VALUE - delay) + delay
+    } else {
+      consecutiveRetries = 0
+      nextAttemptAtMillis = 0L
+    }
+  }
+
+  companion object {
+    private val RETRY_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L, 60_000L)
   }
 }

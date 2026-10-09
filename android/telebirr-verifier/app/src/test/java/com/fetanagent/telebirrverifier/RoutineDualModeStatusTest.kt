@@ -21,7 +21,8 @@ class RoutineDualModeStatusTest {
     val staged = ready("paid_observation_staged")
     assertEquals(staged, RoutineDualModeStatus.select(attention("server_review"), staged))
     val failed = attention("paid_observation_retry")
-    assertEquals(failed, RoutineDualModeStatus.select(ready("no_assignment"), failed))
+    assertEquals(ready("routine_no_money_idle_paid_retry"),
+      RoutineDualModeStatus.select(ready("no_assignment"), failed))
     val noMoneyFailed = attention("routine_retry")
     assertEquals(noMoneyFailed,
       RoutineDualModeStatus.select(noMoneyFailed, ready("no_paid_assignment")))
@@ -29,5 +30,23 @@ class RoutineDualModeStatusTest {
       RoutineDualModeStatus.select(noMoneyFailed, attention("paid_observation_retry")))
     assertEquals(failed,
       RoutineDualModeStatus.select(attention("server_rejected"), failed))
+  }
+
+  @Test fun `paid retries keep their own bounded clock while no-money polling continues`() {
+    var now = 1_000L
+    val pacer = RoutinePaidRetryPacer { now }
+    assertEquals(true, pacer.shouldAttempt())
+    val delays = listOf(5_000L, 10_000L, 20_000L, 30_000L, 60_000L, 60_000L)
+    for (delay in delays) {
+      pacer.record(listOf(RoutinePaidPhonePreparationResult.Retry))
+      assertEquals(true, pacer.waitingForRetry)
+      now += delay - 1L
+      assertEquals(false, pacer.shouldAttempt())
+      now += 1L
+      assertEquals(true, pacer.shouldAttempt())
+    }
+    pacer.record(listOf(RoutinePaidPhonePreparationResult.NoAssignment))
+    assertEquals(false, pacer.waitingForRetry)
+    assertEquals(true, pacer.shouldAttempt())
   }
 }

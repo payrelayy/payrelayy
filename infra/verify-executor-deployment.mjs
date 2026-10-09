@@ -690,7 +690,7 @@ assert.doesNotMatch(
 );
 
 const executorBaseImage =
-  /^FROM --platform=linux\/amd64 (node:[^\s]+@sha256:[0-9a-f]{64}) AS build-base$/m.exec(
+  /^FROM --platform=linux\/amd64 (public\.ecr\.aws\/docker\/library\/node:[^\s]+@sha256:[0-9a-f]{64}) AS build-base$/m.exec(
     dockerfile,
   )?.[1];
 assert.ok(executorBaseImage, 'missing pinned executor build base image');

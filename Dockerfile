@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # This build contains no runtime secret, database URL, or bot token. Every runtime target remains
 # Linux/amd64-only and uses the same reviewed immutable Node base image.
 # Reviewed 2026-08-08 for the London Linux/amd64 VM. Reverify this digest before a real deployment.

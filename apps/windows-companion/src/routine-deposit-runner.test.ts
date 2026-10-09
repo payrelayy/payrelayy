@@ -71,6 +71,28 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
+  it('processes a burst of 100 queued credits in one ordered lane', async () => {
+    const { options } = fixture();
+    const order: number[] = [];
+    let active = 0;
+    let peak = 0;
+    selected.runOnce.mockImplementation(async () => {
+      const sequence = order.length;
+      active++;
+      peak = Math.max(peak, active);
+      await Promise.resolve();
+      order.push(sequence);
+      active--;
+      return sequence < 100
+        ? { status: 'completed' }
+        : { status: 'paused', reason: 'operator_stopped' };
+    });
+    const queue = startRoutineDepositQueue(options);
+    await expect(queue.done).resolves.toMatchObject({ status: 'paused' });
+    expect(order).toEqual(Array.from({ length: 101 }, (_, index) => index));
+    expect(peak).toBe(1);
+  });
+
   it('cancels idle delay promptly and closes the browser once', async () => {
     vi.useFakeTimers();
     const { options, controller, session } = fixture();

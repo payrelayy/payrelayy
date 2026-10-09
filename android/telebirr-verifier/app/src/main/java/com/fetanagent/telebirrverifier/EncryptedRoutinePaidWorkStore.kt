@@ -248,10 +248,16 @@ internal class EncryptedRoutinePaidWorkStore(
     private const val MAX_PLAINTEXT_BYTES = 8 + 1 + 4 + MAX_ASSIGNMENT_BYTES + 4 + MAX_UPLOAD_BYTES
     private const val MAX_SEALED_BYTES = MAX_PLAINTEXT_BYTES + 128
 
-    fun forApplication(context: Context): EncryptedRoutinePaidWorkStore =
-      EncryptedRoutinePaidWorkStore(
-        File(context.applicationContext.noBackupFilesDir, "routine-paid-work-v1"),
-        AndroidKeystoreLivePilotQueueCipher("fetanagent_telebirr_routine_paid_work_aes_v1"),
+    fun forApplication(context: Context, lane: Int = 0): EncryptedRoutinePaidWorkStore {
+      require(lane in 0 until RoutinePaidParallelCycle.MAX_LANES)
+      // Lane zero keeps the original file/key, including any upload pending before this update.
+      val directory = if (lane == 0) "routine-paid-work-v1" else "routine-paid-work-v1-slot-$lane"
+      val alias = if (lane == 0) "fetanagent_telebirr_routine_paid_work_aes_v1"
+        else "fetanagent_telebirr_routine_paid_work_aes_v1_slot_$lane"
+      return EncryptedRoutinePaidWorkStore(
+        File(context.applicationContext.noBackupFilesDir, directory),
+        AndroidKeystoreLivePilotQueueCipher(alias),
       )
+    }
   }
 }

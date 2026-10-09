@@ -27,6 +27,17 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `paid idle poll remains responsive without changing no-money backoff`() {
+    val policy = VerifierRunLoopPolicy { 0.0 }
+    val status = status(LivePilotRuntimeState.READY, "no_paid_assignment")
+    assertEquals(listOf(10_000L, 10_000L, 10_000L),
+      (0..2).map { policy.decide(status, it.toLong()).delayMillis })
+    val retry = status(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
+    assertEquals(5_000L, policy.decide(retry, 3L).delayMillis)
+    assertEquals(10_000L, policy.decide(retry, 4L).delayMillis)
+  }
+
+  @Test
   fun `pending uploads retry quickly then cap at five minutes`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
     val status = status(LivePilotRuntimeState.UPLOAD_PENDING, "upload_retry_scheduled")

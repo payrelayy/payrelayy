@@ -70,11 +70,15 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.ENROLLMENT_REQUIRED,
       -> null
       LivePilotRuntimeState.READY ->
-        if (status.code in READY_IDLE_CODES) delay(READY_IDLE_DELAYS_MILLIS, repeat) else 1_000L
+        if (status.code == "no_paid_assignment") PAID_IDLE_DELAY_MILLIS
+        else if (status.code in READY_IDLE_CODES) delay(READY_IDLE_DELAYS_MILLIS, repeat)
+        else 1_000L
       LivePilotRuntimeState.BUSY -> 1_000L
       LivePilotRuntimeState.UPLOAD_PENDING -> delay(UPLOAD_DELAYS_MILLIS, repeat)
       LivePilotRuntimeState.ATTENTION ->
-        if (status.code in TERMINAL_ATTENTION_CODES) null else delay(ATTENTION_DELAYS_MILLIS, repeat)
+        if (status.code in TERMINAL_ATTENTION_CODES) null
+        else if (status.code == "paid_observation_retry") delay(UPLOAD_DELAYS_MILLIS, repeat)
+        else delay(ATTENTION_DELAYS_MILLIS, repeat)
     }
 
   private fun delay(sequence: LongArray, repeat: Int): Long =
@@ -94,6 +98,7 @@ class VerifierRunLoopPolicy(
   companion object {
     const val HEARTBEAT_INTERVAL_MILLIS = 5 * 60 * 1_000L
     private const val MAXIMUM_JITTER_FRACTION = 0.20
+    private const val PAID_IDLE_DELAY_MILLIS = 10_000L
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
     private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled")
     private val UPLOAD_DELAYS_MILLIS =

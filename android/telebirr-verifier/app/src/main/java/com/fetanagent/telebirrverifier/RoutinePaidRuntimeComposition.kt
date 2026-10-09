@@ -31,32 +31,40 @@ internal object RoutinePaidRuntimeComposition {
     val identity = runCatching { RoutineNoMoneyRuntimeComposition.identity() }.getOrNull()
       ?: return unavailable("routine_device_key_unavailable")
     val enrollmentStore = EncryptedRoutineEnrollmentStore.forApplication(context)
-    val phone = RoutinePaidPhonePreparation(
-      exchange = FixedRoutinePaidPollHttpsExchange(),
-      collector = RoutineTelebirrObservationCollector(SafeOfficialReceiptTransport()),
-      workStore = EncryptedRoutinePaidWorkStore.forApplication(context),
-    )
+    val phones = (0 until RoutinePaidParallelCycle.MAX_LANES).map { lane ->
+      RoutinePaidPhonePreparation(
+        exchange = FixedRoutinePaidPollHttpsExchange(),
+        collector = RoutineTelebirrObservationCollector(SafeOfficialReceiptTransport()),
+        workStore = EncryptedRoutinePaidWorkStore.forApplication(context, lane),
+      )
+    }
+    val parallelCycle = RoutinePaidParallelCycle(phones.size)
+    // Inspect every outbox on restart; after an empty pass, use one idle poll until work arrives.
+    var burst = true
     return VerifierRuntimeSession(
       cycle = VerifierRuntimeCycle {
         val receipt = runCatching {
           enrollmentStore.loadEnrolled(receiptSigner, identity, currentUtc())
         }.getOrNull() ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
           LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
-        when (val result = phone.run(receipt, receiptSigner, lookup.first, lookup.second,
-          identity)) {
-          RoutinePaidPhonePreparationResult.NoAssignment ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_assignment")
-          RoutinePaidPhonePreparationResult.Retry ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
-          RoutinePaidPhonePreparationResult.SubmittedForReview ->
+        val results = parallelCycle.runOnce(if (burst) phones.size else 1) { lane ->
+          phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
+        }
+        burst = results.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
+        val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
+        when {
+          review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
+            review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
+              ?: "routine_paid_review")
+          results.any { it == RoutinePaidPhonePreparationResult.SubmittedForReview } ->
             LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_observation_staged")
-          is RoutinePaidPhonePreparationResult.Review ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
-              result.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
-                ?: "routine_paid_review")
+          results.any { it == RoutinePaidPhonePreparationResult.Retry } ->
+            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
+          else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
         }
       },
       heartbeat = null,
+      close = parallelCycle::close,
     )
   }
 

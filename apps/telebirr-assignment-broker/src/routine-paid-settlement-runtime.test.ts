@@ -84,7 +84,7 @@ describe('isolated routine paid settlement PostgreSQL runtime', () => {
     expect(candidates).toEqual([
       {
         challengeId,
-        occurredAtUtc: '2026-10-09T10:00:00.123456Z',
+        verificationCompletedAtUtc: '2026-10-09T10:00:00.123456Z',
       },
     ]);
     expect(await runtime.database.finalize(challengeId)).toBe('created');

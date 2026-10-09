@@ -319,7 +319,7 @@ export async function createRoutinePaidSettlementRuntime(
         let response: { readonly rows: unknown[] };
         try {
           response = await guardedQuery(LIST_SQL, [
-            cursor?.occurredAtUtc ?? null,
+            cursor?.verificationCompletedAtUtc ?? null,
             cursor?.challengeId ?? null,
             limit,
           ]);
@@ -341,12 +341,14 @@ export async function createRoutinePaidSettlementRuntime(
             throw new RoutinePaidSettlementUnavailableError();
           const candidate = Object.freeze({
             challengeId: row.challenge_id,
-            occurredAtUtc: row.occurred_at_utc,
+            // The SQL output name is retained for rolling compatibility. Its value
+            // is the immutable signed-observation staging completion timestamp.
+            verificationCompletedAtUtc: row.occurred_at_utc,
           });
           if (
             previous &&
-            (candidate.occurredAtUtc < previous.occurredAtUtc ||
-              (candidate.occurredAtUtc === previous.occurredAtUtc &&
+            (candidate.verificationCompletedAtUtc < previous.verificationCompletedAtUtc ||
+              (candidate.verificationCompletedAtUtc === previous.verificationCompletedAtUtc &&
                 candidate.challengeId <= previous.challengeId))
           )
             throw new RoutinePaidSettlementUnavailableError();

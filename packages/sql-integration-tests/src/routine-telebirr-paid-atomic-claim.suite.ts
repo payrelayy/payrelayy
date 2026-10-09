@@ -368,14 +368,29 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         await client.query('rollback to savepoint reject_legacy_origin');
         await client.query('release savepoint reject_legacy_origin');
         await client.query(stagingSql, stagingArgs);
+        const stagedClock = await client.query<{ verification_completed_at_utc: string }>(
+          `select pg_catalog.to_char(staged.recorded_at at time zone 'UTC',
+             'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as verification_completed_at_utc
+             from app.routine_telebirr_paid_observation_staging staged
+            where staged.challenge_id = $1::uuid`,
+          [challengeId],
+        );
         const pending = await client.query<{ challenge_id: string; occurred_at_utc: string }>(
           `select * from app.list_routine_telebirr_paid_settlement_candidates(
             null::timestamptz, null::uuid, 32)`,
         );
         expect(pending.rows).toContainEqual({
           challenge_id: challengeId,
-          occurred_at_utc: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u),
+          occurred_at_utc: stagedClock.rows[0]!.verification_completed_at_utc,
         });
+        const scanDefinition = await client.query<{ definition: string }>(
+          `select pg_catalog.pg_get_functiondef(
+             'app.list_routine_telebirr_paid_settlement_candidates(timestamptz,uuid,integer)'
+               ::pg_catalog.regprocedure) as definition`,
+        );
+        expect(scanDefinition.rows[0]!.definition).toContain(
+          'order by staged.recorded_at, staged.challenge_id',
+        );
         const settled = await client.query<{
           deposit_intent_id: string;
           payment_claim_id: string;

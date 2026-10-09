@@ -68,6 +68,28 @@ jobs:
           ! grep -Eiq 'password|private.?key|raw.?reference|receiver.?name|database.?url' \
             <<<"$startup_output"
 
+      - name: Verify the isolated settlement entrypoint fails closed without its credential
+        shell: bash
+        env:
+          BROKER_IMAGE: fetanagent-telebirr-assignment-broker:ci
+        run: |
+          set -euo pipefail
+          set +e
+          startup_output="$(docker run --rm --network none --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            -e INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED=true \
+            -e FINANCIAL_ACTIONS_MODE=live \
+            -e ROUTINE_PAID_SETTLEMENT_DATABASE_URL_FILE=/run/secrets/routine_paid_settlement_database_url \
+            "$BROKER_IMAGE" node \
+            apps/telebirr-assignment-broker/dist/routine-paid-settlement-main.js 2>&1)"
+          startup_status=$?
+          set -e
+          test "$startup_status" -eq 1
+          grep -F "event: 'startup_failed'" <<<"$startup_output"
+          grep -F 'detailsRedacted: true' <<<"$startup_output"
+          ! grep -Eiq 'password|private.?key|raw.?reference|receiver.?name|database.?url' \
+            <<<"$startup_output"
+
       - name: Verify the image contains only the fixed private socket directory
         shell: bash
         env:

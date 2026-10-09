@@ -346,7 +346,7 @@ begin
        'withdrawal_validation')
        and switch.mode = 'disabled' and switch.settings = '{}'::jsonb
   ) <> 5
-  ) then raise exception 'The routine financial stop set is incomplete.'; end if;
+  then raise exception 'The routine financial stop set is incomplete.'; end if;
   if not exists (
     select 1 from app.feature_switches switch
      where switch.feature_key in ('deposit_execution', 'payment_verification')

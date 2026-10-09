@@ -181,13 +181,25 @@ operation phrase. The workflow requires passing exact-main CI and then calls
 
 The database operation holds the Owner/TeleBirr/cohort/switch locks, rejects an
 active legacy pilot or executor, checks all seven switches disabled and the
-current routine transport and phone proof, then changes **only**
+current routine transport and phone proof, and requires a signed Windows broker
+lease from the last 45 seconds plus a recently successful database liveness
+watchdog run. It then changes **only**
 `payment_verification` and `deposit_execution` to `live`. TeleBirr's retired pilot,
 CBE Birr, and both withdrawal switches remain disabled. It performs no test
 transfer, payment claim, or Player credit. Once it succeeds, new eligible Telegram
 TeleBirr references become paid candidates; the phone and settlement service may
 verify them, and the one-connection Windows worker may credit one verified job at
 a time. Do not describe the service as live until this exact operation succeeds.
+
+The independent 15-second database watchdog stops those two financial gates if
+the signed credit-worker lease becomes stale. It allows 90 seconds while idle and
+up to five minutes while an execution or reconciliation attempt is open. Its
+automatic incident stop does not erase or retry an attempt. Review any unfinished
+attempt before restarting the automatic-deposit Companion or reactivating gates.
+The browser's authenticated lifetime is capped at 12 hours, and KemerBet may
+require a human sign-in again; this safeguard prevents the system from silently
+accepting paid deposits indefinitely after the credit worker exits, but it is
+not automatic KemerBet re-authentication.
 
 The existing no-money reference is not a paid activation check. Observe the
 first naturally occurring eligible live deposit through the Owner and protected

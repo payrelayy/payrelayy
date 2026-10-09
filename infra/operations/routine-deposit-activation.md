@@ -83,6 +83,16 @@ certificate, grants only the routine broker capability, sets the bounded SCRAM l
 the immutable activation. It prints one identifier-free JSON status with
 `"livePaymentPerformed": false`.
 
+If the administrator connection is available only inside the protected GitHub production
+environment, the reviewed `production-routine-deposit-transport-activation.yml` manual workflow
+can run this same SQL. First place **only the newly generated activation password** in the
+`ROUTINE_DEPOSIT_RUNTIME_PASSWORD_ACTIVATION` production-environment secret, without putting it in
+a command argument or workflow input. Dispatch for the exact passing `main` SHA and reviewed Owner
+and certificate UUIDs. Verify that the workflow reports the no-payment result, then delete that
+temporary GitHub secret. Keep the separately generated URL on the protected operator host for
+step 3; never put the URL or password in workflow inputs, chat, artifacts, or logs. A failed or
+uncertain activation requires database-status inspection before retrying.
+
 Unset the password environment variable immediately. Retain the activation-password file only
 until bridge startup and status verification complete, then remove it through the protected
 operator host's normal secret-destruction procedure. Do not copy it to the production VM.

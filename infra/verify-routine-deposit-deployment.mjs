@@ -29,6 +29,7 @@ const [
   routineOverlay,
   deployHelper,
   productionWorkflow,
+  transportActivationWorkflow,
   qualityWorkflow,
   migration,
   activateSql,
@@ -55,6 +56,7 @@ const [
   read('infra/compose.production.routine-deposits.yaml'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('.github/workflows/production-runtime.yml'),
+  read('.github/workflows/production-routine-deposit-transport-activation.yml'),
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
@@ -184,6 +186,19 @@ const disableRole = disableSql.indexOf('app.disable_routine_telebirr_execution_t
 const terminateSession = disableSql.indexOf('pg_catalog.pg_terminate_backend');
 assert.ok(disableRole >= 0 && disableRole < terminateSession);
 assert.match(disableSql, /providerOutcomeRequiresReconciliation', true/u);
+assert.match(transportActivationWorkflow, /workflow_dispatch:/u);
+assert.match(transportActivationWorkflow, /\[\[ "\$GITHUB_REF" == 'refs\/heads\/main' \]\]/u);
+assert.match(transportActivationWorkflow, /"\$CONFIRMED_COMMIT" == "\$GITHUB_SHA"/u);
+assert.match(transportActivationWorkflow, /environment: production/u);
+assert.match(transportActivationWorkflow, /require-production-ci\.mjs/u);
+assert.match(transportActivationWorkflow, /secrets\.ROUTINE_DEPOSIT_RUNTIME_PASSWORD_ACTIVATION/u);
+assert.match(transportActivationWorkflow, /PGSSLMODE: verify-full/u);
+assert.match(transportActivationWorkflow, /production-routine-deposit-activate\.sql/u);
+assert.match(transportActivationWorkflow, /\.livePaymentPerformed == false/u);
+assert.doesNotMatch(
+  transportActivationWorkflow,
+  /production-routine-deposit-disable\.sql|deposit_execution.*enabled/u,
+);
 
 const generator = fileURLToPath(
   new URL('infra/operations/create-production-routine-deposit-runtime-credential.mjs', root),

@@ -1,9 +1,7 @@
-# syntax=docker/dockerfile:1
-
 # This build contains no runtime secret, database URL, or bot token. Every runtime target remains
 # Linux/amd64-only and uses the same reviewed immutable Node base image.
 # Reviewed 2026-08-08 for the London Linux/amd64 VM. Reverify this digest before a real deployment.
-FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS build-base
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS build-base
 
 WORKDIR /workspace
 
@@ -81,7 +79,7 @@ RUN pnpm --filter @fetanagent/trusted-telebirr-verifier... run build \
   && pnpm --filter @fetanagent/trusted-telebirr-verifier deploy --prod /deploy/workspace/apps/trusted-telebirr-verifier \
   && mv /deploy/workspace/apps/trusted-telebirr-verifier/node_modules /deploy/workspace/node_modules
 
-FROM --platform=linux/amd64 node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066 AS runtime-base
 
 RUN groupadd --gid 10001 fetanagent \
   && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin fetanagent \
@@ -369,7 +367,7 @@ CMD ["node", "apps/executor/dist/index.js"]
 
 # Public HTTPS is a separately selected deployment profile. This image contains only the reviewed
 # gateway configuration and static landing-page assets; it receives no application secret.
-FROM --platform=linux/amd64 caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-gateway" \

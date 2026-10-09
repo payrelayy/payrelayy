@@ -1213,7 +1213,7 @@ assert.match(
 );
 
 const reviewedBase =
-  'node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066';
+  'public.ecr.aws/docker/library/node:22-bookworm-slim@sha256:a17d50af28002a160548bd4225b3cfcb12c5efcb171f79e68758f2885fb1b066';
 assert.equal(
   countMatches(dockerfile, new RegExp(`FROM --platform=linux/amd64 ${reviewedBase}`, 'g')),
   2,

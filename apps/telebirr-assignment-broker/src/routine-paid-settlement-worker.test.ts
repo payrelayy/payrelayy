@@ -9,11 +9,11 @@ import {
 
 const first: RoutinePaidSettlementCandidate = {
   challengeId: '11111111-1111-4111-8111-111111111111',
-  occurredAtUtc: '2026-10-09T10:00:00.000001Z',
+  verificationCompletedAtUtc: '2026-10-09T10:00:00.000001Z',
 };
 const second: RoutinePaidSettlementCandidate = {
   challengeId: '22222222-2222-4222-8222-222222222222',
-  occurredAtUtc: '2026-10-09T10:00:00.000002Z',
+  verificationCompletedAtUtc: '2026-10-09T10:00:00.000002Z',
 };
 
 describe('routine paid settlement worker', () => {
@@ -40,7 +40,7 @@ describe('routine paid settlement worker', () => {
   it('carries a cursor across full pages and lets a restart rescan pending rows', async () => {
     const page = Array.from({ length: ROUTINE_PAID_SETTLEMENT_BATCH_SIZE }, (_, index) => ({
       challengeId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-      occurredAtUtc: `2026-10-09T10:00:00.${String(index + 1).padStart(6, '0')}Z`,
+      verificationCompletedAtUtc: `2026-10-09T10:00:00.${String(index + 1).padStart(6, '0')}Z`,
     }));
     const listCandidates = vi.fn(async (cursor: RoutinePaidSettlementCandidate | undefined) =>
       cursor ? [] : page,

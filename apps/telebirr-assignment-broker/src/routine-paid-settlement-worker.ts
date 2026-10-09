@@ -2,7 +2,8 @@ export const ROUTINE_PAID_SETTLEMENT_BATCH_SIZE = 32;
 
 export interface RoutinePaidSettlementCandidate {
   readonly challengeId: string;
-  readonly occurredAtUtc: string;
+  /** The signed phone observation's staging-complete time, not the transfer time. */
+  readonly verificationCompletedAtUtc: string;
 }
 
 export interface RoutinePaidSettlementDatabase {

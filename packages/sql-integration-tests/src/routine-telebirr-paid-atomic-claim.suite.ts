@@ -19,19 +19,23 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
   getOwnerAdminId: () => string,
   getOwnerAuthUserId: () => string,
 ): void {
-  describe('dormant atomic routine TeleBirr paid claim boundary', () => {
-    it('is invoker-only and grants no runtime a claim capability', async () => {
+  describe('isolated atomic routine TeleBirr paid claim boundary', () => {
+    it('grants only an unprovisioned exact-login runtime the guarded claim capability', async () => {
       const client = getClient();
       const catalog = await client.query<{
         owner: string;
         security_definer: boolean;
         config: string[];
         origin_guard: boolean;
+        session_guard: boolean;
       }>(
         `select owner.rolname as owner, routine.prosecdef as security_definer,
                  routine.proconfig as config,
                  pg_catalog.strpos(routine.prosrc, 'sourceOriginAttestation') > 0
-                   as origin_guard
+                   as origin_guard,
+                 pg_catalog.strpos(routine.prosrc,
+                   'not app.routine_telebirr_paid_settlement_session_allowed()') > 0
+                   as session_guard
             from pg_catalog.pg_proc routine
             join pg_catalog.pg_roles owner on owner.oid = routine.proowner
            where routine.oid = $1::pg_catalog.regprocedure`,
@@ -40,9 +44,10 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
       expect(catalog.rows).toEqual([
         {
           owner: 'postgres',
-          security_definer: false,
+          security_definer: true,
           config: ['search_path=pg_catalog'],
           origin_guard: true,
+          session_guard: true,
         },
       ]);
       for (const role of [
@@ -67,10 +72,85 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         `select role.rolname as role_name from pg_catalog.pg_roles role
           where role.rolname like 'fetanagent\\_%' escape '\\'
             and pg_catalog.has_function_privilege(role.rolname,
-              $1::text, 'EXECUTE')`,
+              $1::text, 'EXECUTE')
+          order by role.rolname`,
         [procedure],
       );
-      expect(appGrants.rows).toEqual([]);
+      expect(appGrants.rows).toEqual([
+        { role_name: 'fetanagent_routine_telebirr_paid_settlement' },
+        { role_name: 'fetanagent_routine_telebirr_paid_settlement_runtime' },
+      ]);
+      const roles = await client.query<{
+        role_name: string;
+        can_login: boolean;
+        inherits: boolean;
+        bypasses_rls: boolean;
+        valid_until: Date | null;
+        connection_limit: number;
+      }>(
+        `select rolname as role_name, rolcanlogin as can_login,
+                rolinherit as inherits, rolbypassrls as bypasses_rls,
+                rolvaliduntil as valid_until, rolconnlimit as connection_limit
+           from pg_catalog.pg_roles
+          where rolname in ('fetanagent_routine_telebirr_paid_settlement',
+            'fetanagent_routine_telebirr_paid_settlement_runtime')
+          order by rolname`,
+      );
+      expect(roles.rows).toEqual([
+        {
+          role_name: 'fetanagent_routine_telebirr_paid_settlement',
+          can_login: false,
+          inherits: false,
+          bypasses_rls: false,
+          valid_until: null,
+          connection_limit: 2,
+        },
+        {
+          role_name: 'fetanagent_routine_telebirr_paid_settlement_runtime',
+          can_login: false,
+          inherits: false,
+          bypasses_rls: false,
+          valid_until: null,
+          connection_limit: 1,
+        },
+      ]);
+      const guard = await client.query<{ permitted: boolean }>(
+        `select pg_catalog.has_function_privilege($1::text,
+          'app.routine_telebirr_paid_settlement_session_allowed()'::text,
+          'EXECUTE') as permitted`,
+        ['fetanagent_routine_telebirr_paid_settlement_runtime'],
+      );
+      expect(guard.rows).toEqual([{ permitted: false }]);
+      const surface = await client.query<{
+        only_claim_function: boolean;
+        no_base_object_access: boolean;
+      }>(
+        `select (
+           select count(*) = 1 and pg_catalog.bool_and(routine.oid = $1::pg_catalog.regprocedure)
+             from pg_catalog.pg_proc routine
+             join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
+            where namespace.nspname not in ('pg_catalog', 'information_schema')
+              and namespace.nspname !~ '^pg_(toast|temp)'
+              and pg_catalog.has_schema_privilege($2::text, namespace.oid, 'USAGE')
+              and pg_catalog.has_function_privilege($2::text, routine.oid, 'EXECUTE')
+         ) as only_claim_function,
+         not exists (
+           select 1 from pg_catalog.pg_class relation
+             join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+            where namespace.nspname not in ('pg_catalog', 'information_schema')
+              and namespace.nspname !~ '^pg_(toast|temp)'
+              and pg_catalog.has_schema_privilege($2::text, namespace.oid, 'USAGE')
+              and relation.relkind in ('r','p','v','m','f','S')
+              and case when relation.relkind = 'S'
+                then pg_catalog.has_sequence_privilege($2::text, relation.oid,
+                  'USAGE,SELECT,UPDATE')
+                else pg_catalog.has_table_privilege($2::text, relation.oid,
+                  'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER,MAINTAIN')
+              end
+         ) as no_base_object_access`,
+        [procedure, 'fetanagent_routine_telebirr_paid_settlement_runtime'],
+      );
+      expect(surface.rows).toEqual([{ only_claim_function: true, no_base_object_access: true }]);
     });
 
     it('cannot create a claim while production-style financial gates are off', async () => {

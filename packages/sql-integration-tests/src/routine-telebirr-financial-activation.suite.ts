@@ -97,5 +97,42 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
         await client.query('rollback');
       }
     });
+
+    it('yields no no-money poll assignment in exact live mode without weakening mixed-state rejection', async () => {
+      const client = getClient();
+      const enrollmentId = randomUUID();
+      const requestId = randomUUID();
+      const signerId = randomUUID();
+      const poll = `select * from app.issue_routine_telebirr_no_money_poll_assignment(
+        $1::uuid, $2::uuid, $3::text, pg_catalog.clock_timestamp() + interval '30 seconds',
+        $4::uuid)`;
+      const input = [enrollmentId, requestId, `sha256:${'a'.repeat(64)}`, signerId];
+      await client.query('begin');
+      try {
+        // Disposable database only; rollback restores both the switches and trigger state.
+        await client.query('alter table app.feature_switches disable trigger user');
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const livePoll = await client.query(poll, input);
+        expect(livePoll.rows).toEqual([]);
+        const claims = await client.query<{ claim_count: string }>(
+          `select count(*)::text as claim_count
+             from app.routine_telebirr_no_money_poll_claims
+            where request_id = $1::uuid`,
+          [requestId],
+        );
+        expect(claims.rows).toEqual([{ claim_count: '0' }]);
+
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key = 'deposit_execution'`);
+        await client.query('savepoint mixed_switch_set');
+        await expect(client.query(poll, input)).rejects.toThrow(
+          'The routine no-money boundary is unavailable.',
+        );
+        await client.query('rollback to savepoint mixed_switch_set');
+      } finally {
+        await client.query('rollback');
+      }
+    });
   });
 }

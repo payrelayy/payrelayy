@@ -37,6 +37,7 @@ const [
   qualityWorkflow,
   migration,
   financialBoundaryMigration,
+  liveNoMoneyPollMigration,
   activateSql,
   disableSql,
   financialActivateSql,
@@ -71,6 +72,7 @@ const [
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
   read('supabase/migrations/20261009200332_routine_telebirr_financial_activation_boundary.sql'),
+  read('supabase/migrations/20261009210922_routine_no_money_poll_yields_during_live_deposits.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
   read('infra/sql/production-routine-deposit-disable.sql'),
   read('infra/sql/production-routine-financial-activate.sql'),
@@ -260,6 +262,14 @@ assert.match(financialBoundaryMigration, /routine_activate/u);
 assert.match(financialBoundaryMigration, /routine_stop/u);
 assert.match(financialBoundaryMigration, /sourceOriginAttestation/u);
 assert.match(financialBoundaryMigration, /routine_telebirr_runtime_is_active/u);
+assert.match(liveNoMoneyPollMigration, /v_live_count = 2 and v_other_disabled_count = 5/u);
+assert.match(liveNoMoneyPollMigration, /v_disabled_count <> 7/u);
+assert.match(
+  liveNoMoneyPollMigration,
+  /if v_live_count = 2 and v_other_disabled_count = 5 then\s+return;/u,
+);
+assert.match(liveNoMoneyPollMigration, /app\.claim_routine_telebirr_no_money_poll/u);
+assert.doesNotMatch(liveNoMoneyPollMigration, /(?:update|insert|delete)\s+app\.feature_switches/iu);
 assert.match(
   financialBoundaryMigration,
   /feature_key in \('payment_verification', 'deposit_execution'\)/u,

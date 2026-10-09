@@ -98,6 +98,82 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
       }
     });
 
+    it('installs the postgres-only routine worker liveness boundary without turning deposits on', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        name: string;
+        owner: string;
+        public_execute: boolean;
+        authenticated_execute: boolean;
+      }>(`select routine.proname as name, owner.rolname as owner,
+                 pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                   as public_execute,
+                 pg_catalog.has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+                   as authenticated_execute
+            from pg_catalog.pg_proc routine
+            join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+           where routine.oid in (
+             'app.routine_telebirr_signed_worker_recent(interval)'::pg_catalog.regprocedure,
+             'app.require_routine_telebirr_worker_at_activation()'::pg_catalog.regprocedure,
+             'app.stop_stale_routine_telebirr_financial_gates()'::pg_catalog.regprocedure)
+           order by routine.proname`);
+      expect(catalog.rows).toEqual([
+        {
+          name: 'require_routine_telebirr_worker_at_activation',
+          owner: 'postgres',
+          public_execute: false,
+          authenticated_execute: false,
+        },
+        {
+          name: 'routine_telebirr_signed_worker_recent',
+          owner: 'postgres',
+          public_execute: false,
+          authenticated_execute: false,
+        },
+        {
+          name: 'stop_stale_routine_telebirr_financial_gates',
+          owner: 'postgres',
+          public_execute: false,
+          authenticated_execute: false,
+        },
+      ]);
+      const result = await client.query<{ recent: boolean; stopped: boolean }>(
+        `select app.routine_telebirr_signed_worker_recent(interval '45 seconds') as recent,
+                app.stop_stale_routine_telebirr_financial_gates() as stopped`,
+      );
+      expect(result.rows).toEqual([{ recent: false, stopped: false }]);
+    });
+
+    it('stops stale live gates without clearing a durable attempt or enabling another switch', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        // Disposable database only: force the two switches live, then restore
+        // triggers before invoking the real postgres-only stop path.
+        await client.query('alter table app.feature_switches disable trigger user');
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        await client.query('alter table app.feature_switches enable trigger user');
+        const result = await client.query<{ stopped: boolean }>(
+          'select app.stop_stale_routine_telebirr_financial_gates() as stopped',
+        );
+        expect(result.rows).toEqual([{ stopped: true }]);
+        const switches = await client.query<{ live_count: string; disabled_count: string }>(
+          `select count(*) filter (where mode = 'live')::text as live_count,
+                  count(*) filter (where mode = 'disabled')::text as disabled_count
+             from app.feature_switches
+            where feature_key in (
+              'cbe_birr_authoritative_verification', 'deposit_execution',
+              'payment_verification', 'private_live_deposit_pilot',
+              'telebirr_authoritative_verification', 'withdrawal_collection',
+              'withdrawal_validation')`,
+        );
+        expect(switches.rows).toEqual([{ live_count: '0', disabled_count: '7' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('yields no no-money poll assignment in exact live mode without weakening mixed-state rejection', async () => {
       const client = getClient();
       const enrollmentId = randomUUID();

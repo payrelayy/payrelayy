@@ -37,6 +37,7 @@ const [
   qualityWorkflow,
   migration,
   financialBoundaryMigration,
+  workerLivenessMigration,
   liveNoMoneyPollMigration,
   activateSql,
   disableSql,
@@ -72,6 +73,7 @@ const [
   read('.github/workflows/quality.yml'),
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
   read('supabase/migrations/20261009200332_routine_telebirr_financial_activation_boundary.sql'),
+  read('supabase/migrations/20261010012000_routine_telebirr_worker_liveness_stop.sql'),
   read('supabase/migrations/20261009210922_routine_no_money_poll_yields_during_live_deposits.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
   read('infra/sql/production-routine-deposit-disable.sql'),
@@ -262,6 +264,17 @@ assert.match(financialBoundaryMigration, /routine_activate/u);
 assert.match(financialBoundaryMigration, /routine_stop/u);
 assert.match(financialBoundaryMigration, /sourceOriginAttestation/u);
 assert.match(financialBoundaryMigration, /routine_telebirr_runtime_is_active/u);
+assert.match(
+  workerLivenessMigration,
+  /routine_telebirr_signed_worker_recent\(interval '45 seconds'\)/u,
+);
+assert.match(workerLivenessMigration, /fetanagent-routine-worker-liveness-v1/u);
+assert.match(workerLivenessMigration, /'15 seconds'/u);
+assert.match(workerLivenessMigration, /interval '90 seconds'/u);
+assert.match(workerLivenessMigration, /interval '5 minutes'/u);
+assert.match(workerLivenessMigration, /app\.stop_routine_telebirr_financial_gates\(/u);
+assert.doesNotMatch(workerLivenessMigration, /update\s+app\.feature_switches/iu);
+assert.doesNotMatch(workerLivenessMigration, /app\.activate_routine_telebirr_financial_gates\(/u);
 assert.match(liveNoMoneyPollMigration, /v_live_count = 2 and v_other_disabled_count = 5/u);
 assert.match(liveNoMoneyPollMigration, /v_disabled_count <> 7/u);
 assert.match(

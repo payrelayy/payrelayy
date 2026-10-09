@@ -15,6 +15,7 @@ fun interface VerifierRuntimeHeartbeat {
 class VerifierRuntimeSession(
   val cycle: VerifierRuntimeCycle,
   val heartbeat: VerifierRuntimeHeartbeat?,
+  val close: () -> Unit = {},
 ) {
   override fun toString(): String = "VerifierRuntimeSession(<redacted>)"
 }

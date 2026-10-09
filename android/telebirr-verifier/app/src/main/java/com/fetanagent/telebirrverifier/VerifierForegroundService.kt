@@ -84,6 +84,7 @@ class VerifierForegroundService : Service() {
     loopStarted.set(false)
     loopGeneration.incrementAndGet()
     executor.shutdownNow()
+    if (::runtimeSession.isInitialized) runCatching { runtimeSession.close() }
     super.onDestroy()
   }
 

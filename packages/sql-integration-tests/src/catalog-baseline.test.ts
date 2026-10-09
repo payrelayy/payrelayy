@@ -20,6 +20,7 @@ import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebir
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
 import { registerRoutineTelebirrPaidPollRuntimeSqlTests } from './routine-telebirr-paid-poll-runtime.suite.js';
 import { registerRoutineTelebirrPaidAtomicClaimSqlTests } from './routine-telebirr-paid-atomic-claim.suite.js';
+import { registerRoutineTelebirrFinancialActivationSqlTests } from './routine-telebirr-financial-activation.suite.js';
 import { registerRoutineTelebirrOwnerPairingSqlTests } from './routine-telebirr-owner-pairing.suite.js';
 import { registerDryRunDepositProofIntakeSqlTests } from './dry-run-deposit-proof-intake.suite.js';
 import { registerExpiredLiveTelebirrEvidenceRecoverySqlTests } from './expired-live-telebirr-evidence-recovery.suite.js';
@@ -9885,6 +9886,10 @@ registerRoutineTelebirrPaidPollRuntimeSqlTests(() => client);
 registerRoutineTelebirrPaidAtomicClaimSqlTests(
   () => client,
   () => ownerAdminId,
+  () => ownerAuthUserId,
+);
+registerRoutineTelebirrFinancialActivationSqlTests(
+  () => client,
   () => ownerAuthUserId,
 );
 registerRoutineTelebirrOwnerPairingSqlTests(

@@ -1,0 +1,125 @@
+name: Stop production routine TeleBirr financial gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      reason:
+        description: operator_requested or incident_stop
+        required: true
+        type: choice
+        options:
+          - operator_requested
+          - incident_stop
+      confirm_operation:
+        description: Type STOP ROUTINE TELEBIRR DEPOSITS
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Require main and explicit production stop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+      STOP_REASON: ${{ inputs.reason }}
+    steps:
+      - name: Reject another project, branch, or operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_OPERATION" == 'STOP ROUTINE TELEBIRR DEPOSITS' ]]
+          [[ "$STOP_REASON" == 'operator_requested' || "$STOP_REASON" == 'incident_stop' ]]
+
+  stop:
+    name: Disable financial gates before stopping transport
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    env:
+      FETANAGENT_ROUTINE_FINANCIAL_STOP_REASON: ${{ inputs.reason }}
+      SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+      PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+      PGDATABASE: postgres
+      PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+      PGSSLMODE: verify-full
+      PGCONNECT_TIMEOUT: '5'
+      PGAPPNAME: fetanagent_routine_financial_stop
+      PGSERVICEFILE: /dev/null
+      PGPASSFILE: /dev/null
+      PGOPTIONS: ''
+    steps:
+      - name: Check out current main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Disable the two routine financial gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$FETANAGENT_ROUTINE_FINANCIAL_STOP_REASON" == 'operator_requested' ||
+             "$FETANAGENT_ROUTINE_FINANCIAL_STOP_REASON" == 'incident_stop' ]]
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$(mktemp -d "$RUNNER_TEMP/routine-financial-stop.XXXXXX")"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/ca.crt" "$protected/stop.out" "$protected/stop.err"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/ca.crt"
+          chmod 0600 "$protected/ca.crt"
+          openssl x509 -in "$protected/ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/ca.crt"
+          FETANAGENT_ROUTINE_FINANCIAL_REQUEST_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          export FETANAGENT_ROUTINE_FINANCIAL_REQUEST_KEY
+          if ! timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-routine-financial-stop.sql \
+                >"$protected/stop.out" 2>"$protected/stop.err"; then
+            echo '::error::The financial stop failed; use the production database emergency channel.' >&2
+            exit 1
+          fi
+          jq -se '
+            length == 1 and
+            .[0].operation == "routine_telebirr_financial_stop" and
+            .[0].deploymentTarget == "production" and
+            .[0].financialGatesDisabled == true
+          ' "$protected/stop.out" >/dev/null || {
+            echo '::error::The stop response was not exact.' >&2
+            exit 1
+          }
+          echo 'Routine TeleBirr financial gates disabled. Preserve and reconcile any fenced or uncertain Player credit.' >>"$GITHUB_STEP_SUMMARY"

@@ -25,5 +25,9 @@ class RoutineDualModeStatusTest {
     val noMoneyFailed = attention("routine_retry")
     assertEquals(noMoneyFailed,
       RoutineDualModeStatus.select(noMoneyFailed, ready("no_paid_assignment")))
+    assertEquals(noMoneyFailed,
+      RoutineDualModeStatus.select(noMoneyFailed, attention("paid_observation_retry")))
+    assertEquals(failed,
+      RoutineDualModeStatus.select(attention("server_rejected"), failed))
   }
 }

@@ -1,6 +1,7 @@
 package com.fetanagent.telebirrverifier
 
 import android.content.Context
+import android.util.Log
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
 
@@ -67,6 +68,9 @@ internal object RoutinePaidRuntimeComposition {
           else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
         }
         val noMoneyStatus = noMoneySession.cycle.runOnce()
+        // Both codes are locally validated, fixed operational categories. Never log an
+        // assignment, reference, receipt, address, signature, or response body.
+        Log.i("FetanAgentRoutineCycle", "noMoney=${noMoneyStatus.code} paid=${paidStatus.code}")
         RoutineDualModeStatus.select(noMoneyStatus, paidStatus)
       },
       heartbeat = null,
@@ -89,10 +93,10 @@ internal object RoutinePaidRuntimeComposition {
 internal object RoutineDualModeStatus {
   fun select(noMoney: LivePilotRuntimeStatus, paid: LivePilotRuntimeStatus): LivePilotRuntimeStatus {
     if (paid.code == "paid_observation_staged") return paid
-    if (paid.code == "server_rejected" && noMoney.code != "server_rejected") return noMoney
     if (noMoney.code == "server_rejected") return paid
-    if (paid.state == LivePilotRuntimeState.ATTENTION) return paid
+    if (paid.code == "server_rejected") return noMoney
     if (noMoney.state == LivePilotRuntimeState.ATTENTION) return noMoney
+    if (paid.state == LivePilotRuntimeState.ATTENTION) return paid
     if (paid.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return paid
     if (noMoney.state == LivePilotRuntimeState.ENROLLMENT_REQUIRED) return noMoney
     if (paid.code == "no_paid_assignment" && noMoney.code != "no_assignment") return noMoney

@@ -824,6 +824,8 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-no-money-database-url
   routine_paid_poll_database_url:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-paid-poll-database-url
+  routine_paid_settlement_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-paid-settlement-database-url
   routine_no_money_lookup_signer:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/routine-no-money-lookup-signer.pkcs8.der
   routine_no_money_lookup_manifest:

@@ -358,6 +358,7 @@ jobs:
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
           ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
           ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
+          ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
@@ -445,9 +446,13 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
             [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
             [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" != "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" ]]
+            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" != "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" ]]
+            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" != "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_NO_MONEY_RUNTIME_PASSWORD "* ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_PAID_POLL_RUNTIME_PASSWORD "* ]]
+            [[ ! " ${values[*]} " == *" $ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD "* ]]
           fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -600,6 +605,10 @@ jobs:
               "fetanagent_routine_telebirr_paid_poll_runtime.$PRODUCTION_PROJECT_REF" \
               "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
               >"$secret_dir/routine-paid-poll-database-url"
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "fetanagent_routine_telebirr_paid_settlement_runtime.$PRODUCTION_PROJECT_REF" \
+              "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              >"$secret_dir/routine-paid-settlement-database-url"
           fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
@@ -731,6 +740,32 @@ jobs:
             -v runtime_password="$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
+
+      - name: Activate the isolated paid settlement login with deposits disabled
+        if: inputs.mode == 'deploy-inert'
+        id: routine_paid_settlement_activation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_paid_settlement_activation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          psql -X \
+            -v runtime_password="$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            --file=infra/sql/production-routine-paid-settlement-activate.sql >/dev/null
 
       - name: Build the exact active production TeleBirr assignment manifest
         if: inputs.mode == 'deploy'
@@ -983,6 +1018,7 @@ jobs:
               transfer_files+=(
                 "$SECRET_DIR"/routine-no-money-database-url
                 "$SECRET_DIR"/routine-paid-poll-database-url
+                "$SECRET_DIR"/routine-paid-settlement-database-url
                 "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
                 "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
                 "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
@@ -1135,6 +1171,23 @@ jobs:
           PGPASSFILE: /dev/null
         run: psql -X --file=infra/sql/production-routine-paid-poll-disable.sql >/dev/null
 
+      - name: Disable paid settlement after failed deployment
+        if: always() && (failure() || cancelled()) && steps.routine_paid_settlement_activation.outputs.attempted == 'true'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_paid_settlement_failed_deployment_disable
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: psql -X --file=infra/sql/production-routine-paid-settlement-disable.sql >/dev/null
+
   operate:
     name: Inspect or stop production runtime
     if: inputs.mode == 'status' || inputs.mode == 'stop'
@@ -1207,3 +1260,4 @@ jobs:
           psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql
           psql -X --file=infra/sql/production-routine-no-money-disable.sql
           psql -X --file=infra/sql/production-routine-paid-poll-disable.sql
+          psql -X --file=infra/sql/production-routine-paid-settlement-disable.sql

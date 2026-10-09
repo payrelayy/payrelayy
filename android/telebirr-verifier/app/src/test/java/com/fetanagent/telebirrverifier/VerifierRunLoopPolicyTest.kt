@@ -41,6 +41,14 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `no-money polling stays below a minute while paid polling retries separately`() {
+    val policy = VerifierRunLoopPolicy { 1.0 }
+    val status = status(LivePilotRuntimeState.READY, "routine_no_money_idle_paid_retry")
+    assertEquals(listOf(12_000L, 24_000L, 36_000L, 36_000L, 36_000L),
+      (0..4).map { policy.decide(status, it.toLong()).delayMillis })
+  }
+
+  @Test
   fun `pending uploads retry quickly then cap at five minutes`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
     val status = status(LivePilotRuntimeState.UPLOAD_PENDING, "upload_retry_scheduled")

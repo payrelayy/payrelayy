@@ -71,6 +71,8 @@ class VerifierRunLoopPolicy(
       -> null
       LivePilotRuntimeState.READY ->
         if (status.code == "no_paid_assignment") PAID_IDLE_DELAY_MILLIS
+        else if (status.code == "routine_no_money_idle_paid_retry")
+          delay(ROUTINE_IDLE_DELAYS_MILLIS, repeat)
         else if (status.code in READY_IDLE_CODES) delay(READY_IDLE_DELAYS_MILLIS, repeat)
         else 1_000L
       LivePilotRuntimeState.BUSY -> 1_000L
@@ -101,6 +103,7 @@ class VerifierRunLoopPolicy(
     private const val MAXIMUM_JITTER_FRACTION = 0.20
     private const val PAID_IDLE_DELAY_MILLIS = 10_000L
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
+    private val ROUTINE_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 30_000L)
     private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled")
     private val UPLOAD_DELAYS_MILLIS =
       longArrayOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 120_000L, 300_000L)

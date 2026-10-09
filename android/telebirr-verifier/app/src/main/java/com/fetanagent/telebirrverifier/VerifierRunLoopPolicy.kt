@@ -77,6 +77,7 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.UPLOAD_PENDING -> delay(UPLOAD_DELAYS_MILLIS, repeat)
       LivePilotRuntimeState.ATTENTION ->
         if (status.code in TERMINAL_ATTENTION_CODES) null
+        else if (status.code == "paid_observation_retry") delay(UPLOAD_DELAYS_MILLIS, repeat)
         else delay(ATTENTION_DELAYS_MILLIS, repeat)
     }
 

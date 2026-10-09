@@ -99,13 +99,22 @@ operator host's normal secret-destruction procedure. Do not copy it to the produ
 
 ## 3. Install the bridge credential and exact-release marker
 
-On the production VM, install the URL as root at the exact path and mode expected by the deploy
-helper:
+On the production VM, the parent directory
+`/etc/fetanagent/companion-execution-secrets` must be root:root mode 0700. Install the URL as
+root at the exact path and metadata expected by the deploy helper:
 
 ```text
 /etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url
-owner root:root, mode 0400, one ordinary file, one hard link
+owner 10001:10001, mode 0400, one ordinary file, one hard link
 ```
+
+The bridge runs as UID 10001. Docker Compose bind-mounts file-backed secrets without applying the
+`uid`/`gid`/`mode` hints in the overlay. In the same protected parent directory, install a
+byte-for-byte copy of the existing root-owned
+`production-execution-signer.pkcs8.der` at
+`production-routine-execution-signer.pkcs8.der`, owner 10001:10001 and mode 0400. The deploy
+helper verifies that the copy exactly matches the original root-only signer. The root-only parent
+still prevents non-root host users from traversing to either container-specific source file.
 
 Install an ordinary root-owned mode-0600 marker containing only the exact release SHA and a final
 newline:

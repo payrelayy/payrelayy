@@ -1,0 +1,71 @@
+name: Recover exact production Supabase pooler ban
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RECOVER EXACT ROUTINE POOLER BAN
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-routine-pooler-ban-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Remove only the observed Supavisor backend ban
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main and one-use recovery phrase
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == 'RECOVER EXACT ROUTINE POOLER BAN' ]]
+          node infra/operations/require-production-ci.mjs
+
+      - name: Set up the pinned Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Remove only the exact observed backend IP ban
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          FETANAGENT_DIAGNOSTIC_PROJECT_REF: xzztugbgtulptnbpoelr
+          FETANAGENT_DIAGNOSTIC_SOURCE_IP: 2a05:d018:135e:1600:2419:50b5:f859:6ad4
+        run: |
+          set -euo pipefail
+          [[ -n "$SUPABASE_ACCESS_TOKEN" ]]
+          [[ "$(supabase --version)" == '2.113.0' ]]
+          python3 -I infra/operations/repair-diagnostic-database-ban.py
+          echo 'Only the exact previously observed pooler backend IP was eligible for unbanning. No application, database role, or financial switch was changed.' >>"$GITHUB_STEP_SUMMARY"

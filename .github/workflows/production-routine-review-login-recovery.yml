@@ -1,0 +1,127 @@
+name: Restore inert TeleBirr review logins
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+      confirm_operation:
+        description: Type RESTORE INERT ROUTINE REVIEW LOGINS
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Restore only existing review-only database logins
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact passing main and no-money recovery phrase
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_OPERATION" == 'RESTORE INERT ROUTINE REVIEW LOGINS' ]]
+          node infra/operations/require-production-ci.mjs
+
+      - name: Re-activate only the three already-scoped inert review logins
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-0-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGDATABASE: postgres
+          PGUSER: postgres.xzztugbgtulptnbpoelr
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_inert_routine_review_login_recovery
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
+          ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
+          ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
+          TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          protected="$(mktemp -d "$RUNNER_TEMP/routine-review-login-recovery.XXXXXXXX")"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [[ "$protected" == "$RUNNER_TEMP"/routine-review-login-recovery.* &&
+                  -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/supabase-ca.crt"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$PGPASSWORD" &&
+            -n "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" && -n "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" &&
+            -n "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" ]]
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+          psql -X \
+            -v signer_id="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID" \
+            -v public_spki_digest="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256" \
+            -v valid_from="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            -v runtime_password="$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" \
+            --file=infra/sql/production-routine-no-money-activate.sql >/dev/null
+          psql -X \
+            -v runtime_password="$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
+          psql -X \
+            -v runtime_password="$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" \
+            -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
+            --file=infra/sql/production-routine-paid-settlement-activate.sql >/dev/null
+          result="$(psql -X -q -A -t -v ON_ERROR_STOP=1 -c "
+            select count(*) from pg_catalog.pg_roles role
+            where role.rolname in (
+              'fetanagent_routine_telebirr_no_money_runtime',
+              'fetanagent_routine_telebirr_paid_poll_runtime',
+              'fetanagent_routine_telebirr_paid_settlement_runtime'
+            ) and role.rolcanlogin
+              and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '10 minutes'")"
+          [[ "$result" == '3' ]]
+          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+          echo 'Three review-only logins are restored. All seven financial switches remain disabled; no Player was credited.' >>"$GITHUB_STEP_SUMMARY"

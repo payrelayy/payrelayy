@@ -683,6 +683,38 @@ jobs:
           set -euo pipefail
           psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
 
+      - name: Record existing routine review login states for exact rollback
+        if: inputs.mode == 'deploy-inert'
+        id: routine_previous_logins
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_previous_logins
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          previous="$(psql -X -q -A -t -v ON_ERROR_STOP=1 -c "
+            select string_agg(role.rolcanlogin::text, ',' order by role.rolname)
+            from pg_catalog.pg_roles role
+            where role.rolname in (
+              'fetanagent_routine_telebirr_no_money_runtime',
+              'fetanagent_routine_telebirr_paid_poll_runtime',
+              'fetanagent_routine_telebirr_paid_settlement_runtime'
+            )")"
+          [[ "$previous" =~ ^(true|false),(true|false),(true|false)$ ]]
+          # Alphabetical role order: no-money, paid-poll, paid-settlement.
+          IFS=, read -r no_money paid_poll paid_settlement <<<"$previous"
+          printf 'no_money=%s\npaid_poll=%s\npaid_settlement=%s\n' \
+            "$no_money" "$paid_poll" "$paid_settlement" >>"$GITHUB_OUTPUT"
+
       - name: Activate the separate no-money phone review login
         if: inputs.mode == 'deploy-inert'
         id: routine_review_activation
@@ -1138,7 +1170,7 @@ jobs:
           [[ "$rollback_status" -eq 0 && "$database_status" -eq 0 ]]
 
       - name: Disable no-money phone review after failed deployment
-        if: always() && (failure() || cancelled()) && steps.routine_review_activation.outputs.attempted == 'true'
+        if: always() && (failure() || cancelled()) && steps.routine_review_activation.outputs.attempted == 'true' && steps.routine_previous_logins.outputs.no_money == 'false'
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -1155,7 +1187,7 @@ jobs:
         run: psql -X --file=infra/sql/production-routine-no-money-disable.sql >/dev/null
 
       - name: Disable paid phone observation after failed deployment
-        if: always() && (failure() || cancelled()) && steps.routine_paid_activation.outputs.attempted == 'true'
+        if: always() && (failure() || cancelled()) && steps.routine_paid_activation.outputs.attempted == 'true' && steps.routine_previous_logins.outputs.paid_poll == 'false'
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -1172,7 +1204,7 @@ jobs:
         run: psql -X --file=infra/sql/production-routine-paid-poll-disable.sql >/dev/null
 
       - name: Disable paid settlement after failed deployment
-        if: always() && (failure() || cancelled()) && steps.routine_paid_settlement_activation.outputs.attempted == 'true'
+        if: always() && (failure() || cancelled()) && steps.routine_paid_settlement_activation.outputs.attempted == 'true' && steps.routine_previous_logins.outputs.paid_settlement == 'false'
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

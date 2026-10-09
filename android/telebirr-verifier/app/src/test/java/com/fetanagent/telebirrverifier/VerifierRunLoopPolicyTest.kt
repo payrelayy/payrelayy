@@ -35,6 +35,9 @@ class VerifierRunLoopPolicyTest {
     val retry = status(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
     assertEquals(5_000L, policy.decide(retry, 3L).delayMillis)
     assertEquals(10_000L, policy.decide(retry, 4L).delayMillis)
+    val noMoneyRetry = status(LivePilotRuntimeState.ATTENTION, "routine_retry")
+    assertEquals(5_000L, policy.decide(noMoneyRetry, 5L).delayMillis)
+    assertEquals(10_000L, policy.decide(noMoneyRetry, 6L).delayMillis)
   }
 
   @Test

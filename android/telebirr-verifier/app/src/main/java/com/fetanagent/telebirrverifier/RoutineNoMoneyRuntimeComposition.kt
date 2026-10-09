@@ -1,6 +1,7 @@
 package com.fetanagent.telebirrverifier
 
 import android.content.Context
+import android.util.Log
 import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
 
@@ -77,7 +78,14 @@ internal object RoutineNoMoneyRuntimeComposition {
       ?: return unavailable("routine_device_key_unavailable")
     val rehearsal = RoutineNoMoneyPhoneRehearsal(
       exchange = FixedRoutineNoMoneyHttpsExchange(),
-      collector = RoutineTelebirrObservationCollector(SafeOfficialReceiptTransport()),
+      collector = RoutineTelebirrObservationCollector(SafeOfficialReceiptTransport(
+        diagnostics = ReceiptTransportDiagnostics { phase, failure ->
+          Log.i("FetanAgentReceiptTransport", "phase=$phase failure=$failure")
+        },
+        responseDiagnostics = ReceiptResponseDiagnostics { diagnostic ->
+          Log.i("FetanAgentReceiptResponse", diagnostic.toString())
+        },
+      )),
       workStore = EncryptedRoutineNoMoneyWorkStore.forApplication(context),
     )
     val enrollmentStore = EncryptedRoutineEnrollmentStore.forApplication(context)

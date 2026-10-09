@@ -56,20 +56,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: production
-    env:
-      FETANAGENT_ROUTINE_FINANCIAL_STOP_REASON: ${{ inputs.reason }}
-      SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
-      PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
-      PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
-      PGDATABASE: postgres
-      PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
-      PGSSLMODE: verify-full
-      PGCONNECT_TIMEOUT: '5'
-      PGAPPNAME: fetanagent_routine_financial_stop
-      PGSERVICEFILE: /dev/null
-      PGPASSFILE: /dev/null
-      PGOPTIONS: ''
     steps:
       - name: Check out current main without persisted credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +64,20 @@ jobs:
 
       - name: Disable the two routine financial gates
         shell: bash
+        env:
+          FETANAGENT_ROUTINE_FINANCIAL_STOP_REASON: ${{ inputs.reason }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_routine_financial_stop
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PGOPTIONS: ''
         run: |
           set -euo pipefail
           umask 077

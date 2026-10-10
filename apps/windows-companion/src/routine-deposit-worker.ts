@@ -100,7 +100,10 @@ export interface RoutineDepositExecutionStore {
 }
 
 export type RoutineDepositWorkerResult =
-  | { readonly status: 'idle' | 'busy' | 'stopped' | 'awaiting_reconciliation' }
+  | {
+      readonly status:
+        'idle' | 'busy' | 'stopped' | 'awaiting_reconciliation' | 'temporarily_unavailable';
+    }
   | { readonly status: 'completed' }
   | { readonly status: 'paused'; readonly reason: RoutineDepositPauseReason };
 
@@ -241,7 +244,15 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
           lease = awaitingReconciliation;
           return await reconcile(lease);
         }
-        lease = await options.store.leaseNext();
+        try {
+          lease = await options.store.leaseNext();
+        } catch {
+          // No lease was delivered and no provider action has started. Keep the
+          // guarded browser available while the runner backs off and retries.
+          // A failed request may have prepared a durable lease on the server;
+          // the next authenticated lease call must recover it before any action.
+          return Object.freeze({ status: 'temporarily_unavailable' });
+        }
         if (!lease) return Object.freeze({ status: 'idle' });
         if (!validLease(lease)) return await pause(lease, 'invalid_policy_or_lease');
         // Snapshot the binding so later mutations by a port cannot change a prepared target.

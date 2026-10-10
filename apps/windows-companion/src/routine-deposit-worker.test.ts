@@ -387,9 +387,19 @@ describe('routine production serial deposit worker', () => {
     },
   );
 
-  it('stays paused locally even if the durable pause notification fails', async () => {
+  it('retries a failed pre-lease request without closing or touching the provider', async () => {
+    const { worker, store, session } = fixture();
+    store.leaseNext.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(null);
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
+    expect(store.leaseNext).toHaveBeenCalledTimes(2);
+    expect(store.pause).not.toHaveBeenCalled();
+    expect(session.executeRoutineOneUseDeposit).not.toHaveBeenCalled();
+  });
+
+  it('stays paused locally after a post-lease database failure even if pause notification fails', async () => {
     const { worker, store } = fixture();
-    store.leaseNext.mockRejectedValueOnce(new Error('offline'));
+    store.reconcile.mockRejectedValueOnce(new Error('offline'));
     store.pause.mockRejectedValueOnce(new Error('offline'));
     expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
     expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });

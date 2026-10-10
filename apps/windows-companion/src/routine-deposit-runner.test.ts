@@ -109,6 +109,27 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps Chrome open through an idle database outage and backs off before retrying', async () => {
+    vi.useFakeTimers();
+    const { options, session } = fixture();
+    selected.runOnce
+      .mockResolvedValueOnce({ status: 'temporarily_unavailable' })
+      .mockResolvedValueOnce({ status: 'idle' })
+      .mockResolvedValueOnce({ status: 'paused', reason: 'operator_stopped' });
+    const queue = startRoutineDepositQueue(options);
+    await Promise.resolve();
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(session.stop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(selected.runOnce).toHaveBeenCalledTimes(2);
+    expect(session.stop).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(session.stop).toHaveBeenCalledTimes(1);
+  });
+
   it('does not lease a Player credit while KemerBet is signed out, then resumes in order', async () => {
     vi.useFakeTimers();
     const { options, session } = fixture();

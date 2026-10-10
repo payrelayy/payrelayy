@@ -17,6 +17,7 @@ import {
   createLocalKemerBetDepositAuthorization,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
+  rehearseNoMoneyRoutineDepositPreflight,
   type LocalKemerBetFinalAction,
   type LocalKemerBetRoutineDepositDispatchOutcome,
   type LocalKemerBetRoutineFinalAction,
@@ -100,6 +101,7 @@ export interface LocalKemerBetSession {
     amountMinor: number,
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
+  rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -612,6 +614,31 @@ export async function startLocalKemerBetSession(
           lookupAuthorization,
           depositAuthorization,
           acquireFinalAction,
+          reportRoutinePreflight,
+        );
+      } finally {
+        lookupAuthorization.clear();
+        depositAuthorization.clear();
+        operationInProgress = false;
+      }
+    },
+    async rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number) {
+      const page = localPage;
+      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+        try {
+          reportRoutinePreflight('session_unavailable');
+        } catch {
+          // Diagnostics never determine whether a rehearsal can reach the provider.
+        }
+        throw new Error('The local KemerBet rehearsal session is unavailable.');
+      }
+      operationInProgress = true;
+      try {
+        await rehearseNoMoneyRoutineDepositPreflight(
+          page,
+          playerId,
+          amountMinor,
+          lookupAuthorization,
           reportRoutinePreflight,
         );
       } finally {

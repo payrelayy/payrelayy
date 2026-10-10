@@ -93,6 +93,53 @@ describe('Windows companion configuration', () => {
     ).toThrow('mutually exclusive');
   });
 
+  it('accepts only a complete, redacted no-money preflight in the protected routine lane', () => {
+    const base = {
+      NODE_ENV: 'test',
+      FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+      INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+      FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID:
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    };
+    const environment = {
+      ...base,
+      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
+      INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+    };
+    const config = loadWindowsCompanionConfig(environment);
+    expect(config.routineNoMoneyPreflight).toEqual({
+      playerId: 'SAMPLE-PLAYER',
+      amountMinor: 2500,
+    });
+    expect(JSON.stringify(redactedWindowsCompanionConfig(config))).not.toContain('SAMPLE-PLAYER');
+    expect(environment).not.toHaveProperty('INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID');
+    expect(environment).not.toHaveProperty('INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR');
+    for (const override of [
+      { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER' },
+      { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500' },
+      {
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2499',
+      },
+      {
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'BAD PLAYER',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+      },
+    ]) {
+      expect(() => loadWindowsCompanionConfig({ ...base, ...override })).toThrow(
+        'no-money routine preflight is invalid',
+      );
+    }
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
+        INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+      }),
+    ).toThrow('no-money routine preflight is invalid');
+  });
+
   it('rejects relative paths, control characters, and unreviewed release identities', () => {
     for (const dataRoot of ['relative', `D:\\bad\u0000path`]) {
       expect(() =>

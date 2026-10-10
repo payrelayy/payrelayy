@@ -38,6 +38,11 @@ import {
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
+// KemerBet's agent client returns to login after 900 seconds without a page-level reset. Reload
+// the same guarded page while its Chrome-held session is still valid, with four minutes to spare.
+const KEMERBET_SIGNED_IN_RELOAD_MS = 11 * 60 * 1_000;
+const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
+
 export type LocalKemerBetSessionState =
   | 'starting'
   | 'login_required'
@@ -154,6 +159,7 @@ export async function startLocalKemerBetSession(
   let loginTimer: NodeJS.Timeout | undefined;
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
+  let signedInReloadTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
   let lock: SessionLock | undefined;
@@ -189,6 +195,11 @@ export async function startLocalKemerBetSession(
     candidateTimer = undefined;
   };
 
+  const disarmSignedInReload = (): void => {
+    if (signedInReloadTimer !== undefined) clearTimeout(signedInReloadTimer);
+    signedInReloadTimer = undefined;
+  };
+
   const finish = async (
     state: 'failed' | 'stopped',
     reason?: LocalKemerBetSessionEvent['reason'],
@@ -202,6 +213,7 @@ export async function startLocalKemerBetSession(
     identityVerificationEpoch += 1;
     disarmLoginDeadline();
     disarmCandidateDeadline();
+    disarmSignedInReload();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
     let lockReleased = lock === undefined;
@@ -253,7 +265,7 @@ export async function startLocalKemerBetSession(
     candidateTimer = setTimeout(() => {
       if (deadlineEpoch !== candidateDeadlineEpoch) return;
       candidateTimer = undefined;
-      if (terminal || !signedInCandidate || !signedInVerified || phase !== 'signed_in_read_only') {
+      if (terminal || phase !== 'signed_in_read_only') {
         return;
       }
       void finish('stopped', 'candidate_lifetime_complete');
@@ -350,6 +362,7 @@ export async function startLocalKemerBetSession(
             ...(result.bindingCreated ? { reason: 'identity_binding_created' as const } : {}),
           });
           armCandidateDeadline();
+          armSignedInReload();
         } catch (error) {
           if (terminal || verificationEpoch !== identityVerificationEpoch) return;
           throw error;
@@ -399,11 +412,38 @@ export async function startLocalKemerBetSession(
         signedInCandidate = false;
         signedInVerified = false;
         lookupAuthorization.clear();
+        depositAuthorization.clear();
         disarmCandidateDeadline();
+        disarmSignedInReload();
         phase = 'manual_login';
         armLoginDeadline();
         report({ state: 'login_required', transferDisabled: true, detailsRedacted: true });
       }
+    };
+
+    const armSignedInReload = (delayMs = KEMERBET_SIGNED_IN_RELOAD_MS): void => {
+      disarmSignedInReload();
+      if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+      signedInReloadTimer = setTimeout(() => {
+        signedInReloadTimer = undefined;
+        if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+        if (operationInProgress) {
+          armSignedInReload(KEMERBET_BUSY_RELOAD_RETRY_MS);
+          return;
+        }
+        // Stop new Player work before changing the provider page. The same bound account must
+        // become visible and pass identity verification again before the queue can resume.
+        signedInVerified = false;
+        identityVerificationEpoch += 1;
+        lookupAuthorization.clear();
+        depositAuthorization.clear();
+        report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+        void page
+          .reload({ waitUntil: 'commit', timeout: 45_000 })
+          .then(() => observePage(page))
+          .catch(() => finish('failed', 'provider_request_failed'));
+      }, delayMs);
+      signedInReloadTimer.unref();
     };
 
     page.on('framenavigated', (frame) => {
@@ -429,6 +469,7 @@ export async function startLocalKemerBetSession(
         depositAuthorization.clear();
         disarmLoginDeadline();
         disarmCandidateDeadline();
+        disarmSignedInReload();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
           .then(() => {

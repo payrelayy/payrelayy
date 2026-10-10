@@ -41,6 +41,22 @@ async function queryAsExactOwnerRuntime<T extends QueryResultRow>(
   }
 }
 
+async function queryAsExactPlayerRuntime<T extends QueryResultRow>(
+  client: Client,
+  query: string,
+  values: readonly SqlValue[] = [],
+): Promise<readonly T[]> {
+  try {
+    await client.query('set session authorization fetanagent_player_actions_runtime');
+    const result = await client.query<T>(query, [...values]);
+    await client.query('reset session authorization');
+    return result.rows;
+  } catch (error) {
+    await client.query('reset session authorization');
+    throw error;
+  }
+}
+
 async function expectFailure(operation: () => Promise<unknown>, pattern: RegExp): Promise<void> {
   let failure: unknown;
   try {
@@ -472,6 +488,100 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
           { advanced_claim_state: 'exported', transition_already_recorded: false },
         ]);
 
+        // The legacy exact-five claim remains frozen, but a different public
+        // Telegram user must be able to open the bot and submit a non-claiming
+        // Player ID request through the actual production runtime identity.
+        const telegramUserId = 9_888_000_001;
+        const hmac = (character: string): string => `hmac-sha256-v1:${character.repeat(64)}`;
+        const recordInbound = async (updateId: number, character: string): Promise<string> => {
+          const rows = await queryAsExactPlayerRuntime<{ readonly inbound_event_id: string }>(
+            client,
+            `select inbound_event_id
+               from app.record_public_telegram_action_inbound_event(
+                 $1::bigint, $2::bigint, $3::bigint, $4::text, 'en'::text
+               )`,
+            [updateId, telegramUserId, telegramUserId, hmac(character)],
+          );
+          expect(rows).toHaveLength(1);
+          return rows[0]!.inbound_event_id;
+        };
+        const startEventId = await recordInbound(9_888_100_001, 'a');
+        const capabilityId = randomUUID();
+        const issued = await queryAsExactPlayerRuntime<{
+          readonly result_capability_id: string;
+        }>(
+          client,
+          `select result_capability_id
+             from app.issue_telegram_player_registration_capability(
+               $1::uuid, $2::uuid, $3::text, $4::text
+             )`,
+          [startEventId, capabilityId, hmac('b'), hmac('c')],
+        );
+        expect(issued).toEqual([{ result_capability_id: capabilityId }]);
+
+        const callbackEventId = await recordInbound(9_888_100_002, 'd');
+        const started = await queryAsExactPlayerRuntime<{
+          readonly result_outcome: string;
+        }>(
+          client,
+          `select result_outcome
+             from app.start_telegram_player_registration_action(
+               $1::uuid, $2::uuid, $3::text, $4::text
+             )`,
+          [callbackEventId, capabilityId, hmac('b'), hmac('e')],
+        );
+        expect(started).toEqual([{ result_outcome: 'completed' }]);
+
+        const inputEventId = await recordInbound(9_888_100_003, 'f');
+        const submitted = await queryAsExactPlayerRuntime<{
+          readonly result_outcome: string;
+          readonly request_status: string;
+        }>(
+          client,
+          `select result_outcome, request_status
+             from app.submit_telegram_player_registration_input(
+               $1::uuid, $2::text, $3::text
+             )`,
+          [inputEventId, 'NEW_PUBLIC_PLAYER_1', hmac('0')],
+        );
+        expect(submitted).toEqual([
+          { result_outcome: 'completed', request_status: 'pending_validation' },
+        ]);
+
+        const publicBoundary = await client.query<{
+          readonly claim_state: string;
+          readonly runtime_direct_customer_insert: boolean;
+          readonly runtime_direct_request_insert: boolean;
+          readonly associated_players: number;
+        }>(
+          `
+          select claim.claim_state,
+                 has_table_privilege(
+                   'fetanagent_player_actions_runtime', 'app.customers', 'INSERT'
+                 ) as runtime_direct_customer_insert,
+                 has_table_privilege(
+                   'fetanagent_player_actions_runtime',
+                   'app.player_registration_requests', 'INSERT'
+                 ) as runtime_direct_request_insert,
+                 (select count(*)::integer
+                    from app.player_registration_request_associations association
+                    join app.player_registration_requests request
+                      on request.id = association.player_registration_request_id
+                   where request.player_id = 'NEW_PUBLIC_PLAYER_1') as associated_players
+            from app.private_owner_kemerbet_readiness_cohort_claims claim
+           where claim.id = $1::uuid
+        `,
+          [claimId],
+        );
+        expect(publicBoundary.rows).toEqual([
+          {
+            claim_state: 'exported',
+            runtime_direct_customer_insert: false,
+            runtime_direct_request_insert: false,
+            associated_players: 0,
+          },
+        ]);
+
         await expectFailure(async () => {
           await client.query('savepoint frozen_source_write');
           try {
@@ -480,6 +590,22 @@ export function registerOwnerKemerbetReadinessCohortSqlTests(
           } catch (error) {
             await client.query('rollback to savepoint frozen_source_write');
             await client.query('release savepoint frozen_source_write');
+            throw error;
+          }
+        }, /readiness cohort is frozen/iu);
+
+        await expectFailure(async () => {
+          await client.query('savepoint frozen_registration_write');
+          try {
+            await client.query(`
+              update app.player_registration_requests
+                 set player_id = 'CHANGED_PUBLIC_PLAYER_1'
+               where player_id = 'NEW_PUBLIC_PLAYER_1'
+            `);
+            await client.query('release savepoint frozen_registration_write');
+          } catch (error) {
+            await client.query('rollback to savepoint frozen_registration_write');
+            await client.query('release savepoint frozen_registration_write');
             throw error;
           }
         }, /readiness cohort is frozen/iu);

@@ -56,9 +56,11 @@ describe('reviewed KemerBet session WebSocket', () => {
       handler = callback;
     });
     let phase: 'signed_in_read_only' | 'manual_login' = 'signed_in_read_only';
+    const diagnostics: string[] = [];
     await installProviderSessionWebSocketBoundary(
       { routeWebSocket } as unknown as BrowserContext,
       () => phase,
+      (event) => diagnostics.push(event),
     );
     expect(routeWebSocket).toHaveBeenCalledWith('**/*', expect.any(Function));
 
@@ -78,12 +80,18 @@ describe('reviewed KemerBet session WebSocket', () => {
     onMessage?.(handshake);
     onMessage?.(keepalive);
     expect(send.mock.calls).toEqual([[handshake], [keepalive]]);
+    expect(diagnostics).toEqual([
+      'admin_socket_admitted',
+      'admin_socket_handshake_forwarded',
+      'admin_socket_update_forwarded',
+    ]);
 
     onMessage?.(`{"type":1,"target":"WalletCredit","arguments":[]}${SEPARATOR}`);
     expect(close).toHaveBeenCalledWith(
       expect.objectContaining({ code: 1008, reason: 'Unreviewed provider message' }),
     );
     expect(send).toHaveBeenCalledTimes(2);
+    expect(diagnostics.at(-1)).toBe('admin_socket_frame_rejected');
 
     phase = 'manual_login';
     onMessage?.(`{"type":6}${SEPARATOR}`);

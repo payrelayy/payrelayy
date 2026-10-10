@@ -20,6 +20,7 @@ import {
   type LocalKemerBetFinalAction,
   type LocalKemerBetRoutineDepositDispatchOutcome,
   type LocalKemerBetRoutineFinalAction,
+  type LocalKemerBetRoutinePreflightReporter,
 } from './local-kemerbet-deposit.js';
 import {
   createLocalKemerBetLookupAuthorization,
@@ -140,6 +141,7 @@ export async function startLocalKemerBetSession(
   config: WindowsCompanionConfig,
   report: (event: LocalKemerBetSessionEvent) => void,
   reportDiagnostic: (event: ProviderSessionDiagnosticEvent) => void = () => undefined,
+  reportRoutinePreflight: LocalKemerBetRoutinePreflightReporter = () => undefined,
 ): Promise<LocalKemerBetSession> {
   report({ state: 'starting', transferDisabled: true, detailsRedacted: true });
 
@@ -594,6 +596,11 @@ export async function startLocalKemerBetSession(
     ) {
       const page = localPage;
       if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+        try {
+          reportRoutinePreflight('session_unavailable');
+        } catch {
+          // A diagnostic callback cannot change the guarded execution result.
+        }
         throw new Error('The local KemerBet execution session is unavailable.');
       }
       operationInProgress = true;
@@ -605,6 +612,7 @@ export async function startLocalKemerBetSession(
           lookupAuthorization,
           depositAuthorization,
           acquireFinalAction,
+          reportRoutinePreflight,
         );
       } finally {
         lookupAuthorization.clear();

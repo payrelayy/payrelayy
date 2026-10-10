@@ -77,6 +77,31 @@ export type LocalKemerBetRoutineDepositDispatchOutcome =
       readonly providerResponseDigest: string | null;
     };
 
+/** Fixed, identifier-free checkpoints for diagnosing a stopped routine deposit. */
+export type LocalKemerBetRoutinePreflightStage =
+  | 'session_unavailable'
+  | 'preflight_started'
+  | 'search_surface_ready'
+  | 'player_lookup_started'
+  | 'player_lookup_verified'
+  | 'amount_prepared'
+  | 'final_action_requested';
+
+export type LocalKemerBetRoutinePreflightReporter = (
+  stage: LocalKemerBetRoutinePreflightStage,
+) => void;
+
+function reportPreflight(
+  reporter: LocalKemerBetRoutinePreflightReporter | undefined,
+  stage: LocalKemerBetRoutinePreflightStage,
+): void {
+  try {
+    reporter?.(stage);
+  } catch {
+    // Diagnostics must never change authorization or provider behavior.
+  }
+}
+
 export function isRoutineDepositAmountMinor(value: unknown): value is number {
   return (
     typeof value === 'number' &&
@@ -431,6 +456,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   lookupAuthorization: MutableLocalKemerBetLookupAuthorization,
   depositAuthorization: MutableLocalKemerBetDepositAuthorization,
   acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
+  diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<LocalKemerBetRoutineDepositDispatchOutcome> {
   const outcome = await executeLocalDepositForAmount(
     page,
@@ -443,6 +469,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       if (authority.playerId !== playerId || authority.amountMinor !== amountMinor) unavailable();
       return authority;
     },
+    diagnostic,
   );
   if (outcome.outcome !== 'submission_attempted') return outcome;
   const expectedCredit = `Player Balance +${routineDepositAmountText(amountMinor)} ETB Success`;
@@ -482,10 +509,13 @@ async function executeLocalDepositForAmount(
   lookupAuthorization: MutableLocalKemerBetLookupAuthorization,
   depositAuthorization: MutableLocalKemerBetDepositAuthorization,
   acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
+  diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<LocalKemerBetDepositDispatchOutcome> {
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
   const amountText = routineDepositAmountText(amountMinor);
+  reportPreflight(diagnostic, 'preflight_started');
   await openSearchSurface(page);
+  reportPreflight(diagnostic, 'search_surface_ready');
   const input = await requireEnabled(page.locator(selectors.playerIdInput));
   await input.fill('', { timeout: TIMEOUT_MS });
   await input.pressSequentially(playerId, { delay: 10, timeout: TIMEOUT_MS });
@@ -505,6 +535,7 @@ async function executeLocalDepositForAmount(
   let body: Buffer | undefined;
   let privatePlayer:
     { readonly internalPlayerId: number; readonly identities: readonly string[] } | undefined;
+  reportPreflight(diagnostic, 'player_lookup_started');
   lookupAuthorization.begin(playerId);
   try {
     responsePromise = page.waitForResponse((response) => exactLookupResponse(response, playerId), {
@@ -531,6 +562,7 @@ async function executeLocalDepositForAmount(
     lookupAuthorization.clear();
   }
   if (!privatePlayer) unavailable();
+  reportPreflight(diagnostic, 'player_lookup_verified');
 
   const amount = await requireEnabled(page.locator(selectors.amountInput));
   const notes = await requireEnabled(page.locator(selectors.notesInput));
@@ -539,8 +571,10 @@ async function executeLocalDepositForAmount(
   await notes.fill('', { timeout: TIMEOUT_MS });
   const trialTransfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
   await trialTransfer.click({ trial: true, timeout: TIMEOUT_MS });
+  reportPreflight(diagnostic, 'amount_prepared');
 
   // The server/database fence is intentionally requested only after the page is fully prepared.
+  reportPreflight(diagnostic, 'final_action_requested');
   const finalAction = await acquireFinalAction();
   const transfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
   if (finalAction.isFresh() !== true) unavailable();

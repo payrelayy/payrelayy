@@ -49,6 +49,24 @@ function renderSearch() {
 renderSearch();
 </script>`;
 
+const delayedNavigationHtml = fixtureHtml.replace(
+  'renderSearch();\n</script>',
+  `surface.innerHTML = '<div class="rt--header-right"><button class="rt--header-actions-content-icon">' +
+    '<span class="icon-transfer"></span></button></div>';
+  surface.querySelector('button').onclick = () => {
+    setTimeout(() => {
+      surface.insertAdjacentHTML('beforeend', '<div role="menuitem">Deposit</div>');
+      surface.querySelector('[role="menuitem"]').onclick = () => {
+        setTimeout(() => {
+          surface.innerHTML = '<button class="rt--transfer-item"><span class="icon-player"></span></button>';
+          surface.querySelector('button').onclick = renderSearch;
+        }, 150);
+      };
+    }, 150);
+  };
+</script>`,
+);
+
 describe.skipIf(process.platform !== 'win32')(
   'routine deposit UI in isolated Windows Chrome',
   () => {
@@ -66,7 +84,7 @@ describe.skipIf(process.platform !== 'win32')(
       await browser?.close();
     });
 
-    async function startFixture() {
+    async function startFixture(html = fixtureHtml) {
       const lookup = createLocalKemerBetLookupAuthorization();
       const deposit = createLocalKemerBetDepositAuthorization();
       const submitted: unknown[] = [];
@@ -76,7 +94,7 @@ describe.skipIf(process.platform !== 'win32')(
         const request = route.request();
         const url = new URL(request.url());
         if (request.method() === 'GET' && url.href === AGENTS_URL) {
-          await route.fulfill({ status: 200, contentType: 'text/html', body: fixtureHtml });
+          await route.fulfill({ status: 200, contentType: 'text/html', body: html });
           return;
         }
         if (
@@ -198,6 +216,27 @@ describe.skipIf(process.platform !== 'win32')(
           notes: '',
         }),
       ).toBeUndefined();
+    }, 15000);
+
+    it('waits for delayed guarded navigation controls before the no-money preflight', async () => {
+      const { page, lookup, submitted, blocked } = await startFixture(delayedNavigationHtml);
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(stages).toEqual([
+        'preflight_started',
+        'financial_actions_opened',
+        'deposit_menu_selected',
+        'player_tile_selected',
+        'search_surface_ready',
+        'player_lookup_started',
+        'player_lookup_verified',
+        'amount_prepared',
+        'no_money_rehearsal_completed',
+      ]);
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
     }, 15000);
 
     it('retains the existing pilot UI path at exactly 25 ETB', async () => {

@@ -81,6 +81,9 @@ export type LocalKemerBetRoutineDepositDispatchOutcome =
 export type LocalKemerBetRoutinePreflightStage =
   | 'session_unavailable'
   | 'preflight_started'
+  | 'financial_actions_opened'
+  | 'deposit_menu_selected'
+  | 'player_tile_selected'
   | 'search_surface_ready'
   | 'player_lookup_started'
   | 'player_lookup_verified'
@@ -253,6 +256,16 @@ async function requireEnabled(locator: Locator): Promise<Locator> {
   return selected;
 }
 
+async function waitForEnabledAuthenticatedControl(page: Page, locator: Locator): Promise<Locator> {
+  await waitUntil(async () => {
+    await requireAuthenticatedAgentPage(page);
+    const selected = await exactlyOneVisible(locator);
+    return selected !== undefined && (await selected.isEnabled());
+  });
+  await requireAuthenticatedAgentPage(page);
+  return requireEnabled(locator);
+}
+
 async function anyVisible(page: Page, selector: string): Promise<boolean> {
   return (await exactlyOneVisible(page.locator(selector))) !== undefined;
 }
@@ -321,23 +334,34 @@ async function requireSearchOnlySurface(page: Page): Promise<void> {
   if (counts.some((count) => count !== 0)) unavailable();
 }
 
-async function openSearchSurface(page: Page): Promise<void> {
+async function openSearchSurface(
+  page: Page,
+  diagnostic?: LocalKemerBetRoutinePreflightReporter,
+): Promise<void> {
   await requireAuthenticatedAgentPage(page);
   if (await searchSurfaceReady(page)) {
     await requireSearchOnlySurface(page);
     return;
   }
   await (
-    await requireEnabled(page.locator(selectors.financialActionsTrigger))
+    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.financialActionsTrigger))
   ).click({
     timeout: TIMEOUT_MS,
   });
+  reportPreflight(diagnostic, 'financial_actions_opened');
   await requireAuthenticatedAgentPage(page);
   await (
-    await requireEnabled(page.getByRole('menuitem', { name: 'Deposit', exact: true }))
+    await waitForEnabledAuthenticatedControl(
+      page,
+      page.getByRole('menuitem', { name: 'Deposit', exact: true }),
+    )
   ).click({ timeout: TIMEOUT_MS });
+  reportPreflight(diagnostic, 'deposit_menu_selected');
   await requireAuthenticatedAgentPage(page);
-  await (await requireEnabled(page.locator(selectors.toPlayerTile))).click({ timeout: TIMEOUT_MS });
+  await (
+    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.toPlayerTile))
+  ).click({ timeout: TIMEOUT_MS });
+  reportPreflight(diagnostic, 'player_tile_selected');
   await waitUntil(async () => {
     await requireAuthenticatedAgentPage(page);
     return searchSurfaceReady(page);
@@ -567,7 +591,7 @@ async function prepareLocalDepositForAmount(
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
   const amountText = routineDepositAmountText(amountMinor);
   reportPreflight(diagnostic, 'preflight_started');
-  await openSearchSurface(page);
+  await openSearchSurface(page, diagnostic);
   reportPreflight(diagnostic, 'search_surface_ready');
   const input = await requireEnabled(page.locator(selectors.playerIdInput));
   await input.fill('', { timeout: TIMEOUT_MS });

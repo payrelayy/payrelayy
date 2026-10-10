@@ -87,6 +87,17 @@ export type LocalKemerBetRoutinePreflightStage =
   | 'search_surface_ready'
   | 'player_lookup_started'
   | 'player_lookup_verified'
+  | 'amount_fields_filled'
+  | 'prepared_surface_verified'
+  | 'prepared_root_unavailable'
+  | 'prepared_controls_unavailable'
+  | 'prepared_identity_unavailable'
+  | 'prepared_identity_mismatch'
+  | 'prepared_currency_mismatch'
+  | 'prepared_amount_mismatch'
+  | 'prepared_notes_mismatch'
+  | 'prepared_transfer_disabled'
+  | 'prepared_surface_unavailable'
   | 'amount_prepared'
   | 'no_money_rehearsal_completed'
   | 'final_action_requested';
@@ -426,29 +437,82 @@ function privateInternalPlayer(
   return Object.freeze({ internalPlayerId: value.id as number, identities });
 }
 
+type PreparedSurfaceFailureStage = Extract<
+  LocalKemerBetRoutinePreflightStage,
+  | 'prepared_root_unavailable'
+  | 'prepared_controls_unavailable'
+  | 'prepared_identity_unavailable'
+  | 'prepared_identity_mismatch'
+  | 'prepared_currency_mismatch'
+  | 'prepared_amount_mismatch'
+  | 'prepared_notes_mismatch'
+  | 'prepared_transfer_disabled'
+  | 'prepared_surface_unavailable'
+>;
+
+async function inspectPreparedSurface(
+  page: Page,
+  identities: readonly string[],
+  amountText: string,
+): Promise<{ readonly transfer: Locator } | { readonly failure: PreparedSurfaceFailureStage }> {
+  await requireAuthenticatedAgentPage(page);
+  const root = await exactlyOneVisible(page.locator(selectors.lookupRoot));
+  if (!root) return { failure: 'prepared_root_unavailable' };
+  const amount = await exactlyOneVisible(page.locator(selectors.amountInput));
+  const notes = await exactlyOneVisible(page.locator(selectors.notesInput));
+  const transfer = await exactlyOneVisible(modalButton(page, 'Transfer'));
+  if (!amount || !notes || !transfer || !(await amount.isEnabled()) || !(await notes.isEnabled())) {
+    return { failure: 'prepared_controls_unavailable' };
+  }
+  const identity = await exactlyOneVisible(root.locator(selectors.resolvedIdentity));
+  const currency = await exactlyOneVisible(root.locator(selectors.currencyCode));
+  if (!identity || !currency) return { failure: 'prepared_identity_unavailable' };
+  if (!identities.includes((await identity.innerText()).trim())) {
+    return { failure: 'prepared_identity_mismatch' };
+  }
+  if ((await currency.innerText()).trim() !== 'ETB') {
+    return { failure: 'prepared_currency_mismatch' };
+  }
+  if ((await amount.inputValue()) !== amountText) {
+    return { failure: 'prepared_amount_mismatch' };
+  }
+  if ((await notes.inputValue()) !== '') return { failure: 'prepared_notes_mismatch' };
+  if (!(await transfer.isEnabled())) return { failure: 'prepared_transfer_disabled' };
+  return { transfer };
+}
+
 async function verifyPreparedSurface(
   page: Page,
   identities: readonly string[],
   amountText: string,
+  waitForReady = false,
+  diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<Locator> {
-  await requireAuthenticatedAgentPage(page);
-  const root = await exactlyOneVisible(page.locator(selectors.lookupRoot));
-  const amount = await requireEnabled(page.locator(selectors.amountInput));
-  const notes = await requireEnabled(page.locator(selectors.notesInput));
-  const transfer = await requireEnabled(modalButton(page, 'Transfer'));
-  if (!root) unavailable();
-  const identity = await exactlyOneVisible(root.locator(selectors.resolvedIdentity));
-  const currency = await exactlyOneVisible(root.locator(selectors.currencyCode));
-  if (
-    !identity ||
-    !currency ||
-    !identities.includes((await identity.innerText()).trim()) ||
-    (await currency.innerText()).trim() !== 'ETB' ||
-    (await amount.inputValue()) !== amountText ||
-    (await notes.inputValue()) !== ''
-  ) {
+  if (!waitForReady) {
+    const observed = await inspectPreparedSurface(page, identities, amountText);
+    if ('failure' in observed) {
+      reportPreflight(diagnostic, observed.failure);
+      unavailable();
+    }
+    return observed.transfer;
+  }
+  let failure: PreparedSurfaceFailureStage = 'prepared_surface_unavailable';
+  let transfer: Locator | undefined;
+  try {
+    await waitUntil(async () => {
+      const observed = await inspectPreparedSurface(page, identities, amountText);
+      if ('failure' in observed) {
+        failure = observed.failure;
+        return false;
+      }
+      transfer = observed.transfer;
+      return true;
+    });
+  } catch {
+    reportPreflight(diagnostic, failure);
     unavailable();
   }
+  if (!transfer) unavailable();
   return transfer;
 }
 
@@ -641,12 +705,23 @@ async function prepareLocalDepositForAmount(
   if (!privatePlayer) unavailable();
   reportPreflight(diagnostic, 'player_lookup_verified');
 
-  const amount = await requireEnabled(page.locator(selectors.amountInput));
-  const notes = await requireEnabled(page.locator(selectors.notesInput));
+  const amount = await waitForEnabledAuthenticatedControl(
+    page,
+    page.locator(selectors.amountInput),
+  );
+  const notes = await waitForEnabledAuthenticatedControl(page, page.locator(selectors.notesInput));
   if ((await amount.inputValue()) !== '' || (await notes.inputValue()) !== '') unavailable();
   await amount.fill(amountText, { timeout: TIMEOUT_MS });
   await notes.fill('', { timeout: TIMEOUT_MS });
-  const trialTransfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
+  reportPreflight(diagnostic, 'amount_fields_filled');
+  const trialTransfer = await verifyPreparedSurface(
+    page,
+    privatePlayer.identities,
+    amountText,
+    true,
+    diagnostic,
+  );
+  reportPreflight(diagnostic, 'prepared_surface_verified');
   await trialTransfer.click({ trial: true, timeout: TIMEOUT_MS });
   reportPreflight(diagnostic, 'amount_prepared');
   return Object.freeze({ privatePlayer, amountText });

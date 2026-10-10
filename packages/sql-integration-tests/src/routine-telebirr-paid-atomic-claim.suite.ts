@@ -212,7 +212,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           where feature_key in ('deposit_execution', 'payment_verification',
             'private_live_deposit_pilot', 'telebirr_authoritative_verification')`);
         const actor = await fixtureTelegramActor(client, getOwnerAdminId());
-        const playerId = await fixtureEligiblePlayer(client, actor.customerId);
+        const playerId = await fixtureEligiblePlayer(client); // Another customer's eligible Player.
         await fixtureTelebirrReceiver(client);
         const noMoneyEvent = await fixtureInboundEvent(client, actor.identityId);
         const captured = await client.query<{ proof_request_id: string }>(CAPTURE, [
@@ -412,6 +412,9 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         expect(noLongerPending.rows).toEqual([]);
         const persisted = await client.query<{
           amount_minor: string;
+          intent_customer_id: string;
+          submitting_customer_id: string;
+          player_owner_customer_id: string;
           claim_count: string;
           job_count: string;
           binding_count: string;
@@ -420,6 +423,9 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           authorization_id: string;
         }>(
           `select evidence.amount_minor, intent.opened_at, evidence.occurred_at,
+                  intent.customer_id as intent_customer_id,
+                  candidate.submitting_customer_id,
+                  player.customer_id as player_owner_customer_id,
                   (select count(*)::text from app.deposit_payment_claims claim
                     where claim.deposit_intent_id = intent.id) as claim_count,
                   (select count(*)::text from app.deposit_jobs job
@@ -431,6 +437,9 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
              from app.deposit_intents intent
              join app.routine_telebirr_paid_intent_openings opening
                on opening.deposit_intent_id = intent.id
+             join app.routine_telebirr_untrusted_proof_requests candidate
+               on candidate.id = opening.candidate_id
+             join app.customer_platform_players player on player.id = intent.player_account_id
              join app.deposit_payment_claims claim on claim.deposit_intent_id = intent.id
              join app.provider_payment_evidence evidence on evidence.id = claim.provider_payment_evidence_id
             where intent.id = $1::uuid`,
@@ -443,7 +452,14 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           job_count: '1',
           binding_count: '1',
           authorization_id: authority.authorityId,
+          intent_customer_id: expect.any(String),
+          submitting_customer_id: actor.customerId,
+          player_owner_customer_id: expect.any(String),
         });
+        expect(persisted.rows[0]!.intent_customer_id).toBe(
+          persisted.rows[0]!.player_owner_customer_id,
+        );
+        expect(persisted.rows[0]!.intent_customer_id).not.toBe(actor.customerId);
         expect(persisted.rows[0]!.opened_at).toEqual(persisted.rows[0]!.occurred_at);
       } finally {
         await client.query('rollback');

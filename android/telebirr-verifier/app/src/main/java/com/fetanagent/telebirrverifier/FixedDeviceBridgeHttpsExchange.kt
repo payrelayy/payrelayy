@@ -30,6 +30,13 @@ internal fun interface DeviceBridgeHttpsExecutor {
   ): DeviceBridgeHttpsResponse
 }
 
+/** The shared HTTPS executor serves only these four separately guarded bridge protocols. */
+internal fun isAllowedDeviceBridgeContentType(contentType: String): Boolean =
+  contentType == DeviceBridgeProtocol.CONTENT_TYPE ||
+    contentType == RoutineNoMoneyBridgeProtocol.CONTENT_TYPE ||
+    contentType == RoutinePaidBridgeProtocol.CONTENT_TYPE ||
+    contentType == RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE
+
 /**
  * Immutable HTTPS transport for the FetanAgent device bridge. The hostname and four paths are
  * code-owned; redirects, platform proxies, compression, duplicate security headers, query strings,
@@ -146,8 +153,7 @@ internal object PlatformDeviceBridgeHttpsExecutor : DeviceBridgeHttpsExecutor {
       deploymentTarget == FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET ||
         deploymentTarget == FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET,
     )
-    require(contentType == DeviceBridgeProtocol.CONTENT_TYPE ||
-      contentType == RoutineNoMoneyBridgeProtocol.CONTENT_TYPE)
+    require(isAllowedDeviceBridgeContentType(contentType))
     require(body.isNotEmpty() && body.size <= FixedDeviceBridgeHttpsExchange.MAX_REQUEST_BYTES)
 
     val connection =

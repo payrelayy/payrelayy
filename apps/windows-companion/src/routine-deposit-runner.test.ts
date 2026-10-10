@@ -16,7 +16,11 @@ describe('automatic routine queue loop', () => {
 
   function fixture() {
     const controller = new AbortController();
-    const session = { stop: vi.fn(async () => undefined), executeRoutineOneUseDeposit: vi.fn() };
+    const session = {
+      stop: vi.fn(async () => undefined),
+      executeRoutineOneUseDeposit: vi.fn(),
+      isSignedInVerified: vi.fn(() => true),
+    };
     const options: RoutineDepositQueueOptions = {
       signal: controller.signal,
       session,
@@ -101,6 +105,21 @@ describe('automatic routine queue loop', () => {
     await Promise.resolve();
     controller.abort();
     await expect(queue.done).resolves.toEqual({ status: 'stopped' });
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(session.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not lease a Player credit while KemerBet is signed out, then resumes in order', async () => {
+    vi.useFakeTimers();
+    const { options, session } = fixture();
+    session.isSignedInVerified.mockReturnValue(false);
+    selected.runOnce.mockResolvedValueOnce({ status: 'paused', reason: 'operator_stopped' });
+    const queue = startRoutineDepositQueue(options);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(selected.runOnce).not.toHaveBeenCalled();
+    session.isSignedInVerified.mockReturnValue(true);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
     expect(selected.runOnce).toHaveBeenCalledTimes(1);
     expect(session.stop).toHaveBeenCalledTimes(1);
   });

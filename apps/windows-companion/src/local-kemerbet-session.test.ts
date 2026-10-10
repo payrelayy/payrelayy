@@ -286,8 +286,8 @@ describe('local KemerBet enrollment session', () => {
         matchesRoute(entry.matcher, url),
       );
       expect(registration).toBeDefined();
-      const close = vi.fn();
-      await registration!.handler({ close });
+      const close = vi.fn(async () => undefined);
+      await registration!.handler({ close, url: () => url });
       expect(close).toHaveBeenCalledWith(expect.objectContaining({ code: 1008 }));
     }
   });
@@ -504,10 +504,12 @@ describe('local KemerBet enrollment session', () => {
 
   it('resets a returned candidate to a fresh ten-minute login window without sliding on reload', async () => {
     const { context, events, page, session } = await start();
+    expect(session.isSignedInVerified()).toBe(true);
     await vi.advanceTimersByTimeAsync(8 * 60 * 1_000);
     page.emit('response', fakeAccountInfoResponse());
     await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000);
     page.navigate(LOGIN_URL);
+    expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)?.state).toBe('login_required');
     // A delayed account response cannot restore candidate state after returning to login.
     page.emit('response', fakeAccountInfoResponse());
@@ -520,6 +522,7 @@ describe('local KemerBet enrollment session', () => {
     await vi.advanceTimersByTimeAsync(1);
 
     await expect(session.done).rejects.toThrow('failed closed');
+    expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)).toEqual({
       state: 'failed',
       reason: 'login_lifetime_expired',

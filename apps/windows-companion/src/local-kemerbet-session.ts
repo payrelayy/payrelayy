@@ -30,7 +30,8 @@ import {
   installProviderMutationBoundary,
   type LocalKemerBetDepositDispatchOutcome,
 } from './provider-route.js';
-import { isLocalKemerBetProviderUrl, type LocalKemerBetGuardPhase } from './request-guard.js';
+import type { LocalKemerBetGuardPhase } from './request-guard.js';
+import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
 export type LocalKemerBetSessionState =
@@ -68,6 +69,7 @@ export interface LocalKemerBetSessionEvent {
 export interface LocalKemerBetSession {
   readonly done: Promise<void>;
   readonly verified: Promise<boolean>;
+  isSignedInVerified(): boolean;
   executeExactFiveLookup(
     playerIds: ExactFivePlayerIds,
   ): Promise<
@@ -269,12 +271,10 @@ export async function startLocalKemerBetSession(
       args: ['--no-first-run', '--no-default-browser-check'],
     });
 
-    // The enrollment slice has no provider WebSocket capability. Blocking the two provider
-    // origins closes a transport that cannot express the reviewed read/login HTTP contract and
-    // therefore cannot be allowed to bypass its method-and-path guard.
-    await context.routeWebSocket(isLocalKemerBetProviderUrl, (route) =>
-      route.close({ code: 1008, reason: 'Enrollment transport disabled' }),
-    );
+    // KemerBet's admin hub requests a refresh token when its session needs renewal. Admit only
+    // that exact socket and its non-financial UpdateSession invocation; all other sockets close.
+    // The separate HTTP guard still confines the resulting refresh to /Account/RefreshToken.
+    await installProviderSessionWebSocketBoundary(context, () => phase);
 
     const pages = context.pages();
     const page = pages[0] ?? (await context.newPage());
@@ -490,6 +490,8 @@ export async function startLocalKemerBetSession(
   return Object.freeze({
     done,
     verified,
+    isSignedInVerified: () =>
+      !terminal && !stopping && signedInVerified && phase === 'signed_in_read_only',
     async executeExactFiveLookup(playerIds: ExactFivePlayerIds) {
       const page = localPage;
       if (terminal || stopping || !signedInVerified || operationInProgress || !page) {

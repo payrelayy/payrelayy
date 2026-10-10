@@ -19,7 +19,10 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 }
 
 export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOptions, 'session'> {
-  readonly session: Pick<LocalKemerBetSession, 'executeRoutineOneUseDeposit' | 'stop'>;
+  readonly session: Pick<
+    LocalKemerBetSession,
+    'executeRoutineOneUseDeposit' | 'isSignedInVerified' | 'stop'
+  >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
 }
@@ -38,6 +41,12 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
   const done = (async (): Promise<RoutineDepositWorkerResult> => {
     try {
       while (!controller.signal.aborted) {
+        // A signed launch proof does not mean KemerBet is still authenticated. Stop claiming
+        // work when its page returns to login; the database watchdog can close live gates.
+        if (!options.session.isSignedInVerified()) {
+          await delay(idleDelayMs, controller.signal);
+          continue;
+        }
         // The await is the execution sequence: reconciliation finishes before the next run.
         const result = await worker.runOnce();
         try {

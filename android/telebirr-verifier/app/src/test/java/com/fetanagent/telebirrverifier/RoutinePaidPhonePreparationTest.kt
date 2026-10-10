@@ -74,7 +74,10 @@ class RoutinePaidPhonePreparationTest {
     validUntil = "2026-10-06T17:00:00.000Z",
   )
 
-  private fun assignment(): RoutineSignedLookupAssignment {
+  private fun assignment(
+    issuedAt: String = "2026-10-05T18:02:00.000Z",
+    expiresAt: String = "2026-10-05T18:05:00.000Z",
+  ): RoutineSignedLookupAssignment {
     val body = RoutineLookupAssignmentBody(
       candidateId = "8b9b4a1c-616d-495b-a259-56d39ffef5d1",
       rawReference = PILOT_REFERENCE,
@@ -93,8 +96,8 @@ class RoutinePaidPhonePreparationTest {
       challengeId = "328535af-2636-44cd-84be-6effdfe9cac1",
       challengeDigest = repeatedDigest('d'),
       sourceProfile = RoutineTelebirrLookupProtocol.SOURCE_PROFILE,
-      issuedAt = "2026-10-05T18:02:00.000Z",
-      expiresAt = "2026-10-05T18:05:00.000Z",
+      issuedAt = issuedAt,
+      expiresAt = expiresAt,
     )
     return RoutineSignedLookupAssignment(
       bodyDigest = RoutineLookupCanonicalTranscripts.bodyDigest(body),
@@ -213,6 +216,28 @@ class RoutinePaidPhonePreparationTest {
     assertEquals(RoutinePaidPhonePreparationResult.NoAssignment,
       run(preparation(fixed, ProviderTransport { error("No receipt request") })))
     assertNull(workStore.load())
+  }
+
+  @Test fun `paid assignment issued after poll starts uses a fresh assessment clock`() {
+    val afterPoll = Instant.parse("2026-10-05T18:03:02.000Z").toEpochMilli()
+    val issuedAfterPollStart = assignment(issuedAt = "2026-10-05T18:03:01.000Z")
+    var clockReads = 0
+    var receiptCalls = 0
+    val fixed = exchange { path, contentType, _ ->
+      assertEquals(RoutinePaidBridgeProtocol.POLL_PATH, path)
+      DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse(issuedAfterPollStart))
+    }
+    val preparation = RoutinePaidPhonePreparation(fixed,
+      RoutineTelebirrObservationCollector(ProviderTransport {
+        receiptCalls++
+        error("offline")
+      }, clock = MillisClock { afterPoll }),
+      workStore, MillisClock { if (++clockReads == 1) now else afterPoll })
+    assertEquals(RoutinePaidPhonePreparationResult.Review("transport_unavailable"),
+      run(preparation))
+    assertEquals(1, receiptCalls)
+    assertTrue(clockReads >= 2)
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Assignment)
   }
 
   @Test fun `signed paid assignment persists before lookup and observation stays sealed`() {

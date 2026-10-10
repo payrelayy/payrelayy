@@ -209,11 +209,11 @@ assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /"pairing_only" -> "0\.5\.15-secure-pairing"/);
-assert.match(androidBuild, /routinePaidPhoneEnabled -> "0\.5\.24-routine-paid-transport"/);
+assert.match(androidBuild, /routinePaidPhoneEnabled -> "0\.5\.25-routine-paid-assignment-clock"/);
 assert.match(androidBuild, /routineLookupTrust != null -> "0\.5\.17-routine-no-money"/);
 assert.match(
   androidBuild,
-  /versionCode = if \(routinePaidPhoneEnabled\) 29 else if \(routineLookupTrust != null\) 22 else 20/,
+  /versionCode = if \(routinePaidPhoneEnabled\) 30 else if \(routineLookupTrust != null\) 22 else 20/,
 );
 assert.match(androidBuild, /buildConfigField\("boolean", "ROUTINE_PAID_ENABLED", "false"\)/);
 assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);

@@ -385,8 +385,9 @@ async function handleTelebirrDestination(
 ): Promise<TelegramPrivateActionResult> {
   const livePaymentPresentation =
     config.financialActionsMode === 'live' &&
-    !config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled &&
-    !config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled;
+    !config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled;
+  // The private SQL wrapper selects the legacy pilot or routine Owner authority.
+  // Its payments_enabled result is still required before protected details open.
   const semanticHmac = validateSemanticHmac(
     createTelegramActionSemanticHmac({
       consumer: livePaymentPresentation

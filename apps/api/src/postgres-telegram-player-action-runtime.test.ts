@@ -356,8 +356,19 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(JSON.stringify(calls)).not.toContain('must-not-be-opened');
   });
 
-  it('never presents a payable TeleBirr destination while production candidate routing is selected', async () => {
+  it('presents a payable TeleBirr destination only when routine production and SQL authority are live', async () => {
     const calls: string[] = [];
+    const protectedReceiver = protectReceiverAccountReference(
+      {
+        provider: 'telebirr',
+        reference: '0000000042',
+        secrets: {
+          encryptionSecret: '1'.repeat(64),
+          fingerprintSecret: '2'.repeat(64),
+        },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
     const database: TelegramPlayerActionDatabase = {
       async query(query) {
         calls.push(query);
@@ -372,14 +383,16 @@ describe('Postgres Telegram Player-ID action runtime', () => {
             ],
           };
         }
-        if (query.includes('prepare_telegram_telebirr_destination')) {
+        if (query.includes('prepare_telegram_live_telebirr_destination')) {
           return {
             rows: [
               {
                 provider_code: 'telebirr',
                 receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
                 receiver_account_holder_name: 'Demo Receiver',
-                receiver_account_masked: '***0042',
+                receiver_account_reference_ciphertext: protectedReceiver.ciphertext,
+                receiver_account_reference_fingerprint: protectedReceiver.fingerprint,
+                receiver_account_masked: protectedReceiver.masked,
                 payments_enabled: true,
                 request_replayed: false,
               },
@@ -410,9 +423,12 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         action,
         Buffer.from(JSON.stringify(action), 'utf8'),
       ),
-    ).resolves.toMatchObject({ outcome: 'telebirr_deposit_preview', acceptsPayments: false });
-    expect(calls[1]).toContain('prepare_telegram_telebirr_destination');
-    expect(calls[1]).not.toContain('prepare_telegram_live_telebirr_destination');
+    ).resolves.toMatchObject({
+      outcome: 'telebirr_deposit_destination',
+      receiverAccountReference: '0000000042',
+      acceptsPayments: true,
+    });
+    expect(calls[1]).toContain('prepare_telegram_live_telebirr_destination');
   });
 
   it('opens a non-submittable 25 ETB receiver review with payment authorization disabled', async () => {

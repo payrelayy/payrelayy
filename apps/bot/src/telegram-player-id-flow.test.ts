@@ -205,8 +205,8 @@ describe('Telegram Player-ID flow presentation', () => {
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('📱 Number: 0000000042');
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
-      expect(presentation.text).toContain('Amount: send exactly 25 ETB in TeleBirr.');
-      expect(presentation.text).not.toContain('25–25,000 ETB');
+      expect(presentation.text).toContain('Amount: choose 25–25,000 ETB in TeleBirr.');
+      expect(presentation.text).not.toContain('send exactly 25 ETB');
       expect(presentation.text).toContain('valid for at most 10 minutes');
       expect(presentation.text).not.toContain('valid for 12 hours');
       expect(presentation.text).toContain(

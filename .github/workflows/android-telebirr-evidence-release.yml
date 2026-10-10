@@ -232,8 +232,8 @@ jobs:
             grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
             grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
             if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-              grep -Fq 'VERSION_NAME = "0.5.23-routine-poll-pacing"' "$build_config"
-              grep -Fq 'VERSION_CODE = 28' "$build_config"
+              grep -Fq 'VERSION_NAME = "0.5.24-routine-paid-transport"' "$build_config"
+              grep -Fq 'VERSION_CODE = 29' "$build_config"
               grep -Fq 'ROUTINE_PAID_ENABLED = true' "$build_config"
             else
               grep -Fq 'VERSION_NAME = "0.5.17-routine-no-money"' "$build_config"
@@ -264,7 +264,7 @@ jobs:
           install -d -m 0700 "$artifact_dir"
           if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
             if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.23-production-routine-poll-pacing.apk'
+              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.24-production-routine-paid-transport.apk'
             else
               artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
             fi

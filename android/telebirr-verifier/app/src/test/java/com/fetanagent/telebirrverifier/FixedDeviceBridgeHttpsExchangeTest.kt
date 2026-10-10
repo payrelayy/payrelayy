@@ -10,6 +10,26 @@ import org.junit.Test
 
 class FixedDeviceBridgeHttpsExchangeTest {
   @Test
+  fun `shared HTTPS transport admits both paid routes without widening arbitrary media types`() {
+    listOf(
+      DeviceBridgeProtocol.CONTENT_TYPE,
+      RoutineNoMoneyBridgeProtocol.CONTENT_TYPE,
+      RoutinePaidBridgeProtocol.CONTENT_TYPE,
+      RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE,
+    ).forEach { contentType ->
+      assertTrue(isAllowedDeviceBridgeContentType(contentType))
+    }
+    listOf(
+      "application/json",
+      "application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json; charset=utf-8",
+      "application/vnd.fetanagent.telebirr-routine-paid-poll.v2+json",
+      "application/vnd.fetanagent.telebirr-routine-paid-observation.v2+json",
+    ).forEach { contentType ->
+      assertFalse(isAllowedDeviceBridgeContentType(contentType))
+    }
+  }
+
+  @Test
   fun `accepts only code-owned production or staging routing targets`() {
     FixedDeviceBridgeHttpsExchange(FixedDeviceBridgeHttpsExchange.PRODUCTION_DEPLOYMENT_TARGET)
     FixedDeviceBridgeHttpsExchange(FixedDeviceBridgeHttpsExchange.STAGING_DEPLOYMENT_TARGET)

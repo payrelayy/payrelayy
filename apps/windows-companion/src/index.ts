@@ -108,6 +108,19 @@ function reportRoutinePreflightDiagnostic(stage: LocalKemerBetRoutinePreflightSt
   );
 }
 
+function reportNoMoneyPreflightResult(status: 'completed' | 'failed'): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'routine_no_money_preflight_result',
+      status,
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      moneyMoved: false,
+    }),
+  );
+}
+
 function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): void {
   const state = result?.devicePaired
     ? 'paired'
@@ -310,6 +323,20 @@ export async function runWindowsCompanion(): Promise<void> {
         executionDeadlineMs === undefined ? undefined : executionDeadlineMs - Date.now();
       if (handoff && (remainingExecutionMs === undefined || remainingExecutionMs <= 0)) {
         throw new Error('The guarded Windows companion execution deadline is unavailable.');
+      }
+      if (config.routineNoMoneyPreflight) {
+        // This one-use mode starts no lookup or deposit queue. The session method only
+        // prepares the UI and never requests a fence or clicks the transfer action.
+        try {
+          await session.rehearseNoMoneyRoutinePreflight(
+            config.routineNoMoneyPreflight.playerId,
+            config.routineNoMoneyPreflight.amountMinor,
+          );
+          reportNoMoneyPreflightResult('completed');
+        } catch {
+          reportNoMoneyPreflightResult('failed');
+        }
+        return;
       }
       const handoffExpiryTimer =
         remainingExecutionMs === undefined

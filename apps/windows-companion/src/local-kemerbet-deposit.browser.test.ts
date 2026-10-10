@@ -5,6 +5,7 @@ import {
   createLocalKemerBetDepositAuthorization,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
+  rehearseNoMoneyRoutineDepositPreflight,
   type LocalKemerBetRoutineFinalAction,
 } from './local-kemerbet-deposit.js';
 import { createLocalKemerBetLookupAuthorization } from './local-kemerbet-lookup.js';
@@ -172,6 +173,32 @@ describe.skipIf(process.platform !== 'win32')(
       },
       15000,
     );
+
+    it('rehearses the real preparation path without granting a transfer or submitting', async () => {
+      const { page, lookup, deposit, submitted, blocked } = await startFixture();
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(await amountText(page)).toBe('25.00');
+      expect(stages).toEqual([
+        'preflight_started',
+        'search_surface_ready',
+        'player_lookup_started',
+        'player_lookup_verified',
+        'amount_prepared',
+        'no_money_rehearsal_completed',
+      ]);
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
+      expect(
+        deposit.consumeExactRequest('POST', DEPOSIT_URL, {
+          playerId: 42,
+          amount: 25,
+          notes: '',
+        }),
+      ).toBeUndefined();
+    }, 15000);
 
     it('retains the existing pilot UI path at exactly 25 ETB', async () => {
       const { page, lookup, deposit, submitted } = await startFixture();

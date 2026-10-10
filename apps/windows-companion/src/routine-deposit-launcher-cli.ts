@@ -6,6 +6,7 @@ import { dirname, resolve, win32 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { verifyCompanionLaunchProof } from '@fetanagent/agent-platform-companion-execution-contracts';
+import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR } from '@fetanagent/domain';
 
 import { loadCompanionDeviceSigningRuntime } from './device-enrollment.js';
 import { verifyWindowsCompanionInstallationTree } from './installation-tree.js';
@@ -15,6 +16,8 @@ import {
 } from './launch-proof-channel.js';
 
 const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const PREFLIGHT_AMOUNT = /^(?:[1-9][0-9]{0,6})$/u;
 const RELEASE = /^[0-9a-f]{40}$/u;
 const TREE_DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const PIPE_PREFIX = '\\\\.\\pipe\\fetanagent-companion-launch-';
@@ -70,14 +73,21 @@ function safeWindowsEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return result;
 }
 
-function exactInput(environment: NodeJS.ProcessEnv): {
+export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv): {
   readonly accountId: string;
   readonly dataRoot: string;
   readonly releaseSha: string;
+  readonly noMoneyPreflight?: { readonly playerId: string; readonly amountMinor: number };
 } {
   const accountId = environment.FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID;
   const dataRoot = environment.FETANAGENT_COMPANION_DATA_ROOT;
   const releaseSha = environment.FETANAGENT_COMPANION_RELEASE_SHA;
+  const preflightPlayerId = environment.FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID;
+  const preflightAmountText = environment.FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR;
+  const preflightAmountMinor =
+    preflightAmountText && PREFLIGHT_AMOUNT.test(preflightAmountText)
+      ? Number(preflightAmountText)
+      : undefined;
   if (
     !accountId ||
     !ACCOUNT_ID.test(accountId) ||
@@ -87,13 +97,33 @@ function exactInput(environment: NodeJS.ProcessEnv): {
     /[\u0000-\u001f\u007f]/u.test(dataRoot) ||
     !releaseSha ||
     !RELEASE.test(releaseSha) ||
+    ((preflightPlayerId !== undefined || preflightAmountText !== undefined) &&
+      (!preflightPlayerId ||
+        !PLAYER_ID.test(preflightPlayerId) ||
+        preflightAmountMinor === undefined ||
+        preflightAmountMinor < DEPOSIT_MINIMUM_MINOR ||
+        preflightAmountMinor > DEPOSIT_MAXIMUM_MINOR)) ||
     environment.INTERNAL_COMPANION_EXECUTION_V2_ENABLED !== undefined ||
     environment.INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED !== undefined ||
+    environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID !== undefined ||
+    environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR !== undefined ||
     environment.NODE_OPTIONS !== undefined
   ) {
     return unavailable();
   }
-  return Object.freeze({ accountId, dataRoot: win32.normalize(dataRoot), releaseSha });
+  return Object.freeze({
+    accountId,
+    dataRoot: win32.normalize(dataRoot),
+    releaseSha,
+    ...(preflightPlayerId === undefined || preflightAmountMinor === undefined
+      ? {}
+      : {
+          noMoneyPreflight: Object.freeze({
+            playerId: preflightPlayerId,
+            amountMinor: preflightAmountMinor,
+          }),
+        }),
+  });
 }
 
 async function closeServer(server: Server): Promise<void> {
@@ -113,7 +143,7 @@ async function stopChild(child: ChildProcess): Promise<void> {
 
 async function main(): Promise<void> {
   if (process.platform !== 'win32' || process.argv.length !== 2) return unavailable();
-  const input = exactInput(process.env);
+  const input = parseRoutineDepositLauncherInput(process.env);
   const installationRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const treeDigest = (
     await readFile(resolve(installationRoot, 'INSTALLATION_TREE_SHA256'), 'utf8')
@@ -153,6 +183,14 @@ async function main(): Promise<void> {
         FETANAGENT_COMPANION_RELEASE_SHA: input.releaseSha,
         INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
         FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID: input.accountId,
+        ...(input.noMoneyPreflight === undefined
+          ? {}
+          : {
+              INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: input.noMoneyPreflight.playerId,
+              INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: String(
+                input.noMoneyPreflight.amountMinor,
+              ),
+            }),
         FETANAGENT_COMPANION_LAUNCH_CHALLENGE: challenge,
         FETANAGENT_COMPANION_LAUNCH_PIPE: pipePath,
       },

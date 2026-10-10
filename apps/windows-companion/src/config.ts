@@ -1,11 +1,14 @@
 import { existsSync } from 'node:fs';
 import { win32 } from 'node:path';
 
+import { isRoutineDepositAmountMinor } from './local-kemerbet-deposit.js';
+
 const { isAbsolute, resolve } = win32;
 
 const RELEASE_PATTERN = /^(?:[0-9a-f]{40}|local-development)$/u;
 const PLATFORM_AGENT_ACCOUNT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 export const PRODUCTION_COMPANION_EXECUTION_SIGNER_KEY_ID =
   'companion-execution-production-v1' as const;
@@ -20,6 +23,10 @@ export interface WindowsCompanionConfig {
   readonly executionV2ExpectedPlatformAgentAccountId?: string;
   readonly routineDepositsEnabled: boolean;
   readonly routineExpectedPlatformAgentAccountId?: string;
+  readonly routineNoMoneyPreflight?: {
+    readonly playerId: string;
+    readonly amountMinor: number;
+  };
   readonly expectedAgentIdentityProvided: boolean;
   readonly pairingPackageProvided: boolean;
   readonly profileRoot: string;
@@ -114,6 +121,27 @@ export function loadWindowsCompanionConfig(
   if (routineDepositsEnabled && routineExpectedPlatformAgentAccountId === undefined) {
     throw new Error('FetanAgent Companion routine-deposit account binding is required.');
   }
+  const preflightPlayerId = environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID;
+  const preflightAmountText = environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR;
+  delete environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID;
+  delete environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR;
+  const preflightAmountMinor =
+    preflightAmountText !== undefined && /^[1-9][0-9]{0,6}$/u.test(preflightAmountText)
+      ? Number(preflightAmountText)
+      : undefined;
+  if (
+    (preflightPlayerId !== undefined || preflightAmountText !== undefined) &&
+    (!routineDepositsEnabled ||
+      preflightPlayerId === undefined ||
+      !PLAYER_ID_PATTERN.test(preflightPlayerId) ||
+      !isRoutineDepositAmountMinor(preflightAmountMinor))
+  ) {
+    throw new Error('FetanAgent Companion no-money routine preflight is invalid.');
+  }
+  const routineNoMoneyPreflight =
+    preflightPlayerId === undefined || preflightAmountMinor === undefined
+      ? undefined
+      : Object.freeze({ playerId: preflightPlayerId, amountMinor: preflightAmountMinor });
   return Object.freeze({
     dataRoot,
     executionV2Enabled,
@@ -124,6 +152,7 @@ export function loadWindowsCompanionConfig(
     ...(routineExpectedPlatformAgentAccountId === undefined
       ? {}
       : { routineExpectedPlatformAgentAccountId }),
+    ...(routineNoMoneyPreflight === undefined ? {} : { routineNoMoneyPreflight }),
     expectedAgentIdentityProvided,
     pairingPackageProvided,
     profileRoot: resolve(dataRoot, 'profiles', 'kemerbet', 'primary'),
@@ -149,6 +178,7 @@ export function redactedWindowsCompanionConfig(config: WindowsCompanionConfig) {
       config.executionV2ExpectedPlatformAgentAccountId !== undefined,
     routineDepositsEnabled: config.routineDepositsEnabled,
     routineExpectedAccountConfigured: config.routineExpectedPlatformAgentAccountId !== undefined,
+    routineNoMoneyPreflight: config.routineNoMoneyPreflight !== undefined,
     expectedAgentIdentityProvided: config.expectedAgentIdentityProvided,
     pairingPackageProvided: config.pairingPackageProvided,
     profileConfigured: config.profileRoot.length > 0,

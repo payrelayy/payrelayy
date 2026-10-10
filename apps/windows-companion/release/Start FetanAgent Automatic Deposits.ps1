@@ -1,11 +1,25 @@
 param(
   [switch] $CheckOnly,
-  [string] $CheckDataRoot
+  [string] $CheckDataRoot,
+  [string] $NoMoneyPreflightPlayerId,
+  [int] $NoMoneyPreflightAmountMinor
 )
 
 $ErrorActionPreference = 'Stop'
 
 try {
+  $preflightPlayerProvided = $PSBoundParameters.ContainsKey('NoMoneyPreflightPlayerId')
+  $preflightAmountProvided = $PSBoundParameters.ContainsKey('NoMoneyPreflightAmountMinor')
+  if ($preflightPlayerProvided -ne $preflightAmountProvided -or
+      ($CheckOnly -and $preflightPlayerProvided)) {
+    throw 'A complete no-money preflight is required for this mode.'
+  }
+  if ($preflightPlayerProvided -and (
+      $NoMoneyPreflightPlayerId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or
+      $NoMoneyPreflightAmountMinor -lt 2500 -or
+      $NoMoneyPreflightAmountMinor -gt 2500000)) {
+    throw 'The no-money preflight target is invalid.'
+  }
   if ($CheckDataRoot -and (-not $CheckOnly -or
       -not [System.IO.Path]::IsPathRooted($CheckDataRoot))) {
     throw 'A check-only directory was used for execution.'
@@ -15,10 +29,14 @@ try {
     'INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED',
     'FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID',
     'FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID',
+    'FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID',
+    'FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR',
+    'INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID',
+    'INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR',
     'NODE_OPTIONS',
     'NODE_PATH'
   )) {
-    if ([Environment]::GetEnvironmentVariable($name, 'Process')) {
+    if ([Environment]::GetEnvironmentVariable($name, 'Process') -ne $null) {
       throw 'An ambient protected-launch setting is not allowed.'
     }
   }
@@ -94,9 +112,18 @@ try {
   $env:FETANAGENT_COMPANION_RELEASE_SHA = $releaseSha
   $env:FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID =
     $parsed.platformAgentAccountId
+  if ($preflightPlayerProvided) {
+    $env:FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID = $NoMoneyPreflightPlayerId
+    $env:FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR =
+      [string]$NoMoneyPreflightAmountMinor
+  }
   & $node $entry
   if ($LASTEXITCODE -ne 0) { throw 'The protected routine-deposit session stopped.' }
-  Write-Output 'The protected routine-deposit session ended. Review any unfinished attempt before restarting.'
+  if ($preflightPlayerProvided) {
+    Write-Output 'The no-money preflight session ended. No transfer was authorized.'
+  } else {
+    Write-Output 'The protected routine-deposit session ended. Review any unfinished attempt before restarting.'
+  }
   exit 0
 } catch {
   [Console]::Error.WriteLine(

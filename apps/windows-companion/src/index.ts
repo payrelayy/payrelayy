@@ -27,6 +27,7 @@ import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
 } from './local-kemerbet-session.js';
+import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 import {
   runCompanionExecutionWorker,
   type CompanionExecutionWorkerEvent,
@@ -79,6 +80,19 @@ function report(event: LocalKemerBetSessionEvent): void {
       'Local KemerBet identity verification failed closed. Reopen the reviewed companion and confirm the exact agent header locally.',
     );
   }
+}
+
+function reportProviderSessionDiagnostic(state: ProviderSessionDiagnosticEvent): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'provider_session_diagnostic',
+      state,
+      detailsRedacted: true,
+      credentialsRedacted: true,
+      moneyMoved: false,
+    }),
+  );
 }
 
 function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): void {
@@ -180,7 +194,7 @@ export async function runWindowsCompanion(): Promise<void> {
     }),
   );
   const pairingPackage = config.takePairingPackage();
-  const session = await startLocalKemerBetSession(config, report);
+  const session = await startLocalKemerBetSession(config, report, reportProviderSessionDiagnostic);
   const lookupAbort = new AbortController();
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   let guardedShutdown: GuardedPrePermitShutdown | undefined;

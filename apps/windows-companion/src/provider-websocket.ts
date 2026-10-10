@@ -6,6 +6,15 @@ const ADMIN_SESSION_SOCKET_ORIGIN = 'wss://admin-api.agt-digi.com';
 const MAX_SESSION_SOCKET_FRAME_BYTES = 4_096;
 const SIGNALR_RECORD_SEPARATOR = '\u001e';
 
+export type ProviderSessionTransportEvent =
+  | 'admin_socket_admitted'
+  | 'admin_socket_blocked_phase'
+  | 'admin_socket_blocked_url'
+  | 'admin_socket_handshake_forwarded'
+  | 'admin_socket_update_forwarded'
+  | 'admin_socket_frame_rejected'
+  | 'admin_socket_send_failed';
+
 function plainRecord(value: unknown): value is Record<string, unknown> {
   return (
     typeof value === 'object' &&
@@ -120,14 +129,29 @@ export function isReviewedSessionWebSocketMessage(
 export async function installProviderSessionWebSocketBoundary(
   context: BrowserContext,
   phase: () => LocalKemerBetGuardPhase,
+  reportDiagnostic: (event: ProviderSessionTransportEvent) => void = () => undefined,
 ): Promise<void> {
   await context.routeWebSocket('**/*', (socket) => {
-    if (phase() !== 'signed_in_read_only' || !isReviewedAdminSessionWebSocketUrl(socket.url())) {
+    const rawUrl = socket.url();
+    const reviewedUrl = isReviewedAdminSessionWebSocketUrl(rawUrl);
+    if (phase() !== 'signed_in_read_only' || !reviewedUrl) {
+      if (reviewedUrl) reportDiagnostic('admin_socket_blocked_phase');
+      else {
+        try {
+          const url = new URL(rawUrl);
+          if (url.origin === ADMIN_SESSION_SOCKET_ORIGIN && url.pathname === '/ws') {
+            reportDiagnostic('admin_socket_blocked_url');
+          }
+        } catch {
+          // The existing boundary closes malformed URLs without inspecting their contents.
+        }
+      }
       void socket
         .close({ code: 1008, reason: 'Unreviewed provider transport' })
         .catch(() => undefined);
       return;
     }
+    reportDiagnostic('admin_socket_admitted');
     const server: WebSocketRoute = socket.connectToServer();
     let handshakeComplete = false;
     socket.onMessage((message) => {
@@ -135,15 +159,21 @@ export async function installProviderSessionWebSocketBoundary(
         phase() !== 'signed_in_read_only' ||
         !isReviewedSessionWebSocketMessage(message, handshakeComplete)
       ) {
+        reportDiagnostic('admin_socket_frame_rejected');
         void socket
           .close({ code: 1008, reason: 'Unreviewed provider message' })
           .catch(() => undefined);
         return;
       }
-      handshakeComplete = true;
       try {
         server.send(message);
+        if (!handshakeComplete) reportDiagnostic('admin_socket_handshake_forwarded');
+        else if (message.includes('"UpdateSession"')) {
+          reportDiagnostic('admin_socket_update_forwarded');
+        }
+        handshakeComplete = true;
       } catch {
+        reportDiagnostic('admin_socket_send_failed');
         void socket
           .close({ code: 1011, reason: 'Provider session unavailable' })
           .catch(() => undefined);

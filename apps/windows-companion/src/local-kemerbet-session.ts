@@ -31,6 +31,10 @@ import {
   type LocalKemerBetDepositDispatchOutcome,
 } from './provider-route.js';
 import type { LocalKemerBetGuardPhase } from './request-guard.js';
+import {
+  installProviderSessionPassiveDiagnostics,
+  type ProviderSessionDiagnosticEvent,
+} from './provider-session-diagnostic.js';
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
@@ -130,6 +134,7 @@ async function assertStableProfilePath(profileRoot: string): Promise<void> {
 export async function startLocalKemerBetSession(
   config: WindowsCompanionConfig,
   report: (event: LocalKemerBetSessionEvent) => void,
+  reportDiagnostic: (event: ProviderSessionDiagnosticEvent) => void = () => undefined,
 ): Promise<LocalKemerBetSession> {
   report({ state: 'starting', transferDisabled: true, detailsRedacted: true });
 
@@ -274,12 +279,13 @@ export async function startLocalKemerBetSession(
     // KemerBet's admin hub requests a refresh token when its session needs renewal. Admit only
     // that exact socket and its non-financial UpdateSession invocation; all other sockets close.
     // The separate HTTP guard still confines the resulting refresh to /Account/RefreshToken.
-    await installProviderSessionWebSocketBoundary(context, () => phase);
+    await installProviderSessionWebSocketBoundary(context, () => phase, reportDiagnostic);
 
     const pages = context.pages();
     const page = pages[0] ?? (await context.newPage());
     localPage = page;
     for (const extra of pages.slice(1)) await extra.close();
+    installProviderSessionPassiveDiagnostics(context, page, reportDiagnostic);
 
     await installProviderMutationBoundary(
       context,

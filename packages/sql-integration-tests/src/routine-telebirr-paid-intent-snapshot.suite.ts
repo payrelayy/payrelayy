@@ -49,14 +49,16 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
             from pg_catalog.pg_proc routine
            where routine.oid =
              'app.populate_routine_telebirr_paid_intent_snapshot()'::regprocedure`);
-      expect(snapshotGuard.rows).toEqual([{
-        owner: 'postgres',
-        security_definer: true,
-        config: ['search_path=pg_catalog'],
-        exact_session_guard: true,
-        retired_postgres_only_guard: false,
-        owner_only_execute: true,
-      }]);
+      expect(snapshotGuard.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: true,
+          config: ['search_path=pg_catalog'],
+          exact_session_guard: true,
+          retired_postgres_only_guard: false,
+          owner_only_execute: true,
+        },
+      ]);
       const settlementSurface = await client.query<{
         can_insert_intent: boolean;
         can_execute_snapshot: boolean;
@@ -67,10 +69,12 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
                    'fetanagent_routine_telebirr_paid_settlement_runtime',
                    'app.populate_routine_telebirr_paid_intent_snapshot()', 'EXECUTE')
                    as can_execute_snapshot`);
-      expect(settlementSurface.rows).toEqual([{
-        can_insert_intent: false,
-        can_execute_snapshot: false,
-      }]);
+      expect(settlementSurface.rows).toEqual([
+        {
+          can_insert_intent: false,
+          can_execute_snapshot: false,
+        },
+      ]);
       for (const role of [
         'anon',
         'authenticated',

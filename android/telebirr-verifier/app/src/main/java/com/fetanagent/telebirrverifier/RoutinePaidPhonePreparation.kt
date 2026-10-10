@@ -185,11 +185,22 @@ internal class RoutinePaidPhonePreparation(
         receiverProfileDigest = body.receiverProfileDigest,
       )
     }
+    // The broker issues the challenge after the poll starts, so the pre-poll
+    // enrollment timestamp cannot be used to assess the returned assignment.
+    val assignmentAssessedMillis = try { clock.nowMillis() } catch (_: Exception) {
+      return RoutinePaidPhonePreparationResult.Review("clock_unavailable")
+    }
+    val assignmentAssessedAt = try {
+      DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(
+        Instant.ofEpochMilli(assignmentAssessedMillis))
+    } catch (_: Exception) {
+      return RoutinePaidPhonePreparationResult.Review("clock_unavailable")
+    }
     val assessment = RoutineLookupAssignmentVerifier.verify(assignmentSigner, enrollment,
-      signedAssignment, assignmentSignerSpkiDer, material, assessedAt)
+      signedAssignment, assignmentSignerSpkiDer, material, assignmentAssessedAt)
     if (assessment.authenticatedAssignment == null) {
       if (assessment.reasonCode == "lookup_expired" && pending is RoutinePaidPendingWork.Assignment) {
-        try { workStore.discardExpiredAssignment(now) } catch (_: Exception) {
+        try { workStore.discardExpiredAssignment(assignmentAssessedMillis) } catch (_: Exception) {
           return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
         }
       }

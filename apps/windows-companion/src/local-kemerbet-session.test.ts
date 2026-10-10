@@ -205,7 +205,7 @@ function fakeAccountInfoResponse({
 
 const sessions: LocalKemerBetSession[] = [];
 
-async function start(landingUrl = AGENTS_URL) {
+async function start(landingUrl = AGENTS_URL, sessionConfig = config) {
   const order: string[] = [];
   const context = new FakeContext(order);
   const events: LocalKemerBetSessionEvent[] = [];
@@ -218,7 +218,7 @@ async function start(landingUrl = AGENTS_URL) {
     order.push('context:launch');
     return context;
   });
-  const session = await startLocalKemerBetSession(config, (event) => events.push(event));
+  const session = await startLocalKemerBetSession(sessionConfig, (event) => events.push(event));
   // Expected deadline failures are consumed before timers run, avoiding unhandled test promises.
   void session.done.catch(() => undefined);
   sessions.push(session);
@@ -371,6 +371,48 @@ describe('local KemerBet enrollment session', () => {
     expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)?.reason).toBe('provider_request_failed');
     expect(JSON.stringify(events)).not.toContain('redacted navigation failure');
+  });
+
+  it('keeps signed routine Chrome open beyond 24 hours while re-verifying each guarded refresh', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, page, session } = await start(AGENTS_URL, routineConfig);
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+
+    expect(context.close).not.toHaveBeenCalled();
+    expect(page.reload.mock.calls.length).toBeGreaterThan(100);
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(
+      page.reload.mock.calls.length + 1,
+    );
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
+  it('keeps routine Chrome open but pauses work after provider logout until manual reauthentication', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, page, session } = await start(AGENTS_URL, routineConfig);
+    page.navigate(LOGIN_URL);
+    expect(session.isSignedInVerified()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+    expect(context.close).not.toHaveBeenCalled();
+    expect(page.reload).not.toHaveBeenCalled();
+    expect(events.at(-1)?.state).toBe('login_required');
+
+    page.navigate(AGENTS_URL);
+    await settleIdentityVerification();
+    expect(session.isSignedInVerified()).toBe(true);
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    expect(page.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the first-sign-in deadline for a routine window that was never authenticated', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { events, session } = await start(LOGIN_URL, routineConfig);
+
+    await vi.advanceTimersByTimeAsync(TEN_MINUTES);
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.reason).toBe('login_lifetime_expired');
   });
 
   it('reports a newly created local identity binding without exposing identity material', async () => {

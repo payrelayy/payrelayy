@@ -58,7 +58,11 @@ observed twice, visible signed-out/CAPTCHA markers are absent, and the protected
 matches. Repeated page events do not extend the fixed one-job pilot deadline; that guarded pilot
 session has an overall twelve-hour-ten-minute cap. Routine mode has no client-renewed testing
 window, but every command still requires the current server policy, certificate, account binding,
-runtime activation, one-use claim and fence. Losing any of those stops new work.
+runtime activation, one-use claim and fence. Losing any of those stops new work. In routine mode,
+the same guarded KemerBet page refreshes every eleven minutes and the bound account is verified
+again before more Player work. The routine Chrome window does not close merely because twelve
+hours pass. If KemerBet itself returns to login, credit work pauses and the window waits for you
+to sign in manually; the Companion cannot override KemerBet's own server-session expiry.
 
 The dedicated browser profile is stored at D:\FetanAgent Companion when drive D exists, otherwise
 under the current Windows user's Local AppData folder. Credentials are submitted to KemerBet, and
@@ -67,7 +71,8 @@ provider requests may pass through the companion's local process memory, but sen
 never sent to remote FetanAgent services, Git, or logs.
 
 Chrome starts offline until its request guards are installed. Provider redirects are checked before
-following, and provider service workers and WebSockets are blocked. HTTP caching is disabled while
+following. Provider service workers and all but the exact non-financial admin session WebSocket
+are blocked. HTTP caching is disabled while
 the request guards are active.
 
 Verify the downloaded ZIP against the accompanying .sha256 file before extracting it.

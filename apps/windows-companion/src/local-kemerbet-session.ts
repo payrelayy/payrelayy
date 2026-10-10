@@ -246,6 +246,10 @@ export async function startLocalKemerBetSession(
   };
 
   const armLoginDeadline = (): void => {
+    // A signed routine launch already has a persistent Owner policy and a short server lease.
+    // After its first verified sign-in, leave Chrome open for manual reauthentication if the
+    // provider ends its session; the queue remains unable to claim work while signed out.
+    if (config.routineDepositsEnabled && verifiedSettled) return;
     if (terminal || loginTimer !== undefined) return;
     const deadlineEpoch = ++loginDeadlineEpoch;
     loginTimer = setTimeout(() => {
@@ -260,6 +264,10 @@ export async function startLocalKemerBetSession(
   };
 
   const armCandidateDeadline = (): void => {
+    // Non-routine enrollment/execution windows retain their original non-sliding 12-hour cap.
+    // Routine mode is separately proof-bound, re-verifies the local account on every refresh,
+    // and loses its server lease when the process or verified provider session is unavailable.
+    if (config.routineDepositsEnabled) return;
     if (terminal || candidateTimer !== undefined) return;
     const deadlineEpoch = ++candidateDeadlineEpoch;
     candidateTimer = setTimeout(() => {
@@ -495,14 +503,18 @@ export async function startLocalKemerBetSession(
     });
 
     armLoginDeadline();
-    // Reauthentication cannot extend one browser process indefinitely.
-    sessionTimer = setTimeout(
-      () => {
-        void finish('stopped', 'session_lifetime_complete');
-      },
-      (KEMERBET_MAX_LOGIN_LIFETIME_SECONDS + KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS) * 1_000,
-    );
-    sessionTimer.unref();
+    // The one-use read-only and execution modes keep their hard process cap. A signed routine
+    // launch instead keeps this same guarded window open while the Owner policy and server lease
+    // remain valid; returning to login pauses work rather than silently logging in again.
+    if (!config.routineDepositsEnabled) {
+      sessionTimer = setTimeout(
+        () => {
+          void finish('stopped', 'session_lifetime_complete');
+        },
+        (KEMERBET_MAX_LOGIN_LIFETIME_SECONDS + KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS) * 1_000,
+      );
+      sessionTimer.unref();
+    }
 
     await context.setOffline(false);
 

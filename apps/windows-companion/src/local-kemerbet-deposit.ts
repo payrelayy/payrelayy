@@ -473,7 +473,10 @@ async function inspectPreparedSurface(
   if ((await currency.innerText()).trim() !== 'ETB') {
     return { failure: 'prepared_currency_mismatch' };
   }
-  if ((await amount.inputValue()) !== amountText) {
+  const observedAmount = await amount.inputValue();
+  // KemerBet's amount formatter can prepend exactly one invisible left-to-right mark.
+  // Accept that observed decoration only; a different number or any other text still fails closed.
+  if (observedAmount !== amountText && observedAmount !== `\u200e${amountText}`) {
     return { failure: 'prepared_amount_mismatch' };
   }
   if ((await notes.inputValue()) !== '') return { failure: 'prepared_notes_mismatch' };

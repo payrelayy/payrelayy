@@ -73,6 +73,14 @@ const delayedPreparedHtml = fixtureHtml.replace(
     surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
 );
 
+const directionMarkedAmountHtml = fixtureHtml.replace(
+  `    document.getElementById('transfer').onclick = async () => {`,
+  `    surface.querySelector('[data-placeholder="Enter Amount"] input').addEventListener('input', (event) => {
+      event.currentTarget.value = String.fromCharCode(0x200e) + event.currentTarget.value;
+    });
+    document.getElementById('transfer').onclick = async () => {`,
+);
+
 describe.skipIf(process.platform !== 'win32')(
   'routine deposit UI in isolated Windows Chrome',
   () => {
@@ -256,6 +264,18 @@ describe.skipIf(process.platform !== 'win32')(
         stages.push(stage),
       );
       expect(stages).toContain('prepared_surface_verified');
+      expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
+    }, 15000);
+
+    it('accepts the observed single direction mark on the exact amount without submitting', async () => {
+      const { page, lookup, submitted, blocked } = await startFixture(directionMarkedAmountHtml);
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(await amountText(page)).toBe('\u200e25.00');
       expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
       expect(submitted).toEqual([]);
       expect(blocked).toEqual([]);

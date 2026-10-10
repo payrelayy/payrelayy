@@ -39,6 +39,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
   if (options.signal.aborted) controller.abort();
   const worker = createRoutineDepositWorker({ ...options, signal: controller.signal });
   const done = (async (): Promise<RoutineDepositWorkerResult> => {
+    let consecutiveUnavailable = 0;
     try {
       while (!controller.signal.aborted) {
         // A signed launch proof does not mean KemerBet is still authenticated. Stop claiming
@@ -55,6 +56,15 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           /* Reporting cannot authorize or retry a deposit. */
         }
         if (result.status === 'paused' || result.status === 'stopped') return result;
+        if (result.status === 'temporarily_unavailable') {
+          consecutiveUnavailable++;
+          await delay(
+            Math.min(60_000, 5_000 * 2 ** Math.min(consecutiveUnavailable - 1, 4)),
+            controller.signal,
+          );
+          continue;
+        }
+        consecutiveUnavailable = 0;
         if (result.status !== 'completed') await delay(idleDelayMs, controller.signal);
       }
       return Object.freeze({ status: 'stopped' });

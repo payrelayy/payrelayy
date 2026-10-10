@@ -286,7 +286,7 @@ describe('local KemerBet enrollment session', () => {
         matchesRoute(entry.matcher, url),
       );
       expect(registration).toBeDefined();
-      const close = vi.fn();
+      const close = vi.fn(async () => undefined);
       await registration!.handler({ close, url: () => url });
       expect(close).toHaveBeenCalledWith(expect.objectContaining({ code: 1008 }));
     }

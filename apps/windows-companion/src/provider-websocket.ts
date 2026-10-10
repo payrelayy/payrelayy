@@ -123,7 +123,9 @@ export async function installProviderSessionWebSocketBoundary(
 ): Promise<void> {
   await context.routeWebSocket('**/*', (socket) => {
     if (phase() !== 'signed_in_read_only' || !isReviewedAdminSessionWebSocketUrl(socket.url())) {
-      void socket.close({ code: 1008, reason: 'Unreviewed provider transport' });
+      void socket
+        .close({ code: 1008, reason: 'Unreviewed provider transport' })
+        .catch(() => undefined);
       return;
     }
     const server: WebSocketRoute = socket.connectToServer();
@@ -133,11 +135,19 @@ export async function installProviderSessionWebSocketBoundary(
         phase() !== 'signed_in_read_only' ||
         !isReviewedSessionWebSocketMessage(message, handshakeComplete)
       ) {
-        void socket.close({ code: 1008, reason: 'Unreviewed provider message' });
+        void socket
+          .close({ code: 1008, reason: 'Unreviewed provider message' })
+          .catch(() => undefined);
         return;
       }
       handshakeComplete = true;
-      server.send(message);
+      try {
+        server.send(message);
+      } catch {
+        void socket
+          .close({ code: 1011, reason: 'Provider session unavailable' })
+          .catch(() => undefined);
+      }
     });
   });
 }

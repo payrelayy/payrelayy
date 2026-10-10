@@ -26,6 +26,51 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
       }>(`select relrowsecurity, relforcerowsecurity from pg_class
           where oid = 'app.routine_telebirr_paid_intent_openings'::regclass`);
       expect(catalog.rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
+      const snapshotGuard = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        config: string[];
+        exact_session_guard: boolean;
+        retired_postgres_only_guard: boolean;
+        owner_only_execute: boolean;
+      }>(`select routine.proowner::regrole::text as owner,
+                 routine.prosecdef as security_definer,
+                 routine.proconfig as config,
+                 strpos(routine.prosrc,
+                   'if not app.routine_telebirr_paid_settlement_session_allowed() then') > 0
+                   as exact_session_guard,
+                 strpos(routine.prosrc, 'if session_user <> ''postgres'' then') > 0
+                   as retired_postgres_only_guard,
+                 not exists (
+                   select 1 from pg_catalog.aclexplode(coalesce(routine.proacl,
+                     pg_catalog.acldefault('f', routine.proowner))) privilege
+                   where privilege.privilege_type = 'EXECUTE'
+                     and privilege.grantee <> routine.proowner) as owner_only_execute
+            from pg_catalog.pg_proc routine
+           where routine.oid =
+             'app.populate_routine_telebirr_paid_intent_snapshot()'::regprocedure`);
+      expect(snapshotGuard.rows).toEqual([{
+        owner: 'postgres',
+        security_definer: true,
+        config: ['search_path=pg_catalog'],
+        exact_session_guard: true,
+        retired_postgres_only_guard: false,
+        owner_only_execute: true,
+      }]);
+      const settlementSurface = await client.query<{
+        can_insert_intent: boolean;
+        can_execute_snapshot: boolean;
+      }>(`select has_table_privilege(
+                   'fetanagent_routine_telebirr_paid_settlement_runtime',
+                   'app.deposit_intents', 'INSERT') as can_insert_intent,
+                 has_function_privilege(
+                   'fetanagent_routine_telebirr_paid_settlement_runtime',
+                   'app.populate_routine_telebirr_paid_intent_snapshot()', 'EXECUTE')
+                   as can_execute_snapshot`);
+      expect(settlementSurface.rows).toEqual([{
+        can_insert_intent: false,
+        can_execute_snapshot: false,
+      }]);
       for (const role of [
         'anon',
         'authenticated',

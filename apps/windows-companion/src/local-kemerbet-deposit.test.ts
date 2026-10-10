@@ -1,14 +1,53 @@
-import { describe, expect, it } from 'vitest';
+import type { Page } from 'playwright-core';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   createLocalKemerBetDepositAuthorization,
+  executeRoutineOneUseLocalKemerBetDeposit,
   isRoutineDepositAmountMinor,
+  LocalKemerBetDepositError,
   routineDepositAmountText,
 } from './local-kemerbet-deposit.js';
+import { createLocalKemerBetLookupAuthorization } from './local-kemerbet-lookup.js';
 
 const URL = 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit';
 
 describe('routine receipt-derived amount binding', () => {
+  it('reports only a fixed redacted preflight checkpoint before browser inspection', async () => {
+    const stages: string[] = [];
+    const acquireFinalAction = vi.fn();
+    await expect(
+      executeRoutineOneUseLocalKemerBetDeposit(
+        {} as Page,
+        'private-player-id',
+        2500,
+        createLocalKemerBetLookupAuthorization(),
+        createLocalKemerBetDepositAuthorization(),
+        acquireFinalAction,
+        (stage) => stages.push(stage),
+      ),
+    ).rejects.toThrow();
+    expect(stages).toEqual(['preflight_started']);
+    expect(JSON.stringify(stages)).not.toContain('private-player-id');
+    expect(acquireFinalAction).not.toHaveBeenCalled();
+  });
+
+  it('does not let a diagnostic callback change the guarded preflight result', async () => {
+    await expect(
+      executeRoutineOneUseLocalKemerBetDeposit(
+        {} as Page,
+        '12345',
+        2500,
+        createLocalKemerBetLookupAuthorization(),
+        createLocalKemerBetDepositAuthorization(),
+        vi.fn(),
+        () => {
+          throw new Error('diagnostic failure');
+        },
+      ),
+    ).rejects.toThrow(LocalKemerBetDepositError);
+  });
+
   it.each([
     [2500, '25.00'],
     [2501, '25.01'],

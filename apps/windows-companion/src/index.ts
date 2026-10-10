@@ -27,6 +27,7 @@ import {
   startLocalKemerBetSession,
   type LocalKemerBetSessionEvent,
 } from './local-kemerbet-session.js';
+import type { LocalKemerBetRoutinePreflightStage } from './local-kemerbet-deposit.js';
 import type { ProviderSessionDiagnosticEvent } from './provider-session-diagnostic.js';
 import {
   runCompanionExecutionWorker,
@@ -91,6 +92,18 @@ function reportProviderSessionDiagnostic(state: ProviderSessionDiagnosticEvent):
       detailsRedacted: true,
       credentialsRedacted: true,
       moneyMoved: false,
+    }),
+  );
+}
+
+function reportRoutinePreflightDiagnostic(stage: LocalKemerBetRoutinePreflightStage): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'routine_deposit_preflight_diagnostic',
+      stage,
+      detailsRedacted: true,
+      identifiersRedacted: true,
     }),
   );
 }
@@ -194,7 +207,12 @@ export async function runWindowsCompanion(): Promise<void> {
     }),
   );
   const pairingPackage = config.takePairingPackage();
-  const session = await startLocalKemerBetSession(config, report, reportProviderSessionDiagnostic);
+  const session = await startLocalKemerBetSession(
+    config,
+    report,
+    reportProviderSessionDiagnostic,
+    reportRoutinePreflightDiagnostic,
+  );
   const lookupAbort = new AbortController();
   void session.done.finally(() => lookupAbort.abort()).catch(() => undefined);
   let guardedShutdown: GuardedPrePermitShutdown | undefined;

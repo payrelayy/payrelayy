@@ -67,6 +67,12 @@ const delayedNavigationHtml = fixtureHtml.replace(
 </script>`,
 );
 
+const delayedPreparedHtml = fixtureHtml.replace(
+  `    surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
+  `    await new Promise((resolve) => setTimeout(resolve, 250));
+    surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
+);
+
 describe.skipIf(process.platform !== 'win32')(
   'routine deposit UI in isolated Windows Chrome',
   () => {
@@ -204,6 +210,8 @@ describe.skipIf(process.platform !== 'win32')(
         'search_surface_ready',
         'player_lookup_started',
         'player_lookup_verified',
+        'amount_fields_filled',
+        'prepared_surface_verified',
         'amount_prepared',
         'no_money_rehearsal_completed',
       ]);
@@ -232,9 +240,23 @@ describe.skipIf(process.platform !== 'win32')(
         'search_surface_ready',
         'player_lookup_started',
         'player_lookup_verified',
+        'amount_fields_filled',
+        'prepared_surface_verified',
         'amount_prepared',
         'no_money_rehearsal_completed',
       ]);
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
+    }, 15000);
+
+    it('waits for the exact prepared form after the verified read-only response', async () => {
+      const { page, lookup, submitted, blocked } = await startFixture(delayedPreparedHtml);
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(stages).toContain('prepared_surface_verified');
+      expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
       expect(submitted).toEqual([]);
       expect(blocked).toEqual([]);
     }, 15000);

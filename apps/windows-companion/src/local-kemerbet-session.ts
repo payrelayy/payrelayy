@@ -38,6 +38,11 @@ import {
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
+// KemerBet's agent client returns to login after 900 seconds without a page-level reset. Reload
+// the same guarded page while its Chrome-held session is still valid, with four minutes to spare.
+const KEMERBET_SIGNED_IN_RELOAD_MS = 11 * 60 * 1_000;
+const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
+
 export type LocalKemerBetSessionState =
   | 'starting'
   | 'login_required'
@@ -154,6 +159,7 @@ export async function startLocalKemerBetSession(
   let loginTimer: NodeJS.Timeout | undefined;
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
+  let signedInReloadTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
   let lock: SessionLock | undefined;
@@ -189,6 +195,11 @@ export async function startLocalKemerBetSession(
     candidateTimer = undefined;
   };
 
+  const disarmSignedInReload = (): void => {
+    if (signedInReloadTimer !== undefined) clearTimeout(signedInReloadTimer);
+    signedInReloadTimer = undefined;
+  };
+
   const finish = async (
     state: 'failed' | 'stopped',
     reason?: LocalKemerBetSessionEvent['reason'],
@@ -202,6 +213,7 @@ export async function startLocalKemerBetSession(
     identityVerificationEpoch += 1;
     disarmLoginDeadline();
     disarmCandidateDeadline();
+    disarmSignedInReload();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
     let lockReleased = lock === undefined;
@@ -234,6 +246,10 @@ export async function startLocalKemerBetSession(
   };
 
   const armLoginDeadline = (): void => {
+    // A signed routine launch already has a persistent Owner policy and a short server lease.
+    // After its first verified sign-in, leave Chrome open for manual reauthentication if the
+    // provider ends its session; the queue remains unable to claim work while signed out.
+    if (config.routineDepositsEnabled && verifiedSettled) return;
     if (terminal || loginTimer !== undefined) return;
     const deadlineEpoch = ++loginDeadlineEpoch;
     loginTimer = setTimeout(() => {
@@ -248,12 +264,16 @@ export async function startLocalKemerBetSession(
   };
 
   const armCandidateDeadline = (): void => {
+    // Non-routine enrollment/execution windows retain their original non-sliding 12-hour cap.
+    // Routine mode is separately proof-bound, re-verifies the local account on every refresh,
+    // and loses its server lease when the process or verified provider session is unavailable.
+    if (config.routineDepositsEnabled) return;
     if (terminal || candidateTimer !== undefined) return;
     const deadlineEpoch = ++candidateDeadlineEpoch;
     candidateTimer = setTimeout(() => {
       if (deadlineEpoch !== candidateDeadlineEpoch) return;
       candidateTimer = undefined;
-      if (terminal || !signedInCandidate || !signedInVerified || phase !== 'signed_in_read_only') {
+      if (terminal || phase !== 'signed_in_read_only') {
         return;
       }
       void finish('stopped', 'candidate_lifetime_complete');
@@ -350,6 +370,7 @@ export async function startLocalKemerBetSession(
             ...(result.bindingCreated ? { reason: 'identity_binding_created' as const } : {}),
           });
           armCandidateDeadline();
+          armSignedInReload();
         } catch (error) {
           if (terminal || verificationEpoch !== identityVerificationEpoch) return;
           throw error;
@@ -399,11 +420,38 @@ export async function startLocalKemerBetSession(
         signedInCandidate = false;
         signedInVerified = false;
         lookupAuthorization.clear();
+        depositAuthorization.clear();
         disarmCandidateDeadline();
+        disarmSignedInReload();
         phase = 'manual_login';
         armLoginDeadline();
         report({ state: 'login_required', transferDisabled: true, detailsRedacted: true });
       }
+    };
+
+    const armSignedInReload = (delayMs = KEMERBET_SIGNED_IN_RELOAD_MS): void => {
+      disarmSignedInReload();
+      if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+      signedInReloadTimer = setTimeout(() => {
+        signedInReloadTimer = undefined;
+        if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+        if (operationInProgress) {
+          armSignedInReload(KEMERBET_BUSY_RELOAD_RETRY_MS);
+          return;
+        }
+        // Stop new Player work before changing the provider page. The same bound account must
+        // become visible and pass identity verification again before the queue can resume.
+        signedInVerified = false;
+        identityVerificationEpoch += 1;
+        lookupAuthorization.clear();
+        depositAuthorization.clear();
+        report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+        void page
+          .reload({ waitUntil: 'commit', timeout: 45_000 })
+          .then(() => observePage(page))
+          .catch(() => finish('failed', 'provider_request_failed'));
+      }, delayMs);
+      signedInReloadTimer.unref();
     };
 
     page.on('framenavigated', (frame) => {
@@ -429,6 +477,7 @@ export async function startLocalKemerBetSession(
         depositAuthorization.clear();
         disarmLoginDeadline();
         disarmCandidateDeadline();
+        disarmSignedInReload();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
           .then(() => {
@@ -454,14 +503,18 @@ export async function startLocalKemerBetSession(
     });
 
     armLoginDeadline();
-    // Reauthentication cannot extend one browser process indefinitely.
-    sessionTimer = setTimeout(
-      () => {
-        void finish('stopped', 'session_lifetime_complete');
-      },
-      (KEMERBET_MAX_LOGIN_LIFETIME_SECONDS + KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS) * 1_000,
-    );
-    sessionTimer.unref();
+    // The one-use read-only and execution modes keep their hard process cap. A signed routine
+    // launch instead keeps this same guarded window open while the Owner policy and server lease
+    // remain valid; returning to login pauses work rather than silently logging in again.
+    if (!config.routineDepositsEnabled) {
+      sessionTimer = setTimeout(
+        () => {
+          void finish('stopped', 'session_lifetime_complete');
+        },
+        (KEMERBET_MAX_LOGIN_LIFETIME_SECONDS + KEMERBET_MAX_AUTHENTICATED_LIFETIME_SECONDS) * 1_000,
+      );
+      sessionTimer.unref();
+    }
 
     await context.setOffline(false);
 

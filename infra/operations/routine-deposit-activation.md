@@ -196,10 +196,14 @@ the signed credit-worker lease becomes stale. It allows 90 seconds while idle an
 up to five minutes while an execution or reconciliation attempt is open. Its
 automatic incident stop does not erase or retry an attempt. Review any unfinished
 attempt before restarting the automatic-deposit Companion or reactivating gates.
-The browser's authenticated lifetime is capped at 12 hours, and KemerBet may
-require a human sign-in again; this safeguard prevents the system from silently
-accepting paid deposits indefinitely after the credit worker exits, but it is
-not automatic KemerBet re-authentication.
+The signed routine browser refreshes the same guarded KemerBet page every eleven
+minutes and re-verifies the bound account before new credit work. It stays open
+beyond 24 hours while signed in; the separate non-routine enrollment/execution
+windows retain their twelve-hour cap. If KemerBet itself returns to login, the
+routine window stays open for manual sign-in but stops claiming credit work. The
+short server lease then goes stale and the independent watchdog stops both live
+financial gates; no token is exported from Chrome or used to reauthenticate
+silently. Review any unfinished attempt before reactivating after a logout.
 
 The existing no-money reference is not a paid activation check. Observe the
 first naturally occurring eligible live deposit through the Owner and protected

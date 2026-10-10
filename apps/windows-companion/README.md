@@ -35,12 +35,15 @@ off by default; without the exact opt-in configuration it retains the original r
   response body is sent to remote FetanAgent services, Git, or logs;
 - Chrome starts offline until context-wide request guards are installed; approved provider HTTP
   requests are forwarded locally, with every redirect checked before it is followed;
-- provider service workers and provider WebSockets are disabled so they cannot bypass the HTTP
-  enrollment boundary;
-- the guarded browser stops after ten minutes on the login page or twelve hours after detecting
-  the exact reviewed agent page. Repeated agent-page events do not extend that deadline, and each
-  guarded session has an overall twelve-hour-ten-minute cap. KemerBet may end its own server
-  session earlier.
+- provider service workers are blocked; only the exact non-financial KemerBet admin session
+  WebSocket is admitted, and all other provider WebSockets are blocked;
+- non-routine guarded sessions stop after ten minutes on the login page or twelve hours after
+  detecting the exact reviewed agent page, with an overall twelve-hour-ten-minute cap;
+- the separately signed Automatic Deposits routine session refreshes that same guarded page every
+  eleven minutes, re-verifies the locally bound account before new Player work, and stays open
+  beyond 24 hours while signed in. If KemerBet ends its own server session, new work pauses and
+  the login page stays open for manual sign-in; the Companion does not save a provider token
+  outside Chrome or bypass KemerBet's authentication.
 
 The exact reviewed main-frame `/agents` page first produces only `signed_in_candidate`. The
 companion then rejects visible login/CAPTCHA state, observes exactly one reviewed identity header

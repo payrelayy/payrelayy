@@ -47,9 +47,13 @@ const configured = {
 };
 
 describe('persistent Owner routine processing policy', () => {
-  it('returns unconfigured and persistent policy projections, never a live execution receipt', () => {
+  it('accepts an active routine transport without treating it as a financial switch', () => {
     expect(decodeOwnerRoutineProcessingStatus(baseline)).toEqual(baseline);
     expect(decodeOwnerRoutineProcessingStatus(configured)).toEqual(configured);
+    expect(decodeOwnerRoutineProcessingStatus({ ...configured, executionEnabled: true })).toEqual({
+      ...configured,
+      executionEnabled: true,
+    });
     expect(
       decodeOwnerRoutineProcessingStatus({ ...configured, configurationState: 'stopped' }),
     ).toMatchObject({ configurationState: 'stopped' });
@@ -87,7 +91,12 @@ describe('persistent Owner routine processing policy', () => {
   });
 
   it.each([
-    ['execution flag', { ...configured, executionEnabled: true }],
+    ['non-boolean execution flag', { ...configured, executionEnabled: 'live' }],
+    ['unconfigured active transport', { ...baseline, executionEnabled: true }],
+    [
+      'stopped active transport',
+      { ...configured, configurationState: 'stopped', executionEnabled: true },
+    ],
     ['expiry', { ...configured, expiresAt: '2026-10-06T00:00:00Z' }],
     ['extra secret', { ...configured, credential: 'not-allowed' }],
     ['invalid revision', { ...configured, revision: '9223372036854775808' }],

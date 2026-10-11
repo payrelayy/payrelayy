@@ -449,7 +449,10 @@ describe('persistent routine TeleBirr policy controls', () => {
     });
     expect(browser.element('#routine-processing-status').textContent).toContain('no expiry');
     expect(browser.element('#routine-processing-status').textContent).toContain(
-      'Execution is not enabled',
+      'Routine operator transport inactive',
+    );
+    expect(browser.element('#routine-processing-status').textContent).toContain(
+      'Payment switches are separate',
     );
     expect(
       browser.fetchCalls.filter(({ init }) => init.method === 'POST').map(({ url }) => url),
@@ -504,8 +507,28 @@ describe('persistent routine TeleBirr policy controls', () => {
     expect(browser.element('#routine-processing-stop').disabled).toBe(true);
   });
 
+  it('shows an active routine transport without claiming that payment switches are live', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/routine-telebirr-processing'
+          ? response(200, { configuration: { ...saved, executionEnabled: true } })
+          : profiles(url),
+    });
+    await browser.signIn();
+    expect(browser.element('#routine-processing-status').textContent).toContain(
+      'Routine operator transport active',
+    );
+    expect(browser.element('#routine-processing-status').textContent).toContain(
+      'Payment switches are separate',
+    );
+    expect(browser.element('#routine-processing-save').disabled).toBe(false);
+    expect(browser.element('#routine-processing-stop').disabled).toBe(false);
+    expect(routinePosts(browser)).toHaveLength(0);
+  });
+
   it.each([
-    { ...saved, executionEnabled: true },
+    { ...saved, executionEnabled: 'live' },
+    { ...saved, configurationState: 'stopped', executionEnabled: true },
     { ...saved, expiresAt: '2026-10-05T09:00:00.000Z' },
     { ...saved, policy: { ...saved.policy, successfulDepositQuota: 5 } },
     { ...saved, policy: { ...saved.policy, maxConcurrentDeposits: 2 } },

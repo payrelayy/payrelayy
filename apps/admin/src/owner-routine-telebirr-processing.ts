@@ -21,8 +21,8 @@ export interface OwnerRoutineProcessingPolicy {
 
 export interface OwnerRoutineProcessingStatus {
   readonly configurationState: 'not_configured' | 'authorized' | 'stopped';
-  /** Saving the persistent business policy is not an execution activation. */
-  readonly executionEnabled: false;
+  /** Active routine transport, not authorization for live financial switches. */
+  readonly executionEnabled: boolean;
   readonly authorizationId: string | null;
   readonly revision: string | null;
   readonly platformAgentAccountId: string | null;
@@ -90,7 +90,7 @@ export function decodeOwnerRoutineProcessingStatus(value: unknown): OwnerRoutine
   if (
     Object.keys(status).sort().join(',') !== STATUS_KEYS ||
     !['not_configured', 'authorized', 'stopped'].includes(String(status.configurationState)) ||
-    status.executionEnabled !== false ||
+    typeof status.executionEnabled !== 'boolean' ||
     (status.changedAt !== null &&
       (typeof status.changedAt !== 'string' || !Number.isFinite(Date.parse(status.changedAt))))
   ) {
@@ -103,6 +103,7 @@ export function decodeOwnerRoutineProcessingStatus(value: unknown): OwnerRoutine
       status.platformAgentAccountId !== null ||
       status.authorizedAt !== null ||
       status.policy !== null ||
+      status.executionEnabled !== false ||
       (status.configurationState === 'stopped' && status.changedAt === null) ||
       (status.configurationState === 'not_configured' && status.changedAt !== null)
     ) {
@@ -122,6 +123,7 @@ export function decodeOwnerRoutineProcessingStatus(value: unknown): OwnerRoutine
   const policy = record(status.policy);
   if (
     status.configurationState === 'not_configured' ||
+    (status.configurationState === 'stopped' && status.executionEnabled !== false) ||
     typeof status.authorizationId !== 'string' ||
     !UUID.test(status.authorizationId) ||
     typeof status.platformAgentAccountId !== 'string' ||
@@ -140,7 +142,7 @@ export function decodeOwnerRoutineProcessingStatus(value: unknown): OwnerRoutine
   }
   return Object.freeze({
     configurationState: status.configurationState as 'authorized' | 'stopped',
-    executionEnabled: false,
+    executionEnabled: status.executionEnabled as boolean,
     authorizationId: status.authorizationId,
     revision: status.revision,
     platformAgentAccountId: status.platformAgentAccountId,

@@ -37,15 +37,19 @@ internal object RoutinePaidRuntimeComposition {
     // The no-money SQL boundary requires all financial switches off; the paid SQL boundary
     // requires current live authority. Neither phone route can credit a Player.
     val noMoneySession = RoutineNoMoneyRuntimeComposition.create(context)
-    val phones = (0 until RoutinePaidParallelCycle.MAX_LANES).map { lane ->
+    val workStores = (0 until RoutinePaidParallelCycle.MAX_LANES).map { lane ->
+      EncryptedRoutinePaidWorkStore.forApplication(context, lane)
+    }
+    val phones = workStores.map { workStore ->
       RoutinePaidPhonePreparation(
         exchange = FixedRoutinePaidPollHttpsExchange(),
         collector = RoutineTelebirrObservationCollector(SafeOfficialReceiptTransport()),
-        workStore = EncryptedRoutinePaidWorkStore.forApplication(context, lane),
+        workStore = workStore,
       )
     }
     val parallelCycle = RoutinePaidParallelCycle(phones.size)
     val paidRetryPacer = RoutinePaidRetryPacer(SystemClock::elapsedRealtime)
+    val lastLaneDiagnostics = arrayOfNulls<String>(phones.size)
     // Inspect every outbox on restart; after an empty pass, use one idle poll until work arrives.
     var burst = true
     return VerifierRuntimeSession(
@@ -58,6 +62,16 @@ internal object RoutinePaidRuntimeComposition {
           parallelCycle.runOnce(if (burst) phones.size else 1) { lane ->
             phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
           }.also { attempted ->
+            attempted.forEachIndexed { lane, result ->
+              val outbox = runCatching { RoutinePaidLaneDiagnostic.outbox(workStores[lane].load()) }
+                .getOrDefault(RoutinePaidLaneDiagnostic.Outbox.UNAVAILABLE)
+              val diagnostic = RoutinePaidLaneDiagnostic.render(lane, outbox, result)
+              if (lastLaneDiagnostics[lane] != diagnostic) {
+                // All three fields are fixed categories; no reference, receipt, or sealed work.
+                Log.i("FetanAgentPaidLane", diagnostic)
+                lastLaneDiagnostics[lane] = diagnostic
+              }
+            }
             paidRetryPacer.record(attempted)
             burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
           }

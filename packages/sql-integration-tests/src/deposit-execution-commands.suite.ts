@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Client, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -137,6 +137,27 @@ async function ensureActiveKemerbetAgent(client: Client): Promise<string> {
   `);
   expect(inserted.rows).toHaveLength(1);
   return inserted.rows[0]!.id;
+}
+
+async function ensureActiveTelebirrReceiver(client: Client): Promise<void> {
+  const existing = await client.query(`
+    select receiver.id from app.receiver_accounts receiver
+      join app.payment_providers provider on provider.id = receiver.provider_id
+     where provider.code = 'telebirr' and receiver.status = 'active'
+  `);
+  if (existing.rows.length > 0) return;
+  await client.query(
+    `insert into app.receiver_accounts (
+       provider_id, version, account_holder_name, account_reference_ciphertext,
+       account_reference_masked, account_reference_fingerprint,
+       protection_profile_version, encryption_key_version, fingerprint_key_version,
+       rotation_request_id, rotation_reason
+     ) select provider.id, 1, 'Synthetic Credited Test Receiver',
+              $1::text, '***7300', repeat('7', 64), 1, 1, 1,
+              $2::uuid, 'initial_configuration'
+         from app.payment_providers provider where provider.code = 'telebirr'`,
+    [`receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`, randomUUID()],
+  );
 }
 
 async function rotateActiveKemerbetAgent(client: Client, suffix: string): Promise<void> {
@@ -406,7 +427,10 @@ async function enqueueAndLease(
   };
 }
 
-export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter): void {
+export function registerDepositExecutionCommandSqlTests(
+  getClient: ClientGetter,
+  getOwnerAdminId: () => string,
+): void {
   describe('private production deposit execution commands', () => {
     it('pins the consume-only executor roles, grants, and zero direct ledger access', async () => {
       const client = getClient();
@@ -1101,6 +1125,223 @@ export function registerDepositExecutionCommandSqlTests(getClient: ClientGetter)
         );
         expect(oneShot.rows).toEqual([{ execution_attempts: 1, execution_jobs: 1 }]);
         await rotateActiveKemerbetAgent(client, 'after-fenced-fact-crash');
+      });
+    });
+
+    it('reconciles an Owner-confirmed 30 ETB credit without a second execution', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await ensureActiveTelebirrReceiver(client);
+        const fixture = await createVerifiedDepositFixture(client, 'OWNER-CREDITED-30', {
+          providerCode: 'telebirr',
+          amountMinor: 3000,
+        });
+        const settled = await settleVerifiedDeposit(client, fixture);
+        // Arrange the already-fenced historical incident without manufacturing a
+        // live Owner approval or activation epoch. The trigger is restored before
+        // exercising the gates-off resolution under test.
+        await client.query(
+          `alter table app.deposit_jobs
+             disable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
+        const leased = await queryAsExecutor<{
+          readonly execution_attempt_id: string;
+          readonly execution_job_id: string;
+          readonly lease_token: string;
+        }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
+          '92222222-2222-4222-8222-222222222222',
+        ]);
+        await client.query(
+          `alter table app.deposit_jobs
+             enable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
+        expect(leased).toHaveLength(1);
+        expect(leased[0]!.execution_job_id).toBe(settled.execution_job_id);
+        const attemptId = leased[0]!.execution_attempt_id;
+        // Preserve PostgreSQL microseconds: the JS Date parser truncates the
+        // fence and would put the synthetic history instant just before it.
+        const fence = await queryAsExecutor<{ readonly final_action_fenced_at: string }>(
+          client,
+          `select final_action_fenced_at::text as final_action_fenced_at
+             from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
+          [attemptId, leased[0]!.lease_token],
+        );
+        expect(fence).toHaveLength(1);
+        await client.query(
+          `update app.deposit_jobs
+              set lease_expires_at = clock_timestamp() - interval '1 second'
+            where id = $1::uuid`,
+          [settled.execution_job_id],
+        );
+
+        const requestKey = '93333333-3333-4333-8333-333333333333';
+        const fingerprint = `hmac-sha256-v1:${'e'.repeat(64)}`;
+        const resolve = (attested: boolean, playerId = fixture.playerId, key = requestKey) =>
+          client.query<{ readonly resolution_state: string; readonly replayed: boolean }>(
+            `select * from app.resolve_owner_confirmed_fenced_test_credit(
+              $1::uuid, $2::uuid, $3::uuid, $4::text, $5::timestamptz,
+              $6::text, 3000::bigint, true, $7::boolean, true
+            )`,
+            [
+              getOwnerAdminId(),
+              attemptId,
+              key,
+              fingerprint,
+              fence[0]!.final_action_fenced_at,
+              playerId,
+              attested,
+            ],
+          );
+        await expect(withSavepoint(client, () => resolve(true))).rejects.toThrow(
+          'dormant financial authority',
+        );
+        await client.query(`
+          update app.feature_switches
+             set mode = 'disabled', settings = '{}'::jsonb
+           where feature_key in (
+             'cbe_birr_authoritative_verification', 'deposit_execution',
+             'payment_verification', 'private_live_deposit_pilot',
+             'telebirr_authoritative_verification', 'withdrawal_collection',
+             'withdrawal_validation'
+           )
+        `);
+        await expect(withSavepoint(client, () => resolve(false))).rejects.toThrow(
+          'attestation is incomplete',
+        );
+        await expect(withSavepoint(client, () => resolve(true, 'OTHER-PLAYER'))).rejects.toThrow(
+          'lineage is not eligible',
+        );
+
+        const arranged = await client.query(
+          `select
+             attempt.status::text as attempt_status,
+             attempt.exact_player_credit_match as exact_player_credit_match,
+             intent.status::text as intent_status,
+             intent.expected_amount_minor as amount_minor,
+             provider.code::text as provider_code,
+             platform.code::text as platform_code,
+             player.player_id = $2::text as player_matches,
+             job.status::text as execution_job_status,
+             job.attempt_count as execution_attempt_count,
+             job.max_attempts as execution_max_attempts,
+             job.lease_expires_at <= clock_timestamp() as lease_expired,
+             attempt.final_action_fenced_at is not null as fenced,
+             $3::timestamptz between attempt.final_action_fenced_at
+               and clock_timestamp() as history_in_window,
+             (select count(*)::integer from app.deposit_execution_attempts other_attempt
+               where other_attempt.deposit_intent_id = intent.id) as attempt_count,
+             (select count(*)::integer from app.deposit_jobs other_job
+               where other_job.job_kind in ('execute_deposit', 'reconcile_execution')
+                 and other_job.status in ('queued', 'leased', 'retry_wait')
+                 and other_job.id <> job.id) as other_active_jobs,
+             (select count(*)::integer from app.deposit_execution_attempts other_attempt
+               where other_attempt.id <> attempt.id
+                 and other_attempt.status in (
+                   'prepared', 'final_action_fenced',
+                   'reconciliation_required', 'review_required'
+                 )) as other_blocking_attempts,
+             (select count(*)::integer from app.routine_telebirr_dispatch_evidence evidence
+               where evidence.execution_attempt_id = attempt.id) as dispatches,
+             (select count(*)::integer from app.execution_reconciliations reconciliation
+               where reconciliation.deposit_execution_attempt_id = attempt.id)
+               as reconciliations,
+             (select count(*)::integer from app.deposit_review_cases review_case
+               where review_case.deposit_intent_id = intent.id) as review_cases
+           from app.deposit_execution_attempts attempt
+           join app.deposit_intents intent on intent.id = attempt.deposit_intent_id
+           join app.deposit_jobs job on job.id = attempt.deposit_job_id
+           join app.payment_providers provider on provider.id = intent.payment_provider_id
+           join app.platforms platform on platform.id = intent.platform_id
+           join app.customer_platform_players player on player.id = intent.player_account_id
+           where attempt.id = $1::uuid`,
+          [attemptId, fixture.playerId, fence[0]!.final_action_fenced_at],
+        );
+        expect(arranged.rows).toEqual([
+          {
+            attempt_status: 'final_action_fenced',
+            exact_player_credit_match: null,
+            intent_status: 'execution_in_progress',
+            amount_minor: '3000',
+            provider_code: 'telebirr',
+            platform_code: 'kemerbet',
+            player_matches: true,
+            execution_job_status: 'leased',
+            execution_attempt_count: 1,
+            execution_max_attempts: 1,
+            lease_expired: true,
+            fenced: true,
+            history_in_window: true,
+            attempt_count: 1,
+            other_active_jobs: 0,
+            other_blocking_attempts: 0,
+            dispatches: 0,
+            reconciliations: 0,
+            review_cases: 0,
+          },
+        ]);
+
+        const first = await resolve(true);
+        expect(first.rows).toEqual([{ resolution_state: 'confirmed_executed', replayed: false }]);
+        const replay = await resolve(true);
+        expect(replay.rows).toEqual([{ resolution_state: 'confirmed_executed', replayed: true }]);
+        await expect(
+          withSavepoint(client, () =>
+            resolve(true, fixture.playerId, '94444444-4444-4444-8444-444444444444'),
+          ),
+        ).rejects.toThrow('conflicts with its immutable receipt');
+
+        const final = await client.query<{
+          readonly attempt_status: string;
+          readonly execution_jobs: number;
+          readonly intent_status: string;
+          readonly reconciliation_jobs: number;
+          readonly reconciliations: number;
+          readonly receipts: number;
+          readonly dispatches: number;
+          readonly switch_live_count: number;
+        }>(
+          `select attempt.status::text as attempt_status,
+                  intent.status::text as intent_status,
+                  (select count(*)::integer from app.deposit_jobs job
+                    where job.deposit_intent_id = intent.id
+                      and job.job_kind = 'execute_deposit') as execution_jobs,
+                  (select count(*)::integer from app.deposit_jobs job
+                    where job.deposit_intent_id = intent.id
+                      and job.job_kind = 'reconcile_execution') as reconciliation_jobs,
+                  (select count(*)::integer from app.execution_reconciliations item
+                    where item.deposit_execution_attempt_id = attempt.id) as reconciliations,
+                  (select count(*)::integer from app.owner_confirmed_fenced_test_credits item
+                    where item.execution_attempt_id = attempt.id) as receipts,
+                  (select count(*)::integer from app.routine_telebirr_dispatch_evidence item
+                    where item.execution_attempt_id = attempt.id) as dispatches,
+                  (select count(*)::integer from app.feature_switches feature_switch
+                    where feature_switch.mode = 'live') as switch_live_count
+             from app.deposit_intents intent
+             join app.deposit_execution_attempts attempt
+               on attempt.deposit_intent_id = intent.id
+            where intent.id = $1::uuid`,
+          [fixture.depositIntentId],
+        );
+        expect(final.rows).toEqual([
+          {
+            attempt_status: 'confirmed_executed',
+            intent_status: 'executed',
+            execution_jobs: 1,
+            reconciliation_jobs: 1,
+            reconciliations: 1,
+            receipts: 1,
+            dispatches: 0,
+            switch_live_count: 0,
+          },
+        ]);
+        const permissions = await client.query<{ readonly executor_allowed: boolean }>(
+          `select pg_catalog.has_function_privilege(
+             'fetanagent_deposit_executor',
+             'app.resolve_owner_confirmed_fenced_test_credit(uuid,uuid,uuid,text,timestamptz,text,bigint,boolean,boolean,boolean)',
+             'EXECUTE'
+           ) as executor_allowed`,
+        );
+        expect(permissions.rows).toEqual([{ executor_allowed: false }]);
       });
     });
 

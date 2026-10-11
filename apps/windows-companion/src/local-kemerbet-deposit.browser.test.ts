@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createLocalKemerBetDepositAuthorization,
+  exactKemerBetSuccessTableMatches,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
   rehearseNoMoneyRoutineDepositPreflight,
@@ -81,6 +82,54 @@ const directionMarkedAmountHtml = fixtureHtml.replace(
     });
     document.getElementById('transfer').onclick = async () => {`,
 );
+
+const successTableHtml = fixtureHtml.replace(
+  `'<p>Player Balance +' + Number(amount).toFixed(2) + ' ETB Success</p></div>';`,
+  `'<table><thead><tr><th>Name</th><th>Wallet Type</th><th>Amount</th><th>Message</th></tr></thead>' +
+        '<tbody><tr><td>fixture-identity</td><td>Balance</td><td>' + Number(amount) + '</td><td>Success</td></tr>' +
+        '<tr><td>fixture-agent</td><td>Balance</td><td>-' + Number(amount) + '</td><td>Success</td></tr>' +
+        '<tr><td>PLAT</td><td>Balance</td><td>' + Number(amount) + '</td><td>Success</td></tr></tbody></table>' +
+        '<button>Close</button></div>';`,
+);
+
+const successTableText = [
+  'Transfer Successful!',
+  'Name\tWallet Type\tAmount\tMessage',
+  'fixture-identity\tBalance\t30\tSuccess',
+  'fixture-agent\tBalance\t-30\tSuccess',
+  'PLAT\tBalance\t30\tSuccess',
+  'Close',
+].join('\n');
+
+describe('strict KemerBet success table', () => {
+  it('matches the selected recipient and all three exact success rows', () => {
+    expect(exactKemerBetSuccessTableMatches(successTableText, ['fixture-identity'], 3000)).toBe(
+      true,
+    );
+    expect(
+      exactKemerBetSuccessTableMatches(
+        successTableText.replaceAll('\t30\t', '\t30.00\t').replace('\t-30\t', '\t-30.00\t'),
+        ['fixture-identity'],
+        3000,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ['wrong recipient', successTableText.replace('fixture-identity', 'someone-else')],
+    ['wrong credit amount', successTableText.replace('\t30\tSuccess', '\t31\tSuccess')],
+    ['wrong agent debit', successTableText.replace('\t-30\tSuccess', '\t-29\tSuccess')],
+    ['failed credit', successTableText.replace('\t30\tSuccess', '\t30\tFailed')],
+    [
+      'duplicate row',
+      successTableText.replace('\nClose', '\nfixture-identity\tBalance\t30\tSuccess\nClose'),
+    ],
+    ['missing title', successTableText.replace('Transfer Successful!', 'Transfer Pending')],
+    ['missing close', successTableText.replace('\nClose', '')],
+  ])('rejects %s', (_caseName, text) => {
+    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 3000)).toBe(false);
+  });
+});
 
 describe.skipIf(process.platform !== 'win32')(
   'routine deposit UI in isolated Windows Chrome',
@@ -214,6 +263,29 @@ describe.skipIf(process.platform !== 'win32')(
       },
       15000,
     );
+
+    it('confirms the newer three-row success table without a second transfer', async () => {
+      const { page, lookup, deposit, submitted } = await startFixture(successTableHtml);
+      const stages: string[] = [];
+      const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        3000,
+        lookup,
+        deposit,
+        async () => ({ playerId: PLAYER_ID, amountMinor: 3000, isFresh: () => true }),
+        (stage) => stages.push(stage),
+      );
+      expect(await page.locator('.ant-modal-content table').count()).toBe(1);
+      expect(await page.getByText('Player Balance +30.00 ETB Success').count()).toBe(0);
+      expect(outcome).toEqual({
+        outcome: 'submission_attempted',
+        providerResponseDigest: DIGEST,
+        exactPlayerCreditMatch: true,
+      });
+      expect(submitted).toEqual([{ playerId: 42, amount: 30, notes: null }]);
+      expect(stages.at(-1)).toBe('success_modal_confirmed');
+    }, 15000);
 
     it('reports a post-fence UI mismatch without clicking Transfer or exposing identifiers', async () => {
       const { page, lookup, deposit, submitted } = await startFixture();

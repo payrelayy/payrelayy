@@ -143,6 +143,51 @@ export function routineDepositAmountText(amountMinor: number): string {
   return `${Math.floor(amountMinor / ETB_SCALE)}.${String(amountMinor % ETB_SCALE).padStart(2, '0')}`;
 }
 
+/** KemerBet's newer success modal renders one recipient, one agent debit, and one PLAT row. */
+export function exactKemerBetSuccessTableMatches(
+  dialogText: string,
+  identities: readonly string[],
+  amountMinor: number,
+): boolean {
+  if (!isRoutineDepositAmountMinor(amountMinor) || identities.length < 1) return false;
+  const cells = dialogText
+    .replace(/\u00a0/gu, ' ')
+    .split(/[\t\r\n]+/u)
+    .map((cell) => cell.trim())
+    .filter((cell) => cell.length > 0);
+  if (
+    cells.length !== 18 ||
+    cells[0] !== 'Transfer Successful!' ||
+    cells[1] !== 'Name' ||
+    cells[2] !== 'Wallet Type' ||
+    cells[3] !== 'Amount' ||
+    cells[4] !== 'Message' ||
+    cells[17] !== 'Close'
+  ) {
+    return false;
+  }
+  const exactAmount = routineDepositAmountText(amountMinor);
+  const amountWithOptionalZeroFraction =
+    amountMinor % ETB_SCALE === 0 ? [exactAmount, exactAmount.slice(0, -3)] : [exactAmount];
+  return (
+    identities.includes(cells[5] ?? '') &&
+    cells[6] === 'Balance' &&
+    amountWithOptionalZeroFraction.includes(cells[7] ?? '') &&
+    cells[8] === 'Success' &&
+    typeof cells[9] === 'string' &&
+    cells[9].length <= 256 &&
+    !identities.includes(cells[9]) &&
+    cells[9] !== 'PLAT' &&
+    cells[10] === 'Balance' &&
+    amountWithOptionalZeroFraction.some((amount) => cells[11] === `-${amount}`) &&
+    cells[12] === 'Success' &&
+    cells[13] === 'PLAT' &&
+    cells[14] === 'Balance' &&
+    amountWithOptionalZeroFraction.includes(cells[15] ?? '') &&
+    cells[16] === 'Success'
+  );
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 export class LocalKemerBetDepositError extends Error {
@@ -563,6 +608,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<LocalKemerBetRoutineDepositDispatchOutcome> {
+  let privatePlayerIdentities: readonly string[] = [];
   const outcome = await executeLocalDepositForAmount(
     page,
     playerId,
@@ -575,8 +621,12 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       return authority;
     },
     diagnostic,
+    (identities) => {
+      privatePlayerIdentities = identities;
+    },
   );
   if (outcome.outcome !== 'submission_attempted') return outcome;
+  if (privatePlayerIdentities.length < 1) unavailable();
   const expectedCredit = `Player Balance +${routineDepositAmountText(amountMinor)} ETB Success`;
   try {
     await waitUntil(async () => {
@@ -585,6 +635,7 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       const count = await dialogs.count();
       if (count > 20) unavailable();
       let matched = false;
+      let successDialogs = 0;
       for (let index = 0; index < count; index += 1) {
         const dialog = dialogs.nth(index);
         if (!(await dialog.isVisible())) continue;
@@ -592,9 +643,16 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
           dialog.getByText('Transfer Successful!', { exact: true }),
         );
         if (!title) continue;
+        successDialogs += 1;
+        if (successDialogs > 1) unavailable();
         const credit = await exactlyOneVisible(dialog.getByText(expectedCredit, { exact: true }));
-        if (!credit || matched) unavailable();
-        matched = true;
+        matched =
+          credit !== undefined ||
+          exactKemerBetSuccessTableMatches(
+            await dialog.innerText(),
+            privatePlayerIdentities,
+            amountMinor,
+          );
       }
       return matched;
     });
@@ -617,6 +675,7 @@ async function executeLocalDepositForAmount(
   depositAuthorization: MutableLocalKemerBetDepositAuthorization,
   acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
+  onPlayerPrepared?: (identities: readonly string[]) => void,
 ): Promise<LocalKemerBetDepositDispatchOutcome> {
   const { privatePlayer, amountText } = await prepareLocalDepositForAmount(
     page,
@@ -625,6 +684,7 @@ async function executeLocalDepositForAmount(
     lookupAuthorization,
     diagnostic,
   );
+  onPlayerPrepared?.(privatePlayer.identities);
   // The server/database fence is intentionally requested only after the page is fully prepared.
   reportPreflight(diagnostic, 'final_action_requested');
   const finalAction = await acquireFinalAction();

@@ -135,6 +135,17 @@ before-window, after-window, and missing facts cannot confirm execution or autho
 `ambiguous` and `not_observed` retain no asserted operation or matched timestamp; `not_observed`
 leaves the attempt reconciliation-required and is not proof that no transfer occurred.
 
+An Owner-funded test that has already crossed the final-action fence can be closed without a
+Player credit or refund only through the private postgres-only
+`app.resolve_owner_fenced_test_no_credit(...)` command. It requires a completed ambiguous
+reconciliation, no dispatch evidence, an execution-uncertain pause, the Owner's explicit both-wallets
+and no-credit/no-refund attestation, acceptance that the provider outcome remains unconfirmed, and
+all financial switches and Companion execution disabled. The command writes an immutable receipt,
+resolves an execution review, and leaves the one-shot job and payment claim intact. It does not
+assert that KemerBet never received Transfer, authorize a retry, or apply to a normal customer
+deposit. Its distinct terminal attempt status no longer blocks unrelated agent-account work, but
+live activation remains a separate guarded decision.
+
 The canonical intent and job triggers enforce the same correspondence. Execution jobs require one
 attempt and `max_attempts = 1`; `retry_wait` is rejected. An intent can enter execution only behind
 the durable fence, and can become `executed` only after its reconciliation job, immutable positive

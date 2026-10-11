@@ -8291,6 +8291,7 @@ describe('disposable SQL migration baseline', () => {
           'reconciliation_required',
           'confirmed_executed',
           'review_required',
+          'owner_test_closed_uncredited',
         ],
         type_name: 'deposit_execution_attempt_status',
       },
@@ -8906,7 +8907,9 @@ describe('disposable SQL migration baseline', () => {
         from pg_trigger trigger
        where not trigger.tgisinternal
          and trigger.tgname in (
-           'deposit_execution_attempts_enforce',
+           'deposit_execution_attempts_enforce_insert',
+           'deposit_execution_attempts_enforce_ordinary_update',
+           'deposit_execution_attempts_enforce_owner_test_close',
            'deposit_execution_attempts_modal_fact_immutable',
            'deposit_execution_attempts_no_delete',
            'deposit_execution_attempts_no_truncate',
@@ -8915,16 +8918,20 @@ describe('disposable SQL migration baseline', () => {
            'execution_reconciliations_immutable',
            'execution_reconciliations_no_truncate',
            'deposit_jobs_enforce_execution_safety',
-           'deposit_intents_require_execution_correspondence'
+           'deposit_intents_require_execution_correspondence_ordinary',
+           'deposit_intents_require_owner_fenced_test_close'
          )
        order by trigger.tgname
     `);
     expect(triggerRows.rows.map((row) => row.trigger_name)).toEqual([
-      'deposit_execution_attempts_enforce',
+      'deposit_execution_attempts_enforce_insert',
+      'deposit_execution_attempts_enforce_ordinary_update',
+      'deposit_execution_attempts_enforce_owner_test_close',
       'deposit_execution_attempts_modal_fact_immutable',
       'deposit_execution_attempts_no_delete',
       'deposit_execution_attempts_no_truncate',
-      'deposit_intents_require_execution_correspondence',
+      'deposit_intents_require_execution_correspondence_ordinary',
+      'deposit_intents_require_owner_fenced_test_close',
       'deposit_jobs_enforce_execution_safety',
       'execution_reconciliations_enforce_insert',
       'execution_reconciliations_immutable',

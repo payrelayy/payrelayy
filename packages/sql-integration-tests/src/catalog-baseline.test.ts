@@ -8291,6 +8291,7 @@ describe('disposable SQL migration baseline', () => {
           'reconciliation_required',
           'confirmed_executed',
           'review_required',
+          'owner_test_closed_uncredited',
         ],
         type_name: 'deposit_execution_attempt_status',
       },

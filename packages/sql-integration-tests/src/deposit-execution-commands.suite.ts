@@ -1158,9 +1158,11 @@ export function registerDepositExecutionCommandSqlTests(
         expect(leased).toHaveLength(1);
         expect(leased[0]!.execution_job_id).toBe(settled.execution_job_id);
         const attemptId = leased[0]!.execution_attempt_id;
-        const fence = await queryAsExecutor<{ readonly final_action_fenced_at: Date }>(
+        // Preserve PostgreSQL microseconds: the JS Date parser truncates the
+        // fence and would put the synthetic history instant just before it.
+        const fence = await queryAsExecutor<{ readonly final_action_fenced_at: string }>(
           client,
-          `select final_action_fenced_at
+          `select final_action_fenced_at::text as final_action_fenced_at
              from app.fence_deposit_execution_final_action($1::uuid, $2::uuid)`,
           [attemptId, leased[0]!.lease_token],
         );

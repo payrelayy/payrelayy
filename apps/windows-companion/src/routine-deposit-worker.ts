@@ -274,28 +274,43 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
                 throw new Error('Routine action unavailable.');
               // An ambiguous fence request must never be retried or treated as pre-action safe.
               fenceRequested = true;
+              // Start both deadlines before the request. The database issues its fence during
+              // this round trip, so a deadline measured from here expires no later than the
+              // database fence. Comparing absolute database and PC times would instead reject
+              // a valid fast response whenever the PC clock is slightly behind.
+              const requestStartedAt = now();
+              const requestStartedMonotonic = monotonicNow();
+              if (
+                !Number.isSafeInteger(requestStartedAt) ||
+                !Number.isFinite(requestStartedMonotonic)
+              )
+                throw new Error('Routine action unavailable.');
               const fence = await options.store.fenceFinalAction(selected);
               const observedAt = now();
+              const observedAtMonotonic = monotonicNow();
+              const lifetimeMs = fence.validUntilMs - fence.issuedAtMs;
               if (
                 !matchesBinding(selected, fence) ||
                 fence.firstFenceAcquired !== true ||
                 !Number.isSafeInteger(fence.issuedAtMs) ||
                 !Number.isSafeInteger(fence.validUntilMs) ||
                 !Number.isSafeInteger(observedAt) ||
-                fence.validUntilMs <= fence.issuedAtMs ||
-                fence.validUntilMs - fence.issuedAtMs > ACTION_LIFETIME_MS ||
-                observedAt < fence.issuedAtMs ||
-                observedAt >= fence.validUntilMs ||
+                !Number.isFinite(observedAtMonotonic) ||
+                fence.issuedAtMs <= 0 ||
+                lifetimeMs <= 0 ||
+                lifetimeMs > ACTION_LIFETIME_MS ||
+                observedAt < requestStartedAt ||
+                observedAt - requestStartedAt >= lifetimeMs ||
+                observedAtMonotonic < requestStartedMonotonic ||
+                observedAtMonotonic - requestStartedMonotonic >= lifetimeMs ||
                 options.signal.aborted
               )
                 throw new Error('Routine action unavailable.');
               fenceGranted = true;
-              const issuedAtMs = fence.issuedAtMs;
-              const validUntilMs = fence.validUntilMs;
-              const grantedAtMonotonic = monotonicNow();
-              if (!Number.isFinite(grantedAtMonotonic))
-                throw new Error('Routine action unavailable.');
-              const monotonicDeadline = grantedAtMonotonic + (validUntilMs - observedAt);
+              const wallDeadline = requestStartedAt + lifetimeMs;
+              const monotonicDeadline = requestStartedMonotonic + lifetimeMs;
+              let lastWallNow = observedAt;
+              let lastMonotonicNow = observedAtMonotonic;
               let expired = false;
               actionAuthority = Object.freeze({
                 playerId: selected.playerId,
@@ -307,10 +322,12 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
                     options.signal.aborted ||
                     !Number.isSafeInteger(wallNow) ||
                     !Number.isFinite(monoNow) ||
-                    monoNow < grantedAtMonotonic ||
+                    wallNow < lastWallNow ||
+                    monoNow < lastMonotonicNow ||
                     monoNow >= monotonicDeadline ||
-                    wallNow < issuedAtMs ||
-                    wallNow >= validUntilMs;
+                    wallNow >= wallDeadline;
+                  lastWallNow = wallNow;
+                  lastMonotonicNow = monoNow;
                   return !expired;
                 },
               });

@@ -266,8 +266,8 @@ describe('routine production serial deposit worker', () => {
     { firstFenceAcquired: false },
     { validUntilMs: NOW },
     { validUntilMs: NOW + 10001 },
-    { issuedAtMs: NOW + 1 },
-  ])('does not use expired, overlong, future or reused authority: %j', async (override) => {
+    { issuedAtMs: 0, validUntilMs: 10000 },
+  ])('does not use expired, overlong, invalid or reused authority: %j', async (override) => {
     const { worker, store } = fixture();
     store.fenceFinalAction.mockImplementationOnce(
       async (lease) =>
@@ -279,6 +279,34 @@ describe('routine production serial deposit worker', () => {
           ...override,
         }) as Awaited<ReturnType<RoutineDepositExecutionStore['fenceFinalAction']>>,
     );
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(store.recordDispatch).not.toHaveBeenCalled();
+  });
+
+  it('accepts a fast first-use fence despite a slightly slow PC wall clock', async () => {
+    const { worker, store, setTime } = fixture();
+    setTime(NOW - 400);
+    expect(await worker.runOnce()).toEqual({ status: 'completed' });
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
+    expect(store.recordDispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts the entire fence round trip against the deadline and never dispatches after expiry', async () => {
+    const { worker, store, setMonotonicTime } = fixture();
+    store.fenceFinalAction.mockImplementationOnce(async (lease) => {
+      setMonotonicTime(11_000);
+      return { ...lease, firstFenceAcquired: true, issuedAtMs: NOW, validUntilMs: NOW + 10_000 };
+    });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(store.recordDispatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a backwards wall-clock correction during the fence round trip', async () => {
+    const { worker, store, setTime } = fixture();
+    store.fenceFinalAction.mockImplementationOnce(async (lease) => {
+      setTime(NOW - 1);
+      return { ...lease, firstFenceAcquired: true, issuedAtMs: NOW, validUntilMs: NOW + 10_000 };
+    });
     expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
     expect(store.recordDispatch).not.toHaveBeenCalled();
   });

@@ -187,6 +187,18 @@ export function createRoutinePaidUploadLocalAdapter(
   if (typeof wire !== 'function' || typeof now !== 'function') throw new Error();
   return Object.freeze({
     now,
+    async classifyTerminal(
+      input: Parameters<RoutinePaidUploadBridgeDependencies['classifyTerminal']>[0],
+    ) {
+      const value = await wire('classify_terminal', input);
+      if (
+        !exact(value, ['kind', 'terminal']) ||
+        value.kind !== 'terminal_status' ||
+        typeof value.terminal !== 'boolean'
+      )
+        throw new Error();
+      return value.terminal;
+    },
     async loadObservation(challengeId: string) {
       const value = await wire('load_observation', { challengeId });
       if (exact(value, ['kind']) && value.kind === 'missing') return undefined;

@@ -251,6 +251,17 @@ internal class RoutinePaidPhonePreparation(
       response.statusCode >= 500 || response.statusCode == 429) {
       return RoutinePaidPhonePreparationResult.Retry
     }
+    if (response.statusCode == HttpURLConnection.HTTP_GONE) {
+      val terminal = try {
+        val frame = StrictJson.parse(response.body).requireObject(setOf("code"))
+        frame.string("code") == "paid_observation_terminal_expired"
+      } catch (_: Exception) { false }
+      if (!terminal) return RoutinePaidPhonePreparationResult.Review("invalid_upload_response")
+      try { workStore.archiveTerminal(bytes) } catch (_: Exception) {
+        return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
+      }
+      return RoutinePaidPhonePreparationResult.Review("terminal_upload_archived")
+    }
     if (response.statusCode == HttpURLConnection.HTTP_CONFLICT) {
       return RoutinePaidPhonePreparationResult.Review("observation_conflict")
     }

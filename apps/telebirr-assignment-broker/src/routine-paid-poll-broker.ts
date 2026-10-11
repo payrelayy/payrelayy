@@ -19,7 +19,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
 
-/** The paid role has four exact SQL entry points and no table grants. */
+/** The paid role has five exact SQL entry points and no table grants. */
 export interface RoutinePaidPollBrokerDatabase {
   loadEnrollment(enrollmentId: string): Promise<unknown | undefined>;
   issuePollAssignment(input: {
@@ -30,6 +30,11 @@ export interface RoutinePaidPollBrokerDatabase {
     readonly signerId: string;
   }): Promise<unknown | undefined>;
   loadObservationMaterial(challengeId: string): Promise<unknown | undefined>;
+  classifyTerminal(input: {
+    readonly challengeId: string;
+    readonly challengeDigest: string;
+    readonly devicePublicKeySpkiSha256: string;
+  }): Promise<unknown>;
   stageObservation(input: {
     readonly challengeId: string;
     readonly assignmentBodyDigest: string;
@@ -159,6 +164,25 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
               trustedIssuanceMode: 'paid' as const,
             }),
         );
+      } catch {
+        throw new RoutinePaidPollBrokerUnavailableError();
+      }
+    },
+    async classifyTerminal(input: {
+      readonly challengeId: string;
+      readonly challengeDigest: string;
+      readonly devicePublicKeySpkiSha256: string;
+    }) {
+      try {
+        if (
+          !UUID_V4.test(input.challengeId) ||
+          !DIGEST.test(input.challengeDigest) ||
+          !DIGEST.test(input.devicePublicKeySpkiSha256)
+        )
+          throw new Error();
+        const result = await database.classifyTerminal(input);
+        if (typeof result !== 'boolean') throw new Error();
+        return result;
       } catch {
         throw new RoutinePaidPollBrokerUnavailableError();
       }

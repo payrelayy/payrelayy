@@ -80,22 +80,31 @@ describe('private routine paid upload broker client', () => {
   it('loads only a paid context and stages the verified evidence', async () => {
     const der = Buffer.alloc(91, 3);
     const wire = vi.fn(async (operation: string) =>
-      operation === 'load_observation'
-        ? {
-            kind: 'observation_context',
-            context: {
-              enrollmentId,
-              trustedLookup: {},
-              trustedRawReference: 'REDACTEDREFERENCE',
-              trustedSigner: {},
-              deviceEnrollment: {},
-              trustedSignerSpkiDer: der.toString('base64url'),
-              trustedIssuanceMode: 'paid',
-            },
-          }
-        : { kind: 'recorded' },
+      operation === 'classify_terminal'
+        ? { kind: 'terminal_status', terminal: true }
+        : operation === 'load_observation'
+          ? {
+              kind: 'observation_context',
+              context: {
+                enrollmentId,
+                trustedLookup: {},
+                trustedRawReference: 'REDACTEDREFERENCE',
+                trustedSigner: {},
+                deviceEnrollment: {},
+                trustedSignerSpkiDer: der.toString('base64url'),
+                trustedIssuanceMode: 'paid',
+              },
+            }
+          : { kind: 'recorded' },
     );
     const adapter = createRoutinePaidUploadLocalAdapter(wire, () => '2026-10-08T12:00:00.000Z');
+    expect(
+      await adapter.classifyTerminal({
+        challengeId: requestId,
+        challengeDigest: digest,
+        devicePublicKeySpkiSha256: digest,
+      }),
+    ).toBe(true);
     expect((await adapter.loadObservation(requestId))?.trustedSignerSpkiDer).toEqual(der);
     expect(
       await adapter.stageObservation({
@@ -122,6 +131,7 @@ describe('private routine paid upload broker client', () => {
       }),
     ).toBe('recorded');
     expect(wire.mock.calls.map(([operation]) => operation)).toEqual([
+      'classify_terminal',
       'load_observation',
       'stage_observation',
     ]);
@@ -144,5 +154,18 @@ describe('private routine paid upload broker client', () => {
       () => '2026-10-08T12:00:00.000Z',
     );
     await expect(adapter.loadObservation(requestId)).rejects.toThrow();
+  });
+  it('rejects malformed terminal confirmations', async () => {
+    const adapter = createRoutinePaidUploadLocalAdapter(
+      async () => ({ kind: 'terminal_status', terminal: 'true' }),
+      () => '2026-10-08T12:00:00.000Z',
+    );
+    await expect(
+      adapter.classifyTerminal({
+        challengeId: requestId,
+        challengeDigest: digest,
+        devicePublicKeySpkiSha256: digest,
+      }),
+    ).rejects.toThrow();
   });
 });

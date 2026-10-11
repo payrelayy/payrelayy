@@ -205,6 +205,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       .mockResolvedValueOnce('exact_replay');
     const handler = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:05:30.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
     });
@@ -240,6 +241,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     const contextFor = (trustedIssuanceMode: 'paid') => ({ ...context, trustedIssuanceMode });
     const noMoney = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => ({ ...context, trustedIssuanceMode: 'no_money' }) as never,
       stageObservation,
     });
@@ -249,6 +251,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     ).toBe(403);
     const forged = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => contextFor('paid'),
       stageObservation,
     });
@@ -264,6 +267,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     ).toBe(403);
     const late = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:18:00.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => contextFor('paid'),
       stageObservation,
     });
@@ -279,6 +283,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
     const handler = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
     });
@@ -307,6 +312,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     const { context, frame } = fixture();
     const handler = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation: async () => 'conflict',
     });
@@ -315,5 +321,63 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     );
     expect(result.statusCode).toBe(409);
     expect(decoded(result.body)).toEqual({ code: 'observation_conflict' });
+  });
+
+  it('returns terminal only after private challenge and device binding confirmation', async () => {
+    const { frame } = fixture();
+    const classifyTerminal = vi
+      .fn<RoutinePaidUploadBridgeDependencies['classifyTerminal']>()
+      .mockResolvedValue(true);
+    const loadObservation = vi.fn<RoutinePaidUploadBridgeDependencies['loadObservation']>();
+    const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:20:00.000Z',
+      classifyTerminal,
+      loadObservation,
+      stageObservation,
+    });
+    const result = await handler(
+      http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame),
+    );
+    expect(result.statusCode).toBe(410);
+    expect(decoded(result.body)).toEqual({ code: 'paid_observation_terminal_expired' });
+    expect(classifyTerminal).toHaveBeenCalledWith({
+      challengeId: frame.signedAssignment.body.challengeId,
+      challengeDigest: frame.signedAssignment.body.challengeDigest,
+      devicePublicKeySpkiSha256: hash(Buffer.from(frame.publicKeySpki, 'base64url')),
+    });
+    expect(loadObservation).not.toHaveBeenCalled();
+    expect(stageObservation).not.toHaveBeenCalled();
+    const mismatch = await handler(
+      http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, {
+        ...frame,
+        signedObservation: {
+          ...frame.signedObservation,
+          body: { ...frame.signedObservation.body, challengeDigest: sha('f') },
+        },
+      }),
+    );
+    expect(mismatch.statusCode).toBe(400);
+    expect(classifyTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not claim terminal expiry during a database outage', async () => {
+    const { frame } = fixture();
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:20:00.000Z',
+      classifyTerminal: async () => {
+        throw new Error('database offline');
+      },
+      loadObservation: async () => {
+        throw new Error('must not run');
+      },
+      stageObservation: async () => {
+        throw new Error('must not run');
+      },
+    });
+    const result = await handler(
+      http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame),
+    );
+    expect(result.statusCode).toBe(503);
   });
 });

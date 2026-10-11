@@ -366,6 +366,41 @@ class RoutinePaidPhonePreparationTest {
     assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
   }
 
+  @Test fun `only exact server terminal confirmation archives sealed upload and frees lane`() {
+    var uploadStatus = 401
+    var uploadBody = """{"code":"observation_unavailable"}"""
+    val fixed = exchange { path, contentType, _ ->
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH)
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      else DeviceBridgeRawResponse(uploadStatus, contentType,
+        uploadBody.toByteArray(StandardCharsets.UTF_8))
+    }
+    val initial = run(preparation(fixed, ProviderTransport { observedReceipt() }))
+    assertEquals(RoutinePaidPhonePreparationResult.Review("server_rejected"), initial)
+    val upload = (workStore.load() as RoutinePaidPendingWork.Upload).uploadBytes.copyOf()
+    val sealed = File(workDirectory, "routine-paid.sealed").readBytes()
+    uploadStatus = 410
+    uploadBody = """{"code":"wrong_code"}"""
+    assertEquals(RoutinePaidPhonePreparationResult.Review("invalid_upload_response"),
+      run(preparation(fixed, ProviderTransport { error("No repeat lookup") })))
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
+    uploadBody = """{"code":"paid_observation_terminal_expired"}"""
+    assertEquals(RoutinePaidPhonePreparationResult.Review("terminal_upload_archived"),
+      run(preparation(fixed, ProviderTransport { error("No repeat lookup") })))
+    assertNull(workStore.load())
+    assertFalse(File(workDirectory, "routine-paid.sealed").exists())
+    val archives = workDirectory.listFiles()!!.filter {
+      it.name.startsWith("routine-paid-review-") && it.name.endsWith(".sealed")
+    }
+    assertEquals(1, archives.size)
+    assertTrue(archives.single().readBytes().contentEquals(sealed))
+    assertFalse(String(archives.single().readBytes(), StandardCharsets.ISO_8859_1)
+      .contains(PILOT_REFERENCE))
+    val restarted = EncryptedRoutinePaidWorkStore(workDirectory, workCipher)
+    assertNull(restarted.load())
+    assertTrue(upload.isNotEmpty())
+  }
+
   @Test fun `failed durable stage prevents public receipt lookup`() {
     val failed = EncryptedRoutinePaidWorkStore(File(temporary.root, "failed-paid"),
       object : LivePilotQueueCipher {

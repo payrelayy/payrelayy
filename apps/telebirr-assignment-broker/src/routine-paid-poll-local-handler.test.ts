@@ -54,6 +54,7 @@ function fakeBroker() {
       trustedSignerSpkiDer: Buffer.alloc(91, 1),
       trustedIssuanceMode: 'paid' as const,
     })),
+    classifyTerminal: vi.fn(async () => true),
     stageObservation: vi.fn(async () => 'recorded' as const),
   };
 }
@@ -88,6 +89,17 @@ describe('private routine paid poll local handler', () => {
     const observed = JSON.parse(Buffer.from(observation.body).toString('utf8'));
     expect(observed.kind).toBe('observation_context');
     expect(observed.context.trustedIssuanceMode).toBe('paid');
+    const terminal = await handler(
+      request('classify_terminal', {
+        challengeId: requestId,
+        challengeDigest: digest,
+        devicePublicKeySpkiSha256: digest,
+      }),
+    );
+    expect(JSON.parse(Buffer.from(terminal.body).toString('utf8'))).toEqual({
+      kind: 'terminal_status',
+      terminal: true,
+    });
     const staged = await handler(
       request('stage_observation', {
         evidence: {
@@ -158,6 +170,18 @@ describe('private routine paid poll local handler', () => {
     expect(fake.loadEnrollment).not.toHaveBeenCalled();
     expect(fake.claimAndIssuePoll).not.toHaveBeenCalled();
     expect(fake.loadObservation).not.toHaveBeenCalled();
+    expect(
+      (
+        await handler(
+          request('classify_terminal', {
+            challengeId: requestId,
+            challengeDigest: 'bad',
+            devicePublicKeySpkiSha256: digest,
+          }),
+        )
+      ).statusCode,
+    ).toBe(400);
+    expect(fake.classifyTerminal).not.toHaveBeenCalled();
   });
 
   it('fails closed with no private error detail', async () => {

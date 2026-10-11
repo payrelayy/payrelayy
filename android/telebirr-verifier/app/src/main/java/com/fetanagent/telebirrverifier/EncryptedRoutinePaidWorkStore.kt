@@ -34,6 +34,7 @@ internal interface RoutinePaidWorkStore {
   fun stageAssignment(assignmentBytes: ByteArray)
   fun stageUpload(assignmentBytes: ByteArray, uploadBytes: ByteArray)
   fun acknowledge(uploadBytes: ByteArray)
+  fun archiveTerminal(uploadBytes: ByteArray)
   fun discardExpiredAssignment(nowMillis: Long)
 }
 
@@ -92,6 +93,22 @@ internal class EncryptedRoutinePaidWorkStore(
     check(stateFile.delete()) { "Unable to remove acknowledged paid upload" }
   }
 
+  /** Keep the exact Keystore-sealed evidence for manual review; never erase a rejected upload. */
+  @Synchronized
+  override fun archiveTerminal(uploadBytes: ByteArray) {
+    val pending = read() as? RoutinePaidPendingWork.Upload
+      ?: error("No signed paid upload is staged")
+    require(pending.uploadBytes.contentEquals(uploadBytes))
+    val archived = directory.listFiles()?.count { ARCHIVE_FILE.matches(it.name) }
+      ?: error("Unable to inspect paid work directory")
+    check(archived < MAX_ARCHIVES) { "Paid review archive is full" }
+    val target = File(directory, "routine-paid-review-${UUID.randomUUID()}.sealed").absoluteFile
+    require(target.parentFile == directory && !target.exists())
+    Files.move(stateFile.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+    restrictOwnerAccess(target, executable = false)
+    inspectDirectory()
+  }
+
   @Synchronized
   override fun discardExpiredAssignment(nowMillis: Long) {
     val pending = read() as? RoutinePaidPendingWork.Assignment ?: return
@@ -119,9 +136,10 @@ internal class EncryptedRoutinePaidWorkStore(
 
   private fun inspectDirectory() {
     val files = directory.listFiles()?.toList() ?: error("Unable to inspect paid work directory")
-    require(files.size <= 1)
+    require(files.size <= MAX_ARCHIVES + 1)
     files.forEach { file ->
-      require(file == stateFile && file.isFile && !Files.isSymbolicLink(file.toPath()))
+      require((file == stateFile || ARCHIVE_FILE.matches(file.name)) && file.isFile &&
+        !Files.isSymbolicLink(file.toPath()) && file.length() in 1..MAX_SEALED_BYTES.toLong())
       require(file.canonicalFile.parentFile == directory.canonicalFile)
     }
   }
@@ -241,6 +259,8 @@ internal class EncryptedRoutinePaidWorkStore(
   companion object {
     private val MAGIC = "FETAPW01".toByteArray(StandardCharsets.US_ASCII)
     private val TEMP_FILE = Regex("^\\.routine-paid-[0-9a-f-]{36}\\.tmp$")
+    private val ARCHIVE_FILE = Regex("^routine-paid-review-[0-9a-f-]{36}\\.sealed$")
+    private const val MAX_ARCHIVES = 32
     private val ASSOCIATED_DATA =
       "fetanagent:android:routine-paid-work:v1".toByteArray(StandardCharsets.US_ASCII)
     private const val MAX_ASSIGNMENT_BYTES = 16 * 1_024

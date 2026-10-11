@@ -40,7 +40,8 @@ function renderSearch() {
       await fetch('${DEPOSIT_URL}', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ playerId: body.value.id,
           amount: Number(amount),
-          notes: surface.querySelector('textarea').value }) });
+          // Mirror KemerBet's request interceptor: empty string fields become null.
+          notes: surface.querySelector('textarea').value || null }) });
       surface.innerHTML = '<div class="ant-modal-content"><h2>Transfer Successful!</h2>' +
         '<p>Player Balance +' + Number(amount).toFixed(2) + ' ETB Success</p></div>';
     };
@@ -202,7 +203,9 @@ describe.skipIf(process.platform !== 'win32')(
           providerResponseDigest: DIGEST,
           exactPlayerCreditMatch: true,
         });
-        expect(submitted).toEqual([{ playerId: 42, amount: (amount as number) / 100, notes: '' }]);
+        expect(submitted).toEqual([
+          { playerId: 42, amount: (amount as number) / 100, notes: null },
+        ]);
         expect(fences).toBe(1);
         expect(stages).toContain('post_fence_surface_verified');
         expect(stages).toContain('transfer_click_requested');
@@ -321,7 +324,7 @@ describe.skipIf(process.platform !== 'win32')(
         async () => ({ isFresh: () => true }),
       );
       expect(outcome.outcome).toBe('submission_attempted');
-      expect(submitted).toEqual([{ playerId: 42, amount: 25, notes: '' }]);
+      expect(submitted).toEqual([{ playerId: 42, amount: 25, notes: null }]);
     }, 15000);
 
     it.each(['player', 'amount', 'stale', 'ui_tamper'])(

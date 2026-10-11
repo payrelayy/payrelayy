@@ -238,7 +238,9 @@ export function createLocalKemerBetDepositAuthorization(): MutableLocalKemerBetD
         !exactDataKeys(postData, ['playerId', 'amount', 'notes']) ||
         postData.playerId !== selected.internalPlayerId ||
         postData.amount !== selected.amountMinor / ETB_SCALE ||
-        postData.notes !== '' ||
+        // The current KemerBet client normalizes an empty Notes field to JSON null.
+        // Accept only the two representations of an empty note; non-empty notes stay blocked.
+        (postData.notes !== '' && postData.notes !== null) ||
         !fresh
       ) {
         selected?.settle({ outcome: 'local_uncertain', providerResponseDigest: null });

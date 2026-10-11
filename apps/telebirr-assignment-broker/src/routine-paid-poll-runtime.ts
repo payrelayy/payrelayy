@@ -185,7 +185,7 @@ export const ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL = `
         )
     ) as no_non_system_base_object_access,
     (
-      select count(*) = 4
+      select count(*) = 5
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
       where namespace.nspname not in ('pg_catalog', 'information_schema')
@@ -203,7 +203,7 @@ export const ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_OIDS})
     ) as exact_reachable_function_surface_allowed,
     (
-      select count(*) = 6 and pg_catalog.bool_and(
+      select count(*) = 7 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'

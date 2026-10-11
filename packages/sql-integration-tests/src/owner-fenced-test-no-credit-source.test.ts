@@ -4,13 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 const enumMigration = fileURLToPath(
   new URL(
-    '../../../supabase/migrations/20261011201642_owner_fenced_test_no_credit_closure.sql',
+    '../../../supabase/migrations/20261011203424_owner_fenced_test_no_credit_closure.sql',
     import.meta.url,
   ),
 );
 const guardMigration = fileURLToPath(
   new URL(
-    '../../../supabase/migrations/20261011201721_guarded_owner_fenced_test_resolution.sql',
+    '../../../supabase/migrations/20261011203435_guarded_owner_fenced_test_resolution.sql',
     import.meta.url,
   ),
 );

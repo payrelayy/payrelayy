@@ -476,8 +476,9 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <p class="receipt-label">
             25–25,000 ETB per deposit, any active deposit-eligible Player, no daily or deposit-count
             quota. Process one at a time; uncertain results pause the queue. This policy has no
-            expiry. Saving it does not enable execution; the routine operator connection is not
-            available in this release. The pilot approval controls below are a separate mode.
+            expiry. Saving it does not turn payment switches live, but reauthorizing a paused policy
+            can resume processing if those switches are already live. The pilot controls below are
+            another mode.
           </p>
           <p class="request-meta" id="routine-processing-status" role="status">Sign in to load the saved policy.</p>
           <div class="review-actions">
@@ -2159,7 +2160,8 @@ function renderRoutineProcessing(value) {
     Object.keys(value).sort().join(',') !==
       'authorizationId,authorizedAt,changedAt,configurationState,executionEnabled,platformAgentAccountId,policy,revision' ||
     !['not_configured', 'authorized', 'stopped'].includes(value.configurationState) ||
-    value.executionEnabled !== false ||
+    typeof value.executionEnabled !== 'boolean' ||
+    (value.configurationState !== 'authorized' && value.executionEnabled !== false) ||
     (value.authorizationId === null
       ? value.configurationState === 'authorized' || value.authorizedAt !== null ||
         value.platformAgentAccountId !== null || value.revision !== null || value.policy !== null ||
@@ -2180,7 +2182,9 @@ function renderRoutineProcessing(value) {
   routineProcessingState = value;
   routineProcessingLoaded = true;
   routineProcessingStatus.textContent = value.configurationState === 'authorized'
-    ? 'Persistent policy saved; no expiry. Execution is not enabled. Saved ' + new Date(value.authorizedAt).toLocaleString() + '.'
+    ? 'Persistent policy saved; no expiry. Routine operator transport ' +
+      (value.executionEnabled ? 'active' : 'inactive') +
+      '. Payment switches are separate. Last authorized ' + new Date(value.changedAt).toLocaleString() + '.'
     : value.configurationState === 'stopped'
       ? 'Routine policy stopped. Payment evidence and queued jobs are preserved; no execution is enabled.'
       : 'No routine policy saved. Execution is not enabled.';
@@ -2218,7 +2222,7 @@ async function mutateRoutineProcessing(operation) {
     (operation === 'stop' && routineProcessingState?.configurationState !== 'authorized') ||
     (operation === 'save' && (kemerbetAgentProfileLoadState !== 'loaded' || !activeKemerbetAgentProfileId))) return;
   if (operation === 'save' && !window.confirm(
-    'Save a persistent routine TeleBirr policy: 25–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving this policy does not start execution.'
+    'Save a persistent routine TeleBirr policy: 25–25,000 ETB, any active eligible Player, no daily or count quota, one deposit at a time? Saving does not turn payment switches live, but can resume processing if they are already live. Confirm they are off before reauthorizing a paused policy.'
   )) return;
   const selectedGeneration = ownerAuthGeneration;
   const requestId = crypto.randomUUID();

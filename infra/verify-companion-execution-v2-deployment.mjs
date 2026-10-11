@@ -122,8 +122,9 @@ assert.match(
 assert.match(windowsEntry, /handoffExpiresAtMs: executionDeadlineMs!/u);
 assert.match(
   windowsEntry,
-  /if \(handoff \|\| config\.routineDepositsEnabled\) \{\s*lookupAbort\.abort\(\);\s*await session\.stop\(\);\s*\}/u,
+  /if \(handoff \|\| config\.routineDepositsEnabled\) \{\s*lookupAbort\.abort\(\);[\s\S]*?if \(handoff\) await session\.stop\(\);\s*else if \(routineReviewHeld\) await session\.done;\s*else await session\.stop\(\);\s*\}/u,
 );
+assert.match(windowsEntry, /routineReviewHeld = result\.reason !== 'operator_stopped'/u);
 assert.match(
   windowsEntry,
   /if \(config\.executionV2Enabled \|\| config\.routineDepositsEnabled\) await session\.stop\(\)/u,

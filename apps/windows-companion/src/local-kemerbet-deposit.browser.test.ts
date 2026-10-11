@@ -181,6 +181,7 @@ describe.skipIf(process.platform !== 'win32')(
       'prepares and submits the exact bound amount %s once',
       async (amount, text) => {
         const { page, lookup, deposit, submitted } = await startFixture();
+        const stages: string[] = [];
         let fences = 0;
         const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
           page,
@@ -194,6 +195,7 @@ describe.skipIf(process.platform !== 'win32')(
             fences += 1;
             return { playerId: PLAYER_ID, amountMinor: amount as number, isFresh: () => true };
           },
+          (stage) => stages.push(stage),
         );
         expect(outcome).toEqual({
           outcome: 'submission_attempted',
@@ -202,9 +204,37 @@ describe.skipIf(process.platform !== 'win32')(
         });
         expect(submitted).toEqual([{ playerId: 42, amount: (amount as number) / 100, notes: '' }]);
         expect(fences).toBe(1);
+        expect(stages).toContain('post_fence_surface_verified');
+        expect(stages).toContain('transfer_click_requested');
+        expect(stages).toContain('provider_route_submission_attempted');
+        expect(stages.at(-1)).toBe('success_modal_confirmed');
       },
       15000,
     );
+
+    it('reports a post-fence UI mismatch without clicking Transfer or exposing identifiers', async () => {
+      const { page, lookup, deposit, submitted } = await startFixture();
+      const stages: string[] = [];
+      await expect(
+        executeRoutineOneUseLocalKemerBetDeposit(
+          page,
+          PLAYER_ID,
+          2500,
+          lookup,
+          deposit,
+          async () => {
+            await page.locator('[data-placeholder="Enter Amount"] input').fill('1.00');
+            return { playerId: PLAYER_ID, amountMinor: 2500, isFresh: () => true };
+          },
+          (stage) => stages.push(stage),
+        ),
+      ).rejects.toThrow();
+      expect(stages).toContain('final_action_fenced');
+      expect(stages).toContain('prepared_amount_mismatch');
+      expect(stages).not.toContain('transfer_click_requested');
+      expect(submitted).toEqual([]);
+      expect(JSON.stringify(stages)).not.toContain(PLAYER_ID);
+    });
 
     it('rehearses the real preparation path without granting a transfer or submitting', async () => {
       const { page, lookup, deposit, submitted, blocked } = await startFixture();

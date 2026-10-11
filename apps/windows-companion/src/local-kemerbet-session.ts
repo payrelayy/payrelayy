@@ -52,6 +52,7 @@ export type LocalKemerBetSessionState =
   | 'signed_in_candidate'
   | 'verifying_identity'
   | 'signed_in_verified'
+  | 'review_paused'
   | 'stopping'
   | 'stopped'
   | 'failed';
@@ -103,6 +104,8 @@ export interface LocalKemerBetSession {
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
   rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number): Promise<void>;
+  /** Permanently disarm this routine launch after an uncertain attempt without hiding Chrome. */
+  pauseForReview(): void;
   stop(): Promise<void>;
 }
 
@@ -155,6 +158,7 @@ export async function startLocalKemerBetSession(
   let operationInProgress = false;
   let signedInCandidate = false;
   let signedInVerified = false;
+  let reviewPaused = false;
   let stopping = false;
   let terminal = false;
   let identityVerificationEpoch = 0;
@@ -343,7 +347,7 @@ export async function startLocalKemerBetSession(
     );
 
     const beginIdentityVerification = async (): Promise<void> => {
-      if (terminal || signedInVerified) return;
+      if (terminal || reviewPaused || signedInVerified) return;
       if (identityVerificationPromise !== undefined) {
         await identityVerificationPromise;
         if (
@@ -429,7 +433,7 @@ export async function startLocalKemerBetSession(
     };
 
     const markSignedInCandidate = async (): Promise<void> => {
-      if (terminal) return;
+      if (terminal || reviewPaused) return;
       if (!signedInCandidate) {
         signedInCandidate = true;
         disarmLoginDeadline();
@@ -477,10 +481,24 @@ export async function startLocalKemerBetSession(
 
     const armSignedInReload = (delayMs = KEMERBET_SIGNED_IN_RELOAD_MS): void => {
       disarmSignedInReload();
-      if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+      if (
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        phase !== 'signed_in_read_only'
+      )
+        return;
       signedInReloadTimer = setTimeout(() => {
         signedInReloadTimer = undefined;
-        if (terminal || stopping || !signedInVerified || phase !== 'signed_in_read_only') return;
+        if (
+          terminal ||
+          stopping ||
+          reviewPaused ||
+          !signedInVerified ||
+          phase !== 'signed_in_read_only'
+        )
+          return;
         if (operationInProgress) {
           armSignedInReload(KEMERBET_BUSY_RELOAD_RETRY_MS);
           return;
@@ -597,10 +615,21 @@ export async function startLocalKemerBetSession(
     done,
     verified,
     isSignedInVerified: () =>
-      !terminal && !stopping && signedInVerified && phase === 'signed_in_read_only',
+      !terminal &&
+      !stopping &&
+      !reviewPaused &&
+      signedInVerified &&
+      phase === 'signed_in_read_only',
     async executeExactFiveLookup(playerIds: ExactFivePlayerIds) {
       const page = localPage;
-      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+      if (
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        operationInProgress ||
+        !page
+      ) {
         throw new Error('The local KemerBet lookup session is unavailable.');
       }
       operationInProgress = true;
@@ -616,7 +645,14 @@ export async function startLocalKemerBetSession(
       acquireFinalAction: () => Promise<LocalKemerBetFinalAction>,
     ) {
       const page = localPage;
-      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+      if (
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        operationInProgress ||
+        !page
+      ) {
         throw new Error('The local KemerBet execution session is unavailable.');
       }
       operationInProgress = true;
@@ -640,7 +676,14 @@ export async function startLocalKemerBetSession(
       acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
     ) {
       const page = localPage;
-      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+      if (
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        operationInProgress ||
+        !page
+      ) {
         try {
           reportRoutinePreflight('session_unavailable');
         } catch {
@@ -667,7 +710,14 @@ export async function startLocalKemerBetSession(
     },
     async rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number) {
       const page = localPage;
-      if (terminal || stopping || !signedInVerified || operationInProgress || !page) {
+      if (
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        operationInProgress ||
+        !page
+      ) {
         try {
           reportRoutinePreflight('session_unavailable');
         } catch {
@@ -688,6 +738,23 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         operationInProgress = false;
+      }
+    },
+    pauseForReview: () => {
+      if (!config.routineDepositsEnabled || terminal || stopping || reviewPaused) return;
+      // This launch cannot resume: even a later sign-in or provider refresh must not
+      // re-arm a fenced attempt. The route guard remains attached to the visible page.
+      reviewPaused = true;
+      signedInVerified = false;
+      identityVerificationEpoch += 1;
+      lookupAuthorization.clear();
+      depositAuthorization.clear();
+      disarmSignedInReload();
+      disarmIdentityRetry();
+      try {
+        report({ state: 'review_paused', transferDisabled: true, detailsRedacted: true });
+      } catch {
+        // Reporting must not turn a disarmed review hold into another shutdown path.
       }
     },
     stop: () => finish('stopped'),

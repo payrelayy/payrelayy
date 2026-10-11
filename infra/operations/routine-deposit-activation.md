@@ -210,6 +210,14 @@ first naturally occurring eligible live deposit through the Owner and protected
 operator channels; never create a synthetic paid job or retry an uncertain
 Transfer to prove the path.
 
+If a routine execution becomes uncertain, the Windows worker stops permanently
+for that launch and clears its local lookup and Transfer allowances. The guarded
+Chrome window remains visible in a read-only review hold, with fixed redacted
+checkpoints around the final action. It cannot resume crediting after another
+KemerBet sign-in; the Owner must still reconcile the durable fenced attempt and
+review the provider history before any new activation. Closing the window does
+not resolve the attempt.
+
 ## Emergency or planned stop
 
 First dispatch `production-routine-financial-stop.yml` on `main` with the exact

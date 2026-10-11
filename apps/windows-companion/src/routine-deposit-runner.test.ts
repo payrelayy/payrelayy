@@ -18,6 +18,7 @@ describe('automatic routine queue loop', () => {
     const controller = new AbortController();
     const session = {
       stop: vi.fn(async () => undefined),
+      pauseForReview: vi.fn(),
       executeRoutineOneUseDeposit: vi.fn(),
       isSignedInVerified: vi.fn(() => true),
     };
@@ -49,8 +50,10 @@ describe('automatic routine queue loop', () => {
       reason: 'reconciliation_uncertain',
     });
     expect(selected.runOnce).toHaveBeenCalledTimes(3);
-    expect(session.stop).toHaveBeenCalledTimes(1);
+    expect(session.pauseForReview).toHaveBeenCalledTimes(1);
+    expect(session.stop).not.toHaveBeenCalled();
     await queue.stop();
+    expect(session.stop).toHaveBeenCalledTimes(1);
     expect(selected.runOnce).toHaveBeenCalledTimes(3);
   });
 
@@ -72,7 +75,8 @@ describe('automatic routine queue loop', () => {
     resolve({ status: 'completed' });
     await queue.done;
     expect(selected.runOnce).toHaveBeenCalledTimes(2);
-    expect(session.stop).toHaveBeenCalledTimes(1);
+    expect(session.pauseForReview).toHaveBeenCalledTimes(1);
+    expect(session.stop).not.toHaveBeenCalled();
   });
 
   it('processes a burst of 100 queued credits in one ordered lane', async () => {
@@ -106,6 +110,7 @@ describe('automatic routine queue loop', () => {
     controller.abort();
     await expect(queue.done).resolves.toEqual({ status: 'stopped' });
     expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -127,6 +132,7 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(100);
     await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -142,6 +148,7 @@ describe('automatic routine queue loop', () => {
     await vi.advanceTimersByTimeAsync(100);
     await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
     expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -156,7 +163,8 @@ describe('automatic routine queue loop', () => {
     });
     await expect(queue.done).resolves.toMatchObject({ status: 'paused' });
     expect(selected.runOnce).toHaveBeenCalledTimes(1);
-    expect(session.stop).toHaveBeenCalledTimes(1);
+    expect(session.pauseForReview).toHaveBeenCalledTimes(1);
+    expect(session.stop).not.toHaveBeenCalled();
   });
 
   it('does not start an already-aborted queue', async () => {

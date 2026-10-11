@@ -129,7 +129,19 @@ async function responseBytes(response: Response): Promise<Buffer> {
 }
 
 function binding(candidate: RoutineDepositBinding): RoutineDepositProtocolBinding {
-  return decodeRoutineDepositBinding(candidate) ?? unavailable();
+  // A signed lease also carries policy and execution state; the wire binding accepts only these eight fields.
+  return (
+    decodeRoutineDepositBinding({
+      jobId: candidate.jobId,
+      intentId: candidate.intentId,
+      attemptId: candidate.attemptId,
+      paymentClaimId: candidate.paymentClaimId,
+      platformAgentAccountId: candidate.platformAgentAccountId,
+      playerId: candidate.playerId,
+      amountMinor: candidate.amountMinor,
+      currencyCode: candidate.currencyCode,
+    }) ?? unavailable()
+  );
 }
 
 function sameBinding(

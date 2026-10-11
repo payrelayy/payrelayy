@@ -40,7 +40,33 @@ const leaseBinding = {
   currencyCode: 'ETB',
 } as unknown as RoutineDepositLease;
 
-function fixture(tamperSignature = false) {
+const fullLease: RoutineDepositLease = {
+  ...leaseBinding,
+  policy: {
+    mode: 'routine_production',
+    status: 'active',
+    version: 1,
+    provider: 'telebirr',
+    platformCode: 'kemerbet',
+    currencyCode: 'ETB',
+    minimumAmountMinor: 2500,
+    maximumAmountMinor: 2500000,
+    playerScope: 'all_active_deposit_eligible',
+    playerOwnershipRequired: false,
+    dailyQuotaMinor: null,
+    successfulDepositQuota: null,
+    maxConcurrentDeposits: 1,
+    amountSource: 'official_receipt_settled_amount',
+  },
+  phase: 'execute',
+  paymentVerified: true,
+  playerActive: true,
+  playerDepositEligible: true,
+  attemptNumber: 1,
+  finalActionFenced: false,
+};
+
+function fixture(tamperSignature = false, returnLease = false) {
   const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const signerSpki = Buffer.from(signer.publicKey.export({ format: 'der', type: 'spki' }));
   const operations: string[] = [];
@@ -57,14 +83,20 @@ function fixture(tamperSignature = false) {
     const command = parsed.command;
     operations.push(command.operation);
     const result: RoutineDepositResponseResult =
-      command.operation === 'fence'
-        ? {
-            ...command.binding,
-            firstFenceAcquired: true,
-            issuedAtMs: Date.parse(serverIssuedAt),
-            validUntilMs: Date.parse(serverIssuedAt) + 5_000,
-          }
-        : null;
+      command.operation === 'lease' && returnLease
+        ? fullLease
+        : command.operation === 'fence'
+          ? {
+              ...command.binding,
+              firstFenceAcquired: true,
+              issuedAtMs: Date.parse(serverIssuedAt),
+              validUntilMs: Date.parse(serverIssuedAt) + 5_000,
+            }
+          : command.operation === 'record_dispatch' || command.operation === 'complete'
+            ? command.binding
+            : command.operation === 'reconcile'
+              ? { outcome: 'pending' }
+              : null;
     const body = decodeRoutineDepositResponseBody({
       contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
       protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
@@ -120,6 +152,48 @@ function fixture(tamperSignature = false) {
 }
 
 describe('routine deposit HTTP store', () => {
+  it('projects the exact binding from a full signed lease for every bound command', async () => {
+    const selected = fixture(false, true);
+    const lease = await selected.store.leaseNext();
+    expect(lease).toMatchObject({ phase: 'execute', policy: fullLease.policy });
+    if (!lease) throw new Error('The signed test lease is missing.');
+
+    await expect(selected.store.fenceFinalAction(lease)).resolves.toMatchObject({
+      firstFenceAcquired: true,
+      attemptId: lease.attemptId,
+    });
+    await expect(
+      selected.store.recordDispatch(lease, {
+        outcome: 'submission_attempted',
+        providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+        exactPlayerCreditMatch: true,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(selected.store.reconcile(lease)).resolves.toEqual({ outcome: 'pending' });
+    await expect(
+      selected.store.completeConfirmed(lease, '55555555-5555-4555-8555-555555555555'),
+    ).resolves.toMatchObject({ attemptId: lease.attemptId });
+    await expect(selected.store.pause(lease, 'operator_stopped')).resolves.toBeUndefined();
+
+    expect(selected.operations).toEqual([
+      'lease',
+      'fence',
+      'record_dispatch',
+      'reconcile',
+      'complete',
+      'pause',
+    ]);
+    for (const [, init] of selected.fetchImplementation.mock.calls.slice(1)) {
+      const parsed = JSON.parse(String(init?.body)) as {
+        command: { binding: Record<string, unknown> };
+      };
+      expect(Object.keys(parsed.command.binding).sort()).toEqual(Object.keys(leaseBinding).sort());
+    }
+    expect(selected.diagnostics).toEqual([
+      { operation: 'fence', stage: 'signed_response_verified' },
+    ]);
+  });
+
   it('accepts authenticated null results for an idle lease and pause acknowledgement', async () => {
     const selected = fixture();
 

@@ -387,6 +387,87 @@ describe('local KemerBet enrollment session', () => {
     expect(session.isSignedInVerified()).toBe(true);
   });
 
+  it('pauses routine Player work after an unavailable refresh identity and retries without closing Chrome', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, session } = await start(AGENTS_URL, routineConfig);
+    dependencies.verifyLocalKemerBetIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('redacted unavailable header'), {
+        code: 'FETANAGENT_IDENTITY_BINDING_UNAVAILABLE',
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(context.close).not.toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({
+      state: 'signed_in_candidate',
+      reason: 'identity_binding_unavailable',
+      transferDisabled: true,
+      detailsRedacted: true,
+    });
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, async () => {
+        throw new Error('No final action may be requested while identity is unavailable.');
+      }),
+    ).rejects.toThrow('unavailable');
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(3);
+    expect(session.isSignedInVerified()).toBe(true);
+    expect(context.close).not.toHaveBeenCalled();
+  });
+
+  it('treats an unclassified frame error during a routine refresh as unavailable, never as a verified identity', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, session } = await start(AGENTS_URL, routineConfig);
+    dependencies.verifyLocalKemerBetIdentity.mockRejectedValueOnce(
+      new Error('redacted frame navigation error'),
+    );
+
+    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(context.close).not.toHaveBeenCalled();
+    expect(events.at(-1)?.reason).toBe('identity_binding_unavailable');
+    expect(JSON.stringify(events)).not.toContain('redacted frame navigation error');
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
+  it('cancels an unavailable routine identity retry when KemerBet returns to login', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, page, session } = await start(AGENTS_URL, routineConfig);
+    dependencies.verifyLocalKemerBetIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('redacted unavailable header'), {
+        code: 'FETANAGENT_IDENTITY_BINDING_UNAVAILABLE',
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    page.navigate(LOGIN_URL);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(events.at(-1)?.state).toBe('login_required');
+    expect(context.close).not.toHaveBeenCalled();
+  });
+
+  it('still closes a routine window if the refreshed KemerBet identity differs from its binding', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, session } = await start(AGENTS_URL, routineConfig);
+    dependencies.verifyLocalKemerBetIdentity.mockRejectedValueOnce(
+      Object.assign(new Error('redacted identity mismatch'), {
+        code: 'FETANAGENT_IDENTITY_MISMATCH',
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await expect(session.done).rejects.toThrow('failed closed');
+    expect(events.at(-1)?.reason).toBe('identity_mismatch');
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps routine Chrome open but pauses work after provider logout until manual reauthentication', async () => {
     const routineConfig = { ...config, routineDepositsEnabled: true };
     const { context, events, page, session } = await start(AGENTS_URL, routineConfig);

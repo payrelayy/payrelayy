@@ -82,7 +82,9 @@ function report(event: LocalKemerBetSessionEvent): void {
     event.reason === 'identity_mismatch'
   ) {
     console.info(
-      'Local KemerBet identity verification failed closed. Reopen the reviewed companion and confirm the exact agent header locally.',
+      event.state === 'signed_in_candidate' && event.reason === 'identity_binding_unavailable'
+        ? 'KemerBet account identity is unavailable. Automatic Deposits is paused while this Chrome window stays open and retries the bound account check.'
+        : 'Local KemerBet identity verification failed closed. Reopen the reviewed companion and confirm the exact agent header locally.',
     );
   }
 }

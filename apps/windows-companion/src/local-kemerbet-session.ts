@@ -44,6 +44,7 @@ import { acquireSessionLock, releaseSessionLock, type SessionLock } from './sess
 // the same guarded page while its Chrome-held session is still valid, with four minutes to spare.
 const KEMERBET_SIGNED_IN_RELOAD_MS = 11 * 60 * 1_000;
 const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
+const KEMERBET_ROUTINE_IDENTITY_RETRY_MS = 15 * 1_000;
 
 export type LocalKemerBetSessionState =
   | 'starting'
@@ -164,6 +165,7 @@ export async function startLocalKemerBetSession(
   let candidateTimer: NodeJS.Timeout | undefined;
   let sessionTimer: NodeJS.Timeout | undefined;
   let signedInReloadTimer: NodeJS.Timeout | undefined;
+  let identityRetryTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
   let lock: SessionLock | undefined;
@@ -204,6 +206,11 @@ export async function startLocalKemerBetSession(
     signedInReloadTimer = undefined;
   };
 
+  const disarmIdentityRetry = (): void => {
+    if (identityRetryTimer !== undefined) clearTimeout(identityRetryTimer);
+    identityRetryTimer = undefined;
+  };
+
   const finish = async (
     state: 'failed' | 'stopped',
     reason?: LocalKemerBetSessionEvent['reason'],
@@ -218,6 +225,7 @@ export async function startLocalKemerBetSession(
     disarmLoginDeadline();
     disarmCandidateDeadline();
     disarmSignedInReload();
+    disarmIdentityRetry();
     if (sessionTimer) clearTimeout(sessionTimer);
     let browserClosed = context === undefined;
     let lockReleased = lock === undefined;
@@ -341,6 +349,7 @@ export async function startLocalKemerBetSession(
         if (
           !terminal &&
           !signedInVerified &&
+          identityRetryTimer === undefined &&
           classifyPageUrl(page.url()) === 'authenticated_candidate'
         ) {
           await beginIdentityVerification();
@@ -366,6 +375,7 @@ export async function startLocalKemerBetSession(
           }
           expectedAgentIdentity = undefined;
           signedInVerified = true;
+          disarmIdentityRetry();
           settleVerified(true);
           report({
             state: 'signed_in_verified',
@@ -377,6 +387,37 @@ export async function startLocalKemerBetSession(
           armSignedInReload();
         } catch (error) {
           if (terminal || verificationEpoch !== identityVerificationEpoch) return;
+          // A previously verified routine window may briefly lose the account header while
+          // KemerBet rebuilds the page after a guarded refresh. Never claim Player work in
+          // that state, but do not close the owner's Chrome window for an unavailable header.
+          // A different visible identity still fails closed immediately.
+          if (
+            config.routineDepositsEnabled &&
+            verifiedSettled &&
+            identityFailureReason(error) === 'identity_binding_unavailable' &&
+            classifyPageUrl(page.url()) === 'authenticated_candidate'
+          ) {
+            signedInVerified = false;
+            lookupAuthorization.clear();
+            depositAuthorization.clear();
+            report({
+              state: 'signed_in_candidate',
+              reason: 'identity_binding_unavailable',
+              transferDisabled: true,
+              detailsRedacted: true,
+            });
+            if (identityRetryTimer === undefined) {
+              identityRetryTimer = setTimeout(() => {
+                identityRetryTimer = undefined;
+                if (terminal || stopping) return;
+                void observePage(page).catch((retryError: unknown) =>
+                  finish('failed', identityFailureReason(retryError)),
+                );
+              }, KEMERBET_ROUTINE_IDENTITY_RETRY_MS);
+              identityRetryTimer.unref();
+            }
+            return;
+          }
           throw error;
         }
       })();
@@ -427,6 +468,7 @@ export async function startLocalKemerBetSession(
         depositAuthorization.clear();
         disarmCandidateDeadline();
         disarmSignedInReload();
+        disarmIdentityRetry();
         phase = 'manual_login';
         armLoginDeadline();
         report({ state: 'login_required', transferDisabled: true, detailsRedacted: true });
@@ -482,6 +524,7 @@ export async function startLocalKemerBetSession(
         disarmLoginDeadline();
         disarmCandidateDeadline();
         disarmSignedInReload();
+        disarmIdentityRetry();
         if (sessionTimer) clearTimeout(sessionTimer);
         void releaseSessionLock(lock)
           .then(() => {

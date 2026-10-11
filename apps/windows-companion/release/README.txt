@@ -61,8 +61,11 @@ window, but every command still requires the current server policy, certificate,
 runtime activation, one-use claim and fence. Losing any of those stops new work. In routine mode,
 the same guarded KemerBet page refreshes every eleven minutes and the bound account is verified
 again before more Player work. The routine Chrome window does not close merely because twelve
-hours pass. If KemerBet itself returns to login, credit work pauses and the window waits for you
-to sign in manually; the Companion cannot override KemerBet's own server-session expiry.
+hours pass. If the bound account header is temporarily unavailable after a refresh, credit work
+pauses and the same guarded window retries identity verification; a different account still fails
+closed. The server watchdog may turn deposits off if the signed worker remains unavailable. If
+KemerBet itself returns to login, credit work pauses and the window waits for you to sign in
+manually; the Companion cannot override KemerBet's own server-session expiry.
 
 The dedicated browser profile is stored at D:\FetanAgent Companion when drive D exists, otherwise
 under the current Windows user's Local AppData folder. Credentials are submitted to KemerBet, and

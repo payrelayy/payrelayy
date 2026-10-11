@@ -18,6 +18,7 @@ internal object RoutinePaidLaneDiagnostic {
       RoutinePaidPhonePreparationResult.SubmittedForReview -> "observation_staged"
       is RoutinePaidPhonePreparationResult.Review -> when (result.reasonCode) {
         "server_rejected", "lookup_expired", "local_work_unavailable",
+        "terminal_upload_archived",
         "enrollment_unavailable", "device_key_unavailable", "clock_unavailable",
         "invalid_assignment_response", "invalid_upload_response", "upload_rejected",
         "observation_conflict", "observation_invalid", "transport_unavailable",

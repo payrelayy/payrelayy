@@ -22,7 +22,7 @@ async function asRuntime<T>(client: Client, work: () => Promise<T>): Promise<T> 
 
 export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => Client): void {
   describe('separate paid TeleBirr phone poll runtime boundary', () => {
-    it('starts without a login or password and inherits only four paid functions', async () => {
+    it('starts without a login or password and inherits only five paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         name: string;
@@ -80,6 +80,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           order by routine.proname`,
       );
       expect(functions.rows.map((row) => row.name)).toEqual([
+        'classify_routine_telebirr_paid_upload_terminal',
         'issue_routine_telebirr_paid_poll_assignment',
         'load_routine_telebirr_paid_observation_material',
         'load_routine_telebirr_paid_poll_enrollment',
@@ -118,6 +119,12 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         pg_catalog.has_function_privilege('public',
           'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
           'EXECUTE') as public_paid_stage,
+        pg_catalog.has_function_privilege('public',
+          'app.classify_routine_telebirr_paid_upload_terminal(uuid,text,text)',
+          'EXECUTE') as public_terminal,
+        pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+          'app.classify_routine_telebirr_paid_upload_terminal(uuid,text,text)',
+          'EXECUTE') as no_money_terminal,
         pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
           'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
           'EXECUTE') as no_money_paid_stage`);
@@ -130,6 +137,8 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           no_money_issue: false,
           paid_can_issue_no_money: false,
           public_paid_stage: false,
+          public_terminal: false,
+          no_money_terminal: false,
           no_money_paid_stage: false,
         },
       ]);
@@ -148,11 +157,12 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             'issue_routine_telebirr_paid_lookup_assignment_material',
             'issue_routine_telebirr_paid_lookup_challenge',
             'load_routine_telebirr_paid_observation_material',
+            'classify_routine_telebirr_paid_upload_terminal',
             'stage_routine_telebirr_paid_signed_observation',
           ],
         ],
       );
-      expect(guards.rows).toHaveLength(6);
+      expect(guards.rows).toHaveLength(7);
       expect(guards.rows.every((row) => row.guard_count === 1)).toBe(true);
     });
 
@@ -175,6 +185,12 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             [randomUUID()],
           );
           expect(result.rows).toEqual([]);
+          const terminal = await client.query<{ terminal: boolean }>(
+            `select app.classify_routine_telebirr_paid_upload_terminal(
+              $1::uuid,$2::text,$3::text) as terminal`,
+            [randomUUID(), `sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`],
+          );
+          expect(terminal.rows).toEqual([{ terminal: false }]);
           const preflight = await client.query<Record<string, boolean>>(
             ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL,
             [],

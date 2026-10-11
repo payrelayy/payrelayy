@@ -110,6 +110,7 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
     typeof broker.loadEnrollment !== 'function' ||
     typeof broker.claimAndIssuePoll !== 'function' ||
     typeof broker.loadObservation !== 'function' ||
+    typeof broker.classifyTerminal !== 'function' ||
     typeof broker.stageObservation !== 'function'
   )
     throw new Error();
@@ -183,6 +184,24 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
           kind: 'observation_context',
           context: { ...loaded, trustedSignerSpkiDer: Buffer.from(der).toString('base64url') },
         });
+      }
+      if (value.operation === 'classify_terminal') {
+        if (
+          !exact(input, ['challengeId', 'challengeDigest', 'devicePublicKeySpkiSha256']) ||
+          typeof input.challengeId !== 'string' ||
+          !UUID_V4.test(input.challengeId) ||
+          typeof input.challengeDigest !== 'string' ||
+          !DIGEST.test(input.challengeDigest) ||
+          typeof input.devicePublicKeySpkiSha256 !== 'string' ||
+          !DIGEST.test(input.devicePublicKeySpkiSha256)
+        )
+          return response(400, { code: 'invalid_request' });
+        const terminal = await broker.classifyTerminal({
+          challengeId: input.challengeId,
+          challengeDigest: input.challengeDigest,
+          devicePublicKeySpkiSha256: input.devicePublicKeySpkiSha256,
+        });
+        return response(200, { kind: 'terminal_status', terminal });
       }
       if (value.operation === 'stage_observation') {
         if (

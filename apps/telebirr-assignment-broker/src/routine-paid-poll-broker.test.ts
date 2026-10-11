@@ -110,6 +110,7 @@ function fixture() {
     loadEnrollment: vi.fn(async () => enrollmentRow),
     issuePollAssignment: vi.fn(async () => row),
     loadObservationMaterial: vi.fn(async () => row),
+    classifyTerminal: vi.fn(async () => false),
     stageObservation: vi.fn(async () => 'recorded'),
   };
   const signer = {
@@ -165,6 +166,31 @@ describe('private routine paid poll broker core', () => {
     });
     expect(staged).toBe('recorded');
     expect(f.database.stageObservation).toHaveBeenCalledOnce();
+  });
+  it('requires exact terminal inputs and a boolean database confirmation', async () => {
+    const f = fixture();
+    const input = {
+      challengeId: ids.challenge,
+      challengeDigest: f.row.challenge_digest,
+      devicePublicKeySpkiSha256: f.row.device_public_key_spki_sha256,
+    };
+    expect(await f.broker.classifyTerminal(input)).toBe(false);
+    expect(f.database.classifyTerminal).toHaveBeenCalledWith(input);
+    f.database.classifyTerminal = vi.fn(async () => true);
+    const confirmed = createRoutinePaidPollBroker({
+      database: f.database,
+      openingKey: f.openingKey,
+      signer: f.signer,
+      now: () => now,
+    });
+    expect(await confirmed.classifyTerminal(input)).toBe(true);
+    await expect(
+      confirmed.classifyTerminal({ ...input, challengeDigest: 'bad' }),
+    ).rejects.toBeInstanceOf(RoutinePaidPollBrokerUnavailableError);
+    f.database.classifyTerminal = vi.fn(async () => 'true');
+    await expect(confirmed.classifyTerminal(input)).rejects.toBeInstanceOf(
+      RoutinePaidPollBrokerUnavailableError,
+    );
   });
   it('maps the active SQL enrollment and signs only the atomically reserved snapshot', async () => {
     const f = fixture();

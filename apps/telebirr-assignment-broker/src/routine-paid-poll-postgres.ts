@@ -10,6 +10,8 @@ const LOAD = 'select * from app.load_routine_telebirr_paid_poll_enrollment($1::u
 const ISSUE =
   'select * from app.issue_routine_telebirr_paid_poll_assignment($1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::uuid)';
 const OBSERVATION = 'select * from app.load_routine_telebirr_paid_observation_material($1::uuid)';
+const TERMINAL =
+  'select app.classify_routine_telebirr_paid_upload_terminal($1::uuid,$2::text,$3::text) as terminal';
 const STAGE =
   'select app.stage_routine_telebirr_paid_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb) as status';
 
@@ -48,6 +50,26 @@ export function createRoutinePaidPollPostgresDatabase(
         input.signerId,
       ]),
     loadObservationMaterial: (challengeId: string) => oneRow(client, OBSERVATION, [challengeId]),
+    async classifyTerminal(
+      input: Parameters<RoutinePaidPollBrokerDatabase['classifyTerminal']>[0],
+    ) {
+      const row = await oneRow(client, TERMINAL, [
+        input.challengeId,
+        input.challengeDigest,
+        input.devicePublicKeySpkiSha256,
+      ]);
+      if (
+        typeof row !== 'object' ||
+        row === null ||
+        Array.isArray(row) ||
+        isProxy(row) ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        Reflect.ownKeys(row).length !== 1 ||
+        typeof Object.getOwnPropertyDescriptor(row, 'terminal')?.value !== 'boolean'
+      )
+        throw new RoutinePaidPollSqlUnavailableError();
+      return Object.getOwnPropertyDescriptor(row, 'terminal')?.value as boolean;
+    },
     async stageObservation(
       input: Parameters<RoutinePaidPollBrokerDatabase['stageObservation']>[0],
     ) {

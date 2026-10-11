@@ -39,6 +39,12 @@ export interface RoutinePaidUploadObservationContext {
 
 export interface RoutinePaidUploadBridgeDependencies {
   readonly now: () => string;
+  /** Private database confirmation; false on mismatch or a still-usable challenge. */
+  classifyTerminal(input: {
+    readonly challengeId: string;
+    readonly challengeDigest: string;
+    readonly devicePublicKeySpkiSha256: string;
+  }): Promise<boolean>;
   loadObservation(challengeId: string): Promise<RoutinePaidUploadObservationContext | undefined>;
   stageObservation(input: {
     readonly evidence: RoutineTelebirrPaidPhoneEvidence;
@@ -136,6 +142,7 @@ export function createRoutinePaidUploadBridgeHandler(
   if (
     !dependencies ||
     typeof dependencies.now !== 'function' ||
+    typeof dependencies.classifyTerminal !== 'function' ||
     typeof dependencies.loadObservation !== 'function' ||
     typeof dependencies.stageObservation !== 'function'
   )
@@ -153,14 +160,28 @@ export function createRoutinePaidUploadBridgeHandler(
       const signedObservation = own(value, 'signedObservation');
       const body = record(signedObservation) && own(signedObservation, 'body');
       const challengeId = record(body) && own(body, 'challengeId');
+      const observationChallengeDigest = record(body) && own(body, 'challengeDigest');
+      const assignmentBody = record(signedAssignment) && own(signedAssignment, 'body');
+      const assignmentChallengeId = record(assignmentBody) && own(assignmentBody, 'challengeId');
+      const challengeDigest = record(assignmentBody) && own(assignmentBody, 'challengeDigest');
       if (
         !deviceSpkiDer ||
         !record(signedAssignment) ||
         !record(signedObservation) ||
         typeof challengeId !== 'string' ||
-        !UUID_V4.test(challengeId)
+        !UUID_V4.test(challengeId) ||
+        assignmentChallengeId !== challengeId ||
+        typeof challengeDigest !== 'string' ||
+        !DIGEST.test(challengeDigest) ||
+        observationChallengeDigest !== challengeDigest
       )
         return error(400, 'invalid_request');
+      const terminal = await dependencies.classifyTerminal({
+        challengeId,
+        challengeDigest,
+        devicePublicKeySpkiSha256: `sha256:${createHash('sha256').update(deviceSpkiDer).digest('hex')}`,
+      });
+      if (terminal) return error(410, 'paid_observation_terminal_expired');
       const context = await dependencies.loadObservation(challengeId);
       if (!context) return error(401, 'observation_unavailable');
       const assessment = assessRoutineTelebirrPaidPhoneEvidence(

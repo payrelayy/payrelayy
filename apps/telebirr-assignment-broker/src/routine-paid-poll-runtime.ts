@@ -13,6 +13,7 @@ const ALLOWED_FUNCTIONS = [
   'app.load_routine_telebirr_paid_poll_enrollment(uuid)',
   'app.issue_routine_telebirr_paid_poll_assignment(uuid,uuid,text,timestamptz,uuid)',
   'app.load_routine_telebirr_paid_observation_material(uuid)',
+  'app.classify_routine_telebirr_paid_upload_terminal(uuid,text,text)',
   'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
 ] as const;
 const GUARDED_FUNCTIONS = [

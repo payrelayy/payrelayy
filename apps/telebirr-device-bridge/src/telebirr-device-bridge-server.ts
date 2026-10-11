@@ -226,8 +226,10 @@ function safeResponse(
     headers[normalized] = value;
   }
   if (routine) {
+    const terminalPaidUpload =
+      routineType === ROUTINE_PAID_UPLOAD_CONTENT_TYPE && candidate.statusCode === 410;
     if (
-      !routineStatuses.has(candidate.statusCode) ||
+      (!routineStatuses.has(candidate.statusCode) && !terminalPaidUpload) ||
       headers['content-type'] !== routineType ||
       headers['cache-control'] !== 'no-store'
     ) {
@@ -316,7 +318,9 @@ function safeResponse(
         if (
           Object.keys(parsed).length !== 1 ||
           !('code' in parsed) ||
-          !routineErrorCodes.has(parsed.code as string)
+          (terminalPaidUpload
+            ? parsed.code !== 'paid_observation_terminal_expired'
+            : !routineErrorCodes.has(parsed.code as string))
         )
           throw new Error();
       }

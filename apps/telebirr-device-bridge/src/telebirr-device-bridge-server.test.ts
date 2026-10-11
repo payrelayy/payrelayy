@@ -183,6 +183,77 @@ describe('TeleBirr device bridge HTTP server', () => {
     expect(pilot).not.toHaveBeenCalled();
   });
 
+  it('passes the exact terminal paid-upload response to the phone', async () => {
+    const paidUpload = vi.fn(async () => ({
+      statusCode: 410,
+      headers: { 'cache-control': 'no-store', 'content-type': ROUTINE_PAID_UPLOAD_CONTENT_TYPE },
+      body: Buffer.from('{"code":"paid_observation_terminal_expired"}', 'utf8'),
+    }));
+    runtime = createTelebirrDeviceBridgeHttpServer(
+      vi.fn(),
+      { host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST, port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT },
+      undefined,
+      undefined,
+      paidUpload,
+    );
+    await runtime.listen();
+    const response = await exchange({
+      path: ROUTINE_PAID_UPLOAD_PATH,
+      headers: { 'content-length': '2', 'content-type': ROUTINE_PAID_UPLOAD_CONTENT_TYPE },
+    });
+    expect(response.statusCode).toBe(410);
+    expect(response.headers['content-type']).toBe(ROUTINE_PAID_UPLOAD_CONTENT_TYPE);
+    expect(response.body.toString('utf8')).toBe('{"code":"paid_observation_terminal_expired"}');
+    expect(paidUpload).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      'wrong code',
+      ROUTINE_PAID_UPLOAD_PATH,
+      ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+      410,
+      'temporarily_unavailable',
+    ],
+    [
+      'wrong status',
+      ROUTINE_PAID_UPLOAD_PATH,
+      ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+      401,
+      'paid_observation_terminal_expired',
+    ],
+    [
+      'wrong route',
+      ROUTINE_NO_MONEY_UPLOAD_PATH,
+      ROUTINE_NO_MONEY_CONTENT_TYPE,
+      410,
+      'paid_observation_terminal_expired',
+    ],
+  ] as const)(
+    'rejects a terminal response with %s',
+    async (_name, path, contentType, statusCode, code) => {
+      const response = {
+        statusCode,
+        headers: { 'cache-control': 'no-store', 'content-type': contentType },
+        body: Buffer.from(JSON.stringify({ code }), 'utf8'),
+      };
+      runtime = createTelebirrDeviceBridgeHttpServer(
+        vi.fn(),
+        { host: TELEBIRR_DEVICE_BRIDGE_LISTEN_HOST, port: TELEBIRR_DEVICE_BRIDGE_LISTEN_PORT },
+        vi.fn(async () => response),
+        undefined,
+        vi.fn(async () => response),
+      );
+      await runtime.listen();
+      const received = await exchange({
+        path,
+        headers: { 'content-length': '2', 'content-type': contentType },
+      });
+      expect(received.statusCode).toBe(503);
+      expect(received.body.toString('utf8')).toBe('{"code":"temporarily_unavailable"}');
+    },
+  );
+
   it('isolates the paid poll path and media type from no-money and pilot handlers', async () => {
     const pilot = vi.fn();
     const noMoney = vi.fn();

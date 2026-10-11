@@ -38,9 +38,13 @@ import {
   type GuardedPrePermitShutdown,
 } from './guarded-pre-permit-shutdown.js';
 import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
-import { createRoutineDepositHttpStore } from './routine-deposit-http-store.js';
+import {
+  createRoutineDepositHttpStore,
+  type RoutineDepositHttpStoreDiagnostic,
+} from './routine-deposit-http-store.js';
 import { startRoutineDepositQueue } from './routine-deposit-runner.js';
 import type { RoutineDepositWorkerResult } from './routine-deposit-worker.js';
+import { shouldRunExactFiveLookup } from './worker-mode.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
   const messages: Record<LocalKemerBetSessionEvent['state'], string> = {
@@ -200,6 +204,21 @@ function reportRoutineDeposit(result: RoutineDepositWorkerResult): void {
   );
 }
 
+function reportRoutineDepositBrokerDiagnostic(event: RoutineDepositHttpStoreDiagnostic): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'routine_deposit_broker_diagnostic',
+      operation: event.operation,
+      stage: event.stage,
+      ...(event.httpStatus === undefined ? {} : { httpStatus: event.httpStatus }),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      credentialsRedacted: true,
+    }),
+  );
+}
+
 export async function runWindowsCompanion(): Promise<void> {
   const config = loadWindowsCompanionConfig();
   const launchProofRequest = takeCompanionLaunchProofRequest(
@@ -347,15 +366,18 @@ export async function runWindowsCompanion(): Promise<void> {
             }, remainingExecutionMs);
       stage = 'workers';
       try {
-        const workers: Promise<void>[] = [
-          runCompanionLookupWorker({
-            dataRoot: config.dataRoot,
-            device,
-            session,
-            signal: lookupAbort.signal,
-            report: reportLookup,
-          }),
-        ];
+        const workers: Promise<void>[] = [];
+        if (shouldRunExactFiveLookup(config.routineDepositsEnabled)) {
+          workers.push(
+            runCompanionLookupWorker({
+              dataRoot: config.dataRoot,
+              device,
+              session,
+              signal: lookupAbort.signal,
+              report: reportLookup,
+            }),
+          );
+        }
         if (handoff) {
           workers.push(
             runCompanionExecutionWorker({
@@ -380,6 +402,7 @@ export async function runWindowsCompanion(): Promise<void> {
               trustedExecutionSignerPublicKeySpkiSha256:
                 PRODUCTION_COMPANION_EXECUTION_SIGNER_PUBLIC_KEY_SPKI_SHA256,
               signal: lookupAbort.signal,
+              reportDiagnostic: reportRoutineDepositBrokerDiagnostic,
             }),
             session,
             signal: lookupAbort.signal,

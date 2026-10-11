@@ -9800,7 +9800,10 @@ describe('disposable SQL migration baseline', () => {
   });
 });
 
-registerDepositExecutionCommandSqlTests(() => client);
+registerDepositExecutionCommandSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
 registerRoutineTelebirrProcessingPolicySqlTests(
   () => client,
   () => ownerAuthUserId,

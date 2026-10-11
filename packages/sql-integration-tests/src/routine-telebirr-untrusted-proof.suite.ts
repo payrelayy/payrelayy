@@ -2404,6 +2404,30 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',
           [paidId, paidTrust.enrollmentId, paidTrust.signerId],
         );
+        const disabledPollRequestId = randomUUID();
+        const disabledPoll = await client.query(ISSUE_PAID_POLL, [
+          paidTrust.enrollmentId,
+          disabledPollRequestId,
+          `sha256:${digest()}`,
+          new Date(Date.now() + 30_000),
+          paidTrust.signerId,
+        ]);
+        expect(disabledPoll.rows).toEqual([]);
+        const disabledEffects = await client.query<{
+          claims: string;
+          challenges: string;
+        }>(
+          `select
+             (select count(*) from app.routine_telebirr_paid_poll_claims
+               where request_id = $1::uuid)::text as claims,
+             (select count(*) from ${LOOKUP_TABLE}
+               where candidate_id = $2::uuid)::text as challenges`,
+          [disabledPollRequestId, paidId],
+        );
+        expect(disabledEffects.rows).toEqual([{ claims: '0', challenges: '0' }]);
+
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'payment_verification'`);
         await rejected(client, ISSUE_PAID_POLL, [
           paidTrust.enrollmentId,
           randomUUID(),
@@ -2413,8 +2437,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         ]);
 
         await client.query(`update app.feature_switches set mode = 'live'
-          where feature_key in (
-            'payment_verification', 'deposit_execution')`);
+          where feature_key = 'deposit_execution'`);
         await rejected(
           client,
           'select * from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)',

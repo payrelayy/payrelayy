@@ -21,17 +21,30 @@ import type { CompanionDeviceSigningRuntime } from './device-enrollment.js';
 import {
   RoutineDepositHttpStoreUnavailableError,
   createRoutineDepositHttpStore,
+  type RoutineDepositHttpStoreDiagnostic,
 } from './routine-deposit-http-store.js';
+import type { RoutineDepositLease } from './routine-deposit-worker.js';
 
 const accountId = 'b7cf4f59-4d2f-4e1a-9148-0d07d2d04810';
 const workerInstanceId = 'a2870310-8f08-487c-b1c0-e7dd467ad1dd';
 const signerKeyId = 'routine-execution-key-0001';
 const serverIssuedAt = '2026-10-05T12:00:10.000Z';
+const leaseBinding = {
+  jobId: '11111111-1111-4111-8111-111111111111',
+  intentId: '22222222-2222-4222-8222-222222222222',
+  attemptId: '33333333-3333-4333-8333-333333333333',
+  paymentClaimId: '44444444-4444-4444-8444-444444444444',
+  platformAgentAccountId: accountId,
+  playerId: '12345678',
+  amountMinor: 2500,
+  currencyCode: 'ETB',
+} as unknown as RoutineDepositLease;
 
 function fixture(tamperSignature = false) {
   const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const signerSpki = Buffer.from(signer.publicKey.export({ format: 'der', type: 'spki' }));
   const operations: string[] = [];
+  const diagnostics: RoutineDepositHttpStoreDiagnostic[] = [];
   const createSignedHttpRequest = vi.fn((_path: string, _contentDigest: string) => ({
     synthetic: true,
   }));
@@ -43,7 +56,15 @@ function fixture(tamperSignature = false) {
     const parsed = JSON.parse(String(init?.body)) as { command: RoutineDepositCommand };
     const command = parsed.command;
     operations.push(command.operation);
-    const result: RoutineDepositResponseResult = null;
+    const result: RoutineDepositResponseResult =
+      command.operation === 'fence'
+        ? {
+            ...command.binding,
+            firstFenceAcquired: true,
+            issuedAtMs: Date.parse(serverIssuedAt),
+            validUntilMs: Date.parse(serverIssuedAt) + 5_000,
+          }
+        : null;
     const body = decodeRoutineDepositResponseBody({
       contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
       protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
@@ -93,8 +114,9 @@ function fixture(tamperSignature = false) {
     signal: abort.signal,
     workerInstanceId,
     fetch: fetchImplementation as unknown as typeof fetch,
+    reportDiagnostic: (event) => diagnostics.push(event),
   });
-  return { createSignedHttpRequest, fetchImplementation, operations, store };
+  return { abort, createSignedHttpRequest, diagnostics, fetchImplementation, operations, store };
 }
 
 describe('routine deposit HTTP store', () => {
@@ -120,5 +142,56 @@ describe('routine deposit HTTP store', () => {
     );
     expect(selected.fetchImplementation).toHaveBeenCalledOnce();
     expect(selected.operations).toEqual(['lease']);
+  });
+
+  it('reports a redacted fence transport failure without retrying or exposing the error', async () => {
+    const selected = fixture();
+    selected.fetchImplementation.mockRejectedValueOnce(new Error('private-token-and-player-id'));
+
+    await expect(selected.store.fenceFinalAction(leaseBinding)).rejects.toBeInstanceOf(
+      RoutineDepositHttpStoreUnavailableError,
+    );
+    expect(selected.fetchImplementation).toHaveBeenCalledOnce();
+    expect(selected.diagnostics).toEqual([{ operation: 'fence', stage: 'transport_failed' }]);
+    expect(JSON.stringify(selected.diagnostics)).not.toContain('private-token-and-player-id');
+  });
+
+  it('never sends an already-aborted fence request', async () => {
+    const selected = fixture();
+    selected.abort.abort();
+
+    await expect(selected.store.fenceFinalAction(leaseBinding)).rejects.toBeInstanceOf(
+      RoutineDepositHttpStoreUnavailableError,
+    );
+    expect(selected.fetchImplementation).not.toHaveBeenCalled();
+    expect(selected.diagnostics).toEqual([{ operation: 'fence', stage: 'request_aborted' }]);
+  });
+
+  it('reports only the status of a rejected fence response, never its body', async () => {
+    const selected = fixture();
+    selected.fetchImplementation.mockResolvedValueOnce(
+      new Response('private-payment-reference', { status: 503 }),
+    );
+
+    await expect(selected.store.fenceFinalAction(leaseBinding)).rejects.toBeInstanceOf(
+      RoutineDepositHttpStoreUnavailableError,
+    );
+    expect(selected.fetchImplementation).toHaveBeenCalledOnce();
+    expect(selected.diagnostics).toEqual([
+      { operation: 'fence', stage: 'http_rejected', httpStatus: 503 },
+    ]);
+    expect(JSON.stringify(selected.diagnostics)).not.toContain('private-payment-reference');
+  });
+
+  it('distinguishes an invalid signed fence response from a transport failure', async () => {
+    const selected = fixture(true);
+
+    await expect(selected.store.fenceFinalAction(leaseBinding)).rejects.toBeInstanceOf(
+      RoutineDepositHttpStoreUnavailableError,
+    );
+    expect(selected.fetchImplementation).toHaveBeenCalledOnce();
+    expect(selected.diagnostics).toEqual([
+      { operation: 'fence', stage: 'response_signature_invalid' },
+    ]);
   });
 });

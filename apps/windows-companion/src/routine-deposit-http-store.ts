@@ -46,6 +46,22 @@ export interface RoutineDepositHttpStoreOptions {
   readonly signal: AbortSignal;
   readonly workerInstanceId?: string;
   readonly fetch?: typeof fetch;
+  readonly reportDiagnostic?: (event: RoutineDepositHttpStoreDiagnostic) => void;
+}
+
+export interface RoutineDepositHttpStoreDiagnostic {
+  readonly operation: 'fence';
+  readonly stage:
+    | 'request_aborted'
+    | 'request_build_failed'
+    | 'transport_timeout'
+    | 'transport_failed'
+    | 'http_rejected'
+    | 'response_contract_invalid'
+    | 'response_read_failed'
+    | 'response_signature_invalid'
+    | 'signed_response_verified';
+  readonly httpStatus?: number;
 }
 
 export class RoutineDepositHttpStoreUnavailableError extends Error {
@@ -179,13 +195,41 @@ export function createRoutineDepositHttpStore(
   const fetchImplementation = options.fetch ?? fetch;
 
   async function command(value: RoutineDepositCommand): Promise<RoutineDepositResponseResult> {
-    if (options.signal.aborted) return unavailable();
-    const contentDigest = digestRoutineDepositCommand(value) ?? unavailable();
-    const httpRequest = options.device.createSignedHttpRequest(
-      ROUTINE_DEPOSIT_COMMAND_PATH,
-      contentDigest,
-    );
+    function reportFence(
+      stage: RoutineDepositHttpStoreDiagnostic['stage'],
+      httpStatus?: number,
+    ): void {
+      if (value.operation !== 'fence') return;
+      try {
+        options.reportDiagnostic?.(
+          Object.freeze({
+            operation: 'fence',
+            stage,
+            ...(httpStatus === undefined ? {} : { httpStatus }),
+          }),
+        );
+      } catch {
+        // Diagnostics must never change the fail-closed command outcome.
+      }
+    }
+
+    if (options.signal.aborted) {
+      reportFence('request_aborted');
+      return unavailable();
+    }
+    let httpRequest: ReturnType<CompanionDeviceSigningRuntime['createSignedHttpRequest']>;
+    try {
+      const contentDigest = digestRoutineDepositCommand(value) ?? unavailable();
+      httpRequest = options.device.createSignedHttpRequest(
+        ROUTINE_DEPOSIT_COMMAND_PATH,
+        contentDigest,
+      );
+    } catch {
+      reportFence('request_build_failed');
+      return unavailable();
+    }
     let response: Response;
+    const timeoutSignal = AbortSignal.timeout(15_000);
     try {
       response = await fetchImplementation(ROUTINE_ENDPOINT, {
         method: 'POST',
@@ -200,21 +244,47 @@ export function createRoutineDepositHttpStore(
           httpRequest,
           command: value,
         }),
-        signal: AbortSignal.any([options.signal, AbortSignal.timeout(15_000)]),
+        signal: AbortSignal.any([options.signal, timeoutSignal]),
       });
     } catch {
+      reportFence(
+        options.signal.aborted
+          ? 'request_aborted'
+          : timeoutSignal.aborted
+            ? 'transport_timeout'
+            : 'transport_failed',
+      );
       return unavailable();
     }
-    if (response.status !== 200 && response.status !== 201) return unavailable();
+    if (response.status !== 200 && response.status !== 201) {
+      reportFence('http_rejected', response.status);
+      return unavailable();
+    }
     if (response.headers.get('content-type') !== AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE) {
+      reportFence('response_contract_invalid');
       return unavailable();
     }
     const serverDate = response.headers.get('date');
     const trustedNow = serverDate === null ? new Date(Number.NaN) : new Date(serverDate);
-    const bytes = await responseBytes(response);
+    let bytes: Buffer;
+    try {
+      bytes = await responseBytes(response);
+    } catch {
+      reportFence(
+        options.signal.aborted
+          ? 'request_aborted'
+          : timeoutSignal.aborted
+            ? 'transport_timeout'
+            : 'response_read_failed',
+      );
+      return unavailable();
+    }
     try {
       const parsed: unknown = JSON.parse(bytes.toString('utf8'));
-      if (!plainRecord(parsed) || !exactKeys(parsed, ['response'])) return unavailable();
+      if (!plainRecord(parsed) || !exactKeys(parsed, ['response'])) {
+        reportFence('response_contract_invalid');
+        return unavailable();
+      }
       const verified = verifySignedRoutineDepositResponse(
         parsed.response,
         options.trustedExecutionSignerKeyId,
@@ -222,10 +292,15 @@ export function createRoutineDepositHttpStore(
         value,
         trustedNow,
       );
-      if (!verified) return unavailable();
+      if (!verified) {
+        reportFence('response_signature_invalid');
+        return unavailable();
+      }
+      reportFence('signed_response_verified');
       return verified.body.result;
     } catch (error) {
       if (error instanceof RoutineDepositHttpStoreUnavailableError) throw error;
+      reportFence('response_contract_invalid');
       return unavailable();
     } finally {
       bytes.fill(0);

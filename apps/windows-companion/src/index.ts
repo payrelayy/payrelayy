@@ -429,7 +429,8 @@ export async function runWindowsCompanion(): Promise<void> {
           lookupAbort.abort();
           // A fenced uncertainty must not restart or disappear behind an automatic
           // browser close. Wait for the operator to close the permanently disarmed page.
-          if (routineReviewHeld) await session.done;
+          if (handoff) await session.stop();
+          else if (routineReviewHeld) await session.done;
           else await session.stop();
         }
       }

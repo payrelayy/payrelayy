@@ -1210,6 +1210,74 @@ export function registerDepositExecutionCommandSqlTests(
           'lineage is not eligible',
         );
 
+        const arranged = await client.query(
+          `select
+             attempt.status::text as attempt_status,
+             attempt.exact_player_credit_match as exact_player_credit_match,
+             intent.status::text as intent_status,
+             intent.expected_amount_minor as amount_minor,
+             provider.code::text as provider_code,
+             platform.code::text as platform_code,
+             player.player_id = $2::text as player_matches,
+             job.status::text as execution_job_status,
+             job.attempt_count as execution_attempt_count,
+             job.max_attempts as execution_max_attempts,
+             job.lease_expires_at <= clock_timestamp() as lease_expired,
+             attempt.final_action_fenced_at is not null as fenced,
+             $3::timestamptz between attempt.final_action_fenced_at
+               and clock_timestamp() as history_in_window,
+             (select count(*)::integer from app.deposit_execution_attempts other_attempt
+               where other_attempt.deposit_intent_id = intent.id) as attempt_count,
+             (select count(*)::integer from app.deposit_jobs other_job
+               where other_job.job_kind in ('execute_deposit', 'reconcile_execution')
+                 and other_job.status in ('queued', 'leased', 'retry_wait')
+                 and other_job.id <> job.id) as other_active_jobs,
+             (select count(*)::integer from app.deposit_execution_attempts other_attempt
+               where other_attempt.id <> attempt.id
+                 and other_attempt.status in (
+                   'prepared', 'final_action_fenced',
+                   'reconciliation_required', 'review_required'
+                 )) as other_blocking_attempts,
+             (select count(*)::integer from app.routine_telebirr_dispatch_evidence evidence
+               where evidence.execution_attempt_id = attempt.id) as dispatches,
+             (select count(*)::integer from app.execution_reconciliations reconciliation
+               where reconciliation.deposit_execution_attempt_id = attempt.id)
+               as reconciliations,
+             (select count(*)::integer from app.deposit_review_cases review_case
+               where review_case.deposit_intent_id = intent.id) as review_cases
+           from app.deposit_execution_attempts attempt
+           join app.deposit_intents intent on intent.id = attempt.deposit_intent_id
+           join app.deposit_jobs job on job.id = attempt.deposit_job_id
+           join app.payment_providers provider on provider.id = intent.payment_provider_id
+           join app.platforms platform on platform.id = intent.platform_id
+           join app.customer_platform_players player on player.id = intent.player_account_id
+           where attempt.id = $1::uuid`,
+          [attemptId, fixture.playerId, fence[0]!.final_action_fenced_at],
+        );
+        expect(arranged.rows).toEqual([
+          {
+            attempt_status: 'final_action_fenced',
+            exact_player_credit_match: null,
+            intent_status: 'execution_in_progress',
+            amount_minor: '3000',
+            provider_code: 'telebirr',
+            platform_code: 'kemerbet',
+            player_matches: true,
+            execution_job_status: 'leased',
+            execution_attempt_count: 1,
+            execution_max_attempts: 1,
+            lease_expired: true,
+            fenced: true,
+            history_in_window: true,
+            attempt_count: 1,
+            other_active_jobs: 0,
+            other_blocking_attempts: 0,
+            dispatches: 0,
+            reconciliations: 0,
+            review_cases: 0,
+          },
+        ]);
+
         const first = await resolve(true);
         expect(first.rows).toEqual([{ resolution_state: 'confirmed_executed', replayed: false }]);
         const replay = await resolve(true);

@@ -103,11 +103,36 @@ describe('routine receipt-derived amount binding', () => {
     },
   );
 
+  it('accepts only the provider-normalized empty Notes value', async () => {
+    const authorization = createLocalKemerBetDepositAuthorization();
+    const outcome = authorization.beginRoutine(42, 2500, () => true);
+    const consumed = authorization.consumeExactRequest('POST', URL, {
+      playerId: 42,
+      amount: 25,
+      notes: null,
+    });
+    expect(consumed).toBeDefined();
+    expect(
+      authorization.consumeExactRequest('POST', URL, {
+        playerId: 42,
+        amount: 25,
+        notes: null,
+      }),
+    ).toBeUndefined();
+    consumed?.settle({
+      outcome: 'submission_attempted',
+      providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+    });
+    await expect(outcome).resolves.toMatchObject({ outcome: 'submission_attempted' });
+  });
+
   it.each([
     { playerId: 43, amount: 25000, notes: '' },
     { playerId: 42, amount: 24999.99, notes: '' },
     { playerId: 42, amount: '25000.00', notes: '' },
     { playerId: 42, amount: 25000, notes: 'extra' },
+    { playerId: 42, amount: 25000, notes: 0 },
+    { playerId: 42, amount: 25000, notes: undefined },
     { playerId: 42, amount: 25000, notes: '', receiver: 'extra' },
   ])('burns a mismatched routine request without dispatch: %j', async (payload) => {
     const authorization = createLocalKemerBetDepositAuthorization();

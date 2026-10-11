@@ -56,6 +56,8 @@ function report(event: LocalKemerBetSessionEvent): void {
       'KemerBet agent page detected. Verifying the exact locally bound identity without uploading it…',
     signed_in_verified:
       'The exact locally bound KemerBet identity is verified. Financial actions remain disabled.',
+    review_paused:
+      'Automatic Deposits is paused for review. This Chrome window stays open, but no Player lookup or credit can run from this launch.',
     stopping: 'Stopping the local KemerBet browser…',
     stopped: 'The local KemerBet browser stopped.',
     failed: 'The local KemerBet browser could not continue. Financial requests remain blocked.',
@@ -367,6 +369,7 @@ export async function runWindowsCompanion(): Promise<void> {
               void session.stop();
             }, remainingExecutionMs);
       stage = 'workers';
+      let routineReviewHeld = false;
       try {
         const workers: Promise<void>[] = [];
         if (shouldRunExactFiveLookup(config.routineDepositsEnabled)) {
@@ -412,7 +415,10 @@ export async function runWindowsCompanion(): Promise<void> {
           });
           workers.push(
             queue.done.then((result) => {
-              if (result.status === 'paused') lookupAbort.abort();
+              if (result.status === 'paused') {
+                routineReviewHeld = result.reason !== 'operator_stopped';
+                lookupAbort.abort();
+              }
             }),
           );
         }
@@ -421,7 +427,10 @@ export async function runWindowsCompanion(): Promise<void> {
         if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
         if (handoff || config.routineDepositsEnabled) {
           lookupAbort.abort();
-          await session.stop();
+          // A fenced uncertainty must not restart or disappear behind an automatic
+          // browser close. Wait for the operator to close the permanently disarmed page.
+          if (routineReviewHeld) await session.done;
+          else await session.stop();
         }
       }
     } catch {

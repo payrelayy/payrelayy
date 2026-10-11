@@ -21,7 +21,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
 export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOptions, 'session'> {
   readonly session: Pick<
     LocalKemerBetSession,
-    'executeRoutineOneUseDeposit' | 'isSignedInVerified' | 'stop'
+    'executeRoutineOneUseDeposit' | 'isSignedInVerified' | 'pauseForReview' | 'stop'
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
@@ -38,6 +38,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
   options.signal.addEventListener('abort', onAbort, { once: true });
   if (options.signal.aborted) controller.abort();
   const worker = createRoutineDepositWorker({ ...options, signal: controller.signal });
+  let reviewHeld = false;
   const done = (async (): Promise<RoutineDepositWorkerResult> => {
     let consecutiveUnavailable = 0;
     try {
@@ -55,7 +56,15 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
         } catch {
           /* Reporting cannot authorize or retry a deposit. */
         }
-        if (result.status === 'paused' || result.status === 'stopped') return result;
+        if (result.status === 'paused') {
+          if (result.reason === 'operator_stopped') return result;
+          // Do not hide the evidence surface, but permanently disarm this launch. The
+          // database fence and pause remain authoritative; this cannot retry a credit.
+          options.session.pauseForReview();
+          reviewHeld = true;
+          return result;
+        }
+        if (result.status === 'stopped') return result;
         if (result.status === 'temporarily_unavailable') {
           consecutiveUnavailable++;
           await delay(
@@ -72,7 +81,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
       controller.abort();
       options.signal.removeEventListener('abort', onAbort);
       // Closing Chrome is not permission to clear a durable fence/uncertain account lane.
-      await options.session.stop();
+      if (!reviewHeld) await options.session.stop();
     }
   })();
   // Always observe rejection (e.g. browser shutdown failed), while preserving it for the caller.
@@ -81,7 +90,9 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
     done,
     async stop(): Promise<RoutineDepositWorkerResult> {
       controller.abort();
-      return done;
+      const result = await done;
+      if (reviewHeld) await options.session.stop();
+      return result;
     },
   });
 }

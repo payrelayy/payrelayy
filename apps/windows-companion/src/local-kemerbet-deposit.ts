@@ -100,7 +100,18 @@ export type LocalKemerBetRoutinePreflightStage =
   | 'prepared_surface_unavailable'
   | 'amount_prepared'
   | 'no_money_rehearsal_completed'
-  | 'final_action_requested';
+  | 'final_action_requested'
+  | 'final_action_fenced'
+  | 'post_fence_surface_verified'
+  | 'final_action_expired'
+  | 'route_authorization_unavailable'
+  | 'transfer_click_requested'
+  | 'transfer_click_completed'
+  | 'transfer_click_uncertain'
+  | 'provider_route_submission_attempted'
+  | 'provider_route_uncertain'
+  | 'success_modal_confirmed'
+  | 'success_modal_unavailable';
 
 export type LocalKemerBetRoutinePreflightReporter = (
   stage: LocalKemerBetRoutinePreflightStage,
@@ -586,11 +597,13 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
       return matched;
     });
   } catch {
+    reportPreflight(diagnostic, 'success_modal_unavailable');
     return Object.freeze({
       outcome: 'local_uncertain',
       providerResponseDigest: outcome.providerResponseDigest,
     });
   }
+  reportPreflight(diagnostic, 'success_modal_confirmed');
   return Object.freeze({ ...outcome, exactPlayerCreditMatch: true });
 }
 
@@ -613,17 +626,36 @@ async function executeLocalDepositForAmount(
   // The server/database fence is intentionally requested only after the page is fully prepared.
   reportPreflight(diagnostic, 'final_action_requested');
   const finalAction = await acquireFinalAction();
-  const transfer = await verifyPreparedSurface(page, privatePlayer.identities, amountText);
-  if (finalAction.isFresh() !== true) unavailable();
-  const routeOutcome = depositAuthorization.beginRoutine(
-    privatePlayer.internalPlayerId,
-    amountMinor,
-    finalAction.isFresh,
+  reportPreflight(diagnostic, 'final_action_fenced');
+  const transfer = await verifyPreparedSurface(
+    page,
+    privatePlayer.identities,
+    amountText,
+    false,
+    diagnostic,
   );
+  reportPreflight(diagnostic, 'post_fence_surface_verified');
+  if (finalAction.isFresh() !== true) {
+    reportPreflight(diagnostic, 'final_action_expired');
+    unavailable();
+  }
+  let routeOutcome: Promise<LocalKemerBetDepositDispatchOutcome>;
+  try {
+    routeOutcome = depositAuthorization.beginRoutine(
+      privatePlayer.internalPlayerId,
+      amountMinor,
+      finalAction.isFresh,
+    );
+  } catch {
+    reportPreflight(diagnostic, 'route_authorization_unavailable');
+    unavailable();
+  }
   let routeTimeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    reportPreflight(diagnostic, 'transfer_click_requested');
     await transfer.click({ timeout: TIMEOUT_MS });
-    return await Promise.race([
+    reportPreflight(diagnostic, 'transfer_click_completed');
+    const outcome = await Promise.race([
       routeOutcome,
       new Promise<LocalKemerBetDepositDispatchOutcome>((resolve) => {
         routeTimeout = setTimeout(() => {
@@ -633,7 +665,15 @@ async function executeLocalDepositForAmount(
         routeTimeout.unref();
       }),
     ]);
+    reportPreflight(
+      diagnostic,
+      outcome.outcome === 'submission_attempted'
+        ? 'provider_route_submission_attempted'
+        : 'provider_route_uncertain',
+    );
+    return outcome;
   } catch {
+    reportPreflight(diagnostic, 'transfer_click_uncertain');
     depositAuthorization.clear();
     await routeOutcome.catch(() => undefined);
     return Object.freeze({ outcome: 'local_uncertain', providerResponseDigest: null });

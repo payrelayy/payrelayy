@@ -387,6 +387,36 @@ describe('local KemerBet enrollment session', () => {
     expect(session.isSignedInVerified()).toBe(true);
   });
 
+  it('keeps an uncertain routine window visible but permanently disarms Player work', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { context, events, page, session } = await start(AGENTS_URL, routineConfig);
+    expect(session.isSignedInVerified()).toBe(true);
+
+    session.pauseForReview();
+    expect(events.at(-1)?.state).toBe('review_paused');
+    expect(session.isSignedInVerified()).toBe(false);
+    expect(context.close).not.toHaveBeenCalled();
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, async () => {
+        throw new Error('A paused launch must not request another fence.');
+      }),
+    ).rejects.toThrow('unavailable');
+    const transfer = await context.dispatch(DEPOSIT_URL, 'POST');
+    expect(transfer.abort).toHaveBeenCalledTimes(1);
+    expect(transfer.fetch).not.toHaveBeenCalled();
+
+    page.navigate(LOGIN_URL);
+    page.navigate(AGENTS_URL);
+    await settleIdentityVerification();
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+    expect(context.close).not.toHaveBeenCalled();
+    expect(page.reload).not.toHaveBeenCalled();
+    expect(session.isSignedInVerified()).toBe(false);
+
+    await session.stop();
+    expect(context.close).toHaveBeenCalledTimes(1);
+  });
+
   it('pauses routine Player work after an unavailable refresh identity and retries without closing Chrome', async () => {
     const routineConfig = { ...config, routineDepositsEnabled: true };
     const { context, events, session } = await start(AGENTS_URL, routineConfig);

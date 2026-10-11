@@ -1137,6 +1137,13 @@ export function registerDepositExecutionCommandSqlTests(
           amountMinor: 3000,
         });
         const settled = await settleVerifiedDeposit(client, fixture);
+        // Arrange the already-fenced historical incident without manufacturing a
+        // live Owner approval or activation epoch. The trigger is restored before
+        // exercising the gates-off resolution under test.
+        await client.query(
+          `alter table app.deposit_jobs
+             disable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
         const leased = await queryAsExecutor<{
           readonly execution_attempt_id: string;
           readonly execution_job_id: string;
@@ -1144,6 +1151,10 @@ export function registerDepositExecutionCommandSqlTests(
         }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [
           '92222222-2222-4222-8222-222222222222',
         ]);
+        await client.query(
+          `alter table app.deposit_jobs
+             enable trigger deposit_jobs_require_owner_approved_telebirr_execution`,
+        );
         expect(leased).toHaveLength(1);
         expect(leased[0]!.execution_job_id).toBe(settled.execution_job_id);
         const attemptId = leased[0]!.execution_attempt_id;

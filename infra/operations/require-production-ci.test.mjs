@@ -40,8 +40,8 @@ function run(workflow = 'quality.yml', overrides = {}) {
   };
 }
 
-function response(data, status = 200) {
-  return { status, text: async () => JSON.stringify(data) };
+function response(data, status = 200, headers) {
+  return { status, headers, text: async () => JSON.stringify(data) };
 }
 
 function passingFetch(requests, transform = (data) => data) {
@@ -93,6 +93,80 @@ test('requires all seven exact-SHA runs and rereads every current attempt', asyn
       assert.equal(url.searchParams.has('status'), false);
     }
   }
+});
+
+test('retries one transient GitHub read, then still checks all complete CI evidence', async () => {
+  const requests = [];
+  const delays = [];
+  const passing = passingFetch(requests);
+  let failedOnce = false;
+  const checks = await requireProductionCi({
+    ...configuration,
+    fetchImpl: async (url, options) => {
+      if (!failedOnce && url.includes('/workflows/quality.yml/runs?')) {
+        failedOnce = true;
+        return response({}, 503);
+      }
+      return passing(url, options);
+    },
+    waitImpl: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+  assert.equal(failedOnce, true);
+  assert.deepEqual(delays, [3_000]);
+  assert.equal(requests.length, 21);
+  assert.equal(checks.length, 7);
+});
+
+test('bounds Retry-After and fails closed after repeated temporary GitHub failures', async () => {
+  let reads = 0;
+  const delays = [];
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return response({}, 429, { get: () => '120' });
+      },
+      waitImpl: async (milliseconds) => {
+        delays.push(milliseconds);
+      },
+    }),
+  );
+  assert.equal(reads, 28);
+  assert.equal(delays.length, 21);
+  assert.ok(delays.every((milliseconds) => milliseconds === 60_000));
+});
+
+test('does not retry a successful HTTP response with malformed data', async () => {
+  let reads = 0;
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return { status: 200, text: async () => '{invalid' };
+      },
+      waitImpl: () => assert.fail('malformed data must not be retried'),
+    }),
+  );
+  assert.equal(reads, 7);
+});
+
+test('does not retry a non-temporary GitHub rejection', async () => {
+  let reads = 0;
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return response({}, 404);
+      },
+      waitImpl: () => assert.fail('a permanent rejection must not be retried'),
+    }),
+  );
+  assert.equal(reads, 7);
 });
 
 for (const [name, overrides] of [
@@ -384,11 +458,18 @@ for (const fetchImpl of [
   async () => ({ status: 200, text: async () => TOKEN }),
 ]) {
   test('redacts network errors and invalid response contents', async () => {
-    await assert.rejects(requireProductionCi({ ...configuration, fetchImpl }), (error) => {
-      assert.doesNotMatch(error.message, new RegExp(TOKEN, 'u'));
-      assert.match(error.message, /^Production CI gate denied:/u);
-      return true;
-    });
+    await assert.rejects(
+      requireProductionCi({
+        ...configuration,
+        fetchImpl,
+        waitImpl: async () => {},
+      }),
+      (error) => {
+        assert.doesNotMatch(error.message, new RegExp(TOKEN, 'u'));
+        assert.match(error.message, /^Production CI gate denied:/u);
+        return true;
+      },
+    );
   });
 }
 

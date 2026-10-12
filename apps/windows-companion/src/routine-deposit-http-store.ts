@@ -50,7 +50,7 @@ export interface RoutineDepositHttpStoreOptions {
 }
 
 export interface RoutineDepositHttpStoreDiagnostic {
-  readonly operation: 'fence';
+  readonly operation: 'fence' | 'record_dispatch' | 'reconcile' | 'complete';
   readonly stage:
     | 'request_aborted'
     | 'request_build_failed'
@@ -60,6 +60,8 @@ export interface RoutineDepositHttpStoreDiagnostic {
     | 'response_contract_invalid'
     | 'response_read_failed'
     | 'response_signature_invalid'
+    | 'binding_mismatch'
+    | 'same_signed_request_retry'
     | 'signed_response_verified';
   readonly httpStatus?: number;
 }
@@ -178,9 +180,9 @@ function base(
 }
 
 /**
- * Authenticated network implementation of the routine worker port. It never retries a command:
- * an ambiguous fence request is a permanent local pause, while the broker's replay ledger keeps
- * duplicate transport requests one-use if an intermediary repeats the exact signed request.
+ * Authenticated network implementation of the routine worker port. It never retries a fence or
+ * provider action. After the provider action, one bounded replay of the identical signed broker
+ * request can recover an acknowledgement lost after the broker committed its one-use ledger row.
  */
 export function createRoutineDepositHttpStore(
   options: RoutineDepositHttpStoreOptions,
@@ -206,27 +208,28 @@ export function createRoutineDepositHttpStore(
   }
   const fetchImplementation = options.fetch ?? fetch;
 
-  async function command(value: RoutineDepositCommand): Promise<RoutineDepositResponseResult> {
-    function reportFence(
-      stage: RoutineDepositHttpStoreDiagnostic['stage'],
-      httpStatus?: number,
-    ): void {
-      if (value.operation !== 'fence') return;
-      try {
-        options.reportDiagnostic?.(
-          Object.freeze({
-            operation: 'fence',
-            stage,
-            ...(httpStatus === undefined ? {} : { httpStatus }),
-          }),
-        );
-      } catch {
-        // Diagnostics must never change the fail-closed command outcome.
-      }
+  function reportDiagnostic(
+    operation: RoutineDepositCommand['operation'],
+    stage: RoutineDepositHttpStoreDiagnostic['stage'],
+    httpStatus?: number,
+  ): void {
+    if (operation === 'lease' || operation === 'pause') return;
+    try {
+      options.reportDiagnostic?.(
+        Object.freeze({
+          operation,
+          stage,
+          ...(httpStatus === undefined ? {} : { httpStatus }),
+        }),
+      );
+    } catch {
+      // Diagnostics must never change the fail-closed command outcome.
     }
+  }
 
+  async function command(value: RoutineDepositCommand): Promise<RoutineDepositResponseResult> {
     if (options.signal.aborted) {
-      reportFence('request_aborted');
+      reportDiagnostic(value.operation, 'request_aborted');
       return unavailable();
     }
     let httpRequest: ReturnType<CompanionDeviceSigningRuntime['createSignedHttpRequest']>;
@@ -237,86 +240,124 @@ export function createRoutineDepositHttpStore(
         contentDigest,
       );
     } catch {
-      reportFence('request_build_failed');
+      reportDiagnostic(value.operation, 'request_build_failed');
       return unavailable();
     }
-    let response: Response;
-    const timeoutSignal = AbortSignal.timeout(15_000);
+    // Never create a new command or device signature during recovery. The server's immutable
+    // replay ledger accepts this exact envelope once, including when the first reply was lost.
+    let requestBody: string;
     try {
-      response = await fetchImplementation(ROUTINE_ENDPOINT, {
-        method: 'POST',
-        redirect: 'error',
-        cache: 'no-store',
-        headers: {
-          accept: AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
-          'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
-        },
-        body: JSON.stringify({
-          certificate: options.device.certificate,
-          httpRequest,
-          command: value,
-        }),
-        signal: AbortSignal.any([options.signal, timeoutSignal]),
+      requestBody = JSON.stringify({
+        certificate: options.device.certificate,
+        httpRequest,
+        command: value,
       });
     } catch {
-      reportFence(
-        options.signal.aborted
-          ? 'request_aborted'
-          : timeoutSignal.aborted
-            ? 'transport_timeout'
-            : 'transport_failed',
-      );
+      reportDiagnostic(value.operation, 'request_build_failed');
       return unavailable();
     }
-    if (response.status !== 200 && response.status !== 201) {
-      reportFence('http_rejected', response.status);
-      return unavailable();
-    }
-    if (response.headers.get('content-type') !== AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE) {
-      reportFence('response_contract_invalid');
-      return unavailable();
-    }
-    const serverDate = response.headers.get('date');
-    const trustedNow = serverDate === null ? new Date(Number.NaN) : new Date(serverDate);
-    let bytes: Buffer;
-    try {
-      bytes = await responseBytes(response);
-    } catch {
-      reportFence(
-        options.signal.aborted
-          ? 'request_aborted'
-          : timeoutSignal.aborted
-            ? 'transport_timeout'
-            : 'response_read_failed',
-      );
-      return unavailable();
-    }
-    try {
-      const parsed: unknown = JSON.parse(bytes.toString('utf8'));
-      if (!plainRecord(parsed) || !exactKeys(parsed, ['response'])) {
-        reportFence('response_contract_invalid');
+    const replayable =
+      value.operation === 'record_dispatch' ||
+      value.operation === 'reconcile' ||
+      value.operation === 'complete';
+    for (let attempt = 1; attempt <= (replayable ? 2 : 1); attempt += 1) {
+      if (options.signal.aborted) {
+        reportDiagnostic(value.operation, 'request_aborted');
         return unavailable();
       }
-      const verified = verifySignedRoutineDepositResponse(
-        parsed.response,
-        options.trustedExecutionSignerKeyId,
-        signerPublicKey,
-        value,
-        trustedNow,
-      );
-      if (!verified) {
-        reportFence('response_signature_invalid');
+      const timeoutSignal = AbortSignal.timeout(15_000);
+      let response: Response;
+      try {
+        response = await fetchImplementation(ROUTINE_ENDPOINT, {
+          method: 'POST',
+          redirect: 'error',
+          cache: 'no-store',
+          headers: {
+            accept: AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+            'content-type': AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+          },
+          body: requestBody,
+          signal: AbortSignal.any([options.signal, timeoutSignal]),
+        });
+      } catch {
+        reportDiagnostic(
+          value.operation,
+          options.signal.aborted
+            ? 'request_aborted'
+            : timeoutSignal.aborted
+              ? 'transport_timeout'
+              : 'transport_failed',
+        );
+        if (replayable && attempt === 1 && !options.signal.aborted) {
+          reportDiagnostic(value.operation, 'same_signed_request_retry');
+          continue;
+        }
         return unavailable();
       }
-      reportFence('signed_response_verified');
-      return verified.body.result;
-    } catch (error) {
-      if (error instanceof RoutineDepositHttpStoreUnavailableError) throw error;
-      reportFence('response_contract_invalid');
-      return unavailable();
-    } finally {
-      bytes.fill(0);
+      if (response.status !== 200 && response.status !== 201) {
+        reportDiagnostic(value.operation, 'http_rejected', response.status);
+        if (replayable && attempt === 1 && response.status >= 500 && !options.signal.aborted) {
+          await response.body?.cancel().catch(() => undefined);
+          reportDiagnostic(value.operation, 'same_signed_request_retry');
+          continue;
+        }
+        return unavailable();
+      }
+      if (response.headers.get('content-type') !== AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE) {
+        reportDiagnostic(value.operation, 'response_contract_invalid');
+        return unavailable();
+      }
+      const serverDate = response.headers.get('date');
+      const trustedNow = serverDate === null ? new Date(Number.NaN) : new Date(serverDate);
+      let bytes: Buffer;
+      try {
+        bytes = await responseBytes(response);
+      } catch {
+        reportDiagnostic(
+          value.operation,
+          options.signal.aborted
+            ? 'request_aborted'
+            : timeoutSignal.aborted
+              ? 'transport_timeout'
+              : 'response_read_failed',
+        );
+        if (replayable && attempt === 1 && !options.signal.aborted) {
+          await response.body?.cancel().catch(() => undefined);
+          reportDiagnostic(value.operation, 'same_signed_request_retry');
+          continue;
+        }
+        return unavailable();
+      }
+      try {
+        const parsed: unknown = JSON.parse(bytes.toString('utf8'));
+        if (!plainRecord(parsed) || !exactKeys(parsed, ['response'])) {
+          reportDiagnostic(value.operation, 'response_contract_invalid');
+          return unavailable();
+        }
+        const verified = verifySignedRoutineDepositResponse(
+          parsed.response,
+          options.trustedExecutionSignerKeyId,
+          signerPublicKey,
+          value,
+          trustedNow,
+        );
+        if (!verified) {
+          reportDiagnostic(value.operation, 'response_signature_invalid');
+          return unavailable();
+        }
+        if (value.operation === 'fence' || attempt > 1) {
+          reportDiagnostic(value.operation, 'signed_response_verified');
+        }
+        return verified.body.result;
+      } catch (error) {
+        if (error instanceof RoutineDepositHttpStoreUnavailableError) throw error;
+        reportDiagnostic(value.operation, 'response_contract_invalid');
+        return unavailable();
+      } finally {
+        bytes.fill(0);
+      }
     }
+    return unavailable();
   }
 
   return Object.freeze({
@@ -365,7 +406,10 @@ export function createRoutineDepositHttpStore(
         }),
       });
       const result = await command(request);
-      if (!sameBinding(expectedBinding, result)) return unavailable();
+      if (!sameBinding(expectedBinding, result)) {
+        reportDiagnostic('record_dispatch', 'binding_mismatch');
+        return unavailable();
+      }
     },
     async reconcile(lease: RoutineDepositLease): Promise<RoutineDepositReconciliation> {
       const request: RoutineDepositCommand = Object.freeze({

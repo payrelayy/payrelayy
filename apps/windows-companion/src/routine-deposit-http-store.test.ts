@@ -268,4 +268,101 @@ describe('routine deposit HTTP store', () => {
       { operation: 'fence', stage: 'response_signature_invalid' },
     ]);
   });
+
+  it('recovers a lost post-dispatch acknowledgement with the identical signed request', async () => {
+    const selected = fixture();
+    const server = selected.fetchImplementation.getMockImplementation();
+    if (!server) throw new Error('The synthetic server is unavailable.');
+    selected.fetchImplementation.mockImplementationOnce(async (...args) => {
+      // Simulate a durable broker commit followed by a lost HTTP response.
+      await server(...args);
+      throw new Error('private-payment-reference-and-token');
+    });
+
+    await expect(
+      selected.store.recordDispatch(leaseBinding, {
+        outcome: 'submission_attempted',
+        providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+        exactPlayerCreditMatch: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
+    expect(selected.fetchImplementation.mock.calls[0]?.[1]?.body).toBe(
+      selected.fetchImplementation.mock.calls[1]?.[1]?.body,
+    );
+    expect(selected.operations).toEqual(['record_dispatch', 'record_dispatch']);
+    expect(selected.diagnostics).toEqual([
+      { operation: 'record_dispatch', stage: 'transport_failed' },
+      { operation: 'record_dispatch', stage: 'same_signed_request_retry' },
+      { operation: 'record_dispatch', stage: 'signed_response_verified' },
+    ]);
+    expect(JSON.stringify(selected.diagnostics)).not.toContain(
+      'private-payment-reference-and-token',
+    );
+  });
+
+  it('replays a transient reconciliation failure without a new signed command', async () => {
+    const selected = fixture();
+    selected.fetchImplementation.mockResolvedValueOnce(
+      new Response('private-provider-response', { status: 503 }),
+    );
+
+    await expect(selected.store.reconcile(leaseBinding)).resolves.toEqual({ outcome: 'pending' });
+    expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
+    expect(selected.fetchImplementation.mock.calls[0]?.[1]?.body).toBe(
+      selected.fetchImplementation.mock.calls[1]?.[1]?.body,
+    );
+    expect(selected.diagnostics).toEqual([
+      { operation: 'reconcile', stage: 'http_rejected', httpStatus: 503 },
+      { operation: 'reconcile', stage: 'same_signed_request_retry' },
+      { operation: 'reconcile', stage: 'signed_response_verified' },
+    ]);
+    expect(JSON.stringify(selected.diagnostics)).not.toContain('private-provider-response');
+  });
+
+  it('never replays an invalid post-dispatch signature or an aborted request', async () => {
+    const invalid = fixture(true);
+    await expect(
+      invalid.store.recordDispatch(leaseBinding, {
+        outcome: 'submission_attempted',
+        providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+        exactPlayerCreditMatch: true,
+      }),
+    ).rejects.toBeInstanceOf(RoutineDepositHttpStoreUnavailableError);
+    expect(invalid.fetchImplementation).toHaveBeenCalledOnce();
+    expect(invalid.diagnostics).toEqual([
+      { operation: 'record_dispatch', stage: 'response_signature_invalid' },
+    ]);
+
+    const aborted = fixture();
+    aborted.abort.abort();
+    await expect(aborted.store.reconcile(leaseBinding)).rejects.toBeInstanceOf(
+      RoutineDepositHttpStoreUnavailableError,
+    );
+    expect(aborted.fetchImplementation).not.toHaveBeenCalled();
+    expect(aborted.diagnostics).toEqual([{ operation: 'reconcile', stage: 'request_aborted' }]);
+  });
+
+  it('limits post-dispatch recovery to one identical replay', async () => {
+    const selected = fixture();
+    selected.fetchImplementation.mockRejectedValue(new Error('private-token'));
+
+    await expect(
+      selected.store.recordDispatch(leaseBinding, {
+        outcome: 'submission_attempted',
+        providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+        exactPlayerCreditMatch: true,
+      }),
+    ).rejects.toBeInstanceOf(RoutineDepositHttpStoreUnavailableError);
+    expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
+    expect(selected.diagnostics).toEqual([
+      { operation: 'record_dispatch', stage: 'transport_failed' },
+      { operation: 'record_dispatch', stage: 'same_signed_request_retry' },
+      { operation: 'record_dispatch', stage: 'transport_failed' },
+    ]);
+  });
 });

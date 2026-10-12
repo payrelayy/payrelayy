@@ -21,6 +21,7 @@ function preflightRow(overrides: Readonly<Record<string, boolean>> = {}) {
     capability_member: true,
     command_allowed: true,
     command_hardened: true,
+    history_command_hardened: true,
     exact_runtime: true,
     no_app_relation_privileges: true,
     schema_usage: true,
@@ -59,6 +60,9 @@ describe('routine-deposit PostgreSQL runtime', () => {
     expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain('as schema_usage');
     expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain(
       'app.execute_agent_platform_routine_deposit_command',
+    );
+    expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain(
+      'app.execute_agent_platform_routine_deposit_history_confirmation',
     );
     expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain('has_any_column_privilege');
     expect(ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL).toContain(

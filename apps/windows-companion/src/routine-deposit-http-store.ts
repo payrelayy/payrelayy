@@ -20,6 +20,7 @@ import {
 
 import type { CompanionDeviceSigningRuntime } from './device-enrollment.js';
 import type { LocalKemerBetDepositDispatchOutcome } from './provider-route.js';
+import type { RoutineHistoryObservation } from './routine-kemerbet-history.js';
 import type {
   RoutineDepositBinding,
   RoutineDepositExecutionStore,
@@ -50,7 +51,7 @@ export interface RoutineDepositHttpStoreOptions {
 }
 
 export interface RoutineDepositHttpStoreDiagnostic {
-  readonly operation: 'fence' | 'record_dispatch' | 'reconcile' | 'complete';
+  readonly operation: 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete';
   readonly stage:
     | 'request_aborted'
     | 'request_build_failed'
@@ -259,6 +260,7 @@ export function createRoutineDepositHttpStore(
     const replayable =
       value.operation === 'record_dispatch' ||
       value.operation === 'reconcile' ||
+      value.operation === 'confirm_history' ||
       value.operation === 'complete';
     for (let attempt = 1; attempt <= (replayable ? 2 : 1); attempt += 1) {
       if (options.signal.aborted) {
@@ -416,6 +418,20 @@ export function createRoutineDepositHttpStore(
         ...base(randomUUID(), workerInstanceId, 'reconcile'),
         operation: 'reconcile',
         binding: binding(lease),
+      });
+      return (await command(
+        request,
+      )) as RoutineDepositProtocolReconciliation as RoutineDepositReconciliation;
+    },
+    async confirmHistory(
+      lease: RoutineDepositLease,
+      observation: RoutineHistoryObservation,
+    ): Promise<RoutineDepositReconciliation> {
+      const request: RoutineDepositCommand = Object.freeze({
+        ...base(randomUUID(), workerInstanceId, 'confirm_history'),
+        operation: 'confirm_history',
+        binding: binding(lease),
+        observation,
       });
       return (await command(
         request,

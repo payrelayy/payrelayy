@@ -181,6 +181,51 @@ describe('routine deposit protocol', () => {
     expect(decodeRoutineDepositCommand({ ...command, retryAllowed: true })).toBeUndefined();
   });
 
+  it('binds an approved History observation to the exact Player, amount, and provider IDs', () => {
+    const observation = {
+      transactionId: '110891902',
+      requestId: '19686411',
+      occurredAt: '2026-10-12T18:33:14.257728Z',
+      playerId: binding.playerId,
+      amountMinor: binding.amountMinor,
+      currencyCode: 'ETB',
+      approvedHistoryMatchCount: 1,
+    } as const;
+    const command = {
+      contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
+      protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
+      capability: ROUTINE_DEPOSIT_CAPABILITY,
+      requestId,
+      workerInstanceId,
+      operation: 'confirm_history',
+      binding,
+      observation,
+    } as const;
+    expect(decodeRoutineDepositCommand(command)).toEqual(command);
+    for (const mutation of [
+      { amountMinor: 2_502 },
+      { playerId: 'other-player' },
+      { approvedHistoryMatchCount: 2 },
+      { transactionId: 'bad' },
+      { requestId: 'bad' },
+      { occurredAt: '2026-10-12T18:33:14.257Z' },
+      { occurredAt: '2026-13-12T18:33:14.257728Z' },
+    ]) {
+      expect(
+        decodeRoutineDepositCommand({
+          ...command,
+          observation: { ...observation, ...mutation },
+        }),
+      ).toBeUndefined();
+    }
+    expect(
+      decodeRoutineDepositCommand({
+        ...command,
+        observation: { ...observation, approved: true },
+      }),
+    ).toBeUndefined();
+  });
+
   it('binds a fresh execution signature to the exact command and result', () => {
     const command = leaseCommand();
     const { publicKey, response } = signedLeaseResponse(command);

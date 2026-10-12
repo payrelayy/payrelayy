@@ -19,13 +19,25 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const OPAQUE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/u;
+const HISTORY_ID = /^[0-9]{6,20}$/u;
+const HISTORY_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u;
 const MINIMUM_AMOUNT_MINOR = 2_500;
 const MAXIMUM_AMOUNT_MINOR = 2_500_000;
 
 type UnknownRecord = Record<string, unknown>;
 
 export type RoutineDepositOperation =
-  'lease' | 'fence' | 'record_dispatch' | 'reconcile' | 'complete' | 'pause';
+  'lease' | 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete' | 'pause';
+
+export interface RoutineDepositHistoryObservation {
+  readonly transactionId: string;
+  readonly requestId: string;
+  readonly occurredAt: string;
+  readonly playerId: string;
+  readonly amountMinor: number;
+  readonly currencyCode: 'ETB';
+  readonly approvedHistoryMatchCount: 1;
+}
 
 export interface RoutineDepositProtocolBinding {
   readonly jobId: string;
@@ -117,6 +129,11 @@ export type RoutineDepositCommand =
       };
     })
   | (RoutineDepositCommandBase & {
+      readonly operation: 'confirm_history';
+      readonly binding: RoutineDepositProtocolBinding;
+      readonly observation: RoutineDepositHistoryObservation;
+    })
+  | (RoutineDepositCommandBase & {
       readonly operation: 'complete';
       readonly binding: RoutineDepositProtocolBinding;
       readonly reconciliationId: string;
@@ -202,6 +219,7 @@ function base(candidate: UnknownRecord): RoutineDepositCommandBase | undefined {
       candidate.operation !== 'fence' &&
       candidate.operation !== 'record_dispatch' &&
       candidate.operation !== 'reconcile' &&
+      candidate.operation !== 'confirm_history' &&
       candidate.operation !== 'complete' &&
       candidate.operation !== 'pause')
   ) {
@@ -413,6 +431,58 @@ export function decodeRoutineDepositCommand(candidate: unknown): RoutineDepositC
       }),
     });
   }
+  if (common.operation === 'confirm_history') {
+    const observation = candidate.observation;
+    if (
+      !exactKeys(candidate, [
+        'contractVersion',
+        'protocolMode',
+        'capability',
+        'requestId',
+        'workerInstanceId',
+        'operation',
+        'binding',
+        'observation',
+      ]) ||
+      !plainRecord(observation) ||
+      !exactKeys(observation, [
+        'transactionId',
+        'requestId',
+        'occurredAt',
+        'playerId',
+        'amountMinor',
+        'currencyCode',
+        'approvedHistoryMatchCount',
+      ]) ||
+      typeof observation.transactionId !== 'string' ||
+      !HISTORY_ID.test(observation.transactionId) ||
+      typeof observation.requestId !== 'string' ||
+      !HISTORY_ID.test(observation.requestId) ||
+      typeof observation.occurredAt !== 'string' ||
+      !HISTORY_TIME.test(observation.occurredAt) ||
+      !Number.isFinite(Date.parse(observation.occurredAt)) ||
+      typeof observation.playerId !== 'string' ||
+      observation.playerId !== binding.playerId ||
+      observation.amountMinor !== binding.amountMinor ||
+      observation.currencyCode !== 'ETB' ||
+      observation.approvedHistoryMatchCount !== 1
+    )
+      return undefined;
+    return Object.freeze({
+      ...common,
+      operation: 'confirm_history',
+      binding,
+      observation: Object.freeze({
+        transactionId: observation.transactionId,
+        requestId: observation.requestId,
+        occurredAt: observation.occurredAt,
+        playerId: binding.playerId,
+        amountMinor: binding.amountMinor,
+        currencyCode: 'ETB',
+        approvedHistoryMatchCount: 1,
+      }),
+    });
+  }
   if (
     !exactKeys(candidate, [
       'contractVersion',
@@ -453,7 +523,7 @@ function decodeResult(
 ): RoutineDepositResponseResult | undefined {
   if (operation === 'pause') return candidate === null ? null : undefined;
   if (operation === 'lease' && candidate === null) return null;
-  if (operation === 'reconcile') {
+  if (operation === 'reconcile' || operation === 'confirm_history') {
     if (
       plainRecord(candidate) &&
       exactKeys(candidate, ['outcome']) &&
@@ -638,6 +708,7 @@ export function decodeRoutineDepositResponseBody(
       candidate.operation !== 'fence' &&
       candidate.operation !== 'record_dispatch' &&
       candidate.operation !== 'reconcile' &&
+      candidate.operation !== 'confirm_history' &&
       candidate.operation !== 'complete' &&
       candidate.operation !== 'pause') ||
     typeof candidate.requestContentDigest !== 'string' ||

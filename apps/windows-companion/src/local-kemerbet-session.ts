@@ -28,6 +28,7 @@ import {
   executeExactFiveLocalKemerBetLookup,
   type LocalKemerBetLookupOutcome,
 } from './local-kemerbet-lookup.js';
+import { scanRoutineKemerBetHistory, type RoutineHistoryScan } from './routine-kemerbet-history.js';
 import {
   installProviderMutationBoundary,
   type LocalKemerBetDepositDispatchOutcome,
@@ -103,6 +104,7 @@ export interface LocalKemerBetSession {
     amountMinor: number,
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
+  scanRoutineDepositHistory(playerId: string, amountMinor: number): Promise<RoutineHistoryScan>;
   rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number): Promise<void>;
   /** Permanently disarm this routine launch after an uncertain attempt without hiding Chrome. */
   pauseForReview(): void;
@@ -156,6 +158,7 @@ export async function startLocalKemerBetSession(
   const lookupAuthorization = createLocalKemerBetLookupAuthorization();
   const depositAuthorization = createLocalKemerBetDepositAuthorization();
   let operationInProgress = false;
+  let historyReadAuthorized = false;
   let signedInCandidate = false;
   let signedInVerified = false;
   let reviewPaused = false;
@@ -172,6 +175,7 @@ export async function startLocalKemerBetSession(
   let identityRetryTimer: NodeJS.Timeout | undefined;
   let context: BrowserContext | undefined;
   let localPage: Page | undefined;
+  let observePage!: (candidate: Page) => Promise<void>;
   let lock: SessionLock | undefined;
   let resolveDone!: () => void;
   let rejectDone!: (error: Error) => void;
@@ -344,6 +348,7 @@ export async function startLocalKemerBetSession(
       },
       lookupAuthorization,
       depositAuthorization,
+      () => historyReadAuthorized,
     );
 
     const beginIdentityVerification = async (): Promise<void> => {
@@ -451,7 +456,7 @@ export async function startLocalKemerBetSession(
       return 'identity_binding_unavailable';
     };
 
-    const observePage = async (candidate: Page): Promise<void> => {
+    observePage = async (candidate: Page): Promise<void> => {
       const kind = classifyPageUrl(candidate.url());
       if (kind === 'unsupported' && candidate.url() !== 'about:blank' && !stopping) {
         void finish('failed', 'unexpected_page');
@@ -706,6 +711,41 @@ export async function startLocalKemerBetSession(
         lookupAuthorization.clear();
         depositAuthorization.clear();
         operationInProgress = false;
+      }
+    },
+    async scanRoutineDepositHistory(playerId: string, amountMinor: number) {
+      const page = localPage;
+      if (
+        !config.routineDepositsEnabled ||
+        terminal ||
+        stopping ||
+        reviewPaused ||
+        !signedInVerified ||
+        operationInProgress ||
+        !page
+      )
+        throw new Error('The local KemerBet history session is unavailable.');
+      operationInProgress = true;
+      historyReadAuthorized = true;
+      signedInVerified = false;
+      identityVerificationEpoch += 1;
+      disarmSignedInReload();
+      report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+      try {
+        return await scanRoutineKemerBetHistory(page, playerId, amountMinor);
+      } finally {
+        historyReadAuthorized = false;
+        try {
+          if (!terminal && !stopping && !reviewPaused) {
+            await page.goto(KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL, {
+              waitUntil: 'commit',
+              timeout: 15_000,
+            });
+            await observePage(page);
+          }
+        } finally {
+          operationInProgress = false;
+        }
       }
     },
     async rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number) {

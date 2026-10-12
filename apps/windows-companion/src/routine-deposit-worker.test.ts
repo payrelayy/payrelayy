@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import type { RoutineHistoryScan } from './routine-kemerbet-history.js';
 
 import {
   createRoutineDepositWorker,
@@ -79,10 +80,17 @@ function fixture(lease = makeLease()) {
     reconcile: vi.fn(async (selected: RoutineDepositLease): Promise<RoutineDepositReconciliation> =>
       confirmed(selected),
     ),
+    confirmHistory: vi.fn(
+      async (selected: RoutineDepositLease): Promise<RoutineDepositReconciliation> =>
+        confirmed(selected),
+    ),
     completeConfirmed: vi.fn(async (selected: RoutineDepositLease) => ({ ...selected })),
     pause: vi.fn(async () => undefined),
   } satisfies RoutineDepositExecutionStore;
   const session = {
+    scanRoutineDepositHistory: vi.fn(async (): Promise<RoutineHistoryScan> => ({
+      outcome: 'not_observed',
+    })),
     executeRoutineOneUseDeposit: vi.fn(
       async (
         _player: string,
@@ -174,6 +182,64 @@ describe('routine production serial deposit worker', () => {
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(store.completeConfirmed).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirms exactly one approved history row after dispatch without a second Transfer', async () => {
+    const { worker, store, session, lease } = fixture();
+    store.reconcile.mockResolvedValueOnce({ outcome: 'pending' });
+    session.scanRoutineDepositHistory.mockResolvedValueOnce({
+      outcome: 'exact_match',
+      observation: {
+        transactionId: '110891902',
+        requestId: '19686411',
+        occurredAt: '2026-10-12T18:33:14.257728Z',
+        playerId: lease.playerId,
+        amountMinor: lease.amountMinor,
+        currencyCode: 'ETB',
+        approvedHistoryMatchCount: 1,
+      },
+    });
+    expect(await worker.runOnce()).toEqual({ status: 'completed' });
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
+    expect(session.scanRoutineDepositHistory).toHaveBeenCalledWith(
+      lease.playerId,
+      lease.amountMinor,
+    );
+    expect(store.confirmHistory).toHaveBeenCalledTimes(1);
+    expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      session.scanRoutineDepositHistory.mock.invocationCallOrder[0]!,
+    );
+    expect(store.confirmHistory.mock.invocationCallOrder[0]).toBeLessThan(
+      store.completeConfirmed.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('pauses an ambiguous history without crediting or retrying Transfer', async () => {
+    const { worker, store, session } = fixture();
+    store.reconcile.mockResolvedValueOnce({ outcome: 'pending' });
+    session.scanRoutineDepositHistory.mockResolvedValueOnce({ outcome: 'ambiguous' });
+    expect(await worker.runOnce()).toEqual({
+      status: 'paused',
+      reason: 'reconciliation_uncertain',
+    });
+    expect(store.confirmHistory).not.toHaveBeenCalled();
+    expect(store.completeConfirmed).not.toHaveBeenCalled();
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses after three unreadable history scans without retrying Transfer', async () => {
+    const { worker, store, session } = fixture();
+    store.reconcile.mockResolvedValue({ outcome: 'pending' });
+    session.scanRoutineDepositHistory.mockRejectedValue(new Error('history unavailable'));
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(await worker.runOnce()).toEqual({
+      status: 'paused',
+      reason: 'reconciliation_uncertain',
+    });
+    expect(store.confirmHistory).not.toHaveBeenCalled();
+    expect(store.completeConfirmed).not.toHaveBeenCalled();
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
   });
 
   it('blocks a concurrent local run while one provider operation is unresolved', async () => {

@@ -9,6 +9,8 @@ import {
 
 const ROUTINE_FUNCTION =
   'app.execute_agent_platform_routine_deposit_command(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,text,text,jsonb)';
+const HISTORY_FUNCTION =
+  'app.execute_agent_platform_routine_deposit_history_confirmation(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,text,text,jsonb)';
 
 export const ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL = `
   select
@@ -37,6 +39,7 @@ export const ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL = `
        where member.rolname = current_user
     ) as capability_member,
     pg_catalog.has_function_privilege(current_user, '${ROUTINE_FUNCTION}', 'execute')
+      and pg_catalog.has_function_privilege(current_user, '${HISTORY_FUNCTION}', 'execute')
       and not exists (
         select 1 from pg_catalog.pg_proc routine
         join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
@@ -44,7 +47,10 @@ export const ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL = `
           and namespace.nspname !~ '^pg_(toast|temp)'
           and pg_catalog.has_schema_privilege(current_user, namespace.oid, 'usage')
           and pg_catalog.has_function_privilege(current_user, routine.oid, 'execute')
-          and routine.oid <> pg_catalog.to_regprocedure('${ROUTINE_FUNCTION}')
+          and routine.oid not in (
+            pg_catalog.to_regprocedure('${ROUTINE_FUNCTION}'),
+            pg_catalog.to_regprocedure('${HISTORY_FUNCTION}')
+          )
       ) as command_allowed,
     pg_catalog.has_schema_privilege(current_user, 'app', 'usage')
       and not pg_catalog.has_schema_privilege(current_user, 'app', 'create')
@@ -95,7 +101,18 @@ export const ROUTINE_DEPOSIT_POSTGRES_PREFLIGHT_SQL = `
          and owner_role.rolname = 'postgres'
          and routine.prosecdef
          and routine.proconfig = array['search_path=pg_catalog']::text[]
-    ) as command_hardened
+    ) as command_hardened,
+    exists (
+      select 1
+        from pg_catalog.pg_proc routine
+        join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
+        join pg_catalog.pg_roles owner_role on owner_role.oid = routine.proowner
+       where routine.oid = pg_catalog.to_regprocedure('${HISTORY_FUNCTION}')
+         and namespace.nspname = 'app'
+         and owner_role.rolname = 'postgres'
+         and routine.prosecdef
+         and routine.proconfig = array['search_path=pg_catalog']::text[]
+    ) as history_command_hardened
 `;
 
 interface RoutinePool {
@@ -131,6 +148,7 @@ function passed(row: unknown): boolean {
         'command_allowed',
         'command_hardened',
         'exact_runtime',
+        'history_command_hardened',
         'no_app_relation_privileges',
         'schema_usage',
       ]

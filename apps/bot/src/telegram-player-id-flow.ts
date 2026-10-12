@@ -30,6 +30,12 @@ export function presentTelegramPlayerIdFlowResult(
   context: TelegramPlayerIdFlowContext = {},
 ): TelegramPlayerIdFlowPresentation {
   switch (result.outcome) {
+    case 'deposit_outcome_none':
+    case 'deposit_outcome_delivery':
+    case 'deposit_outcome_completed':
+      throw new Error(
+        'A bot-only notification operation cannot be presented as a customer action.',
+      );
     case 'menu':
       return { kind: 'menu', menu: renderPlayerRegistrationMenu(result.callbackData) };
     case 'awaiting_player_id':

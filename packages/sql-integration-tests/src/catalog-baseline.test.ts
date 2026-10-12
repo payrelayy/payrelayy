@@ -15,6 +15,7 @@ import { registerOperatorLifecycleConnectionSqlTests } from './operator-lifecycl
 import { registerDepositExecutionCommandSqlTests } from './deposit-execution-commands.suite.js';
 import { registerRoutineTelebirrProcessingPolicySqlTests } from './routine-telebirr-processing-policy.suite.js';
 import { registerRoutineTelebirrPaidIntentSnapshotSqlTests } from './routine-telebirr-paid-intent-snapshot.suite.js';
+import { registerTelegramDepositOutcomeNotificationsSqlTests } from './telegram-deposit-outcome-notifications.suite.js';
 import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
@@ -1112,7 +1113,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly seventeen reviewed private procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly nineteen reviewed private procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1156,6 +1157,8 @@ describe('disposable SQL migration baseline', () => {
       'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
+      'app.claim_telegram_deposit_outcome_notification()',
+      'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
@@ -9812,6 +9815,7 @@ registerRoutineTelebirrPaidIntentSnapshotSqlTests(
   () => client,
   () => ownerAuthUserId,
 );
+registerTelegramDepositOutcomeNotificationsSqlTests(() => client);
 registerOperatorLifecycleConnectionSqlTests(() => createSqlIntegrationClient(environment));
 registerCompanionDevicePairingSqlTests(
   () => client,

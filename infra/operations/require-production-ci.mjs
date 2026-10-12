@@ -123,8 +123,8 @@ async function requestJson(path, token, fetchImpl, waitImpl) {
       continue;
     }
     if (response?.status !== 200) {
-      if (!RETRYABLE_STATUSES.has(response?.status) ||
-        attempt === READ_RETRY_DELAYS_MS.length) break;
+      if (!RETRYABLE_STATUSES.has(response?.status) || attempt === READ_RETRY_DELAYS_MS.length)
+        break;
       await waitImpl(retryDelayMs(response, attempt));
       continue;
     }
@@ -138,8 +138,10 @@ async function requestJson(path, token, fetchImpl, waitImpl) {
     }
     // A successful HTTP response with malformed data is an integrity failure,
     // not a transport retry. The full CI evidence is still checked below.
-    requireCondition(typeof body === 'string' && body.length <= 2_000_000,
-      'GitHub response exceeded the size limit');
+    requireCondition(
+      typeof body === 'string' && body.length <= 2_000_000,
+      'GitHub response exceeded the size limit',
+    );
     try {
       return JSON.parse(body);
     } catch {
@@ -242,7 +244,12 @@ async function checkWorkflow(workflow, sha, token, fetchImpl, waitImpl) {
 }
 
 export async function requireProductionCi({
-  repository, sha, ref, token, fetchImpl = fetch, waitImpl = wait,
+  repository,
+  sha,
+  ref,
+  token,
+  fetchImpl = fetch,
+  waitImpl = wait,
 }) {
   requireCondition(
     repository === REPOSITORY &&

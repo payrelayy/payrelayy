@@ -109,7 +109,9 @@ test('retries one transient GitHub read, then still checks all complete CI evide
       }
       return passing(url, options);
     },
-    waitImpl: async (milliseconds) => { delays.push(milliseconds); },
+    waitImpl: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
   });
   assert.equal(failedOnce, true);
   assert.deepEqual(delays, [3_000]);
@@ -120,14 +122,18 @@ test('retries one transient GitHub read, then still checks all complete CI evide
 test('bounds Retry-After and fails closed after repeated temporary GitHub failures', async () => {
   let reads = 0;
   const delays = [];
-  await assert.rejects(requireProductionCi({
-    ...configuration,
-    fetchImpl: async () => {
-      reads += 1;
-      return response({}, 429, { get: () => '120' });
-    },
-    waitImpl: async (milliseconds) => { delays.push(milliseconds); },
-  }));
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return response({}, 429, { get: () => '120' });
+      },
+      waitImpl: async (milliseconds) => {
+        delays.push(milliseconds);
+      },
+    }),
+  );
   assert.equal(reads, 28);
   assert.equal(delays.length, 21);
   assert.ok(delays.every((milliseconds) => milliseconds === 60_000));
@@ -135,24 +141,31 @@ test('bounds Retry-After and fails closed after repeated temporary GitHub failur
 
 test('does not retry a successful HTTP response with malformed data', async () => {
   let reads = 0;
-  await assert.rejects(requireProductionCi({
-    ...configuration,
-    fetchImpl: async () => {
-      reads += 1;
-      return { status: 200, text: async () => '{invalid' };
-    },
-    waitImpl: () => assert.fail('malformed data must not be retried'),
-  }));
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return { status: 200, text: async () => '{invalid' };
+      },
+      waitImpl: () => assert.fail('malformed data must not be retried'),
+    }),
+  );
   assert.equal(reads, 7);
 });
 
 test('does not retry a non-temporary GitHub rejection', async () => {
   let reads = 0;
-  await assert.rejects(requireProductionCi({
-    ...configuration,
-    fetchImpl: async () => { reads += 1; return response({}, 404); },
-    waitImpl: () => assert.fail('a permanent rejection must not be retried'),
-  }));
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: async () => {
+        reads += 1;
+        return response({}, 404);
+      },
+      waitImpl: () => assert.fail('a permanent rejection must not be retried'),
+    }),
+  );
   assert.equal(reads, 7);
 });
 
@@ -445,13 +458,18 @@ for (const fetchImpl of [
   async () => ({ status: 200, text: async () => TOKEN }),
 ]) {
   test('redacts network errors and invalid response contents', async () => {
-    await assert.rejects(requireProductionCi({
-      ...configuration, fetchImpl, waitImpl: async () => {},
-    }), (error) => {
-      assert.doesNotMatch(error.message, new RegExp(TOKEN, 'u'));
-      assert.match(error.message, /^Production CI gate denied:/u);
-      return true;
-    });
+    await assert.rejects(
+      requireProductionCi({
+        ...configuration,
+        fetchImpl,
+        waitImpl: async () => {},
+      }),
+      (error) => {
+        assert.doesNotMatch(error.message, new RegExp(TOKEN, 'u'));
+        assert.match(error.message, /^Production CI gate denied:/u);
+        return true;
+      },
+    );
   });
 }
 

@@ -18,6 +18,8 @@ const ALLOWED_FUNCTIONS = [
   'app.get_telegram_customer_deposit(uuid,uuid)',
   'app.get_telegram_customer_deposit_proof(uuid,uuid)',
   'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
+  'app.claim_telegram_deposit_outcome_notification()',
+  'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
 ] as const;
 
 const ROUTINE_CANDIDATE_FUNCTION =
@@ -124,6 +126,12 @@ function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean):
             ),
             pg_catalog.to_regprocedure(
               'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.claim_telegram_deposit_outcome_notification()'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)'
             )${
               routineCandidateEnabled
                 ? `,

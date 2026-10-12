@@ -50,6 +50,19 @@ export interface TelegramPrivateActionIdentity {
  * or full Telegram Update.
  */
 export type TelegramPrivateActionEnvelope =
+  | {
+      readonly version: 1;
+      /** Bot process only; no customer or Telegram Update is fabricated for this poll. */
+      readonly kind: 'deposit_outcome_claim';
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'deposit_outcome_complete';
+      readonly notificationId: string;
+      readonly leaseToken: string;
+      readonly deliveryResult: 'sent' | 'retry' | 'unavailable';
+      readonly telegramMessageId: number | null;
+    }
   | (TelegramPrivateActionIdentity & {
       readonly kind: 'root_menu';
     })
@@ -108,6 +121,25 @@ export type TelegramPrivateActionEnvelope =
  * confirm that customer payments are currently accepted.
  */
 export type TelegramPrivateActionResult =
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_outcome_none';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_outcome_delivery';
+      readonly notificationId: string;
+      readonly leaseToken: string;
+      readonly privateChatId: string;
+      readonly outcomeCode: 'credited' | 'rejected' | 'not_credited' | 'not_verified';
+      readonly amountMinor: string | null;
+      readonly referenceMasked: string;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_outcome_completed';
+      readonly accepted: boolean;
+    }
   | {
       readonly version: 1;
       readonly outcome: 'menu';
@@ -309,7 +341,13 @@ export function redactTelegramPrivateActionForLog(action: TelegramPrivateActionE
   return {
     version: action.version,
     kind: action.kind,
-    preferredLocale: action.preferredLocale,
-    customerInputPresent: action.kind !== 'root_menu',
+    preferredLocale:
+      action.kind === 'deposit_outcome_claim' || action.kind === 'deposit_outcome_complete'
+        ? 'en'
+        : action.preferredLocale,
+    customerInputPresent:
+      action.kind !== 'root_menu' &&
+      action.kind !== 'deposit_outcome_claim' &&
+      action.kind !== 'deposit_outcome_complete',
   };
 }

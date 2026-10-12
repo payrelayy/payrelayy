@@ -56,6 +56,43 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.outcome !== 'string')
     return undefined;
   const keys = Object.keys(value);
+  if (value.outcome === 'deposit_outcome_none' && keys.length === 2) {
+    return { version: 1, outcome: 'deposit_outcome_none' };
+  }
+  if (
+    value.outcome === 'deposit_outcome_delivery' &&
+    keys.length === 8 &&
+    typeof value.notificationId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.notificationId,
+    ) &&
+    typeof value.leaseToken === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.leaseToken,
+    ) &&
+    typeof value.privateChatId === 'string' &&
+    /^[1-9][0-9]{0,15}$/u.test(value.privateChatId) &&
+    BigInt(value.privateChatId) <= 9007199254740991n &&
+    ['credited', 'rejected', 'not_credited', 'not_verified'].includes(
+      value.outcomeCode as string,
+    ) &&
+    (value.amountMinor === null ||
+      (typeof value.amountMinor === 'string' &&
+        /^[1-9][0-9]*$/u.test(value.amountMinor) &&
+        BigInt(value.amountMinor) >= 2500n &&
+        BigInt(value.amountMinor) <= 2500000n)) &&
+    (value.outcomeCode === 'credited') === (value.amountMinor !== null) &&
+    typeof value.referenceMasked === 'string' &&
+    /^\*{3}[A-Z0-9]{4}$/u.test(value.referenceMasked)
+  )
+    return value as unknown as TelegramPrivateActionResult;
+  if (
+    value.outcome === 'deposit_outcome_completed' &&
+    keys.length === 3 &&
+    typeof value.accepted === 'boolean'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
   if (value.outcome === 'menu') {
     return keys.length === 3 &&
       parseTelegramPlayerRegistrationCapabilityCallback(value.callbackData)

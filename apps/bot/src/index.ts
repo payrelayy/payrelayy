@@ -4,6 +4,7 @@ import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
+import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
 import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './telegram-support.js';
@@ -387,11 +388,22 @@ bot.catch((error) => {
   );
 });
 
+const outcomeNotifierAbort = new AbortController();
+let outcomeNotifier: Promise<void> | undefined;
 await runTelegramPolling(
   bot,
   {
     allowed_updates: playerActions.enabled ? ['message', 'callback_query'] : ['message'],
     onStart: (botInfo) => {
+      if (playerActions.enabled) {
+        outcomeNotifier = runTelegramDepositOutcomeNotifier(
+          {
+            request: (action) => deliverTelegramPrivateActionWithRetry(action, playerActions),
+            send: (chatId, text) => bot.api.sendMessage(chatId, text),
+          },
+          outcomeNotifierAbort.signal,
+        );
+      }
       console.info(
         {
           username: botInfo.username,
@@ -404,5 +416,11 @@ await runTelegramPolling(
       );
     },
   },
-  { onShutdown: pollingReadiness.stop },
+  {
+    onShutdown: () => {
+      outcomeNotifierAbort.abort();
+      pollingReadiness.stop();
+    },
+  },
 );
+await outcomeNotifier;

@@ -110,6 +110,16 @@ const GET_CUSTOMER_LIVE_TELEBIRR_PROOF_SQL = `
   select live_proof_id, provider_code, deposit_status, amount_minor, currency_code, submitted_at
   from app.get_telegram_customer_live_telebirr_proof($1::uuid, $2::uuid)
 `;
+const CLAIM_TELEGRAM_DEPOSIT_OUTCOME_SQL = `
+  select notification_id, notification_lease_token, notification_private_chat_id,
+         notification_outcome_code, notification_amount_minor, notification_reference_masked
+  from app.claim_telegram_deposit_outcome_notification()
+`;
+const COMPLETE_TELEGRAM_DEPOSIT_OUTCOME_SQL = `
+  select app.complete_telegram_deposit_outcome_notification(
+    $1::uuid, $2::uuid, $3::text, $4::bigint
+  ) as accepted
+`;
 
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
   'intake_received',
@@ -197,9 +207,73 @@ function amountEtbToMinor(value: string): string | undefined {
   return amountMinor.toString();
 }
 
+async function handleDepositOutcomeClaim(
+  database: TelegramPlayerActionDatabase,
+): Promise<TelegramPrivateActionResult> {
+  const rows = (await database.query(CLAIM_TELEGRAM_DEPOSIT_OUTCOME_SQL, [])).rows;
+  if (rows.length === 0) return { version: 1, outcome: 'deposit_outcome_none' };
+  const row = oneRow(rows);
+  if (
+    Object.keys(row).length !== 6 ||
+    typeof row.notification_id !== 'string' ||
+    !UUID_PATTERN.test(row.notification_id) ||
+    typeof row.notification_lease_token !== 'string' ||
+    !UUID_PATTERN.test(row.notification_lease_token) ||
+    typeof row.notification_private_chat_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.notification_private_chat_id) ||
+    BigInt(row.notification_private_chat_id) > 9007199254740991n ||
+    !['credited', 'rejected', 'not_credited', 'not_verified'].includes(
+      row.notification_outcome_code as string,
+    ) ||
+    !(
+      row.notification_amount_minor === null ||
+      (typeof row.notification_amount_minor === 'string' &&
+        /^[1-9][0-9]*$/u.test(row.notification_amount_minor))
+    ) ||
+    (row.notification_outcome_code === 'credited') !== (row.notification_amount_minor !== null) ||
+    typeof row.notification_reference_masked !== 'string' ||
+    !/^\*{3}[A-Z0-9]{4}$/u.test(row.notification_reference_masked)
+  )
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  return {
+    version: 1,
+    outcome: 'deposit_outcome_delivery',
+    notificationId: row.notification_id,
+    leaseToken: row.notification_lease_token,
+    privateChatId: row.notification_private_chat_id,
+    outcomeCode: row.notification_outcome_code as
+      'credited' | 'rejected' | 'not_credited' | 'not_verified',
+    amountMinor: row.notification_amount_minor as string | null,
+    referenceMasked: row.notification_reference_masked,
+  };
+}
+
+async function handleDepositOutcomeComplete(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'deposit_outcome_complete' }>,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(COMPLETE_TELEGRAM_DEPOSIT_OUTCOME_SQL, [
+        action.notificationId,
+        action.leaseToken,
+        action.deliveryResult,
+        action.telegramMessageId,
+      ])
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'deposit_outcome_completed', accepted: row.accepted };
+}
+
 async function recordInbound(
   database: TelegramPlayerActionDatabase,
-  action: TelegramPrivateActionEnvelope,
+  action: Exclude<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'deposit_outcome_claim' | 'deposit_outcome_complete' }
+  >,
   rawBody: Buffer,
   secret: string,
 ): Promise<string> {
@@ -884,6 +958,12 @@ export function createPostgresTelegramPlayerActionRuntime(
     nonceStore,
     async handle(action, rawBody) {
       try {
+        if (action.kind === 'deposit_outcome_claim') {
+          return await handleDepositOutcomeClaim(pool);
+        }
+        if (action.kind === 'deposit_outcome_complete') {
+          return await handleDepositOutcomeComplete(pool, action);
+        }
         const inboundEventId = await recordInbound(
           pool,
           action,

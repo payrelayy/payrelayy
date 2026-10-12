@@ -118,6 +118,17 @@ const DEPOSIT_PROOF_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'proofToken']);
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
 const COMPACT_UUID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
+const NOTIFICATION_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const OUTCOME_CLAIM_KEYS = new Set(['version', 'kind']);
+const OUTCOME_COMPLETE_KEYS = new Set([
+  'version',
+  'kind',
+  'notificationId',
+  'leaseToken',
+  'deliveryResult',
+  'telegramMessageId',
+]);
 
 function oneHeaderValue(request: TelegramPrivateActionRequest, name: string): string | undefined {
   const values: string[] = [];
@@ -246,6 +257,39 @@ export function parseTelegramPrivateActionEnvelope(
   if (!isRecord(parsed) || typeof parsed.kind !== 'string') return undefined;
 
   switch (parsed.kind) {
+    case 'deposit_outcome_claim':
+      return parsed.version === 1 &&
+        Object.keys(parsed).length === 2 &&
+        hasOnlyKeys(parsed, OUTCOME_CLAIM_KEYS)
+        ? { version: 1, kind: 'deposit_outcome_claim' }
+        : undefined;
+    case 'deposit_outcome_complete':
+      if (
+        parsed.version !== 1 ||
+        Object.keys(parsed).length !== OUTCOME_COMPLETE_KEYS.size ||
+        !hasOnlyKeys(parsed, OUTCOME_COMPLETE_KEYS) ||
+        typeof parsed.notificationId !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.notificationId) ||
+        typeof parsed.leaseToken !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.leaseToken) ||
+        !['sent', 'retry', 'unavailable'].includes(parsed.deliveryResult as string) ||
+        !(
+          parsed.telegramMessageId === null ||
+          (typeof parsed.telegramMessageId === 'number' &&
+            Number.isSafeInteger(parsed.telegramMessageId) &&
+            parsed.telegramMessageId > 0)
+        ) ||
+        (parsed.deliveryResult === 'sent') !== (parsed.telegramMessageId !== null)
+      )
+        return undefined;
+      return {
+        version: 1,
+        kind: 'deposit_outcome_complete',
+        notificationId: parsed.notificationId,
+        leaseToken: parsed.leaseToken,
+        deliveryResult: parsed.deliveryResult as 'sent' | 'retry' | 'unavailable',
+        telegramMessageId: parsed.telegramMessageId as number | null,
+      };
     case 'root_menu': {
       if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);

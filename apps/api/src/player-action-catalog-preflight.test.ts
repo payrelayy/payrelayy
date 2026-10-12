@@ -53,7 +53,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires public onboarding and the guarded proof-first procedures in the exact 16-function surface', () => {
+  it('requires public onboarding, guarded proof-first actions, and notification delivery in the exact 18-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -105,7 +105,13 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 16');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 18');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.claim_telegram_deposit_outcome_notification()',
+    );
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
+    );
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).not.toContain(
       'app.capture_telegram_routine_telebirr_untrusted_proof',
     );
@@ -128,7 +134,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
     );
-    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 17');
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 19');
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       "then array['search_path=pg_catalog']::text[]",
     );

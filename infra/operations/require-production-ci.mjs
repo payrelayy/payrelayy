@@ -1,4 +1,5 @@
 import { pathToFileURL } from 'node:url';
+import { setTimeout as wait } from 'node:timers/promises';
 
 export const REQUIRED_WORKFLOWS = Object.freeze([
   'quality.yml',
@@ -13,6 +14,9 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
 const REPOSITORY = 'payrelayy/payrelayy';
 const PAGE_SIZE = 100;
 const MAX_PAGES = 5;
+const READ_TIMEOUT_MS = 25_000;
+const READ_RETRY_DELAYS_MS = Object.freeze([3_000, 9_000, 20_000]);
+const RETRYABLE_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
 
 class GateError extends Error {
   constructor(code, workflow) {
@@ -89,29 +93,64 @@ export function selectLatestRun(runs, sha, workflow) {
   return latest;
 }
 
-async function requestJson(path, token, fetchImpl) {
-  try {
-    const response = await fetchImpl(`https://api.github.com/repos/${REPOSITORY}/${path}`, {
-      method: 'GET',
-      redirect: 'error',
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'X-GitHub-Api-Version': '2026-03-10',
-      },
-    });
-    requireCondition(response.status === 200, 'GitHub read request failed');
-    const body = await response.text();
-    requireCondition(body.length <= 2_000_000, 'GitHub response exceeded the size limit');
-    return JSON.parse(body);
-  } catch {
-    // Do not echo response bodies, URLs, credentials, or arbitrary exception text.
-    throw new GateError('GitHub read request failed or returned invalid data');
-  }
+function retryDelayMs(response, attempt) {
+  // GitHub may provide Retry-After during a temporary secondary limit. Never
+  // trust an unbounded header to hold a production operation indefinitely.
+  const header = response?.headers?.get?.('retry-after');
+  const seconds = Number(header);
+  return Number.isSafeInteger(seconds) && seconds > 0
+    ? Math.max(READ_RETRY_DELAYS_MS[attempt], Math.min(seconds * 1_000, 60_000))
+    : READ_RETRY_DELAYS_MS[attempt];
 }
 
-async function loadWorkflowRuns(workflow, sha, token, fetchImpl) {
+async function requestJson(path, token, fetchImpl, waitImpl) {
+  for (let attempt = 0; attempt <= READ_RETRY_DELAYS_MS.length; attempt += 1) {
+    let response;
+    try {
+      response = await fetchImpl(`https://api.github.com/repos/${REPOSITORY}/${path}`, {
+        method: 'GET',
+        redirect: 'error',
+        signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2026-03-10',
+        },
+      });
+    } catch {
+      if (attempt === READ_RETRY_DELAYS_MS.length) break;
+      await waitImpl(READ_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    if (response?.status !== 200) {
+      if (!RETRYABLE_STATUSES.has(response?.status) ||
+        attempt === READ_RETRY_DELAYS_MS.length) break;
+      await waitImpl(retryDelayMs(response, attempt));
+      continue;
+    }
+    let body;
+    try {
+      body = await response.text();
+    } catch {
+      if (attempt === READ_RETRY_DELAYS_MS.length) break;
+      await waitImpl(READ_RETRY_DELAYS_MS[attempt]);
+      continue;
+    }
+    // A successful HTTP response with malformed data is an integrity failure,
+    // not a transport retry. The full CI evidence is still checked below.
+    requireCondition(typeof body === 'string' && body.length <= 2_000_000,
+      'GitHub response exceeded the size limit');
+    try {
+      return JSON.parse(body);
+    } catch {
+      break;
+    }
+  }
+  // Do not echo response bodies, URLs, credentials, or arbitrary exception text.
+  throw new GateError('GitHub read request failed or returned invalid data');
+}
+
+async function loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl) {
   const runs = [];
   let expectedTotal;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
@@ -127,6 +166,7 @@ async function loadWorkflowRuns(workflow, sha, token, fetchImpl) {
       `actions/workflows/${workflow}/runs?${query}`,
       token,
       fetchImpl,
+      waitImpl,
     );
     requireCondition(
       result !== null &&
@@ -169,11 +209,11 @@ function runSetIdentity(runs) {
   );
 }
 
-async function checkWorkflow(workflow, sha, token, fetchImpl) {
-  const runs = await loadWorkflowRuns(workflow, sha, token, fetchImpl);
+async function checkWorkflow(workflow, sha, token, fetchImpl, waitImpl) {
+  const runs = await loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl);
   const selected = selectLatestRun(runs, sha, workflow);
   // Re-read the current run, not an immutable successful historical attempt.
-  const current = await requestJson(`actions/runs/${selected.id}`, token, fetchImpl);
+  const current = await requestJson(`actions/runs/${selected.id}`, token, fetchImpl, waitImpl);
   validateRun(current, sha, workflow);
   requireCondition(
     current.id === selected.id &&
@@ -191,7 +231,7 @@ async function checkWorkflow(workflow, sha, token, fetchImpl) {
   // sibling attempts and newly created runs cannot hide behind that success.
   // This is a fresh read, not an atomic lock on GitHub; deployment checks again
   // immediately before activation as well as before using production secrets.
-  const refreshed = await loadWorkflowRuns(workflow, sha, token, fetchImpl);
+  const refreshed = await loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl);
   selectLatestRun(refreshed, sha, workflow);
   requireCondition(
     runSetIdentity(runs) === runSetIdentity(refreshed),
@@ -201,7 +241,9 @@ async function checkWorkflow(workflow, sha, token, fetchImpl) {
   return { workflow, runId: current.id, attempt: current.run_attempt };
 }
 
-export async function requireProductionCi({ repository, sha, ref, token, fetchImpl = fetch }) {
+export async function requireProductionCi({
+  repository, sha, ref, token, fetchImpl = fetch, waitImpl = wait,
+}) {
   requireCondition(
     repository === REPOSITORY &&
       ref === 'refs/heads/main' &&
@@ -212,7 +254,7 @@ export async function requireProductionCi({ repository, sha, ref, token, fetchIm
     'invalid deployment target or missing read credential',
   );
   return Promise.all(
-    REQUIRED_WORKFLOWS.map((workflow) => checkWorkflow(workflow, sha, token, fetchImpl)),
+    REQUIRED_WORKFLOWS.map((workflow) => checkWorkflow(workflow, sha, token, fetchImpl, waitImpl)),
   );
 }
 

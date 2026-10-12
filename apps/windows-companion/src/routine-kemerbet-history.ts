@@ -6,7 +6,7 @@ const HISTORY_API_PATH = '/Transaction/DepositHistory';
 const MAX_PAGES = 20;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const RECENT_HISTORY_MS = 5 * 60_000;
-const UTC_MICROSECOND = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}$/u;
+const UTC_FRACTIONAL_MICROSECOND = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{5,6})$/u;
 const NUMERIC_ID = /^[0-9]{6,20}$/u;
 const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
@@ -79,6 +79,7 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
     const playerId = raw.playerId;
     const amountMinor = moneyMinor(raw.amount);
     const rawTime = raw.transactionTime;
+    const timeMatch = typeof rawTime === 'string' ? UTC_FRACTIONAL_MICROSECOND.exec(rawTime) : null;
     if (
       !transactionId ||
       !requestId ||
@@ -86,11 +87,12 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
       !PLAYER_ID.test(playerId) ||
       amountMinor === undefined ||
       raw.currencyCode !== 'ETB' ||
-      typeof rawTime !== 'string' ||
-      !UTC_MICROSECOND.test(rawTime)
+      !timeMatch
     )
       return undefined;
-    const occurredAt = `${rawTime}Z`;
+    // KemerBet returns five or six fractional digits. Keep the wire contract's
+    // six-digit UTC precision without rounding the provider's timestamp.
+    const occurredAt = `${timeMatch[1]}.${timeMatch[2]!.padEnd(6, '0')}Z`;
     const occurredAtMs = Date.parse(occurredAt);
     if (!Number.isSafeInteger(occurredAtMs) || occurredAtMs <= 0) return undefined;
     rows.push(

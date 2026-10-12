@@ -70,6 +70,13 @@ describe('read-only KemerBet deposit history parser', () => {
     });
   });
 
+  it('normalizes KemerBet five-digit fractional seconds to the six-digit history contract', () => {
+    expect(
+      parseRoutineKemerBetHistoryPage(response({ transactionTime: '2026-10-12T18:33:14.25772' }))
+        ?.rows[0]?.occurredAt,
+    ).toBe('2026-10-12T18:33:14.257720Z');
+  });
+
   it('does not treat a rejected, non-EPOS, or unrelated operation as approved', () => {
     for (const override of [
       { state: 2 },
@@ -90,6 +97,9 @@ describe('read-only KemerBet deposit history parser', () => {
       { amount: Number.NaN },
       { transactionTime: '2026-10-12 09:33 PM' },
       { transactionTime: '2026-10-12T18:33:14' },
+      { transactionTime: '2026-10-12T18:33:14.2577' },
+      { transactionTime: '2026-10-12T18:33:14.2577280' },
+      { transactionTime: '2026-10-12T18:33:14.25772Z' },
       { walletTransactionId: 0 },
       { transactionId: '19686411' },
       { playerId: '28379330\nother' },
@@ -102,6 +112,31 @@ describe('read-only KemerBet deposit history parser', () => {
   it('accepts exactly one recent approved match from the reviewed History response', async () => {
     const row = response().value.item2[0]!;
     expect(await scanRoutineKemerBetHistory(fakeHistoryPage([row]), '28379330', 2900)).toEqual({
+      outcome: 'exact_match',
+      observation: {
+        transactionId: '110891902',
+        requestId: '19686411',
+        occurredAt: '2026-10-12T18:33:14.257728Z',
+        playerId: '28379330',
+        amountMinor: 2900,
+        currencyCode: 'ETB',
+        approvedHistoryMatchCount: 1,
+      },
+    });
+  });
+
+  it('finds a recent exact match even when an older page row has five fractional digits', async () => {
+    const recent = response().value.item2[0]!;
+    const older = {
+      ...recent,
+      walletTransactionId: 110891901,
+      transactionId: 19686410,
+      transactionTime: '2026-10-12T18:32:14.25772',
+      playerId: 'another-player',
+    };
+    expect(
+      await scanRoutineKemerBetHistory(fakeHistoryPage([recent, older]), '28379330', 2900),
+    ).toEqual({
       outcome: 'exact_match',
       observation: {
         transactionId: '110891902',

@@ -121,7 +121,13 @@ assert.match(windowsLauncher, /INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'tru
 assert.match(windowsLauncher, /stdio: \['ignore', 'inherit', 'inherit', 'ipc'\]/u);
 assert.match(windowsStore, /verifySignedRoutineDepositResponse/u);
 assert.match(windowsStore, /redirect: 'error'/u);
-assert.match(windowsStore, /It never retries a command/u);
+assert.match(windowsStore, /It never retries a fence or/u);
+assert.match(windowsStore, /requestBody = JSON\.stringify/u);
+assert.match(windowsStore, /value\.operation === 'record_dispatch' \|\|/u);
+assert.match(windowsStore, /value\.operation === 'reconcile' \|\|/u);
+assert.match(windowsStore, /value\.operation === 'complete'/u);
+assert.match(windowsStore, /attempt <= \(replayable \? 2 : 1\)/u);
+assert.match(windowsStore, /same_signed_request_retry/u);
 
 assert.match(localDeposit, /Transfer Successful!/u);
 assert.match(

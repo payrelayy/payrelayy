@@ -457,18 +457,27 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         const fenceTimes = fenced.result as { issuedAtMs: number; validUntilMs: number };
         expect(fenceTimes.validUntilMs - fenceTimes.issuedAtMs).toBe(10_000);
 
-        const dispatched = await execute(
-          runtime,
-          certificate,
-          boundCommand(command, 'record_dispatch', binding, {
-            dispatch: {
-              outcome: 'submission_attempted',
-              providerResponseDigest: digest(),
-              exactPlayerCreditMatch: true,
-            },
-          }),
-        );
+        const dispatchCommand = boundCommand(command, 'record_dispatch', binding, {
+          dispatch: {
+            outcome: 'submission_attempted',
+            providerResponseDigest: digest(),
+            exactPlayerCreditMatch: true,
+          },
+        });
+        const dispatched = await execute(runtime, certificate, dispatchCommand);
         expect(dispatched.result).toEqual(binding);
+        expect(
+          (await execute(runtime, certificate, dispatchCommand, dispatched.identities)).result,
+        ).toEqual(binding);
+        expect(
+          (
+            await client.query<{ count: number }>(
+              `select count(*)::integer as count from app.routine_telebirr_dispatch_evidence
+                where broker_request_id = $1::uuid`,
+              [dispatchCommand.requestId],
+            )
+          ).rows,
+        ).toEqual([{ count: 1 }]);
         expect(
           (await execute(runtime, certificate, boundCommand(command, 'reconcile', binding))).result,
         ).toEqual({ outcome: 'pending' });

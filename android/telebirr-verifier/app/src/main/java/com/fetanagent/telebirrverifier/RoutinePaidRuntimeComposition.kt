@@ -76,19 +76,7 @@ internal object RoutinePaidRuntimeComposition {
             burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
           }
         } else emptyList()
-        val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
-        val paidStatus = when {
-          results.isEmpty() && paidRetryPacer.waitingForRetry ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
-          review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
-            review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
-              ?: "routine_paid_review")
-          results.any { it == RoutinePaidPhonePreparationResult.SubmittedForReview } ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_observation_staged")
-          results.any { it == RoutinePaidPhonePreparationResult.Retry } ->
-            LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
-          else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
-        }
+        val paidStatus = RoutinePaidCycleStatus.fromResults(results, paidRetryPacer.waitingForRetry)
         val noMoneyStatus = noMoneySession.cycle.runOnce()
         // Both codes are locally validated, fixed operational categories. Never log an
         // assignment, reference, receipt, address, signature, or response body.
@@ -109,6 +97,28 @@ internal object RoutinePaidRuntimeComposition {
     },
     heartbeat = null,
   )
+}
+
+/** Only a staged paid receipt's transient network failure gets the shorter retry cadence. */
+internal object RoutinePaidCycleStatus {
+  fun fromResults(results: List<RoutinePaidPhonePreparationResult>, waitingForRetry: Boolean):
+    LivePilotRuntimeStatus {
+    val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
+    return when {
+      results.isEmpty() && waitingForRetry ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
+      review?.reasonCode == "network_unavailable" ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_receipt_network_retry")
+      review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
+        review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
+          ?: "routine_paid_review")
+      results.any { it == RoutinePaidPhonePreparationResult.SubmittedForReview } ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_observation_staged")
+      results.any { it == RoutinePaidPhonePreparationResult.Retry } ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
+      else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
+    }
+  }
 }
 
 /** Status presentation only; the server gates, not this choice, authorize an assignment. */

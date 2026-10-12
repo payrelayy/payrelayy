@@ -49,4 +49,15 @@ class RoutineDualModeStatusTest {
     assertEquals(false, pacer.waitingForRetry)
     assertEquals(true, pacer.shouldAttempt())
   }
+
+  @Test fun `only a paid receipt network failure selects the fast retry`() {
+    val network = RoutinePaidCycleStatus.fromResults(
+      listOf(RoutinePaidPhonePreparationResult.Review("network_unavailable")), false)
+    assertEquals(attention("paid_receipt_network_retry"), network)
+    assertEquals(network, RoutineDualModeStatus.select(ready("no_assignment"), network))
+    assertEquals(attention("receipt_review"), RoutinePaidCycleStatus.fromResults(
+      listOf(RoutinePaidPhonePreparationResult.Review("receipt_review")), false))
+    assertEquals(attention("paid_observation_retry"),
+      RoutinePaidCycleStatus.fromResults(emptyList(), true))
+  }
 }

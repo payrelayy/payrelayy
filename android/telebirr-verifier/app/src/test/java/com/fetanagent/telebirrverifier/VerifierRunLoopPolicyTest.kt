@@ -71,6 +71,17 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `assigned paid receipt network retries stay quick but remain bounded`() {
+    val policy = VerifierRunLoopPolicy { 0.0 }
+    val paidNetwork = status(LivePilotRuntimeState.ATTENTION, "paid_receipt_network_retry")
+    assertEquals(listOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 120_000L, 300_000L),
+      (0..6).map { policy.decide(paidNetwork, it.toLong()).delayMillis })
+    val genericNetwork = status(LivePilotRuntimeState.ATTENTION, "network_unavailable")
+    assertEquals(30_000L, policy.decide(genericNetwork, 7L).delayMillis)
+    assertEquals(60_000L, policy.decide(genericNetwork, 8L).delayMillis)
+  }
+
+  @Test
   fun `disabled enrollment and terminal trust failures stop`() {
     val statuses =
       listOf(

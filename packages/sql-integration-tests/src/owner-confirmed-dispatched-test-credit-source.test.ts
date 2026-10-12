@@ -29,7 +29,9 @@ describe('Owner-confirmed dispatched test credit', () => {
     expect(source).toContain("control.control_state = 'disabled'");
     expect(source).toContain('app.current_private_trusted_telebirr_activation_epoch() is not null');
     expect(source).toContain('p_owner_attests_both_wallets is distinct from true');
-    expect(source).toContain('p_owner_attests_success_and_approved_history is distinct from true');
+    expect(source).toContain(
+      'p_operator_verified_success_and_approved_history is distinct from true',
+    );
     expect(source).toContain('p_owner_accepts_no_second_credit_or_refund is distinct from true');
     expect(source).toContain('intent_row.expected_amount_minor <> 10000');
     expect(source).toContain("provider_code <> 'telebirr'");

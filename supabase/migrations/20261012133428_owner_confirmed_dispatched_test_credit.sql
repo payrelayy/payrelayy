@@ -171,7 +171,7 @@ create function app.resolve_owner_confirmed_dispatched_test_credit(
   p_observed_player_id text,
   p_observed_amount_minor bigint,
   p_owner_attests_both_wallets boolean,
-  p_owner_attests_success_and_approved_history boolean,
+  p_operator_verified_success_and_approved_history boolean,
   p_owner_accepts_no_second_credit_or_refund boolean
 )
 returns table (resolution_state text, replayed boolean)
@@ -213,7 +213,7 @@ begin
     or p_observed_player_id is null
     or p_observed_amount_minor is distinct from 10000
     or p_owner_attests_both_wallets is distinct from true
-    or p_owner_attests_success_and_approved_history is distinct from true
+    or p_operator_verified_success_and_approved_history is distinct from true
     or p_owner_accepts_no_second_credit_or_refund is distinct from true then
     raise exception 'The credited Owner-test evidence or attestation is incomplete.';
   end if;
@@ -484,7 +484,7 @@ begin
       'resolution_request_key', p_request_key,
       'history_time_precision', 'minute',
       'owner_attested_both_wallets', true,
-      'owner_attested_success_and_approved_history', true,
+      'operator_verified_success_and_approved_history', true,
       'existing_provider_credit_recorded', true,
       'additional_credit_or_refund_performed', false
     )

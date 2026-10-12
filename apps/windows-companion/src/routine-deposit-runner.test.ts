@@ -20,6 +20,7 @@ describe('automatic routine queue loop', () => {
       stop: vi.fn(async () => undefined),
       pauseForReview: vi.fn(),
       executeRoutineOneUseDeposit: vi.fn(),
+      scanRoutineDepositHistory: vi.fn(),
       isSignedInVerified: vi.fn(() => true),
     };
     const options: RoutineDepositQueueOptions = {
@@ -30,6 +31,7 @@ describe('automatic routine queue loop', () => {
         fenceFinalAction: vi.fn(),
         recordDispatch: vi.fn(),
         reconcile: vi.fn(),
+        confirmHistory: vi.fn(),
         completeConfirmed: vi.fn(),
         pause: vi.fn(),
       },

@@ -287,6 +287,14 @@ export const EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL = `
   ) as result
 `;
 
+export const CONFIRM_ROUTINE_DEPOSIT_HISTORY_SQL = `
+  select app.execute_agent_platform_routine_deposit_history_confirmation(
+    $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,
+    $7::timestamptz, $8::timestamptz, $9::timestamptz,
+    $10::text, $11::text, $12::text, $13::jsonb
+  ) as result
+`;
+
 function rowObject(row: unknown): Record<string, unknown> {
   if (typeof row !== 'object' || row === null || Array.isArray(row) || isProxy(row)) {
     throw new CompanionDeviceStateUnavailableError();
@@ -953,21 +961,26 @@ export class PostgresCompanionDeviceState {
     try {
       const commandDigest = digestRoutineDepositCommand(command);
       if (!commandDigest) throw new CompanionDeviceStateUnavailableError();
-      const result = await this.database.query(EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL, [
-        httpReplayIdentity,
-        request.bodyDigest,
-        request.body.requestId,
-        certificate.body.certificateId,
-        certificate.body.deviceId,
-        certificate.body.deviceKeyId,
-        request.body.issuedAt,
-        request.body.expiresAt,
-        assessedAt,
-        this.signerKeyId,
-        this.requireExecutionSignerKeyId(),
-        commandDigest,
-        JSON.stringify(command),
-      ]);
+      const result = await this.database.query(
+        command.operation === 'confirm_history'
+          ? CONFIRM_ROUTINE_DEPOSIT_HISTORY_SQL
+          : EXECUTE_ROUTINE_DEPOSIT_COMMAND_SQL,
+        [
+          httpReplayIdentity,
+          request.bodyDigest,
+          request.body.requestId,
+          certificate.body.certificateId,
+          certificate.body.deviceId,
+          certificate.body.deviceKeyId,
+          request.body.issuedAt,
+          request.body.expiresAt,
+          assessedAt,
+          this.signerKeyId,
+          this.requireExecutionSignerKeyId(),
+          commandDigest,
+          JSON.stringify(command),
+        ],
+      );
       if (result.rows.length !== 1) return undefined;
       const row = rowObject(result.rows[0]);
       if (!exactKeys(row, ['result'])) throw new CompanionDeviceStateUnavailableError();

@@ -108,6 +108,56 @@ describe('local KemerBet request guard', () => {
     });
   });
 
+  it('opens only the bounded deposit-history read during an explicit reconciliation scan', () => {
+    const query = new URLSearchParams([
+      ['page', '1'],
+      ['limit', '10'],
+      ['orderBy', 'CreatedAt'],
+      ['orderDirection', '2'],
+      ['userNameOrId', ''],
+      ['transactionId', ''],
+      ['walletTransactionId', ''],
+      ['paymentType', ''],
+      ['playerExternalId', ''],
+      ['state', ''],
+      ['from', '2026-10-01T00:00:00.000Z'],
+      ['to', '2026-10-13T00:00:00.000Z'],
+      ['createdAtFrom', ''],
+      ['createdAtTo', ''],
+    ]).toString();
+    const url = `https://admin-api.agt-digi.com/Transaction/DepositHistory?${query}`;
+    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only')).toEqual({
+      action: 'abort',
+      reason: 'unreviewed_read',
+    });
+    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only', undefined, true)).toEqual({
+      action: 'allow',
+      reason: 'provider_read',
+    });
+    expect(
+      decideLocalKemerBetRequest('OPTIONS', url, 'signed_in_read_only', undefined, true),
+    ).toEqual({ action: 'allow', reason: 'provider_read' });
+    expect(decideLocalKemerBetRequest('GET', url, 'manual_login', undefined, true).action).toBe(
+      'abort',
+    );
+    expect(
+      decideLocalKemerBetRequest('POST', url, 'signed_in_read_only', undefined, true).action,
+    ).toBe('abort');
+    expect(
+      decideLocalKemerBetRequest('GET', `${url}&amount=25`, 'signed_in_read_only', undefined, true)
+        .action,
+    ).toBe('abort');
+    expect(
+      decideLocalKemerBetRequest(
+        'GET',
+        url.replace('2026-10-01', '2026-13-01'),
+        'signed_in_read_only',
+        undefined,
+        true,
+      ).action,
+    ).toBe('abort');
+  });
+
   it('classifies alternate provider transports then rejects them rather than allowing outside traffic', () => {
     for (const origin of [
       'http://admin-api.agt-digi.com',

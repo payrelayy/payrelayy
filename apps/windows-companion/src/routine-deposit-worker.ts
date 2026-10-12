@@ -6,6 +6,7 @@ import {
   type LocalKemerBetRoutineFinalAction,
 } from './local-kemerbet-deposit.js';
 import type { LocalKemerBetDepositDispatchOutcome } from './provider-route.js';
+import type { RoutineHistoryObservation } from './routine-kemerbet-history.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -92,6 +93,10 @@ export interface RoutineDepositExecutionStore {
     outcome: LocalKemerBetDepositDispatchOutcome,
   ): Promise<void>;
   reconcile(lease: RoutineDepositLease): Promise<RoutineDepositReconciliation>;
+  confirmHistory(
+    lease: RoutineDepositLease,
+    observation: RoutineHistoryObservation,
+  ): Promise<RoutineDepositReconciliation>;
   completeConfirmed(
     lease: RoutineDepositLease,
     reconciliationId: string,
@@ -109,7 +114,10 @@ export type RoutineDepositWorkerResult =
 
 export interface RoutineDepositWorkerOptions {
   readonly store: RoutineDepositExecutionStore;
-  readonly session: Pick<LocalKemerBetSession, 'executeRoutineOneUseDeposit'>;
+  readonly session: Pick<
+    LocalKemerBetSession,
+    'executeRoutineOneUseDeposit' | 'scanRoutineDepositHistory'
+  >;
   readonly signal: AbortSignal;
   readonly now?: () => number;
   readonly monotonicNow?: () => number;
@@ -190,6 +198,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   let busy = false;
   let pauseReason: RoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
+  let historyScanFailures = 0;
 
   async function pause(
     lease: RoutineDepositLease | null,
@@ -212,8 +221,24 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
       phase: 'reconcile',
       finalActionFenced: true,
     });
-    const outcome = await options.store.reconcile(awaitingReconciliation);
-    if (outcome.outcome === 'pending') return Object.freeze({ status: 'awaiting_reconciliation' });
+    let outcome = await options.store.reconcile(awaitingReconciliation);
+    if (outcome.outcome === 'pending') {
+      let scan: Awaited<ReturnType<LocalKemerBetSession['scanRoutineDepositHistory']>>;
+      try {
+        scan = await options.session.scanRoutineDepositHistory(lease.playerId, lease.amountMinor);
+        historyScanFailures = 0;
+      } catch {
+        historyScanFailures += 1;
+        return historyScanFailures < 3
+          ? Object.freeze({ status: 'temporarily_unavailable' })
+          : pause(awaitingReconciliation, 'reconciliation_uncertain');
+      }
+      if (scan.outcome === 'not_observed')
+        return Object.freeze({ status: 'awaiting_reconciliation' });
+      if (scan.outcome === 'ambiguous')
+        return pause(awaitingReconciliation, 'reconciliation_uncertain');
+      outcome = await options.store.confirmHistory(awaitingReconciliation, scan.observation);
+    }
     if (outcome.outcome !== 'confirmed_executed') {
       return pause(awaitingReconciliation, 'reconciliation_uncertain');
     }

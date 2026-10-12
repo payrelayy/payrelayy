@@ -155,6 +155,7 @@ async function forwardProviderRequest(
   resetNavigationRedirects: () => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
   depositAuthorization?: LocalKemerBetDepositAuthorization,
+  allowHistoryRead: () => boolean = () => false,
 ): Promise<void> {
   const request = route.request();
   const method = request.method();
@@ -210,6 +211,7 @@ async function forwardProviderRequest(
         targetUrl.href,
         phase(),
         lookupAuthorization?.currentPlayerId(),
+        allowHistoryRead(),
       );
       if (decision.action !== 'allow') {
         await abort('mutation_attempt_blocked');
@@ -253,7 +255,15 @@ async function forwardProviderRequest(
           await abort('mutation_attempt_blocked');
           return;
         }
-        if (decideLocalKemerBetRequest(method, next.href, phase()).action !== 'allow') {
+        if (
+          decideLocalKemerBetRequest(
+            method,
+            next.href,
+            phase(),
+            lookupAuthorization?.currentPlayerId(),
+            allowHistoryRead(),
+          ).action !== 'allow'
+        ) {
           await abort('mutation_attempt_blocked');
           return;
         }
@@ -299,6 +309,7 @@ export async function installProviderMutationBoundary(
   reportBlocked: (reason: BlockReason) => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
   depositAuthorization?: LocalKemerBetDepositAuthorization,
+  allowHistoryRead: () => boolean = () => false,
 ): Promise<void> {
   // Chrome starts offline; context-wide routing covers initial popup, iframe, and worker
   // requests, with service workers disabled. Unrelated CAPTCHA traffic stays in Chrome.
@@ -314,6 +325,7 @@ export async function installProviderMutationBoundary(
       },
       lookupAuthorization,
       depositAuthorization,
+      allowHistoryRead,
     ),
   );
 }

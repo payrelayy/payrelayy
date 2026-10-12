@@ -9,6 +9,8 @@ const runtimeRole = 'fetanagent_routine_deposit_broker_runtime';
 const brokerRole = 'fetanagent_routine_deposit_broker';
 const commandSignature =
   'app.execute_agent_platform_routine_deposit_command(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,jsonb)';
+const historyCommandSignature =
+  'app.execute_agent_platform_routine_deposit_history_confirmation(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,jsonb)';
 const digest = (seed = randomUUID()): string =>
   `sha256:${createHash('sha256').update(seed, 'utf8').digest('hex')}`;
 
@@ -164,8 +166,12 @@ async function execute(
   const assessedAt = new Date(Math.floor(Date.now() / 1_000) * 1_000);
   const issuedAt = new Date(assessedAt.getTime() - 1_000);
   const expiresAt = new Date(assessedAt.getTime() + 30_000);
+  const functionName =
+    command.operation === 'confirm_history'
+      ? 'app.execute_agent_platform_routine_deposit_history_confirmation'
+      : 'app.execute_agent_platform_routine_deposit_command';
   const result = await client.query<{ result: unknown }>(
-    `select app.execute_agent_platform_routine_deposit_command(
+    `select ${functionName}(
       $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,
       $7::timestamptz, $8::timestamptz, $9::timestamptz,
       $10::text, $11::text, $12::text, $13::jsonb
@@ -196,7 +202,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
   createRuntimeClient: (password: string) => Client,
 ): void {
   describe('routine TeleBirr execution broker', () => {
-    it('is dormant after migration and exposes one hardened function only', async () => {
+    it('is dormant after migration and exposes only the two hardened routine commands', async () => {
       const client = getClient();
       const roles = await client.query<{
         rolcanlogin: boolean;
@@ -265,6 +271,29 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           schema_usage: true,
         },
       ]);
+      const historyPrivileges = await client.query<{
+        broker_execute: boolean;
+        runtime_execute: boolean;
+        public_execute: boolean;
+        hardened: boolean;
+      }>(
+        `select
+        has_function_privilege($1::text, $3::text, 'execute') as broker_execute,
+        has_function_privilege($2::text, $3::text, 'execute') as runtime_execute,
+        has_function_privilege('public', $3::text, 'execute') as public_execute,
+        (select procedure.prosecdef and procedure.proowner = 'postgres'::regrole
+          and procedure.proconfig = array['search_path=pg_catalog']::text[]
+          from pg_proc procedure where procedure.oid = $3::regprocedure) as hardened`,
+        [brokerRole, runtimeRole, historyCommandSignature],
+      );
+      expect(historyPrivileges.rows).toEqual([
+        {
+          broker_execute: true,
+          runtime_execute: false,
+          public_execute: false,
+          hardened: true,
+        },
+      ]);
       const ledgers = await client.query<{
         relforcerowsecurity: boolean;
         relname: string;
@@ -272,9 +301,10 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
       }>(`select relname, relrowsecurity, relforcerowsecurity from pg_class
           where relnamespace = 'app'::regnamespace and relname = any(array[
             'routine_telebirr_runtime_events', 'routine_telebirr_broker_requests',
-            'routine_telebirr_dispatch_evidence', 'routine_telebirr_runtime_pauses'
+            'routine_telebirr_dispatch_evidence', 'routine_telebirr_runtime_pauses',
+            'routine_telebirr_history_confirmations'
           ]) order by relname`);
-      expect(ledgers.rows).toHaveLength(4);
+      expect(ledgers.rows).toHaveLength(5);
       expect(ledgers.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity)).toBe(true);
     });
 
@@ -327,7 +357,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
                end
             ) as relation_privileges
         `);
-        expect(runtimeSurface.rows).toEqual([{ callable_functions: 1, relation_privileges: 0 }]);
+        expect(runtimeSurface.rows).toEqual([{ callable_functions: 2, relation_privileges: 0 }]);
         const command = leaseCommand(policy.accountId);
         const first = await execute(runtime, certificate, command);
         expect(first.result).toBeNull();
@@ -482,39 +512,78 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           (await execute(runtime, certificate, boundCommand(command, 'reconcile', binding))).result,
         ).toEqual({ outcome: 'pending' });
 
-        const reconciliationLease = await client.query<{
-          reconciliation_job_id: string;
-          lease_token: string;
-        }>(
-          `select reconciliation_job_id, lease_token::text
-              from app.lease_next_deposit_execution_reconciliation($1::uuid, 300)`,
-          [randomUUID()],
-        );
-        expect(reconciliationLease.rows).toHaveLength(1);
         const matchedHistory = await client.query<{ matched_at: string }>(
-          `select (attempt.final_action_fenced_at
-              + (attempt.reconciliation_required_at - attempt.final_action_fenced_at) / 2
-              )::text as matched_at
+          `select to_char(
+              (attempt.final_action_fenced_at
+                + (attempt.reconciliation_required_at - attempt.final_action_fenced_at) / 2
+              ) at time zone 'UTC',
+              'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ) as matched_at
              from app.deposit_execution_attempts attempt where attempt.id = $1::uuid`,
           [binding.attemptId],
         );
         expect(matchedHistory.rows).toHaveLength(1);
-        const settled = await client.query<{ outcome: string; attempt_status: string }>(
-          `select outcome, attempt_status
-             from app.record_deposit_execution_reconciliation(
-               $1::uuid, $2::uuid, 'confirmed_executed', $3::text, 1::smallint,
-               'deposit', $4::timestamptz, true, true, true, true
-             )`,
-          [
-            reconciliationLease.rows[0]!.reconciliation_job_id,
-            reconciliationLease.rows[0]!.lease_token,
-            `hmac-sha256-v1:${'c'.repeat(64)}`,
-            matchedHistory.rows[0]!.matched_at,
-          ],
+        await expect(
+          execute(
+            runtime,
+            certificate,
+            boundCommand(command, 'confirm_history', binding, {
+              observation: {
+                transactionId: '110891902',
+                requestId: '19686411',
+                occurredAt: '2026-10-11T18:33:14.257728Z',
+                playerId: deposit.playerId,
+                amountMinor: 2501,
+                currencyCode: 'ETB',
+                approvedHistoryMatchCount: 1,
+              },
+            }),
+          ),
+        ).rejects.toThrow('outside the server-authored final action');
+        await expect(
+          execute(
+            runtime,
+            certificate,
+            boundCommand(command, 'confirm_history', binding, {
+              observation: {
+                transactionId: '110891902',
+                requestId: '19686411',
+                occurredAt: matchedHistory.rows[0]!.matched_at,
+                playerId: deposit.playerId,
+                amountMinor: 2502,
+                currencyCode: 'ETB',
+                approvedHistoryMatchCount: 1,
+              },
+            }),
+          ),
+        ).rejects.toThrow('binding does not match');
+        const historyCommand = boundCommand(command, 'confirm_history', binding, {
+          observation: {
+            transactionId: '110891902',
+            requestId: '19686411',
+            occurredAt: matchedHistory.rows[0]!.matched_at,
+            playerId: deposit.playerId,
+            amountMinor: 2501,
+            currencyCode: 'ETB',
+            approvedHistoryMatchCount: 1,
+          },
+        });
+        const settled = await execute(runtime, certificate, historyCommand);
+        expect(settled.result).toMatchObject({
+          ...binding,
+          outcome: 'confirmed_executed',
+          exactHistoryMatchCount: 1,
+          playerCreditConfirmed: true,
+        });
+        expect(
+          (await execute(runtime, certificate, historyCommand, settled.identities)).result,
+        ).toEqual(settled.result);
+        const protectedReceipt = await client.query<{ count: number }>(
+          `select count(*)::integer as count from app.routine_telebirr_history_confirmations
+            where execution_attempt_id = $1::uuid`,
+          [binding.attemptId],
         );
-        expect(settled.rows).toEqual([
-          { outcome: 'confirmed_executed', attempt_status: 'confirmed_executed' },
-        ]);
+        expect(protectedReceipt.rows).toEqual([{ count: 1 }]);
         const confirmed = await execute(
           runtime,
           certificate,

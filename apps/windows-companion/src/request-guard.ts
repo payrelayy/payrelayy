@@ -6,6 +6,7 @@ import {
 
 const KEMERBET_LOGIN_PATH = '/Account/Login';
 const KEMERBET_REFRESH_PATH = '/Account/RefreshToken';
+const KEMERBET_DEPOSIT_HISTORY_PATH = '/Transaction/DepositHistory';
 export const KEMERBET_DEPOSIT_PATH = '/Wallet/PlayerEPOSDeposit' as const;
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -72,6 +73,7 @@ export function decideLocalKemerBetRequest(
   rawUrl: string,
   phase: LocalKemerBetGuardPhase,
   approvedLookupPlayerId?: string,
+  approvedHistoryRead = false,
 ): LocalKemerBetRequestDecision {
   const method = methodCandidate.toUpperCase();
   let url: URL;
@@ -113,6 +115,54 @@ export function decideLocalKemerBetRequest(
       return { action: 'allow', reason: 'provider_read' };
     }
     const query = [...url.searchParams.entries()];
+    const historyKeys = [
+      'page',
+      'limit',
+      'orderBy',
+      'orderDirection',
+      'userNameOrId',
+      'transactionId',
+      'walletTransactionId',
+      'paymentType',
+      'playerExternalId',
+      'state',
+      'from',
+      'to',
+      'createdAtFrom',
+      'createdAtTo',
+    ];
+    const exactHistoryRead =
+      approvedHistoryRead &&
+      phase === 'signed_in_read_only' &&
+      (method === 'GET' || method === 'OPTIONS') &&
+      url.origin === KEMERBET_AGENT_API_ORIGIN &&
+      url.pathname === KEMERBET_DEPOSIT_HISTORY_PATH &&
+      query.length === historyKeys.length &&
+      historyKeys.every((key, index) => query[index]?.[0] === key) &&
+      /^(?:[1-9]|1[0-9]|20)$/u.test(url.searchParams.get('page') ?? '') &&
+      url.searchParams.get('limit') === '10' &&
+      url.searchParams.get('orderBy') === 'CreatedAt' &&
+      url.searchParams.get('orderDirection') === '2' &&
+      [
+        'userNameOrId',
+        'transactionId',
+        'walletTransactionId',
+        'paymentType',
+        'playerExternalId',
+        'state',
+        'createdAtFrom',
+        'createdAtTo',
+      ].every((key) => url.searchParams.get(key) === '') &&
+      ['from', 'to'].every((key) => {
+        const value = url.searchParams.get(key);
+        return (
+          value !== null &&
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) &&
+          Number.isFinite(Date.parse(value)) &&
+          new Date(value).toISOString() === value
+        );
+      });
+    if (exactHistoryRead) return { action: 'allow', reason: 'provider_read' };
     const infoQuery =
       url.pathname === '/Account/Info' &&
       query.length === 1 &&

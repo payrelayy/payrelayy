@@ -119,6 +119,12 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
            order by routine.proname`);
       expect(catalog.rows).toEqual([
         {
+          name: 'observe_routine_telebirr_worker_liveness',
+          owner: 'postgres',
+          public_execute: false,
+          authenticated_execute: false,
+        },
+        {
           name: 'require_routine_telebirr_worker_at_activation',
           owner: 'postgres',
           public_execute: false,
@@ -126,12 +132,6 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
         },
         {
           name: 'routine_telebirr_signed_worker_recent',
-          owner: 'postgres',
-          public_execute: false,
-          authenticated_execute: false,
-        },
-        {
-          name: 'observe_routine_telebirr_worker_liveness',
           owner: 'postgres',
           public_execute: false,
           authenticated_execute: false,

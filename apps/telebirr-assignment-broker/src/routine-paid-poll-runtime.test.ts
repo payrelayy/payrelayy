@@ -108,6 +108,51 @@ describe('separate paid phone poll PostgreSQL runtime', () => {
     expect(fake.end).toHaveBeenCalledOnce();
   });
 
+  it('serializes a paid poll behind readiness on the same PostgreSQL client', async () => {
+    const fake = fakeClient();
+    const runtime = await createRoutinePaidPollPostgresRuntime(connection, {
+      createClient: () => fake.client,
+    });
+    let releaseCatalog: (() => void) | undefined;
+    let reportCatalogStarted: (() => void) | undefined;
+    const catalogGate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    const catalogStarted = new Promise<void>((resolve) => {
+      reportCatalogStarted = resolve;
+    });
+    let activeQueries = 0;
+    let peakActiveQueries = 0;
+    let paused = false;
+    fake.query.mockImplementation(async (sql: string) => {
+      activeQueries += 1;
+      peakActiveQueries = Math.max(peakActiveQueries, activeQueries);
+      try {
+        if (sql === ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL && !paused) {
+          paused = true;
+          reportCatalogStarted?.();
+          await catalogGate;
+        }
+        return sql === ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL
+          ? { rows: [goodPreflight] }
+          : { rows: [] };
+      } finally {
+        activeQueries -= 1;
+      }
+    });
+
+    const readiness = runtime.ready();
+    await catalogStarted;
+    const polling = runtime.database.loadEnrollment(enrollmentId);
+    await Promise.resolve();
+    expect(peakActiveQueries).toBe(1);
+    releaseCatalog?.();
+    await expect(readiness).resolves.toBe(true);
+    await expect(polling).resolves.toBeUndefined();
+    expect(peakActiveQueries).toBe(1);
+    await runtime.close();
+  });
+
   it('fails closed on any missing catalog assertion', async () => {
     const bad = fakeClient({ ...goodPreflight, exact_reachable_function_surface_allowed: false });
     await expect(

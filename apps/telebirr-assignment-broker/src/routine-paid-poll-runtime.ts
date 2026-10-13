@@ -6,6 +6,7 @@ import {
   type RoutinePaidPollSqlClient,
 } from './routine-paid-poll-postgres.js';
 import type { RoutinePaidPollBrokerDatabase } from './routine-paid-poll-broker.js';
+import { createSerializedPostgresLane } from './serialized-postgres-lane.js';
 
 const GROUP_ROLE = 'fetanagent_routine_telebirr_paid_poll';
 const RUNTIME_ROLE = 'fetanagent_routine_telebirr_paid_poll_runtime';
@@ -359,6 +360,7 @@ export async function createRoutinePaidPollPostgresRuntime(
   }
   let available = false;
   let closed = false;
+  const lane = createSerializedPostgresLane();
   const markUnavailable = () => {
     available = false;
   };
@@ -379,11 +381,14 @@ export async function createRoutinePaidPollPostgresRuntime(
     async query(sql: string, values: unknown[]) {
       if (!available || closed) throw new RoutinePaidPollRuntimeUnavailableError();
       try {
-        await assertCatalog(client);
-        if (!available || closed) throw new Error();
-        const result = await client.query(sql, values);
-        if (!available || closed) throw new Error();
-        return result;
+        return await lane.run(async () => {
+          if (!available || closed) throw new Error();
+          await assertCatalog(client);
+          if (!available || closed) throw new Error();
+          const result = await client.query(sql, values);
+          if (!available || closed) throw new Error();
+          return result;
+        });
       } catch {
         markUnavailable();
         throw new RoutinePaidPollRuntimeUnavailableError();
@@ -395,8 +400,11 @@ export async function createRoutinePaidPollPostgresRuntime(
     async ready() {
       if (!available || closed) return false;
       try {
-        await assertCatalog(client);
-        return available && !closed;
+        return await lane.run(async () => {
+          if (!available || closed) return false;
+          await assertCatalog(client);
+          return available && !closed;
+        });
       } catch {
         markUnavailable();
         return false;
@@ -407,6 +415,7 @@ export async function createRoutinePaidPollPostgresRuntime(
       closed = true;
       markUnavailable();
       try {
+        await lane.drain();
         await client.end();
       } catch {
         throw new RoutinePaidPollRuntimeUnavailableError();

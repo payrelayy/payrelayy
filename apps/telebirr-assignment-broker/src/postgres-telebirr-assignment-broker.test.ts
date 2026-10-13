@@ -281,6 +281,74 @@ describe('TeleBirr assignment broker PostgreSQL adapter', () => {
     expect(client.end).toHaveBeenCalledOnce();
   });
 
+  it('serializes overlapping singleton readiness checks on one PostgreSQL client', async () => {
+    let releaseHeld: (() => void) | undefined;
+    let reportHeldStarted: (() => void) | undefined;
+    const heldGate = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    const heldStarted = new Promise<void>((resolve) => {
+      reportHeldStarted = resolve;
+    });
+    let activeQueries = 0;
+    let peakActiveQueries = 0;
+    let paused = false;
+    const client: TelebirrAssignmentBrokerPostgresClient = {
+      connect: vi.fn(async () => undefined),
+      end: vi.fn(async () => undefined),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+      query: vi.fn(async (sql: string) => {
+        activeQueries += 1;
+        peakActiveQueries = Math.max(peakActiveQueries, activeQueries);
+        try {
+          if (sql === TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_HELD_SQL && !paused) {
+            paused = true;
+            reportHeldStarted?.();
+            await heldGate;
+          }
+          if (sql === TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_ACQUIRE_SQL) {
+            return { rows: [{ singleton_acquired: true }] };
+          }
+          if (sql === TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_HELD_SQL) {
+            return { rows: [{ singleton_held: true }] };
+          }
+          if (sql === TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_RELEASE_SQL) {
+            return { rows: [{ singleton_released: true }] };
+          }
+          if (sql === TELEBIRR_ASSIGNMENT_BROKER_CATALOG_PREFLIGHT_SQL) {
+            return { rows: [preflightRow()] };
+          }
+          throw new Error('unexpected query');
+        } finally {
+          activeQueries -= 1;
+        }
+      }),
+    };
+    const runtime = await createTelebirrAssignmentBrokerPostgresRuntime(
+      {
+        ca: 'synthetic-ca',
+        database: 'postgres',
+        host: 'db.example.test',
+        password: 'synthetic-password-value',
+        port: 5432,
+        runtimeCredentialValidity: 'continuous',
+        user: 'fetanagent_telebirr_assignment_broker_runtime',
+      },
+      { createClient: () => client },
+    );
+    const firstReadiness = runtime.ready();
+    await heldStarted;
+    const secondReadiness = runtime.ready();
+    await Promise.resolve();
+    expect(peakActiveQueries).toBe(1);
+    releaseHeld?.();
+    await expect(firstReadiness).resolves.toBe(true);
+    await expect(secondReadiness).resolves.toBe(true);
+    expect(peakActiveQueries).toBe(1);
+    await runtime.close();
+  });
+
   it('fails startup closed when the singleton lock is already owned', async () => {
     const client: TelebirrAssignmentBrokerPostgresClient = {
       connect: vi.fn(async () => undefined),

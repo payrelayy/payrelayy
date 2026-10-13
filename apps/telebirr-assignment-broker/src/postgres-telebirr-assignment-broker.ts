@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import { types as nodeUtilTypes } from 'node:util';
 
+import { createSerializedPostgresLane } from './serialized-postgres-lane.js';
+
 import type {
   TelebirrAssignmentBrokerDatabase,
   TelebirrAssignmentLease,
@@ -567,6 +569,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
   let available = false;
   let closed = false;
   let lockHeld = false;
+  const lane = createSerializedPostgresLane();
   const markUnavailable = () => {
     available = false;
     lockHeld = false;
@@ -578,9 +581,12 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
     async query(query, values) {
       if (!available || closed) throw new TelebirrAssignmentBrokerPostgresUnavailableError();
       try {
-        const result = await client.query(query, values);
-        if (!available || closed) throw new Error();
-        return result;
+        return await lane.run(async () => {
+          if (!available || closed) throw new Error();
+          const result = await client.query(query, values);
+          if (!available || closed) throw new Error();
+          return result;
+        });
       } catch {
         markUnavailable();
         throw new TelebirrAssignmentBrokerPostgresUnavailableError();
@@ -613,15 +619,18 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
     async ready() {
       if (!available || closed || !lockHeld) return false;
       try {
-        const held = await guarded.query(TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_HELD_SQL, [
-          ...TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS,
-        ]);
-        if (held.rows.length !== 1 || !exactBooleanRow(held.rows[0], 'singleton_held')) {
-          markUnavailable();
-          return false;
-        }
-        await assertTelebirrAssignmentBrokerCatalogPreflight(guarded, runtimeCredentialValidity);
-        return available && !closed && lockHeld;
+        return await lane.run(async () => {
+          if (!available || closed || !lockHeld) return false;
+          const held = await client.query(TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_HELD_SQL, [
+            ...TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_KEYS,
+          ]);
+          if (held.rows.length !== 1 || !exactBooleanRow(held.rows[0], 'singleton_held')) {
+            markUnavailable();
+            return false;
+          }
+          await assertTelebirrAssignmentBrokerCatalogPreflight(client, runtimeCredentialValidity);
+          return available && !closed && lockHeld;
+        });
       } catch {
         markUnavailable();
         return false;
@@ -632,6 +641,7 @@ export async function createTelebirrAssignmentBrokerPostgresRuntime(
       closed = true;
       available = false;
       let failed = false;
+      await lane.drain();
       if (lockHeld) {
         try {
           const released = await client.query(TELEBIRR_ASSIGNMENT_BROKER_SINGLETON_RELEASE_SQL, [

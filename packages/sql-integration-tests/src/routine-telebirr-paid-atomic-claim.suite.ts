@@ -523,18 +523,111 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [duplicateId],
         );
         expect(knownDuplicate.rows).toEqual([{ already_used: false }]);
-        // Disposable fixture only: model a completed Player credit without
-        // contacting KemerBet. The same customer must now get a final result
-        // without consuming another paid phone lane.
+        // Disposable fixture only: advance the prior intent through the
+        // real one-shot fence and reconciliation ledger, without KemerBet.
+        // A queued intent alone must never mark a repeated reference used.
+        const intentId = settled.rows[0]!.deposit_intent_id;
+        const executionJobId = settled.rows[0]!.execution_job_id;
         await client.query(
-          `update app.deposit_intents set status = 'execution_in_progress'
-            where id = $1::uuid`,
-          [settled.rows[0]!.deposit_intent_id],
+          `update app.deposit_jobs set status = 'leased', attempt_count = 1,
+             lease_token = gen_random_uuid(), leased_by = 'duplicate_sql_test',
+             lease_expires_at = clock_timestamp() + interval '5 minutes'
+             where id = $1::uuid`,
+          [executionJobId],
+        );
+        const attemptId = (
+          await client.query<{ id: string }>(
+            `insert into app.deposit_execution_attempts (
+               deposit_intent_id, deposit_job_id, platform_agent_account_id, attempt_number
+             ) values ($1::uuid, $2::uuid, $3::uuid, 1) returning id`,
+            [intentId, executionJobId, authority.accountId],
+          )
+        ).rows[0]!.id;
+        await client.query(
+          `update app.deposit_execution_attempts set status = 'final_action_fenced'
+             where id = $1::uuid`,
+          [attemptId],
         );
         await client.query(
-          `update app.deposit_intents set status = 'executed'
-            where id = $1::uuid`,
-          [settled.rows[0]!.deposit_intent_id],
+          `update app.deposit_intents set status = 'execution_in_progress'
+             where id = $1::uuid`,
+          [intentId],
+        );
+        await client.query(
+          `update app.deposit_execution_attempts
+             set status = 'reconciliation_required', exact_player_credit_match = true
+             where id = $1::uuid`,
+          [attemptId],
+        );
+        await client.query(
+          `update app.deposit_intents set status = 'execution_uncertain'
+             where id = $1::uuid`,
+          [intentId],
+        );
+        await client.query(
+          `update app.deposit_jobs set status = 'succeeded', lease_token = null,
+             leased_by = null, lease_expires_at = null, last_error_code = null
+             where id = $1::uuid`,
+          [executionJobId],
+        );
+        const reconciliationJobId = (
+          await client.query<{ id: string }>(
+            `insert into app.deposit_jobs (
+               deposit_intent_id, job_kind, job_key, max_attempts
+             ) values ($1::uuid, 'reconcile_execution', $2::text, 4) returning id`,
+            [intentId, `sql:reconcile:duplicate:${intentId}`],
+          )
+        ).rows[0]!.id;
+        await client.query(
+          `update app.deposit_intents set status = 'execution_reconciliation'
+             where id = $1::uuid`,
+          [intentId],
+        );
+        await client.query(
+          `update app.deposit_jobs set status = 'leased', attempt_count = 1,
+             lease_token = gen_random_uuid(), leased_by = 'duplicate_sql_test',
+             lease_expires_at = clock_timestamp() + interval '5 minutes'
+             where id = $1::uuid`,
+          [reconciliationJobId],
+        );
+        await client.query(
+          `insert into app.execution_reconciliations (
+             deposit_execution_attempt_id, deposit_intent_id, platform_agent_account_id,
+             deposit_job_id, reconciliation_number, outcome, reason_code,
+             keyed_external_reference_fingerprint, approved_history_match_count,
+             normalized_operation_type, matched_history_occurred_at,
+             exact_player_match, exact_amount_match, exact_currency_match,
+             exact_player_credit_match
+           ) select $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1,
+              'confirmed_executed',
+              'agent_deposit_history_in_window_and_player_credit_confirmed',
+              $5::text, 1, 'deposit',
+              attempt.final_action_fenced_at
+                + (attempt.reconciliation_required_at - attempt.final_action_fenced_at) / 2,
+              true, true, true, true
+             from app.deposit_execution_attempts attempt where attempt.id = $1::uuid`,
+          [
+            attemptId,
+            intentId,
+            authority.accountId,
+            reconciliationJobId,
+            `hmac-sha256-v1:${'a'.repeat(64)}`,
+          ],
+        );
+        await client.query(
+          `update app.deposit_jobs set status = 'succeeded', lease_token = null,
+             leased_by = null, lease_expires_at = null, last_error_code = null
+             where id = $1::uuid`,
+          [reconciliationJobId],
+        );
+        await client.query(
+          `update app.deposit_execution_attempts set status = 'confirmed_executed'
+             where id = $1::uuid`,
+          [attemptId],
+        );
+        await client.query(
+          `update app.deposit_intents set status = 'executed' where id = $1::uuid`,
+          [intentId],
         );
         const completedDuplicate = await client.query<{ already_used: boolean }>(
           `select app.routine_telebirr_same_customer_credited_reference($1::uuid)

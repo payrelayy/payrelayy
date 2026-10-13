@@ -311,6 +311,28 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/AB12CD34EF|uuid|token|amount/iu);
   });
 
+  it('immediately explains a same-customer completed duplicate without exposing the reference', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_already_used',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'already_used',
+      verificationMode: 'same_customer_completed_ledger',
+    });
+    expect(presentation).toEqual({
+      kind: 'message',
+      text: [
+        '⚠️ Reference already used.',
+        'This Telegram account already used it for a completed deposit. No new Player credit was made.',
+        'Do not pay again. Contact support if this is unexpected.',
+      ].join('\n'),
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(
+      /AB12CD34EF|PLAYER-DEMO-42|uuid|token|amount/iu,
+    );
+  });
+
   it('renders a live verifier acknowledgement with one opaque tracking button', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,

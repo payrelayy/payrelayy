@@ -48,7 +48,7 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
     try {
       while (!controller.signal.aborted) {
         // A signed launch proof does not mean KemerBet is still authenticated. Stop claiming
-        // work when its page returns to login; the database watchdog can close live gates.
+        // work when its page returns to login; verified payments remain queued in the database.
         if (!options.session.isSignedInVerified()) {
           await delay(idleDelayMs, controller.signal);
           continue;

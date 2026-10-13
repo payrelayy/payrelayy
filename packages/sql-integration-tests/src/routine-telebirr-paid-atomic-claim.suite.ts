@@ -399,6 +399,28 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         }>(`select * from app.finalize_routine_telebirr_paid_observation($1::uuid)`, [challengeId]);
         expect(settled.rows).toHaveLength(1);
         expect(settled.rows[0]!.already_finalized).toBe(false);
+        // Verification/queueing succeeds without a Windows broker lease. Its
+        // absence must not erase or disable an already verified payment.
+        const offlineQueue = await client.query<{
+          worker_recent: boolean;
+          live_gates: string;
+          queued_jobs: string;
+          eligible_jobs: string;
+        }>(
+          `select app.observe_routine_telebirr_worker_liveness() as worker_recent,
+                  (select count(*)::text from app.feature_switches
+                    where feature_key in ('payment_verification', 'deposit_execution')
+                      and mode = 'live') as live_gates,
+                  (select count(*)::text from app.deposit_jobs
+                    where id = $1::uuid and status = 'queued' and attempt_count = 0)
+                    as queued_jobs,
+                  (select count(*)::text from app.assess_routine_telebirr_execution_job(
+                    $1::uuid)) as eligible_jobs`,
+          [settled.rows[0]!.execution_job_id],
+        );
+        expect(offlineQueue.rows).toEqual([
+          { worker_recent: false, live_gates: '2', queued_jobs: '1', eligible_jobs: '1' },
+        ]);
         const replay = await client.query<(typeof settled.rows)[number]>(
           `select * from app.finalize_routine_telebirr_paid_observation($1::uuid)`,
           [challengeId],

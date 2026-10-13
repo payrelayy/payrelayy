@@ -180,7 +180,27 @@ function fixture() {
     signedAssignment,
     signedObservation,
   };
-  return { context, frame, rawReference };
+  const withFacts = (changes: Partial<typeof facts>) => {
+    const changedFacts = { ...facts, ...changes };
+    const body = {
+      ...observationBody,
+      normalizedFactsDigest: digestRoutineTelebirrObservationFacts(changedFacts)!,
+      facts: changedFacts,
+    };
+    return {
+      ...frame,
+      signedObservation: {
+        ...signedObservation,
+        body,
+        bodyDigest: digestRoutineTelebirrObservationBody(body)!,
+        signature: sign('sha256', canonicalRoutineTelebirrObservationSignatureBytes(body)!, {
+          key: device.privateKey,
+          dsaEncoding: 'ieee-p1363',
+        }).toString('base64url'),
+      },
+    };
+  };
+  return { context, frame, rawReference, withFacts };
 }
 
 function http(path: string, contentType: string, body: unknown) {
@@ -276,6 +296,44 @@ describe('paid TeleBirr phone observation upload boundary', () => {
         .statusCode,
     ).toBe(403);
     expect(stageObservation).not.toHaveBeenCalled();
+  });
+
+  it('retires only authenticated immutable receipt mismatches, not pending or forged evidence', async () => {
+    const { context, frame, withFacts } = fixture();
+    const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
+      loadObservation: async () => context,
+      stageObservation,
+    });
+    for (const changed of [
+      withFacts({ receiverMatch: 'mismatched' }),
+      withFacts({ occurredAt: '2026-10-05T16:59:00.000Z' }),
+    ]) {
+      const response = await handler(
+        http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, changed),
+      );
+      expect(response.statusCode).toBe(410);
+      expect(decoded(response.body)).toEqual({ code: 'paid_observation_terminal_review' });
+      const forged = await handler(
+        http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, {
+          ...changed,
+          signedObservation: { ...changed.signedObservation, signature: 'A'.repeat(86) },
+        }),
+      );
+      expect(forged.statusCode).toBe(403);
+    }
+    const pending = await handler(
+      http(
+        ROUTINE_PAID_UPLOAD_PATH,
+        ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+        withFacts({ providerFinalStatus: 'pending' }),
+      ),
+    );
+    expect(pending.statusCode).toBe(403);
+    expect(stageObservation).not.toHaveBeenCalled();
+    expect(frame.signedObservation.body.facts.receiverMatch).toBe('matched');
   });
 
   it('cannot accept the no-money path, media type, caller authority, or duplicate keys', async () => {

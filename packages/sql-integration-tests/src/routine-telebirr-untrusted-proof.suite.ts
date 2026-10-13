@@ -2152,6 +2152,71 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
+    it('notifies an unverified Telegram submitter after three minutes without rejecting payment', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const noMoneyId = (
+          await client.query<CaptureRow>(CAPTURE, [
+            ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+          ])
+        ).rows[0]!.proof_request_id;
+        const paidEventId = await fixtureInboundEvent(client, actor.identityId);
+        const submittedAt = (
+          await client.query<{ processed_at: Date }>(
+            `update app.inbound_events
+              set processed_at = date_trunc('milliseconds', clock_timestamp()) - interval '4 minutes'
+            where id = $1::uuid returning processed_at`,
+            [paidEventId],
+          )
+        ).rows[0]!.processed_at;
+        const paidId = (
+          await client.query<{ id: string }>(
+            `insert into ${TABLE} (
+             submitting_customer_id, origin_identity_id, origin_channel,
+             origin_request_key, semantic_input_hmac, platform_id,
+             player_account_id, player_deposit_eligibility_decision_id,
+             payment_provider_id, provider_code, candidate_reference_ciphertext,
+             candidate_reference_fingerprint, candidate_reference_masked,
+             reference_encryption_key_version, reference_profile_version,
+             receiver_account_id, receiver_account_version, submitted_at, intake_mode
+           ) select submitting_customer_id, origin_identity_id, origin_channel,
+               $2::uuid, semantic_input_hmac, platform_id,
+               player_account_id, player_deposit_eligibility_decision_id,
+               payment_provider_id, provider_code, candidate_reference_ciphertext,
+               candidate_reference_fingerprint, candidate_reference_masked,
+               reference_encryption_key_version, reference_profile_version,
+               receiver_account_id, receiver_account_version,
+               $3::timestamptz, 'paid'
+             from ${TABLE} where id = $1::uuid returning id`,
+            [noMoneyId, paidEventId, submittedAt],
+          )
+        ).rows[0]!.id;
+        await client.query(
+          `update app.telegram_deposit_outcome_cutover
+              set enabled_at = $1::timestamptz - interval '1 minute',
+                  waiting_enabled_at = $1::timestamptz - interval '1 minute',
+                  checking_enabled_at = $1::timestamptz - interval '1 minute'
+            where singleton = true`,
+          [submittedAt],
+        );
+        const first = await client.query<{ notification_outcome_code: string }>(
+          'select * from app.claim_telegram_deposit_outcome_notification()',
+        );
+        expect(first.rows).toMatchObject([{ notification_outcome_code: 'checking' }]);
+        const deliveries = await client.query<{ notification_stage: string; outcome_code: string }>(
+          `select notification_stage, outcome_code
+             from app.telegram_deposit_outcome_deliveries where candidate_id = $1::uuid`,
+          [paidId],
+        );
+        expect(deliveries.rows).toEqual([
+          { notification_stage: 'checking', outcome_code: 'checking' },
+        ]);
+      });
+    });
+
     it('runs the staging API adapter with the exact durable Player-action grant', async () => {
       const client = getClient();
       await rollback(client, async () => {

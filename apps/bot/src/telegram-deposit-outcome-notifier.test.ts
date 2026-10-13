@@ -101,6 +101,20 @@ describe('Telegram deposit outcome notifier', () => {
     expect(waiting).not.toContain('Deposit complete');
   });
 
+  it('gives an early non-final status without calling an unverified reference rejected', () => {
+    const checking = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'checking',
+      amountMinor: null,
+    });
+    expect(checking).toContain('not verified yet');
+    expect(checking).toContain('1A2B');
+    expect(checking).toContain('final result');
+    expect(checking).not.toContain('Deposit complete');
+    expect(checking).not.toContain('rejected');
+    expect(checking).not.toContain('30.00');
+  });
+
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,

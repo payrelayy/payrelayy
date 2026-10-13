@@ -102,6 +102,14 @@ describe('Telegram private-action bot client', () => {
       deliverTelegramPrivateAction(claim, config, {
         fetch: async () => ({
           status: 200,
+          json: async () => ({ ...waiting, outcomeCode: 'checking' }),
+        }),
+      }),
+    ).resolves.toEqual({ ...waiting, outcomeCode: 'checking' });
+    await expect(
+      deliverTelegramPrivateAction(claim, config, {
+        fetch: async () => ({
+          status: 200,
           json: async () => ({ ...waiting, amountMinor: '3000' }),
         }),
       }),

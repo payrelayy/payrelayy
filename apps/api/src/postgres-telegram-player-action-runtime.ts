@@ -222,9 +222,14 @@ async function handleDepositOutcomeClaim(
     typeof row.notification_private_chat_id !== 'string' ||
     !/^[1-9][0-9]{0,15}$/u.test(row.notification_private_chat_id) ||
     BigInt(row.notification_private_chat_id) > 9007199254740991n ||
-    !['verified_waiting', 'credited', 'rejected', 'not_credited', 'not_verified'].includes(
-      row.notification_outcome_code as string,
-    ) ||
+    ![
+      'checking',
+      'verified_waiting',
+      'credited',
+      'rejected',
+      'not_credited',
+      'not_verified',
+    ].includes(row.notification_outcome_code as string) ||
     !(
       row.notification_amount_minor === null ||
       (typeof row.notification_amount_minor === 'string' &&
@@ -242,7 +247,7 @@ async function handleDepositOutcomeClaim(
     leaseToken: row.notification_lease_token,
     privateChatId: row.notification_private_chat_id,
     outcomeCode: row.notification_outcome_code as
-      'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified',
+      'checking' | 'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified',
     amountMinor: row.notification_amount_minor as string | null,
     referenceMasked: row.notification_reference_masked,
   };

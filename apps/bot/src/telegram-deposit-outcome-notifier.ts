@@ -25,9 +25,9 @@ function formatMinorEtb(amountMinor: string): string {
 export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'checking') {
     return [
-      '⏳ TeleBirr reference not verified yet',
-      `Verification is still pending for the submission ending ${delivery.referenceMasked.slice(-4)}.`,
-      'Do not pay again. We will send the final result here.',
+      '⚠️ Deposit not credited yet',
+      `At the last check, the TeleBirr reference ending ${delivery.referenceMasked.slice(-4)} was not verified and no Player credit was recorded.`,
+      'We are still checking and will send a final result here. Do not pay again.',
     ].join('\n');
   }
   if (delivery.outcomeCode === 'verified_waiting') {
@@ -66,8 +66,8 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     ].join('\n');
   }
   return [
-    '⚠️ We couldn’t verify this TeleBirr reference in time',
-    `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not record a Player credit.`,
+    '❌ Deposit not credited',
+    `We couldn’t verify the TeleBirr reference ending ${delivery.referenceMasked.slice(-4)} within the allowed time. No Player credit was recorded for this submission.`,
     'Check the reference. If money left your wallet, do not pay again—contact support.',
   ].join('\n');
 }

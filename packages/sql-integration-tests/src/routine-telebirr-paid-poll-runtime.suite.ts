@@ -22,6 +22,38 @@ async function asRuntime<T>(client: Client, work: () => Promise<T>): Promise<T> 
 
 export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => Client): void {
   describe('separate paid TeleBirr phone poll runtime boundary', () => {
+    it('keeps signed wrong-receiver evidence private and tied to seven-day retention', async () => {
+      const client = getClient();
+      const table = await client.query<{
+        owner: string;
+        row_security: boolean;
+        forced: boolean;
+        cascade_foreign_keys: string;
+      }>(`select owner.rolname as owner, relation.relrowsecurity as row_security,
+                 relation.relforcerowsecurity as forced,
+                 count(*) filter (where constraint.confdeltype = 'c')::text
+                   as cascade_foreign_keys
+            from pg_catalog.pg_class relation
+            join pg_catalog.pg_roles owner on owner.oid = relation.relowner
+            join pg_catalog.pg_constraint constraint on constraint.conrelid = relation.oid
+           where relation.oid = 'app.routine_telebirr_paid_terminal_rejections'::regclass
+           group by owner.rolname, relation.relrowsecurity, relation.relforcerowsecurity`);
+      expect(table.rows).toEqual([
+        {
+          owner: 'postgres',
+          row_security: true,
+          forced: true,
+          cascade_foreign_keys: '2',
+        },
+      ]);
+      const source = await client.query<{ body: string }>(
+        `select pg_catalog.pg_get_functiondef(
+          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)'::regprocedure) as body`,
+      );
+      expect(source.rows[0]?.body).toContain("feature_switch.mode = 'live'");
+      expect(source.rows[0]?.body).toContain("'wrong_receiver', null");
+    });
+
     it('cannot place one candidate in another lane while its first upload is still acceptable', async () => {
       const client = getClient();
       const sources = await client.query<{ poll: string; nested: string }>(`
@@ -41,7 +73,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       expect(sources.rows[0]?.nested).toContain("challenge.issuance_mode = 'paid'");
     });
 
-    it('starts without a login or password and inherits only five paid functions', async () => {
+    it('starts without a login or password and inherits only six paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         name: string;
@@ -103,6 +135,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         'issue_routine_telebirr_paid_poll_assignment',
         'load_routine_telebirr_paid_observation_material',
         'load_routine_telebirr_paid_poll_enrollment',
+        'record_routine_telebirr_paid_wrong_receiver',
         'stage_routine_telebirr_paid_signed_observation',
       ]);
       const baseAccess = await client.query<{ accessible: string }>(
@@ -146,7 +179,13 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           'EXECUTE') as no_money_terminal,
         pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
           'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
-          'EXECUTE') as no_money_paid_stage`);
+          'EXECUTE') as no_money_paid_stage,
+        pg_catalog.has_function_privilege('public',
+          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)',
+          'EXECUTE') as public_wrong_receiver,
+        pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)',
+          'EXECUTE') as no_money_wrong_receiver`);
       expect(access.rows).toEqual([
         {
           public_enrollment: false,
@@ -159,6 +198,8 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           public_terminal: false,
           no_money_terminal: false,
           no_money_paid_stage: false,
+          public_wrong_receiver: false,
+          no_money_wrong_receiver: false,
         },
       ]);
       const guards = await client.query<{ name: string; guard_count: number }>(
@@ -178,10 +219,11 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             'load_routine_telebirr_paid_observation_material',
             'classify_routine_telebirr_paid_upload_terminal',
             'stage_routine_telebirr_paid_signed_observation',
+            'record_routine_telebirr_paid_wrong_receiver',
           ],
         ],
       );
-      expect(guards.rows).toHaveLength(7);
+      expect(guards.rows).toHaveLength(8);
       expect(guards.rows.every((row) => row.guard_count === 1)).toBe(true);
     });
 

@@ -118,6 +118,14 @@ describe('Telegram private-action bot client', () => {
       deliverTelegramPrivateAction(claim, config, {
         fetch: async () => ({
           status: 200,
+          json: async () => ({ ...waiting, outcomeCode: 'wrong_receiver' }),
+        }),
+      }),
+    ).resolves.toEqual({ ...waiting, outcomeCode: 'wrong_receiver' });
+    await expect(
+      deliverTelegramPrivateAction(claim, config, {
+        fetch: async () => ({
+          status: 200,
           json: async () => ({ ...waiting, amountMinor: '3000' }),
         }),
       }),

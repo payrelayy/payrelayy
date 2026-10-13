@@ -111,7 +111,8 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
     typeof broker.claimAndIssuePoll !== 'function' ||
     typeof broker.loadObservation !== 'function' ||
     typeof broker.classifyTerminal !== 'function' ||
-    typeof broker.stageObservation !== 'function'
+    typeof broker.stageObservation !== 'function' ||
+    typeof broker.recordReceiverMismatch !== 'function'
   )
     throw new Error();
   return async (
@@ -256,6 +257,31 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
           signedObservation: input.signedObservation,
         });
         return response(200, { kind: staged });
+      }
+      if (value.operation === 'record_receiver_mismatch') {
+        if (
+          !exact(input, ['challengeId', 'signedObservation']) ||
+          typeof input.challengeId !== 'string' ||
+          !UUID_V4.test(input.challengeId) ||
+          !exact(input.signedObservation, [
+            'contractVersion',
+            'providerCode',
+            'protocolMode',
+            'transcriptVersion',
+            'bodyDigestAlgorithm',
+            'bodyDigest',
+            'signatureAlgorithm',
+            'signatureEncoding',
+            'body',
+            'signature',
+          ])
+        )
+          return response(400, { code: 'invalid_request' });
+        const recorded = await broker.recordReceiverMismatch({
+          challengeId: input.challengeId,
+          signedObservation: input.signedObservation,
+        });
+        return response(200, { kind: recorded });
       }
       return response(400, { code: 'invalid_request' });
     } catch {

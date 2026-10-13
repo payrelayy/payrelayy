@@ -244,6 +244,17 @@ export function createRoutinePaidUploadLocalAdapter(
         throw new Error();
       return value.kind;
     },
+    async recordReceiverMismatch(
+      input: Parameters<RoutinePaidUploadBridgeDependencies['recordReceiverMismatch']>[0],
+    ) {
+      const value = await wire('record_receiver_mismatch', input);
+      if (
+        !exact(value, ['kind']) ||
+        (value.kind !== 'recorded' && value.kind !== 'exact_replay' && value.kind !== 'conflict')
+      )
+        throw new Error();
+      return value.kind;
+    },
   });
 }
 

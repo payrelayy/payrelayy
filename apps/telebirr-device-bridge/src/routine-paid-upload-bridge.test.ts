@@ -228,6 +228,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     const request = http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame);
     const responses: Uint8Array[] = [];
@@ -264,6 +265,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => ({ ...context, trustedIssuanceMode: 'no_money' }) as never,
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     expect(
       (await noMoney(http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame)))
@@ -274,6 +276,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => contextFor('paid'),
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     expect(
       (
@@ -290,6 +293,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => contextFor('paid'),
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     expect(
       (await late(http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame)))
@@ -301,14 +305,18 @@ describe('paid TeleBirr phone observation upload boundary', () => {
   it('retires only authenticated immutable receipt mismatches, not pending or forged evidence', async () => {
     const { context, frame, withFacts } = fixture();
     const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
+    const recordReceiverMismatch = vi.fn<
+      RoutinePaidUploadBridgeDependencies['recordReceiverMismatch']
+    >(async () => 'recorded' as const);
     const handler = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
       classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
+      recordReceiverMismatch,
     });
     for (const changed of [
-      withFacts({ receiverMatch: 'mismatched' }),
+      withFacts({ receiverMatch: 'mismatched', creditedPartyNameDigest: sha('f') }),
       withFacts({ occurredAt: '2026-10-05T16:59:00.000Z' }),
     ]) {
       const response = await handler(
@@ -333,7 +341,31 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     );
     expect(pending.statusCode).toBe(403);
     expect(stageObservation).not.toHaveBeenCalled();
+    expect(recordReceiverMismatch).toHaveBeenCalledTimes(1);
+    expect(recordReceiverMismatch.mock.calls[0]?.[0]).toMatchObject({
+      challengeId: frame.signedObservation.body.challengeId,
+    });
     expect(frame.signedObservation.body.facts.receiverMatch).toBe('matched');
+  });
+
+  it('keeps a signed wrong-receiver upload retryable until the final bot result is durable', async () => {
+    const { context, withFacts } = fixture();
+    const changed = withFacts({
+      receiverMatch: 'mismatched',
+      creditedPartyNameDigest: sha('f'),
+    });
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
+      loadObservation: async () => context,
+      stageObservation: async () => 'conflict',
+      recordReceiverMismatch: async () => 'retry',
+    });
+    const response = await handler(
+      http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, changed),
+    );
+    expect(response.statusCode).toBe(503);
+    expect(decoded(response.body)).toEqual({ code: 'temporarily_unavailable' });
   });
 
   it('cannot accept the no-money path, media type, caller authority, or duplicate keys', async () => {
@@ -344,6 +376,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     for (const request of [
       http('/v1/telebirr/routine/observations:upload', ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame),
@@ -373,6 +406,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation: async () => 'conflict',
+      recordReceiverMismatch: async () => 'recorded',
     });
     const result = await handler(
       http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame),
@@ -393,6 +427,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       classifyTerminal,
       loadObservation,
       stageObservation,
+      recordReceiverMismatch: async () => 'recorded',
     });
     const result = await handler(
       http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, frame),
@@ -430,6 +465,9 @@ describe('paid TeleBirr phone observation upload boundary', () => {
         throw new Error('must not run');
       },
       stageObservation: async () => {
+        throw new Error('must not run');
+      },
+      recordReceiverMismatch: async () => {
         throw new Error('must not run');
       },
     });

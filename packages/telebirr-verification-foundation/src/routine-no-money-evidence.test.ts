@@ -441,7 +441,11 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
       fixture(true);
     const paid = { ...input, trustedIssuanceMode: 'paid' };
     for (const changedFacts of [
-      { ...facts, receiverMatch: 'mismatched' },
+      {
+        ...facts,
+        receiverMatch: 'mismatched',
+        creditedPartyNameDigest: `sha256:${'f'.repeat(64)}`,
+      },
       { ...facts, occurredAt: '2026-10-05T16:59:00.000Z' },
     ]) {
       const observation = signedObservation(observationBody(changedFacts), deviceKey.privateKey);
@@ -465,6 +469,17 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         ),
       ).not.toHaveProperty('terminalReview');
     }
+    const inconsistentReceiver = signedObservation(
+      observationBody({ ...facts, receiverMatch: 'mismatched' }),
+      deviceKey.privateKey,
+    );
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: inconsistentReceiver },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).not.toHaveProperty('terminalReasonCode');
   });
 
   it('rejects a valid phone observation once its receipt is one hour old', () => {

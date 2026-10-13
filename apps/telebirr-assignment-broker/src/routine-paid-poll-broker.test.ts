@@ -112,6 +112,7 @@ function fixture() {
     loadObservationMaterial: vi.fn(async () => row),
     classifyTerminal: vi.fn(async () => false),
     stageObservation: vi.fn(async () => 'recorded'),
+    recordReceiverMismatch: vi.fn(async () => 'recorded'),
   };
   const signer = {
     assignmentSignerId: ids.signer,
@@ -191,6 +192,33 @@ describe('private routine paid poll broker core', () => {
     await expect(confirmed.classifyTerminal(input)).rejects.toBeInstanceOf(
       RoutinePaidPollBrokerUnavailableError,
     );
+  });
+  it('records only a bounded wrong-receiver result and fails closed on SQL errors', async () => {
+    const f = fixture();
+    const signedObservation = { bodyDigest: f.row.challenge_digest };
+    expect(
+      await f.broker.recordReceiverMismatch({
+        challengeId: ids.challenge,
+        signedObservation,
+      }),
+    ).toBe('recorded');
+    expect(f.database.recordReceiverMismatch).toHaveBeenCalledWith({
+      challengeId: ids.challenge,
+      signedObservation,
+    });
+    await expect(
+      f.broker.recordReceiverMismatch({
+        challengeId: 'invalid',
+        signedObservation,
+      }),
+    ).rejects.toBeInstanceOf(RoutinePaidPollBrokerUnavailableError);
+    f.database.recordReceiverMismatch = vi.fn(async () => 'unexpected');
+    await expect(
+      f.broker.recordReceiverMismatch({
+        challengeId: ids.challenge,
+        signedObservation,
+      }),
+    ).rejects.toBeInstanceOf(RoutinePaidPollBrokerUnavailableError);
   });
   it('maps the active SQL enrollment and signs only the atomically reserved snapshot', async () => {
     const f = fixture();

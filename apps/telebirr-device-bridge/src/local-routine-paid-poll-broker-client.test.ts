@@ -130,10 +130,17 @@ describe('private routine paid upload broker client', () => {
         signedObservation: {},
       }),
     ).toBe('recorded');
+    expect(
+      await adapter.recordReceiverMismatch({
+        challengeId: requestId,
+        signedObservation: { bodyDigest: digest },
+      }),
+    ).toBe('recorded');
     expect(wire.mock.calls.map(([operation]) => operation)).toEqual([
       'classify_terminal',
       'load_observation',
       'stage_observation',
+      'record_receiver_mismatch',
     ]);
   });
 

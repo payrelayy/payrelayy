@@ -54,7 +54,7 @@ describe('Telegram deposit outcome notifier', () => {
     );
     expect(result).toBe('processed');
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toContain('30.00 ETB was credited');
+    expect(messages[0]).toContain('30.00 ETB credited');
     expect(messages[0]).toContain('1A2B');
     expect(actions).toEqual([
       { version: 1, kind: 'deposit_outcome_claim' },
@@ -88,7 +88,20 @@ describe('Telegram deposit outcome notifier', () => {
     expect(actions).toEqual([{ version: 1, kind: 'deposit_outcome_claim' }]);
   });
 
-  it('never describes a rejected or unverified payment as credited or refunded', () => {
+  it('reports a verified queued payment without claiming a Player credit', () => {
+    const waiting = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'verified_waiting',
+      amountMinor: null,
+    });
+    expect(waiting).toContain('payment verified');
+    expect(waiting).toContain('waiting for Player credit');
+    expect(waiting).toContain('1A2B');
+    expect(waiting).not.toContain('30.00');
+    expect(waiting).not.toContain('Deposit complete');
+  });
+
+  it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,
       outcomeCode: 'rejected',
@@ -99,12 +112,13 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'not_verified',
       amountMinor: null,
     });
-    expect(rejected).toContain('deposit rejected');
-    expect(unverified).toContain('could not be verified');
+    expect(rejected).toContain('Deposit not credited');
+    expect(unverified).toContain('couldn’t verify');
     for (const text of [rejected, unverified]) {
       expect(text).toContain('do not pay again');
       expect(text).not.toContain('30.00');
       expect(text).not.toContain('refunded');
+      expect(text).not.toContain('fake');
     }
   });
 

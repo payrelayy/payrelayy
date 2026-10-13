@@ -131,7 +131,8 @@ export type TelegramPrivateActionResult =
       readonly notificationId: string;
       readonly leaseToken: string;
       readonly privateChatId: string;
-      readonly outcomeCode: 'credited' | 'rejected' | 'not_credited' | 'not_verified';
+      readonly outcomeCode:
+        'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified';
       readonly amountMinor: string | null;
       readonly referenceMasked: string;
     }

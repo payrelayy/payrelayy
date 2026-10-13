@@ -23,31 +23,38 @@ function formatMinorEtb(amountMinor: string): string {
 
 /** Customer-safe copy: no full receipt reference, Player ID, or internal job state. */
 export function presentTelegramDepositOutcome(delivery: Delivery): string {
+  if (delivery.outcomeCode === 'verified_waiting') {
+    return [
+      '✅ TeleBirr payment verified',
+      `Transaction ending ${delivery.referenceMasked.slice(-4)} is waiting for Player credit.`,
+      'No action needed. We’ll send the final result here.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'credited' && delivery.amountMinor !== null) {
     return [
-      '✅ TeleBirr deposit completed',
-      `${formatMinorEtb(delivery.amountMinor)} ETB was credited to the selected Player account.`,
+      '✅ Deposit complete',
+      `${formatMinorEtb(delivery.amountMinor)} ETB credited to the selected Player account.`,
       `Transaction ending ${delivery.referenceMasked.slice(-4)}.`,
     ].join('\n');
   }
   if (delivery.outcomeCode === 'rejected') {
     return [
-      '❌ TeleBirr deposit rejected',
-      `Transaction ending ${delivery.referenceMasked.slice(-4)} was not credited to a Player account.`,
-      'If money left your wallet, do not pay again. Contact support with your transaction reference.',
+      '❌ Deposit not credited',
+      `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not credit the selected Player account.`,
+      'If money left your wallet, do not pay again. Contact support with the reference.',
     ].join('\n');
   }
   if (delivery.outcomeCode === 'not_credited') {
     return [
-      '⚠️ TeleBirr deposit not credited',
-      `The payment check for transaction ending ${delivery.referenceMasked.slice(-4)} did not result in a Player credit.`,
-      'If money left your wallet, do not pay again. Contact support with your transaction reference.',
+      '⚠️ Deposit not credited',
+      `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not result in a Player credit.`,
+      'If money left your wallet, do not pay again. Contact support with the reference.',
     ].join('\n');
   }
   return [
-    '⚠️ TeleBirr payment could not be verified in time',
-    `No Player credit was recorded for transaction ending ${delivery.referenceMasked.slice(-4)}.`,
-    'If money left your wallet, do not pay again. Contact support with your transaction reference.',
+    '⚠️ We couldn’t verify this TeleBirr reference in time',
+    `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not record a Player credit.`,
+    'Check the reference. If money left your wallet, do not pay again—contact support.',
   ].join('\n');
 }
 

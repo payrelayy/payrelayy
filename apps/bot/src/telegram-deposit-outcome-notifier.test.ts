@@ -115,6 +115,20 @@ describe('Telegram deposit outcome notifier', () => {
     expect(checking).not.toContain('30.00');
   });
 
+  it('reports a same-account already-credited reference without a second credit claim', () => {
+    const duplicate = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'already_used',
+      amountMinor: null,
+    });
+    expect(duplicate).toContain('Reference already used');
+    expect(duplicate).toContain('This Telegram account');
+    expect(duplicate).toContain('No new Player credit was made');
+    expect(duplicate).toContain('1A2B');
+    expect(duplicate).not.toContain('30.00');
+    expect(duplicate).not.toContain('fake');
+  });
+
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,

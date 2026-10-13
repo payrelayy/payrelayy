@@ -29,6 +29,8 @@ export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: (
         runtime_claim: boolean;
         runtime_complete: boolean;
         anon_claim: boolean;
+        runtime_duplicate_predicate: boolean;
+        anon_duplicate_predicate: boolean;
       }>(`select
            has_function_privilege('fetanagent_player_actions_runtime',
              'app.claim_telegram_deposit_outcome_notification()', 'EXECUTE') as runtime_claim,
@@ -36,12 +38,20 @@ export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: (
              'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
              'EXECUTE') as runtime_complete,
            has_function_privilege('anon',
-             'app.claim_telegram_deposit_outcome_notification()', 'EXECUTE') as anon_claim`);
+             'app.claim_telegram_deposit_outcome_notification()', 'EXECUTE') as anon_claim,
+           has_function_privilege('fetanagent_player_actions_runtime',
+             'app.routine_telebirr_same_customer_credited_reference(uuid)', 'EXECUTE')
+             as runtime_duplicate_predicate,
+           has_function_privilege('anon',
+             'app.routine_telebirr_same_customer_credited_reference(uuid)', 'EXECUTE')
+             as anon_duplicate_predicate`);
       expect(grants.rows).toEqual([
         {
           runtime_claim: true,
           runtime_complete: true,
           anon_claim: false,
+          runtime_duplicate_predicate: false,
+          anon_duplicate_predicate: false,
         },
       ]);
     });

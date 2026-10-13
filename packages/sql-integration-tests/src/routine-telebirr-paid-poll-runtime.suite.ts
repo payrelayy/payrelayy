@@ -31,11 +31,11 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         cascade_foreign_keys: string;
       }>(`select owner.rolname as owner, relation.relrowsecurity as row_security,
                  relation.relforcerowsecurity as forced,
-                 count(*) filter (where constraint.confdeltype = 'c')::text
+                 count(*) filter (where fk_constraint.confdeltype = 'c')::text
                    as cascade_foreign_keys
             from pg_catalog.pg_class relation
             join pg_catalog.pg_roles owner on owner.oid = relation.relowner
-            join pg_catalog.pg_constraint constraint on constraint.conrelid = relation.oid
+            join pg_catalog.pg_constraint fk_constraint on fk_constraint.conrelid = relation.oid
            where relation.oid = 'app.routine_telebirr_paid_terminal_rejections'::regclass
            group by owner.rolname, relation.relrowsecurity, relation.relforcerowsecurity`);
       expect(table.rows).toEqual([

@@ -22,6 +22,25 @@ async function asRuntime<T>(client: Client, work: () => Promise<T>): Promise<T> 
 
 export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => Client): void {
   describe('separate paid TeleBirr phone poll runtime boundary', () => {
+    it('cannot place one candidate in another lane while its first upload is still acceptable', async () => {
+      const client = getClient();
+      const sources = await client.query<{ poll: string; nested: string }>(`
+        select pg_catalog.pg_get_functiondef(
+                 'app.issue_routine_telebirr_paid_poll_assignment(uuid,uuid,text,timestamptz,uuid)'
+                   ::pg_catalog.regprocedure) as poll,
+               pg_catalog.pg_get_functiondef(
+                 'app.issue_routine_telebirr_paid_lookup_challenge(uuid,uuid,uuid)'
+                   ::pg_catalog.regprocedure) as nested`);
+      expect(sources.rows).toHaveLength(1);
+      expect(sources.rows[0]?.poll).toContain(
+        "challenge.expires_at + interval '15 minutes' > v_now",
+      );
+      expect(sources.rows[0]?.nested).toContain(
+        "challenge.expires_at + interval '15 minutes' > v_now",
+      );
+      expect(sources.rows[0]?.nested).toContain("challenge.issuance_mode = 'paid'");
+    });
+
     it('starts without a login or password and inherits only five paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{

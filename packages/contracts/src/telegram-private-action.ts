@@ -132,7 +132,7 @@ export type TelegramPrivateActionResult =
       readonly leaseToken: string;
       readonly privateChatId: string;
       readonly outcomeCode:
-        'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified';
+        'checking' | 'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified';
       readonly amountMinor: string | null;
       readonly referenceMasked: string;
     }

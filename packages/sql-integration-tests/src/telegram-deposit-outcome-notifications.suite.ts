@@ -143,5 +143,46 @@ export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: (
         await client.query('rollback');
       }
     });
+
+    it('sends one non-final checking message before a later final outcome', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const candidateId = randomUUID();
+        await client.query(
+          `insert into app.telegram_deposit_outcome_deliveries
+             (candidate_id, notification_stage, private_chat_id, reference_masked,
+              outcome_code, amount_minor, next_attempt_at)
+           values ($1::uuid, 'checking', 123456789, '***1A2B', 'checking', null,
+                   pg_catalog.clock_timestamp())`,
+          [candidateId],
+        );
+        const checking = await client.query<{
+          notification_id: string;
+          notification_lease_token: string;
+          notification_outcome_code: string;
+        }>('select * from app.claim_telegram_deposit_outcome_notification()');
+        expect(checking.rows).toMatchObject([{ notification_outcome_code: 'checking' }]);
+        await client.query(
+          `select app.complete_telegram_deposit_outcome_notification(
+             $1::uuid,$2::uuid,'sent',42)`,
+          [checking.rows[0]!.notification_id, checking.rows[0]!.notification_lease_token],
+        );
+        await client.query(
+          `insert into app.telegram_deposit_outcome_deliveries
+             (candidate_id, notification_stage, private_chat_id, reference_masked,
+              outcome_code, amount_minor, next_attempt_at)
+           values ($1::uuid, 'final', 123456789, '***1A2B', 'not_verified', null,
+                   pg_catalog.clock_timestamp())`,
+          [candidateId],
+        );
+        const final = await client.query<{ notification_outcome_code: string }>(
+          'select * from app.claim_telegram_deposit_outcome_notification()',
+        );
+        expect(final.rows).toMatchObject([{ notification_outcome_code: 'not_verified' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
   });
 }

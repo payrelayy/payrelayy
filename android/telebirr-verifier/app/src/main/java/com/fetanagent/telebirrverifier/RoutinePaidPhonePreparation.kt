@@ -254,7 +254,8 @@ internal class RoutinePaidPhonePreparation(
     if (response.statusCode == HttpURLConnection.HTTP_GONE) {
       val terminal = try {
         val frame = StrictJson.parse(response.body).requireObject(setOf("code"))
-        frame.string("code") == "paid_observation_terminal_expired"
+        frame.string("code") in setOf(
+          "paid_observation_terminal_expired", "paid_observation_terminal_review")
       } catch (_: Exception) { false }
       if (!terminal) return RoutinePaidPhonePreparationResult.Review("invalid_upload_response")
       try { workStore.archiveTerminal(bytes) } catch (_: Exception) {

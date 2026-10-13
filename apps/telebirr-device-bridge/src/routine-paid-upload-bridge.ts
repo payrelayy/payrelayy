@@ -199,7 +199,9 @@ export function createRoutinePaidUploadBridgeHandler(
         deviceSpkiDer,
       );
       if (assessment.disposition !== 'paid_phone_observation_matches_policy')
-        return error(403, 'paid_observation_review');
+        return assessment.terminalReview
+          ? error(410, 'paid_observation_terminal_review')
+          : error(403, 'paid_observation_review');
       const assignmentBodyDigest = own(signedAssignment, 'bodyDigest');
       const signature = own(signedObservation, 'signature');
       if (

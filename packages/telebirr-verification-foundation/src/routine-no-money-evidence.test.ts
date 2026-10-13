@@ -427,6 +427,44 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         deviceSpki,
       ),
     ).toMatchObject({ disposition: 'review', reasonCode: 'receipt_policy_review', evidence: null });
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: reversed },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).not.toHaveProperty('terminalReview');
+  });
+
+  it('retires only a signed official receipt with an immutable wrong receiver or old date', () => {
+    const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
+      fixture(true);
+    const paid = { ...input, trustedIssuanceMode: 'paid' };
+    for (const changedFacts of [
+      { ...facts, receiverMatch: 'mismatched' },
+      { ...facts, occurredAt: '2026-10-05T16:59:00.000Z' },
+    ]) {
+      const observation = signedObservation(observationBody(changedFacts), deviceKey.privateKey);
+      expect(
+        assessRoutineTelebirrPaidPhoneEvidence(
+          { ...paid, signedObservation: observation },
+          signerSpki,
+          deviceSpki,
+        ),
+      ).toMatchObject({
+        disposition: 'review',
+        reasonCode: 'receipt_policy_review',
+        terminalReview: true,
+        evidence: null,
+      });
+      expect(
+        assessRoutineTelebirrPaidPhoneEvidence(
+          { ...paid, signedObservation: { ...observation, signature: 'A'.repeat(86) } },
+          signerSpki,
+          deviceSpki,
+        ),
+      ).not.toHaveProperty('terminalReview');
+    }
   });
 
   it('rejects a valid phone observation once its receipt is one hour old', () => {

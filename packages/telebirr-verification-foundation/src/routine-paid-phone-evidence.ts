@@ -35,6 +35,8 @@ export type RoutineTelebirrPaidPhoneAssessment =
       reasonCode: string;
       financialActionAllowed: false;
       evidence: null;
+      /** Only an authenticated, immutable receipt mismatch can retire this sealed upload. */
+      terminalReview?: true;
     }>
   | Readonly<{
       disposition: 'paid_phone_observation_matches_policy';
@@ -62,13 +64,36 @@ function utc(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
-function review(reasonCode: string): RoutineTelebirrPaidPhoneAssessment {
+function review(reasonCode: string, terminalReview = false): RoutineTelebirrPaidPhoneAssessment {
   return Object.freeze({
     disposition: 'review',
     reasonCode,
     financialActionAllowed: false,
     evidence: null,
+    ...(terminalReview ? { terminalReview: true as const } : {}),
   });
+}
+
+function immutableReceiptMismatch(
+  lookupCandidate: unknown,
+  observationCandidate: unknown,
+): boolean {
+  if (!isPlainNonProxyRecord(lookupCandidate) || !isPlainNonProxyRecord(observationCandidate))
+    return false;
+  const body = ownDataValue(observationCandidate, 'body');
+  const facts = isPlainNonProxyRecord(body) && ownDataValue(body, 'facts');
+  if (!isPlainNonProxyRecord(facts)) return false;
+  const submittedAt = ownDataValue(lookupCandidate, 'submittedAt');
+  const occurredAt = ownDataValue(facts, 'occurredAt');
+  return (
+    ownDataValue(facts, 'referenceMatch') === 'mismatched' ||
+    ownDataValue(facts, 'receiverMatch') === 'mismatched' ||
+    ownDataValue(facts, 'creditedPartyNameDigest') !==
+      ownDataValue(lookupCandidate, 'expectedReceiverNameDigest') ||
+    (utc(submittedAt) &&
+      utc(occurredAt) &&
+      Date.parse(occurredAt) < Date.parse(submittedAt) - 3_600_000)
+  );
 }
 
 /**
@@ -120,7 +145,18 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
       !checked.providedSnapshotMatched ||
       !checked.replayIdentity
     ) {
-      return review(checked.reasonCode);
+      return review(
+        checked.reasonCode,
+        checked.reasonCode === 'receipt_policy_review' &&
+          checked.serverSignatureVerified &&
+          checked.deviceSignatureVerified &&
+          checked.providedSnapshotMatched &&
+          checked.phoneOfficialOriginAttested &&
+          immutableReceiptMismatch(
+            ownDataValue(candidate, 'trustedLookup'),
+            ownDataValue(candidate, 'signedObservation'),
+          ),
+      );
     }
     // Version 1 remains usable for no-money review, never for a paid decision.
     // Version 2 signs the fixed official TLS-origin assertion in the same fact

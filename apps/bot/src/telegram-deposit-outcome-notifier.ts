@@ -23,6 +23,13 @@ function formatMinorEtb(amountMinor: string): string {
 
 /** Customer-safe copy: no full receipt reference, Player ID, or internal job state. */
 export function presentTelegramDepositOutcome(delivery: Delivery): string {
+  if (delivery.outcomeCode === 'checking') {
+    return [
+      '⏳ TeleBirr reference not verified yet',
+      `Verification is still pending for the submission ending ${delivery.referenceMasked.slice(-4)}.`,
+      'Do not pay again. We will send the final result here.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'verified_waiting') {
     return [
       '✅ TeleBirr payment verified',

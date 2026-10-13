@@ -401,6 +401,29 @@ class RoutinePaidPhonePreparationTest {
     assertTrue(upload.isNotEmpty())
   }
 
+  @Test fun `authenticated terminal review archives sealed upload without another lookup`() {
+    var uploadStatus = 403
+    val fixed = exchange { path, contentType, _ ->
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH)
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse())
+      else DeviceBridgeRawResponse(uploadStatus, contentType,
+        if (uploadStatus == 410) """{"code":"paid_observation_terminal_review"}"""
+          .toByteArray(StandardCharsets.UTF_8)
+        else """{"code":"paid_observation_review"}"""
+          .toByteArray(StandardCharsets.UTF_8))
+    }
+    assertEquals(RoutinePaidPhonePreparationResult.Review("server_rejected"),
+      run(preparation(fixed, ProviderTransport { observedReceipt() })))
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
+    uploadStatus = 410
+    assertEquals(RoutinePaidPhonePreparationResult.Review("terminal_upload_archived"),
+      run(preparation(fixed, ProviderTransport { error("No second receipt lookup") })))
+    assertNull(workStore.load())
+    assertEquals(1, workDirectory.listFiles()!!.count {
+      it.name.startsWith("routine-paid-review-") && it.name.endsWith(".sealed")
+    })
+  }
+
   @Test fun `failed durable stage prevents public receipt lookup`() {
     val failed = EncryptedRoutinePaidWorkStore(File(temporary.root, "failed-paid"),
       object : LivePilotQueueCipher {

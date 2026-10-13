@@ -2152,7 +2152,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
-    it('notifies an unverified Telegram submitter after three minutes without rejecting payment', async () => {
+    it('notifies an unverified Telegram submitter after 30 seconds without rejecting payment', async () => {
       const client = getClient();
       await rollback(client, async () => {
         const actor = await fixtureTelegramActor(client, getOwnerAdminId());
@@ -2167,7 +2167,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         const submittedAt = (
           await client.query<{ processed_at: Date }>(
             `update app.inbound_events
-              set processed_at = date_trunc('milliseconds', clock_timestamp()) - interval '4 minutes'
+              set processed_at = date_trunc('milliseconds', clock_timestamp()) - interval '40 seconds'
             where id = $1::uuid returning processed_at`,
             [paidEventId],
           )

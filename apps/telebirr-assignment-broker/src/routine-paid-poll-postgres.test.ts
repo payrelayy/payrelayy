@@ -46,3 +46,27 @@ describe('private routine paid SQL terminal check', () => {
     );
   });
 });
+
+describe('signed wrong-receiver result', () => {
+  it('uses only the narrow parameterized function and accepts an exact status', async () => {
+    const query = vi.fn(async () => ({ rows: [{ status: 'recorded' }] }));
+    const database = createRoutinePaidPollPostgresDatabase({ query });
+    const signedObservation = { bodyDigest: challengeDigest };
+    expect(await database.recordReceiverMismatch({ challengeId, signedObservation })).toBe(
+      'recorded',
+    );
+    expect(query).toHaveBeenCalledWith(
+      'select app.record_routine_telebirr_paid_wrong_receiver($1::uuid,$2::jsonb) as status',
+      [challengeId, JSON.stringify(signedObservation)],
+    );
+  });
+
+  it('fails closed on missing or unexpected SQL shape', async () => {
+    for (const rows of [[], [{ status: 'recorded', extra: true }], [{ result: 'recorded' }]]) {
+      const database = createRoutinePaidPollPostgresDatabase({ query: async () => ({ rows }) });
+      await expect(
+        database.recordReceiverMismatch({ challengeId, signedObservation: {} }),
+      ).rejects.toBeInstanceOf(RoutinePaidPollSqlUnavailableError);
+    }
+  });
+});

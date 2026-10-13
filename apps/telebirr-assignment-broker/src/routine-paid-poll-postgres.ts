@@ -14,6 +14,8 @@ const TERMINAL =
   'select app.classify_routine_telebirr_paid_upload_terminal($1::uuid,$2::text,$3::text) as terminal';
 const STAGE =
   'select app.stage_routine_telebirr_paid_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb) as status';
+const REJECT_RECEIVER =
+  'select app.record_routine_telebirr_paid_wrong_receiver($1::uuid,$2::jsonb) as status';
 
 export class RoutinePaidPollSqlUnavailableError extends Error {
   constructor() {
@@ -79,6 +81,27 @@ export function createRoutinePaidPollPostgresDatabase(
         input.observationBodyDigest,
         input.observationSignatureDigest,
         input.replayIdentity,
+        JSON.stringify(input.signedObservation),
+      ]);
+      if (
+        typeof row !== 'object' ||
+        row === null ||
+        Array.isArray(row) ||
+        isProxy(row) ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        Reflect.ownKeys(row).length !== 1
+      )
+        throw new RoutinePaidPollSqlUnavailableError();
+      const status = Object.getOwnPropertyDescriptor(row, 'status');
+      if (!status?.enumerable || !Object.hasOwn(status, 'value'))
+        throw new RoutinePaidPollSqlUnavailableError();
+      return status.value;
+    },
+    async recordReceiverMismatch(
+      input: Parameters<RoutinePaidPollBrokerDatabase['recordReceiverMismatch']>[0],
+    ) {
+      const row = await oneRow(client, REJECT_RECEIVER, [
+        input.challengeId,
         JSON.stringify(input.signedObservation),
       ]);
       if (

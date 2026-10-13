@@ -51,6 +51,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
       'No new Player credit was made. Do not pay again; contact support if this is unexpected.',
     ].join('\n');
   }
+  if (delivery.outcomeCode === 'wrong_receiver') {
+    return [
+      '❌ Deposit rejected — wrong receiver',
+      `The TeleBirr receipt ending ${delivery.referenceMasked.slice(-4)} names a different receiver. No Player credit was made.`,
+      'If money left your wallet, do not pay again. Contact support with the reference.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'rejected') {
     return [
       '❌ Deposit not credited',

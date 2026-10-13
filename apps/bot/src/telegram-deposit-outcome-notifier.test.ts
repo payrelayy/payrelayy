@@ -132,6 +132,19 @@ describe('Telegram deposit outcome notifier', () => {
     expect(duplicate).not.toContain('fake');
   });
 
+  it('gives a definitive signed wrong-receiver result without revealing receiver details', () => {
+    const wrongReceiver = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'wrong_receiver',
+      amountMinor: null,
+    });
+    expect(wrongReceiver).toContain('Deposit rejected — wrong receiver');
+    expect(wrongReceiver).toContain('different receiver');
+    expect(wrongReceiver).toContain('No Player credit was made');
+    expect(wrongReceiver).toContain('1A2B');
+    expect(wrongReceiver).not.toContain('30.00');
+  });
+
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,

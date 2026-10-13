@@ -52,6 +52,11 @@ export interface RoutinePaidUploadBridgeDependencies {
     readonly observationSignatureDigest: string;
     readonly signedObservation: unknown;
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
+  /** Persist only a signed, official-origin wrong-receiver result before retiring the phone upload. */
+  recordReceiverMismatch(input: {
+    readonly challengeId: string;
+    readonly signedObservation: unknown;
+  }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -144,7 +149,8 @@ export function createRoutinePaidUploadBridgeHandler(
     typeof dependencies.now !== 'function' ||
     typeof dependencies.classifyTerminal !== 'function' ||
     typeof dependencies.loadObservation !== 'function' ||
-    typeof dependencies.stageObservation !== 'function'
+    typeof dependencies.stageObservation !== 'function' ||
+    typeof dependencies.recordReceiverMismatch !== 'function'
   )
     throw new Error();
   return async (
@@ -198,10 +204,21 @@ export function createRoutinePaidUploadBridgeHandler(
         context.trustedSignerSpkiDer,
         deviceSpkiDer,
       );
-      if (assessment.disposition !== 'paid_phone_observation_matches_policy')
+      if (assessment.disposition !== 'paid_phone_observation_matches_policy') {
+        if (assessment.terminalReasonCode === 'receiver_mismatch') {
+          const recorded = await dependencies.recordReceiverMismatch({
+            challengeId,
+            signedObservation,
+          });
+          if (recorded === 'retry') return error(503, 'temporarily_unavailable');
+          if (recorded === 'conflict') return error(409, 'observation_conflict');
+          if (recorded !== 'recorded' && recorded !== 'exact_replay')
+            return error(503, 'temporarily_unavailable');
+        }
         return assessment.terminalReview
           ? error(410, 'paid_observation_terminal_review')
           : error(403, 'paid_observation_review');
+      }
       const assignmentBodyDigest = own(signedAssignment, 'bodyDigest');
       const signature = own(signedObservation, 'signature');
       if (

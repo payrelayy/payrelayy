@@ -56,6 +56,7 @@ function fakeBroker() {
     })),
     classifyTerminal: vi.fn(async () => true),
     stageObservation: vi.fn(async () => 'recorded' as const),
+    recordReceiverMismatch: vi.fn(async () => 'recorded' as const),
   };
 }
 
@@ -138,6 +139,25 @@ describe('private routine paid poll local handler', () => {
     expect(staged.statusCode).toBe(200);
     expect(JSON.parse(Buffer.from(staged.body).toString('utf8'))).toEqual({ kind: 'recorded' });
     expect(fake.stageObservation).toHaveBeenCalledOnce();
+    const receiverMismatch = await handler(
+      request('record_receiver_mismatch', {
+        challengeId: requestId,
+        signedObservation: {
+          contractVersion: 2,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v2',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v2',
+          bodyDigestAlgorithm: 'sha256',
+          bodyDigest: digest,
+          signatureAlgorithm: 'ecdsa-p256-sha256',
+          signatureEncoding: 'ieee-p1363-base64url',
+          body: {},
+          signature: 'A'.repeat(86),
+        },
+      }),
+    );
+    expect(receiverMismatch.statusCode).toBe(200);
+    expect(fake.recordReceiverMismatch).toHaveBeenCalledOnce();
   });
 
   it('rejects no-money media and malformed operations before broker access', async () => {
@@ -182,6 +202,17 @@ describe('private routine paid poll local handler', () => {
       ).statusCode,
     ).toBe(400);
     expect(fake.classifyTerminal).not.toHaveBeenCalled();
+    expect(
+      (
+        await handler(
+          request('record_receiver_mismatch', {
+            challengeId: 'bad',
+            signedObservation: {},
+          }),
+        )
+      ).statusCode,
+    ).toBe(400);
+    expect(fake.recordReceiverMismatch).not.toHaveBeenCalled();
   });
 
   it('fails closed with no private error detail', async () => {

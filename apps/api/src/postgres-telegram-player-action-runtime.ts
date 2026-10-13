@@ -227,6 +227,7 @@ async function handleDepositOutcomeClaim(
       'verified_waiting',
       'credited',
       'rejected',
+      'wrong_receiver',
       'not_credited',
       'not_verified',
       'already_used',
@@ -252,6 +253,7 @@ async function handleDepositOutcomeClaim(
       | 'verified_waiting'
       | 'credited'
       | 'rejected'
+      | 'wrong_receiver'
       | 'not_credited'
       | 'not_verified'
       | 'already_used',

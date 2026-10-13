@@ -81,6 +81,33 @@ describe('Telegram private-action bot client', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
   });
 
+  it('accepts only an amount-free, masked verified-waiting notification', async () => {
+    const waiting = {
+      version: 1,
+      outcome: 'deposit_outcome_delivery',
+      notificationId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      privateChatId: '123456789',
+      outcomeCode: 'verified_waiting',
+      amountMinor: null,
+      referenceMasked: '***1A2B',
+    } as const;
+    const claim: TelegramPrivateActionEnvelope = { version: 1, kind: 'deposit_outcome_claim' };
+    await expect(
+      deliverTelegramPrivateAction(claim, config, {
+        fetch: async () => ({ status: 200, json: async () => waiting }),
+      }),
+    ).resolves.toEqual(waiting);
+    await expect(
+      deliverTelegramPrivateAction(claim, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ ...waiting, amountMinor: '3000' }),
+        }),
+      }),
+    ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+  });
+
   it('accepts only exact, internally consistent TeleBirr receiver projections', async () => {
     const preview = {
       version: 1,

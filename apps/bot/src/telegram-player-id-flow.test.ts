@@ -304,12 +304,11 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'message',
       text: [
-        '✅ TeleBirr transaction number received.',
-        'Status: Pending official receipt verification.',
-        'No KemerBet deposit or credit has been made. Credit requires a matching receipt checked by the paired phone.',
+        '🔎 TeleBirr reference received. We’re checking the payment.',
+        'This submission has not credited a Player account. We’ll send an update here.',
       ].join('\n'),
     });
-    expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|AB12CD34EF|uuid|token|amount/iu);
+    expect(JSON.stringify(presentation)).not.toMatch(/AB12CD34EF|uuid|token|amount/iu);
   });
 
   it('renders a live verifier acknowledgement with one opaque tracking button', () => {

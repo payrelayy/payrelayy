@@ -106,5 +106,42 @@ export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: (
         await client.query('rollback');
       }
     });
+
+    it('suppresses a stale waiting update and sends the final result for the same candidate', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const candidateId = randomUUID();
+        await client.query(
+          `insert into app.telegram_deposit_outcome_deliveries
+             (candidate_id, notification_stage, private_chat_id, reference_masked,
+              outcome_code, amount_minor, next_attempt_at)
+           values
+             ($1::uuid, 'waiting', 123456789, '***1A2B', 'verified_waiting', null,
+              pg_catalog.clock_timestamp() - interval '1 minute'),
+             ($1::uuid, 'final', 123456789, '***1A2B', 'credited', 3000,
+              pg_catalog.clock_timestamp() - interval '1 minute')`,
+          [candidateId],
+        );
+        const claimed = await client.query<{
+          notification_outcome_code: string;
+        }>('select * from app.claim_telegram_deposit_outcome_notification()');
+        expect(claimed.rows).toEqual([
+          expect.objectContaining({ notification_outcome_code: 'credited' }),
+        ]);
+        const states = await client.query<{ notification_stage: string; status: string }>(
+          `select notification_stage, status
+             from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid order by notification_stage`,
+          [candidateId],
+        );
+        expect(states.rows).toEqual([
+          { notification_stage: 'final', status: 'leased' },
+          { notification_stage: 'waiting', status: 'unavailable' },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
   });
 }

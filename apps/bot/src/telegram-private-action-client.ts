@@ -73,7 +73,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     typeof value.privateChatId === 'string' &&
     /^[1-9][0-9]{0,15}$/u.test(value.privateChatId) &&
     BigInt(value.privateChatId) <= 9007199254740991n &&
-    ['credited', 'rejected', 'not_credited', 'not_verified'].includes(
+    ['verified_waiting', 'credited', 'rejected', 'not_credited', 'not_verified'].includes(
       value.outcomeCode as string,
     ) &&
     (value.amountMinor === null ||

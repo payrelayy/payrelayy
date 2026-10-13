@@ -165,9 +165,8 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          '✅ TeleBirr transaction number received.',
-          'Status: Pending official receipt verification.',
-          'No KemerBet deposit or credit has been made. Credit requires a matching receipt checked by the paired phone.',
+          '🔎 TeleBirr reference received. We’re checking the payment.',
+          'This submission has not credited a Player account. We’ll send an update here.',
         ].join('\n'),
       };
     case 'telebirr_live_verification_queued':

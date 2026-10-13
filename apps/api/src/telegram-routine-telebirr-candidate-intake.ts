@@ -109,7 +109,7 @@ async function captureInternal(
   const row = result.rows[0];
   // The PostgreSQL switch set, not this live-capable API process, decides whether
   // production intake is a no-money rehearsal or a paid pending candidate.
-  const paidCandidate = row.proof_status === 'paid_pending';
+  const paidCandidate = row.proof_status === 'paid_pending' || row.proof_status === 'already_used';
   const responseModeAllowed =
     row.proof_status === 'untrusted_received' ||
     (paidCandidate && productionCandidate && config.financialActionsMode === 'live');
@@ -132,6 +132,17 @@ async function captureInternal(
     typeof row.request_replayed !== 'boolean'
   ) {
     throw new TelegramRoutineTelebirrCandidateUnavailableError();
+  }
+
+  if (row.proof_status === 'already_used') {
+    return {
+      version: 1,
+      outcome: 'telebirr_routine_candidate_already_used',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'already_used',
+      verificationMode: 'same_customer_completed_ledger',
+    };
   }
 
   if (paidCandidate) {

@@ -87,7 +87,7 @@ const action: Extract<TelegramPrivateActionEnvelope, { kind: 'deposit_proof_comm
 
 function acceptedDatabase(
   calls: Array<{ readonly query: string; readonly values: readonly unknown[] }>,
-  proofStatus: 'untrusted_received' | 'paid_pending' = 'untrusted_received',
+  proofStatus: 'untrusted_received' | 'paid_pending' | 'already_used' = 'untrusted_received',
 ): TelegramRoutineTelebirrCandidateDatabase {
   return {
     async query(query, values) {
@@ -188,6 +188,29 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     expect(calls[0]!.query).not.toMatch(/execute|settle|transfer|verification_job/iu);
   });
 
+  it('returns a confirmed same-customer completed duplicate immediately and nothing private', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    const realAction = { ...action, transactionReference: 'AB12CD34EF' };
+
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls, 'already_used'),
+        inboundEventId,
+        realAction,
+        enabledProductionConfig,
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'telebirr_routine_candidate_already_used',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'already_used',
+      verificationMode: 'same_customer_completed_ledger',
+    });
+    expect(calls).toHaveLength(1);
+    expect(JSON.stringify(calls)).not.toContain(realAction.transactionReference);
+  });
+
   it('reports a database-authorized no-money capture even when the production API is live-capable', async () => {
     const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
     await expect(
@@ -277,6 +300,18 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
       ),
     ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
     expect(calls).toHaveLength(1);
+  });
+
+  it('rejects an already-used database response outside the live-capable production route', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls, 'already_used'),
+        inboundEventId,
+        action,
+        config,
+      ),
+    ).rejects.toBeInstanceOf(TelegramRoutineTelebirrCandidateUnavailableError);
   });
 
   it.each([

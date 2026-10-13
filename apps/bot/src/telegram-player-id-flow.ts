@@ -169,6 +169,15 @@ export function presentTelegramPlayerIdFlowResult(
           'This submission has not credited a Player account. We’ll send an update here.',
         ].join('\n'),
       };
+    case 'telebirr_routine_candidate_already_used':
+      return {
+        kind: 'message',
+        text: [
+          '⚠️ Reference already used.',
+          'This Telegram account already used it for a completed deposit. No new Player credit was made.',
+          'Do not pay again. Contact support if this is unexpected.',
+        ].join('\n'),
+      };
     case 'telebirr_live_verification_queued':
       return {
         kind: 'menu',

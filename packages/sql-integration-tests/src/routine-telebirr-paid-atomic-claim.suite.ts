@@ -523,6 +523,34 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [duplicateId],
         );
         expect(knownDuplicate.rows).toEqual([{ already_used: false }]);
+        const pendingReference = (
+          await client.query<{
+            candidate_reference_ciphertext: string;
+            candidate_reference_fingerprint: string;
+            candidate_reference_masked: string;
+            semantic_input_hmac: string;
+          }>(
+            `select candidate_reference_ciphertext, candidate_reference_fingerprint,
+                    candidate_reference_masked, semantic_input_hmac
+               from app.routine_telebirr_untrusted_proof_requests
+              where id = $1::uuid`,
+            [duplicateId],
+          )
+        ).rows[0]!;
+        const pendingReplay = await client.query<{
+          proof_status: string;
+          request_replayed: boolean;
+        }>(CAPTURE, [
+          duplicateEvent,
+          playerId,
+          pendingReference.candidate_reference_ciphertext,
+          pendingReference.candidate_reference_fingerprint,
+          pendingReference.candidate_reference_masked,
+          pendingReference.semantic_input_hmac,
+        ]);
+        expect(pendingReplay.rows).toEqual([
+          expect.objectContaining({ proof_status: 'paid_pending', request_replayed: true }),
+        ]);
         // Disposable fixture only: advance the prior intent through the
         // real one-shot fence and reconciliation ledger, without KemerBet.
         // A queued intent alone must never mark a repeated reference used.
@@ -661,6 +689,61 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [duplicateId],
         );
         expect(completedDuplicate.rows).toEqual([{ already_used: true }]);
+        const priorReference = (
+          await client.query<{
+            candidate_reference_ciphertext: string;
+            candidate_reference_fingerprint: string;
+            candidate_reference_masked: string;
+          }>(
+            `select candidate_reference_ciphertext, candidate_reference_fingerprint,
+                    candidate_reference_masked
+               from app.routine_telebirr_untrusted_proof_requests
+              where id = $1::uuid`,
+            [paidId],
+          )
+        ).rows[0]!;
+        const freshDuplicateEvent = await fixtureInboundEvent(client, actor.identityId);
+        const freshDuplicateArgs = [
+          freshDuplicateEvent,
+          playerId,
+          priorReference.candidate_reference_ciphertext,
+          priorReference.candidate_reference_fingerprint,
+          priorReference.candidate_reference_masked,
+          `hmac-sha256-v1:${createHash('sha256').update(randomUUID()).digest('hex')}`,
+        ];
+        const capturedDuplicate = await client.query<{
+          proof_request_id: string;
+          proof_status: string;
+          request_replayed: boolean;
+        }>(CAPTURE, freshDuplicateArgs);
+        expect(capturedDuplicate.rows).toMatchObject([
+          { proof_status: 'already_used', request_replayed: false },
+        ]);
+        const replayedDuplicate = await client.query<{
+          proof_request_id: string;
+          proof_status: string;
+          request_replayed: boolean;
+        }>(CAPTURE, freshDuplicateArgs);
+        expect(replayedDuplicate.rows).toMatchObject([
+          {
+            proof_request_id: capturedDuplicate.rows[0]!.proof_request_id,
+            proof_status: 'already_used',
+            request_replayed: true,
+          },
+        ]);
+        const duplicateFinancialArtifacts = await client.query<{
+          openings: string;
+          jobs: string;
+        }>(
+          `select (select count(*)::text from app.routine_telebirr_paid_intent_openings
+                    where candidate_id = $1::uuid) as openings,
+                  (select count(*)::text from app.deposit_jobs job
+                    join app.routine_telebirr_paid_intent_openings opening
+                      on opening.deposit_intent_id = job.deposit_intent_id
+                   where opening.candidate_id = $1::uuid) as jobs`,
+          [capturedDuplicate.rows[0]!.proof_request_id],
+        );
+        expect(duplicateFinancialArtifacts.rows).toEqual([{ openings: '0', jobs: '0' }]);
         const otherActor = await fixtureTelegramActor(client, getOwnerAdminId());
         const otherEvent = await fixtureInboundEvent(client, otherActor.identityId);
         const otherSubmittedAt = (

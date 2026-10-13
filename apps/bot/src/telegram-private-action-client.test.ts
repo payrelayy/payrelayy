@@ -405,6 +405,34 @@ describe('Telegram private-action bot client', () => {
     }
   });
 
+  it('accepts only the narrow same-customer completed-duplicate projection', async () => {
+    const duplicateResult = {
+      version: 1,
+      outcome: 'telebirr_routine_candidate_already_used',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      proofStatus: 'already_used',
+      verificationMode: 'same_customer_completed_ledger',
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => duplicateResult }),
+      }),
+    ).resolves.toEqual(duplicateResult);
+    for (const unsafeResult of [
+      { ...duplicateResult, providerCode: 'cbe_birr' },
+      { ...duplicateResult, proofStatus: 'pending_verification' },
+      { ...duplicateResult, verificationMode: 'phone_receipt_pending' },
+      { ...duplicateResult, transactionReference: 'AB12CD34EF' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => unsafeResult }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only exact live TeleBirr queue and status projections', async () => {
     const proofToken = `${'B'.repeat(21)}A`;
     const queued = {

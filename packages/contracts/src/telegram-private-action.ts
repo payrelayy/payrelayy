@@ -266,6 +266,15 @@ export type TelegramPrivateActionResult =
     }
   | {
       readonly version: 1;
+      /** Only this Telegram customer has a prior executed paid intent for this reference. */
+      readonly outcome: 'telebirr_routine_candidate_already_used';
+      readonly providerCode: 'telebirr';
+      readonly providerName: 'TeleBirr';
+      readonly proofStatus: 'already_used';
+      readonly verificationMode: 'same_customer_completed_ledger';
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'telebirr_live_verification_queued';
       /** Compact opaque UUID presentation. It carries no reference, amount, or Player ID. */
       readonly proofToken: string;

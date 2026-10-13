@@ -80,6 +80,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'rejected',
       'not_credited',
       'not_verified',
+      'already_used',
     ].includes(value.outcomeCode as string) &&
     (value.amountMinor === null ||
       (typeof value.amountMinor === 'string' &&

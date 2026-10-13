@@ -483,6 +483,152 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         );
         expect(persisted.rows[0]!.intent_customer_id).not.toBe(actor.customerId);
         expect(persisted.rows[0]!.opened_at).toEqual(persisted.rows[0]!.occurred_at);
+
+        // A second submission is not a known duplicate merely because its
+        // protected reference matches an uncompleted prior intent.
+        const duplicateEvent = await fixtureInboundEvent(client, actor.identityId);
+        const duplicateSubmittedAt = (
+          await client.query<{ processed_at: Date }>(
+            `update app.inbound_events
+                set processed_at = date_trunc('milliseconds', clock_timestamp())
+              where id = $1::uuid returning processed_at`,
+            [duplicateEvent],
+          )
+        ).rows[0]!.processed_at;
+        const duplicateId = (
+          await client.query<{ id: string }>(
+            `insert into app.routine_telebirr_untrusted_proof_requests (
+               submitting_customer_id, origin_identity_id, origin_channel,
+               origin_request_key, semantic_input_hmac, platform_id,
+               player_account_id, player_deposit_eligibility_decision_id,
+               payment_provider_id, provider_code, candidate_reference_ciphertext,
+               candidate_reference_fingerprint, candidate_reference_masked,
+               reference_encryption_key_version, reference_profile_version,
+               receiver_account_id, receiver_account_version, submitted_at, intake_mode
+             ) select submitting_customer_id, origin_identity_id, origin_channel,
+                 $2::uuid, semantic_input_hmac, platform_id,
+                 player_account_id, player_deposit_eligibility_decision_id,
+                 payment_provider_id, provider_code, candidate_reference_ciphertext,
+                 candidate_reference_fingerprint, candidate_reference_masked,
+                 reference_encryption_key_version, reference_profile_version,
+                 receiver_account_id, receiver_account_version, $3::timestamptz, 'paid'
+               from app.routine_telebirr_untrusted_proof_requests where id = $1::uuid
+             returning id`,
+            [paidId, duplicateEvent, duplicateSubmittedAt],
+          )
+        ).rows[0]!.id;
+        const knownDuplicate = await client.query<{ already_used: boolean }>(
+          `select app.routine_telebirr_same_customer_credited_reference($1::uuid)
+            as already_used`,
+          [duplicateId],
+        );
+        expect(knownDuplicate.rows).toEqual([{ already_used: false }]);
+        // Disposable fixture only: model a completed Player credit without
+        // contacting KemerBet. The same customer must now get a final result
+        // without consuming another paid phone lane.
+        await client.query(
+          `update app.deposit_intents set status = 'execution_in_progress'
+            where id = $1::uuid`,
+          [settled.rows[0]!.deposit_intent_id],
+        );
+        await client.query(
+          `update app.deposit_intents set status = 'executed'
+            where id = $1::uuid`,
+          [settled.rows[0]!.deposit_intent_id],
+        );
+        const completedDuplicate = await client.query<{ already_used: boolean }>(
+          `select app.routine_telebirr_same_customer_credited_reference($1::uuid)
+            as already_used`,
+          [duplicateId],
+        );
+        expect(completedDuplicate.rows).toEqual([{ already_used: true }]);
+        const otherActor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const otherEvent = await fixtureInboundEvent(client, otherActor.identityId);
+        const otherSubmittedAt = (
+          await client.query<{ processed_at: Date }>(
+            `update app.inbound_events
+                set processed_at = date_trunc('milliseconds', clock_timestamp())
+              where id = $1::uuid returning processed_at`,
+            [otherEvent],
+          )
+        ).rows[0]!.processed_at;
+        const otherCustomerCandidateId = (
+          await client.query<{ id: string }>(
+            `insert into app.routine_telebirr_untrusted_proof_requests (
+               submitting_customer_id, origin_identity_id, origin_channel,
+               origin_request_key, semantic_input_hmac, platform_id,
+               player_account_id, player_deposit_eligibility_decision_id,
+               payment_provider_id, provider_code, candidate_reference_ciphertext,
+               candidate_reference_fingerprint, candidate_reference_masked,
+               reference_encryption_key_version, reference_profile_version,
+               receiver_account_id, receiver_account_version, submitted_at, intake_mode
+             ) select $2::uuid, $3::uuid, origin_channel,
+                 $4::uuid, semantic_input_hmac, platform_id,
+                 player_account_id, player_deposit_eligibility_decision_id,
+                 payment_provider_id, provider_code, candidate_reference_ciphertext,
+                 candidate_reference_fingerprint, candidate_reference_masked,
+                 reference_encryption_key_version, reference_profile_version,
+                 receiver_account_id, receiver_account_version, $5::timestamptz, 'paid'
+               from app.routine_telebirr_untrusted_proof_requests where id = $1::uuid
+             returning id`,
+            [paidId, otherActor.customerId, otherActor.identityId, otherEvent, otherSubmittedAt],
+          )
+        ).rows[0]!.id;
+        const crossCustomerDuplicate = await client.query<{ already_used: boolean }>(
+          `select app.routine_telebirr_same_customer_credited_reference($1::uuid)
+            as already_used`,
+          [otherCustomerCandidateId],
+        );
+        expect(crossCustomerDuplicate.rows).toEqual([{ already_used: false }]);
+        const duplicatePoll = await client.query<{ candidate_id: string }>(
+          `select candidate_id from app.issue_routine_telebirr_paid_poll_assignment(
+            $1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::uuid)`,
+          [
+            trust.enrollmentId,
+            randomUUID(),
+            digest(randomUUID()),
+            new Date(Date.now() + 30_000),
+            trust.signerId,
+          ],
+        );
+        expect(duplicatePoll.rows).toEqual([{ candidate_id: otherCustomerCandidateId }]);
+        await client.query('savepoint reject_duplicate_paid_challenge');
+        await expect(
+          client.query(
+            `select * from app.issue_routine_telebirr_paid_lookup_challenge(
+            $1::uuid,$2::uuid,$3::uuid)`,
+            [duplicateId, trust.enrollmentId, trust.signerId],
+          ),
+        ).rejects.toThrow();
+        await client.query('rollback to savepoint reject_duplicate_paid_challenge');
+        await client.query('release savepoint reject_duplicate_paid_challenge');
+        await client.query(
+          `update app.telegram_deposit_outcome_cutover
+              set enabled_at = $1::timestamptz - interval '1 minute',
+                  waiting_enabled_at = $1::timestamptz - interval '1 minute',
+                  checking_enabled_at = $1::timestamptz - interval '1 minute'
+            where singleton = true`,
+          [duplicateSubmittedAt],
+        );
+        await client.query('select * from app.claim_telegram_deposit_outcome_notification()');
+        const duplicateDelivery = await client.query<{
+          notification_stage: string;
+          outcome_code: string;
+        }>(
+          `select notification_stage, outcome_code
+             from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid`,
+          [duplicateId],
+        );
+        expect(duplicateDelivery.rows).toEqual([
+          { notification_stage: 'final', outcome_code: 'already_used' },
+        ]);
+        const otherDelivery = await client.query<{ outcome_code: string }>(
+          `select outcome_code from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid`,
+          [otherCustomerCandidateId],
+        );
+        expect(otherDelivery.rows).toEqual([]);
       } finally {
         await client.query('rollback');
       }

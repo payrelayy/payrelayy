@@ -229,6 +229,7 @@ async function handleDepositOutcomeClaim(
       'rejected',
       'not_credited',
       'not_verified',
+      'already_used',
     ].includes(row.notification_outcome_code as string) ||
     !(
       row.notification_amount_minor === null ||
@@ -247,7 +248,13 @@ async function handleDepositOutcomeClaim(
     leaseToken: row.notification_lease_token,
     privateChatId: row.notification_private_chat_id,
     outcomeCode: row.notification_outcome_code as
-      'checking' | 'verified_waiting' | 'credited' | 'rejected' | 'not_credited' | 'not_verified',
+      | 'checking'
+      | 'verified_waiting'
+      | 'credited'
+      | 'rejected'
+      | 'not_credited'
+      | 'not_verified'
+      | 'already_used',
     amountMinor: row.notification_amount_minor as string | null,
     referenceMasked: row.notification_reference_masked,
   };

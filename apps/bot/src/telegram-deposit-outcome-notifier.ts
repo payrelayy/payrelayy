@@ -44,6 +44,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
       `Transaction ending ${delivery.referenceMasked.slice(-4)}.`,
     ].join('\n');
   }
+  if (delivery.outcomeCode === 'already_used') {
+    return [
+      '⚠️ Reference already used',
+      `This Telegram account already submitted the TeleBirr reference ending ${delivery.referenceMasked.slice(-4)} for a completed deposit.`,
+      'No new Player credit was made. Do not pay again; contact support if this is unexpected.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'rejected') {
     return [
       '❌ Deposit not credited',

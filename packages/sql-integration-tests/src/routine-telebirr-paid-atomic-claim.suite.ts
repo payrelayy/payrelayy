@@ -709,7 +709,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           priorReference.candidate_reference_ciphertext,
           priorReference.candidate_reference_fingerprint,
           priorReference.candidate_reference_masked,
-          `hmac-sha256-v1:${digest(randomUUID())}`,
+          `hmac-sha256-v1:${createHash('sha256').update(randomUUID()).digest('hex')}`,
         ];
         const capturedDuplicate = await client.query<{
           proof_request_id: string;

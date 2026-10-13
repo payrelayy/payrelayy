@@ -107,6 +107,51 @@ describe('separate routine no-money PostgreSQL runtime', () => {
     await expect(runtime.database.loadEnrollment(id)).rejects.toThrow('unavailable');
   });
 
+  it('keeps readiness and a routine poll on one PostgreSQL client lane', async () => {
+    const fake = fakeClient();
+    const runtime = await createRoutineNoMoneyPostgresRuntime(connection, {
+      createClient: () => fake.client,
+    });
+    let releaseCatalog: (() => void) | undefined;
+    let reportCatalogStarted: (() => void) | undefined;
+    const catalogGate = new Promise<void>((resolve) => {
+      releaseCatalog = resolve;
+    });
+    const catalogStarted = new Promise<void>((resolve) => {
+      reportCatalogStarted = resolve;
+    });
+    let activeQueries = 0;
+    let peakActiveQueries = 0;
+    let paused = false;
+    fake.query.mockImplementation(async (sql: string) => {
+      activeQueries += 1;
+      peakActiveQueries = Math.max(peakActiveQueries, activeQueries);
+      try {
+        if (sql === ROUTINE_NO_MONEY_CATALOG_PREFLIGHT_SQL && !paused) {
+          paused = true;
+          reportCatalogStarted?.();
+          await catalogGate;
+        }
+        return sql === ROUTINE_NO_MONEY_CATALOG_PREFLIGHT_SQL
+          ? { rows: [goodPreflight] }
+          : { rows: [] };
+      } finally {
+        activeQueries -= 1;
+      }
+    });
+
+    const readiness = runtime.ready();
+    await catalogStarted;
+    const polling = runtime.database.loadEnrollment(id);
+    await Promise.resolve();
+    expect(peakActiveQueries).toBe(1);
+    releaseCatalog?.();
+    await expect(readiness).resolves.toBe(true);
+    await expect(polling).resolves.toBeUndefined();
+    expect(peakActiveQueries).toBe(1);
+    await runtime.close();
+  });
+
   it('fails closed on a false, missing, or extra preflight field', async () => {
     const badRows = [
       { ...goodPreflight, runtime_login_is_safe: false },

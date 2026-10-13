@@ -6,6 +6,7 @@ import {
   type RoutineNoMoneySqlClient,
 } from './routine-no-money-postgres.js';
 import type { RoutineNoMoneyBrokerDatabase } from './routine-no-money-broker.js';
+import { createSerializedPostgresLane } from './serialized-postgres-lane.js';
 
 const GROUP_ROLE = 'fetanagent_routine_telebirr_no_money';
 const RUNTIME_ROLE = 'fetanagent_routine_telebirr_no_money_runtime';
@@ -360,6 +361,7 @@ export async function createRoutineNoMoneyPostgresRuntime(
   }
   let available = false;
   let closed = false;
+  const lane = createSerializedPostgresLane();
   const markUnavailable = () => {
     available = false;
   };
@@ -380,11 +382,14 @@ export async function createRoutineNoMoneyPostgresRuntime(
     async query(sql: string, values: unknown[]) {
       if (!available || closed) throw new RoutineNoMoneyRuntimeUnavailableError();
       try {
-        await assertCatalog(client);
-        if (!available || closed) throw new Error();
-        const result = await client.query(sql, values);
-        if (!available || closed) throw new Error();
-        return result;
+        return await lane.run(async () => {
+          if (!available || closed) throw new Error();
+          await assertCatalog(client);
+          if (!available || closed) throw new Error();
+          const result = await client.query(sql, values);
+          if (!available || closed) throw new Error();
+          return result;
+        });
       } catch {
         markUnavailable();
         throw new RoutineNoMoneyRuntimeUnavailableError();
@@ -396,8 +401,11 @@ export async function createRoutineNoMoneyPostgresRuntime(
     async ready() {
       if (!available || closed) return false;
       try {
-        await assertCatalog(client);
-        return available && !closed;
+        return await lane.run(async () => {
+          if (!available || closed) return false;
+          await assertCatalog(client);
+          return available && !closed;
+        });
       } catch {
         markUnavailable();
         return false;
@@ -408,6 +416,7 @@ export async function createRoutineNoMoneyPostgresRuntime(
       closed = true;
       markUnavailable();
       try {
+        await lane.drain();
         await client.end();
       } catch {
         throw new RoutineNoMoneyRuntimeUnavailableError();

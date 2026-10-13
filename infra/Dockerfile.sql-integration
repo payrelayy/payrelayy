@@ -115,6 +115,8 @@ COPY apps/telebirr-assignment-broker/src/routine-paid-poll-runtime.ts \
   ./apps/telebirr-assignment-broker/src/routine-paid-poll-runtime.ts
 COPY apps/telebirr-assignment-broker/src/routine-paid-poll-postgres.ts \
   ./apps/telebirr-assignment-broker/src/routine-paid-poll-postgres.ts
+COPY apps/telebirr-assignment-broker/src/serialized-postgres-lane.ts \
+  ./apps/telebirr-assignment-broker/src/serialized-postgres-lane.ts
 COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts \
   ./packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts

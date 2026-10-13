@@ -107,9 +107,12 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'checking',
       amountMinor: null,
     });
-    expect(checking).toContain('not verified yet');
+    expect(checking).toContain('Deposit not credited yet');
+    expect(checking).toContain('was not verified');
     expect(checking).toContain('1A2B');
     expect(checking).toContain('final result');
+    expect(checking).toContain('no Player credit was recorded');
+    expect(checking).not.toContain('pending');
     expect(checking).not.toContain('Deposit complete');
     expect(checking).not.toContain('rejected');
     expect(checking).not.toContain('30.00');
@@ -141,7 +144,9 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(rejected).toContain('Deposit not credited');
+    expect(unverified).toContain('Deposit not credited');
     expect(unverified).toContain('couldn’t verify');
+    expect(unverified).toContain('No Player credit was recorded for this submission');
     for (const text of [rejected, unverified]) {
       expect(text).toContain('do not pay again');
       expect(text).not.toContain('30.00');

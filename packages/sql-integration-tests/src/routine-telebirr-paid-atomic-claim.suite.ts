@@ -528,13 +528,32 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         // A queued intent alone must never mark a repeated reference used.
         const intentId = settled.rows[0]!.deposit_intent_id;
         const executionJobId = settled.rows[0]!.execution_job_id;
+        // The routine lease trigger requires the broker's session_user, not
+        // just a privileged SQL client. Use a transaction-local definer
+        // wrapper so the disposable fixture exercises that identity guard.
+        await client.query(`create function pg_temp.lease_duplicate_fixture_job(p_job_id uuid)
+          returns void language plpgsql security definer set search_path = pg_catalog
+          as $$ begin
+            update app.deposit_jobs set status = 'leased', attempt_count = 1,
+              lease_token = gen_random_uuid(), leased_by = 'duplicate_sql_test',
+              lease_expires_at = clock_timestamp() + interval '5 minutes'
+              where id = p_job_id;
+          end; $$`);
         await client.query(
-          `update app.deposit_jobs set status = 'leased', attempt_count = 1,
-             lease_token = gen_random_uuid(), leased_by = 'duplicate_sql_test',
-             lease_expires_at = clock_timestamp() + interval '5 minutes'
-             where id = $1::uuid`,
-          [executionJobId],
+          `revoke all on function pg_temp.lease_duplicate_fixture_job(uuid) from public`,
         );
+        await client.query(
+          `grant execute on function pg_temp.lease_duplicate_fixture_job(uuid)
+             to fetanagent_routine_deposit_broker_runtime`,
+        );
+        await client.query('set session authorization fetanagent_routine_deposit_broker_runtime');
+        try {
+          await client.query(`select pg_temp.lease_duplicate_fixture_job($1::uuid)`, [
+            executionJobId,
+          ]);
+        } finally {
+          await client.query('reset session authorization');
+        }
         const attemptId = (
           await client.query<{ id: string }>(
             `insert into app.deposit_execution_attempts (

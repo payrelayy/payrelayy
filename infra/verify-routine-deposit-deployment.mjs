@@ -38,6 +38,7 @@ const [
   migration,
   financialBoundaryMigration,
   workerLivenessMigration,
+  offlineQueueMigration,
   liveNoMoneyPollMigration,
   activateSql,
   disableSql,
@@ -74,6 +75,7 @@ const [
   read('supabase/migrations/20261005090000_routine_telebirr_execution_broker.sql'),
   read('supabase/migrations/20261009200332_routine_telebirr_financial_activation_boundary.sql'),
   read('supabase/migrations/20261010012000_routine_telebirr_worker_liveness_stop.sql'),
+  read('supabase/migrations/20261013103229_routine_telebirr_offline_verified_queue.sql'),
   read('supabase/migrations/20261009210922_routine_no_money_poll_yields_during_live_deposits.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
   read('infra/sql/production-routine-deposit-disable.sql'),
@@ -281,6 +283,18 @@ assert.match(workerLivenessMigration, /interval '5 minutes'/u);
 assert.match(workerLivenessMigration, /app\.stop_routine_telebirr_financial_gates\(/u);
 assert.doesNotMatch(workerLivenessMigration, /update\s+app\.feature_switches/iu);
 assert.doesNotMatch(workerLivenessMigration, /app\.activate_routine_telebirr_financial_gates\(/u);
+assert.match(
+  offlineQueueMigration,
+  /create function app\.observe_routine_telebirr_worker_liveness\(\)/u,
+);
+assert.match(offlineQueueMigration, /cron\.alter_job\(/u);
+assert.match(
+  offlineQueueMigration,
+  /drop function app\.stop_stale_routine_telebirr_financial_gates\(\)/u,
+);
+assert.match(offlineQueueMigration, /select app\.observe_routine_telebirr_worker_liveness\(\)/u);
+assert.doesNotMatch(offlineQueueMigration, /select app\.stop_routine_telebirr_financial_gates\(/u);
+assert.doesNotMatch(offlineQueueMigration, /(?:update|insert|delete)\s+app\.feature_switches/iu);
 assert.match(liveNoMoneyPollMigration, /v_live_count = 2 and v_other_disabled_count = 5/u);
 assert.match(liveNoMoneyPollMigration, /v_disabled_count <> 7/u);
 assert.match(

@@ -98,7 +98,7 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
       }
     });
 
-    it('installs the postgres-only routine worker liveness boundary without turning deposits on', async () => {
+    it('installs the postgres-only worker probe without turning deposits on', async () => {
       const client = getClient();
       const catalog = await client.query<{
         name: string;
@@ -115,7 +115,7 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
            where routine.oid in (
              'app.routine_telebirr_signed_worker_recent(interval)'::pg_catalog.regprocedure,
              'app.require_routine_telebirr_worker_at_activation()'::pg_catalog.regprocedure,
-             'app.stop_stale_routine_telebirr_financial_gates()'::pg_catalog.regprocedure)
+             'app.observe_routine_telebirr_worker_liveness()'::pg_catalog.regprocedure)
            order by routine.proname`);
       expect(catalog.rows).toEqual([
         {
@@ -131,33 +131,33 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
           authenticated_execute: false,
         },
         {
-          name: 'stop_stale_routine_telebirr_financial_gates',
+          name: 'observe_routine_telebirr_worker_liveness',
           owner: 'postgres',
           public_execute: false,
           authenticated_execute: false,
         },
       ]);
-      const result = await client.query<{ recent: boolean; stopped: boolean }>(
+      const result = await client.query<{ recent: boolean; observed: boolean }>(
         `select app.routine_telebirr_signed_worker_recent(interval '45 seconds') as recent,
-                app.stop_stale_routine_telebirr_financial_gates() as stopped`,
+                app.observe_routine_telebirr_worker_liveness() as observed`,
       );
-      expect(result.rows).toEqual([{ recent: false, stopped: false }]);
+      expect(result.rows).toEqual([{ recent: false, observed: false }]);
     });
 
-    it('stops stale live gates without clearing a durable attempt or enabling another switch', async () => {
+    it('keeps verification and the durable execution queue live when the worker is absent', async () => {
       const client = getClient();
       await client.query('begin');
       try {
         // Disposable database only: force the two switches live, then restore
-        // triggers before invoking the real postgres-only stop path.
+        // triggers before invoking the read-only postgres liveness probe.
         await client.query('alter table app.feature_switches disable trigger user');
         await client.query(`update app.feature_switches set mode = 'live'
           where feature_key in ('payment_verification', 'deposit_execution')`);
         await client.query('alter table app.feature_switches enable trigger user');
-        const result = await client.query<{ stopped: boolean }>(
-          'select app.stop_stale_routine_telebirr_financial_gates() as stopped',
+        const result = await client.query<{ observed: boolean }>(
+          'select app.observe_routine_telebirr_worker_liveness() as observed',
         );
-        expect(result.rows).toEqual([{ stopped: true }]);
+        expect(result.rows).toEqual([{ observed: false }]);
         const switches = await client.query<{ live_count: string; disabled_count: string }>(
           `select count(*) filter (where mode = 'live')::text as live_count,
                   count(*) filter (where mode = 'disabled')::text as disabled_count
@@ -168,7 +168,12 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
               'telebirr_authoritative_verification', 'withdrawal_collection',
               'withdrawal_validation')`,
         );
-        expect(switches.rows).toEqual([{ live_count: '0', disabled_count: '7' }]);
+        expect(switches.rows).toEqual([{ live_count: '2', disabled_count: '5' }]);
+        const legacyStop = await client.query<{ exists: boolean }>(
+          `select pg_catalog.to_regprocedure(
+            'app.stop_stale_routine_telebirr_financial_gates()') is not null as exists`,
+        );
+        expect(legacyStop.rows).toEqual([{ exists: false }]);
       } finally {
         await client.query('rollback');
       }

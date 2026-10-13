@@ -63,7 +63,8 @@ the same guarded KemerBet page refreshes every eleven minutes and the bound acco
 again before more Player work. The routine Chrome window does not close merely because twelve
 hours pass. If the bound account header is temporarily unavailable after a refresh, credit work
 pauses and the same guarded window retries identity verification; a different account still fails
-closed. The server watchdog may turn deposits off if the signed worker remains unavailable. If
+closed. After the offline-queue migration, a missing signed worker leaves verified payments
+queued; only an explicit stop or incident can turn paid TeleBirr off. If
 KemerBet itself returns to login, credit work pauses and the window waits for you to sign in
 manually; the Companion cannot override KemerBet's own server-session expiry.
 

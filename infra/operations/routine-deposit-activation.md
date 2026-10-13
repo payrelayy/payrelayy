@@ -191,19 +191,27 @@ TeleBirr references become paid candidates; the phone and settlement service may
 verify them, and the one-connection Windows worker may credit one verified job at
 a time. Do not describe the service as live until this exact operation succeeds.
 
-The independent 15-second database watchdog stops those two financial gates if
-the signed credit-worker lease becomes stale. It allows 90 seconds while idle and
-up to five minutes while an execution or reconciliation attempt is open. Its
-automatic incident stop does not erase or retry an attempt. Review any unfinished
-attempt before restarting the automatic-deposit Companion or reactivating gates.
+After `routine_telebirr_offline_verified_queue` is installed, the independent
+15-second database job observes the signed credit-worker lease but does not stop
+TeleBirr when the Companion goes offline. The paid phone can keep verifying
+eligible references and atomically enqueue one-use jobs. Those verified jobs stay
+queued without a worker; the signed broker serves them serially when it returns,
+rechecking current policy and Player eligibility before each credit. A fenced or
+uncertain Transfer remains ahead of new jobs for reconciliation, never an automatic
+retry. An explicit Owner or incident stop still disables both financial gates.
+If a reference cannot be verified while fresh, it must not later be treated as a
+verified queued payment. A paused or changed Owner policy may require operator
+resolution instead of silently crediting an old queue item.
+
+Review any unfinished attempt before restarting the automatic-deposit Companion.
 The signed routine browser refreshes the same guarded KemerBet page every eleven
 minutes and re-verifies the bound account before new credit work. It stays open
 beyond 24 hours while signed in; the separate non-routine enrollment/execution
 windows retain their twelve-hour cap. If KemerBet itself returns to login, the
 routine window stays open for manual sign-in but stops claiming credit work. The
-short server lease then goes stale and the independent watchdog stops both live
-financial gates; no token is exported from Chrome or used to reauthenticate
-silently. Review any unfinished attempt before reactivating after a logout.
+signed worker lease then goes stale, while paid verification and already verified
+jobs remain available/queued. No token is exported from Chrome or used to
+reauthenticate silently. Recheck any unfinished attempt before credit work resumes.
 
 The existing no-money reference is not a paid activation check. Observe the
 first naturally occurring eligible live deposit through the Owner and protected

@@ -546,6 +546,13 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           `grant execute on function pg_temp.lease_duplicate_fixture_job(uuid)
              to fetanagent_routine_deposit_broker_runtime`,
         );
+        // Production grants this membership only when routine transport is
+        // explicitly activated. Model that activation within the rolled-back
+        // disposable test transaction, without enabling a production login.
+        await client.query(
+          `grant fetanagent_routine_deposit_broker
+             to fetanagent_routine_deposit_broker_runtime`,
+        );
         await client.query('set session authorization fetanagent_routine_deposit_broker_runtime');
         try {
           await client.query(`select pg_temp.lease_duplicate_fixture_job($1::uuid)`, [

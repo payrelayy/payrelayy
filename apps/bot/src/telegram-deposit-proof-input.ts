@@ -47,13 +47,20 @@ export function reduceTelegramDepositProofInput(
 ): TelegramDepositProofInput {
   if (!isBoundedTelegramDepositProofText(text)) return { kind: 'invalid_input' };
 
-  // Keep the established direct-reference envelope byte-for-byte stable for delivery retries,
-  // including lowercase input. Provider normalization still happens at the protected API boundary.
-  if (isDirectReference(text)) return { kind: 'candidate', transactionReference: text };
+  // TeleBirr references are case-insensitive. Canonicalize before the protected action is sent,
+  // while retaining the existing CBE Birr input behavior.
+  if (isDirectReference(text)) {
+    return {
+      kind: 'candidate',
+      transactionReference: providerCode === 'telebirr' ? text.toUpperCase() : text,
+    };
+  }
   if (providerCode !== 'telebirr') return { kind: 'invalid_input' };
 
   const trimmed = text.trim();
-  if (isDirectReference(trimmed)) return { kind: 'candidate', transactionReference: trimmed };
+  if (isDirectReference(trimmed)) {
+    return { kind: 'candidate', transactionReference: trimmed.toUpperCase() };
+  }
 
   // Scan both labels and receipt paths, even when the text starts with a URL. URL-only scanning
   // would overlook a conflicting labelled transaction in the same pasted message.

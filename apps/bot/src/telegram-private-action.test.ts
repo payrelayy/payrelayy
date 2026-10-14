@@ -158,7 +158,7 @@ describe('private Telegram action reducers', () => {
     expect(
       reduceTelegramGuidedDepositProofSubmission({
         ...privateMetadata,
-        text: 'SYNTB00000001',
+        text: 'syntB00000001',
         replyToMessage: { text: paymentPrompt, from: { is_bot: true } },
       }),
     ).toEqual({

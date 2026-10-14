@@ -106,7 +106,7 @@ describe('Telegram amount-free TeleBirr proof input', () => {
 
   it.each([
     { providerCode: 'telebirr', expectedReference: 'SYNTB00000001' },
-    { providerCode: 'cbe_birr', expectedReference: 'syntb00000001' },
+    { providerCode: 'cbe_birr', expectedReference: 'SYNTB00000001' },
   ] as const)(
     'canonicalizes the $providerCode direct-reference action only where supported',
     ({ providerCode, expectedReference }) => {
@@ -216,17 +216,60 @@ describe('Telegram amount-free TeleBirr proof input', () => {
   });
 
   it.each([
-    `https://example.invalid/receipt/${reference}`,
-    `Transaction ID: ${reference}`,
-    ` ${reference}`,
-    `${reference}\n`,
-  ])('does not apply TeleBirr extraction or whitespace normalization to CBE Birr', (proofText) => {
-    expect(
-      reduceTelegramDepositProofSubmission({
-        ...metadata,
-        command: `/deposit cbe_birr PLAYER-DEMO-42 ${proofText}`,
-      }),
-    ).toEqual({ kind: 'invalid_input' });
+    `Txn ID syntb00000001. For invoice https://cbepay1.cbe.com.et/aureceipt?TID=SYNTB00000001&PH=900000001`,
+    `https://cbepay1.cbe.com.et/aureceipt?TID=syntb00000001&PH=900000002`,
+    `Order ID ${reference}\nTransaction Status Completed`,
+    `Receipt Number ${reference}\nPaid amount 100.00`,
+    ` ${reference}\n`,
+  ])(
+    'extracts one CBE Birr reference without treating PH or text as payment evidence',
+    (proofText) => {
+      expect(
+        reduceTelegramDepositProofSubmission({
+          ...metadata,
+          command: `/deposit cbe_birr PLAYER-DEMO-42 ${proofText}`,
+        }),
+      ).toMatchObject({
+        kind: 'action',
+        action: { providerCode: 'cbe_birr', transactionReference: reference },
+      });
+    },
+  );
+
+  it('reduces sender and receiver SMS links to the same CBE Birr candidate', () => {
+    const sms = (phoneSelector: string) =>
+      `Dear TEST CUSTOMER, you received 100.00Br. from 251900000002 - TEST SENDER ` +
+      `on 15/10/26 00:03,Txn ID ${reference}.Your CBE Birr account balance is 1000.00Br. ` +
+      `For invoice https://cbepay1.cbe.com.et/aureceipt?TID=${reference}&PH=${phoneSelector}`;
+    expect(reduceTelegramDepositProofInput('cbe_birr', sms('900000001'))).toEqual({
+      kind: 'candidate',
+      transactionReference: reference,
+    });
+    expect(reduceTelegramDepositProofInput('cbe_birr', sms('900000002'))).toEqual({
+      kind: 'candidate',
+      transactionReference: reference,
+    });
+  });
+
+  it.each([
+    `Txn ID ${reference}. For invoice https://cbepay1.cbe.com.et/aureceipt?TID=${otherReference}&PH=900000001`,
+    `Order ID ${reference}\nReceipt Number ${otherReference}`,
+  ])('requires explicit choice for conflicting CBE Birr references', (proofText) => {
+    expect(reduceTelegramDepositProofInput('cbe_birr', proofText)).toEqual({
+      kind: 'selection_required',
+    });
+  });
+
+  it.each([
+    `https://example.invalid/aureceipt?TID=${reference}&PH=900000001`,
+    `https://cbepay1.cbe.com.et/aureceipt?TID=${reference}&TID=${otherReference}`,
+    `Txn ID ${reference}. For invoice https://example.invalid/aureceipt?TID=${reference}`,
+    `Txn ID short`,
+    `Txn ID ${reference} and Order ID short`,
+  ])('does not guess CBE Birr references from unknown or malformed sources', (proofText) => {
+    expect(reduceTelegramDepositProofInput('cbe_birr', proofText)).toEqual({
+      kind: 'invalid_input',
+    });
   });
 
   it('bounds the entire command in UTF-8 bytes, not just the extracted reference or code points', () => {

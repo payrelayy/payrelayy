@@ -12,17 +12,18 @@ TeleBirr is governed by its separate approved contract in
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Payment participants          | The payer, submitting FetanAgent user, and KemerBet account holder may all be different people. No identity match among them is required.                                    |
 | Sender and claimant identity  | Do not match or require the CBE sender, Telegram identity, web identity, or KemerBet identity.                                                                               |
-| Destination                   | A customer may deposit to a saved eligible Player ID or choose **Deposit to another Player ID**.                                                                             |
+| Destination                   | Each Telegram account has one saved Player ID at a time. The customer may replace it with **Change Player ID**; different Telegram accounts may save the same Player ID.     |
 | Amount entry                  | The customer does not enter an amount. The principal paid amount comes only from the freshly retrieved official receipt.                                                     |
 | Per-deposit limits            | 25 ETB minimum and 25,000 ETB maximum. An out-of-range receipt goes to manual review.                                                                                        |
 | Deposit count                 | There is no business limit on the number of successful deposits. Abuse controls may still bound concurrent checks and invalid-reference probing.                             |
 | Transaction type              | Automatic verification initially accepts only CBE Birr **Send Money**. Other transaction types go to manual review.                                                          |
-| Age                           | A payment made before the FetanAgent flow may be verified automatically when submitted within one hour of the official transaction time. Older receipts go to manual review. |
+| Age                           | A payment within one hour of the official transaction time may be checked. If its payment instruction expired before submission, accept it for review, not automatic credit. |
 | Multiple references           | If submitted material contains multiple candidate transaction IDs, the customer must select one. FetanAgent must not guess.                                                  |
 | Customer confirmation         | No second confirmation is required after exact verification. The verified amount proceeds automatically to the selected Player ID.                                           |
 | Duplicate customer response   | Say only **This transaction was already used.** Never reveal the other user or Player ID.                                                                                    |
 | Internal duplicate visibility | The Owner and authorized payment-review admins may see the internal user, channel, Player ID, amount, timestamps, and audit history.                                         |
 | Receiver configuration        | The Owner configures one official full name and one wallet/account number per immutable CBE Birr receiver revision. Personal or merchant receiver accounts are supported.    |
+| Instruction lifetime          | An issued instruction and its receiver remain valid for one hour through ordinary receiver rotation. An emergency Owner stop may invalidate the old receiver immediately.    |
 
 ## Trust boundary
 
@@ -52,8 +53,10 @@ must reject malformed or oversized input and must not infer a candidate that is 
 there is exactly one candidate, the flow may continue. When there are several, the customer chooses
 one. When there is none, the customer receives a safe retry message.
 
-For a submitted URL, FetanAgent uses only the extracted transaction ID. It ignores the submitted
-scheme, host, path, phone parameter, query parameters, fragment, and redirects.
+For a submitted URL, FetanAgent accepts only the allowlisted official receipt-link shape and
+extracts the candidate `TID`. In particular, the `PH` selector is not receiver proof: two different
+`PH` values may retrieve the same PDF. The customer-selected URL, host, path, other query
+parameters, fragment, and redirects never select the server fetch target.
 
 ## Official receipt retrieval
 
@@ -81,12 +84,13 @@ account number. Aliases, fuzzy name lists, and silent in-place edits are not all
 
 A change creates a new immutable revision with its activation time, deactivation time, Owner actor,
 reason, and audit record. Earlier revisions remain available for verification history and are never
-rewritten or deleted. The receipt must match the receiver revision that was active at the official
-transaction time using the half-open interval `active_from <= occurred_at < retired_at`; the exact
-rotation instant belongs to the new revision. Gaps or overlaps fail closed to review. Therefore, a
-payment made immediately before a receiver change may still match the previous revision when it is
-submitted within the remaining one-hour freshness window; the new revision must never be applied
-retroactively.
+rewritten or deleted. Each payment instruction snapshots one receiver revision and expires one hour
+after issue. Ordinary rotation gives new instructions the new receiver immediately but keeps the
+old instruction's receiver valid until its own expiry; an audited emergency stop can revoke this
+grace. A receipt for the old receiver cannot be matched to the new revision merely because the
+submission happened after rotation. A payment submitted after its instruction expires is retained
+for review when it falls in the one-hour payment-freshness window, never silently discarded or
+automatically credited under an expired instruction.
 
 For CBE Birr, the returned receiver wallet or account identity is authoritative. The single
 configured full name is a display and diagnostic fact, not a substitute for that stronger identity.
@@ -106,8 +110,9 @@ following without ambiguity:
 8. Service charge, VAT, tip, and every other fee are excluded from the credited amount.
 9. The principal amount is between 25 ETB and 25,000 ETB inclusive.
 10. The provider occurrence time is present, unambiguous, and no more than one hour before the
-    server-recorded submission time. A narrowly bounded provider-clock tolerance may accept a time
-    no more than five minutes ahead; anything else goes to review.
+    server-recorded submission time, and it falls within a still-valid instruction for the matched
+    receiver revision. A narrowly bounded provider-clock tolerance may accept a time no more than
+    five minutes ahead; anything else goes to review.
 11. The selected KemerBet Player ID exists, is active, and is currently deposit-eligible at the
     settlement and execution boundaries.
 12. The canonical provider reference has not already funded or been conclusively claimed by another
@@ -119,10 +124,20 @@ is available.
 
 ## Player-ID selection
 
-If a customer has exactly one saved eligible Player ID, FetanAgent selects it automatically and
-still displays **Deposit to another Player ID**. With multiple saved eligible Player IDs, the
-customer selects one. A different active and eligible Player ID may be entered through **Deposit to
-another Player ID**.
+Each Telegram account has exactly one selected Player ID at a time, reused for repeat deposits.
+**Change Player ID** replaces that selection only after the newly entered ID passes current
+eligibility checks. Changing the selection must not retarget an already-submitted payment or an
+unexpired instruction. Many Telegram accounts may select the same Player ID; selection does not
+prove ownership. The bot's main menu presents **Deposit** and **Change Player ID**. **Withdraw**
+remains hidden until withdrawals are ready.
+
+After a saved ID exists, a direct receipt/reference message may start deposit intake without
+tapping **Deposit**. A clearly provider-specific official link or receipt can select TeleBirr or
+CBE Birr; a bare reference whose format overlaps the providers must not be guessed when both are
+enabled. The bot should ask the customer to choose the payment method. A one-hour payment
+instruction is retired from the conversation when it expires and the main actions return. The
+main actions also return promptly after a definitive approval or rejection, rather than waiting
+for the instruction timeout. These are target behaviors, not currently deployed claims.
 
 FetanAgent deliberately does not prove that the submitting user owns the Player ID and does not
 match the CBE sender to the customer or KemerBet account. Different Telegram and web accounts may
@@ -156,7 +171,7 @@ reconciliation or review.
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Every automatic-verification fact is proven and the global claim succeeds                                                                                                                                       | Continue automatically to guarded settlement and execution |
 | Definitive invalid reference, wrong receiver, failed transaction, or already-used reference                                                                                                                     | Reject with safe customer copy                             |
-| Receipt older than one hour or principal amount outside the supported range                                                                                                                                     | Manual review                                              |
+| Receipt older than one hour, submitted after its instruction expired, or principal amount outside the supported range                                                                                           | Manual review                                              |
 | Unsupported transaction type, pending or unknown status, missing/conflicting field, ambiguous timezone, parser/layout drift, provider outage, timeout, unsafe redirect, or uncertain duplicate/execution result | Manual review and fail closed                              |
 
 Manual review must not silently manufacture missing evidence. Any approval or rejection records the
@@ -208,9 +223,9 @@ reused to simulate this contract. The new proof boundary must preserve the offic
 and derive the applicable receiver revision and amount before the immutable claim is created.
 
 The Telegram and web interfaces must therefore stop requiring an amount for this CBE flow. Existing
-ownership records may remain useful for saved destinations, but ownership must not be a prerequisite
-for depositing to another Player ID. Current Player-ID validity and deposit eligibility remain
-mandatory destination safety checks.
+ownership records must not be reused as the Telegram account's single current Player selection,
+and ownership must not be a prerequisite for selecting a beneficiary. Current Player-ID validity
+and deposit eligibility remain mandatory destination safety checks.
 
 Implementation and rollout must include deterministic redacted fixtures for every accepted input
 form and every failure class; parser/source drift tests; concurrent duplicate-claim tests; exact

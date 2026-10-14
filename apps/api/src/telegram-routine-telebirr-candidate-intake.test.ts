@@ -163,6 +163,20 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     );
   });
 
+  it('canonicalizes mixed-case synthetic references only on the staging route', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    await expect(
+      captureTelegramRoutineTelebirrCandidate(
+        acceptedDatabase(calls),
+        inboundEventId,
+        { ...action, transactionReference: 'fetanTESTREF7890' },
+        config,
+      ),
+    ).resolves.toMatchObject({ outcome: 'telebirr_routine_candidate_recorded_no_money' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.values[5]).toBe('***7890');
+  });
+
   it('protects a real-format production reference without sending plaintext or an amount to SQL', async () => {
     const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
     const realAction = { ...action, transactionReference: 'AB12CD34EF' };
@@ -186,6 +200,25 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
     expect(calls[0]!.values[5]).toBe('***34EF');
     expect(JSON.stringify(calls)).not.toContain(realAction.transactionReference);
     expect(calls[0]!.query).not.toMatch(/execute|settle|transfer|verification_job/iu);
+  });
+
+  it('uses the same protected identity for lowercase, mixed-case, and uppercase references', async () => {
+    const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
+    for (const transactionReference of ['ab12cd34ef', 'Ab12cD34eF', 'AB12CD34EF']) {
+      await expect(
+        captureTelegramRoutineTelebirrCandidate(
+          acceptedDatabase(calls, 'paid_pending'),
+          inboundEventId,
+          { ...action, transactionReference },
+          enabledProductionConfig,
+        ),
+      ).resolves.toMatchObject({ outcome: 'telebirr_routine_candidate_recorded_paid_pending' });
+    }
+    expect(calls).toHaveLength(3);
+    expect(new Set(calls.map(({ values }) => values[4]))).toHaveProperty('size', 1);
+    expect(new Set(calls.map(({ values }) => values[5]))).toEqual(new Set(['***34EF']));
+    expect(new Set(calls.map(({ values }) => values[8]))).toHaveProperty('size', 1);
+    expect(JSON.stringify(calls)).not.toMatch(/ab12cd34ef|Ab12cD34eF|AB12CD34EF/u);
   });
 
   it('returns a confirmed same-customer completed duplicate immediately and nothing private', async () => {
@@ -247,11 +280,10 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
       { action, config: productionConfig },
       { action, config: { ...config, financialActionsMode: 'live' as const } },
       { action: { ...action, transactionReference: 'SYNTB1234567890' }, config },
-      { action: { ...action, transactionReference: 'fetanTESTREF7890' }, config },
       { action: { ...action, providerCode: 'cbe_birr' as const }, config },
       { action, config: enabledProductionConfig },
       {
-        action: { ...action, transactionReference: 'ab12CD34EF' },
+        action: { ...action, transactionReference: 'fetanTESTREF7890' },
         config: enabledProductionConfig,
       },
       {
@@ -260,6 +292,10 @@ describe('dormant routine Telegram TeleBirr candidate adapter', () => {
       },
       {
         action: { ...action, transactionReference: 'AB12CD34ÉF' },
+        config: enabledProductionConfig,
+      },
+      {
+        action: { ...action, transactionReference: 'AB12CD34ſF' },
         config: enabledProductionConfig,
       },
     ];

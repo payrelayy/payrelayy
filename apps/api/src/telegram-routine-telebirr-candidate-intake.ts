@@ -9,7 +9,7 @@ import { createTelegramActionSemanticHmac } from './telegram-action-capability.j
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SYNTHETIC_REFERENCE_PATTERN = /^FETANTEST[A-Z0-9]{4,20}$/u;
-const REAL_REFERENCE_PATTERN = /^[A-Z0-9]{8,32}$/u;
+const ASCII_REFERENCE_PATTERN = /^[A-Za-z0-9]{8,32}$/u;
 
 /** Requires a separate private grant; both candidate routes remain default-off in base config. */
 export const CAPTURE_TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_SQL = `
@@ -47,19 +47,25 @@ async function captureInternal(
   config: ApiConfig,
 ): Promise<TelegramPrivateActionResult> {
   const runtime = config.telegramPlayerActionRuntime;
+  // Validate the original ASCII shape before uppercasing: Unicode case folding can otherwise
+  // turn a non-ASCII lookalike into an accepted reference. Use one canonical value for both the
+  // production/staging boundary and the protected duplicate fingerprint.
+  const referenceIsAscii = ASCII_REFERENCE_PATTERN.test(action.transactionReference);
+  const normalizedReference = referenceIsAscii ? action.transactionReference.toUpperCase() : '';
   const stagingCandidate =
     config.financialActionsMode === 'dry_run' &&
     runtime.enabled &&
     runtime.routineTelebirrCandidateStagingEnabled &&
     runtime.deploymentTarget === 'staging' &&
-    SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference);
+    referenceIsAscii &&
+    SYNTHETIC_REFERENCE_PATTERN.test(normalizedReference);
   const productionCandidate =
     runtime.enabled &&
     runtime.routineTelebirrCandidateProductionEnabled &&
     runtime.deploymentTarget === 'production' &&
     (config.financialActionsMode === 'dry_run' || config.financialActionsMode === 'live') &&
-    REAL_REFERENCE_PATTERN.test(action.transactionReference) &&
-    !SYNTHETIC_REFERENCE_PATTERN.test(action.transactionReference);
+    referenceIsAscii &&
+    !SYNTHETIC_REFERENCE_PATTERN.test(normalizedReference);
   if (
     !config.telegramActionCapability.enabled ||
     !runtime.enabled ||
@@ -75,7 +81,7 @@ async function captureInternal(
 
   const protectedReference = protectDepositProofReference({
     provider: 'telebirr',
-    reference: action.transactionReference,
+    reference: normalizedReference,
     secrets: {
       encryptionSecret: runtime.depositProofReferenceEncryptionMasterSecret,
       fingerprintSecret: runtime.depositProofReferenceFingerprintMasterSecret,

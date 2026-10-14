@@ -21,9 +21,12 @@ const prefix = '/deposit telebirr PLAYER-DEMO-42 ';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Telegram amount-free TeleBirr proof input', () => {
-  it.each(['telebirr', 'cbe_birr'] as const)(
-    'preserves the established %s direct-reference action for exact delivery retries',
-    (providerCode) => {
+  it.each([
+    { providerCode: 'telebirr', expectedReference: 'SYNTB00000001' },
+    { providerCode: 'cbe_birr', expectedReference: 'syntb00000001' },
+  ] as const)(
+    'canonicalizes the $providerCode direct-reference action only where supported',
+    ({ providerCode, expectedReference }) => {
       const command = `/deposit ${providerCode} PLAYER-DEMO-42 syntb00000001`;
       const expected = {
         version: 1,
@@ -34,7 +37,7 @@ describe('Telegram amount-free TeleBirr proof input', () => {
         preferredLocale: 'en',
         providerCode,
         playerId: 'PLAYER-DEMO-42',
-        transactionReference: 'syntb00000001',
+        transactionReference: expectedReference,
       };
       expect(reduceTelegramDepositProofSubmission({ ...metadata, command })).toEqual({
         kind: 'action',
@@ -82,10 +85,10 @@ describe('Telegram amount-free TeleBirr proof input', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('accepts a pasted direct TeleBirr ID with surrounding whitespace without changing its case', () => {
-    expect(reduceTelegramDepositProofInput('telebirr', ' \nsyntb00000001\r\n')).toEqual({
+  it('canonicalizes a pasted TeleBirr ID with surrounding whitespace or mixed case', () => {
+    expect(reduceTelegramDepositProofInput('telebirr', ' \nsyntB00000001\r\n')).toEqual({
       kind: 'candidate',
-      transactionReference: 'syntb00000001',
+      transactionReference: 'SYNTB00000001',
     });
   });
 

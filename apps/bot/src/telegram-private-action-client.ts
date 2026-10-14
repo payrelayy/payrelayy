@@ -79,6 +79,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'credited',
       'rejected',
       'wrong_receiver',
+      'invalid_reference',
       'not_credited',
       'not_verified',
       'already_used',

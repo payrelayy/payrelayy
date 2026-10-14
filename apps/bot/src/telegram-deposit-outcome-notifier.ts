@@ -58,6 +58,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
       'If money left your wallet, do not pay again. Contact support with the reference.',
     ].join('\n');
   }
+  if (delivery.outcomeCode === 'invalid_reference') {
+    return [
+      '❌ Invalid TeleBirr reference',
+      `The official receipt page did not recognize the reference ending ${delivery.referenceMasked.slice(-4)}. No Player credit was made.`,
+      'Check the reference. If money left your wallet, do not pay again—contact support.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'rejected') {
     return [
       '❌ Deposit not credited',

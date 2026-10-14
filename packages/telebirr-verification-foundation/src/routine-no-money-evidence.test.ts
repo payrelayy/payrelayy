@@ -482,6 +482,57 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     ).not.toHaveProperty('terminalReasonCode');
   });
 
+  it('treats only the exact signed official invalid-page profile as a terminal rejection', () => {
+    const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
+      fixture(true);
+    const negativeFacts = {
+      ...facts,
+      amountMinor: 0,
+      canonicalReferencePresent: false,
+      creditedPartyNameDigest: sha('0'),
+      currencyCode: 'unknown',
+      occurredAt: facts.retrievedAt,
+      paymentChannel: 'unknown',
+      paymentMode: 'unknown',
+      paymentReason: 'unknown',
+      providerFinalStatus: 'unknown',
+      receiverMatch: 'unknown',
+      referenceMatch: 'unknown',
+    };
+    const negativeBody = {
+      ...observationBody(negativeFacts),
+      sourceDocumentDigest:
+        'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+    };
+    const negative = signedObservation(negativeBody, deviceKey.privateKey);
+    const paid = { ...input, trustedIssuanceMode: 'paid', signedObservation: negative };
+    expect(assessRoutineTelebirrPaidPhoneEvidence(paid, signerSpki, deviceSpki)).toMatchObject({
+      disposition: 'review',
+      terminalReview: true,
+      terminalReasonCode: 'explicit_invalid_reference',
+      financialActionAllowed: false,
+      evidence: null,
+    });
+    const lookalike = signedObservation(
+      { ...negativeBody, sourceDocumentDigest: sha('e') },
+      deviceKey.privateKey,
+    );
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: lookalike },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).not.toHaveProperty('terminalReview');
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...paid, signedObservation: { ...negative, signature: 'A'.repeat(86) } },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).not.toHaveProperty('terminalReview');
+  });
+
   it('rejects a valid phone observation once its receipt is one hour old', () => {
     const {
       input,

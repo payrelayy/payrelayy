@@ -137,6 +137,7 @@ export type TelegramPrivateActionResult =
         | 'credited'
         | 'rejected'
         | 'wrong_receiver'
+        | 'invalid_reference'
         | 'not_credited'
         | 'not_verified'
         | 'already_used';

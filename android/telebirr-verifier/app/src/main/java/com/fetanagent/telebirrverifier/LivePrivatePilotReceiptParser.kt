@@ -57,6 +57,12 @@ class LivePrivatePilotReceiptParser {
     receiverNameDigest: (String) -> String?,
   ): LivePilotParsedProviderObservation =
     when (document) {
+      is ProviderDocument.ExplicitInvalidReference ->
+        review(
+          sourceDocumentDigest = document.sourceDocumentDigest,
+          reason = "explicit_invalid_reference",
+          retrievedAt = document.retrievedAt,
+        )
       is ProviderDocument.NotFound ->
         review(
           sourceDocumentDigest = document.sourceDocumentDigest,

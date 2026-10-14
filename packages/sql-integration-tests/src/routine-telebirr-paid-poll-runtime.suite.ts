@@ -22,7 +22,7 @@ async function asRuntime<T>(client: Client, work: () => Promise<T>): Promise<T> 
 
 export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => Client): void {
   describe('separate paid TeleBirr phone poll runtime boundary', () => {
-    it('keeps signed wrong-receiver evidence private and tied to seven-day retention', async () => {
+    it('keeps signed terminal negatives private and tied to seven-day retention', async () => {
       const client = getClient();
       const table = await client.query<{
         owner: string;
@@ -48,10 +48,22 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       ]);
       const source = await client.query<{ body: string }>(
         `select pg_catalog.pg_get_functiondef(
-          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)'::regprocedure) as body`,
+          'app.record_routine_telebirr_paid_terminal_result(uuid,jsonb)'::regprocedure) as body`,
       );
       expect(source.rows[0]?.body).toContain("feature_switch.mode = 'live'");
-      expect(source.rows[0]?.body).toContain("'wrong_receiver', null");
+      expect(source.rows[0]?.body).toContain("'explicit_invalid_reference'");
+      expect(source.rows[0]?.body).toContain("'invalid_reference'");
+      const constraints = await client.query<{ name: string; definition: string }>(`
+        select conname as name, pg_catalog.pg_get_constraintdef(oid) as definition
+          from pg_catalog.pg_constraint
+         where conrelid = 'app.routine_telebirr_paid_terminal_rejections'::regclass
+           and conname in ('routine_paid_terminal_signed_shape',
+             'routine_telebirr_paid_terminal_rejections_reason_code_check')
+         order by conname`);
+      expect(constraints.rows).toHaveLength(2);
+      expect(
+        constraints.rows.every((row) => row.definition.includes('explicit_invalid_reference')),
+      ).toBe(true);
     });
 
     it('cannot place one candidate in another lane while its first upload is still acceptable', async () => {
@@ -135,7 +147,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         'issue_routine_telebirr_paid_poll_assignment',
         'load_routine_telebirr_paid_observation_material',
         'load_routine_telebirr_paid_poll_enrollment',
-        'record_routine_telebirr_paid_wrong_receiver',
+        'record_routine_telebirr_paid_terminal_result',
         'stage_routine_telebirr_paid_signed_observation',
       ]);
       const baseAccess = await client.query<{ accessible: string }>(
@@ -181,10 +193,10 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
           'EXECUTE') as no_money_paid_stage,
         pg_catalog.has_function_privilege('public',
-          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)',
+          'app.record_routine_telebirr_paid_terminal_result(uuid,jsonb)',
           'EXECUTE') as public_wrong_receiver,
         pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
-          'app.record_routine_telebirr_paid_wrong_receiver(uuid,jsonb)',
+          'app.record_routine_telebirr_paid_terminal_result(uuid,jsonb)',
           'EXECUTE') as no_money_wrong_receiver`);
       expect(access.rows).toEqual([
         {
@@ -219,7 +231,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             'load_routine_telebirr_paid_observation_material',
             'classify_routine_telebirr_paid_upload_terminal',
             'stage_routine_telebirr_paid_signed_observation',
-            'record_routine_telebirr_paid_wrong_receiver',
+            'record_routine_telebirr_paid_terminal_result',
           ],
         ],
       );

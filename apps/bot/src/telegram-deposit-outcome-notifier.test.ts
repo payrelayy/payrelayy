@@ -145,6 +145,20 @@ describe('Telegram deposit outcome notifier', () => {
     expect(wrongReceiver).not.toContain('30.00');
   });
 
+  it('gives an explicit invalid-reference result without claiming money moved', () => {
+    const invalid = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'invalid_reference',
+      amountMinor: null,
+    });
+    expect(invalid).toContain('Invalid TeleBirr reference');
+    expect(invalid).toContain('official receipt page did not recognize');
+    expect(invalid).toContain('No Player credit was made');
+    expect(invalid).toContain('1A2B');
+    expect(invalid).not.toContain('30.00');
+    expect(invalid).not.toContain('fake');
+  });
+
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,

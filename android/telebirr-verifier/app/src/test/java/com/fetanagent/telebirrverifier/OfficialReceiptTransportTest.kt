@@ -3,6 +3,7 @@ package com.fetanagent.telebirrverifier
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Base64
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLParameters
@@ -14,6 +15,63 @@ import org.junit.Test
 
 class OfficialReceiptTransportTest {
   private val publicResolver = HostResolver { _, _ -> listOf(InetAddress.getByName("8.8.8.8")) }
+
+  // The public 305-byte error page captured on 2026-10-14; no receipt or personal data.
+  private val explicitInvalidPage = Base64.getDecoder().decode(
+    "PCFET0NUWVBFIGh0bWw+DQo8aHRtbCBsYW5nPSJlbiI+DQo8aGVhZHI+DQo8L2hlYWRlcj4NCjxib2R5Pg0KICAgIDxkaXYgc3R5bGU9IndpZHRoOjEwMCU7IGhlaWdodDo1MHB4OyBiYWNrZ3JvdW5kLWNvbG9yOnJnYigyNDMsIDI0MSwgMjQxKTsgYm9yZGVyOjFweCBzb2xpZCByZ2IoMTk2LCAxODksIDE4OSk7IHRleHQtYWxpZ246IGNlbnRlcjsgdmVydGljYWwtYWxpZ246IG1pZGRsZTsgcGFkZGluZy10b3A6IDMwcHg7Ij4NClRoaXMgcmVxdWVzdCBpcyBub3QgY29ycmVjdHR0dHR0DQogICAgPC9kaXY+DQo8L2JvZHk+DQo8aHRtbD4="
+  )
+
+  @Test
+  fun `only two identical official error pages identify an invalid reference`() {
+    var calls = 0
+    val transport = SafeOfficialReceiptTransport(
+      resolver = publicResolver,
+      exchange = HttpsExchange { _, _, _, _, _ ->
+        calls += 1
+        RawHttpsResponse(200, "text/html; charset=utf-8", null, explicitInvalidPage)
+      },
+      clock = MillisClock { 1_778_000_000_000L },
+    )
+
+    val result = transport.retrieve(route()) as ProviderDocument.ExplicitInvalidReference
+    assertEquals(2, calls)
+    assertEquals(SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST,
+      result.sourceDocumentDigest)
+    assertEquals(ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+      result.originAttestation)
+  }
+
+  @Test
+  fun `one error page followed by a receipt is not a rejection`() {
+    var calls = 0
+    val transport = SafeOfficialReceiptTransport(
+      resolver = publicResolver,
+      exchange = HttpsExchange { _, _, _, _, _ ->
+        calls += 1
+        RawHttpsResponse(200, "text/html; charset=utf-8", null,
+          if (calls == 1) explicitInvalidPage else officialHtml().toByteArray())
+      },
+      clock = MillisClock { 1_778_000_000_000L },
+    )
+    assertTrue(transport.retrieve(route()) is ProviderDocument.Found)
+    assertEquals(2, calls)
+  }
+
+  @Test
+  fun `error lookalikes and session pages never become explicit invalid results`() {
+    val nearMatch = explicitInvalidPage.copyOf().also { it[it.lastIndex] = '!'.code.toByte() }
+    for (response in listOf(
+      RawHttpsResponse(200, "text/html; charset=utf-8", null, nearMatch),
+      RawHttpsResponse(200, "text/html; charset=utf-8", null, explicitInvalidPage,
+        setCookieHeader = true),
+    )) {
+      val transport = SafeOfficialReceiptTransport(
+        resolver = publicResolver,
+        exchange = HttpsExchange { _, _, _, _, _ -> response },
+      )
+      assertFalse(transport.retrieve(route()) is ProviderDocument.ExplicitInvalidReference)
+    }
+  }
 
   @Test
   fun `pins the official hostname for verification during TLS handshake`() {

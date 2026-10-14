@@ -112,7 +112,7 @@ function fixture() {
     loadObservationMaterial: vi.fn(async () => row),
     classifyTerminal: vi.fn(async () => false),
     stageObservation: vi.fn(async () => 'recorded'),
-    recordReceiverMismatch: vi.fn(async () => 'recorded'),
+    recordTerminalRejection: vi.fn(async () => 'recorded'),
   };
   const signer = {
     assignmentSignerId: ids.signer,
@@ -197,24 +197,24 @@ describe('private routine paid poll broker core', () => {
     const f = fixture();
     const signedObservation = { bodyDigest: f.row.challenge_digest };
     expect(
-      await f.broker.recordReceiverMismatch({
+      await f.broker.recordTerminalRejection({
         challengeId: ids.challenge,
         signedObservation,
       }),
     ).toBe('recorded');
-    expect(f.database.recordReceiverMismatch).toHaveBeenCalledWith({
+    expect(f.database.recordTerminalRejection).toHaveBeenCalledWith({
       challengeId: ids.challenge,
       signedObservation,
     });
     await expect(
-      f.broker.recordReceiverMismatch({
+      f.broker.recordTerminalRejection({
         challengeId: 'invalid',
         signedObservation,
       }),
     ).rejects.toBeInstanceOf(RoutinePaidPollBrokerUnavailableError);
-    f.database.recordReceiverMismatch = vi.fn(async () => 'unexpected');
+    f.database.recordTerminalRejection = vi.fn(async () => 'unexpected');
     await expect(
-      f.broker.recordReceiverMismatch({
+      f.broker.recordTerminalRejection({
         challengeId: ids.challenge,
         signedObservation,
       }),

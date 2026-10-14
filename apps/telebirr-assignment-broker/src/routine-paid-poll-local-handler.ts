@@ -112,7 +112,7 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
     typeof broker.loadObservation !== 'function' ||
     typeof broker.classifyTerminal !== 'function' ||
     typeof broker.stageObservation !== 'function' ||
-    typeof broker.recordReceiverMismatch !== 'function'
+    typeof broker.recordTerminalRejection !== 'function'
   )
     throw new Error();
   return async (
@@ -258,7 +258,7 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
         });
         return response(200, { kind: staged });
       }
-      if (value.operation === 'record_receiver_mismatch') {
+      if (value.operation === 'record_terminal_rejection') {
         if (
           !exact(input, ['challengeId', 'signedObservation']) ||
           typeof input.challengeId !== 'string' ||
@@ -277,7 +277,7 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
           ])
         )
           return response(400, { code: 'invalid_request' });
-        const recorded = await broker.recordReceiverMismatch({
+        const recorded = await broker.recordTerminalRejection({
           challengeId: input.challengeId,
           signedObservation: input.signedObservation,
         });

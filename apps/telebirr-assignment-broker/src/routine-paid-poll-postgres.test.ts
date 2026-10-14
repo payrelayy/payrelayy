@@ -52,11 +52,11 @@ describe('signed wrong-receiver result', () => {
     const query = vi.fn(async () => ({ rows: [{ status: 'recorded' }] }));
     const database = createRoutinePaidPollPostgresDatabase({ query });
     const signedObservation = { bodyDigest: challengeDigest };
-    expect(await database.recordReceiverMismatch({ challengeId, signedObservation })).toBe(
+    expect(await database.recordTerminalRejection({ challengeId, signedObservation })).toBe(
       'recorded',
     );
     expect(query).toHaveBeenCalledWith(
-      'select app.record_routine_telebirr_paid_wrong_receiver($1::uuid,$2::jsonb) as status',
+      'select app.record_routine_telebirr_paid_terminal_result($1::uuid,$2::jsonb) as status',
       [challengeId, JSON.stringify(signedObservation)],
     );
   });
@@ -65,7 +65,7 @@ describe('signed wrong-receiver result', () => {
     for (const rows of [[], [{ status: 'recorded', extra: true }], [{ result: 'recorded' }]]) {
       const database = createRoutinePaidPollPostgresDatabase({ query: async () => ({ rows }) });
       await expect(
-        database.recordReceiverMismatch({ challengeId, signedObservation: {} }),
+        database.recordTerminalRejection({ challengeId, signedObservation: {} }),
       ).rejects.toBeInstanceOf(RoutinePaidPollSqlUnavailableError);
     }
   });

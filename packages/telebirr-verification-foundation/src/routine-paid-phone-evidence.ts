@@ -37,7 +37,8 @@ export type RoutineTelebirrPaidPhoneAssessment =
       evidence: null;
       /** Only an authenticated, immutable receipt mismatch can retire this sealed upload. */
       terminalReview?: true;
-      terminalReasonCode?: 'receiver_mismatch' | 'reference_mismatch' | 'old_receipt';
+      terminalReasonCode?:
+        'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | 'explicit_invalid_reference';
     }>
   | Readonly<{
       disposition: 'paid_phone_observation_matches_policy';
@@ -58,6 +59,11 @@ const INPUT_KEYS = [
 ] as const;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
+// The exact public, 305-byte official HTML error page observed on 2026-10-14.
+// A changed page is review-only until its negative profile is re-evaluated.
+const EXPLICIT_INVALID_PAGE_DIGEST =
+  'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2';
+const NO_RECEIVER_DIGEST = `sha256:${'0'.repeat(64)}`;
 
 function utc(value: unknown): value is string {
   if (typeof value !== 'string' || !UTC.test(value)) return false;
@@ -67,7 +73,12 @@ function utc(value: unknown): value is string {
 
 function review(
   reasonCode: string,
-  terminalReasonCode: 'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | null = null,
+  terminalReasonCode:
+    | 'receiver_mismatch'
+    | 'reference_mismatch'
+    | 'old_receipt'
+    | 'explicit_invalid_reference'
+    | null = null,
 ): RoutineTelebirrPaidPhoneAssessment {
   return Object.freeze({
     disposition: 'review',
@@ -81,14 +92,38 @@ function review(
 function immutableReceiptMismatch(
   lookupCandidate: unknown,
   observationCandidate: unknown,
-): 'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | null {
+):
+  'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | 'explicit_invalid_reference' | null {
   if (!isPlainNonProxyRecord(lookupCandidate) || !isPlainNonProxyRecord(observationCandidate))
     return null;
   const body = ownDataValue(observationCandidate, 'body');
-  const facts = isPlainNonProxyRecord(body) && ownDataValue(body, 'facts');
+  if (!isPlainNonProxyRecord(body)) return null;
+  const facts = ownDataValue(body, 'facts');
   if (!isPlainNonProxyRecord(facts)) return null;
   const submittedAt = ownDataValue(lookupCandidate, 'submittedAt');
   const occurredAt = ownDataValue(facts, 'occurredAt');
+  const retrievedAt = ownDataValue(facts, 'retrievedAt');
+  if (
+    ownDataValue(body, 'contractVersion') === 2 &&
+    ownDataValue(body, 'sourceDocumentDigest') === EXPLICIT_INVALID_PAGE_DIGEST &&
+    ownDataValue(facts, 'sourceOriginAttestation') === 'official_tls_origin' &&
+    ownDataValue(facts, 'sourceProfile') === 'telebirr_official_receipt_v1' &&
+    ownDataValue(facts, 'amountMinor') === 0 &&
+    ownDataValue(facts, 'canonicalReferencePresent') === false &&
+    ownDataValue(facts, 'creditedPartyNameDigest') === NO_RECEIVER_DIGEST &&
+    ownDataValue(facts, 'currencyCode') === 'unknown' &&
+    ownDataValue(facts, 'evidenceSource') === 'provider_receipt_lookup' &&
+    occurredAt === retrievedAt &&
+    retrievedAt === ownDataValue(body, 'observedAt') &&
+    ownDataValue(facts, 'paymentChannel') === 'unknown' &&
+    ownDataValue(facts, 'paymentMode') === 'unknown' &&
+    ownDataValue(facts, 'paymentReason') === 'unknown' &&
+    ownDataValue(facts, 'providerFinalStatus') === 'unknown' &&
+    ownDataValue(facts, 'providerIdentity') === 'matched' &&
+    ownDataValue(facts, 'receiverMatch') === 'unknown' &&
+    ownDataValue(facts, 'referenceMatch') === 'unknown'
+  )
+    return 'explicit_invalid_reference';
   if (ownDataValue(facts, 'referenceMatch') === 'mismatched') return 'reference_mismatch';
   if (
     ownDataValue(facts, 'referenceMatch') === 'matched' &&

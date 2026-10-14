@@ -244,10 +244,10 @@ export function createRoutinePaidUploadLocalAdapter(
         throw new Error();
       return value.kind;
     },
-    async recordReceiverMismatch(
-      input: Parameters<RoutinePaidUploadBridgeDependencies['recordReceiverMismatch']>[0],
+    async recordTerminalRejection(
+      input: Parameters<RoutinePaidUploadBridgeDependencies['recordTerminalRejection']>[0],
     ) {
-      const value = await wire('record_receiver_mismatch', input);
+      const value = await wire('record_terminal_rejection', input);
       if (
         !exact(value, ['kind']) ||
         (value.kind !== 'recorded' && value.kind !== 'exact_replay' && value.kind !== 'conflict')

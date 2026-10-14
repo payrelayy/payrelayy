@@ -38,6 +38,7 @@ import { registerPrivateLiveMoneyPilotSqlTests } from './private-live-money-pilo
 import { registerPrivateLiveExecutionActivationEpochSqlTests } from './private-live-execution-activation-epoch.suite.js';
 import { registerPrivateLiveTelebirrProofLineageSqlTests } from './private-live-telebirr-proof-lineage.suite.js';
 import { registerPublicTelegramActionOnboardingSqlTests } from './public-telegram-action-onboarding.suite.js';
+import { registerTelegramSavedPlayerSelectionSqlTests } from './telegram-saved-player-selection.suite.js';
 import { registerReviewedSourceBindingShadowWindowRetrySqlTests } from './reviewed-source-binding-shadow-window-retry.suite.js';
 import { registerStagingContinuousAvailabilitySqlTests } from './staging-continuous-availability.suite.js';
 import { registerStoppedPilotPaidExecutionReviewSqlTests } from './stopped-pilot-paid-execution-review.suite.js';
@@ -1163,12 +1164,14 @@ describe('disposable SQL migration baseline', () => {
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
       'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
+      'app.get_telegram_saved_player_selection(uuid)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
       'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
+      'app.save_telegram_player_selection(uuid,text)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
       'app.submit_telegram_player_registration_input(uuid,text,text)',
     ]);
@@ -9946,6 +9949,7 @@ registerTrustedTelebirrVerifierRuntimeSqlTests(
   () => ownerAdminId,
 );
 registerPublicTelegramActionOnboardingSqlTests(() => client);
+registerTelegramSavedPlayerSelectionSqlTests(() => client);
 registerStagingContinuousAvailabilitySqlTests(() => client);
 registerStagingTelebirrShadowVerifierLifecycleSqlTests(
   () => client,

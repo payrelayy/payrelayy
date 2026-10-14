@@ -245,7 +245,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     },
   );
 
-  it('does not download media from an unprompted message or a group', async () => {
+  it('accepts a private direct receipt but never downloads from a group', async () => {
     await loadComposition(false, true);
     const context = messageContext('');
     await runtime.messageHandler!({
@@ -267,7 +267,34 @@ describe('Telegram admission, private action, and ingress composition', () => {
         },
       },
     });
-    expect(runtime.mediaReads).toHaveLength(0);
+    expect(runtime.mediaReads).toHaveLength(1);
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_telebirr_proof_command',
+        transactionReference: 'SYNTB00000001',
+      }),
+    ]);
+  });
+
+  it('submits a direct TeleBirr reference using the saved-Player action', async () => {
+    await loadComposition(false, true);
+    const context = messageContext('syntb00000001');
+    await runtime.messageHandler!(context);
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_telebirr_proof_command',
+        transactionReference: 'SYNTB00000001',
+      }),
+    ]);
+  });
+
+  it('does not route a clearly CBE Birr receipt into TeleBirr', async () => {
+    await loadComposition(false, true);
+    const context = messageContext('CBE Birr receipt Txn ID TESTCBE123456');
+    await runtime.messageHandler!(context);
+    expect(context.replies).toEqual([
+      expect.stringContaining('CBE Birr deposits are not available'),
+    ]);
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
@@ -381,7 +408,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('For app or account-access help, use /support.');
-    expect(context.replies[0]).toContain('Tap /menu, then 💰 Make a deposit');
+    expect(context.replies[0]).toContain('Save your KemerBet Player ID once');
     expect(context.replies[0]).toContain('/deposit_status');
   });
 
@@ -476,6 +503,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       version: 1,
       outcome: 'menu',
       callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: null,
     };
     const context = messageContext('/menu');
     let keyboard: { buttons: { text: string; callbackData: string }[] } | undefined;
@@ -490,8 +518,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(context.replies[0]).toContain('Welcome to FetanAgent');
     expect(keyboard?.buttons).toEqual([
       { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
+      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
       {
-        text: '🎮 Add Player ID',
+        text: '➕ Request Player ID review',
         callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
       },
     ]);
@@ -548,6 +577,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     'opens the same Force Reply deposit prompt from the %s entry point',
     async (entryPoint) => {
       await loadComposition(false, true);
+      runtime.actionResult = { version: 1, outcome: 'player_selection_missing' };
       const replies: { text: string; options?: unknown }[] = [];
       const reply = async (text: string, options?: unknown) => {
         replies.push({ text, options });
@@ -579,22 +609,19 @@ describe('Telegram admission, private action, and ingress composition', () => {
           },
         },
       ]);
-      expect(runtime.actionDeliveries).toHaveLength(0);
+      expect(runtime.actionDeliveries).toEqual([
+        expect.objectContaining({ kind: 'saved_telebirr_destination_command' }),
+      ]);
       expect(runtime.ingressDeliveries).toHaveLength(0);
     },
   );
 
-  it('selects one Player ID and presents clear TeleBirr payment details', async () => {
+  it('saves one Player ID and offers Deposit without starting payment', async () => {
     await loadComposition(false, true);
     runtime.actionResult = {
       version: 1,
-      outcome: 'telebirr_deposit_destination',
-      providerCode: 'telebirr',
-      providerName: 'TeleBirr',
-      receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
-      receiverAccountMasked: '***0042',
-      acceptsPayments: true,
+      outcome: 'player_selection_saved',
+      playerId: 'PLAYER-DEMO-42',
     };
     const context = messageContext('PLAYER-DEMO-42');
     const replies: { text: string; options?: unknown }[] = [];
@@ -615,7 +642,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toEqual([
       {
         version: 1,
-        kind: 'telebirr_deposit_destination_command',
+        kind: 'save_player_selection_command',
         updateId: '123456',
         telegramUserId: '123456789',
         privateChatId: '123456789',
@@ -623,22 +650,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
         playerId: 'PLAYER-DEMO-42',
       },
     ]);
-    expect(replies).toEqual([
-      {
-        text: buildTelegramTelebirrPaymentPrompt({
-          playerId: 'PLAYER-DEMO-42',
-          receiverAccountHolderName: 'Demo Receiver',
-          receiverAccountReference: '0000000042',
-        }),
-        options: {
-          reply_markup: {
-            force_reply: true,
-            selective: true,
-            input_field_placeholder: 'TeleBirr transaction number',
-          },
-        },
-      },
-    ]);
+    expect(replies[0]?.text).toContain('Player ID PLAYER-DEMO-42 saved');
+    expect(replies[0]?.options).toBeDefined();
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
@@ -781,9 +794,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain(
-      'FetanAgent will show the receiver name and wallet number',
-    );
+    expect(context.replies[0]).toContain('Tap Deposit to see the current TeleBirr receiver');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -909,8 +920,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('Tap /menu, then 💰 Make a deposit');
-    expect(context.replies[0]).toContain('reply with the TeleBirr transaction number');
+    expect(context.replies[0]).toContain('Save your KemerBet Player ID once');
+    expect(context.replies[0]).toContain('send the transaction number');
     expect(context.replies[0]).toContain('/deposit_status');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

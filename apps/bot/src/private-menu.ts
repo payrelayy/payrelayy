@@ -1,6 +1,7 @@
 import { parseTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 
 import {
+  TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
@@ -21,20 +22,30 @@ export interface PrivateTelegramMenu {
  * callback below has no authority: it only opens a local reply prompt, and the completed input
  * still crosses the existing authenticated API and database boundary.
  */
-export function renderPlayerRegistrationMenu(capabilityCallbackData: string): PrivateTelegramMenu {
+export function renderPlayerRegistrationMenu(
+  capabilityCallbackData: string,
+  selectedPlayerId: string | null = null,
+): PrivateTelegramMenu {
   if (!parseTelegramPlayerRegistrationCapabilityCallback(capabilityCallbackData)) {
     throw new Error('The Player ID menu requires a valid opaque capability callback.');
   }
 
   return {
-    text: TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
+    text:
+      selectedPlayerId === null
+        ? `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\n\nNo Player ID saved yet.`
+        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\n\n🎮 Player ID: ${selectedPlayerId}`,
     buttons: [
       {
         text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
         callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
       },
       {
-        text: '🎮 Add Player ID',
+        text: selectedPlayerId === null ? '🎮 Set Player ID' : '🔄 Change Player ID',
+        callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
+      },
+      {
+        text: '➕ Request Player ID review',
         callbackData: capabilityCallbackData,
       },
     ],

@@ -44,8 +44,9 @@ describe('Telegram deposit outcome notifier', () => {
     const result = await processOneTelegramDepositOutcome(
       dependencies(
         delivery,
-        async (chatId, text) => {
+        async (chatId, text, showDepositButton) => {
           expect(chatId).toBe(123456789);
+          expect(showDepositButton).toBe(true);
           messages.push(text);
           return { message_id: 42 };
         },
@@ -99,6 +100,20 @@ describe('Telegram deposit outcome notifier', () => {
     expect(waiting).toContain('1A2B');
     expect(waiting).not.toContain('30.00');
     expect(waiting).not.toContain('Deposit complete');
+  });
+
+  it('does not offer another deposit as the final action while a credit is still waiting', async () => {
+    const actions: TelegramPrivateActionEnvelope[] = [];
+    await processOneTelegramDepositOutcome(
+      dependencies(
+        { ...delivery, outcomeCode: 'verified_waiting', amountMinor: null },
+        async (_chatId, _text, showDepositButton) => {
+          expect(showDepositButton).toBe(false);
+          return { message_id: 43 };
+        },
+        actions,
+      ),
+    );
   });
 
   it('gives an early non-final status without calling an unverified reference rejected', () => {

@@ -12,7 +12,11 @@ type Delivery = Extract<
 
 export interface TelegramDepositOutcomeNotifierDependencies {
   readonly request: (action: TelegramPrivateActionEnvelope) => Promise<TelegramPrivateActionResult>;
-  readonly send: (privateChatId: number, text: string) => Promise<{ readonly message_id: number }>;
+  readonly send: (
+    privateChatId: number,
+    text: string,
+    showDepositButton: boolean,
+  ) => Promise<{ readonly message_id: number }>;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -134,6 +138,7 @@ export async function processOneTelegramDepositOutcome(
     const sent = await dependencies.send(
       Number(claimed.privateChatId),
       presentTelegramDepositOutcome(claimed),
+      claimed.outcomeCode !== 'checking' && claimed.outcomeCode !== 'verified_waiting',
     );
     if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) {
       throw new Error('Telegram returned no valid message ID.');

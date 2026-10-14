@@ -6,7 +6,12 @@ import {
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
-import { buildTelegramTelebirrPaymentPrompt } from './telegram-guided-deposit.js';
+import {
+  buildTelegramTelebirrPaymentPrompt,
+  TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
+  TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+} from './telegram-guided-deposit.js';
 
 export type TelegramPlayerIdFlowPresentation =
   | { readonly kind: 'menu'; readonly menu: PrivateTelegramMenu }
@@ -22,8 +27,8 @@ export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
 
 /**
  * Maps the API's deliberately small, non-sensitive result union to English-only Telegram copy.
- * Only the compact tracking handle is shown; raw database UUIDs, Player IDs and credentials are
- * excluded from customer text.
+ * Only the compact tracking handle is shown for payment state. The customer's selected Player ID
+ * may be echoed in their private chat; raw database UUIDs and credentials are excluded.
  */
 export function presentTelegramPlayerIdFlowResult(
   result: TelegramPrivateActionResult,
@@ -37,7 +42,27 @@ export function presentTelegramPlayerIdFlowResult(
         'A bot-only notification operation cannot be presented as a customer action.',
       );
     case 'menu':
-      return { kind: 'menu', menu: renderPlayerRegistrationMenu(result.callbackData) };
+      return {
+        kind: 'menu',
+        menu: renderPlayerRegistrationMenu(result.callbackData, result.selectedPlayerId),
+      };
+    case 'player_selection_missing':
+      return {
+        kind: 'force_reply',
+        text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+        placeholder: 'KemerBet Player ID',
+      };
+    case 'player_selection_saved':
+      return {
+        kind: 'menu',
+        menu: {
+          text: `✅ Player ID ${result.playerId} saved. Future deposits will use it until you change it.`,
+          buttons: [
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
+            { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
+          ],
+        },
+      };
     case 'awaiting_player_id':
       return { kind: 'message', text: message(DEFAULT_LOCALE, 'enterKemerBetPlayerId') };
     case 'player_id_pending':
@@ -58,7 +83,8 @@ export function presentTelegramPlayerIdFlowResult(
         ].join('\n'),
       };
     case 'telebirr_deposit_destination_review': {
-      if (!context.selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
+      const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
+      if (!selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
       return {
         kind: 'message',
         text: [
@@ -68,7 +94,7 @@ export function presentTelegramPlayerIdFlowResult(
           `👤 Name: ${result.receiverAccountHolderName}`,
           `📱 Number: ${result.receiverAccountReference}`,
           '',
-          `🎮 KemerBet Player ID: ${context.selectedPlayerId}`,
+          `🎮 KemerBet Player ID: ${selectedPlayerId}`,
           '💵 Amount: 25 ETB',
           '',
           'NO PAYMENT YET.',
@@ -78,11 +104,12 @@ export function presentTelegramPlayerIdFlowResult(
       };
     }
     case 'telebirr_deposit_destination': {
-      if (!context.selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
+      const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
+      if (!selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
       return {
         kind: 'force_reply',
         text: buildTelegramTelebirrPaymentPrompt({
-          playerId: context.selectedPlayerId,
+          playerId: selectedPlayerId,
           receiverAccountHolderName: result.receiverAccountHolderName,
           receiverAccountReference: result.receiverAccountReference,
         }),
@@ -163,20 +190,26 @@ export function presentTelegramPlayerIdFlowResult(
       };
     case 'telebirr_routine_candidate_recorded_paid_pending':
       return {
-        kind: 'message',
-        text: [
-          '🔎 TeleBirr reference received. We’re checking the payment.',
-          'This submission has not credited a Player account. We’ll send an update here.',
-        ].join('\n'),
+        kind: 'menu',
+        menu: {
+          text: [
+            '🔎 TeleBirr reference received. We’re checking the payment.',
+            'This submission has not credited a Player account. We’ll send an update here.',
+          ].join('\n'),
+          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA }],
+        },
       };
     case 'telebirr_routine_candidate_already_used':
       return {
-        kind: 'message',
-        text: [
-          '⚠️ Reference already used.',
-          'This Telegram account already used it for a completed deposit. No new Player credit was made.',
-          'Do not pay again. Contact support if this is unexpected.',
-        ].join('\n'),
+        kind: 'menu',
+        menu: {
+          text: [
+            '⚠️ Reference already used.',
+            'This Telegram account already used it for a completed deposit. No new Player credit was made.',
+            'Do not pay again. Contact support if this is unexpected.',
+          ].join('\n'),
+          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA }],
+        },
       };
     case 'telebirr_live_verification_queued':
       return {
@@ -194,6 +227,7 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Check status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
           ],
         },
       };
@@ -215,6 +249,7 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Refresh status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
           ],
         },
       };
@@ -245,10 +280,11 @@ export function telegramDepositHelpText(): string {
   return [
     '💰 How to deposit',
     '',
-    '1. Tap /menu, then 💰 Make a deposit.',
-    '2. Send the KemerBet Player ID.',
-    '3. FetanAgent will show the receiver name and wallet number when payments are live.',
-    '4. After paying, reply with the TeleBirr transaction number, full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).',
+    '1. Save your KemerBet Player ID once in /menu.',
+    '2. Tap Deposit to see the current TeleBirr receiver.',
+    '3. After paying, send the transaction number, full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB) directly here.',
+    'For now, a direct number is treated as TeleBirr. CBE Birr deposits are not live yet.',
+    'Use Change Player ID in /menu if you want future deposits to go to another Player.',
     '',
     'Check an earlier request with /deposit_status and its tracking reference.',
     'Need help? Tap /support.',

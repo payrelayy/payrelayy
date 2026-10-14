@@ -6,6 +6,8 @@ import {
   isRecognizedTelegramDepositStatusCommand,
   isTelegramGuidedDepositStartCallback,
   isTelegramGuidedDepositStartCommand,
+  isTelegramSavedPlayerChangeCallback,
+  isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
   reduceTelegramDepositIntentCommand,
   reduceTelegramGuidedDepositDestinationSubmission,
@@ -17,6 +19,8 @@ import {
   reduceTelegramPlayerIdTextAction,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
+  reduceTelegramSavedTelebirrDestinationAction,
+  reduceTelegramSavedTelebirrProofSubmission,
 } from './telegram-private-action.js';
 import {
   TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
@@ -38,6 +42,42 @@ const privateMetadata = {
 const callbackData = 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w';
 
 describe('private Telegram action reducers', () => {
+  it('routes saved-Player actions only from the same private chat', () => {
+    expect(reduceTelegramSavedTelebirrDestinationAction(privateMetadata)).toMatchObject({
+      kind: 'saved_telebirr_destination_command',
+      preferredLocale: 'en',
+    });
+    expect(
+      isTelegramSavedPlayerChangeCallback({ ...privateMetadata, callbackData: 'sp1.change' }),
+    ).toBe(true);
+    expect(
+      reduceTelegramSavedTelebirrDestinationAction({
+        ...privateMetadata,
+        chat: { id: 99, type: 'group' },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('extracts one direct TeleBirr reference but never infers CBE Birr as TeleBirr', () => {
+    expect(
+      reduceTelegramSavedTelebirrProofSubmission({ ...privateMetadata, command: 'syntb00000001' }),
+    ).toMatchObject({
+      kind: 'action',
+      action: { kind: 'saved_telebirr_proof_command', transactionReference: 'SYNTB00000001' },
+    });
+    expect(
+      reduceTelegramSavedTelebirrProofSubmission({ ...privateMetadata, command: 'hello there' }),
+    ).toBeUndefined();
+    expect(isCbeBirrReceiptText('https://cbepay1.cbe.com.et/aureceipt?TID=TESTCBE123456')).toBe(
+      true,
+    );
+    expect(
+      reduceTelegramSavedTelebirrProofSubmission({
+        ...privateMetadata,
+        command: 'CBE Birr receipt Transaction ID: TESTCBE123456',
+      }),
+    ).toBeUndefined();
+  });
   it('reduces only exact root-menu commands to an English-only envelope', () => {
     expect(reduceTelegramRootMenuAction({ ...privateMetadata, command: '/start' })).toEqual({
       version: 1,
@@ -116,7 +156,7 @@ describe('private Telegram action reducers', () => {
       kind: 'action',
       action: {
         version: 1,
-        kind: 'telebirr_deposit_destination_command',
+        kind: 'save_player_selection_command',
         updateId: '123456',
         telegramUserId: '123456789',
         privateChatId: '123456789',

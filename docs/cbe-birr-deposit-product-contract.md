@@ -131,6 +131,12 @@ unexpired instruction. Many Telegram accounts may select the same Player ID; sel
 prove ownership. The bot's main menu presents **Deposit** and **Change Player ID**. **Withdraw**
 remains hidden until withdrawals are ready.
 
+The saved-Player-ID menu and direct receipt/reference flow are being implemented first for
+TeleBirr. The CBE Birr path remains diagnostic-only until its official-receipt verification and
+financial activation receive separate review. This intermediate implementation does not change
+the existing 10-minute TeleBirr payment-presentation window or establish one-hour receiver
+grandfathering; those remain required follow-up work before the full contract below is met.
+
 After a saved ID exists, a direct receipt/reference message may start deposit intake without
 tapping **Deposit**. A clearly provider-specific official link or receipt can select TeleBirr or
 CBE Birr; a bare reference whose format overlaps the providers must not be guessed when both are

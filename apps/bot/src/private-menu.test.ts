@@ -17,12 +17,15 @@ describe('English-only private customer menu', () => {
       text: [
         'Welcome to FetanAgent 👋',
         '',
-        'Deposit from TeleBirr to KemerBet in a few simple steps.',
+        'Deposit from TeleBirr to your selected KemerBet Player ID.',
         'Choose an option below.',
+        '',
+        'No Player ID saved yet.',
       ].join('\n'),
       buttons: [
         { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
-        { text: '🎮 Add Player ID', callbackData },
+        { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+        { text: '➕ Request Player ID review', callbackData },
       ],
     });
     expect(Buffer.byteLength(menu.buttons[0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);

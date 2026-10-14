@@ -52,6 +52,20 @@ function validReceiverPresentation(value: Record<string, unknown>): boolean {
   );
 }
 
+function validSelectedPlayerId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value === value.trim() &&
+    value.length > 0 &&
+    Array.from(value).length <= 64 &&
+    !/[\s\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function validOptionalSelectedPlayerId(value: Record<string, unknown>): boolean {
+  return !Object.hasOwn(value, 'selectedPlayerId') || validSelectedPlayerId(value.selectedPlayerId);
+}
+
 function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.outcome !== 'string')
     return undefined;
@@ -102,10 +116,23 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (value.outcome === 'menu') {
-    return keys.length === 3 &&
-      parseTelegramPlayerRegistrationCapabilityCallback(value.callbackData)
-      ? { version: 1, outcome: 'menu', callbackData: value.callbackData as string }
+    return keys.length === 4 &&
+      parseTelegramPlayerRegistrationCapabilityCallback(value.callbackData) &&
+      (value.selectedPlayerId === null || validSelectedPlayerId(value.selectedPlayerId))
+      ? {
+          version: 1,
+          outcome: 'menu',
+          callbackData: value.callbackData as string,
+          selectedPlayerId: value.selectedPlayerId as string | null,
+        }
       : undefined;
+  }
+  if (
+    value.outcome === 'player_selection_saved' &&
+    keys.length === 3 &&
+    validSelectedPlayerId(value.playerId)
+  ) {
+    return { version: 1, outcome: 'player_selection_saved', playerId: value.playerId };
   }
   if (
     value.outcome === 'deposit_instructions' &&
@@ -136,16 +163,18 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   }
   if (
     value.outcome === 'telebirr_deposit_preview' &&
-    keys.length === 7 &&
+    (keys.length === 7 || (keys.length === 8 && Object.hasOwn(value, 'selectedPlayerId'))) &&
     validReceiverPresentation(value) &&
+    validOptionalSelectedPlayerId(value) &&
     value.acceptsPayments === false
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
     value.outcome === 'telebirr_deposit_destination' &&
-    keys.length === 8 &&
+    (keys.length === 8 || (keys.length === 9 && Object.hasOwn(value, 'selectedPlayerId'))) &&
     validReceiverPresentation(value) &&
+    validOptionalSelectedPlayerId(value) &&
     typeof value.receiverAccountReference === 'string' &&
     /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
     value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
@@ -155,8 +184,9 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   }
   if (
     value.outcome === 'telebirr_deposit_destination_review' &&
-    keys.length === 10 &&
+    (keys.length === 10 || (keys.length === 11 && Object.hasOwn(value, 'selectedPlayerId'))) &&
     validReceiverPresentation(value) &&
+    validOptionalSelectedPlayerId(value) &&
     typeof value.receiverAccountReference === 'string' &&
     /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
     value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
@@ -266,6 +296,7 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
       'deposit_input_invalid',
       'deposit_status_unavailable',
       'deposit_unavailable',
+      'player_selection_missing',
     ].includes(value.outcome)
   ) {
     return { version: 1, outcome: value.outcome } as TelegramPrivateActionResult;

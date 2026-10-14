@@ -102,6 +102,7 @@ const ROOT_MENU_KEYS = new Set([
   'privateChatId',
   'preferredLocale',
 ]);
+const SAVED_PROOF_KEYS = new Set([...ROOT_MENU_KEYS, 'transactionReference']);
 const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const TELEBIRR_DESTINATION_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
@@ -294,6 +295,29 @@ export function parseTelegramPrivateActionEnvelope(
       if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);
       return identity ? { ...identity, kind: 'root_menu' } : undefined;
+    }
+    case 'saved_telebirr_destination_command': {
+      if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity ? { ...identity, kind: 'saved_telebirr_destination_command' } : undefined;
+    }
+    case 'save_player_selection_command': {
+      if (!hasOnlyKeys(parsed, PLAYER_ID_TEXT_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity && validDestinationPlayerId(parsed.playerId)
+        ? { ...identity, kind: 'save_player_selection_command', playerId: parsed.playerId }
+        : undefined;
+    }
+    case 'saved_telebirr_proof_command': {
+      if (!hasOnlyKeys(parsed, SAVED_PROOF_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity && validDepositProofReference(parsed.transactionReference)
+        ? {
+            ...identity,
+            kind: 'saved_telebirr_proof_command',
+            transactionReference: parsed.transactionReference,
+          }
+        : undefined;
     }
     case 'player_registration_callback': {
       if (!hasOnlyKeys(parsed, CALLBACK_KEYS)) return undefined;

@@ -7,6 +7,7 @@ import { isBoundedTelegramDepositProofText } from './telegram-deposit-proof-inpu
  * Player ID, payment reference, or authority to call the API.
  */
 export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
+export const TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA = 'sp1.change';
 
 export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Make a deposit';
 
@@ -22,12 +23,22 @@ const CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT =
 export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = [
   'Welcome to FetanAgent 👋',
   '',
-  'Deposit from TeleBirr to KemerBet in a few simple steps.',
+  'Deposit from TeleBirr to your selected KemerBet Player ID.',
   'Choose an option below.',
 ].join('\n');
 
 /** First step of the current deposit wizard. */
 export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = [
+  '🎮 Choose Player ID',
+  '',
+  'Which KemerBet Player ID should receive your deposits?',
+  'Reply with the Player ID only.',
+  'This choice applies to future direct submissions; it does not change a deposit already submitted.',
+  '',
+  'Tap /menu to cancel.',
+].join('\n');
+
+const PREVIOUS_GUIDED_DEPOSIT_PROMPT_TEXT = [
   '💰 New deposit',
   '',
   'Which KemerBet Player ID should receive the money?',
@@ -88,7 +99,11 @@ export function isTelegramGuidedDepositPromptReply(value: unknown): boolean {
 export function isTelegramGuidedDepositPlayerPromptReply(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const message = value as TelegramReplyMessageShape;
-  return message.text === TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT && message.from?.is_bot === true;
+  return (
+    (message.text === TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT ||
+      message.text === PREVIOUS_GUIDED_DEPOSIT_PROMPT_TEXT) &&
+    message.from?.is_bot === true
+  );
 }
 
 export interface TelegramTelebirrPaymentPromptInput {

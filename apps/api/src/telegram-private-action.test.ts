@@ -330,6 +330,48 @@ describe('private Telegram action transport contract', () => {
     }
   });
 
+  it('accepts only exact saved-Player and direct TeleBirr actions', async () => {
+    const identity = {
+      version: 1 as const,
+      updateId: '123456',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en' as const,
+    };
+    const actions: TelegramPrivateActionEnvelope[] = [
+      { ...identity, kind: 'save_player_selection_command', playerId: 'PLAYER-DEMO-42' },
+      { ...identity, kind: 'saved_telebirr_destination_command' },
+      { ...identity, kind: 'saved_telebirr_proof_command', transactionReference: 'SYNTB00000001' },
+    ];
+    for (const action of actions) {
+      const valid = signedRequest(action);
+      await expect(
+        verifyTelegramPrivateActionRequest(valid.request, valid.rawBody, verificationOptions()),
+      ).resolves.toEqual(action);
+      const pollutedPayload: unknown = { ...action, providerCode: 'cbe_birr' };
+      const polluted = signedRequest(pollutedPayload as TelegramPrivateActionEnvelope);
+      await expect(
+        verifyTelegramPrivateActionRequest(
+          polluted.request,
+          polluted.rawBody,
+          verificationOptions(),
+        ),
+      ).resolves.toBeUndefined();
+    }
+    const invalidPlayer = signedRequest({
+      ...identity,
+      kind: 'save_player_selection_command',
+      playerId: ' PLAYER-DEMO-42',
+    });
+    await expect(
+      verifyTelegramPrivateActionRequest(
+        invalidPlayer.request,
+        invalidPlayer.rawBody,
+        verificationOptions(),
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it('accepts only strict deposit, protected-reference, and status commands', async () => {
     const depositAction: TelegramPrivateActionEnvelope = {
       version: 1,

@@ -9,25 +9,50 @@ import {
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
+  it('presents the saved selection and a one-tap repeat deposit', () => {
+    const saved = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'player_selection_saved',
+      playerId: 'PLAYER-DEMO-42',
+    });
+    expect(saved.kind).toBe('menu');
+    if (saved.kind === 'menu') {
+      expect(saved.menu.text).toContain('PLAYER-DEMO-42 saved');
+      expect(saved.menu.buttons[0]).toEqual({ text: '💰 Deposit', callbackData: 'gd1.telebirr' });
+    }
+    const missing = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'player_selection_missing',
+    });
+    expect(missing.kind).toBe('force_reply');
+  });
   it('renders the guided deposit before the opaque Player-ID action', () => {
     const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
       compactCapabilityId: 'AAAAAAAAAAAAAAAAAAAAAA',
       token: '_____________________w',
     });
     expect(
-      presentTelegramPlayerIdFlowResult({ version: 1, outcome: 'menu', callbackData }),
+      presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome: 'menu',
+        callbackData,
+        selectedPlayerId: null,
+      }),
     ).toEqual({
       kind: 'menu',
       menu: {
         text: [
           'Welcome to FetanAgent 👋',
           '',
-          'Deposit from TeleBirr to KemerBet in a few simple steps.',
+          'Deposit from TeleBirr to your selected KemerBet Player ID.',
           'Choose an option below.',
+          '',
+          'No Player ID saved yet.',
         ].join('\n'),
         buttons: [
           { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
-          { text: '🎮 Add Player ID', callbackData },
+          { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+          { text: '➕ Request Player ID review', callbackData },
         ],
       },
     });
@@ -78,7 +103,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['deposit_input_invalid', 'Tap /menu, then 💰 Make a deposit'],
+    ['deposit_input_invalid', 'Save your KemerBet Player ID once'],
     ['deposit_unavailable', 'No payment action was started'],
     ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
@@ -302,11 +327,14 @@ describe('Telegram Player-ID flow presentation', () => {
     });
 
     expect(presentation).toEqual({
-      kind: 'message',
-      text: [
-        '🔎 TeleBirr reference received. We’re checking the payment.',
-        'This submission has not credited a Player account. We’ll send an update here.',
-      ].join('\n'),
+      kind: 'menu',
+      menu: {
+        text: [
+          '🔎 TeleBirr reference received. We’re checking the payment.',
+          'This submission has not credited a Player account. We’ll send an update here.',
+        ].join('\n'),
+        buttons: [{ text: '💰 Deposit', callbackData: 'gd1.telebirr' }],
+      },
     });
     expect(JSON.stringify(presentation)).not.toMatch(/AB12CD34EF|uuid|token|amount/iu);
   });
@@ -321,12 +349,15 @@ describe('Telegram Player-ID flow presentation', () => {
       verificationMode: 'same_customer_completed_ledger',
     });
     expect(presentation).toEqual({
-      kind: 'message',
-      text: [
-        '⚠️ Reference already used.',
-        'This Telegram account already used it for a completed deposit. No new Player credit was made.',
-        'Do not pay again. Contact support if this is unexpected.',
-      ].join('\n'),
+      kind: 'menu',
+      menu: {
+        text: [
+          '⚠️ Reference already used.',
+          'This Telegram account already used it for a completed deposit. No new Player credit was made.',
+          'Do not pay again. Contact support if this is unexpected.',
+        ].join('\n'),
+        buttons: [{ text: '💰 Deposit', callbackData: 'gd1.telebirr' }],
+      },
     });
     expect(JSON.stringify(presentation)).not.toMatch(
       /AB12CD34EF|PLAYER-DEMO-42|uuid|token|amount/iu,
@@ -353,7 +384,10 @@ describe('Telegram Player-ID flow presentation', () => {
           'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
           'FetanAgent will verify the payment and prepare the KemerBet deposit automatically.',
         ].join('\n'),
-        buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
+        buttons: [
+          { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
+          { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+        ],
       },
     });
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|SYNTB|uuid/iu);
@@ -388,9 +422,9 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it('explains the button-first flow and tracking without requiring command syntax', () => {
-    expect(telegramDepositHelpText()).toContain('Tap /menu, then 💰 Make a deposit');
-    expect(telegramDepositHelpText()).toContain('Send the KemerBet Player ID');
-    expect(telegramDepositHelpText()).toContain('show the receiver name and wallet number');
+    expect(telegramDepositHelpText()).toContain('Save your KemerBet Player ID once');
+    expect(telegramDepositHelpText()).toContain('Tap Deposit to see the current TeleBirr receiver');
+    expect(telegramDepositHelpText()).toContain('Change Player ID');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
     expect(telegramDepositHelpText()).toContain('receipt link, JPG/PNG screenshot, or PDF');
     expect(telegramDepositHelpText()).not.toContain('first line');

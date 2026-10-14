@@ -27,6 +27,35 @@ const config = {
 };
 
 describe('Telegram private-action bot client', () => {
+  it('accepts only a bounded selected Player in private menu and receiver results', async () => {
+    const callbackData = 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w';
+    const menu = { version: 1, outcome: 'menu', callbackData, selectedPlayerId: 'PLAYER-DEMO-42' };
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => menu }),
+      }),
+    ).resolves.toEqual(menu);
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ ...menu, selectedPlayerId: 'BAD PLAYER' }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({
+            ...menu,
+            selectedPlayerId: 'PLAYER-DEMO-42',
+            receiverAccountReference: '0000000042',
+          }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+  });
   it('signs the exact serialized bytes and accepts only a strict safe result', async () => {
     let captured: RequestInit | undefined;
     await expect(

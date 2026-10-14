@@ -67,6 +67,17 @@ export type TelegramPrivateActionEnvelope =
       readonly kind: 'root_menu';
     })
   | (TelegramPrivateActionIdentity & {
+      readonly kind: 'save_player_selection_command';
+      readonly playerId: string;
+    })
+  | (TelegramPrivateActionIdentity & {
+      readonly kind: 'saved_telebirr_destination_command';
+    })
+  | (TelegramPrivateActionIdentity & {
+      readonly kind: 'saved_telebirr_proof_command';
+      readonly transactionReference: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'player_registration_callback';
       /** Opaque, compact capability presentation; never log this raw value. */
       readonly callbackData: string;
@@ -116,9 +127,10 @@ export type TelegramPrivateActionEnvelope =
     });
 
 /**
- * Safe bot-visible result. It never contains a raw database UUID, Player ID, raw callback token,
- * or state. A complete receiver reference is present only when the database and API independently
- * confirm that customer payments are currently accepted.
+ * Safe bot-visible result. It never contains a raw database UUID, raw callback token, or state.
+ * The selected Player ID may be returned only for the authenticated private Telegram chat and is
+ * rechecked before payment intake. A complete receiver reference is present only when the database
+ * and API independently confirm that customer payments are currently accepted.
  */
 export type TelegramPrivateActionResult =
   | {
@@ -153,6 +165,16 @@ export type TelegramPrivateActionResult =
       readonly version: 1;
       readonly outcome: 'menu';
       readonly callbackData: string;
+      readonly selectedPlayerId: string | null;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_selection_saved';
+      readonly playerId: string;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_selection_missing';
     }
   | {
       readonly version: 1;
@@ -174,6 +196,7 @@ export type TelegramPrivateActionResult =
       readonly receiverAccountHolderName: string;
       readonly receiverAccountMasked: string;
       readonly acceptsPayments: false;
+      readonly selectedPlayerId?: string;
     }
   | {
       readonly version: 1;
@@ -185,6 +208,7 @@ export type TelegramPrivateActionResult =
       readonly receiverAccountReference: string;
       readonly receiverAccountMasked: string;
       readonly acceptsPayments: true;
+      readonly selectedPlayerId?: string;
     }
   | {
       readonly version: 1;
@@ -199,6 +223,7 @@ export type TelegramPrivateActionResult =
       readonly currencyCode: 'ETB';
       /** Review messages are deliberately not recognized as payment-proof reply prompts. */
       readonly acceptsPayments: false;
+      readonly selectedPlayerId?: string;
     }
   | {
       readonly version: 1;

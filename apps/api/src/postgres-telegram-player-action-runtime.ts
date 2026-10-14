@@ -106,6 +106,14 @@ const PREPARE_LIVE_TELEBIRR_DESTINATION_SQL = `
          receiver_account_masked, payments_enabled, request_replayed
   from app.prepare_telegram_live_telebirr_destination($1::uuid, $2::text, $3::text)
 `;
+const GET_SAVED_PLAYER_SELECTION_SQL = `
+  select selected_player_id
+  from app.get_telegram_saved_player_selection($1::uuid)
+`;
+const SAVE_PLAYER_SELECTION_SQL = `
+  select selected_player_id, request_replayed
+  from app.save_telegram_player_selection($1::uuid, $2::text)
+`;
 const GET_CUSTOMER_LIVE_TELEBIRR_PROOF_SQL = `
   select live_proof_id, provider_code, deposit_status, amount_minor, currency_code, submitted_at
   from app.get_telegram_customer_live_telebirr_proof($1::uuid, $2::uuid)
@@ -367,7 +375,97 @@ async function handleRootMenu(
   ) {
     throw new TelegramPlayerActionRuntimeUnavailableError();
   }
-  return { version: 1, outcome: 'menu', callbackData: presentation.callbackData };
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  return {
+    version: 1,
+    outcome: 'menu',
+    callbackData: presentation.callbackData,
+    selectedPlayerId,
+  };
+}
+
+async function getSavedPlayerSelection(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+): Promise<string | null> {
+  const rows = (await database.query(GET_SAVED_PLAYER_SELECTION_SQL, [originInboundEventId])).rows;
+  if (rows.length === 0) return null;
+  const row = oneRow(rows);
+  if (
+    typeof row.selected_player_id !== 'string' ||
+    row.selected_player_id !== row.selected_player_id.trim() ||
+    Array.from(row.selected_player_id).length < 1 ||
+    Array.from(row.selected_player_id).length > 64 ||
+    /[\s\u0000-\u001f\u007f]/u.test(row.selected_player_id)
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return row.selected_player_id;
+}
+
+async function handleSavePlayerSelection(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'save_player_selection_command' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (await database.query(SAVE_PLAYER_SELECTION_SQL, [originInboundEventId, action.playerId])).rows,
+  );
+  if (row.selected_player_id !== action.playerId || typeof row.request_replayed !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'player_selection_saved', playerId: action.playerId };
+}
+
+async function handleSavedTelebirrDestination(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'saved_telebirr_destination_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  if (selectedPlayerId === null) return { version: 1, outcome: 'player_selection_missing' };
+  const result = await handleTelebirrDestination(
+    database,
+    originInboundEventId,
+    { ...action, kind: 'telebirr_deposit_destination_command', playerId: selectedPlayerId },
+    config,
+  );
+  if (
+    result.outcome === 'telebirr_deposit_destination' ||
+    result.outcome === 'telebirr_deposit_destination_review' ||
+    result.outcome === 'telebirr_deposit_preview'
+  ) {
+    return { ...result, selectedPlayerId };
+  }
+  return result;
+}
+
+async function handleSavedTelebirrProof(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'saved_telebirr_proof_command' }>,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  if (selectedPlayerId === null) return { version: 1, outcome: 'player_selection_missing' };
+  return handleDepositProof(
+    database,
+    originInboundEventId,
+    {
+      ...action,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId: selectedPlayerId,
+    },
+    config,
+  );
 }
 
 async function handleCallback(
@@ -989,6 +1087,12 @@ export function createPostgresTelegramPlayerActionRuntime(
         switch (action.kind) {
           case 'root_menu':
             return await handleRootMenu(pool, inboundEventId, config);
+          case 'save_player_selection_command':
+            return await handleSavePlayerSelection(pool, inboundEventId, action);
+          case 'saved_telebirr_destination_command':
+            return await handleSavedTelebirrDestination(pool, inboundEventId, action, config);
+          case 'saved_telebirr_proof_command':
+            return await handleSavedTelebirrProof(pool, inboundEventId, action, config);
           case 'player_registration_callback':
             return await handleCallback(pool, inboundEventId, action, config);
           case 'player_id_text':

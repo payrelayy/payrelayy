@@ -17,10 +17,15 @@ import {
   isRecognizedTelegramDepositStatusCommand,
   isTelegramGuidedDepositStartCallback,
   isTelegramGuidedDepositStartCommand,
+  isTelegramSavedPlayerChangeCallback,
+  isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
   reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositMediaSubmission,
   reduceTelegramGuidedDepositProofSubmission,
+  reduceTelegramSavedTelebirrDestinationAction,
+  reduceTelegramSavedTelebirrMediaSubmission,
+  reduceTelegramSavedTelebirrProofSubmission,
   reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
@@ -33,6 +38,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
+  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
@@ -104,6 +110,8 @@ async function deliverPlayerAction(
       action.kind === 'deposit_proof_status_command' || action.kind === 'deposit_status_command'
         ? TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT
         : action.kind === 'deposit_proof_command' ||
+            action.kind === 'saved_telebirr_proof_command' ||
+            action.kind === 'saved_telebirr_destination_command' ||
             action.kind === 'telebirr_deposit_destination_command'
           ? message('en', 'depositUnavailable')
           : message('en', 'playerActionUnavailable'),
@@ -183,13 +191,24 @@ bot.on('message', async (context) => {
       return;
     }
     if (isTelegramGuidedDepositStartCommand({ ...metadata, command: text })) {
-      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
-        reply_markup: {
-          force_reply: true,
-          selective: true,
-          input_field_placeholder: 'KemerBet Player ID',
-        },
-      });
+      const action = reduceTelegramSavedTelebirrDestinationAction(metadata);
+      if (action)
+        await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
+          context.reply(
+            replyText,
+            placeholder
+              ? {
+                  reply_markup: {
+                    force_reply: true,
+                    selective: true,
+                    input_field_placeholder: placeholder,
+                  },
+                }
+              : keyboard
+                ? { reply_markup: keyboard }
+                : undefined,
+          ),
+        );
       return;
     }
     const destinationSubmission = reduceTelegramGuidedDepositDestinationSubmission({
@@ -226,8 +245,7 @@ bot.on('message', async (context) => {
       ('photo' in context.message || 'document' in context.message) &&
       context.chat?.type === 'private' &&
       context.from?.id === context.chat.id &&
-      !context.from.is_bot &&
-      parseTelegramTelebirrPaymentPromptReply(replyToMessage)
+      !context.from.is_bot
     ) {
       const selection = selectTelegramProofMedia(context.message);
       if (selection.kind !== 'selected') {
@@ -252,13 +270,19 @@ bot.on('message', async (context) => {
         );
         return;
       }
-      const mediaSubmission = reduceTelegramGuidedDepositMediaSubmission({
+      const mediaMetadata = {
         ...metadata,
-        replyToMessage,
         caption: 'caption' in context.message ? context.message.caption : undefined,
         extractedText: extracted.text,
-        sourceKind: selection.media.kind === 'pdf' ? 'pdf_text' : 'ocr_text',
-      });
+        sourceKind: selection.media.kind === 'pdf' ? ('pdf_text' as const) : ('ocr_text' as const),
+      };
+      if (isCbeBirrReceiptText(extracted.text) || isCbeBirrReceiptText(mediaMetadata.caption)) {
+        await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
+        return;
+      }
+      const mediaSubmission = parseTelegramTelebirrPaymentPromptReply(replyToMessage)
+        ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
+        : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
       if (mediaSubmission?.kind === 'action') {
         await deliverPlayerAction(mediaSubmission.action, (replyText, keyboard) =>
           context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
@@ -332,6 +356,25 @@ bot.on('message', async (context) => {
       await context.reply(TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT);
       return;
     }
+    if (isCbeBirrReceiptText(text)) {
+      await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
+      return;
+    }
+    const savedProof = reduceTelegramSavedTelebirrProofSubmission({ ...metadata, command: text });
+    if (savedProof) {
+      if (savedProof.kind === 'action') {
+        await deliverPlayerAction(savedProof.action, (replyText, keyboard) =>
+          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        );
+      } else {
+        await context.reply(
+          savedProof.kind === 'selection_required'
+            ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
+            : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+        );
+      }
+      return;
+    }
     if (!(typeof text === 'string' && text.startsWith('/'))) {
       const playerIdAction = reduceTelegramPlayerIdTextAction({ ...metadata, text });
       if (playerIdAction) {
@@ -395,11 +438,33 @@ if (playerActions.enabled) {
       callbackData: context.callbackQuery.data,
     };
     const guidedDepositStart = isTelegramGuidedDepositStartCallback(callbackMetadata);
+    const changePlayer = isTelegramSavedPlayerChangeCallback(callbackMetadata);
     const action =
       reduceTelegramDepositProofStatusCallbackAction(callbackMetadata) ??
       reduceTelegramPlayerRegistrationCallbackAction(callbackMetadata);
     await context.answerCallbackQuery();
     if (guidedDepositStart) {
+      const savedAction = reduceTelegramSavedTelebirrDestinationAction(callbackMetadata);
+      if (savedAction)
+        await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
+          context.reply(
+            replyText,
+            placeholder
+              ? {
+                  reply_markup: {
+                    force_reply: true,
+                    selective: true,
+                    input_field_placeholder: placeholder,
+                  },
+                }
+              : keyboard
+                ? { reply_markup: keyboard }
+                : undefined,
+          ),
+        );
+      return;
+    }
+    if (changePlayer) {
       await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
         reply_markup: {
           force_reply: true,
@@ -456,7 +521,19 @@ await runTelegramPolling(
         outcomeNotifier = runTelegramDepositOutcomeNotifier(
           {
             request: (action) => deliverTelegramPrivateActionWithRetry(action, playerActions),
-            send: (chatId, text) => bot.api.sendMessage(chatId, text),
+            send: (chatId, text, showDepositButton) =>
+              bot.api.sendMessage(
+                chatId,
+                text,
+                showDepositButton
+                  ? {
+                      reply_markup: new InlineKeyboard().text(
+                        '💰 Deposit',
+                        TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+                      ),
+                    }
+                  : undefined,
+              ),
           },
           outcomeNotifierAbort.signal,
         );

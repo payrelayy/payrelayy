@@ -17,6 +17,7 @@ import {
   reduceTelegramDepositProofInput,
 } from './telegram-deposit-proof-input.js';
 import {
+  TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   isTelegramGuidedDepositPromptReply,
   isTelegramGuidedDepositPlayerPromptReply,
@@ -71,7 +72,7 @@ export type TelegramGuidedDepositDestinationSubmission =
       readonly kind: 'action';
       readonly action: Extract<
         TelegramPrivateActionEnvelope,
-        { kind: 'telebirr_deposit_destination_command' }
+        { kind: 'save_player_selection_command' }
       >;
     }
   | { readonly kind: 'invalid_input' };
@@ -168,6 +169,22 @@ export function isTelegramGuidedDepositStartCallback(
   );
 }
 
+export function isTelegramSavedPlayerChangeCallback(
+  metadata: TelegramPlayerRegistrationCallbackMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    metadata.callbackData === TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA
+  );
+}
+
+export function reduceTelegramSavedTelebirrDestinationAction(
+  metadata: TelegramPrivateActionMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  return identity ? { ...identity, kind: 'saved_telebirr_destination_command' } : undefined;
+}
+
 /** `/deposit` is the discoverable guided entry point; argument-bearing legacy commands still work. */
 export function isTelegramGuidedDepositStartCommand(
   metadata: TelegramDepositCommandMetadata,
@@ -245,8 +262,8 @@ export function reduceTelegramPlayerIdTextAction(
 }
 
 /**
- * Convert the first wizard reply into a protected destination lookup. Ordinary Player-ID text and
- * forged customer-authored prompts never enter this path.
+ * Save the Player ID only after a reply to the exact bot prompt. Payment instructions are fetched
+ * by a separate user action, so a failed save cannot disclose or start a payment destination.
  */
 export function reduceTelegramGuidedDepositDestinationSubmission(
   metadata: TelegramGuidedDepositReplyMetadata,
@@ -261,8 +278,85 @@ export function reduceTelegramGuidedDepositDestinationSubmission(
     kind: 'action',
     action: {
       ...identity,
-      kind: 'telebirr_deposit_destination_command',
+      kind: 'save_player_selection_command',
       playerId,
+    },
+  };
+}
+
+/** Direct receipt intake is enabled only for TeleBirr. Clear CBE Birr material must not be
+ * silently interpreted as TeleBirr while that provider remains non-live. */
+export function isCbeBirrReceiptText(text: unknown): boolean {
+  return (
+    typeof text === 'string' &&
+    /(?:cbepay1\.cbe\.com\.et|\bCBE\s?Birr\b|\bCredit Account\b)/iu.test(text)
+  );
+}
+
+export function reduceTelegramSavedTelebirrProofSubmission(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  const inputText = metadata.command;
+  if (
+    !identity ||
+    typeof inputText !== 'string' ||
+    inputText.startsWith('/') ||
+    isCbeBirrReceiptText(inputText)
+  )
+    return undefined;
+  const looksLikeReference = /^(?=[A-Za-z0-9]{8,32}$)(?=.*[0-9])[A-Za-z0-9]+$/u.test(
+    inputText.trim(),
+  );
+  const looksLikeReceipt = /(?:https:\/\/|transaction|receipt|reference|txn\s*id)/iu.test(
+    inputText,
+  );
+  if (!looksLikeReference && !looksLikeReceipt) return undefined;
+  const proof = reduceTelegramDepositProofInput('telebirr', inputText);
+  if (proof.kind !== 'candidate') return proof;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'saved_telebirr_proof_command',
+      transactionReference: proof.transactionReference,
+    },
+  };
+}
+
+export function reduceTelegramSavedTelebirrMediaSubmission(
+  metadata: Omit<TelegramGuidedDepositMediaMetadata, 'replyToMessage'>,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (
+    !identity ||
+    isCbeBirrReceiptText(metadata.extractedText) ||
+    isCbeBirrReceiptText(metadata.caption)
+  )
+    return undefined;
+  if (typeof metadata.caption !== 'undefined' && typeof metadata.caption !== 'string') {
+    return { kind: 'invalid_input' };
+  }
+  const caption = (metadata.caption ?? '').trim();
+  const labelledCaption = /^[A-Za-z0-9]{8,32}$/u.test(caption)
+    ? `Transaction ID: ${caption}`
+    : caption;
+  const recognized = metadata.extractedText.trim();
+  const labelledRecognized = /^[A-Za-z0-9]{8,32}$/u.test(recognized)
+    ? `Transaction ID: ${recognized}`
+    : metadata.extractedText;
+  const input = reduceTelegramDepositProofInput(
+    'telebirr',
+    labelledCaption ? `${labelledCaption}\n${labelledRecognized}` : labelledRecognized,
+    metadata.sourceKind,
+  );
+  if (input.kind !== 'candidate') return input;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'saved_telebirr_proof_command',
+      transactionReference: input.transactionReference,
     },
   };
 }
@@ -285,7 +379,10 @@ export function reduceTelegramDepositIntentCommand(
 export type TelegramDepositProofSubmission =
   | {
       readonly kind: 'action';
-      readonly action: Extract<TelegramPrivateActionEnvelope, { kind: 'deposit_proof_command' }>;
+      readonly action: Extract<
+        TelegramPrivateActionEnvelope,
+        { kind: 'deposit_proof_command' | 'saved_telebirr_proof_command' }
+      >;
     }
   | { readonly kind: 'selection_required' }
   | { readonly kind: 'invalid_input' };

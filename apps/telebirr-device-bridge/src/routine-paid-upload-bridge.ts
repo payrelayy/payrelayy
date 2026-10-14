@@ -52,8 +52,8 @@ export interface RoutinePaidUploadBridgeDependencies {
     readonly observationSignatureDigest: string;
     readonly signedObservation: unknown;
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
-  /** Persist only a signed, official-origin wrong-receiver result before retiring the phone upload. */
-  recordReceiverMismatch(input: {
+  /** Persist only a signed, official-origin terminal rejection before retiring the upload. */
+  recordTerminalRejection(input: {
     readonly challengeId: string;
     readonly signedObservation: unknown;
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
@@ -150,7 +150,7 @@ export function createRoutinePaidUploadBridgeHandler(
     typeof dependencies.classifyTerminal !== 'function' ||
     typeof dependencies.loadObservation !== 'function' ||
     typeof dependencies.stageObservation !== 'function' ||
-    typeof dependencies.recordReceiverMismatch !== 'function'
+    typeof dependencies.recordTerminalRejection !== 'function'
   )
     throw new Error();
   return async (
@@ -205,8 +205,11 @@ export function createRoutinePaidUploadBridgeHandler(
         deviceSpkiDer,
       );
       if (assessment.disposition !== 'paid_phone_observation_matches_policy') {
-        if (assessment.terminalReasonCode === 'receiver_mismatch') {
-          const recorded = await dependencies.recordReceiverMismatch({
+        if (
+          assessment.terminalReasonCode === 'receiver_mismatch' ||
+          assessment.terminalReasonCode === 'explicit_invalid_reference'
+        ) {
+          const recorded = await dependencies.recordTerminalRejection({
             challengeId,
             signedObservation,
           });

@@ -78,8 +78,10 @@ internal class RoutineTelebirrObservationCollector(
         parsed as RoutineTelebirrParsedReceipt.Observed,
         deviceIdentity,
         officialOriginFromSafeTransport = transport is SafeOfficialReceiptTransport &&
-          document is ProviderDocument.Found &&
-          document.originAttestation == ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+          (document is ProviderDocument.Found &&
+            document.originAttestation == ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN ||
+            document is ProviderDocument.ExplicitInvalidReference &&
+            document.originAttestation == ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN),
       )
     } catch (_: Exception) {
       return RoutineTelebirrObservationCollection.Review("observation_invalid")

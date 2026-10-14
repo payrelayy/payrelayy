@@ -17,6 +17,11 @@ data class ParsedProviderObservation(
 class OfficialReceiptParser {
   fun parse(document: ProviderDocument, expectedReference: CanonicalReference): ParsedProviderObservation =
     when (document) {
+      is ProviderDocument.ExplicitInvalidReference ->
+        ParsedProviderObservation(
+          UnavailableReceiptFacts("unavailable", "provider"),
+          document.sourceDocumentDigest,
+        )
       is ProviderDocument.NotFound ->
         ParsedProviderObservation(NotFoundReceiptFacts("not_found"), document.sourceDocumentDigest)
       is ProviderDocument.Unavailable ->

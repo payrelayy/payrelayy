@@ -131,7 +131,7 @@ describe('private routine paid upload broker client', () => {
       }),
     ).toBe('recorded');
     expect(
-      await adapter.recordReceiverMismatch({
+      await adapter.recordTerminalRejection({
         challengeId: requestId,
         signedObservation: { bodyDigest: digest },
       }),
@@ -140,7 +140,7 @@ describe('private routine paid upload broker client', () => {
       'classify_terminal',
       'load_observation',
       'stage_observation',
-      'record_receiver_mismatch',
+      'record_terminal_rejection',
     ]);
   });
 

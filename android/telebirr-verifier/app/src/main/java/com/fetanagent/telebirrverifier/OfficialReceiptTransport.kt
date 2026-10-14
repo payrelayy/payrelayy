@@ -73,6 +73,15 @@ sealed interface ProviderDocument {
     override fun toString(): String = "ProviderDocument.NotFound(sourceDocumentDigest=<redacted>)"
   }
 
+  /** Two identical, official-TLS reads of the provider's explicit invalid-reference page. */
+  data class ExplicitInvalidReference(
+    val sourceDocumentDigest: String,
+    val retrievedAt: String,
+    val originAttestation: ProviderDocumentOriginAttestation,
+  ) : ProviderDocument {
+    override fun toString(): String = "ProviderDocument.ExplicitInvalidReference(<redacted>)"
+  }
+
   data class Unavailable(val uncertainty: String, val sourceDocumentDigest: String) : ProviderDocument {
     init {
       require(uncertainty in setOf("provider", "network", "parser", "device"))
@@ -209,6 +218,7 @@ class SafeOfficialReceiptTransport(
         trace.fail(ReceiptTransportFailure.NON_PUBLIC_ADDRESS)
         return unavailable("network")
       }
+      var firstExplicitInvalidDigest: String? = null
       for (attempt in 1..MAX_PROVIDER_FETCHES) {
         val response =
           route.useUrl { url ->
@@ -231,6 +241,22 @@ class SafeOfficialReceiptTransport(
         }
         val decoded = decodeUtf8Strict(response.body) ?: return unavailable("parser")
         recordResponse(response, decoded)
+        if (isExplicitInvalidReferencePage(response)) {
+          val digest = CanonicalTranscripts.sha256(response.body)
+          if (firstExplicitInvalidDigest == digest) {
+            return ProviderDocument.ExplicitInvalidReference(
+              sourceDocumentDigest = digest,
+              retrievedAt = canonicalTimestamp(clock.nowMillis()),
+              originAttestation = ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+            )
+          }
+          // A single error page may be a transient provider failure. Only two identical
+          // official-origin reads of the *same* reference authorize a terminal result.
+          if (attempt == 1) {
+            firstExplicitInvalidDigest = digest
+            continue
+          }
+        }
         if (attempt == 1 && isBriefUnmarkedPage(response, decoded)) {
           // The official origin sometimes serves a tiny 200 HTML page with no receipt fields,
           // challenge text, or session signals. Repeat only this unmarked read once, within the
@@ -319,6 +345,13 @@ class SafeOfficialReceiptTransport(
       !lower.contains("<script") && !lower.contains("http-equiv")
   }
 
+  private fun isExplicitInvalidReferencePage(response: RawHttpsResponse): Boolean =
+    response.body.size == EXPLICIT_INVALID_BODY_BYTES &&
+      !response.setCookieHeader && !response.varyCookieHeader &&
+      !response.varyUserAgentHeader && !response.authenticationHeader &&
+      !response.refreshHeader &&
+      CanonicalTranscripts.sha256(response.body) == EXPLICIT_INVALID_BODY_DIGEST
+
   private fun responseWordHint(lower: String): String =
     when {
       listOf("captcha", "verify you are human", "human verification").any(lower::contains) -> "challenge_words"
@@ -332,6 +365,11 @@ class SafeOfficialReceiptTransport(
     const val TOTAL_TIMEOUT_MILLIS = 15_000
     const val MAX_RESPONSE_BYTES = 32 * 1024
     private const val MAX_PROVIDER_FETCHES = 2
+    // Observed from the public Ethiotelecom receipt endpoint on 2026-10-14.
+    // Pinning the complete HTML bytes intentionally fails closed if the provider changes it.
+    private const val EXPLICIT_INVALID_BODY_BYTES = 305
+    internal const val EXPLICIT_INVALID_BODY_DIGEST =
+      "sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2"
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
     internal fun canonicalTimestamp(epochMillis: Long): String =

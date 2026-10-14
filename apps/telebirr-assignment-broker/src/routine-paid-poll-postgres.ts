@@ -14,8 +14,8 @@ const TERMINAL =
   'select app.classify_routine_telebirr_paid_upload_terminal($1::uuid,$2::text,$3::text) as terminal';
 const STAGE =
   'select app.stage_routine_telebirr_paid_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb) as status';
-const REJECT_RECEIVER =
-  'select app.record_routine_telebirr_paid_wrong_receiver($1::uuid,$2::jsonb) as status';
+const REJECT_TERMINAL =
+  'select app.record_routine_telebirr_paid_terminal_result($1::uuid,$2::jsonb) as status';
 
 export class RoutinePaidPollSqlUnavailableError extends Error {
   constructor() {
@@ -97,10 +97,10 @@ export function createRoutinePaidPollPostgresDatabase(
         throw new RoutinePaidPollSqlUnavailableError();
       return status.value;
     },
-    async recordReceiverMismatch(
-      input: Parameters<RoutinePaidPollBrokerDatabase['recordReceiverMismatch']>[0],
+    async recordTerminalRejection(
+      input: Parameters<RoutinePaidPollBrokerDatabase['recordTerminalRejection']>[0],
     ) {
-      const row = await oneRow(client, REJECT_RECEIVER, [
+      const row = await oneRow(client, REJECT_TERMINAL, [
         input.challengeId,
         JSON.stringify(input.signedObservation),
       ]);

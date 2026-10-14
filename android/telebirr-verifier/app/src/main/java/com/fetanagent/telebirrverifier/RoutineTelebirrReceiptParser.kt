@@ -121,6 +121,31 @@ internal class RoutineTelebirrReceiptParser(
     document: ProviderDocument,
     lookup: RoutineReceiptLookupExpectation,
   ): RoutineTelebirrParsedReceipt {
+    if (document is ProviderDocument.ExplicitInvalidReference) {
+      if (document.originAttestation != ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN ||
+        document.sourceDocumentDigest != SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST
+      ) return RoutineTelebirrParsedReceipt.Review("invalid_page_unattested", document.sourceDocumentDigest)
+      return RoutineTelebirrParsedReceipt.Observed(
+        facts = RoutineTelebirrObservedReceiptFacts(
+          amountMinor = 0,
+          canonicalReferencePresent = false,
+          creditedPartyNameDigest = EXPLICIT_INVALID_NO_RECEIVER_DIGEST,
+          currencyCode = "unknown",
+          evidenceSource = "provider_receipt_lookup",
+          occurredAt = document.retrievedAt,
+          paymentChannel = "unknown",
+          paymentMode = "unknown",
+          paymentReason = "unknown",
+          providerFinalStatus = "unknown",
+          providerIdentity = "matched",
+          receiverMatch = "unknown",
+          referenceMatch = "unknown",
+          retrievedAt = document.retrievedAt,
+          sourceProfile = LivePrivatePilotProtocol.SOURCE_PROFILE,
+        ),
+        sourceDocumentDigest = document.sourceDocumentDigest,
+      )
+    }
     val parsed = officialParser.parseForExpectedReceipt(
       document,
       lookup.rawReference,
@@ -168,5 +193,11 @@ internal class RoutineTelebirrReceiptParser(
       ),
       sourceDocumentDigest = parsed.sourceDocumentDigest,
     )
+  }
+
+  companion object {
+    // This value is a sentinel for a page containing no receipt or receiver, never a name hash.
+    const val EXPLICIT_INVALID_NO_RECEIVER_DIGEST =
+      "sha256:0000000000000000000000000000000000000000000000000000000000000000"
   }
 }

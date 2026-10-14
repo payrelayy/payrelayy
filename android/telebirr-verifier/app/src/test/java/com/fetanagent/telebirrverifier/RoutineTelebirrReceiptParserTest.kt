@@ -20,6 +20,34 @@ class RoutineTelebirrReceiptParserTest {
   private val parser = RoutineTelebirrReceiptParser()
 
   @Test
+  fun `explicit official invalid page produces only nonfinancial sentinel facts`() {
+    val parsed = parser.parse(ProviderDocument.ExplicitInvalidReference(
+      SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST,
+      "2026-10-14T10:30:00.000Z",
+      ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+    ), lookup) as RoutineTelebirrParsedReceipt.Observed
+    assertEquals(0L, parsed.facts.amountMinor)
+    assertFalse(parsed.facts.canonicalReferencePresent)
+    assertEquals("unknown", parsed.facts.providerFinalStatus)
+    assertEquals("unknown", parsed.facts.referenceMatch)
+    assertEquals(RoutineTelebirrReceiptParser.EXPLICIT_INVALID_NO_RECEIVER_DIGEST,
+      parsed.facts.creditedPartyNameDigest)
+  }
+
+  @Test
+  fun `an unattested or changed invalid page cannot become terminal evidence`() {
+    for (document in listOf(
+      ProviderDocument.ExplicitInvalidReference(repeatedDigest('7'),
+        "2026-10-14T10:30:00.000Z", ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN),
+      ProviderDocument.ExplicitInvalidReference(
+        SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST,
+        "2026-10-14T10:30:00.000Z", ProviderDocumentOriginAttestation.UNATTESTED),
+    )) {
+      assertTrue(parser.parse(document, lookup) is RoutineTelebirrParsedReceipt.Review)
+    }
+  }
+
+  @Test
   fun `maps a trusted official receipt to the exact routine facts vocabulary`() {
     val parsed = parser.parse(livePilotProviderFound(currentOfficialCardLivePilotHtml()), lookup)
       as RoutineTelebirrParsedReceipt.Observed

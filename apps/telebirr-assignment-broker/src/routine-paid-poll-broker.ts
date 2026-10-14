@@ -43,7 +43,7 @@ export interface RoutinePaidPollBrokerDatabase {
     readonly replayIdentity: string;
     readonly signedObservation: unknown;
   }): Promise<unknown>;
-  recordReceiverMismatch(input: {
+  recordTerminalRejection(input: {
     readonly challengeId: string;
     readonly signedObservation: unknown;
   }): Promise<unknown>;
@@ -77,7 +77,7 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
     !openingKey ||
     !signer ||
     typeof now !== 'function' ||
-    typeof database.recordReceiverMismatch !== 'function'
+    typeof database.recordTerminalRejection !== 'function'
   ) {
     throw new RoutinePaidPollBrokerUnavailableError();
   }
@@ -234,7 +234,7 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
         throw new RoutinePaidPollBrokerUnavailableError();
       }
     },
-    async recordReceiverMismatch(input: {
+    async recordTerminalRejection(input: {
       readonly challengeId: string;
       readonly signedObservation: unknown;
     }) {
@@ -246,7 +246,7 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
           JSON.stringify(input.signedObservation).length > 16384
         )
           throw new Error();
-        const result = await database.recordReceiverMismatch(input);
+        const result = await database.recordTerminalRejection(input);
         if (result !== 'recorded' && result !== 'exact_replay' && result !== 'conflict')
           throw new Error();
         return result;

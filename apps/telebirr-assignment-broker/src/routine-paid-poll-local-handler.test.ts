@@ -56,7 +56,7 @@ function fakeBroker() {
     })),
     classifyTerminal: vi.fn(async () => true),
     stageObservation: vi.fn(async () => 'recorded' as const),
-    recordReceiverMismatch: vi.fn(async () => 'recorded' as const),
+    recordTerminalRejection: vi.fn(async () => 'recorded' as const),
   };
 }
 
@@ -140,7 +140,7 @@ describe('private routine paid poll local handler', () => {
     expect(JSON.parse(Buffer.from(staged.body).toString('utf8'))).toEqual({ kind: 'recorded' });
     expect(fake.stageObservation).toHaveBeenCalledOnce();
     const receiverMismatch = await handler(
-      request('record_receiver_mismatch', {
+      request('record_terminal_rejection', {
         challengeId: requestId,
         signedObservation: {
           contractVersion: 2,
@@ -157,7 +157,7 @@ describe('private routine paid poll local handler', () => {
       }),
     );
     expect(receiverMismatch.statusCode).toBe(200);
-    expect(fake.recordReceiverMismatch).toHaveBeenCalledOnce();
+    expect(fake.recordTerminalRejection).toHaveBeenCalledOnce();
   });
 
   it('rejects no-money media and malformed operations before broker access', async () => {
@@ -205,14 +205,14 @@ describe('private routine paid poll local handler', () => {
     expect(
       (
         await handler(
-          request('record_receiver_mismatch', {
+          request('record_terminal_rejection', {
             challengeId: 'bad',
             signedObservation: {},
           }),
         )
       ).statusCode,
     ).toBe(400);
-    expect(fake.recordReceiverMismatch).not.toHaveBeenCalled();
+    expect(fake.recordTerminalRejection).not.toHaveBeenCalled();
   });
 
   it('fails closed with no private error detail', async () => {

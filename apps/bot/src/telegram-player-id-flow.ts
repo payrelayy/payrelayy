@@ -248,7 +248,7 @@ export function telegramDepositHelpText(): string {
     '1. Tap /menu, then 💰 Make a deposit.',
     '2. Send the KemerBet Player ID.',
     '3. FetanAgent will show the receiver name and wallet number when payments are live.',
-    '4. After paying, reply with the TeleBirr transaction number, receipt link, or full SMS.',
+    '4. After paying, reply with the TeleBirr transaction number, full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).',
     '',
     'Check an earlier request with /deposit_status and its tracking reference.',
     'Need help? Tap /support.',

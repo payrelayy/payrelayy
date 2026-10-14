@@ -207,3 +207,11 @@ jobs:
 
       - name: Build and test
         run: pnpm test
+
+      - name: Build and check local receipt readers in the bot image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull=false --target bot --build-arg "VCS_REF=$GITHUB_SHA" --tag fetanagent-bot:ci .
+          docker run --rm --read-only --entrypoint /bin/sh fetanagent-bot:ci -ec \
+            'command -v tesseract; command -v pdfinfo; command -v pdftotext; command -v pdftoppm; tesseract --list-langs | grep -qx eng'

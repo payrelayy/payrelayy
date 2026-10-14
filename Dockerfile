@@ -114,6 +114,12 @@ ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-bot" \
       org.opencontainers.image.revision="${VCS_REF}"
 
+USER root
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng \
+  && rm -rf /var/lib/apt/lists/*
+USER 10001:10001
+
 COPY --from=bot-build --chown=10001:10001 /deploy/workspace ./
 
 CMD ["node", "apps/bot/dist/index.js"]

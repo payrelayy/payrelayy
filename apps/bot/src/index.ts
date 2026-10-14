@@ -4,6 +4,10 @@ import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
 import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
+import {
+  extractTelegramProofMediaText,
+  selectTelegramProofMedia,
+} from './telegram-deposit-media.js';
 import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
@@ -15,6 +19,7 @@ import {
   isTelegramGuidedDepositStartCommand,
   isTelegramPrivateHelpCommand,
   reduceTelegramGuidedDepositDestinationSubmission,
+  reduceTelegramGuidedDepositMediaSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
@@ -28,6 +33,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
+  parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
 import {
@@ -52,6 +58,7 @@ if (!config.telegram.enabled) {
 }
 
 const bot = new Bot(config.telegram.token);
+const telegramToken = config.telegram.token;
 const pollingReadiness = createTelegramPollingReadiness();
 bot.api.config.use(pollingReadiness.transformer);
 const betaAdmission = config.telegramBetaAdmission;
@@ -162,6 +169,8 @@ bot.on('message', async (context) => {
         : undefined,
     };
     const text = 'text' in context.message ? context.message.text : undefined;
+    const replyToMessage =
+      'reply_to_message' in context.message ? context.message.reply_to_message : undefined;
     if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
       await context.reply(`${telegramDepositHelpText()}\n${TELEGRAM_SUPPORT_HELP_TEXT}`);
       return;
@@ -186,8 +195,7 @@ bot.on('message', async (context) => {
     const destinationSubmission = reduceTelegramGuidedDepositDestinationSubmission({
       ...metadata,
       text,
-      replyToMessage:
-        'reply_to_message' in context.message ? context.message.reply_to_message : undefined,
+      replyToMessage,
     });
     if (destinationSubmission) {
       if (destinationSubmission.kind === 'action') {
@@ -214,11 +222,60 @@ bot.on('message', async (context) => {
       }
       return;
     }
+    if (
+      ('photo' in context.message || 'document' in context.message) &&
+      context.chat?.type === 'private' &&
+      context.from?.id === context.chat.id &&
+      !context.from.is_bot &&
+      parseTelegramTelebirrPaymentPromptReply(replyToMessage)
+    ) {
+      const selection = selectTelegramProofMedia(context.message);
+      if (selection.kind !== 'selected') {
+        await context.reply(
+          selection.kind === 'too_large'
+            ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
+            : 'Please send a JPG/PNG screenshot or PDF, or type the TeleBirr transaction number.',
+        );
+        return;
+      }
+      const extracted = await extractTelegramProofMediaText(selection.media, {
+        token: telegramToken,
+        getFile: (fileId) => bot.api.getFile(fileId),
+      });
+      if (extracted.kind !== 'text') {
+        await context.reply(
+          extracted.kind === 'busy'
+            ? 'Receipt reading is busy. Please try again shortly or type the transaction number.'
+            : extracted.kind === 'too_large'
+              ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
+              : 'I could not read this receipt. Please send a clearer image/PDF or type the transaction number. Nothing was submitted.',
+        );
+        return;
+      }
+      const mediaSubmission = reduceTelegramGuidedDepositMediaSubmission({
+        ...metadata,
+        replyToMessage,
+        caption: 'caption' in context.message ? context.message.caption : undefined,
+        extractedText: extracted.text,
+        sourceKind: selection.media.kind === 'pdf' ? 'pdf_text' : 'ocr_text',
+      });
+      if (mediaSubmission?.kind === 'action') {
+        await deliverPlayerAction(mediaSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        );
+      } else {
+        await context.reply(
+          mediaSubmission?.kind === 'selection_required'
+            ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
+            : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
+        );
+      }
+      return;
+    }
     const guidedSubmission = reduceTelegramGuidedDepositProofSubmission({
       ...metadata,
       text,
-      replyToMessage:
-        'reply_to_message' in context.message ? context.message.reply_to_message : undefined,
+      replyToMessage,
     });
     if (guidedSubmission) {
       if (guidedSubmission.kind === 'action') {

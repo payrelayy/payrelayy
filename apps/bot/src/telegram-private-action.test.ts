@@ -198,6 +198,27 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('accepts a reply to the prior text-only payment card during the media rollout', () => {
+    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    }).replace(
+      'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).',
+      'You can also paste the receipt link or full SMS.',
+    );
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'SYNTB00000001',
+        replyToMessage: { text: previousPrompt, from: { is_bot: true } },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: { playerId: 'PLAYER-DEMO-42', transactionReference: 'SYNTB00000001' },
+    });
+  });
+
   it('accepts an already-open exactly-25-ETB payment reply during rollout', () => {
     const previousPrompt = buildTelegramTelebirrPaymentPrompt({
       playerId: 'PLAYER-DEMO-42',

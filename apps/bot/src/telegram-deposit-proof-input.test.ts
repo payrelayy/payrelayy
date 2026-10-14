@@ -7,7 +7,9 @@ import {
 import {
   reduceTelegramDepositProofCommand,
   reduceTelegramDepositProofSubmission,
+  reduceTelegramGuidedDepositMediaSubmission,
 } from './telegram-private-action.js';
+import { buildTelegramTelebirrPaymentPrompt } from './telegram-guided-deposit.js';
 
 const metadata = {
   updateId: 123456,
@@ -17,10 +19,91 @@ const metadata = {
 const reference = 'SYNTB00000001';
 const otherReference = 'SYNTB00000002';
 const prefix = '/deposit telebirr PLAYER-DEMO-42 ';
+const paymentPrompt = {
+  from: { is_bot: true },
+  text: buildTelegramTelebirrPaymentPrompt({
+    playerId: 'PLAYER-DEMO-42',
+    receiverAccountHolderName: 'Synthetic Receiver',
+    receiverAccountReference: '0912345678',
+  }),
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Telegram amount-free TeleBirr proof input', () => {
+  it.each(['ocr_text', 'pdf_text'] as const)(
+    'reduces a %s attachment to the same protected reference-only action',
+    (sourceKind) => {
+      expect(
+        reduceTelegramGuidedDepositMediaSubmission({
+          ...metadata,
+          replyToMessage: paymentPrompt,
+          caption: undefined,
+          extractedText: 'Transaction ID: syntb00000001. Amount ETB 900.00.',
+          sourceKind,
+        }),
+      ).toEqual({
+        kind: 'action',
+        action: {
+          version: 1,
+          kind: 'deposit_proof_command',
+          updateId: '123456',
+          telegramUserId: '123456789',
+          privateChatId: '123456789',
+          preferredLocale: 'en',
+          providerCode: 'telebirr',
+          playerId: 'PLAYER-DEMO-42',
+          transactionReference: reference,
+        },
+      });
+    },
+  );
+
+  it('compares a caption reference with the attachment and never guesses on a conflict', () => {
+    expect(
+      reduceTelegramGuidedDepositMediaSubmission({
+        ...metadata,
+        replyToMessage: paymentPrompt,
+        caption: otherReference,
+        extractedText: `Transaction ID: ${reference}`,
+        sourceKind: 'ocr_text',
+      }),
+    ).toEqual({ kind: 'selection_required' });
+    expect(
+      reduceTelegramGuidedDepositMediaSubmission({
+        ...metadata,
+        replyToMessage: paymentPrompt,
+        caption: reference.toLowerCase(),
+        extractedText: reference,
+        sourceKind: 'pdf_text',
+      }),
+    ).toMatchObject({ kind: 'action' });
+  });
+
+  it('does not accept media outside an authentic private payment prompt', () => {
+    for (const replyToMessage of [undefined, { ...paymentPrompt, from: { is_bot: false } }]) {
+      expect(
+        reduceTelegramGuidedDepositMediaSubmission({
+          ...metadata,
+          replyToMessage,
+          caption: undefined,
+          extractedText: `Transaction ID: ${reference}`,
+          sourceKind: 'ocr_text',
+        }),
+      ).toBeUndefined();
+    }
+    expect(
+      reduceTelegramGuidedDepositMediaSubmission({
+        ...metadata,
+        chat: { id: 123456789, type: 'group' },
+        replyToMessage: paymentPrompt,
+        caption: undefined,
+        extractedText: `Transaction ID: ${reference}`,
+        sourceKind: 'ocr_text',
+      }),
+    ).toBeUndefined();
+  });
+
   it.each([
     { providerCode: 'telebirr', expectedReference: 'SYNTB00000001' },
     { providerCode: 'cbe_birr', expectedReference: 'syntb00000001' },

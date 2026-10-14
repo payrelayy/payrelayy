@@ -25,9 +25,9 @@ import {
  * Pure byte-input boundary for the one-page CBE Birr receipt-PDF shape attested in Stage 1E.
  *
  * This package deliberately exposes no URL, transport, callback, persistence, claim, settlement,
- * enqueue, execution, or financial capability. The attested shape exposes a display name but no
- * unambiguous full receiver account/wallet identifier, so it can never produce an acceptance or
- * settlement candidate. Display names are presence-checked and discarded, never compared.
+ * enqueue, execution, or financial capability. An older attested layout exposes only a display
+ * name; a newer layout exposes an exact Credit Account identifier. Both remain advisory-only:
+ * matching a locally supplied identifier does not attest that the PDF was fetched from CBE.
  *
  * Runtime composition remains deliberately unresolved: the transport's public safe result omits
  * raw PDF bytes. A future, separately reviewed internal one-fetch orchestration must pass the same
@@ -88,6 +88,9 @@ const SOURCE_TIMESTAMP_PATTERN =
 const CANONICAL_ADDIS_TIMESTAMP_PATTERN =
   /^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\+03:00$/u;
 const MINOR_UNITS_PATTERN = /^(0|[1-9][0-9]{0,17})$/u;
+const BARE_MONEY_PATTERN = /^(0|[1-9][0-9]{0,15})\.([0-9]{2})$/u;
+const NEW_LAYOUT_TIMESTAMP_PATTERN =
+  /^(?<year>20[0-9]{2})-(?<month>[0-9]{2})-(?<day>[0-9]{2}) (?<hour>[0-9]{2}):(?<minute>[0-9]{2})$/u;
 
 const EXPECTED_BANK_HEADING = 'Commercial Bank of Ethiopia';
 const EXPECTED_RECEIPT_HEADING = 'VAT Invoice / Customer Receipt';
@@ -188,6 +191,7 @@ const safeFactKeys = [
   'vatMinor',
   'totalPaidAmountMinor',
   'feeArithmetic',
+  'additionalFeesMinor',
   'occurredAt',
   'occurredAtTimeZone',
 ] as const;
@@ -249,9 +253,11 @@ export type CbeBirrAuthoritativePdfParserReviewReason =
   | 'receipt_status_unsupported'
   | 'transaction_type_unsupported'
   | 'fee_arithmetic_mismatch'
-  | 'receiver_identity_unavailable';
+  | 'receiver_identity_unavailable'
+  | 'receiver_identity_observed';
 
-export type CbeBirrAuthoritativePdfParserRejectReason = 'reference_mismatch' | 'currency_not_etb';
+export type CbeBirrAuthoritativePdfParserRejectReason =
+  'reference_mismatch' | 'currency_not_etb' | 'receiver_mismatch';
 
 export type CbeBirrAuthoritativePdfParserReason =
   CbeBirrAuthoritativePdfParserReviewReason | CbeBirrAuthoritativePdfParserRejectReason;
@@ -264,16 +270,17 @@ interface CbeBirrAuthoritativePdfParserResultBase extends DisabledParserCapabili
 }
 
 export interface CbeBirrAuthoritativePdfSafeFacts {
-  readonly documentTopology: 'cbe_birr_vat_customer_receipt_v1';
+  readonly documentTopology:
+    'cbe_birr_vat_customer_receipt_v1' | 'cbe_birr_vat_customer_receipt_credit_account_v2';
   readonly pageCount: 1;
   readonly activeContentAbsent: true;
   readonly attachmentsAbsent: true;
   readonly formsAbsent: true;
   readonly referenceMatched: boolean;
   readonly receiverDisplayNamePresent: true;
-  readonly receiverIdentifierEvidence: 'unavailable';
-  readonly receiverIdentityMatch: 'unavailable';
-  readonly receiverMatchBasis: 'exact_account_identifier_required';
+  readonly receiverIdentifierEvidence: 'unavailable' | 'exact_pdf_credit_account';
+  readonly receiverIdentityMatch: 'unavailable' | 'matched' | 'mismatched';
+  readonly receiverMatchBasis: 'exact_account_identifier_required' | 'pdf_credit_account';
   readonly receiptStatus: 'completed' | 'unsupported';
   readonly transactionType: 'send_money' | 'unsupported';
   readonly currencyCode: 'ETB' | 'other';
@@ -282,6 +289,7 @@ export interface CbeBirrAuthoritativePdfSafeFacts {
   readonly vatMinor: string;
   readonly totalPaidAmountMinor: string;
   readonly feeArithmetic: 'consistent' | 'mismatched';
+  readonly additionalFeesMinor: string;
   readonly occurredAt: string;
   readonly occurredAtTimeZone: typeof CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE;
 }
@@ -303,7 +311,8 @@ export interface CbeBirrAuthoritativePdfParsedReviewResult extends CbeBirrAuthor
     | 'receipt_status_unsupported'
     | 'transaction_type_unsupported'
     | 'fee_arithmetic_mismatch'
-    | 'receiver_identity_unavailable';
+    | 'receiver_identity_unavailable'
+    | 'receiver_identity_observed';
   readonly facts: CbeBirrAuthoritativePdfSafeFacts;
 }
 
@@ -357,6 +366,9 @@ interface ExtractedReceiptFields {
   readonly vat: ParsedMoney;
   readonly totalPaid: ParsedMoney;
   readonly occurredAt: string;
+  readonly receiverIdentifier?: string;
+  readonly additionalFeesMinor?: string;
+  readonly documentTopology?: CbeBirrAuthoritativePdfSafeFacts['documentTopology'];
 }
 
 type ExtractedReceiptResult =
@@ -1105,6 +1117,195 @@ function extractReceiptFields(rows: readonly TextRow[]): ExtractedReceiptResult 
   };
 }
 
+function parseBareMoney(value: string): ParsedMoney | undefined {
+  const match = BARE_MONEY_PATTERN.exec(value);
+  if (!match) return undefined;
+  return {
+    minor: (BigInt(match[1]!) * 100n + BigInt(match[2]!)).toString(),
+    currency: 'ETB',
+  };
+}
+
+function parseNewLayoutTimestamp(value: string): string | undefined {
+  const match = NEW_LAYOUT_TIMESTAMP_PATTERN.exec(value);
+  if (!match?.groups) return undefined;
+  const { year, month, day, hour, minute } = match.groups;
+  if (
+    !year ||
+    !month ||
+    !day ||
+    !hour ||
+    !minute ||
+    Number(month) < 1 ||
+    Number(month) > 12 ||
+    Number(day) < 1 ||
+    Number(day) > daysInMonth(Number(year), Number(month)) ||
+    Number(hour) > 23 ||
+    Number(minute) > 59
+  )
+    return undefined;
+  // This receipt prints minutes only. The safe fact is minute precision, not a claim about
+  // the provider's unknown seconds; a later freshness policy must preserve that uncertainty.
+  return `${year}-${month}-${day}T${hour}:${minute}:00+03:00`;
+}
+
+/**
+ * A privacy-controlled official CBE Birr PDF showed this second, one-page topology. In this
+ * layout the PH query parameter is NOT receiver evidence: sender and receiver selectors can
+ * return the same PDF. Only the PDF's Credit Account (cross-checked against Receiver Name's
+ * account) is compared to the configured receiver. No account digits leave this parser.
+ */
+function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedReceiptResult {
+  const infoIndexes = rows.flatMap((row, index) =>
+    row.text === 'Transaction Information' ? [index] : [],
+  );
+  const detailIndexes = rows.flatMap((row, index) =>
+    row.text === 'Transaction Details' ? [index] : [],
+  );
+  if (infoIndexes.length !== 1 || detailIndexes.length !== 1) {
+    return { ok: false, reasonCode: 'pdf_field_duplicate' };
+  }
+  const infoIndex = infoIndexes[0]!;
+  const detailIndex = detailIndexes[0]!;
+  if (
+    rows[0]?.text !== EXPECTED_BANK_HEADING ||
+    rows[1]?.text !== 'VAT Invoice/ Customer Receipt' ||
+    detailIndex <= infoIndex + 6
+  )
+    return { ok: false, reasonCode: 'pdf_layout_drift' };
+
+  const information = rows.slice(infoIndex + 1, detailIndex);
+  const labels = [
+    'Debit Account',
+    'Credit Account',
+    'Receiver Name',
+    'Order ID',
+    'Transaction Status',
+    'Reference',
+  ] as const;
+  const labelled = labels.map((label) =>
+    information.flatMap((row, index) => (row.text.startsWith(`${label} `) ? [index] : [])),
+  );
+  if (labelled.some((indexes) => indexes.length === 0)) {
+    return { ok: false, reasonCode: 'pdf_field_missing' };
+  }
+  if (labelled.some((indexes) => indexes.length !== 1)) {
+    return { ok: false, reasonCode: 'pdf_field_duplicate' };
+  }
+  const positions = labelled.map((indexes) => indexes[0]!);
+  if (
+    information.length < 6 ||
+    information.length > 8 ||
+    positions[0] !== 0 ||
+    positions[1] !== 1 ||
+    positions.some((position, index) => index > 0 && position <= positions[index - 1]!) ||
+    positions[5] !== information.length - 1
+  )
+    return { ok: false, reasonCode: 'pdf_layout_drift' };
+  for (let index = 0; index < information.length; index += 1) {
+    if (positions.includes(index)) continue;
+    // At most one wrapped display-name line after each account row is admitted. It can never
+    // supply receiver digits or override the exact account-bearing row.
+    if (
+      (index !== positions[1]! + 1 && index !== positions[2]! + 1) ||
+      !/^[A-Za-z][A-Za-z ]{0,79}$/u.test(information[index]!.text)
+    )
+      return { ok: false, reasonCode: 'pdf_layout_drift' };
+  }
+
+  const debit = valueAfterLabel(information[positions[0]!]!, 'Debit Account');
+  const credit = valueAfterLabel(information[positions[1]!]!, 'Credit Account');
+  const receiver = valueAfterLabel(information[positions[2]!]!, 'Receiver Name');
+  const orderId = valueAfterLabel(information[positions[3]!]!, 'Order ID');
+  const status = valueAfterLabel(information[positions[4]!]!, 'Transaction Status');
+  const referencePlaceholder = valueAfterLabel(information[positions[5]!]!, 'Reference');
+  const accountPattern = /^(251[0-9]{9}) - (.{1,100})$/u;
+  const debitMatch = debit ? accountPattern.exec(debit) : null;
+  const creditMatch = credit ? accountPattern.exec(credit) : null;
+  const receiverMatch = receiver ? accountPattern.exec(receiver) : null;
+  if (
+    !debitMatch ||
+    !creditMatch ||
+    !receiverMatch ||
+    !SOURCE_VALUE_PATTERN.test(creditMatch[2]!) ||
+    !SOURCE_VALUE_PATTERN.test(receiverMatch[2]!) ||
+    !orderId ||
+    !CANONICAL_REFERENCE_PATTERN.test(orderId) ||
+    !status ||
+    !SOURCE_CHANNEL_PATTERN.test(status) ||
+    referencePlaceholder !== ':'
+  )
+    return { ok: false, reasonCode: 'pdf_value_invalid' };
+  if (creditMatch[1] !== receiverMatch[1]) {
+    return { ok: false, reasonCode: 'pdf_field_conflict' };
+  }
+
+  const details = rows.slice(detailIndex + 1);
+  if (
+    details.length < 13 ||
+    details[0]?.text !== EXPECTED_SUMMARY_HEADING ||
+    details[4]?.text !== 'Disaster Response' ||
+    details[6]?.text !== 'Fee' ||
+    details[10]?.text.startsWith('Total Amount in word ') !== true ||
+    !/\bETB\b/u.test(details[10]!.text)
+  )
+    return { ok: false, reasonCode: 'pdf_layout_drift' };
+  const summary =
+    /^(?<reference>[A-Z0-9]{8,32}) (?<timestamp>20[0-9]{2}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}) (?<amount>(?:0|[1-9][0-9]{0,15})\.[0-9]{2})$/u.exec(
+      details[1]!.text,
+    );
+  const occurredAt = summary?.groups
+    ? parseNewLayoutTimestamp(summary.groups.timestamp!)
+    : undefined;
+  const summaryAmount = summary?.groups ? parseBareMoney(summary.groups.amount!) : undefined;
+  const principal = parseBareMoney(valueAfterLabel(details[2]!, 'Paid amount') ?? '');
+  const serviceCharge = parseBareMoney(valueAfterLabel(details[3]!, 'Service Charge') ?? '');
+  const disasterFee = parseBareMoney(details[5]!.text);
+  const vat = parseBareMoney(valueAfterLabel(details[7]!, 'VAT') ?? '');
+  const tip = parseBareMoney(valueAfterLabel(details[8]!, 'Tip') ?? '');
+  const totalPaid = parseBareMoney(valueAfterLabel(details[9]!, 'Total Paid Amount') ?? '');
+  const paymentReason = valueAfterLabel(details[11]!, 'Payment Reason');
+  const paymentChannel = valueAfterLabel(details[12]!, 'Payment Channel');
+  if (
+    !summary?.groups ||
+    summary.groups.reference !== orderId ||
+    !occurredAt ||
+    !summaryAmount ||
+    !principal ||
+    principal.minor === '0' ||
+    !serviceCharge ||
+    !disasterFee ||
+    !vat ||
+    !tip ||
+    !totalPaid ||
+    !paymentReason ||
+    !SOURCE_CHANNEL_PATTERN.test(paymentReason) ||
+    !paymentChannel ||
+    !SOURCE_CHANNEL_PATTERN.test(paymentChannel)
+  )
+    return { ok: false, reasonCode: 'pdf_value_invalid' };
+  if (summaryAmount.minor !== principal.minor) {
+    return { ok: false, reasonCode: 'pdf_field_conflict' };
+  }
+
+  return {
+    ok: true,
+    fields: {
+      reference: orderId,
+      status,
+      paymentReason,
+      principal,
+      serviceCharge,
+      vat,
+      totalPaid,
+      occurredAt,
+      receiverIdentifier: creditMatch[1]!,
+      additionalFeesMinor: (BigInt(disasterFee.minor) + BigInt(tip.minor)).toString(),
+      documentTopology: 'cbe_birr_vat_customer_receipt_credit_account_v2',
+    },
+  };
+}
+
 function safeFacts(
   fields: ExtractedReceiptFields,
   expectations: ParsedExpectations,
@@ -1117,23 +1318,30 @@ function safeFacts(
   const arithmeticMatches =
     BigInt(fields.principal.minor) +
       BigInt(fields.serviceCharge.minor) +
-      BigInt(fields.vat.minor) ===
+      BigInt(fields.vat.minor) +
+      BigInt(fields.additionalFeesMinor ?? '0') ===
     BigInt(fields.totalPaid.minor);
-
-  // The configured identifier is deliberately consumed only as a required expectation. The
-  // allowlisted PDF topology contains no full receiver identifier that could be compared to it.
-  void expectations.configuredReceiverAccountIdentifier;
+  const receiverEvidence = fields.receiverIdentifier
+    ? ('exact_pdf_credit_account' as const)
+    : ('unavailable' as const);
+  const receiverMatch = fields.receiverIdentifier
+    ? fields.receiverIdentifier === expectations.configuredReceiverAccountIdentifier
+      ? ('matched' as const)
+      : ('mismatched' as const)
+    : ('unavailable' as const);
   return deepFreeze({
-    documentTopology: 'cbe_birr_vat_customer_receipt_v1' as const,
+    documentTopology: fields.documentTopology ?? 'cbe_birr_vat_customer_receipt_v1',
     pageCount: 1 as const,
     activeContentAbsent: true as const,
     attachmentsAbsent: true as const,
     formsAbsent: true as const,
     referenceMatched: fields.reference === expectations.canonicalReference,
     receiverDisplayNamePresent: true as const,
-    receiverIdentifierEvidence: 'unavailable' as const,
-    receiverIdentityMatch: 'unavailable' as const,
-    receiverMatchBasis: 'exact_account_identifier_required' as const,
+    receiverIdentifierEvidence: receiverEvidence,
+    receiverIdentityMatch: receiverMatch,
+    receiverMatchBasis: fields.receiverIdentifier
+      ? ('pdf_credit_account' as const)
+      : ('exact_account_identifier_required' as const),
     receiptStatus,
     transactionType,
     currencyCode,
@@ -1142,6 +1350,7 @@ function safeFacts(
     vatMinor: fields.vat.minor,
     totalPaidAmountMinor: fields.totalPaid.minor,
     feeArithmetic: arithmeticMatches ? ('consistent' as const) : ('mismatched' as const),
+    additionalFeesMinor: fields.additionalFeesMinor ?? '0',
     occurredAt: fields.occurredAt,
     occurredAtTimeZone: CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE,
   });
@@ -1155,7 +1364,15 @@ function reduceFacts(facts: CbeBirrAuthoritativePdfSafeFacts): CbeBirrAuthoritat
   }
   if (facts.currencyCode !== 'ETB') return definiteReject('currency_not_etb', facts);
   if (facts.feeArithmetic !== 'consistent') return parsedReview('fee_arithmetic_mismatch', facts);
-  return parsedReview('receiver_identity_unavailable', facts);
+  if (facts.receiverIdentityMatch === 'mismatched') {
+    return definiteReject('receiver_mismatch', facts);
+  }
+  return parsedReview(
+    facts.receiverIdentityMatch === 'matched'
+      ? 'receiver_identity_observed'
+      : 'receiver_identity_unavailable',
+    facts,
+  );
 }
 
 async function inspectLoadedPdf(
@@ -1180,7 +1397,9 @@ async function inspectLoadedPdf(
   const rows = textRows(fragments);
   if (!rows) return structuralReview('pdf_layout_drift');
   if (rows.length === 0) return structuralReview('pdf_text_unavailable');
-  const extracted = extractReceiptFields(rows);
+  const extracted = rows.some((row) => row.text === 'Transaction Information')
+    ? extractCreditAccountReceiptFields(rows)
+    : extractReceiptFields(rows);
   if (!extracted.ok) return structuralReview(extracted.reasonCode);
   return reduceFacts(safeFacts(extracted.fields, expectations));
 }
@@ -1310,18 +1529,28 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
   const vatMinor = ownDataValue(candidate, 'vatMinor');
   const totalPaidAmountMinor = ownDataValue(candidate, 'totalPaidAmountMinor');
   const feeArithmetic = ownDataValue(candidate, 'feeArithmetic');
+  const additionalFeesMinor = ownDataValue(candidate, 'additionalFeesMinor');
   const occurredAt = ownDataValue(candidate, 'occurredAt');
+  const documentTopology = ownDataValue(candidate, 'documentTopology');
+  const receiverIdentifierEvidence = ownDataValue(candidate, 'receiverIdentifierEvidence');
+  const receiverIdentityMatch = ownDataValue(candidate, 'receiverIdentityMatch');
+  const receiverMatchBasis = ownDataValue(candidate, 'receiverMatchBasis');
   if (
-    ownDataValue(candidate, 'documentTopology') !== 'cbe_birr_vat_customer_receipt_v1' ||
+    (documentTopology !== 'cbe_birr_vat_customer_receipt_v1' &&
+      documentTopology !== 'cbe_birr_vat_customer_receipt_credit_account_v2') ||
     ownDataValue(candidate, 'pageCount') !== 1 ||
     ownDataValue(candidate, 'activeContentAbsent') !== true ||
     ownDataValue(candidate, 'attachmentsAbsent') !== true ||
     ownDataValue(candidate, 'formsAbsent') !== true ||
     typeof referenceMatched !== 'boolean' ||
     ownDataValue(candidate, 'receiverDisplayNamePresent') !== true ||
-    ownDataValue(candidate, 'receiverIdentifierEvidence') !== 'unavailable' ||
-    ownDataValue(candidate, 'receiverIdentityMatch') !== 'unavailable' ||
-    ownDataValue(candidate, 'receiverMatchBasis') !== 'exact_account_identifier_required' ||
+    !(documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+      ? receiverIdentifierEvidence === 'unavailable' &&
+        receiverIdentityMatch === 'unavailable' &&
+        receiverMatchBasis === 'exact_account_identifier_required'
+      : receiverIdentifierEvidence === 'exact_pdf_credit_account' &&
+        (receiverIdentityMatch === 'matched' || receiverIdentityMatch === 'mismatched') &&
+        receiverMatchBasis === 'pdf_credit_account') ||
     (receiptStatus !== 'completed' && receiptStatus !== 'unsupported') ||
     (transactionType !== 'send_money' && transactionType !== 'unsupported') ||
     (currencyCode !== 'ETB' && currencyCode !== 'other') ||
@@ -1334,6 +1563,9 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
     !MINOR_UNITS_PATTERN.test(vatMinor) ||
     typeof totalPaidAmountMinor !== 'string' ||
     !MINOR_UNITS_PATTERN.test(totalPaidAmountMinor) ||
+    typeof additionalFeesMinor !== 'string' ||
+    !MINOR_UNITS_PATTERN.test(additionalFeesMinor) ||
+    (documentTopology === 'cbe_birr_vat_customer_receipt_v1' && additionalFeesMinor !== '0') ||
     (feeArithmetic !== 'consistent' && feeArithmetic !== 'mismatched') ||
     !isCanonicalAddisTimestamp(occurredAt) ||
     ownDataValue(candidate, 'occurredAtTimeZone') !== CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE
@@ -1341,20 +1573,34 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
     return undefined;
   }
   const arithmeticMatches =
-    BigInt(principalAmountMinor) + BigInt(serviceChargeMinor) + BigInt(vatMinor) ===
+    BigInt(principalAmountMinor) +
+      BigInt(serviceChargeMinor) +
+      BigInt(vatMinor) +
+      BigInt(additionalFeesMinor) ===
     BigInt(totalPaidAmountMinor);
   if ((feeArithmetic === 'consistent') !== arithmeticMatches) return undefined;
   return deepFreeze({
-    documentTopology: 'cbe_birr_vat_customer_receipt_v1' as const,
+    documentTopology,
     pageCount: 1 as const,
     activeContentAbsent: true as const,
     attachmentsAbsent: true as const,
     formsAbsent: true as const,
     referenceMatched,
     receiverDisplayNamePresent: true as const,
-    receiverIdentifierEvidence: 'unavailable' as const,
-    receiverIdentityMatch: 'unavailable' as const,
-    receiverMatchBasis: 'exact_account_identifier_required' as const,
+    receiverIdentifierEvidence:
+      documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+        ? ('unavailable' as const)
+        : ('exact_pdf_credit_account' as const),
+    receiverIdentityMatch:
+      documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+        ? ('unavailable' as const)
+        : receiverIdentityMatch === 'matched'
+          ? ('matched' as const)
+          : ('mismatched' as const),
+    receiverMatchBasis:
+      documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+        ? ('exact_account_identifier_required' as const)
+        : ('pdf_credit_account' as const),
     receiptStatus,
     transactionType,
     currencyCode,
@@ -1363,6 +1609,7 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
     vatMinor,
     totalPaidAmountMinor,
     feeArithmetic,
+    additionalFeesMinor,
     occurredAt,
     occurredAtTimeZone: CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE,
   });
@@ -1407,7 +1654,14 @@ function parsedReasonMatchesFacts(
         facts.referenceMatched &&
         facts.receiptStatus === 'completed' &&
         facts.transactionType === 'send_money' &&
-        facts.currencyCode === 'other')
+        facts.currencyCode === 'other') ||
+      (reasonCode === 'receiver_mismatch' &&
+        facts.referenceMatched &&
+        facts.receiptStatus === 'completed' &&
+        facts.transactionType === 'send_money' &&
+        facts.currencyCode === 'ETB' &&
+        facts.feeArithmetic === 'consistent' &&
+        facts.receiverIdentityMatch === 'mismatched')
     );
   }
   if (disposition !== 'would_review' || !facts.referenceMatched) return false;
@@ -1418,7 +1672,12 @@ function parsedReasonMatchesFacts(
   }
   if (facts.transactionType !== 'send_money' || facts.currencyCode !== 'ETB') return false;
   if (reasonCode === 'fee_arithmetic_mismatch') return facts.feeArithmetic === 'mismatched';
-  return reasonCode === 'receiver_identity_unavailable' && facts.feeArithmetic === 'consistent';
+  return (
+    facts.feeArithmetic === 'consistent' &&
+    ((reasonCode === 'receiver_identity_unavailable' &&
+      facts.receiverIdentityMatch === 'unavailable') ||
+      (reasonCode === 'receiver_identity_observed' && facts.receiverIdentityMatch === 'matched'))
+  );
 }
 
 function parseResultCandidate(candidate: unknown): CbeBirrAuthoritativePdfParserResult | undefined {

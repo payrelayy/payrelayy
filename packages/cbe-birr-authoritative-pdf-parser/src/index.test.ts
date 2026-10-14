@@ -41,6 +41,12 @@ declare global {
 }
 
 interface SyntheticReceiptOptions {
+  readonly layout?: 'credit_account_v2';
+  readonly creditAccount?: string;
+  readonly receiverAccount?: string;
+  readonly summaryReference?: string;
+  readonly disasterFee?: string;
+  readonly tip?: string;
   readonly reference?: string;
   readonly status?: string;
   readonly summaryAmount?: string;
@@ -87,6 +93,49 @@ function pdfString(value: string): string {
 }
 
 function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRow[] {
+  if (options.layout === 'credit_account_v2') {
+    const reference = options.reference ?? SYNTHETIC_REFERENCE;
+    const creditAccount = options.creditAccount ?? SYNTHETIC_RECEIVER_IDENTIFIER;
+    const receiverAccount = options.receiverAccount ?? creditAccount;
+    const row = (y: number, label: string, value?: string): SyntheticTextRow => ({
+      y,
+      fragments:
+        value === undefined
+          ? [{ x: 50, text: label }]
+          : [
+              { x: 50, text: label },
+              { x: 300, text: value },
+            ],
+    });
+    return [
+      row(760, 'Commercial Bank of Ethiopia'),
+      row(740, 'VAT Invoice/ Customer Receipt'),
+      row(710, 'Transaction Information'),
+      row(680, 'Debit Account', '251900000002 - SYNTHETIC PAYER'),
+      row(655, 'Credit Account', `${creditAccount} - SYNTHETIC RECEIVER`),
+      row(630, 'Receiver Name', `${receiverAccount} - SYNTHETIC RECEIVER`),
+      row(605, 'Order ID', reference),
+      row(580, 'Transaction Status', options.status ?? 'Completed'),
+      row(555, 'Reference', ':'),
+      row(525, 'Transaction Details'),
+      row(500, 'Receipt Number Transaction Date Amount'),
+      row(
+        475,
+        `${options.summaryReference ?? reference} 2026-10-15 00:03 ${options.summaryAmount ?? '100.00'}`,
+      ),
+      row(450, 'Paid amount', options.paidAmount ?? '100.00'),
+      row(425, 'Service Charge', options.serviceCharge ?? '0.00'),
+      row(400, 'Disaster Response'),
+      row(388, options.disasterFee ?? '0.00'),
+      row(375, 'Fee'),
+      row(350, 'VAT', options.vat ?? '0.00'),
+      row(325, 'Tip', options.tip ?? '0.00'),
+      row(300, 'Total Paid Amount', options.totalPaid ?? '100.00'),
+      row(270, 'Total Amount in word One Hundred ETB and zero Cents .'),
+      row(240, 'Payment Reason', options.paymentReason ?? 'Send Money'),
+      row(215, 'Payment Channel', options.paymentChannel ?? 'USSD'),
+    ];
+  }
   const summaryAmount = options.summaryAmount ?? options.paidAmount ?? '100.00 ETB';
   const rows: SyntheticTextRow[] = [
     { y: 760, fragments: [{ x: 180, text: 'Commercial Bank of Ethiopia' }] },
@@ -497,6 +546,7 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
         vatMinor: '30',
         totalPaidAmountMinor: '10230',
         feeArithmetic: 'consistent',
+        additionalFeesMinor: '0',
         occurredAt: '2024-02-29T14:05:09+03:00',
         occurredAtTimeZone: 'Africa/Addis_Ababa',
       },
@@ -506,6 +556,64 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     expect(serialized).not.toContain(SYNTHETIC_REFERENCE);
     expect(serialized).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
     expect(serialized).not.toContain(SYNTHETIC_RECEIVER_NAME);
+  });
+
+  it('matches the newer official Credit Account layout without granting financial authority', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2' }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      advisoryOnly: true,
+      financialActionAllowed: false,
+      facts: {
+        documentTopology: 'cbe_birr_vat_customer_receipt_credit_account_v2',
+        referenceMatched: true,
+        receiverIdentifierEvidence: 'exact_pdf_credit_account',
+        receiverIdentityMatch: 'matched',
+        receiverMatchBasis: 'pdf_credit_account',
+        principalAmountMinor: '10000',
+        additionalFeesMinor: '0',
+        feeArithmetic: 'consistent',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('rejects a different Credit Account and reviews conflicting account fields', async () => {
+    const wrongReceiver = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2' }),
+      { ...expectations(), configuredReceiverAccountIdentifier: '251900000009' },
+    );
+    expect(wrongReceiver).toMatchObject({
+      disposition: 'would_reject',
+      reasonCode: 'receiver_mismatch',
+      facts: { receiverIdentityMatch: 'mismatched' },
+    });
+    const conflictingPdf = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        receiverAccount: '251900000009',
+      }),
+      expectations(),
+    );
+    expect(conflictingPdf).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'pdf_field_conflict',
+    });
+    expect(Reflect.ownKeys(conflictingPdf)).not.toContain('facts');
+  });
+
+  it.each([
+    [{ layout: 'credit_account_v2', summaryReference: 'OTHERREF1234' }, 'pdf_value_invalid'],
+    [{ layout: 'credit_account_v2', status: 'Pending' }, 'receipt_status_unsupported'],
+    [{ layout: 'credit_account_v2', totalPaid: '100.01' }, 'fee_arithmetic_mismatch'],
+  ] as const)('keeps newer-layout inconsistency %# fail-closed', async (options, reasonCode) => {
+    const result = await parseCbeBirrAuthoritativePdf(syntheticReceiptPdf(options), expectations());
+    expect(result.reasonCode).toBe(reasonCode);
+    expect(result.disposition).toBe('would_review');
   });
 
   it('has no accepting disposition and makes every authority capability literal false', () => {

@@ -25,6 +25,12 @@ the exact 12-digit international receiver selector (`251` plus nine decimal digi
 receiver-name input. Callers cannot select the method, scheme, host, port, path, query names, query
 order, headers, redirect target, TLS policy, timeout, response bounds, or retry count.
 
+The `PH` selector is **not receiver evidence**. A privacy-controlled example showed that the
+sender and receiver phone selectors for one transaction can open the same PDF. Any future
+verification must compare the PDF's own `Credit Account` field to the immutable receiver revision
+used for the payment instruction; it must never infer a receiver match from `PH`, the pasted SMS,
+the submitted URL, or a display name.
+
 The transport enforces:
 
 - one attempt and a 5,000 ms total deadline covering DNS, connection, headers, and body;
@@ -70,9 +76,13 @@ the digest and byte length as well as all protected request and response materia
 only fixed reason and failure classes.
 
 A privacy-controlled provider observation established that the current successful envelope is a
-PDF rather than the HTML shape assumed by the older synthetic fixture. It does not attest an exact
-field-extraction contract. No live response, real receipt identifier, name, phone number, field
-value, or provider document is stored in this package or its tests.
+PDF rather than the HTML shape assumed by the older synthetic fixture. A separate, still-unwired
+parser now recognizes one newer receipt layout containing `Credit Account`, `Receiver Name`,
+`Order ID`, completed status, minute-precision time, principal, and fee rows. Matching those
+fields is an advisory parsing result only; the transport does not pass raw PDF bytes to that
+parser, so there is no end-to-end authoritative verification. No live response, real receipt
+identifier, name, phone number, field value, or provider document is stored in this package or
+its tests.
 
 ## Test and runtime isolation
 
@@ -95,10 +105,10 @@ capability also remains true for the authoritative lookup runtime: no permitted 
 this package, no protected lookup material can reach it, and no operational source authorization
 or trusted incident stop is wired.
 
-The next provider-response boundary is a separately reviewed, exact PDF parsing package or library
-built from privacy-controlled attestation. It must define fail-closed field extraction and drift
-handling without widening this transport's public body surface. Later runtime composition must
-also resolve source permission and request/rate policy, redacted operational telemetry,
+The next boundary is a separately reviewed, one-fetch composition of the isolated transport and
+PDF parser. It must not refetch or expose raw bytes through the transport's public result. Later
+runtime composition must also resolve source permission and request/rate policy, redacted
+operational telemetry,
 receiver-material protection, worker decryption, normalization ownership, prelease-safe protected
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of
 those capabilities is implied by an opaque PDF observation.

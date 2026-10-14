@@ -10,6 +10,7 @@ import {
   type TelegramPrivateActionIdentity,
 } from '@fetanagent/contracts';
 import { normalizeLocale } from '@fetanagent/i18n';
+import type { TelebirrCandidateSourceKind } from '@fetanagent/telebirr-verification-foundation/candidate-extraction';
 
 import {
   isBoundedTelegramDepositProofText,
@@ -56,6 +57,13 @@ export interface TelegramDepositCommandMetadata extends TelegramPrivateActionMet
 export interface TelegramGuidedDepositReplyMetadata extends TelegramPrivateActionMetadata {
   readonly text: unknown;
   readonly replyToMessage: unknown;
+}
+
+export interface TelegramGuidedDepositMediaMetadata extends TelegramPrivateActionMetadata {
+  readonly replyToMessage: unknown;
+  readonly caption: unknown;
+  readonly extractedText: string;
+  readonly sourceKind: Extract<TelebirrCandidateSourceKind, 'ocr_text' | 'pdf_text'>;
 }
 
 export type TelegramGuidedDepositDestinationSubmission =
@@ -311,6 +319,44 @@ export function reduceTelegramGuidedDepositProofSubmission(
       providerCode: 'telebirr',
       playerId,
       transactionReference: proofInput.transactionReference,
+    },
+  };
+}
+
+/**
+ * Media is only a reference source for a reply to our exact payment prompt. The reference still
+ * crosses the same protected action boundary as typed input. A conflicting caption and image/PDF
+ * must require explicit customer selection rather than choosing either one silently.
+ */
+export function reduceTelegramGuidedDepositMediaSubmission(
+  metadata: TelegramGuidedDepositMediaMetadata,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  const playerId = parseTelegramTelebirrPaymentPromptReply(metadata.replyToMessage);
+  if (!identity || !playerId) return undefined;
+  if (typeof metadata.caption !== 'undefined' && typeof metadata.caption !== 'string') {
+    return { kind: 'invalid_input' };
+  }
+  const caption = (metadata.caption ?? '').trim();
+  // A bare reference in an attachment caption is compared with the recognized reference too.
+  const labelledCaption = /^[A-Za-z0-9]{8,32}$/u.test(caption)
+    ? `Transaction ID: ${caption}`
+    : caption;
+  const recognized = metadata.extractedText.trim();
+  const labelledRecognized = /^[A-Za-z0-9]{8,32}$/u.test(recognized)
+    ? `Transaction ID: ${recognized}`
+    : metadata.extractedText;
+  const text = labelledCaption ? `${labelledCaption}\n${labelledRecognized}` : labelledRecognized;
+  const input = reduceTelegramDepositProofInput('telebirr', text, metadata.sourceKind);
+  if (input.kind !== 'candidate') return input;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'deposit_proof_command',
+      providerCode: 'telebirr',
+      playerId,
+      transactionReference: input.transactionReference,
     },
   };
 }

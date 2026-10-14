@@ -15,6 +15,9 @@ const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in Tele
 const TELEBIRR_PRESENTATION_WINDOW_TEXT =
   'This payment instruction is valid for at most 10 minutes; submit the reference promptly.';
 const LEGACY_TELEBIRR_WINDOW_TEXT = 'These payment details are valid for 12 hours.';
+const PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT = 'You can also paste the receipt link or full SMS.';
+const CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT =
+  'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).';
 
 export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = [
   'Welcome to FetanAgent 👋',
@@ -59,7 +62,7 @@ export const TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT = [
 
 export const TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT = [
   "I couldn't find one TeleBirr transaction number. Nothing was submitted.",
-  'Reply to the payment-details message with the transaction number, receipt link, or full SMS.',
+  'Reply to the payment-details message with the transaction number, full message, receipt link, screenshot, or PDF.',
   'Tap /menu to cancel.',
 ].join('\n');
 
@@ -120,7 +123,7 @@ export function buildTelegramTelebirrPaymentPrompt(
     TELEBIRR_PRESENTATION_WINDOW_TEXT,
     '',
     'After paying, reply to this message with the TeleBirr transaction number.',
-    'You can also paste the receipt link or full SMS.',
+    CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
     '',
     'Before sending, confirm the name shown in TeleBirr matches the name above.',
     'Tap /menu to cancel.',
@@ -151,9 +154,24 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       LEGACY_TELEBIRR_WINDOW_TEXT,
     );
+    const previousMediaPrompt = currentPrompt.replace(
+      CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
+      PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
+    );
     return message.text === currentPrompt ||
       message.text === previousPilotPrompt ||
-      message.text === legacyPrompt
+      message.text === legacyPrompt ||
+      message.text === previousMediaPrompt ||
+      message.text ===
+        previousPilotPrompt.replace(
+          CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
+          PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
+        ) ||
+      message.text ===
+        legacyPrompt.replace(
+          CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
+          PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
+        )
       ? playerId
       : undefined;
   } catch {

@@ -392,7 +392,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(telegramDepositHelpText()).toContain('Send the KemerBet Player ID');
     expect(telegramDepositHelpText()).toContain('show the receiver name and wallet number');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
-    expect(telegramDepositHelpText()).toContain('receipt link, or full SMS');
+    expect(telegramDepositHelpText()).toContain('receipt link, JPG/PNG screenshot, or PDF');
     expect(telegramDepositHelpText()).not.toContain('first line');
     expect(telegramDepositHelpText()).not.toContain('second line');
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');

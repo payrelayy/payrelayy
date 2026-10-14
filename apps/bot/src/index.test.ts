@@ -15,6 +15,8 @@ const runtime = vi.hoisted(() => ({
   catchHandler: undefined as ((error: unknown) => void) | undefined,
   config: undefined as unknown,
   ingressDeliveries: [] as unknown[],
+  mediaReads: [] as unknown[],
+  mediaResult: { kind: 'text', text: 'Transaction ID: SYNTB00000001' } as unknown,
   messageHandler: undefined as ((context: unknown) => Promise<void>) | undefined,
   startOptions: undefined as
     | {
@@ -90,6 +92,14 @@ vi.mock('./telegram-ingress.js', () => ({
   }),
   deliverTelegramPrivateInboundWithRetry: async (inbound: unknown) => {
     runtime.ingressDeliveries.push(inbound);
+  },
+}));
+
+vi.mock('./telegram-deposit-media.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./telegram-deposit-media.js')>()),
+  extractTelegramProofMediaText: async (...arguments_: unknown[]) => {
+    runtime.mediaReads.push(arguments_);
+    return runtime.mediaResult;
   },
 }));
 
@@ -180,6 +190,8 @@ beforeEach(() => {
   runtime.catchHandler = undefined;
   runtime.config = undefined;
   runtime.ingressDeliveries = [];
+  runtime.mediaReads = [];
+  runtime.mediaResult = { kind: 'text', text: 'Transaction ID: SYNTB00000001' };
   runtime.messageHandler = undefined;
   runtime.startOptions = undefined;
 });
@@ -196,6 +208,91 @@ afterEach(() => {
 });
 
 describe('Telegram admission, private action, and ingress composition', () => {
+  it.each(['photo', 'document'] as const)(
+    'routes a replied %s receipt through the existing protected proof action',
+    async (kind) => {
+      await loadComposition(false, true);
+      const context = messageContext('');
+      const prompt = buildTelegramTelebirrPaymentPrompt({
+        playerId: 'PLAYER-DEMO-42',
+        receiverAccountHolderName: 'Demo Receiver',
+        receiverAccountReference: '0000000042',
+      });
+      await runtime.messageHandler!({
+        ...context,
+        message: {
+          reply_to_message: { from: { is_bot: true }, text: prompt },
+          ...(kind === 'photo'
+            ? { photo: [{ file_id: 'photo-id', file_size: 100 }] }
+            : { document: { file_id: 'pdf-id', file_size: 100, mime_type: 'application/pdf' } }),
+        },
+      });
+      expect(runtime.mediaReads).toHaveLength(1);
+      expect(runtime.actionDeliveries).toEqual([
+        {
+          version: 1,
+          kind: 'deposit_proof_command',
+          updateId: '123456',
+          telegramUserId: '123456789',
+          privateChatId: '123456789',
+          preferredLocale: 'en',
+          providerCode: 'telebirr',
+          playerId: 'PLAYER-DEMO-42',
+          transactionReference: 'SYNTB00000001',
+        },
+      ]);
+      expect(runtime.ingressDeliveries).toHaveLength(0);
+    },
+  );
+
+  it('does not download media from an unprompted message or a group', async () => {
+    await loadComposition(false, true);
+    const context = messageContext('');
+    await runtime.messageHandler!({
+      ...context,
+      message: { photo: [{ file_id: 'photo-id', file_size: 100 }] },
+    });
+    await runtime.messageHandler!({
+      ...context,
+      chat: { id: -123456789, type: 'group' },
+      message: {
+        photo: [{ file_id: 'photo-id', file_size: 100 }],
+        reply_to_message: {
+          from: { is_bot: true },
+          text: buildTelegramTelebirrPaymentPrompt({
+            playerId: 'PLAYER-DEMO-42',
+            receiverAccountHolderName: 'Demo Receiver',
+            receiverAccountReference: '0000000042',
+          }),
+        },
+      },
+    });
+    expect(runtime.mediaReads).toHaveLength(0);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
+  it('never starts a deposit when the replied receipt cannot be read', async () => {
+    await loadComposition(false, true);
+    runtime.mediaResult = { kind: 'unavailable' };
+    const context = messageContext('');
+    await runtime.messageHandler!({
+      ...context,
+      message: {
+        photo: [{ file_id: 'photo-id', file_size: 100 }],
+        reply_to_message: {
+          from: { is_bot: true },
+          text: buildTelegramTelebirrPaymentPrompt({
+            playerId: 'PLAYER-DEMO-42',
+            receiverAccountHolderName: 'Demo Receiver',
+            receiverAccountReference: '0000000042',
+          }),
+        },
+      },
+    });
+    expect(context.replies).toEqual([expect.stringContaining('Nothing was submitted.')]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
   it.each([
     { beta: false, action: false },
     { beta: true, action: false },

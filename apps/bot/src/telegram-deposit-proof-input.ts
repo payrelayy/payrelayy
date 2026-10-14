@@ -6,6 +6,7 @@ import {
 import {
   TELEBIRR_CANDIDATE_EXTRACTION_MAX_INPUT_BYTES,
   extractTelebirrReferenceCandidates,
+  type TelebirrCandidateSourceKind,
 } from '@fetanagent/telebirr-verification-foundation/candidate-extraction';
 
 export const TELEGRAM_DEPOSIT_PROOF_COMMAND_MAX_BYTES =
@@ -44,6 +45,7 @@ function isDirectReference(text: string): boolean {
 export function reduceTelegramDepositProofInput(
   providerCode: DepositProofProviderCode,
   text: string,
+  sourceKind: TelebirrCandidateSourceKind = 'sms',
 ): TelegramDepositProofInput {
   if (!isBoundedTelegramDepositProofText(text)) return { kind: 'invalid_input' };
 
@@ -66,7 +68,7 @@ export function reduceTelegramDepositProofInput(
   // would overlook a conflicting labelled transaction in the same pasted message.
   const extraction = extractTelebirrReferenceCandidates({
     contractVersion: 1,
-    sourceKind: 'sms',
+    sourceKind,
     text,
   });
   if (extraction.outcome === 'candidate_ready') {

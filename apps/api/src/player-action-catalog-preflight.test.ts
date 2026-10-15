@@ -53,7 +53,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires public onboarding, guarded proof-first actions, saved selection, and notification delivery in the exact 20-function surface', () => {
+  it('requires onboarding, proof, notification, and temporary-message functions in the exact 24-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -105,7 +105,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 20');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 24');
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_saved_player_selection(uuid)',
     );
@@ -118,6 +118,14 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
     );
+    for (const signature of [
+      'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+      'app.cancel_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+      'app.claim_telegram_deposit_temporary_deletion()',
+      'app.complete_telegram_deposit_temporary_deletion(bigint,uuid,text)',
+    ]) {
+      expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(signature);
+    }
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).not.toContain(
       'app.capture_telegram_routine_telebirr_untrusted_proof',
     );
@@ -140,7 +148,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
     );
-    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 21');
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 25');
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       "then array['search_path=pg_catalog']::text[]",
     );

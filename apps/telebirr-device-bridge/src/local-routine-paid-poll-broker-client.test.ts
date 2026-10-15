@@ -121,6 +121,8 @@ describe('private routine paid upload broker client', () => {
           retrievedAt: '2026-10-08T12:00:00.000Z',
           amountMinor: 2500,
           currencyCode: 'ETB',
+          creditedPartyNameDigest: digest,
+          creditedPartyVisibleSuffix: null,
           sourceDocumentDigest: digest,
           observationBodyDigest: digest,
           replayIdentity: digest,

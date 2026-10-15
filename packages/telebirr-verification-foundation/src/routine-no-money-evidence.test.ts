@@ -13,6 +13,7 @@ import {
 import {
   ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION,
   ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+  ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION,
   canonicalRoutineTelebirrObservationSignatureBytes,
   digestRoutineTelebirrObservationBody,
   digestRoutineTelebirrObservationFacts,
@@ -22,12 +23,14 @@ import {
   assessRoutineTelebirrNoMoneyEvidence,
 } from './routine-no-money-evidence.js';
 import { assessRoutineTelebirrPaidPhoneEvidence } from './routine-paid-phone-evidence.js';
+import { assessRoutineTelebirrDirectOldReceiverGrace } from './routine-receiver-grace-policy.js';
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const hash = (bytes: Uint8Array): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 
-function fixture(origin = false) {
+function fixture(origin = false, receiverSuffix = false) {
+  const attestedOrigin = origin || receiverSuffix;
   const signerKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const deviceKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const signerSpki = signerKey.publicKey.export({ type: 'spki', format: 'der' });
@@ -44,7 +47,7 @@ function fixture(origin = false) {
     referenceFingerprint: 'a'.repeat(64),
     referenceKeyVersion: 2,
     referenceProfileVersion: 2,
-    submittedAt: '2026-10-05T18:00:00.000Z',
+    submittedAt: receiverSuffix ? '2026-10-05T18:02:00.000Z' : '2026-10-05T18:00:00.000Z',
     receiverRevisionId: '98b5e8a9-79bb-4fa1-b2a7-6dbfd6ef1803',
     receiverVersion: 3,
     receiverProfileDigest: sha('b'),
@@ -128,15 +131,22 @@ function fixture(origin = false) {
     referenceMatch: 'matched',
     retrievedAt: '2026-10-05T18:03:00.000Z',
     sourceProfile: 'telebirr_official_receipt_v1',
-    ...(origin ? { sourceOriginAttestation: 'official_tls_origin' } : {}),
+    ...(attestedOrigin ? { sourceOriginAttestation: 'official_tls_origin' } : {}),
+    ...(receiverSuffix ? { creditedPartyVisibleSuffix: '1234' } : {}),
   };
-  const observationHeader = origin
+  const observationHeader = receiverSuffix
     ? {
-        contractVersion: 2,
+        contractVersion: 3,
         providerCode: 'telebirr',
-        protocolMode: 'routine_signed_observation_v2',
+        protocolMode: 'routine_signed_observation_v3',
       }
-    : header;
+    : origin
+      ? {
+          contractVersion: 2,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v2',
+        }
+      : header;
   const observationBody = (receiptFacts: typeof facts) => ({
     ...observationHeader,
     candidateId: trustedLookup.candidateId,
@@ -156,9 +166,11 @@ function fixture(origin = false) {
   });
   const signedObservation = (body: ReturnType<typeof observationBody>, key: KeyObject) => ({
     ...observationHeader,
-    transcriptVersion: origin
-      ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
-      : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+    transcriptVersion: receiverSuffix
+      ? ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION
+      : origin
+        ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+        : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
     bodyDigestAlgorithm: 'sha256',
     bodyDigest: digestRoutineTelebirrObservationBody(body)!,
     signatureAlgorithm: 'ecdsa-p256-sha256',
@@ -384,11 +396,75 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         receiverVersion: input.trustedLookup.receiverVersion,
         amountMinor: input.signedObservation.body.facts.amountMinor,
         currencyCode: 'ETB',
+        creditedPartyNameDigest: input.trustedLookup.expectedReceiverNameDigest,
+        creditedPartyVisibleSuffix: null,
       },
     });
     expect(JSON.stringify(result)).not.toContain(input.trustedRawReference);
     expect(JSON.stringify(result)).not.toContain(input.signedAssignment.signature);
     expect(JSON.stringify(result)).not.toContain(input.signedObservation.signature);
+  });
+
+  it('projects a signed v3 credited-party suffix into advisory direct-instruction matching', () => {
+    const { input, signerSpki, deviceSpki } = fixture(true, true);
+    const result = assessRoutineTelebirrPaidPhoneEvidence(
+      { ...input, trustedIssuanceMode: 'paid' },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(result.disposition).toBe('paid_phone_observation_matches_policy');
+    if (result.disposition !== 'paid_phone_observation_matches_policy') return;
+    expect(result.evidence.creditedPartyVisibleSuffix).toBe('1234');
+    const tamperedObservation = {
+      ...input.signedObservation,
+      body: {
+        ...input.signedObservation.body,
+        facts: { ...input.signedObservation.body.facts, creditedPartyVisibleSuffix: '5678' },
+      },
+    };
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'paid', signedObservation: tamperedObservation },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'review', evidence: null });
+    expect(
+      assessRoutineTelebirrDirectOldReceiverGrace({
+        customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+        playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+        privateChatId: '123456789',
+        paymentOccurredAt: result.evidence.occurredAt,
+        referenceSubmittedAt: result.evidence.submittedAt,
+        officialReceiptAuthenticated: true,
+        officialReceiptCompleted: true,
+        receiptReceiverNameDigest: result.evidence.creditedPartyNameDigest,
+        receiptVisibleSuffix: result.evidence.creditedPartyVisibleSuffix,
+        configuredReceiverRevisions: [
+          {
+            revisionId: input.trustedLookup.receiverRevisionId,
+            receiverNameDigest: input.trustedLookup.expectedReceiverNameDigest,
+            visibleSuffix: '1234',
+          },
+        ],
+        instructions: [
+          {
+            instructionEventId: '939e637f-ac4a-43ad-bb8d-5b1e9bc822db',
+            customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+            playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+            privateChatId: '123456789',
+            receiverRevisionId: input.trustedLookup.receiverRevisionId,
+            issuedAt: '2026-10-05T17:45:00.000Z',
+            expiresAt: '2026-10-05T18:45:00.000Z',
+            receiverRetiredAt: '2026-10-05T17:50:00.000Z',
+            emergencyRevokedAt: null,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      disposition: 'would_match_one_instruction',
+      financialActionAllowed: false,
+    });
   });
 
   it('allows a bounded upload retry but reviews tampered, late, and non-completed evidence', () => {

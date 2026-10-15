@@ -17,6 +17,11 @@ staging table and atomic claim accept only version 2. This draft cannot be merge
 old-receiver auto-credit until those downstream guards are implemented. No full phone number, name,
 receipt, or reference belongs in diagnostics or application logs.
 
+The paid evidence adapter now projects the name digest and credited-party suffix from a
+signature-verified version-3 observation. It projects `null` for the suffix on version 2 and
+never grants money authority. The direct-instruction selector consumes these projected facts in a
+cross-component test; production does not call that selector or emit version 3.
+
 The Owner chose automatic grace matching by the exact normalized official credited-party full name
 **and** the visible four-digit suffix when that pair identifies exactly one configured immutable
 receiver revision. This is an accepted heuristic, not proof of the hidden digits. A missing,

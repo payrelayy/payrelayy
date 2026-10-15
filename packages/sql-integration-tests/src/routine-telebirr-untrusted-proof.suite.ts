@@ -2152,7 +2152,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
-    it('notifies an unverified Telegram submitter after 30 seconds without rejecting payment', async () => {
+    it('sends no early reply but one honest notice after two minutes of unverified payment', async () => {
       const client = getClient();
       await rollback(client, async () => {
         const actor = await fixtureTelegramActor(client, getOwnerAdminId());
@@ -2172,9 +2172,7 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
             [paidEventId],
           )
         ).rows[0]!.processed_at;
-        const paidId = (
-          await client.query<{ id: string }>(
-            `insert into ${TABLE} (
+        const cloneCandidateSql = `insert into ${TABLE} (
              submitting_customer_id, origin_identity_id, origin_channel,
              origin_request_key, semantic_input_hmac, platform_id,
              player_account_id, player_deposit_eligibility_decision_id,
@@ -2190,30 +2188,59 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
                reference_encryption_key_version, reference_profile_version,
                receiver_account_id, receiver_account_version,
                $3::timestamptz, 'paid'
-             from ${TABLE} where id = $1::uuid returning id`,
-            [noMoneyId, paidEventId, submittedAt],
-          )
+             from ${TABLE} where id = $1::uuid returning id`;
+        const paidId = (
+          await client.query<{ id: string }>(cloneCandidateSql, [
+            noMoneyId,
+            paidEventId,
+            submittedAt,
+          ])
         ).rows[0]!.id;
         await client.query(
           `update app.telegram_deposit_outcome_cutover
-              set enabled_at = $1::timestamptz - interval '1 minute',
-                  waiting_enabled_at = $1::timestamptz - interval '1 minute',
-                  checking_enabled_at = $1::timestamptz - interval '1 minute'
+              set enabled_at = clock_timestamp() - interval '1 day',
+                  waiting_enabled_at = clock_timestamp() - interval '1 day',
+                  checking_enabled_at = clock_timestamp() - interval '1 day'
             where singleton = true`,
-          [submittedAt],
         );
-        const first = await client.query<{ notification_outcome_code: string }>(
+        const tooEarly = await client.query<{ notification_outcome_code: string }>(
           'select * from app.claim_telegram_deposit_outcome_notification()',
         );
-        expect(first.rows).toMatchObject([{ notification_outcome_code: 'checking' }]);
+        expect(tooEarly.rows).toEqual([]);
+        const oldEventId = await fixtureInboundEvent(client, actor.identityId);
+        const oldSubmittedAt = (
+          await client.query<{ processed_at: Date }>(
+            `update app.inbound_events
+                set processed_at = date_trunc('milliseconds', clock_timestamp()) - interval '2 minutes 10 seconds'
+              where id = $1::uuid returning processed_at`,
+            [oldEventId],
+          )
+        ).rows[0]!.processed_at;
+        const oldPaidId = (
+          await client.query<{ id: string }>(cloneCandidateSql, [
+            noMoneyId,
+            oldEventId,
+            oldSubmittedAt,
+          ])
+        ).rows[0]!.id;
+        const afterTwoMinutes = await client.query<{ notification_outcome_code: string }>(
+          'select * from app.claim_telegram_deposit_outcome_notification()',
+        );
+        expect(afterTwoMinutes.rows).toMatchObject([{ notification_outcome_code: 'checking' }]);
         const deliveries = await client.query<{ notification_stage: string; outcome_code: string }>(
           `select notification_stage, outcome_code
              from app.telegram_deposit_outcome_deliveries where candidate_id = $1::uuid`,
-          [paidId],
+          [oldPaidId],
         );
         expect(deliveries.rows).toEqual([
           { notification_stage: 'checking', outcome_code: 'checking' },
         ]);
+        const stillEarly = await client.query<{ notification_stage: string }>(
+          `select notification_stage from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid`,
+          [paidId],
+        );
+        expect(stillEarly.rows).toEqual([]);
       });
     });
 

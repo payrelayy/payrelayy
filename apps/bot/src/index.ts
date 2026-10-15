@@ -87,6 +87,7 @@ async function deliverPlayerAction(
         ? { selectedPlayerId: action.playerId }
         : {},
     );
+    if (presentation.kind === 'deferred') return;
     if (presentation.kind === 'message') {
       await reply(presentation.text);
       return;

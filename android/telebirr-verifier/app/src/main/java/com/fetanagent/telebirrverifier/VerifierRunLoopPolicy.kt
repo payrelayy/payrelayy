@@ -70,7 +70,8 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.ENROLLMENT_REQUIRED,
       -> null
       LivePilotRuntimeState.READY ->
-        if (status.code == "no_paid_assignment") PAID_IDLE_DELAY_MILLIS
+        if (status.code == "no_paid_assignment" || status.code == "paid_partial_lane_recovery")
+          PAID_IDLE_DELAY_MILLIS
         else if (status.code == "routine_no_money_idle_paid_retry")
           delay(ROUTINE_IDLE_DELAYS_MILLIS, repeat)
         else if (status.code in READY_IDLE_CODES) delay(READY_IDLE_DELAYS_MILLIS, repeat)
@@ -79,6 +80,8 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.UPLOAD_PENDING -> delay(UPLOAD_DELAYS_MILLIS, repeat)
       LivePilotRuntimeState.ATTENTION ->
         if (status.code in TERMINAL_ATTENTION_CODES) null
+        else if (status.code == "paid_receipt_review_retry")
+          delay(RECEIPT_REVIEW_DELAYS_MILLIS, repeat)
         else if (status.code == "paid_observation_retry" || status.code == "routine_retry" ||
           status.code == "paid_receipt_network_retry")
           delay(UPLOAD_DELAYS_MILLIS, repeat)
@@ -105,6 +108,7 @@ class VerifierRunLoopPolicy(
     private const val PAID_IDLE_DELAY_MILLIS = 10_000L
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
     private val ROUTINE_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 30_000L)
+    private val RECEIPT_REVIEW_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L)
     private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled")
     private val UPLOAD_DELAYS_MILLIS =
       longArrayOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 120_000L, 300_000L)

@@ -122,11 +122,11 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'checking',
       amountMinor: null,
     });
-    expect(checking).toContain('Deposit not credited yet');
-    expect(checking).toContain('was not verified');
+    expect(checking).toContain('Still checking your TeleBirr payment');
+    expect(checking).toContain('has not been verified or credited yet');
     expect(checking).toContain('1A2B');
     expect(checking).toContain('final result');
-    expect(checking).toContain('no Player credit was recorded');
+    expect(checking).toContain('Please do not pay again');
     expect(checking).not.toContain('pending');
     expect(checking).not.toContain('Deposit complete');
     expect(checking).not.toContain('rejected');

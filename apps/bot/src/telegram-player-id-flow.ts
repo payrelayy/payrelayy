@@ -14,6 +14,7 @@ import {
 } from './telegram-guided-deposit.js';
 
 export type TelegramPlayerIdFlowPresentation =
+  | { readonly kind: 'deferred' }
   | { readonly kind: 'menu'; readonly menu: PrivateTelegramMenu }
   | { readonly kind: 'message'; readonly text: string }
   | { readonly kind: 'force_reply'; readonly text: string; readonly placeholder: string };
@@ -189,16 +190,11 @@ export function presentTelegramPlayerIdFlowResult(
         ].join('\n'),
       };
     case 'telebirr_routine_candidate_recorded_paid_pending':
-      return {
-        kind: 'menu',
-        menu: {
-          text: [
-            '🔎 TeleBirr reference received. We’re checking the payment.',
-            'This submission has not credited a Player account. We’ll send an update here.',
-          ].join('\n'),
-          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA }],
-        },
-      };
+      // The signed phone result normally arrives quickly. A permanent acknowledgment
+      // here would give an invalid reference two bot messages before its final result.
+      // The outcome notifier sends one definitive message, or a delayed checking notice
+      // if the phone/provider remains unavailable.
+      return { kind: 'deferred' };
     case 'telebirr_routine_candidate_already_used':
       return {
         kind: 'menu',

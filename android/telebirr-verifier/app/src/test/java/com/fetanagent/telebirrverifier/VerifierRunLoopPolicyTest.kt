@@ -41,6 +41,22 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `a partial paid lane failure still polls every ten seconds`() {
+    val policy = VerifierRunLoopPolicy { 0.0 }
+    val status = status(LivePilotRuntimeState.READY, "paid_partial_lane_recovery")
+    assertEquals(listOf(10_000L, 10_000L, 10_000L, 10_000L),
+      (0..3).map { policy.decide(status, it.toLong()).delayMillis })
+  }
+
+  @Test
+  fun `unattested receipt review retries quickly without becoming a rejection`() {
+    val policy = VerifierRunLoopPolicy { 0.0 }
+    val status = status(LivePilotRuntimeState.ATTENTION, "paid_receipt_review_retry")
+    assertEquals(listOf(5_000L, 10_000L, 20_000L, 30_000L, 30_000L),
+      (0..4).map { policy.decide(status, it.toLong()).delayMillis })
+  }
+
+  @Test
   fun `no-money polling stays below a minute while paid polling retries separately`() {
     val policy = VerifierRunLoopPolicy { 1.0 }
     val status = status(LivePilotRuntimeState.READY, "routine_no_money_idle_paid_retry")

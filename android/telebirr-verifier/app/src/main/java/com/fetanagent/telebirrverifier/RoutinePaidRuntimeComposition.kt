@@ -49,6 +49,7 @@ internal object RoutinePaidRuntimeComposition {
     }
     val parallelCycle = RoutinePaidParallelCycle(phones.size)
     val paidRetryPacer = RoutinePaidRetryPacer(SystemClock::elapsedRealtime)
+    val rejectedLanePacer = RoutinePaidRejectedLanePacer(phones.size, SystemClock::elapsedRealtime)
     val lastLaneDiagnostics = arrayOfNulls<String>(phones.size)
     // Inspect every outbox on restart; after an empty pass, use one idle poll until work arrives.
     var burst = true
@@ -59,10 +60,17 @@ internal object RoutinePaidRuntimeComposition {
         }.getOrNull() ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
           LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
         val results = if (paidRetryPacer.shouldAttempt()) {
-          parallelCycle.runOnce(if (burst) phones.size else 1) { lane ->
-            phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
+          val attemptedLanes = BooleanArray(phones.size)
+          parallelCycle.runOnce(if (burst || rejectedLanePacer.hasCoolingLanes()) phones.size else 1) { lane ->
+            if (!rejectedLanePacer.shouldAttempt(lane)) {
+              RoutinePaidPhonePreparationResult.NoAssignment
+            } else {
+              attemptedLanes[lane] = true
+              phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
+            }
           }.also { attempted ->
             attempted.forEachIndexed { lane, result ->
+              if (!attemptedLanes[lane]) return@forEachIndexed
               val outbox = runCatching { RoutinePaidLaneDiagnostic.outbox(workStores[lane].load()) }
                 .getOrDefault(RoutinePaidLaneDiagnostic.Outbox.UNAVAILABLE)
               val diagnostic = RoutinePaidLaneDiagnostic.render(lane, outbox, result)
@@ -71,9 +79,11 @@ internal object RoutinePaidRuntimeComposition {
                 Log.i("FetanAgentPaidLane", diagnostic)
                 lastLaneDiagnostics[lane] = diagnostic
               }
+              rejectedLanePacer.record(lane, result)
             }
             paidRetryPacer.record(attempted)
-            burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment }
+            burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment } ||
+              rejectedLanePacer.hasCoolingLanes()
           }
         } else emptyList()
         val paidStatus = RoutinePaidCycleStatus.fromResults(results, paidRetryPacer.waitingForRetry)
@@ -99,26 +109,39 @@ internal object RoutinePaidRuntimeComposition {
   )
 }
 
-/** Only a staged paid receipt's transient network failure gets the shorter retry cadence. */
+/** Preserve independent paid-lane progress and retry transient receipt reviews promptly. */
 internal object RoutinePaidCycleStatus {
   fun fromResults(results: List<RoutinePaidPhonePreparationResult>, waitingForRetry: Boolean):
     LivePilotRuntimeStatus {
-    val review = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>().firstOrNull()
+    val reviews = results.filterIsInstance<RoutinePaidPhonePreparationResult.Review>()
     return when {
       results.isEmpty() && waitingForRetry ->
         LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
-      review?.reasonCode == "network_unavailable" ->
-        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_receipt_network_retry")
-      review != null -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
-        review.reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
-          ?: "routine_paid_review")
       results.any { it == RoutinePaidPhonePreparationResult.SubmittedForReview } ->
         LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_observation_staged")
       results.any { it == RoutinePaidPhonePreparationResult.Retry } ->
         LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
+      reviews.any { it.reasonCode == "network_unavailable" } ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_receipt_network_retry")
+      reviews.any { isRetryableReceiptReview(it.reasonCode) } ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_receipt_review_retry")
+      reviews.any { it.reasonCode == "server_rejected" } &&
+        results.any { it == RoutinePaidPhonePreparationResult.NoAssignment } ->
+        // A stale sealed lane must not put other healthy, idle lanes on the
+        // no-money route's one-minute backoff. Keep polling without discarding
+        // the rejected upload or treating it as a payment decision.
+        LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_partial_lane_recovery")
+      reviews.isNotEmpty() -> LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION,
+        reviews.first().reasonCode.takeIf { Regex("^[a-z][a-z0-9_]{2,63}$").matches(it) }
+          ?: "routine_paid_review")
       else -> LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "no_paid_assignment")
     }
   }
+
+  private fun isRetryableReceiptReview(reason: String): Boolean =
+    reason in setOf("transport_unavailable", "receipt_review", "invalid_page_unattested",
+      "receipt_semantics_incomplete", "lookup_expired") || reason == "unknown_layout" ||
+      reason.startsWith("unknown_layout_")
 }
 
 /** Status presentation only; the server gates, not this choice, authorize an assignment. */
@@ -165,4 +188,30 @@ internal class RoutinePaidRetryPacer(private val nowMillis: () -> Long) {
   companion object {
     private val RETRY_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L, 60_000L)
   }
+}
+
+/** Quarantine a 401/403 lane briefly without slowing the other paid receipt lanes. */
+internal class RoutinePaidRejectedLanePacer(
+  lanes: Int,
+  private val nowMillis: () -> Long,
+) {
+  private val nextAttemptAtMillis = LongArray(lanes)
+
+  init { require(lanes in 1..RoutinePaidParallelCycle.MAX_LANES) }
+
+  fun shouldAttempt(lane: Int): Boolean = nowMillis() >= nextAttemptAtMillis[lane]
+
+  fun hasCoolingLanes(): Boolean {
+    val now = nowMillis()
+    return nextAttemptAtMillis.any { it > now }
+  }
+
+  fun record(lane: Int, result: RoutinePaidPhonePreparationResult) {
+    nextAttemptAtMillis[lane] = if (result is RoutinePaidPhonePreparationResult.Review &&
+      result.reasonCode == "server_rejected") {
+      nowMillis().coerceAtMost(Long.MAX_VALUE - REJECTED_RETRY_MILLIS) + REJECTED_RETRY_MILLIS
+    } else 0L
+  }
+
+  companion object { private const val REJECTED_RETRY_MILLIS = 60_000L }
 }

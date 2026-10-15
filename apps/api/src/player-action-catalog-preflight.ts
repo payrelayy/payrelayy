@@ -22,6 +22,10 @@ const ALLOWED_FUNCTIONS = [
   'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
   'app.get_telegram_saved_player_selection(uuid)',
   'app.save_telegram_player_selection(uuid,text)',
+  'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+  'app.cancel_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+  'app.claim_telegram_deposit_temporary_deletion()',
+  'app.complete_telegram_deposit_temporary_deletion(bigint,uuid,text)',
 ] as const;
 
 const ROUTINE_CANDIDATE_FUNCTION =
@@ -140,6 +144,18 @@ function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean):
             ),
             pg_catalog.to_regprocedure(
               'app.save_telegram_player_selection(uuid,text)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.cancel_telegram_deposit_temporary_message(bigint,bigint,bigint)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.claim_telegram_deposit_temporary_deletion()'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.complete_telegram_deposit_temporary_deletion(bigint,uuid,text)'
             )${
               routineCandidateEnabled
                 ? `,

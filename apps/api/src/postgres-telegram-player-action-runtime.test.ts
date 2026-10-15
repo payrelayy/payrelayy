@@ -1425,7 +1425,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(1);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 21');
+    expect(queries[0]).toContain('select count(*) = 25');
   });
 
   it('keeps an inactive candidate route ready across only the exact grant handoff', async () => {
@@ -1436,7 +1436,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         const row = Object.fromEntries(
           Array.from({ length: 12 }, (_, index) => [`catalog_${index}`, true]),
         );
-        if (query.includes('select count(*) = 20')) row.catalog_7 = false;
+        if (query.includes('select count(*) = 24')) row.catalog_7 = false;
         return { rows: [row] };
       },
       async end() {},
@@ -1446,8 +1446,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       createPostgresTelegramPlayerActionRuntime(actionConfig, database).ready(),
     ).resolves.toBe(true);
     expect(queries).toHaveLength(2);
-    expect(queries[0]).toContain('select count(*) = 20');
-    expect(queries[1]).toContain('select count(*) = 21');
+    expect(queries[0]).toContain('select count(*) = 24');
+    expect(queries[1]).toContain('select count(*) = 25');
   });
 
   it('does not fall back to shadow intake for a non-synthetic routine candidate', async () => {
@@ -1518,7 +1518,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(1);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 21');
+    expect(queries[0]).toContain('select count(*) = 25');
   });
 
   it('disables payment-proof submission while receiver review is enabled', async () => {

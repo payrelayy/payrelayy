@@ -373,7 +373,10 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     expect(decoded(response.body)).toEqual({ code: 'temporarily_unavailable' });
   });
 
-  it('records the signed exact invalid-page result without staging a Player credit', async () => {
+  it.each([
+    'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+    'sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707',
+  ])('records the signed exact invalid-page result %s without a Player credit', async (digest) => {
     const { context, withFacts } = fixture();
     const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
     const recordTerminalRejection = vi.fn<
@@ -400,7 +403,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
         receiverMatch: 'unknown',
         referenceMatch: 'unknown',
       },
-      'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+      digest,
     );
     const assessment = assessRoutineTelebirrPaidPhoneEvidence(
       {

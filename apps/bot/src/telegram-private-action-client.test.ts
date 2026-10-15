@@ -110,6 +110,68 @@ describe('Telegram private-action bot client', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
   });
 
+  it('accepts exact one-hour instruction record and expiry responses', async () => {
+    const recordAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'payment_instruction_record',
+      updateId: '10',
+      privateChatId: '20',
+      telegramMessageId: 42,
+    };
+    const claimAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'payment_instruction_expiry_claim',
+    };
+    const delivery = {
+      version: 1,
+      outcome: 'payment_instruction_expiry_delivery',
+      instructionEventId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      privateChatId: '123456789',
+      telegramMessageId: 42,
+      suppressMenu: false,
+    } as const;
+    const completeAction: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'payment_instruction_expiry_complete',
+      instructionEventId: delivery.instructionEventId,
+      leaseToken: delivery.leaseToken,
+      expiryResult: 'complete',
+    };
+
+    for (const [request, response] of [
+      [recordAction, { version: 1, outcome: 'payment_instruction_recorded', accepted: true }],
+      [recordAction, { version: 1, outcome: 'payment_instruction_recorded', accepted: false }],
+      [claimAction, { version: 1, outcome: 'payment_instruction_expiry_none' }],
+      [claimAction, delivery],
+      [
+        completeAction,
+        { version: 1, outcome: 'payment_instruction_expiry_completed', accepted: true },
+      ],
+    ] as const) {
+      await expect(
+        deliverTelegramPrivateAction(request, config, {
+          fetch: async () => ({ status: 200, json: async () => response }),
+        }),
+      ).resolves.toEqual(response);
+    }
+
+    for (const invalid of [
+      { ...delivery, instructionEventId: 'not-a-uuid' },
+      { ...delivery, privateChatId: '0' },
+      { ...delivery, telegramMessageId: 0 },
+      { ...delivery, suppressMenu: 'false' },
+      { ...delivery, receiverAccountReference: 'must-not-leak' },
+      { version: 1, outcome: 'payment_instruction_recorded', accepted: true, extra: 1 },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(claimAction, config, {
+          fetch: async () => ({ status: 200, json: async () => invalid }),
+        }),
+      ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+    }
+  });
+
   it('accepts only an amount-free, masked verified-waiting notification', async () => {
     const waiting = {
       version: 1,

@@ -41,16 +41,9 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: [
-          'Welcome to FetanAgent 👋',
-          '',
-          'Deposit from TeleBirr to your selected KemerBet Player ID.',
-          'Choose an option below.',
-          '',
-          'No Player ID saved yet.',
-        ].join('\n'),
+        text: 'FetanAgent\nSet a Player ID to deposit.',
         buttons: [
-          { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
+          { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
           { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
           { text: '➕ Request Player ID review', callbackData },
         ],
@@ -103,7 +96,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['deposit_input_invalid', 'Save your KemerBet Player ID once'],
+    ['deposit_input_invalid', 'Save a Player ID once'],
     ['deposit_unavailable', 'No payment action was started'],
     ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
@@ -230,12 +223,12 @@ describe('Telegram Player-ID flow presentation', () => {
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('📱 Number: 0000000042');
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
-      expect(presentation.text).toContain('Amount: choose 25–25,000 ETB in TeleBirr.');
+      expect(presentation.text).toContain('Send 25–25,000 ETB to:');
       expect(presentation.text).not.toContain('send exactly 25 ETB');
-      expect(presentation.text).toContain('remain valid for 1 hour');
+      expect(presentation.text).toContain('Valid for 1 hour');
       expect(presentation.text).not.toContain('valid for 12 hours');
       expect(presentation.text).toContain(
-        'reply to this message with the TeleBirr transaction number',
+        'send the reference, SMS, receipt link, screenshot or PDF',
       );
       expect(presentation.text).not.toContain('first line');
       expect(presentation.text).not.toContain('second line');
@@ -413,11 +406,10 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it('explains the button-first flow and tracking without requiring command syntax', () => {
-    expect(telegramDepositHelpText()).toContain('Save your KemerBet Player ID once');
-    expect(telegramDepositHelpText()).toContain('Tap Deposit to see the current TeleBirr receiver');
-    expect(telegramDepositHelpText()).toContain('Change Player ID');
+    expect(telegramDepositHelpText()).toContain('Save a Player ID once');
+    expect(telegramDepositHelpText()).toContain('tap Deposit for the current receiver');
     expect(telegramDepositHelpText()).toContain('/deposit_status');
-    expect(telegramDepositHelpText()).toContain('receipt link, JPG/PNG screenshot, or PDF');
+    expect(telegramDepositHelpText()).toContain('receipt link, screenshot or PDF');
     expect(telegramDepositHelpText()).not.toContain('first line');
     expect(telegramDepositHelpText()).not.toContain('second line');
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');
@@ -425,7 +417,7 @@ describe('Telegram Player-ID flow presentation', () => {
 
   it('asks the customer to choose one reference without exposing the candidate list', () => {
     expect(telegramDepositReferenceSelectionText()).toContain('Nothing was submitted.');
-    expect(telegramDepositReferenceSelectionText()).toContain('only the transaction number');
+    expect(telegramDepositReferenceSelectionText()).toContain('Send one reference only.');
     expect(telegramDepositReferenceSelectionText()).not.toContain('PLAYER_ID TRANSACTION_ID');
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 
-import { renderPlayerRegistrationMenu } from './private-menu.js';
+import { renderPlayerRegistrationMenu, renderTelegramQuickMenu } from './private-menu.js';
 
 const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
   compactCapabilityId: 'AAAAAAAAAAAAAAAAAAAAAA',
@@ -14,16 +14,9 @@ describe('English-only private customer menu', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
-      text: [
-        'Welcome to FetanAgent 👋',
-        '',
-        'Deposit from TeleBirr to your selected KemerBet Player ID.',
-        'Choose an option below.',
-        '',
-        'No Player ID saved yet.',
-      ].join('\n'),
+      text: 'FetanAgent\nSet a Player ID to deposit.',
       buttons: [
-        { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
+        { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
         { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
         { text: '➕ Request Player ID review', callbackData },
       ],
@@ -36,5 +29,16 @@ describe('English-only private customer menu', () => {
     expect(() => renderPlayerRegistrationMenu('start:player-registration')).toThrow(
       'valid opaque capability callback',
     );
+  });
+
+  it('shows a neutral, compact menu after cleanup without an expiry alert or unavailable action', () => {
+    expect(renderTelegramQuickMenu()).toEqual({
+      text: 'FetanAgent',
+      buttons: [
+        { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+        { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
+      ],
+    });
+    expect(JSON.stringify(renderTelegramQuickMenu())).not.toMatch(/expir|withdraw|unavailable/iu);
   });
 });

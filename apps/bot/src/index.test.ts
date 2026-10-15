@@ -408,7 +408,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('For app or account-access help, use /support.');
-    expect(context.replies[0]).toContain('Save your KemerBet Player ID once');
+    expect(context.replies[0]).toContain('Save a Player ID once');
     expect(context.replies[0]).toContain('/deposit_status');
   });
 
@@ -515,9 +515,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     });
 
-    expect(context.replies[0]).toContain('Welcome to FetanAgent');
+    expect(context.replies[0]).toContain('FetanAgent');
     expect(keyboard?.buttons).toEqual([
-      { text: '💰 Make a deposit', callbackData: 'gd1.telebirr' },
+      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
       {
         text: '➕ Request Player ID review',
@@ -710,7 +710,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
     expect(context.replies).toHaveLength(1);
-    expect(context.replies[0]).toContain("I couldn't read that Player ID");
+    expect(context.replies[0]).toContain('Invalid Player ID');
     expect(context.replies[0]).not.toMatch(/PLAYER-DEMO|PRIVATE-INVALID/);
   });
 
@@ -779,10 +779,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies).toEqual([
-      expect.stringContaining('more than one TeleBirr transaction number'),
-    ]);
-    expect(context.replies[0]).toContain('Reply to the payment-details message');
+    expect(context.replies).toEqual([expect.stringContaining('more than one TeleBirr reference')]);
+    expect(context.replies[0]).toContain('Send one reference only.');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO|example\.invalid/);
   });
 
@@ -794,7 +792,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain('Tap Deposit to see the current TeleBirr receiver');
+    expect(context.replies[0]).toContain('tap Deposit for the current receiver.');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -920,8 +918,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('Save your KemerBet Player ID once');
-    expect(context.replies[0]).toContain('send the transaction number');
+    expect(context.replies[0]).toContain('Save a Player ID once');
+    expect(context.replies[0]).toContain('send your reference');
     expect(context.replies[0]).toContain('/deposit_status');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

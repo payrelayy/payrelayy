@@ -9,7 +9,7 @@ import { isBoundedTelegramDepositProofText } from './telegram-deposit-proof-inpu
 export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
 export const TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA = 'sp1.change';
 
-export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Make a deposit';
+export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Deposit';
 
 const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
@@ -22,15 +22,16 @@ const PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT = 'You can also paste the receipt lin
 const CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT =
   'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).';
 
-export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = [
-  'Welcome to FetanAgent 👋',
-  '',
-  'Deposit from TeleBirr to your selected KemerBet Player ID.',
-  'Choose an option below.',
-].join('\n');
+export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = 'FetanAgent';
 
 /** First step of the current deposit wizard. */
 export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = [
+  '🎮 Player ID',
+  'Send your KemerBet Player ID. Future deposits will use it.',
+  '/menu to cancel.',
+].join('\n');
+
+const PRIOR_GUIDED_DEPOSIT_PROMPT_TEXT = [
   '🎮 Choose Player ID',
   '',
   'Which KemerBet Player ID should receive your deposits?',
@@ -68,21 +69,18 @@ export const TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT = [
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT = [
-  "I couldn't read that Player ID.",
-  'Reply to the deposit question with the KemerBet Player ID only.',
-  'Tap /menu to cancel.',
+  'Invalid Player ID. Send the KemerBet Player ID only.',
+  '/menu to cancel.',
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT = [
-  "I couldn't find one TeleBirr transaction number. Nothing was submitted.",
-  'Reply to the payment-details message with the transaction number, full message, receipt link, screenshot, or PDF.',
-  'Tap /menu to cancel.',
+  "I couldn't find one TeleBirr reference. Nothing was submitted.",
+  'Send a reference, SMS, receipt link, screenshot or PDF.',
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT = [
-  'I found more than one TeleBirr transaction number. Nothing was submitted.',
-  'Reply again with only the transaction number you want to use.',
-  'Tap /menu to cancel.',
+  'I found more than one TeleBirr reference. Nothing was submitted.',
+  'Send one reference only.',
 ].join('\n');
 
 interface TelegramReplyMessageShape {
@@ -103,6 +101,7 @@ export function isTelegramGuidedDepositPlayerPromptReply(value: unknown): boolea
   const message = value as TelegramReplyMessageShape;
   return (
     (message.text === TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT ||
+      message.text === PRIOR_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PREVIOUS_GUIDED_DEPOSIT_PROMPT_TEXT) &&
     message.from?.is_bot === true
   );
@@ -128,6 +127,21 @@ export function buildTelegramTelebirrPaymentPrompt(
     throw new Error('The TeleBirr payment prompt is unavailable.');
   }
 
+  return [
+    '💰 TeleBirr deposit',
+    'Send 25–25,000 ETB to:',
+    `👤 Name: ${input.receiverAccountHolderName}`,
+    `📱 Number: ${input.receiverAccountReference}`,
+    `🎮 KemerBet Player ID: ${input.playerId}`,
+    'Valid for 1 hour. Check the receiver name before paying.',
+    'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+  ].join('\n');
+}
+
+/** Exact previous card stays recognizable while customers reply to already-issued instructions. */
+function buildPriorTelegramTelebirrPaymentPrompt(
+  input: TelegramTelebirrPaymentPromptInput,
+): string {
   return [
     '💰 TeleBirr payment details',
     '',
@@ -163,23 +177,29 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     });
-    const previousPilotPrompt = currentPrompt.replace(
+    const priorPrompt = buildPriorTelegramTelebirrPaymentPrompt({
+      playerId,
+      receiverAccountHolderName: holder,
+      receiverAccountReference: reference,
+    });
+    const previousPilotPrompt = priorPrompt.replace(
       TELEBIRR_AMOUNT_TEXT,
       PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT,
     );
-    const legacyPrompt = currentPrompt.replace(
+    const legacyPrompt = priorPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       LEGACY_TELEBIRR_WINDOW_TEXT,
     );
-    const previousWindowPrompt = currentPrompt.replace(
+    const previousWindowPrompt = priorPrompt.replace(
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       PREVIOUS_TELEBIRR_WINDOW_TEXT,
     );
-    const previousMediaPrompt = currentPrompt.replace(
+    const previousMediaPrompt = priorPrompt.replace(
       CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
     );
     return message.text === currentPrompt ||
+      message.text === priorPrompt ||
       message.text === previousPilotPrompt ||
       message.text === legacyPrompt ||
       message.text === previousWindowPrompt ||

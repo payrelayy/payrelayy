@@ -66,7 +66,7 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'menu',
         menu: {
-          text: `✅ Player ID ${result.playerId} saved. Future deposits will use it until you change it.`,
+          text: `✅ Player ID ${result.playerId} saved.`,
           buttons: [
             { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
             { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
@@ -283,23 +283,18 @@ export function presentTelegramPlayerIdFlowResult(
 
 export function telegramDepositHelpText(): string {
   return [
-    '💰 How to deposit',
-    '',
-    '1. Save your KemerBet Player ID once in /menu.',
-    '2. Tap Deposit to see the current TeleBirr receiver.',
-    '3. After paying, send the transaction number, full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB) directly here.',
-    'For now, a direct number is treated as TeleBirr. CBE Birr deposits are not live yet.',
-    'Use Change Player ID in /menu if you want future deposits to go to another Player.',
-    '',
-    'Check an earlier request with /deposit_status and its tracking reference.',
-    'Need help? Tap /support.',
+    '💰 TeleBirr deposit',
+    'Save a Player ID once in /menu, then tap Deposit for the current receiver.',
+    'After paying, send your reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    'A direct reference is treated as TeleBirr. CBE Birr is not live yet.',
+    'Status: /deposit_status with your tracking code. Help: /support.',
   ].join('\n');
 }
 
 export function telegramDepositReferenceSelectionText(): string {
   return [
-    'I found more than one TeleBirr transaction number. Nothing was submitted.',
-    'Reply to the payment-details message with only the transaction number you want to use.',
+    'I found more than one TeleBirr reference. Nothing was submitted.',
+    'Send one reference only.',
   ].join('\n');
 }
 

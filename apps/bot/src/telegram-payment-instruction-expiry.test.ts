@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { deliverTelegramPrivateAction } from './telegram-private-action-client.js';
 import {
   processOneTelegramPaymentInstructionExpiry,
   recordTelegramPaymentInstruction,
@@ -26,6 +27,35 @@ describe('one-hour Telegram instruction cleanup', () => {
       privateChatId: '4567',
       telegramMessageId: 89,
     });
+    expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it('keeps a sent instruction when the real client parses an accepted API response', async () => {
+    const deleted = vi.fn(async () => true);
+    const accepted = await recordTelegramPaymentInstruction(
+      {
+        request: (action) =>
+          deliverTelegramPrivateAction(
+            action,
+            { baseUrl: 'http://api:3000/', transportHmacSecret: 'a'.repeat(64) },
+            {
+              fetch: async () => ({
+                status: 200,
+                json: async () => ({
+                  version: 1,
+                  outcome: 'payment_instruction_recorded',
+                  accepted: true,
+                }),
+              }),
+            },
+          ),
+        delete: deleted,
+      },
+      '1234',
+      '4567',
+      89,
+    );
+    expect(accepted).toBe(true);
     expect(deleted).not.toHaveBeenCalled();
   });
 
@@ -78,6 +108,7 @@ describe('one-hour Telegram instruction cleanup', () => {
     ).toBe('processed');
     expect(deleted).toHaveBeenCalledWith(4567, 89);
     expect(sendMenu).toHaveBeenCalledWith(4567);
+    expect(deleted.mock.invocationCallOrder[0]).toBeLessThan(sendMenu.mock.invocationCallOrder[0]!);
     expect(request).toHaveBeenCalledWith({
       version: 1,
       kind: 'payment_instruction_expiry_complete',

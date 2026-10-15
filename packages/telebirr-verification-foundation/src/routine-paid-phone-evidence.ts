@@ -59,10 +59,13 @@ const INPUT_KEYS = [
 ] as const;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
-// The exact public, 305-byte official HTML error page observed on 2026-10-14.
-// A changed page is review-only until its negative profile is re-evaluated.
-const EXPLICIT_INVALID_PAGE_DIGEST =
-  'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2';
+// The two exact public official HTML error pages attested by the paired phone
+// (305 and 300 bytes). Keep this in sync with OfficialReceiptTransport and the
+// terminal-result database constraint. Changed pages remain review-only.
+const EXPLICIT_INVALID_PAGE_DIGESTS = new Set([
+  'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+  'sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707',
+]);
 const NO_RECEIVER_DIGEST = `sha256:${'0'.repeat(64)}`;
 
 function utc(value: unknown): value is string {
@@ -103,9 +106,11 @@ function immutableReceiptMismatch(
   const submittedAt = ownDataValue(lookupCandidate, 'submittedAt');
   const occurredAt = ownDataValue(facts, 'occurredAt');
   const retrievedAt = ownDataValue(facts, 'retrievedAt');
+  const sourceDocumentDigest = ownDataValue(body, 'sourceDocumentDigest');
   if (
     ownDataValue(body, 'contractVersion') === 2 &&
-    ownDataValue(body, 'sourceDocumentDigest') === EXPLICIT_INVALID_PAGE_DIGEST &&
+    typeof sourceDocumentDigest === 'string' &&
+    EXPLICIT_INVALID_PAGE_DIGESTS.has(sourceDocumentDigest) &&
     ownDataValue(facts, 'sourceOriginAttestation') === 'official_tls_origin' &&
     ownDataValue(facts, 'sourceProfile') === 'telebirr_official_receipt_v1' &&
     ownDataValue(facts, 'amountMinor') === 0 &&

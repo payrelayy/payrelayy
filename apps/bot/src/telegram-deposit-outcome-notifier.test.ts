@@ -176,6 +176,19 @@ describe('Telegram deposit outcome notifier', () => {
     expect(invalid).not.toContain('fake');
   });
 
+  it('holds a rotated-instruction submission for review without implying rejection', () => {
+    const held = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'manual_review',
+      amountMinor: null,
+    });
+    expect(held).toContain('Deposit needs review');
+    expect(held).toContain('not automatically credited');
+    expect(held).toContain('Do not pay again');
+    expect(held).not.toContain('Deposit rejected');
+    expect(held).not.toContain('30.00');
+  });
+
   it('never describes a rejected or unverified payment as credited, fake, or refunded', () => {
     const rejected = presentTelegramDepositOutcome({
       ...delivery,

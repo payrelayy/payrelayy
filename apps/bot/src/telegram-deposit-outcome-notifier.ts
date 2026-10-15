@@ -72,6 +72,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
       'Check the reference. If money left your wallet, do not pay again—contact support.',
     ].join('\n');
   }
+  if (delivery.outcomeCode === 'manual_review') {
+    return [
+      '⚠️ Deposit needs review',
+      `The receiving number changed while your instructions were open. We have not automatically credited submission ending ${delivery.referenceMasked.slice(-4)}.`,
+      'Do not pay again. Contact support with your reference so the payment can be checked.',
+    ].join('\n');
+  }
   if (delivery.outcomeCode === 'rejected') {
     return [
       '❌ Deposit not credited',

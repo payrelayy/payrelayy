@@ -79,20 +79,6 @@ class RoutineTelebirrReceiptParserTest {
   }
 
   @Test
-  fun `retains a credited-party suffix locally without adding it to the current signed facts`() {
-    val html = livePilotHtml().replace(
-      "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
-      "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr><tr><td>Credited party account no</td><td>2519****1234</td></tr>",
-    )
-    val parsed = parser.parse(livePilotProviderFound(html), lookup)
-      as RoutineTelebirrParsedReceipt.Observed
-
-    assertEquals("1234", parsed.creditedPartyVisibleSuffix)
-    assertFalse(parsed.toString().contains("1234"))
-    assertFalse(parsed.facts.toString().contains("1234"))
-  }
-
-  @Test
   fun `retains mismatches as evidence for later server review`() {
     val parsed =
       parser.parse(

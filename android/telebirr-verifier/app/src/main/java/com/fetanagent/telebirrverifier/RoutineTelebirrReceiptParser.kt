@@ -93,8 +93,6 @@ internal data class RoutineTelebirrObservedReceiptFacts(
   val retrievedAt: String,
   val sourceProfile: String,
   val sourceOriginAttestation: String? = null,
-  /** Signed only in observation v3, after the official TLS-origin check. */
-  val creditedPartyVisibleSuffix: String? = null,
 ) {
   override fun toString(): String = "RoutineTelebirrObservedReceiptFacts(<redacted>)"
 }
@@ -103,8 +101,6 @@ internal sealed interface RoutineTelebirrParsedReceipt {
   data class Observed(
     val facts: RoutineTelebirrObservedReceiptFacts,
     val sourceDocumentDigest: String,
-    /** The official credited-party field, never the payer-number field. */
-    val creditedPartyVisibleSuffix: String? = null,
   ) : RoutineTelebirrParsedReceipt {
     override fun toString(): String = "RoutineTelebirrParsedReceipt.Observed(<redacted>)"
   }
@@ -196,7 +192,6 @@ internal class RoutineTelebirrReceiptParser(
         sourceProfile = LivePrivatePilotProtocol.SOURCE_PROFILE,
       ),
       sourceDocumentDigest = parsed.sourceDocumentDigest,
-      creditedPartyVisibleSuffix = parsed.creditedPartyVisibleSuffix,
     )
   }
 

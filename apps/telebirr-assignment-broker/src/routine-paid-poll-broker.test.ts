@@ -157,8 +157,6 @@ describe('private routine paid poll broker core', () => {
         retrievedAt: now,
         amountMinor: 2500,
         currencyCode: 'ETB',
-        creditedPartyNameDigest: `sha256:${'f'.repeat(64)}`,
-        creditedPartyVisibleSuffix: null,
         sourceDocumentDigest: sha(Buffer.from('document')),
         observationBodyDigest: sha(Buffer.from('observation')),
         replayIdentity: sha(Buffer.from('replay')),

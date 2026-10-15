@@ -10,8 +10,6 @@ data class LivePilotParsedProviderObservation(
   val facts: LivePilotReceiptFacts,
   val sourceDocumentDigest: String,
   val invoiceShapeDiagnostic: LivePilotInvoiceShapeDiagnostic? = null,
-  /** Four visible digits from the official credited-party account field; never payer digits. */
-  val creditedPartyVisibleSuffix: String? = null,
 ) {
   override fun toString(): String =
     "LivePilotParsedProviderObservation(lookupOutcome=${facts.lookupOutcome},sourceDocumentDigest=<redacted>)"
@@ -138,11 +136,6 @@ class LivePrivatePilotReceiptParser {
         "unknown_layout_credited_party_name",
         document.retrievedAt,
       )
-    // This is optional for existing receipts. A missing, duplicated, or changed mask cannot
-    // support old-receiver grace, but must not invalidate an otherwise ordinary receipt.
-    val creditedPartyVisibleSuffix =
-      unique(rows, "credited party account no")
-        ?.let { creditedPartyAccountMask.matchEntire(it.trim())?.groupValues?.get(1) }
     val paymentMode = unique(rows, "payment mode")
       ?: return review(
         document.sourceDocumentDigest,
@@ -199,7 +192,6 @@ class LivePrivatePilotReceiptParser {
           retrievedAt = document.retrievedAt,
         ),
       sourceDocumentDigest = document.sourceDocumentDigest,
-      creditedPartyVisibleSuffix = creditedPartyVisibleSuffix,
     )
   }
 
@@ -536,7 +528,6 @@ class LivePrivatePilotReceiptParser {
         "credited party name" to "credited party name",
         "credited party" to "credited party name",
         "transaction to" to "credited party name",
-        "credited party account no" to "credited party account no",
         "transaction status" to "transaction status",
         "status" to "transaction status",
         "payment mode" to "payment mode",
@@ -544,7 +535,6 @@ class LivePrivatePilotReceiptParser {
         "transaction type" to "payment reason",
         "payment channel" to "payment channel",
       )
-    private val creditedPartyAccountMask = Regex("^[0-9]{4}\\*{4}([0-9]{4})$")
     private val requiredLabels =
       setOf(
         "invoice no",

@@ -103,23 +103,19 @@ reason, and audit record. Earlier revisions remain available for verification hi
 rewritten or deleted. Normally the official credited-party name must match the revision that was
 active at the official payment time using the half-open interval
 `active_from <= occurred_at < retired_at`; the exact rotation instant belongs to the new revision.
-Gaps or overlaps fail closed to review. Therefore, a payment made immediately before a receiver
-change may still match the previous revision when submitted within the remaining one-hour freshness
-window; the new revision must never be applied retroactively.
+Gaps or overlaps fail closed to review. A payment made immediately before a receiver change can
+still be associated with the previous revision for investigation, but an instruction issued before
+that change does not authorize an automatic credit afterward. The new revision must never be
+applied retroactively.
 
-An ordinary receiver change does not cancel an unexpired payment instruction for the old receiver.
-The Owner wants a completed payment to that old receiver during the instruction's remaining
-one-hour lifetime to credit its selected Player automatically. The Owner has accepted matching the
-official receipt's full receiver name **and visible number suffix** to the old immutable receiver
-revision, provided the pair uniquely identifies that revision among configured receivers. This is
-a conscious residual risk: another wallet with the same name and visible suffix could look alike.
-The signed official receipt must still prove the exact reference, completed status, settled amount,
-payment time, and all ordinary eligibility and duplicate checks. Missing, malformed, conflicting,
-or non-unique suffix evidence goes to review, not automatic credit or wrong-receiver rejection.
-The instruction must have been issued for that exact old revision before rotation, and the payment
-must have occurred within its issued one-hour window. A valid late submission of a payment made
-within that window goes to review rather than being discarded. An Owner emergency stop can revoke
-the grace period immediately; it does not retroactively authorize an uncertain payment.
+An ordinary receiver change does not erase an already displayed payment instruction. If the
+receiver changes after the instruction is shown, a submission associated with that instruction
+goes to manual review; it must never be automatically rebound to the new receiver or automatically
+credited to a Player. The bot tells the payer that no automatic credit occurred and not to pay
+again. A payment made during the instruction's one-hour window but submitted after its expiry is
+retained for review rather than discarded. Already completed credits are not reversed by a later
+receiver change. The visible receiver-number suffix is only supporting review evidence, not
+authority to auto-credit.
 
 Name comparison uses a versioned conservative normalization profile: Unicode normalization,
 case-folding where defined, whitespace normalization, and narrowly reviewed harmless punctuation
@@ -127,12 +123,9 @@ normalization. It preserves word content and order, supports Ethiopic text, and 
 nickname, transliteration, token-reordering, similarity, or partial-name matching. Anything that is
 not an exact normalized match goes to manual review.
 
-For old-receiver grace, the full-name and visible-suffix comparison is conjunctive: neither field
-alone can authorize a match. The parser must recognize an exact reviewed official number label and
-mask shape; it must not guess digits from unrelated receipt text. Other receiver-match decisions
-continue to require the exact full-name match and all ordinary paid-path safeguards.
-The rollout dependencies and current non-live boundary are recorded in
-[telebirr-receiver-rotation-grace-implementation.md](telebirr-receiver-rotation-grace-implementation.md).
+No combination of a name and partially visible receiver number authorizes an automatic
+old-receiver match. The current paid path remains bound to the active receiver; a changed
+instruction is a separate review boundary.
 
 ## Telegram customer experience
 
@@ -160,8 +153,8 @@ the following without ambiguity:
 4. The payment reason is exactly the supported `Send Money to Registered Customer` reason.
 5. The canonical invoice number exactly matches the normalized requested transaction ID.
 6. The official credited-party full name exactly matches the immutable configured receiver revision
-   under the approved normalization profile. Old-receiver grace additionally requires an exact,
-   unique match of the official visible-number suffix to that revision.
+   under the approved normalization profile. A receiver change after the relevant instruction was
+   shown disqualifies the submission from automatic credit regardless of name or suffix.
 7. The currency is ETB.
 8. **Settled Amount** is present and converts exactly to integer ETB minor units.
 9. Stamp duty, discount fields, service fee, service-fee VAT, **Total Paid Amount**, and every other
@@ -178,8 +171,8 @@ the following without ambiguity:
     deposit.
 
 The payer name, masked payer number, payer account type, QR code, and payment channel are useful
-evidence and anomaly signals. The masked credited-party number participates only in the strictly
-bounded old-receiver grace match described above. None replaces the required canonical reference,
+evidence and anomaly signals. The masked credited-party number cannot authorize an old-receiver
+automatic credit. None replaces the required canonical reference,
 credited-party full-name, completed-status, reason, time, and settled-principal checks.
 
 ## Ethiopian Android verifier boundary
@@ -333,8 +326,8 @@ Implementation and rollout require deterministic synthetic, redacted fixtures fo
   reordered, partial, transliterated, or alias matches;
 - the current receiver revision, the immediately previous revision within its remaining one-hour
   window, the exact half-open rotation boundary, gaps/overlaps, and rejected retroactive matching;
-- old-receiver grace with a unique name-and-suffix match, missing or conflicting suffix, same-name
-  suffix collisions, late submission, emergency revocation, and a receipt whose mask shape changes;
+- a receiver change while an instruction is open, a same-name old/new receiver, a late submission,
+  and a visible-suffix collision all staying out of automatic credit;
 - settled principal distinct from service fee, VAT, stamp duty, discount, and total paid amount;
 - 25 ETB and 25,000 ETB boundaries, below/above range, exact minor units, and malformed amounts;
 - fresh, exactly one-hour-old, older, narrowly future-skewed, excessive future, explicit

@@ -5,8 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE,
   ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
-  ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_PROTOCOL_MODE,
-  ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION,
   canonicalRoutineTelebirrObservationSignatureBytes,
   digestRoutineTelebirrObservationBody,
   digestRoutineTelebirrObservationFacts,
@@ -116,73 +114,6 @@ function fixture() {
 }
 
 describe('routine TeleBirr paired-device observation', () => {
-  it('accepts a versioned signed credited-party suffix as advisory evidence only', () => {
-    const { input, spki, privateKey } = fixture();
-    const header = {
-      contractVersion: 3,
-      providerCode: 'telebirr',
-      protocolMode: ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_PROTOCOL_MODE,
-    };
-    const facts = {
-      ...input.signedObservation.body.facts,
-      sourceOriginAttestation: 'official_tls_origin',
-      creditedPartyVisibleSuffix: '1234',
-    };
-    const body = {
-      ...input.signedObservation.body,
-      ...header,
-      facts,
-      normalizedFactsDigest: digestRoutineTelebirrObservationFacts(facts)!,
-    };
-    const signedObservation = {
-      ...input.signedObservation,
-      ...header,
-      transcriptVersion: ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION,
-      bodyDigest: digestRoutineTelebirrObservationBody(body)!,
-      body,
-      signature: sign('sha256', canonicalRoutineTelebirrObservationSignatureBytes(body)!, {
-        key: privateKey,
-        dsaEncoding: 'ieee-p1363',
-      }).toString('base64url'),
-    };
-    expect(digestRoutineTelebirrObservationFacts(facts)).toMatch(/^sha256:[0-9a-f]{64}$/u);
-    expect(
-      verifyRoutineTelebirrSignedObservation({ ...input, signedObservation }, spki),
-    ).toMatchObject({
-      disposition: 'would_forward_signed_observation',
-      deviceSignatureVerified: true,
-      phoneOfficialOriginAttested: true,
-      financialActionAllowed: false,
-    });
-    const changedFacts = { ...facts, creditedPartyVisibleSuffix: '5678' };
-    expect(
-      verifyRoutineTelebirrSignedObservation(
-        {
-          ...input,
-          signedObservation: {
-            ...signedObservation,
-            body: { ...body, facts: changedFacts },
-          },
-        },
-        spki,
-      ).reasonCode,
-    ).toBe('facts_digest_mismatch');
-    for (const badSuffix of ['', '123', '12345', '12a4']) {
-      expect(
-        digestRoutineTelebirrObservationFacts({
-          ...facts,
-          creditedPartyVisibleSuffix: badSuffix,
-        }),
-      ).toBeUndefined();
-    }
-    expect(
-      digestRoutineTelebirrObservationFacts({
-        ...facts,
-        creditedPartyVisibleSuffix: undefined,
-      }),
-    ).toBeUndefined();
-  });
-
   it('pins the Android routine facts and body digest transcripts', () => {
     const { input } = fixture();
     const facts = {
@@ -202,24 +133,6 @@ describe('routine TeleBirr paired-device observation', () => {
     };
     expect(digestRoutineTelebirrObservationBody(body)).toBe(
       'sha256:a314d72dbfd5efc47b9575e393ba4453930e24aa5978311a082b437016e447ba',
-    );
-    const suffixFacts = {
-      ...facts,
-      sourceOriginAttestation: 'official_tls_origin',
-      creditedPartyVisibleSuffix: '1234',
-    };
-    const suffixBody = {
-      ...body,
-      contractVersion: 3,
-      protocolMode: ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_PROTOCOL_MODE,
-      normalizedFactsDigest: digestRoutineTelebirrObservationFacts(suffixFacts)!,
-      facts: suffixFacts,
-    };
-    expect(digestRoutineTelebirrObservationFacts(suffixFacts)).toBe(
-      'sha256:b2cb9085d32c837b048e3df795343e0b27a5a143871d00455f2f4ea69ddf56c6',
-    );
-    expect(digestRoutineTelebirrObservationBody(suffixBody)).toBe(
-      'sha256:3cf0f5ec86d359f6e5b4858e2e1dc959d4be13b8b364c3fedfc3c4d7d69c4184',
     );
   });
 

@@ -24,9 +24,6 @@ export interface RoutineTelebirrPaidPhoneEvidence {
   readonly retrievedAt: string;
   readonly amountMinor: number;
   readonly currencyCode: 'ETB';
-  readonly creditedPartyNameDigest: string;
-  /** Only a verified v3 phone transcript can supply this credited-party field. */
-  readonly creditedPartyVisibleSuffix: string | null;
   readonly sourceDocumentDigest: string;
   readonly observationBodyDigest: string;
   readonly replayIdentity: string;
@@ -222,22 +219,12 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     const sourceDocumentDigest = ownDataValue(body, 'sourceDocumentDigest');
     const observationBodyDigest = ownDataValue(observation, 'bodyDigest');
     const occurredAt = ownDataValue(facts, 'occurredAt');
-    const creditedPartyNameDigest = ownDataValue(facts, 'creditedPartyNameDigest');
-    const creditedPartyVisibleSuffix =
-      ownDataValue(body, 'contractVersion') === 3
-        ? ownDataValue(facts, 'creditedPartyVisibleSuffix')
-        : null;
     if (
       typeof sourceDocumentDigest !== 'string' ||
       !DIGEST.test(sourceDocumentDigest) ||
       typeof observationBodyDigest !== 'string' ||
       !DIGEST.test(observationBodyDigest) ||
-      typeof occurredAt !== 'string' ||
-      typeof creditedPartyNameDigest !== 'string' ||
-      !DIGEST.test(creditedPartyNameDigest) ||
-      (creditedPartyVisibleSuffix !== null &&
-        (typeof creditedPartyVisibleSuffix !== 'string' ||
-          !/^[0-9]{4}$/u.test(creditedPartyVisibleSuffix)))
+      typeof occurredAt !== 'string'
     ) {
       return review('invalid_request');
     }
@@ -264,8 +251,6 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
         retrievedAt: ownDataValue(facts, 'retrievedAt') as string,
         amountMinor: ownDataValue(facts, 'amountMinor') as number,
         currencyCode: 'ETB',
-        creditedPartyNameDigest,
-        creditedPartyVisibleSuffix,
         sourceDocumentDigest,
         observationBodyDigest,
         replayIdentity: checked.replayIdentity,

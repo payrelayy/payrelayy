@@ -178,6 +178,38 @@ describe('bot-only Telegram deposit outcome runtime', () => {
     });
   });
 
+  it('projects a receiver-change review without inventing a credited amount', async () => {
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        expect(query).toContain('claim_telegram_deposit_outcome_notification');
+        return {
+          rows: [
+            {
+              notification_id: '7e868cac-6ef2-4203-ad6e-449043111937',
+              notification_lease_token: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+              notification_private_chat_id: '123456789',
+              notification_outcome_code: 'manual_review',
+              notification_amount_minor: null,
+              notification_reference_masked: '***1A2B',
+            },
+          ],
+        };
+      },
+      async end() {},
+    };
+    const claim: TelegramPrivateActionEnvelope = { version: 1, kind: 'deposit_outcome_claim' };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        claim,
+        Buffer.from(JSON.stringify(claim)),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'deposit_outcome_delivery',
+      outcomeCode: 'manual_review',
+      amountMinor: null,
+    });
+  });
+
   it('claims and completes a final outcome without recording a customer inbound event', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];
     const database: TelegramPlayerActionDatabase = {

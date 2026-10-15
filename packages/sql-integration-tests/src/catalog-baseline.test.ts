@@ -18,7 +18,7 @@ import { registerRoutineTelebirrPaidIntentSnapshotSqlTests } from './routine-tel
 import { registerTelegramDepositOutcomeNotificationsSqlTests } from './telegram-deposit-outcome-notifications.suite.js';
 import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
-import { registerRoutineTelebirrReceiverGracePreviewSqlTests } from './routine-telebirr-receiver-grace-preview.suite.js';
+import { registerRoutineTelebirrRotatedInstructionReviewSqlTests } from './routine-telebirr-rotated-instruction-review.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
 import { registerRoutineTelebirrPaidPollRuntimeSqlTests } from './routine-telebirr-paid-poll-runtime.suite.js';
 import { registerRoutineTelebirrPaidAtomicClaimSqlTests } from './routine-telebirr-paid-atomic-claim.suite.js';
@@ -9906,7 +9906,7 @@ registerRoutineTelebirrUntrustedProofSqlTests(
   () => client,
   () => ownerAdminId,
 );
-registerRoutineTelebirrReceiverGracePreviewSqlTests(
+registerRoutineTelebirrRotatedInstructionReviewSqlTests(
   () => client,
   () => ownerAdminId,
 );

@@ -15,7 +15,7 @@ import {
 import { assessRoutineTelebirrObservedReceiptFacts } from './routine-receipt-assessment.js';
 import { TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE } from './synthetic-official-receipt.js';
 
-/** Version 1 is device-signature-only review evidence; no version grants money authority. */
+/** Version 1 is device-signature-only review evidence; neither version grants money authority. */
 export const ROUTINE_TELEBIRR_OBSERVATION_CONTRACT_VERSION = 1 as const;
 export const ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE = 'routine_signed_observation_v1' as const;
 export const ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION =
@@ -25,11 +25,6 @@ export const ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_PROTOCOL_MODE =
   'routine_signed_observation_v2' as const;
 export const ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION =
   'telebirr-routine-observation-transcript-v2' as const;
-export const ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_CONTRACT_VERSION = 3 as const;
-export const ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_PROTOCOL_MODE =
-  'routine_signed_observation_v3' as const;
-export const ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION =
-  'telebirr-routine-observation-transcript-v3' as const;
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
@@ -91,8 +86,6 @@ const factsKeys = [
   'sourceProfile',
 ] as const;
 const originFactsKeys = [...factsKeys, 'sourceOriginAttestation'] as const;
-const receiverSuffixFactsKeys = [...originFactsKeys, 'creditedPartyVisibleSuffix'] as const;
-const VISIBLE_RECEIVER_SUFFIX = /^[0-9]{4}$/u;
 const bodyKeys = [
   'contractVersion',
   'providerCode',
@@ -205,25 +198,12 @@ function observationHeader(value: UnknownRecord): boolean {
     ((value.contractVersion === ROUTINE_TELEBIRR_OBSERVATION_CONTRACT_VERSION &&
       value.protocolMode === ROUTINE_TELEBIRR_OBSERVATION_PROTOCOL_MODE) ||
       (value.contractVersion === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION &&
-        value.protocolMode === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_PROTOCOL_MODE) ||
-      (value.contractVersion === ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_CONTRACT_VERSION &&
-        value.protocolMode === ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_PROTOCOL_MODE))
+        value.protocolMode === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_PROTOCOL_MODE))
   );
 }
 
 function originVersion(value: UnknownRecord): boolean {
-  return (
-    value.contractVersion === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION ||
-    value.contractVersion === ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_CONTRACT_VERSION
-  );
-}
-
-function receiverSuffixVersion(value: UnknownRecord): boolean {
-  return value.contractVersion === ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_CONTRACT_VERSION;
-}
-
-function factKeysForVersion(version: 1 | 2 | 3): readonly string[] {
-  return version === 3 ? receiverSuffixFactsKeys : version === 2 ? originFactsKeys : factsKeys;
+  return value.contractVersion === ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_CONTRACT_VERSION;
 }
 
 function digest(value: Uint8Array): string {
@@ -238,8 +218,8 @@ function values(value: UnknownRecord, keys: readonly string[]): unknown[] {
   return keys.map((key) => value[key]);
 }
 
-function parseFacts(value: unknown, version: 1 | 2 | 3): Facts | undefined {
-  const facts = record(value, factKeysForVersion(version));
+function parseFacts(value: unknown, origin: boolean): Facts | undefined {
+  const facts = record(value, origin ? originFactsKeys : factsKeys);
   if (
     !facts ||
     typeof facts.amountMinor !== 'number' ||
@@ -271,10 +251,7 @@ function parseFacts(value: unknown, version: 1 | 2 | 3): Facts | undefined {
     typeof facts.referenceMatch !== 'string' ||
     !['matched', 'mismatched', 'unknown'].includes(facts.referenceMatch) ||
     facts.sourceProfile !== TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE ||
-    (version >= 2 && facts.sourceOriginAttestation !== 'official_tls_origin') ||
-    (version === 3 &&
-      (typeof facts.creditedPartyVisibleSuffix !== 'string' ||
-        !VISIBLE_RECEIVER_SUFFIX.test(facts.creditedPartyVisibleSuffix)))
+    (origin && facts.sourceOriginAttestation !== 'official_tls_origin')
   )
     return undefined;
   return facts as Facts;
@@ -311,7 +288,7 @@ function parseBody(value: unknown): Body | undefined {
     typeof body.normalizedFactsDigest !== 'string' ||
     !DIGEST.test(body.normalizedFactsDigest) ||
     !utc(body.observedAt) ||
-    !parseFacts(body.facts, receiverSuffixVersion(body) ? 3 : originVersion(body) ? 2 : 1)
+    !parseFacts(body.facts, originVersion(body))
   )
     return undefined;
   return body as Body;
@@ -323,17 +300,12 @@ export function canonicalRoutineTelebirrObservationBodyBytes(value: unknown): Bu
     const body = parseBody(value);
     if (!body) return undefined;
     return encode(
-      receiverSuffixVersion(body)
-        ? 'telebirr-routine-observation-body-v3'
-        : originVersion(body)
-          ? 'telebirr-routine-observation-body-v2'
-          : 'telebirr-routine-observation-body-v1',
+      originVersion(body)
+        ? 'telebirr-routine-observation-body-v2'
+        : 'telebirr-routine-observation-body-v1',
       [
         ...values(body, bodyKeys.slice(0, -1)),
-        values(
-          body.facts as UnknownRecord,
-          factKeysForVersion(receiverSuffixVersion(body) ? 3 : originVersion(body) ? 2 : 1),
-        ),
+        values(body.facts as UnknownRecord, originVersion(body) ? originFactsKeys : factsKeys),
       ],
     );
   } catch {
@@ -348,23 +320,17 @@ export function digestRoutineTelebirrObservationBody(value: unknown): string | u
 
 export function digestRoutineTelebirrObservationFacts(value: unknown): string | undefined {
   try {
-    const version =
-      isPlainNonProxyRecord(value) && hasExactEnumerableDataKeys(value, receiverSuffixFactsKeys)
-        ? 3
-        : isPlainNonProxyRecord(value) && hasExactEnumerableDataKeys(value, originFactsKeys)
-          ? 2
-          : 1;
-    const facts = parseFacts(value, version);
+    const origin =
+      isPlainNonProxyRecord(value) && hasExactEnumerableDataKeys(value, originFactsKeys);
+    const facts = parseFacts(value, origin);
     return (
       facts &&
       digest(
         encode(
-          version === 3
-            ? 'telebirr-routine-observation-facts-v3'
-            : version === 2
-              ? 'telebirr-routine-observation-facts-v2'
-              : 'telebirr-routine-observation-facts-v1',
-          values(facts, factKeysForVersion(version)),
+          origin
+            ? 'telebirr-routine-observation-facts-v2'
+            : 'telebirr-routine-observation-facts-v1',
+          values(facts, origin ? originFactsKeys : factsKeys),
         ),
       )
     );
@@ -379,11 +345,9 @@ export function canonicalRoutineTelebirrObservationSignatureBytes(
   const bodyDigest = digestRoutineTelebirrObservationBody(value);
   return bodyDigest
     ? encode(
-        isPlainNonProxyRecord(value) && ownDataValue(value, 'contractVersion') === 3
-          ? ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION
-          : isPlainNonProxyRecord(value) && ownDataValue(value, 'contractVersion') === 2
-            ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
-            : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
+        isPlainNonProxyRecord(value) && ownDataValue(value, 'contractVersion') === 2
+          ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+          : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION,
         [bodyDigest],
       )
     : undefined;
@@ -477,11 +441,9 @@ export function verifyRoutineTelebirrSignedObservation(
       typeof enrollment.receiverProfileDigest !== 'string' ||
       !DIGEST.test(enrollment.receiverProfileDigest) ||
       envelope.transcriptVersion !==
-        (receiverSuffixVersion(body)
-          ? ROUTINE_TELEBIRR_RECEIVER_SUFFIX_OBSERVATION_TRANSCRIPT_VERSION
-          : originVersion(body)
-            ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
-            : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION) ||
+        (originVersion(body)
+          ? ROUTINE_TELEBIRR_ORIGIN_OBSERVATION_TRANSCRIPT_VERSION
+          : ROUTINE_TELEBIRR_OBSERVATION_TRANSCRIPT_VERSION) ||
       envelope.bodyDigestAlgorithm !== 'sha256' ||
       typeof envelope.bodyDigest !== 'string' ||
       !DIGEST.test(envelope.bodyDigest) ||

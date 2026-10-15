@@ -55,27 +55,4 @@ class RoutineTelebirrSignedObservationTest {
     assertFalse(body.toString().contains(PILOT_REFERENCE))
     assertFalse(facts.toString().contains(PILOT_RECEIVER_NAME))
   }
-
-  @Test
-  fun `version three credited-party suffix digests match TypeScript vectors`() {
-    val suffixFacts = facts.copy(
-      sourceOriginAttestation = "official_tls_origin",
-      creditedPartyVisibleSuffix = "1234",
-    )
-    val suffixBody = body.copy(
-      contractVersion = 3,
-      protocolMode = RoutineTelebirrObservationCanonical.RECEIVER_SUFFIX_PROTOCOL_MODE,
-      normalizedFactsDigest = RoutineTelebirrObservationCanonical.factsDigest(suffixFacts),
-      facts = suffixFacts,
-    )
-    assertEquals(
-      "sha256:b2cb9085d32c837b048e3df795343e0b27a5a143871d00455f2f4ea69ddf56c6",
-      RoutineTelebirrObservationCanonical.factsDigest(suffixFacts),
-    )
-    assertEquals(
-      "sha256:3cf0f5ec86d359f6e5b4858e2e1dc959d4be13b8b364c3fedfc3c4d7d69c4184",
-      RoutineTelebirrObservationCanonical.bodyDigest(suffixBody),
-    )
-    assertFalse(suffixFacts.toString().contains("1234"))
-  }
 }

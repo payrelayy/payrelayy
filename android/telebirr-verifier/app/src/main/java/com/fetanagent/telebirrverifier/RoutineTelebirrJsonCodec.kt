@@ -87,12 +87,8 @@ internal object RoutineTelebirrJsonCodec {
     RoutineTelebirrLookupProtocol.requireUtc(facts.retrievedAt)
     require(facts.retrievedAt == body.observedAt)
     require(facts.sourceProfile == RoutineTelebirrLookupProtocol.SOURCE_PROFILE)
-    require((body.contractVersion >= 2) ==
+    require((body.contractVersion == 2) ==
       (facts.sourceOriginAttestation == "official_tls_origin"))
-    require((body.contractVersion == 3) == (facts.creditedPartyVisibleSuffix != null))
-    if (body.contractVersion == 3) {
-      require(Regex("^[0-9]{4}$").matches(requireNotNull(facts.creditedPartyVisibleSuffix)))
-    }
     require(facts.currencyCode in setOf("ETB", "unknown"))
     require(facts.evidenceSource in setOf("provider_receipt_lookup", "unknown"))
     require(facts.paymentMode in setOf("telebirr", "other", "unknown"))
@@ -123,8 +119,6 @@ internal object RoutineTelebirrJsonCodec {
       "sourceProfile" to text(facts.sourceProfile),
     ) + (facts.sourceOriginAttestation?.let {
       arrayOf("sourceOriginAttestation" to text(it))
-    } ?: emptyArray()) + (facts.creditedPartyVisibleSuffix?.let {
-      arrayOf("creditedPartyVisibleSuffix" to text(it))
     } ?: emptyArray())
     val bytes =
       StrictJson.encode(

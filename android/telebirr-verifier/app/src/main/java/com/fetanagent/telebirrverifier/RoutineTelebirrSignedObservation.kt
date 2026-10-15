@@ -38,10 +38,7 @@ internal data class RoutineTelebirrObservationBody(
     require(p.DIGEST.matches(sourceDocumentDigest))
     require(p.DIGEST.matches(normalizedFactsDigest))
     p.requireUtc(observedAt)
-    require((contractVersion >= 2) == (facts.sourceOriginAttestation == "official_tls_origin"))
-    require((contractVersion == 3) == (facts.creditedPartyVisibleSuffix != null))
-    if (contractVersion == 3) require(Regex("^[0-9]{4}$").matches(
-      requireNotNull(facts.creditedPartyVisibleSuffix)))
+    require((contractVersion == 2) == (facts.sourceOriginAttestation == "official_tls_origin"))
   }
 
   override fun toString(): String = "RoutineTelebirrObservationBody(<redacted>)"
@@ -82,40 +79,28 @@ internal object RoutineTelebirrObservationCanonical {
   const val TRANSCRIPT_VERSION = "telebirr-routine-observation-transcript-v1"
   const val ORIGIN_TRANSCRIPT_VERSION = "telebirr-routine-observation-transcript-v2"
   const val ORIGIN_PROTOCOL_MODE = "routine_signed_observation_v2"
-  const val RECEIVER_SUFFIX_TRANSCRIPT_VERSION = "telebirr-routine-observation-transcript-v3"
-  const val RECEIVER_SUFFIX_PROTOCOL_MODE = "routine_signed_observation_v3"
 
   fun requireHeader(version: Int, providerCode: String, mode: String) {
     require(providerCode == RoutineTelebirrLookupProtocol.PROVIDER_CODE)
     require((version == 1 && mode == RoutineTelebirrLookupProtocol.PROTOCOL_MODE) ||
-      (version == 2 && mode == ORIGIN_PROTOCOL_MODE) ||
-      (version == 3 && mode == RECEIVER_SUFFIX_PROTOCOL_MODE))
+      (version == 2 && mode == ORIGIN_PROTOCOL_MODE))
   }
 
   fun transcriptVersion(body: RoutineTelebirrObservationBody): String =
-    when (body.contractVersion) {
-      3 -> RECEIVER_SUFFIX_TRANSCRIPT_VERSION
-      2 -> ORIGIN_TRANSCRIPT_VERSION
-      else -> TRANSCRIPT_VERSION
-    }
+    if (body.contractVersion == 2) ORIGIN_TRANSCRIPT_VERSION else TRANSCRIPT_VERSION
 
   fun factsDigest(facts: RoutineTelebirrObservedReceiptFacts): String =
     RoutineLookupCanonicalTranscripts.sha256(
-      jsonArray(when {
-        facts.creditedPartyVisibleSuffix != null -> "telebirr-routine-observation-facts-v3"
-        facts.sourceOriginAttestation != null -> "telebirr-routine-observation-facts-v2"
-        else -> "telebirr-routine-observation-facts-v1"
-      }, factsValues(facts)),
+      jsonArray(if (facts.sourceOriginAttestation == null)
+        "telebirr-routine-observation-facts-v1" else
+        "telebirr-routine-observation-facts-v2", factsValues(facts)),
     )
 
   fun bodyDigest(body: RoutineTelebirrObservationBody): String =
     RoutineLookupCanonicalTranscripts.sha256(
       jsonArray(
-        when (body.contractVersion) {
-          3 -> "telebirr-routine-observation-body-v3"
-          2 -> "telebirr-routine-observation-body-v2"
-          else -> "telebirr-routine-observation-body-v1"
-        },
+        if (body.contractVersion == 2) "telebirr-routine-observation-body-v2" else
+          "telebirr-routine-observation-body-v1",
         listOf(
           body.contractVersion,
           body.providerCode,
@@ -158,8 +143,7 @@ internal object RoutineTelebirrObservationCanonical {
       facts.referenceMatch,
       facts.retrievedAt,
       facts.sourceProfile,
-    ) + listOfNotNull(facts.sourceOriginAttestation) +
-      listOfNotNull(facts.creditedPartyVisibleSuffix)
+    ) + listOfNotNull(facts.sourceOriginAttestation)
 
   private fun jsonArray(domain: String, values: List<Any>): ByteArray {
     val output = StringWriter()
@@ -197,8 +181,6 @@ internal object RoutineTelebirrSignedObservationFactory {
     parsed: RoutineTelebirrParsedReceipt.Observed,
     identity: P256Identity,
     officialOriginFromSafeTransport: Boolean = false,
-    // Kept off for the operational collector until paid staging and atomic claims accept v3.
-    signReceiverSuffix: Boolean = false,
   ): RoutineTelebirrSignedObservation {
     val assigned = assignment.body
     val material = identity.publicMaterial()
@@ -209,13 +191,8 @@ internal object RoutineTelebirrSignedObservationFactory {
     require(enrollment.receiverVersion == assigned.receiverVersion)
     require(enrollment.receiverProfileDigest == assigned.receiverProfileDigest)
     require(enrollment.state == "active")
-    require(!signReceiverSuffix || officialOriginFromSafeTransport)
-    val suffix = if (signReceiverSuffix) requireNotNull(parsed.creditedPartyVisibleSuffix)
-      .also { require(Regex("^[0-9]{4}$").matches(it)) } else null
-    val facts = parsed.facts.copy(
-      sourceOriginAttestation = if (officialOriginFromSafeTransport) "official_tls_origin" else null,
-      creditedPartyVisibleSuffix = suffix,
-    )
+    val facts = parsed.facts.copy(sourceOriginAttestation =
+      if (officialOriginFromSafeTransport) "official_tls_origin" else null)
     require(facts.amountMinor in 0..9_007_199_254_740_991L)
     require(RoutineTelebirrLookupProtocol.DIGEST.matches(facts.creditedPartyNameDigest))
     require(RoutineTelebirrLookupProtocol.DIGEST.matches(parsed.sourceDocumentDigest))
@@ -236,13 +213,10 @@ internal object RoutineTelebirrSignedObservationFactory {
     require(facts.retrievedAt >= assigned.issuedAt && facts.retrievedAt < assigned.expiresAt)
     val body =
       RoutineTelebirrObservationBody(
-        contractVersion = if (suffix != null) 3 else
-          if (officialOriginFromSafeTransport) 2 else 1,
-        protocolMode = if (suffix != null)
-          RoutineTelebirrObservationCanonical.RECEIVER_SUFFIX_PROTOCOL_MODE else
-          if (officialOriginFromSafeTransport)
-            RoutineTelebirrObservationCanonical.ORIGIN_PROTOCOL_MODE else
-            RoutineTelebirrLookupProtocol.PROTOCOL_MODE,
+        contractVersion = if (officialOriginFromSafeTransport) 2 else 1,
+        protocolMode = if (officialOriginFromSafeTransport)
+          RoutineTelebirrObservationCanonical.ORIGIN_PROTOCOL_MODE else
+          RoutineTelebirrLookupProtocol.PROTOCOL_MODE,
         candidateId = assigned.candidateId,
         referenceFingerprint = assigned.referenceFingerprint,
         receiverRevisionId = assigned.receiverRevisionId,

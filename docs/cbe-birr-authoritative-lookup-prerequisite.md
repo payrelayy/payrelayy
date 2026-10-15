@@ -5,6 +5,15 @@ remaining work before authoritative CBE Birr lookup can begin. It imports the St
 profile label but does not call its synthetic parser or add transport, protected-material access,
 database access, persistence, runtime wiring, evidence, claims, settlement, or financial actions.
 
+The package also has a metadata-only receiver-revision preflight for the newly configured Owner
+receiver path. Given an exact, non-sensitive snapshot of the revision status and three protection
+version labels, it distinguishes a possible v1 metadata shape from an inactive or legacy/unsupported
+shape. **Every** result remains blocked: matching labels do not prove the ciphertext, lookup-phone
+format, key provenance, independent worker decryption, or an official receipt. The preflight accepts
+no account number, holder name, ciphertext, fingerprint, secret, or revision identifier, and no
+application or SQL lease calls it. A newly configured receiver therefore does not clear the
+authoritative-lookup blockers by itself.
+
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:
 

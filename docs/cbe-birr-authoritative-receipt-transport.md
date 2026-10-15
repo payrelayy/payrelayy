@@ -87,7 +87,9 @@ parser now recognizes one newer receipt layout containing `Credit Account`, `Rec
 fields is an advisory parsing result only. The internal one-fetch composition now passes bounded
 raw PDF bytes directly to that parser and derives its reference expectation from the canonical
 request. The expected receiver account is supplied separately from `PH`; the parser compares it
-to the PDF's `Credit Account` field. This is still **not** end-to-end authoritative verification:
+to the PDF's `Credit Account` field. A second critical account, reference, status, or amount label
+anywhere in the newer-layout PDF now yields advisory review, while unrelated footer text remains
+permitted. This is still **not** end-to-end authoritative verification:
 no trusted immutable receiver revision, live response contract, production source permission,
 claim, or application runtime is wired. A parser `would_reject` result must never be treated as a
 customer-facing rejection or a financial decision. No live response, real receipt

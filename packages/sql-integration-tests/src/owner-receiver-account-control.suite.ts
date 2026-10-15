@@ -253,7 +253,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
       }
     });
 
-    it('permits only first CBE setup while TeleBirr is live and leaves TeleBirr untouched', async () => {
+    it('permits only first CBE setup with other payment switches non-disabled and leaves TeleBirr untouched', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -278,7 +278,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
         `);
 
         await client.query(`
-          update app.feature_switches set mode = 'live'
+          update app.feature_switches set mode = 'dry_run'
            where feature_key in (
              'payment_verification', 'deposit_execution', 'telebirr_authoritative_verification'
            )
@@ -357,9 +357,9 @@ export function registerOwnerReceiverAccountControlSqlTests(
         `);
         expect(switches.rows).toEqual([
           { feature_key: 'cbe_birr_authoritative_verification', mode: 'disabled' },
-          { feature_key: 'deposit_execution', mode: 'live' },
-          { feature_key: 'payment_verification', mode: 'live' },
-          { feature_key: 'telebirr_authoritative_verification', mode: 'live' },
+          { feature_key: 'deposit_execution', mode: 'dry_run' },
+          { feature_key: 'payment_verification', mode: 'dry_run' },
+          { feature_key: 'telebirr_authoritative_verification', mode: 'dry_run' },
         ]);
       } finally {
         await client.query('rollback');

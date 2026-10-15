@@ -223,8 +223,9 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             complete account number is encrypted in server memory and is never displayed again.
           </p>
           <p class="pilot-warning">
-            Rotation is accepted only while every payment, provider, pilot, settlement, and KemerBet
-            execution switch is disabled. Stop any pilot before changing its receiver.
+            TeleBirr receiver changes and later CBE Birr rotations require the financial switches
+            to be off. The first CBE Birr receiver may be saved while TeleBirr runs, but CBE Birr
+            verification must stay off. Stop any pilot for the provider before changing its receiver.
           </p>
           <div class="request-list" id="receiver-list"></div>
           <form id="receiver-form" autocomplete="off">
@@ -3239,7 +3240,8 @@ async function rotateReceiver() {
     receiverConfirmation.checked = false;
     const message = receiver.providerDisplayName + ' receiver revision ' + receiver.revision +
       (receiver.receiverStatus === 'active' ? ' is active.' : ' was already applied and has since been superseded.') +
-      ' The full account number is not displayed. Money remains disabled until later readiness gates pass.';
+      ' The full account number is not displayed. Payment switches were not changed.' +
+      (providerCode === 'cbe_birr' ? ' CBE Birr deposits remain disabled until separate activation.' : '');
     await loadReceivers();
     setReceiverFeedback(message);
     setNotice(message);

@@ -22,6 +22,15 @@ signature-verified version-3 observation. It projects `null` for the suffix on v
 never grants money authority. The direct-instruction selector consumes these projected facts in a
 cross-component test; production does not call that selector or emit version 3.
 
+A separate postgres-only database preview now reads the immutable candidate, same-private-chat
+instruction message, one-hour receipt, all configured TeleBirr receiver revisions, and a private
+emergency-revocation veto. It returns a possible unique instruction and
+`financial_action_allowed = false` in every case. Its receipt digest, suffix, and occurrence-time
+arguments are **not** authenticated by that function. It cannot update the candidate, issue a
+challenge, create a claim, or credit a Player; no application role can invoke it. The operational
+capture trigger still binds the active receiver, so the preview is not an old-receiver paid path.
+Its SQL integration test must pass in a disposable database before this migration is deployable.
+
 The Owner chose automatic grace matching by the exact normalized official credited-party full name
 **and** the visible four-digit suffix when that pair identifies exactly one configured immutable
 receiver revision. This is an accepted heuristic, not proof of the hidden digits. A missing,

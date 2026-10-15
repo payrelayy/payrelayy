@@ -482,7 +482,10 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     ).not.toHaveProperty('terminalReasonCode');
   });
 
-  it('treats only the exact signed official invalid-page profile as a terminal rejection', () => {
+  it.each([
+    'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+    'sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707',
+  ])('treats only the exact signed official invalid-page profile %s as terminal', (digest) => {
     const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
       fixture(true);
     const negativeFacts = {
@@ -501,8 +504,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     };
     const negativeBody = {
       ...observationBody(negativeFacts),
-      sourceDocumentDigest:
-        'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+      sourceDocumentDigest: digest,
     };
     const negative = signedObservation(negativeBody, deviceKey.privateKey);
     const paid = { ...input, trustedIssuanceMode: 'paid', signedObservation: negative };

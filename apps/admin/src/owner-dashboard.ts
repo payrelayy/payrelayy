@@ -914,6 +914,7 @@ let ownerRefreshTimer;
 let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
 let receiverChangeReviewCursor;
+let receiverChangeReviewRequest = 0;
 let supportContactRevision;
 let supportContactSavedUsername;
 let supportContactRequest = 0;
@@ -4917,6 +4918,10 @@ function renderReceiverChangeReviews(reviews, olderPage) {
 
 async function loadReceiverChangeReviews(beforeCaseId) {
   const olderPage = typeof beforeCaseId === 'string';
+  const generation = ownerAuthGeneration;
+  const requestId = ++receiverChangeReviewRequest;
+  const current = () => generation === ownerAuthGeneration &&
+    requestId === receiverChangeReviewRequest && Boolean(accessToken);
   receiverChangeReviewRefresh.disabled = true;
   receiverChangeReviewOlder.disabled = true;
   try {
@@ -4932,15 +4937,20 @@ async function loadReceiverChangeReviews(beforeCaseId) {
     }
     const reviews = payload.reviews.map(validReceiverChangeReview);
     if (reviews.some((review) => !review)) throw new Error('receiver_change_reviews');
+    if (!current()) return;
     renderReceiverChangeReviews(reviews, olderPage);
     receiverChangeReviewCursor = reviews.length === 25 ? reviews[24].caseId : undefined;
     receiverChangeReviewOlder.hidden = receiverChangeReviewCursor === undefined;
   } catch (error) {
-    if (!olderPage) clearReceiverChangeReviews();
-    if (!isSignedOutError(error)) setNotice('TeleBirr receiver-change cases are unavailable. No review action was taken.');
+    if (current()) {
+      if (!olderPage) clearReceiverChangeReviews();
+      if (!isSignedOutError(error)) setNotice('TeleBirr receiver-change cases are unavailable. No review action was taken.');
+    }
   } finally {
-    receiverChangeReviewRefresh.disabled = false;
-    receiverChangeReviewOlder.disabled = false;
+    if (current()) {
+      receiverChangeReviewRefresh.disabled = false;
+      receiverChangeReviewOlder.disabled = false;
+    }
   }
 }
 

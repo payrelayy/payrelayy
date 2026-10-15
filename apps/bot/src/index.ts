@@ -51,6 +51,7 @@ import {
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
+import { renderTelegramQuickMenu, type PrivateTelegramMenuButton } from './private-menu.js';
 import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
   presentTelegramPlayerIdFlowResult,
@@ -79,6 +80,17 @@ bot.api.config.use(pollingReadiness.transformer);
 const betaAdmission = config.telegramBetaAdmission;
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
+const quickMenu = renderTelegramQuickMenu();
+
+function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const [index, button] of buttons.entries()) {
+    if (index > 0) keyboard.row();
+    keyboard.text(button.text, button.callbackData);
+  }
+  return keyboard;
+}
+
 const temporaryMessageDependencies = {
   request: (action: TelegramPrivateActionEnvelope) => {
     if (!playerActions.enabled) throw new Error('Telegram player actions are disabled.');
@@ -150,12 +162,7 @@ async function deliverPlayerAction(
       }
       return;
     }
-    const keyboard = new InlineKeyboard();
-    for (const [index, button] of presentation.menu.buttons.entries()) {
-      if (index > 0) keyboard.row();
-      keyboard.text(button.text, button.callbackData);
-    }
-    await reply(presentation.menu.text, keyboard);
+    await reply(presentation.menu.text, inlineMenu(presentation.menu.buttons));
   } catch {
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     console.warn(
@@ -602,27 +609,13 @@ await runTelegramPolling(
               bot.api.sendMessage(
                 chatId,
                 text,
-                showDepositButton
-                  ? {
-                      reply_markup: new InlineKeyboard()
-                        .text('💰 Deposit', TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA)
-                        .row()
-                        .text('🔄 Change Player ID', TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA),
-                    }
-                  : undefined,
+                showDepositButton ? { reply_markup: inlineMenu(quickMenu.buttons) } : undefined,
               ),
             delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
             sendMenu: (chatId) =>
-              bot.api.sendMessage(
-                chatId,
-                'Payment instructions expired. If you already paid, send the receipt so we can check it. Do not pay again. Choose an option below.',
-                {
-                  reply_markup: new InlineKeyboard()
-                    .text('💰 Deposit', TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA)
-                    .row()
-                    .text('🔄 Change Player ID', TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA),
-                },
-              ),
+              bot.api.sendMessage(chatId, quickMenu.text, {
+                reply_markup: inlineMenu(quickMenu.buttons),
+              }),
           },
           outcomeNotifierAbort.signal,
         );

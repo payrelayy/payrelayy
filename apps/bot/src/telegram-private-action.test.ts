@@ -41,6 +41,25 @@ const privateMetadata = {
 
 const callbackData = 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w';
 
+/** A card sent by the immediately preceding release must remain replyable after rollout. */
+const priorPaymentPrompt = [
+  '💰 TeleBirr payment details',
+  '',
+  'Send money to:',
+  '👤 Name: Demo Receiver',
+  '📱 Number: 0000000042',
+  '',
+  '🎮 KemerBet Player ID: PLAYER-DEMO-42',
+  'Amount: choose 25–25,000 ETB in TeleBirr.',
+  'These payment details remain valid for 1 hour. Send the receipt or reference after paying.',
+  '',
+  'After paying, reply to this message with the TeleBirr transaction number.',
+  'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).',
+  '',
+  'Before sending, confirm the name shown in TeleBirr matches the name above.',
+  'Tap /menu to cancel.',
+].join('\n');
+
 describe('private Telegram action reducers', () => {
   it('routes saved-Player actions only from the same private chat', () => {
     expect(reduceTelegramSavedTelebirrDestinationAction(privateMetadata)).toMatchObject({
@@ -166,6 +185,25 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('still accepts a reply to the previous Player ID question', () => {
+    const priorPlayerPrompt = [
+      '🎮 Choose Player ID',
+      '',
+      'Which KemerBet Player ID should receive your deposits?',
+      'Reply with the Player ID only.',
+      'This choice applies to future direct submissions; it does not change a deposit already submitted.',
+      '',
+      'Tap /menu to cancel.',
+    ].join('\n');
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42',
+        replyToMessage: { text: priorPlayerPrompt, from: { is_bot: true } },
+      }),
+    ).toMatchObject({ kind: 'action', action: { playerId: 'PLAYER-DEMO-42' } });
+  });
+
   it('does not accept malformed Player IDs or customer-authored wizard prompts', () => {
     expect(
       reduceTelegramGuidedDepositDestinationSubmission({
@@ -217,13 +255,22 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('accepts a reply to a full one-hour card sent before the copy update', () => {
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'SYNTB00000001',
+        replyToMessage: { text: priorPaymentPrompt, from: { is_bot: true } },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: { playerId: 'PLAYER-DEMO-42', transactionReference: 'SYNTB00000001' },
+    });
+  });
+
   it('accepts an already-open payment reply from the previous pilot card during rollout', () => {
-    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
-      playerId: 'PLAYER-DEMO-42',
-      receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
-    }).replace(
-      'This payment instruction is valid for at most 10 minutes; submit the reference promptly.',
+    const previousPrompt = priorPaymentPrompt.replace(
+      'These payment details remain valid for 1 hour. Send the receipt or reference after paying.',
       'These payment details are valid for 12 hours.',
     );
     expect(
@@ -239,11 +286,7 @@ describe('private Telegram action reducers', () => {
   });
 
   it('accepts a reply to a ten-minute instruction already open during the one-hour rollout', () => {
-    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
-      playerId: 'PLAYER-DEMO-42',
-      receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
-    }).replace(
+    const previousPrompt = priorPaymentPrompt.replace(
       'These payment details remain valid for 1 hour. Send the receipt or reference after paying.',
       'This payment instruction is valid for at most 10 minutes; submit the reference promptly.',
     );
@@ -260,11 +303,7 @@ describe('private Telegram action reducers', () => {
   });
 
   it('accepts a reply to the prior text-only payment card during the media rollout', () => {
-    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
-      playerId: 'PLAYER-DEMO-42',
-      receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
-    }).replace(
+    const previousPrompt = priorPaymentPrompt.replace(
       'You can also send the full message, receipt link, JPG/PNG screenshot, or PDF (up to 5 MB).',
       'You can also paste the receipt link or full SMS.',
     );
@@ -281,11 +320,7 @@ describe('private Telegram action reducers', () => {
   });
 
   it('accepts an already-open exactly-25-ETB payment reply during rollout', () => {
-    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
-      playerId: 'PLAYER-DEMO-42',
-      receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
-    }).replace(
+    const previousPrompt = priorPaymentPrompt.replace(
       'Amount: choose 25–25,000 ETB in TeleBirr.',
       'Amount: send exactly 25 ETB in TeleBirr.',
     );

@@ -108,6 +108,7 @@ describe('one-hour Telegram instruction cleanup', () => {
     ).toBe('processed');
     expect(deleted).toHaveBeenCalledWith(4567, 89);
     expect(sendMenu).toHaveBeenCalledWith(4567);
+    expect(deleted.mock.invocationCallOrder[0]).toBeLessThan(sendMenu.mock.invocationCallOrder[0]!);
     expect(request).toHaveBeenCalledWith({
       version: 1,
       kind: 'payment_instruction_expiry_complete',

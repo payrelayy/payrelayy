@@ -17,6 +17,20 @@ export interface PrivateTelegramMenu {
   readonly buttons: readonly PrivateTelegramMenuButton[];
 }
 
+/** Short, non-expiry menu used when an old payment card is removed. */
+export function renderTelegramQuickMenu(): PrivateTelegramMenu {
+  return {
+    text: TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
+    buttons: [
+      {
+        text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
+        callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+      },
+      { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
+    ],
+  };
+}
+
 /**
  * The privileged Player-ID action always uses the API-supplied opaque callback. The fixed deposit
  * callback below has no authority: it only opens a local reply prompt, and the completed input
@@ -33,8 +47,8 @@ export function renderPlayerRegistrationMenu(
   return {
     text:
       selectedPlayerId === null
-        ? `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\n\nNo Player ID saved yet.`
-        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\n\n🎮 Player ID: ${selectedPlayerId}`,
+        ? `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nSet a Player ID to deposit.`
+        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}`,
     buttons: [
       {
         text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,

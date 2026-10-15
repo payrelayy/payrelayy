@@ -232,6 +232,73 @@ describe('bot-only Telegram deposit outcome runtime', () => {
   });
 });
 
+describe('bot-only Telegram temporary deposit message runtime', () => {
+  it('records, claims, and completes a deletion without recording a customer inbound event', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('claim_telegram_deposit_temporary_deletion')) {
+          return {
+            rows: [
+              {
+                cleanup_update_id: '123',
+                cleanup_lease_token: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+                cleanup_private_chat_id: '123456789',
+                cleanup_message_id: '42',
+              },
+            ],
+          };
+        }
+        return { rows: [{ accepted: true }] };
+      },
+      async end() {},
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(actionConfig, database);
+    const actions: TelegramPrivateActionEnvelope[] = [
+      {
+        version: 1,
+        kind: 'deposit_temporary_record',
+        updateId: '123',
+        privateChatId: '123456789',
+        telegramMessageId: 42,
+      },
+      { version: 1, kind: 'deposit_temporary_cleanup_claim' },
+      {
+        version: 1,
+        kind: 'deposit_temporary_cleanup_complete',
+        updateId: '123',
+        leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+        deletionResult: 'deleted',
+      },
+    ];
+    expect(await runtime.handle(actions[0]!, Buffer.from(JSON.stringify(actions[0])))).toEqual({
+      version: 1,
+      outcome: 'deposit_temporary_recorded',
+      accepted: true,
+    });
+    expect(
+      await runtime.handle(actions[1]!, Buffer.from(JSON.stringify(actions[1]))),
+    ).toMatchObject({
+      outcome: 'deposit_temporary_cleanup_delivery',
+      updateId: '123',
+      privateChatId: '123456789',
+      telegramMessageId: 42,
+    });
+    expect(await runtime.handle(actions[2]!, Buffer.from(JSON.stringify(actions[2])))).toEqual({
+      version: 1,
+      outcome: 'deposit_temporary_cleanup_completed',
+      accepted: true,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.values).toEqual(['123', '123456789', 42]);
+    expect(calls[2]?.values).toEqual(['123', '03618c2d-47d4-44ea-b681-9c4a0a4d1fab', 'deleted']);
+    expect(calls.map((call) => call.query).join('\n')).not.toContain(
+      'record_public_telegram_action_inbound_event',
+    );
+  });
+});
+
 describe('Postgres Telegram Player-ID action runtime', () => {
   it('publicly onboards the action update before issuing a deterministic non-financial menu', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];

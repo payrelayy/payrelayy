@@ -1114,7 +1114,7 @@ describe('disposable SQL migration baseline', () => {
     expect(actionProcedureGrants.rows.every((procedure) => !procedure.allowed)).toBe(true);
   });
 
-  it('gives the dedicated Player-ID runtime exactly nineteen reviewed private procedures', async () => {
+  it('gives the dedicated Player-ID runtime exactly twenty-five reviewed private procedures', async () => {
     const functions = await client.query<{
       readonly group_allowed: boolean;
       readonly hardened: boolean;
@@ -1153,13 +1153,16 @@ describe('disposable SQL migration baseline', () => {
       order by signature
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
+      'app.cancel_telegram_deposit_temporary_message(bigint,bigint,bigint)',
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.claim_telegram_deposit_outcome_notification()',
+      'app.claim_telegram_deposit_temporary_deletion()',
       'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
+      'app.complete_telegram_deposit_temporary_deletion(bigint,uuid,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
@@ -1170,6 +1173,7 @@ describe('disposable SQL migration baseline', () => {
       'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,
+      'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)',
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.save_telegram_player_selection(uuid,text)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',

@@ -52,6 +52,32 @@ export interface TelegramPrivateActionIdentity {
 export type TelegramPrivateActionEnvelope =
   | {
       readonly version: 1;
+      /** Bot process only; records the ID of its own temporary private-chat message. */
+      readonly kind: 'deposit_temporary_record';
+      readonly updateId: string;
+      readonly privateChatId: string;
+      readonly telegramMessageId: number;
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'deposit_temporary_cancel';
+      readonly updateId: string;
+      readonly privateChatId: string;
+      readonly telegramMessageId: number;
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'deposit_temporary_cleanup_claim';
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'deposit_temporary_cleanup_complete';
+      readonly updateId: string;
+      readonly leaseToken: string;
+      readonly deletionResult: 'deleted' | 'retry' | 'unavailable';
+    }
+  | {
+      readonly version: 1;
       /** Bot process only; no customer or Telegram Update is fabricated for this poll. */
       readonly kind: 'deposit_outcome_claim';
     }
@@ -133,6 +159,28 @@ export type TelegramPrivateActionEnvelope =
  * and API independently confirm that customer payments are currently accepted.
  */
 export type TelegramPrivateActionResult =
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_temporary_recorded' | 'deposit_temporary_cancelled';
+      readonly accepted: boolean;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_temporary_cleanup_none';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_temporary_cleanup_delivery';
+      readonly updateId: string;
+      readonly leaseToken: string;
+      readonly privateChatId: string;
+      readonly telegramMessageId: number;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'deposit_temporary_cleanup_completed';
+      readonly accepted: boolean;
+    }
   | {
       readonly version: 1;
       readonly outcome: 'deposit_outcome_none';
@@ -385,12 +433,18 @@ export function redactTelegramPrivateActionForLog(action: TelegramPrivateActionE
     version: action.version,
     kind: action.kind,
     preferredLocale:
-      action.kind === 'deposit_outcome_claim' || action.kind === 'deposit_outcome_complete'
+      action.kind === 'deposit_outcome_claim' ||
+      action.kind === 'deposit_outcome_complete' ||
+      action.kind === 'deposit_temporary_record' ||
+      action.kind === 'deposit_temporary_cancel' ||
+      action.kind === 'deposit_temporary_cleanup_claim' ||
+      action.kind === 'deposit_temporary_cleanup_complete'
         ? 'en'
         : action.preferredLocale,
     customerInputPresent:
       action.kind !== 'root_menu' &&
       action.kind !== 'deposit_outcome_claim' &&
-      action.kind !== 'deposit_outcome_complete',
+      action.kind !== 'deposit_outcome_complete' &&
+      !action.kind.startsWith('deposit_temporary_'),
   };
 }

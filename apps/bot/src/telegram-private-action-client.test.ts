@@ -161,6 +161,37 @@ describe('Telegram private-action bot client', () => {
     ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
   });
 
+  it('accepts a bounded bot-owned temporary deletion lease and rejects extra data', async () => {
+    const claim: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'deposit_temporary_cleanup_claim',
+    };
+    const delivery = {
+      version: 1,
+      outcome: 'deposit_temporary_cleanup_delivery',
+      updateId: '123',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      privateChatId: '123456789',
+      telegramMessageId: 42,
+    };
+    await expect(
+      deliverTelegramPrivateAction(claim, config, {
+        fetch: async () => ({ status: 200, json: async () => delivery }),
+      }),
+    ).resolves.toEqual(delivery);
+    for (const invalid of [
+      { ...delivery, privateChatId: '0' },
+      { ...delivery, telegramMessageId: 0 },
+      { ...delivery, paymentReference: 'must-not-leak' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(claim, config, {
+          fetch: async () => ({ status: 200, json: async () => invalid }),
+        }),
+      ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+    }
+  });
+
   it('accepts only exact, internally consistent TeleBirr receiver projections', async () => {
     const preview = {
       version: 1,

@@ -39,6 +39,11 @@ export function presentTelegramPlayerIdFlowResult(
     case 'deposit_outcome_none':
     case 'deposit_outcome_delivery':
     case 'deposit_outcome_completed':
+    case 'deposit_temporary_recorded':
+    case 'deposit_temporary_cancelled':
+    case 'deposit_temporary_cleanup_none':
+    case 'deposit_temporary_cleanup_delivery':
+    case 'deposit_temporary_cleanup_completed':
       throw new Error(
         'A bot-only notification operation cannot be presented as a customer action.',
       );

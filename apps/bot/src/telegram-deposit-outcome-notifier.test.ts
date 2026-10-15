@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   presentTelegramDepositOutcome,
   processOneTelegramDepositOutcome,
+  processOneTelegramDepositTemporaryCleanup,
   type TelegramDepositOutcomeNotifierDependencies,
 } from './telegram-deposit-outcome-notifier.js';
 
@@ -34,6 +35,7 @@ function dependencies(
         : { version: 1, outcome: 'deposit_outcome_completed', accepted: true };
     },
     send,
+    delete: async () => true,
   };
 }
 
@@ -218,6 +220,81 @@ describe('Telegram deposit outcome notifier', () => {
         kind: 'deposit_outcome_complete',
         deliveryResult: outcome,
         telegramMessageId: null,
+      });
+    },
+  );
+
+  it('deletes only the leased bot-owned notice after a status was sent', async () => {
+    const actions: TelegramPrivateActionEnvelope[] = [];
+    const deleted: Array<[number, number]> = [];
+    const result = await processOneTelegramDepositTemporaryCleanup({
+      request: async (action) => {
+        actions.push(action);
+        return action.kind === 'deposit_temporary_cleanup_claim'
+          ? {
+              version: 1,
+              outcome: 'deposit_temporary_cleanup_delivery',
+              updateId: '123',
+              leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+              privateChatId: '123456789',
+              telegramMessageId: 42,
+            }
+          : { version: 1, outcome: 'deposit_temporary_cleanup_completed', accepted: true };
+      },
+      send: async () => {
+        throw new Error('No new status may be sent by cleanup.');
+      },
+      delete: async (chatId, messageId) => {
+        deleted.push([chatId, messageId]);
+        return true;
+      },
+    });
+    expect(result).toBe('processed');
+    expect(deleted).toEqual([[123456789, 42]]);
+    expect(actions).toEqual([
+      { version: 1, kind: 'deposit_temporary_cleanup_claim' },
+      {
+        version: 1,
+        kind: 'deposit_temporary_cleanup_complete',
+        updateId: '123',
+        leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+        deletionResult: 'deleted',
+      },
+    ]);
+  });
+
+  it.each([
+    { errorCode: 400, outcome: 'unavailable' },
+    { errorCode: 403, outcome: 'unavailable' },
+    { errorCode: 429, outcome: 'retry' },
+  ] as const)(
+    'acknowledges Telegram deletion error $errorCode as $outcome',
+    async ({ errorCode, outcome }) => {
+      const actions: TelegramPrivateActionEnvelope[] = [];
+      await processOneTelegramDepositTemporaryCleanup({
+        request: async (action) => {
+          actions.push(action);
+          return action.kind === 'deposit_temporary_cleanup_claim'
+            ? {
+                version: 1,
+                outcome: 'deposit_temporary_cleanup_delivery',
+                updateId: '124',
+                leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+                privateChatId: '123456789',
+                telegramMessageId: 43,
+              }
+            : { version: 1, outcome: 'deposit_temporary_cleanup_completed', accepted: true };
+        },
+        send: async () => {
+          throw new Error('Unexpected send.');
+        },
+        delete: async () => {
+          throw { error_code: errorCode };
+        },
+      });
+      expect(actions[1]).toMatchObject({
+        kind: 'deposit_temporary_cleanup_complete',
+        deletionResult: outcome,
       });
     },
   );

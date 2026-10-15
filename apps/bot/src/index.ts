@@ -9,6 +9,7 @@ import {
   selectTelegramProofMedia,
 } from './telegram-deposit-media.js';
 import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
+import { recordTelegramPaymentInstruction } from './telegram-payment-instruction-expiry.js';
 import {
   cancelTelegramTemporaryMessage,
   startTelegramTemporaryMessage,
@@ -46,6 +47,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
@@ -109,8 +111,9 @@ async function deliverPlayerAction(
         )
       : undefined);
   try {
+    const result = await deliverTelegramPrivateActionWithRetry(action, playerActions);
     const presentation = presentTelegramPlayerIdFlowResult(
-      await deliverTelegramPrivateActionWithRetry(action, playerActions),
+      result,
       action.kind === 'telebirr_deposit_destination_command'
         ? { selectedPlayerId: action.playerId }
         : {},
@@ -122,7 +125,29 @@ async function deliverPlayerAction(
       return;
     }
     if (presentation.kind === 'force_reply') {
-      await reply(presentation.text, undefined, presentation.placeholder);
+      const sent = await reply(presentation.text, undefined, presentation.placeholder);
+      if (
+        result.outcome === 'telebirr_deposit_destination' &&
+        (action.kind === 'saved_telebirr_destination_command' ||
+          action.kind === 'telebirr_deposit_destination_command')
+      ) {
+        const messageId =
+          typeof sent === 'object' && sent !== null && 'message_id' in sent
+            ? sent.message_id
+            : undefined;
+        const recorded =
+          typeof messageId === 'number' &&
+          (await recordTelegramPaymentInstruction(
+            temporaryMessageDependencies,
+            action.updateId,
+            action.privateChatId,
+            messageId,
+          ));
+        if (!recorded) {
+          console.warn('Telegram payment instruction could not be tracked for expiry.');
+          await reply(message('en', 'depositUnavailable'));
+        }
+      }
       return;
     }
     const keyboard = new InlineKeyboard();
@@ -579,14 +604,25 @@ await runTelegramPolling(
                 text,
                 showDepositButton
                   ? {
-                      reply_markup: new InlineKeyboard().text(
-                        '💰 Deposit',
-                        TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
-                      ),
+                      reply_markup: new InlineKeyboard()
+                        .text('💰 Deposit', TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA)
+                        .row()
+                        .text('🔄 Change Player ID', TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA),
                     }
                   : undefined,
               ),
             delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
+            sendMenu: (chatId) =>
+              bot.api.sendMessage(
+                chatId,
+                'Payment instructions expired. If you already paid, send the receipt so we can check it. Do not pay again. Choose an option below.',
+                {
+                  reply_markup: new InlineKeyboard()
+                    .text('💰 Deposit', TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA)
+                    .row()
+                    .text('🔄 Change Player ID', TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA),
+                },
+              ),
           },
           outcomeNotifierAbort.signal,
         );

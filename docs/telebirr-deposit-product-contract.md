@@ -95,17 +95,31 @@ be interpreted as an invalid payment.
 
 The Owner may replace the active TeleBirr receiver with another personal or merchant receiver
 account. Each revision contains exactly one official full receiver name. Aliases, alternative
-spellings, fuzzy matching, and silent in-place edits are not allowed. A masked receiver number may
-be retained as a diagnostic fact, but it is not sufficiently complete to authorize a match.
+spellings, fuzzy matching, and silent in-place edits are not allowed. Its configured masked-number
+suffix is retained for receiver identity comparison, but a suffix is not proof of the full number.
 
 A change creates a new immutable revision with its activation time, deactivation time, Owner actor,
 reason, and audit record. Earlier revisions remain available for verification history and are never
-rewritten or deleted. The official credited-party name must match the revision that was active at
-the official payment time using the half-open interval
+rewritten or deleted. Normally the official credited-party name must match the revision that was
+active at the official payment time using the half-open interval
 `active_from <= occurred_at < retired_at`; the exact rotation instant belongs to the new revision.
 Gaps or overlaps fail closed to review. Therefore, a payment made immediately before a receiver
 change may still match the previous revision when submitted within the remaining one-hour freshness
 window; the new revision must never be applied retroactively.
+
+An ordinary receiver change does not cancel an unexpired payment instruction for the old receiver.
+The Owner wants a completed payment to that old receiver during the instruction's remaining
+one-hour lifetime to credit its selected Player automatically. The Owner has accepted matching the
+official receipt's full receiver name **and visible number suffix** to the old immutable receiver
+revision, provided the pair uniquely identifies that revision among configured receivers. This is
+a conscious residual risk: another wallet with the same name and visible suffix could look alike.
+The signed official receipt must still prove the exact reference, completed status, settled amount,
+payment time, and all ordinary eligibility and duplicate checks. Missing, malformed, conflicting,
+or non-unique suffix evidence goes to review, not automatic credit or wrong-receiver rejection.
+The instruction must have been issued for that exact old revision before rotation, and the payment
+must have occurred within its issued one-hour window. A valid late submission of a payment made
+within that window goes to review rather than being discarded. An Owner emergency stop can revoke
+the grace period immediately; it does not retroactively authorize an uncertain payment.
 
 Name comparison uses a versioned conservative normalization profile: Unicode normalization,
 case-folding where defined, whitespace normalization, and narrowly reviewed harmless punctuation
@@ -113,9 +127,12 @@ normalization. It preserves word content and order, supports Ethiopic text, and 
 nickname, transliteration, token-reordering, similarity, or partial-name matching. Anything that is
 not an exact normalized match goes to manual review.
 
-If a configured masked-number suffix is available, it remains diagnostic. A conflict between that
-suffix and the official receipt goes to manual review; the suffix cannot override or substitute for
-the required full-name match.
+For old-receiver grace, the full-name and visible-suffix comparison is conjunctive: neither field
+alone can authorize a match. The parser must recognize an exact reviewed official number label and
+mask shape; it must not guess digits from unrelated receipt text. Other receiver-match decisions
+continue to require the exact full-name match and all ordinary paid-path safeguards.
+The rollout dependencies and current non-live boundary are recorded in
+[telebirr-receiver-rotation-grace-implementation.md](telebirr-receiver-rotation-grace-implementation.md).
 
 ## Telegram customer experience
 
@@ -143,7 +160,8 @@ the following without ambiguity:
 4. The payment reason is exactly the supported `Send Money to Registered Customer` reason.
 5. The canonical invoice number exactly matches the normalized requested transaction ID.
 6. The official credited-party full name exactly matches the immutable configured receiver revision
-   under the approved normalization profile.
+   under the approved normalization profile. Old-receiver grace additionally requires an exact,
+   unique match of the official visible-number suffix to that revision.
 7. The currency is ETB.
 8. **Settled Amount** is present and converts exactly to integer ETB minor units.
 9. Stamp duty, discount fields, service fee, service-fee VAT, **Total Paid Amount**, and every other
@@ -159,9 +177,10 @@ the following without ambiguity:
 13. The canonical provider reference has not already funded or been conclusively claimed by another
     deposit.
 
-The payer name, masked payer number, payer account type, masked credited-party number, QR code, and
-payment channel are useful evidence and anomaly signals. They do not replace the required canonical
-reference, credited-party full-name, completed-status, reason, time, and settled-principal checks.
+The payer name, masked payer number, payer account type, QR code, and payment channel are useful
+evidence and anomaly signals. The masked credited-party number participates only in the strictly
+bounded old-receiver grace match described above. None replaces the required canonical reference,
+credited-party full-name, completed-status, reason, time, and settled-principal checks.
 
 ## Ethiopian Android verifier boundary
 
@@ -314,8 +333,8 @@ Implementation and rollout require deterministic synthetic, redacted fixtures fo
   reordered, partial, transliterated, or alias matches;
 - the current receiver revision, the immediately previous revision within its remaining one-hour
   window, the exact half-open rotation boundary, gaps/overlaps, and rejected retroactive matching;
-- matching and conflicting diagnostic masked-number suffixes without letting the suffix authorize a
-  receipt;
+- old-receiver grace with a unique name-and-suffix match, missing or conflicting suffix, same-name
+  suffix collisions, late submission, emergency revocation, and a receipt whose mask shape changes;
 - settled principal distinct from service fee, VAT, stamp duty, discount, and total paid amount;
 - 25 ETB and 25,000 ETB boundaries, below/above range, exact minor units, and malformed amounts;
 - fresh, exactly one-hour-old, older, narrowly future-skewed, excessive future, explicit

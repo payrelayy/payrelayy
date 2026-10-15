@@ -11,6 +11,13 @@ export {
   type TelebirrCandidateSourceKind,
 } from './candidate-extraction.js';
 export {
+  assessRoutineTelebirrOldReceiverGrace,
+  type RoutineReceiverGraceAssessment,
+  type RoutineReceiverGraceInput,
+  type RoutineReceiverGraceReason,
+  type RoutineReceiverGraceRevision,
+} from './routine-receiver-grace-policy.js';
+export {
   TELEBIRR_OFFICIAL_RECEIPT_FIXTURE_NORMALIZER_VERSION,
   TELEBIRR_OFFICIAL_RECEIPT_FIXTURE_SCHEMA,
   TELEBIRR_OFFICIAL_RECEIPT_FIXTURE_SCHEMA_VERSION,

@@ -28,6 +28,43 @@ class LivePrivatePilotReceiptParserTest {
   }
 
   @Test
+  fun `extracts only the four visible credited-party account digits from the reviewed mask`() {
+    val withDistinctPayerAndReceiver =
+      livePilotHtml().replace(
+        "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
+        """
+        <tr><td>Payer telebirr no.</td><td>2519****9876</td></tr>
+        <tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>
+        <tr><td>የገንዘብ ተቀባይ ቴሌብር ቁ./Credited party account no</td><td>2519****1234</td></tr>
+        """.trimIndent(),
+      )
+    val parsed = parser.parse(livePilotProviderFound(withDistinctPayerAndReceiver), assignment)
+
+    assertEquals("1234", parsed.creditedPartyVisibleSuffix)
+    assertFalse(parsed.toString().contains("1234"))
+    assertFalse(parsed.toString().contains("9876"))
+    assertEquals("matched", (parsed.facts as LivePilotFoundFacts).receiverMatch)
+  }
+
+  @Test
+  fun `does not infer a credited-party suffix from a payer field or a changed mask`() {
+    val payerOnly = livePilotHtml().replace(
+      "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
+      "<tr><td>Payer telebirr no.</td><td>2519****9876</td></tr><tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
+    )
+    val malformedReceiver = payerOnly.replace(
+      "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
+      "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr><tr><td>Credited party account no</td><td>2519***1234</td></tr>",
+    )
+
+    assertEquals(null, parser.parse(livePilotProviderFound(payerOnly), assignment).creditedPartyVisibleSuffix)
+    assertEquals(
+      null,
+      parser.parse(livePilotProviderFound(malformedReceiver), assignment).creditedPartyVisibleSuffix,
+    )
+  }
+
+  @Test
   fun `emits only a digest and mismatch fact for a different receiver name`() {
     val parsed =
       parser.parse(

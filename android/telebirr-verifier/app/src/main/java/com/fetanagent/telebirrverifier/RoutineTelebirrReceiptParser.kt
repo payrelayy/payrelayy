@@ -101,6 +101,8 @@ internal sealed interface RoutineTelebirrParsedReceipt {
   data class Observed(
     val facts: RoutineTelebirrObservedReceiptFacts,
     val sourceDocumentDigest: String,
+    /** Local-only until a versioned signed observation carries this fact end to end. */
+    val creditedPartyVisibleSuffix: String? = null,
   ) : RoutineTelebirrParsedReceipt {
     override fun toString(): String = "RoutineTelebirrParsedReceipt.Observed(<redacted>)"
   }
@@ -192,6 +194,7 @@ internal class RoutineTelebirrReceiptParser(
         sourceProfile = LivePrivatePilotProtocol.SOURCE_PROFILE,
       ),
       sourceDocumentDigest = parsed.sourceDocumentDigest,
+      creditedPartyVisibleSuffix = parsed.creditedPartyVisibleSuffix,
     )
   }
 

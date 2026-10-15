@@ -133,9 +133,11 @@ remains hidden until withdrawals are ready.
 
 The saved-Player-ID menu and direct receipt/reference flow are being implemented first for
 TeleBirr. The CBE Birr path remains diagnostic-only until its official-receipt verification and
-financial activation receive separate review. This intermediate implementation does not change
-the existing 10-minute TeleBirr payment-presentation window or establish one-hour receiver
-grandfathering; those remain required follow-up work before the full contract below is met.
+financial activation receive separate review. The one-hour TeleBirr presentation and bot-message
+expiry are being prepared separately from CBE Birr verification. They must not be described as
+fully live until receiver-rotation grace, emergency revocation, and late-submission review have
+also been exercised end to end. Existing ten-minute and twelve-hour receipt records retain their
+original deadlines.
 
 After a saved ID exists, a direct receipt/reference message may start deposit intake without
 tapping **Deposit**. A clearly provider-specific official link or receipt can select TeleBirr or

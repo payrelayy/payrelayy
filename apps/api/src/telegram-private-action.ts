@@ -144,6 +144,13 @@ const TEMPORARY_CLEANUP_COMPLETE_KEYS = new Set([
   'leaseToken',
   'deletionResult',
 ]);
+const INSTRUCTION_EXPIRY_COMPLETE_KEYS = new Set([
+  'version',
+  'kind',
+  'instructionEventId',
+  'leaseToken',
+  'expiryResult',
+]);
 
 function oneHeaderValue(request: TelegramPrivateActionRequest, name: string): string | undefined {
   const values: string[] = [];
@@ -272,6 +279,7 @@ export function parseTelegramPrivateActionEnvelope(
   if (!isRecord(parsed) || typeof parsed.kind !== 'string') return undefined;
 
   switch (parsed.kind) {
+    case 'payment_instruction_record':
     case 'deposit_temporary_record':
     case 'deposit_temporary_cancel': {
       if (
@@ -297,6 +305,32 @@ export function parseTelegramPrivateActionEnvelope(
         updateId,
         privateChatId,
         telegramMessageId: parsed.telegramMessageId,
+      };
+    }
+    case 'payment_instruction_expiry_claim':
+      return parsed.version === 1 &&
+        Object.keys(parsed).length === 2 &&
+        hasOnlyKeys(parsed, OUTCOME_CLAIM_KEYS)
+        ? { version: 1, kind: 'payment_instruction_expiry_claim' }
+        : undefined;
+    case 'payment_instruction_expiry_complete': {
+      if (
+        parsed.version !== 1 ||
+        !hasOnlyKeys(parsed, INSTRUCTION_EXPIRY_COMPLETE_KEYS) ||
+        Object.keys(parsed).length !== INSTRUCTION_EXPIRY_COMPLETE_KEYS.size ||
+        typeof parsed.instructionEventId !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.instructionEventId) ||
+        typeof parsed.leaseToken !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.leaseToken) ||
+        !['complete', 'retry', 'unavailable'].includes(parsed.expiryResult as string)
+      )
+        return undefined;
+      return {
+        version: 1,
+        kind: 'payment_instruction_expiry_complete',
+        instructionEventId: parsed.instructionEventId,
+        leaseToken: parsed.leaseToken,
+        expiryResult: parsed.expiryResult as 'complete' | 'retry' | 'unavailable',
       };
     }
     case 'deposit_temporary_cleanup_claim':

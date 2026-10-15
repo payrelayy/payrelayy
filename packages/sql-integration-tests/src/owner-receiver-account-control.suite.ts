@@ -112,7 +112,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
       ]);
     });
 
-    it('atomically retires the old CBE revision, creates one protected revision, and replays exactly', async () => {
+    it('creates one protected CBE revision, retires any old revision, and replays exactly', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -248,6 +248,119 @@ export function registerOwnerReceiverAccountControlSqlTests(
           [authUserId, requestId, ciphertext, 'b'.repeat(64)],
           /conflicts with its original use/u,
         );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('permits only first CBE setup with other payment switches non-disabled and leaves TeleBirr untouched', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid and role = 'owner' and status = 'active'`,
+          [getOwnerAdminId()],
+        );
+        expect(owner.rows).toHaveLength(1);
+        const cbeBefore = await client.query<{ readonly count: number }>(`
+          select count(*)::integer as count
+            from app.receiver_accounts receiver
+            join app.payment_providers provider on provider.id = receiver.provider_id
+           where provider.code = 'cbe_birr'
+        `);
+        expect(cbeBefore.rows).toEqual([{ count: 0 }]);
+        const telebirrBefore = await client.query<{ readonly receiver_ids: string[] }>(`
+          select coalesce(array_agg(receiver.id::text order by receiver.version), array[]::text[])
+                   as receiver_ids
+            from app.receiver_accounts receiver
+            join app.payment_providers provider on provider.id = receiver.provider_id
+           where provider.code = 'telebirr'
+        `);
+
+        await client.query(`
+          update app.feature_switches set mode = 'dry_run'
+           where feature_key in (
+             'payment_verification', 'deposit_execution', 'telebirr_authoritative_verification'
+           )
+        `);
+        const requestId = randomUUID();
+        const ciphertext = `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(24)}`;
+        const fingerprint = 'd'.repeat(64);
+        const initialSql = `select * from app.rotate_owner_receiver_account(
+          $1::uuid, $2::uuid, 'cbe_birr', 'First CBE Receiver',
+          $3::text, $4::text, '***6789', 1::smallint, 1::smallint, 1::smallint,
+          'initial_configuration'
+        )`;
+        const values = [owner.rows[0]!.auth_user_id, requestId, ciphertext, fingerprint];
+        await client.query(`
+          update app.feature_switches set mode = 'dry_run'
+           where feature_key = 'cbe_birr_authoritative_verification'
+        `);
+        await expectFailure(
+          client,
+          initialSql,
+          values,
+          /requires every payment, provider, pilot, and execution switch to be disabled/u,
+        );
+        await client.query(`
+          update app.feature_switches set mode = 'disabled'
+           where feature_key = 'cbe_birr_authoritative_verification'
+        `);
+        const first = await queryAsOwnerControl<{
+          readonly receiver_revision_id: string;
+          readonly revision: number;
+          readonly receiver_status: string;
+        }>(client, initialSql, values);
+        expect(first).toHaveLength(1);
+        expect(first[0]).toMatchObject({ revision: 1, receiver_status: 'active' });
+        expect(await queryAsOwnerControl(client, initialSql, values)).toEqual(first);
+
+        await expectFailure(
+          client,
+          initialSql,
+          [owner.rows[0]!.auth_user_id, randomUUID(), ciphertext, 'e'.repeat(64)],
+          /Existing CBE Birr receiver rotation requires every payment switch to be disabled/u,
+        );
+        await expectFailure(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+            $1::uuid, $2::uuid, 'telebirr', 'Blocked TeleBirr Receiver',
+            $3::text, $4::text, '***6789', 1::smallint, 1::smallint, 1::smallint,
+            'initial_configuration'
+          )`,
+          [
+            owner.rows[0]!.auth_user_id,
+            randomUUID(),
+            `receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(24)}`,
+            'f'.repeat(64),
+          ],
+          /requires every payment, provider, pilot, and execution switch to be disabled/u,
+        );
+
+        const telebirrAfter = await client.query<{ readonly receiver_ids: string[] }>(`
+          select coalesce(array_agg(receiver.id::text order by receiver.version), array[]::text[])
+                   as receiver_ids
+            from app.receiver_accounts receiver
+            join app.payment_providers provider on provider.id = receiver.provider_id
+           where provider.code = 'telebirr'
+        `);
+        expect(telebirrAfter.rows).toEqual(telebirrBefore.rows);
+        const switches = await client.query<{
+          readonly feature_key: string;
+          readonly mode: string;
+        }>(`
+          select feature_key, mode from app.feature_switches
+           where feature_key in (
+             'cbe_birr_authoritative_verification', 'payment_verification',
+             'deposit_execution', 'telebirr_authoritative_verification'
+           ) order by feature_key
+        `);
+        expect(switches.rows).toEqual([
+          { feature_key: 'cbe_birr_authoritative_verification', mode: 'disabled' },
+          { feature_key: 'deposit_execution', mode: 'dry_run' },
+          { feature_key: 'payment_verification', mode: 'dry_run' },
+          { feature_key: 'telebirr_authoritative_verification', mode: 'dry_run' },
+        ]);
       } finally {
         await client.query('rollback');
       }

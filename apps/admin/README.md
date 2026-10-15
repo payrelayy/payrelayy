@@ -21,8 +21,11 @@ wallet/account number in the browser; the server immediately creates a provider-
 AES-256-GCM envelope, keyed fingerprint, and `***last4` mask before calling PostgreSQL. The API and
 database never return the complete number, ciphertext, or fingerprint. Each change creates a new
 immutable revision and retires the old revision at the exact new activation timestamp, so receipt
-history is never rewritten. Rotation is rejected unless all payment, provider, pilot, and execution
-switches are disabled and no draft/armed pilot uses that provider. The existing provider-neutral
+history is never rewritten. TeleBirr receiver changes and subsequent CBE Birr rotations are
+rejected unless all payment, provider, pilot, and execution switches are disabled. The first CBE
+Birr receiver may be configured while TeleBirr is live only when CBE Birr authoritative verification
+is disabled and no draft/armed pilot uses CBE Birr. This exception does not enable CBE Birr or
+change any switch. The existing provider-neutral
 master files are reused only after their immutable key-profile identity is verified; receiver
 encryption and fingerprint keys are derived under a separate receiver-account/provider domain.
 

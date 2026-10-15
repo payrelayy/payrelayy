@@ -463,6 +463,12 @@ afterAll(async () => {
   await client?.end();
 });
 
+// Exercise first-receiver setup before later baseline scenarios create a legacy CBE fixture.
+registerOwnerReceiverAccountControlSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+
 describe('disposable SQL migration baseline', () => {
   it('applies every checked-in migration in lexical filename order', async () => {
     const expectedMigrationNames = await listMigrationsLexically(environment.migrationsDirectory);
@@ -9843,10 +9849,6 @@ registerExpiredLiveTelebirrEvidenceRecoverySqlTests(
 );
 registerLiveCustomerDepositIntakeSqlTests(() => client);
 registerLiveDepositExecutionLineageSqlTests(() => client);
-registerOwnerReceiverAccountControlSqlTests(
-  () => client,
-  () => ownerAdminId,
-);
 registerOwnerKemerbetAgentProfileControlSqlTests(
   () => client,
   () => ownerAdminId,

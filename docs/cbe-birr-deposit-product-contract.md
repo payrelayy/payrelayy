@@ -8,22 +8,22 @@ TeleBirr is governed by its separate approved contract in
 
 ## Product decisions
 
-| Decision                      | Approved behavior                                                                                                                                                            |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Payment participants          | The payer, submitting FetanAgent user, and KemerBet account holder may all be different people. No identity match among them is required.                                    |
-| Sender and claimant identity  | Do not match or require the CBE sender, Telegram identity, web identity, or KemerBet identity.                                                                               |
-| Destination                   | Each Telegram account has one saved Player ID at a time. The customer may replace it with **Change Player ID**; different Telegram accounts may save the same Player ID.     |
-| Amount entry                  | The customer does not enter an amount. The principal paid amount comes only from the freshly retrieved official receipt.                                                     |
-| Per-deposit limits            | 25 ETB minimum and 25,000 ETB maximum. An out-of-range receipt goes to manual review.                                                                                        |
-| Deposit count                 | There is no business limit on the number of successful deposits. Abuse controls may still bound concurrent checks and invalid-reference probing.                             |
-| Transaction type              | Automatic verification initially accepts only CBE Birr **Send Money**. Other transaction types go to manual review.                                                          |
-| Age                           | A payment within one hour of the official transaction time may be checked. If its payment instruction expired before submission, accept it for review, not automatic credit. |
-| Multiple references           | If submitted material contains multiple candidate transaction IDs, the customer must select one. FetanAgent must not guess.                                                  |
-| Customer confirmation         | No second confirmation is required after exact verification. The verified amount proceeds automatically to the selected Player ID.                                           |
-| Duplicate customer response   | Say only **This transaction was already used.** Never reveal the other user or Player ID.                                                                                    |
-| Internal duplicate visibility | The Owner and authorized payment-review admins may see the internal user, channel, Player ID, amount, timestamps, and audit history.                                         |
-| Receiver configuration        | The Owner configures one official full name and one wallet/account number per immutable CBE Birr receiver revision. Personal or merchant receiver accounts are supported.    |
-| Instruction lifetime          | An issued instruction and its receiver remain valid for one hour through ordinary receiver rotation. An emergency Owner stop may invalidate the old receiver immediately.    |
+| Decision                      | Approved behavior                                                                                                                                                                                                                                   |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payment participants          | The payer, submitting FetanAgent user, and KemerBet account holder may all be different people. No identity match among them is required.                                                                                                           |
+| Sender and claimant identity  | Do not match or require the CBE sender, Telegram identity, web identity, or KemerBet identity.                                                                                                                                                      |
+| Destination                   | Each Telegram account has one saved Player ID at a time. The customer may replace it with **Change Player ID**; different Telegram accounts may save the same Player ID.                                                                            |
+| Amount entry                  | The customer does not enter an amount. The principal paid amount comes only from the freshly retrieved official receipt.                                                                                                                            |
+| Per-deposit limits            | 25 ETB minimum and 25,000 ETB maximum. An out-of-range receipt goes to manual review.                                                                                                                                                               |
+| Deposit count                 | There is no business limit on the number of successful deposits. Abuse controls may still bound concurrent checks and invalid-reference probing.                                                                                                    |
+| Transaction type              | Automatic verification initially accepts only CBE Birr **Send Money**. Other transaction types go to manual review.                                                                                                                                 |
+| Age                           | A payment within one hour of the official transaction time may be checked. If its payment instruction expired before submission, accept it for review, not automatic credit.                                                                        |
+| Multiple references           | If submitted material contains multiple candidate transaction IDs, the customer must select one. FetanAgent must not guess.                                                                                                                         |
+| Customer confirmation         | No second confirmation is required after exact verification. The verified amount proceeds automatically to the selected Player ID.                                                                                                                  |
+| Duplicate customer response   | Say only **This transaction was already used.** Never reveal the other user or Player ID.                                                                                                                                                           |
+| Internal duplicate visibility | The Owner and authorized payment-review admins may see the internal user, channel, Player ID, amount, timestamps, and audit history.                                                                                                                |
+| Receiver configuration        | The Owner configures one official full name and one wallet/account number per immutable CBE Birr receiver revision. Personal or merchant receiver accounts are supported.                                                                           |
+| Instruction lifetime          | An issued instruction stays visible for one hour. If its receiver changes during that time, a payment to the old receiver is retained for manual review, not automatic credit. An emergency Owner stop may invalidate the old receiver immediately. |
 
 ## Trust boundary
 
@@ -85,12 +85,13 @@ account number. Aliases, fuzzy name lists, and silent in-place edits are not all
 A change creates a new immutable revision with its activation time, deactivation time, Owner actor,
 reason, and audit record. Earlier revisions remain available for verification history and are never
 rewritten or deleted. Each payment instruction snapshots one receiver revision and expires one hour
-after issue. Ordinary rotation gives new instructions the new receiver immediately but keeps the
-old instruction's receiver valid until its own expiry; an audited emergency stop can revoke this
-grace. A receipt for the old receiver cannot be matched to the new revision merely because the
-submission happened after rotation. A payment submitted after its instruction expires is retained
-for review when it falls in the one-hour payment-freshness window, never silently discarded or
-automatically credited under an expired instruction.
+after issue. Ordinary rotation gives new instructions the new receiver immediately. An unexpired
+old instruction may still be used to submit evidence, but a payment to the retired receiver is
+retained for manual review rather than automatically credited. An audited emergency stop may
+invalidate the old receiver immediately. A receipt for the old receiver cannot be matched to the
+new revision merely because the submission happened after rotation. A payment submitted after its
+instruction expires is retained for review when it falls in the one-hour payment-freshness window,
+never silently discarded or automatically credited under an expired instruction.
 
 For CBE Birr, the returned receiver wallet or account identity is authoritative. The single
 configured full name is a display and diagnostic fact, not a substitute for that stronger identity.
@@ -111,8 +112,9 @@ following without ambiguity:
 9. The principal amount is between 25 ETB and 25,000 ETB inclusive.
 10. The provider occurrence time is present, unambiguous, and no more than one hour before the
     server-recorded submission time, and it falls within a still-valid instruction for the matched
-    receiver revision. A narrowly bounded provider-clock tolerance may accept a time no more than
-    five minutes ahead; anything else goes to review.
+    receiver revision. That revision is still active at submission; a retired receiver goes to
+    review even if its instruction has not expired. A narrowly bounded provider-clock tolerance
+    may accept a time no more than five minutes ahead; anything else goes to review.
 11. The selected KemerBet Player ID exists, is active, and is currently deposit-eligible at the
     settlement and execution boundaries.
 12. The canonical provider reference has not already funded or been conclusively claimed by another
@@ -135,7 +137,7 @@ The saved-Player-ID menu and direct receipt/reference flow are being implemented
 TeleBirr. The CBE Birr path remains diagnostic-only until its official-receipt verification and
 financial activation receive separate review. The one-hour TeleBirr presentation and bot-message
 expiry are being prepared separately from CBE Birr verification. They must not be described as
-fully live until receiver-rotation grace, emergency revocation, and late-submission review have
+fully live until receiver-rotation review, emergency revocation, and late-submission review have
 also been exercised end to end. Existing ten-minute and twelve-hour receipt records retain their
 original deadlines.
 

@@ -14,6 +14,7 @@
     "test": "vitest run src --passWithNoTests"
   },
   "dependencies": {
+    "@fetanagent/cbe-birr-authoritative-pdf-parser": "workspace:*",
     "@fetanagent/cbe-birr-official-source-policy": "workspace:*"
   }
 }

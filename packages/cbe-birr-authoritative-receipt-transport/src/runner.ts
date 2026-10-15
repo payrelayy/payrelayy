@@ -10,6 +10,7 @@ import {
   type CbeBirrAuthoritativeReceiptFailureClass,
   type CbeBirrAuthoritativeReceiptFailureReason,
   type CbeBirrAuthoritativeReceiptInternalTransport,
+  type CbeBirrAuthoritativeReceiptLookupInput,
   type CbeBirrAuthoritativeReceiptOpaquePdfObservation,
   compileSensitiveRequestPlan,
   failureClassForReason,
@@ -142,7 +143,8 @@ function dispositionForFailure(
   return 'failed_closed';
 }
 
-function failedResult(
+/** Internal failure builder; not part of the package entry point. */
+export function failedResult(
   reasonCode: CbeBirrAuthoritativeReceiptFailureReason,
 ): CbeBirrAuthoritativeReceiptFailedResult {
   return Object.freeze({
@@ -153,41 +155,72 @@ function failedResult(
   });
 }
 
+/** Internal only: raw bytes never appear in the package entry point or public result. */
+export type CbeBirrAuthoritativeReceiptInternalFetchResult =
+  | { readonly ok: false; readonly result: CbeBirrAuthoritativeReceiptFailedResult }
+  | {
+      readonly ok: true;
+      readonly input: CbeBirrAuthoritativeReceiptLookupInput;
+      readonly body: Uint8Array;
+      readonly result: CbeBirrAuthoritativeReceiptOpaquePdfResult;
+    };
+
+/** Internal package seam shared by opaque observation and advisory one-fetch composition. */
+export async function fetchCbeBirrAuthoritativeReceiptInternallyWithTransport(
+  inputCandidate: unknown,
+  controlCandidate: unknown,
+  transport: CbeBirrAuthoritativeReceiptInternalTransport,
+): Promise<CbeBirrAuthoritativeReceiptInternalFetchResult> {
+  try {
+    const input = parseLookupInput(inputCandidate);
+    if (!input) return { ok: false, result: failedResult('invalid_request') };
+    const control = parseTransportControl(controlCandidate);
+    if (!control) return { ok: false, result: failedResult('invalid_control') };
+    if (control.incidentStop === 'open') {
+      return { ok: false, result: failedResult('incident_stop_open') };
+    }
+    if (control.providerRequest === 'disabled') {
+      return { ok: false, result: failedResult('provider_request_disabled') };
+    }
+
+    let transportCandidate: unknown;
+    try {
+      transportCandidate = await transport(compileSensitiveRequestPlan(input));
+    } catch {
+      return { ok: false, result: failedResult('network_request_failed') };
+    }
+    const transportResult = parseInternalTransportResult(transportCandidate);
+    if (!transportResult) return { ok: false, result: failedResult('network_request_failed') };
+    if (!transportResult.ok) {
+      return { ok: false, result: failedResult(transportResult.reasonCode) };
+    }
+
+    const observed = observeCbeBirrOpaquePdfEnvelope(transportResult.body);
+    if (!observed.ok) return { ok: false, result: failedResult(observed.reasonCode) };
+    const result: CbeBirrAuthoritativeReceiptOpaquePdfResult = Object.freeze({
+      ...resultBase,
+      disposition: 'opaque_pdf_observation' as const,
+      reasonCode: 'official_pdf_observed' as const,
+      observation: observed.observation,
+    });
+    return { ok: true, input, body: transportResult.body, result };
+  } catch {
+    return { ok: false, result: failedResult('network_request_failed') };
+  }
+}
+
 /** Internal test seam; it is deliberately absent from the package entry point. */
 export async function retrieveCbeBirrAuthoritativeReceiptWithTransport(
   inputCandidate: unknown,
   controlCandidate: unknown,
   transport: CbeBirrAuthoritativeReceiptInternalTransport,
 ): Promise<CbeBirrAuthoritativeReceiptTransportResult> {
-  try {
-    const input = parseLookupInput(inputCandidate);
-    if (!input) return failedResult('invalid_request');
-    const control = parseTransportControl(controlCandidate);
-    if (!control) return failedResult('invalid_control');
-    if (control.incidentStop === 'open') return failedResult('incident_stop_open');
-    if (control.providerRequest === 'disabled') return failedResult('provider_request_disabled');
-
-    let transportCandidate: unknown;
-    try {
-      transportCandidate = await transport(compileSensitiveRequestPlan(input));
-    } catch {
-      return failedResult('network_request_failed');
-    }
-    const transportResult = parseInternalTransportResult(transportCandidate);
-    if (!transportResult) return failedResult('network_request_failed');
-    if (!transportResult.ok) return failedResult(transportResult.reasonCode);
-
-    const observed = observeCbeBirrOpaquePdfEnvelope(transportResult.body);
-    if (!observed.ok) return failedResult(observed.reasonCode);
-    return Object.freeze({
-      ...resultBase,
-      disposition: 'opaque_pdf_observation' as const,
-      reasonCode: 'official_pdf_observed' as const,
-      observation: observed.observation,
-    });
-  } catch {
-    return failedResult('network_request_failed');
-  }
+  const fetched = await fetchCbeBirrAuthoritativeReceiptInternallyWithTransport(
+    inputCandidate,
+    controlCandidate,
+    transport,
+  );
+  return fetched.result;
 }
 
 /**

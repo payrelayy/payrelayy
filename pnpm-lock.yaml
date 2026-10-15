@@ -330,6 +330,9 @@ importers:
 
   packages/cbe-birr-authoritative-receipt-transport:
     dependencies:
+      '@fetanagent/cbe-birr-authoritative-pdf-parser':
+        specifier: workspace:*
+        version: link:../cbe-birr-authoritative-pdf-parser
       '@fetanagent/cbe-birr-official-source-policy':
         specifier: workspace:*
         version: link:../cbe-birr-official-source-policy

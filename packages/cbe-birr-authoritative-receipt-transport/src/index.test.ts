@@ -97,7 +97,7 @@ describe('public CBE Birr authoritative receipt transport policy', () => {
 });
 
 describe('dependency and runtime isolation', () => {
-  it('depends only on the pure official-source policy', () => {
+  it('depends only on the isolated PDF parser and pure official-source policy', () => {
     const manifests = import.meta.glob('../package.json', {
       eager: true,
       import: 'default',
@@ -105,13 +105,14 @@ describe('dependency and runtime isolation', () => {
     }) as Record<string, string>;
     const manifest = JSON.parse(Object.values(manifests)[0]!) as Record<string, unknown>;
     expect(manifest.dependencies).toEqual({
+      '@fetanagent/cbe-birr-authoritative-pdf-parser': 'workspace:*',
       '@fetanagent/cbe-birr-official-source-policy': 'workspace:*',
     });
     expect(manifest.devDependencies).toBeUndefined();
     expect(manifest.optionalDependencies).toBeUndefined();
   });
 
-  it('is not imported or depended on by any other workspace package or source', () => {
+  it('keeps both packages absent from all application and unrelated workspace sources', () => {
     const dormantPackages = [
       '@fetanagent/cbe-birr-authoritative-receipt-transport',
       '@fetanagent/cbe-birr-authoritative-pdf-parser',
@@ -173,12 +174,11 @@ describe('dependency and runtime isolation', () => {
       },
     ) as Record<string, string>;
     expect(Object.keys(ownManifests)).toHaveLength(2);
-    for (const source of Object.values(ownManifests)) {
-      const manifest = JSON.parse(source) as { readonly name?: unknown };
-      const otherPackage = dormantPackages.find((packageName) => packageName !== manifest.name);
-      expect(otherPackage).toBeDefined();
-      expect(source).not.toContain(otherPackage!);
-    }
+    const parserManifest = Object.entries(ownManifests).find(([path]) =>
+      path.includes('cbe-birr-authoritative-pdf-parser'),
+    )?.[1];
+    expect(parserManifest).toBeDefined();
+    expect(parserManifest).not.toContain(dormantPackages[0]);
 
     const importPattern = (packageName: string): RegExp =>
       new RegExp(
@@ -189,14 +189,6 @@ describe('dependency and runtime isolation', () => {
         'u',
       );
     const ownSourceBoundaries = [
-      {
-        forbiddenPackage: dormantPackageDirectories[1],
-        sources: import.meta.glob('./**/*.{ts,tsx,mts,cts,js,mjs,cjs}', {
-          eager: true,
-          import: 'default',
-          query: '?raw',
-        }) as Record<string, string>,
-      },
       {
         forbiddenPackage: dormantPackageDirectories[0],
         sources: import.meta.glob(
@@ -226,6 +218,8 @@ describe('dependency and runtime isolation', () => {
     const entry = Object.entries(modules).find(([path]) => path.endsWith('/index.ts'))?.[1];
     expect(entry).toBeDefined();
     expect(entry).not.toContain('retrieveCbeBirrAuthoritativeReceiptWithTransport');
+    expect(entry).not.toContain('retrieveAndParseCbeBirrReceiptAdvisoryOnly');
+    expect(entry).not.toContain('fetchCbeBirrAuthoritativeReceiptInternallyWithTransport');
     expect(entry).not.toContain('SensitiveCbeBirrAuthoritativeReceiptRequestPlan');
     expect(entry).not.toContain('createCbeBirrNodeHttpsTransport');
 
@@ -255,7 +249,7 @@ describe('dependency and runtime isolation', () => {
       /  packages\/cbe-birr-authoritative-receipt-transport:\r?\n(?<body>(?:    .*\r?\n|      .*\r?\n|        .*\r?\n)+?)(?=\r?\n  packages\/)/u,
     );
     expect(importer?.groups?.body).toBe(
-      "    dependencies:\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n".replaceAll(
+      "    dependencies:\n      '@fetanagent/cbe-birr-authoritative-pdf-parser':\n        specifier: workspace:*\n        version: link:../cbe-birr-authoritative-pdf-parser\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n".replaceAll(
         '\n',
         lock.includes('\r\n') ? '\r\n' : '\n',
       ),

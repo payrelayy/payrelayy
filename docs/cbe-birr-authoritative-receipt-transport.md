@@ -5,7 +5,10 @@ the fixed CBE Birr official-receipt route. It can perform at most one request wh
 exact request-scoped control. No application imports it, and no configuration, worker, database,
 queue, deployment, or feature switch makes the request reachable.
 
-The package does not parse receipt fields or produce authoritative evidence. Every result fixes
+The public transport entry point does not parse receipt fields or produce authoritative evidence.
+The separate package-internal advisory composition described below parses the same fetched bytes,
+but is not exported through the package entry point or imported by an application. Every public
+transport result fixes
 `responseContractAttested`, `receiptFieldParsingAllowed`, `authoritativeAdapterAllowed`,
 `evidenceClaimAllowed`, `duplicateClaimAllowed`, `databaseAccessAllowed`, `persistenceAllowed`,
 `runtimeWiringAllowed`, `settlementAllowed`, and `financialActionAllowed` to literal `false`. A
@@ -68,8 +71,10 @@ not full PDF validation and not receipt parsing. A `200` HTML response, includin
 for an invalid selector, fails closed as `content_type_rejected` before body interpretation.
 Malformed PDF-shaped bodies fail as `pdf_envelope_rejected`.
 
-The internal transport body exists only long enough to check that envelope and calculate a SHA-256
-digest. The public success returns a frozen descriptor containing only envelope version, fixed
+The internal transport body is bounded and used to check that envelope and calculate a SHA-256
+digest. In the package-internal advisory composition only, those same bytes are passed once to
+the isolated PDF parser, without another provider request. The public transport success returns a
+frozen descriptor containing only envelope version, fixed
 media type, byte length, and digest. It never returns the PDF bytes, response headers, URL,
 reference, receiver selector, resolved address, or exception. The narrower log projection omits
 the digest and byte length as well as all protected request and response material. Failures expose
@@ -79,8 +84,13 @@ A privacy-controlled provider observation established that the current successfu
 PDF rather than the HTML shape assumed by the older synthetic fixture. A separate, still-unwired
 parser now recognizes one newer receipt layout containing `Credit Account`, `Receiver Name`,
 `Order ID`, completed status, minute-precision time, principal, and fee rows. Matching those
-fields is an advisory parsing result only; the transport does not pass raw PDF bytes to that
-parser, so there is no end-to-end authoritative verification. No live response, real receipt
+fields is an advisory parsing result only. The internal one-fetch composition now passes bounded
+raw PDF bytes directly to that parser and derives its reference expectation from the canonical
+request. The expected receiver account is supplied separately from `PH`; the parser compares it
+to the PDF's `Credit Account` field. This is still **not** end-to-end authoritative verification:
+no trusted immutable receiver revision, live response contract, production source permission,
+claim, or application runtime is wired. A parser `would_reject` result must never be treated as a
+customer-facing rejection or a financial decision. No live response, real receipt
 identifier, name, phone number, field value, or provider document is stored in this package or
 its tests.
 
@@ -91,10 +101,13 @@ DNS answers, streams, and errors. The lower-level DNS/HTTPS seam is available on
 module import in package tests; it is not re-exported by the package entry point. No test contacts
 CBE or any other network destination.
 
-No application manifest or source imports the package. The package has no dependency on a PDF
-parser, shared financial contracts, domain logic, runtime configuration, Supabase, PostgreSQL,
-filesystem access, settlement, KemerBet, Telegram, customer web, or deployment code. Its only
-dependency is the pure official-source policy.
+No application manifest or source imports the package. The package depends only on the isolated
+PDF parser and pure official-source policy; it has no dependency on shared financial contracts,
+domain logic, runtime configuration, Supabase, PostgreSQL, filesystem access, settlement,
+KemerBet, Telegram, customer web, or deployment code. The parser has no dependency back on the
+transport. The composition returns only advisory parser facts and the opaque transport descriptor;
+raw bytes, request URL, reference, and receiver account do not appear in the result. Tests assert
+one request, no parse on incident stop or malformed response, and no leakage on parser failure.
 
 ## Remaining blockers and next boundary
 
@@ -105,9 +118,8 @@ capability also remains true for the authoritative lookup runtime: no permitted 
 this package, no protected lookup material can reach it, and no operational source authorization
 or trusted incident stop is wired.
 
-The next boundary is a separately reviewed, one-fetch composition of the isolated transport and
-PDF parser. It must not refetch or expose raw bytes through the transport's public result. Later
-runtime composition must also resolve source permission and request/rate policy, redacted
+The package-only one-fetch composition is in place, but it confers no live capability. Any later
+runtime composition must resolve source permission and request/rate policy, redacted
 operational telemetry,
 receiver-material protection, worker decryption, normalization ownership, prelease-safe protected
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of

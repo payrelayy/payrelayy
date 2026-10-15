@@ -53,6 +53,12 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       expect(source.rows[0]?.body).toContain("feature_switch.mode = 'live'");
       expect(source.rows[0]?.body).toContain("'explicit_invalid_reference'");
       expect(source.rows[0]?.body).toContain("'invalid_reference'");
+      expect(source.rows[0]?.body).toContain(
+        'sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2',
+      );
+      expect(source.rows[0]?.body).toContain(
+        'sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707',
+      );
       const constraints = await client.query<{ name: string; definition: string }>(`
         select conname as name, pg_catalog.pg_get_constraintdef(oid) as definition
           from pg_catalog.pg_constraint
@@ -64,6 +70,10 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       expect(
         constraints.rows.every((row) => row.definition.includes('explicit_invalid_reference')),
       ).toBe(true);
+      expect(
+        constraints.rows.find((row) => row.name === 'routine_paid_terminal_signed_shape')
+          ?.definition,
+      ).toContain('sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707');
     });
 
     it('cannot place one candidate in another lane while its first upload is still acceptable', async () => {

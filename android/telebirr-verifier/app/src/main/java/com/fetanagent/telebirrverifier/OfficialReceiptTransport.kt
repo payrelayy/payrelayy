@@ -346,11 +346,10 @@ class SafeOfficialReceiptTransport(
   }
 
   private fun isExplicitInvalidReferencePage(response: RawHttpsResponse): Boolean =
-    response.body.size == EXPLICIT_INVALID_BODY_BYTES &&
-      !response.setCookieHeader && !response.varyCookieHeader &&
+    !response.setCookieHeader && !response.varyCookieHeader &&
       !response.varyUserAgentHeader && !response.authenticationHeader &&
       !response.refreshHeader &&
-      CanonicalTranscripts.sha256(response.body) == EXPLICIT_INVALID_BODY_DIGEST
+      pinnedExplicitInvalidDigest(response.body.size) == CanonicalTranscripts.sha256(response.body)
 
   private fun responseWordHint(lower: String): String =
     when {
@@ -365,11 +364,25 @@ class SafeOfficialReceiptTransport(
     const val TOTAL_TIMEOUT_MILLIS = 15_000
     const val MAX_RESPONSE_BYTES = 32 * 1024
     private const val MAX_PROVIDER_FETCHES = 2
-    // Observed from the public Ethiotelecom receipt endpoint on 2026-10-14.
-    // Pinning the complete HTML bytes intentionally fails closed if the provider changes it.
+    // Both complete, unmarked HTML responses were observed repeatedly at the official origin.
+    // The provider serves the 300-byte form for ordinary nonexistent references, but has also
+    // served the 305-byte form. Never infer invalidity from words, status, or body size alone.
     private const val EXPLICIT_INVALID_BODY_BYTES = 305
     internal const val EXPLICIT_INVALID_BODY_DIGEST =
       "sha256:91afbccab306bb594b924b41b38a065c02e39e8ef89f97c2edd21b1b1006b3b2"
+    private const val EXPLICIT_INVALID_STANDARD_BODY_BYTES = 300
+    internal const val EXPLICIT_INVALID_STANDARD_BODY_DIGEST =
+      "sha256:cdc7494ceb7b145858e52bef7f76607373b8c523b2430590859066ac3ae2b707"
+
+    internal fun isPinnedExplicitInvalidDigest(digest: String): Boolean =
+      digest == EXPLICIT_INVALID_BODY_DIGEST ||
+        digest == EXPLICIT_INVALID_STANDARD_BODY_DIGEST
+
+    private fun pinnedExplicitInvalidDigest(bodyBytes: Int): String? = when (bodyBytes) {
+      EXPLICIT_INVALID_BODY_BYTES -> EXPLICIT_INVALID_BODY_DIGEST
+      EXPLICIT_INVALID_STANDARD_BODY_BYTES -> EXPLICIT_INVALID_STANDARD_BODY_DIGEST
+      else -> null
+    }
     private val timestampFormatter = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
 
     internal fun canonicalTimestamp(epochMillis: Long): String =

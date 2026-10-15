@@ -21,17 +21,22 @@ class RoutineTelebirrReceiptParserTest {
 
   @Test
   fun `explicit official invalid page produces only nonfinancial sentinel facts`() {
-    val parsed = parser.parse(ProviderDocument.ExplicitInvalidReference(
+    for (digest in listOf(
       SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST,
-      "2026-10-14T10:30:00.000Z",
-      ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
-    ), lookup) as RoutineTelebirrParsedReceipt.Observed
-    assertEquals(0L, parsed.facts.amountMinor)
-    assertFalse(parsed.facts.canonicalReferencePresent)
-    assertEquals("unknown", parsed.facts.providerFinalStatus)
-    assertEquals("unknown", parsed.facts.referenceMatch)
-    assertEquals(RoutineTelebirrReceiptParser.EXPLICIT_INVALID_NO_RECEIVER_DIGEST,
-      parsed.facts.creditedPartyNameDigest)
+      SafeOfficialReceiptTransport.EXPLICIT_INVALID_STANDARD_BODY_DIGEST,
+    )) {
+      val parsed = parser.parse(ProviderDocument.ExplicitInvalidReference(
+        digest,
+        "2026-10-14T10:30:00.000Z",
+        ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+      ), lookup) as RoutineTelebirrParsedReceipt.Observed
+      assertEquals(0L, parsed.facts.amountMinor)
+      assertFalse(parsed.facts.canonicalReferencePresent)
+      assertEquals("unknown", parsed.facts.providerFinalStatus)
+      assertEquals("unknown", parsed.facts.referenceMatch)
+      assertEquals(RoutineTelebirrReceiptParser.EXPLICIT_INVALID_NO_RECEIVER_DIGEST,
+        parsed.facts.creditedPartyNameDigest)
+    }
   }
 
   @Test

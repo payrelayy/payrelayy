@@ -20,6 +20,10 @@ class OfficialReceiptTransportTest {
   private val explicitInvalidPage = Base64.getDecoder().decode(
     "PCFET0NUWVBFIGh0bWw+DQo8aHRtbCBsYW5nPSJlbiI+DQo8aGVhZHI+DQo8L2hlYWRlcj4NCjxib2R5Pg0KICAgIDxkaXYgc3R5bGU9IndpZHRoOjEwMCU7IGhlaWdodDo1MHB4OyBiYWNrZ3JvdW5kLWNvbG9yOnJnYigyNDMsIDI0MSwgMjQxKTsgYm9yZGVyOjFweCBzb2xpZCByZ2IoMTk2LCAxODksIDE4OSk7IHRleHQtYWxpZ246IGNlbnRlcjsgdmVydGljYWwtYWxpZ246IG1pZGRsZTsgcGFkZGluZy10b3A6IDMwcHg7Ij4NClRoaXMgcmVxdWVzdCBpcyBub3QgY29ycmVjdHR0dHR0DQogICAgPC9kaXY+DQo8L2JvZHk+DQo8aHRtbD4="
   )
+  // The second official form, observed repeatedly on 2026-10-15 for nonexistent references.
+  private val standardInvalidPage =
+    String(explicitInvalidPage, Charsets.UTF_8).replace("correctttttt", "correct")
+      .toByteArray(Charsets.UTF_8)
 
   @Test
   fun `only two identical official error pages identify an invalid reference`() {
@@ -42,6 +46,44 @@ class OfficialReceiptTransportTest {
   }
 
   @Test
+  fun `only two identical official standard error pages identify an invalid reference`() {
+    var calls = 0
+    val transport = SafeOfficialReceiptTransport(
+      resolver = publicResolver,
+      exchange = HttpsExchange { _, _, _, _, _ ->
+        calls += 1
+        RawHttpsResponse(200, "text/html; charset=utf-8", null, standardInvalidPage)
+      },
+      clock = MillisClock { 1_778_000_000_000L },
+    )
+
+    val result = transport.retrieve(route()) as ProviderDocument.ExplicitInvalidReference
+    assertEquals(300, standardInvalidPage.size)
+    assertEquals(2, calls)
+    assertEquals(SafeOfficialReceiptTransport.EXPLICIT_INVALID_STANDARD_BODY_DIGEST,
+      result.sourceDocumentDigest)
+    assertEquals(ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN,
+      result.originAttestation)
+  }
+
+  @Test
+  fun `different official error page variants cannot produce a terminal result`() {
+    var calls = 0
+    val transport = SafeOfficialReceiptTransport(
+      resolver = publicResolver,
+      exchange = HttpsExchange { _, _, _, _, _ ->
+        calls += 1
+        RawHttpsResponse(200, "text/html; charset=utf-8", null,
+          if (calls == 1) explicitInvalidPage else standardInvalidPage)
+      },
+      clock = MillisClock { 1_778_000_000_000L },
+    )
+
+    assertFalse(transport.retrieve(route()) is ProviderDocument.ExplicitInvalidReference)
+    assertEquals(2, calls)
+  }
+
+  @Test
   fun `one error page followed by a receipt is not a rejection`() {
     var calls = 0
     val transport = SafeOfficialReceiptTransport(
@@ -60,9 +102,15 @@ class OfficialReceiptTransportTest {
   @Test
   fun `error lookalikes and session pages never become explicit invalid results`() {
     val nearMatch = explicitInvalidPage.copyOf().also { it[it.lastIndex] = '!'.code.toByte() }
+    val standardNearMatch = standardInvalidPage.copyOf().also {
+      it[it.lastIndex] = '!'.code.toByte()
+    }
     for (response in listOf(
       RawHttpsResponse(200, "text/html; charset=utf-8", null, nearMatch),
+      RawHttpsResponse(200, "text/html; charset=utf-8", null, standardNearMatch),
       RawHttpsResponse(200, "text/html; charset=utf-8", null, explicitInvalidPage,
+        setCookieHeader = true),
+      RawHttpsResponse(200, "text/html; charset=utf-8", null, standardInvalidPage,
         setCookieHeader = true),
     )) {
       val transport = SafeOfficialReceiptTransport(

@@ -14,6 +14,8 @@ export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Make a deposit';
 const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
 const TELEBIRR_PRESENTATION_WINDOW_TEXT =
+  'These payment details remain valid for 1 hour. Send the receipt or reference after paying.';
+const PREVIOUS_TELEBIRR_WINDOW_TEXT =
   'This payment instruction is valid for at most 10 minutes; submit the reference promptly.';
 const LEGACY_TELEBIRR_WINDOW_TEXT = 'These payment details are valid for 12 hours.';
 const PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT = 'You can also paste the receipt link or full SMS.';
@@ -169,6 +171,10 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       TELEBIRR_PRESENTATION_WINDOW_TEXT,
       LEGACY_TELEBIRR_WINDOW_TEXT,
     );
+    const previousWindowPrompt = currentPrompt.replace(
+      TELEBIRR_PRESENTATION_WINDOW_TEXT,
+      PREVIOUS_TELEBIRR_WINDOW_TEXT,
+    );
     const previousMediaPrompt = currentPrompt.replace(
       CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
@@ -176,6 +182,7 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
     return message.text === currentPrompt ||
       message.text === previousPilotPrompt ||
       message.text === legacyPrompt ||
+      message.text === previousWindowPrompt ||
       message.text === previousMediaPrompt ||
       message.text ===
         previousPilotPrompt.replace(

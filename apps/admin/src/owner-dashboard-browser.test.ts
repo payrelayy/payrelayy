@@ -372,6 +372,42 @@ function ownerBrowserHarness(
   };
 }
 
+describe('read-only TeleBirr receiver-change review queue', () => {
+  it('does not redraw a late case response after Owner sign-out', async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    let queueCalls = 0;
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) => {
+        if (!url.startsWith('/v1/owner/routine-telebirr-receiver-change-reviews')) return undefined;
+        queueCalls += 1;
+        return queueCalls === 1 ? response(200, { reviews: [] }) : pending.promise;
+      },
+    });
+    await browser.signIn();
+    const loading = browser.call('loadReceiverChangeReviews');
+    await vi.waitFor(() => expect(queueCalls).toBe(2));
+    await browser.call('signOut');
+    pending.resolve(
+      response(200, {
+        reviews: [
+          {
+            caseId: '11111111-1111-4111-8111-111111111111',
+            playerId: '12345678',
+            referenceMasked: '***AB12',
+            instructedReceiverMasked: '***7494',
+            candidateReceiverMasked: '***7002',
+            submittedAt: '2026-10-15T00:00:00.000Z',
+            recordedAt: '2026-10-15T00:01:00.000Z',
+            reasonCode: 'receiver_changed_during_instruction',
+          },
+        ],
+      }),
+    );
+    await loading;
+    expect(browser.element('#receiver-change-review-list').children).toHaveLength(0);
+  });
+});
+
 describe('persistent routine TeleBirr policy controls', () => {
   const unconfigured = {
     configurationState: 'not_configured',

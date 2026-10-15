@@ -23,6 +23,10 @@ import {
   OwnerDepositIntakeUnavailableError,
 } from './owner-deposit-intake.js';
 import {
+  OwnerRoutineTelebirrReceiverReviewRejectedError,
+  OwnerRoutineTelebirrReceiverReviewUnavailableError,
+} from './owner-routine-telebirr-receiver-reviews.js';
+import {
   OWNER_DRY_RUN_FIXTURE_IDS,
   OwnerDryRunFixtureAssessmentRejectedError,
   OwnerDryRunFixtureAssessmentUnavailableError,
@@ -816,6 +820,48 @@ export function buildOwnerControlApp(
         }
         if (error instanceof OwnerDepositIntakeUnavailableError) {
           request.log.warn('Owner dry-run deposit intake is unavailable.');
+        }
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string; beforeCaseId?: string } }>(
+    '/v1/owner/routine-telebirr-receiver-change-reviews',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit' && key !== 'beforeCaseId')) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        const beforeCaseId = request.query.beforeCaseId;
+        if (
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          (beforeCaseId !== undefined && !UUID_V4_PATTERN.test(beforeCaseId))
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.receiverChangeReviews) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const reviews = await dependencies.runtime.receiverChangeReviews.list(
+          authUserId,
+          limit,
+          beforeCaseId,
+        );
+        return reply.code(200).send({ reviews });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerRoutineTelebirrReceiverReviewRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        if (error instanceof OwnerRoutineTelebirrReceiverReviewUnavailableError) {
+          request.log.warn('Owner TeleBirr receiver-change review queue is unavailable.');
         }
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }

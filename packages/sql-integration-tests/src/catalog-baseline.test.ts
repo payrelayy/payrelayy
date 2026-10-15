@@ -18,6 +18,7 @@ import { registerRoutineTelebirrPaidIntentSnapshotSqlTests } from './routine-tel
 import { registerTelegramDepositOutcomeNotificationsSqlTests } from './telegram-deposit-outcome-notifications.suite.js';
 import { registerRoutineTelebirrExecutionBrokerSqlTests } from './routine-telebirr-execution-broker.suite.js';
 import { registerRoutineTelebirrUntrustedProofSqlTests } from './routine-telebirr-untrusted-proof.suite.js';
+import { registerRoutineTelebirrRotatedInstructionReviewSqlTests } from './routine-telebirr-rotated-instruction-review.suite.js';
 import { registerRoutineTelebirrNoMoneyRuntimeSqlTests } from './routine-telebirr-no-money-runtime.suite.js';
 import { registerRoutineTelebirrPaidPollRuntimeSqlTests } from './routine-telebirr-paid-poll-runtime.suite.js';
 import { registerRoutineTelebirrPaidAtomicClaimSqlTests } from './routine-telebirr-paid-atomic-claim.suite.js';
@@ -1161,8 +1162,10 @@ describe('disposable SQL migration baseline', () => {
       'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.claim_telegram_deposit_outcome_notification()',
       'app.claim_telegram_deposit_temporary_deletion()',
+      'app.claim_telegram_payment_instruction_expiry()',
       'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
       'app.complete_telegram_deposit_temporary_deletion(bigint,uuid,text)',
+      'app.complete_telegram_payment_instruction_expiry(uuid,uuid,text)',
       'app.expire_telegram_player_registration_action(uuid,text)',
       'app.get_telegram_customer_deposit(uuid,uuid)',
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
@@ -1174,6 +1177,7 @@ describe('disposable SQL migration baseline', () => {
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,
       'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+      'app.record_telegram_payment_instruction_message(bigint,bigint,bigint)',
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.save_telegram_player_selection(uuid,text)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',
@@ -9899,6 +9903,10 @@ registerRoutineTelebirrExecutionBrokerSqlTests(
     }),
 );
 registerRoutineTelebirrUntrustedProofSqlTests(
+  () => client,
+  () => ownerAdminId,
+);
+registerRoutineTelebirrRotatedInstructionReviewSqlTests(
   () => client,
   () => ownerAdminId,
 );

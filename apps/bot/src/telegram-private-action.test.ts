@@ -238,6 +238,27 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('accepts a reply to a ten-minute instruction already open during the one-hour rollout', () => {
+    const previousPrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    }).replace(
+      'These payment details remain valid for 1 hour. Send the receipt or reference after paying.',
+      'This payment instruction is valid for at most 10 minutes; submit the reference promptly.',
+    );
+    expect(
+      reduceTelegramGuidedDepositProofSubmission({
+        ...privateMetadata,
+        text: 'SYNTB00000001',
+        replyToMessage: { text: previousPrompt, from: { is_bot: true } },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: { playerId: 'PLAYER-DEMO-42', transactionReference: 'SYNTB00000001' },
+    });
+  });
+
   it('accepts a reply to the prior text-only payment card during the media rollout', () => {
     const previousPrompt = buildTelegramTelebirrPaymentPrompt({
       playerId: 'PLAYER-DEMO-42',

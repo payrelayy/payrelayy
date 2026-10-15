@@ -148,6 +148,22 @@ const COMPLETE_TELEGRAM_DEPOSIT_TEMPORARY_CLEANUP_SQL = `
     $1::bigint, $2::uuid, $3::text
   ) as accepted
 `;
+const RECORD_PAYMENT_INSTRUCTION_SQL = `
+  select app.record_telegram_payment_instruction_message(
+    $1::bigint, $2::bigint, $3::bigint
+  ) as accepted
+`;
+const CLAIM_PAYMENT_INSTRUCTION_EXPIRY_SQL = `
+  select instruction_event_id, instruction_lease_token,
+         instruction_private_chat_id, instruction_message_id,
+         instruction_suppress_menu
+  from app.claim_telegram_payment_instruction_expiry()
+`;
+const COMPLETE_PAYMENT_INSTRUCTION_EXPIRY_SQL = `
+  select app.complete_telegram_payment_instruction_expiry(
+    $1::uuid, $2::uuid, $3::text
+  ) as accepted
+`;
 
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
   'intake_received',
@@ -257,6 +273,7 @@ async function handleDepositOutcomeClaim(
       'rejected',
       'wrong_receiver',
       'invalid_reference',
+      'manual_review',
       'not_credited',
       'not_verified',
       'already_used',
@@ -284,6 +301,7 @@ async function handleDepositOutcomeClaim(
       | 'rejected'
       | 'wrong_receiver'
       | 'invalid_reference'
+      | 'manual_review'
       | 'not_credited'
       | 'not_verified'
       | 'already_used',
@@ -396,6 +414,80 @@ async function handleDepositTemporaryCleanupComplete(
   return { version: 1, outcome: 'deposit_temporary_cleanup_completed', accepted: row.accepted };
 }
 
+async function handlePaymentInstructionRecord(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<TelegramPrivateActionEnvelope, { readonly kind: 'payment_instruction_record' }>,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(RECORD_PAYMENT_INSTRUCTION_SQL, [
+        action.updateId,
+        action.privateChatId,
+        action.telegramMessageId,
+      ])
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'payment_instruction_recorded', accepted: row.accepted };
+}
+
+async function handlePaymentInstructionExpiryClaim(
+  database: TelegramPlayerActionDatabase,
+): Promise<TelegramPrivateActionResult> {
+  const rows = (await database.query(CLAIM_PAYMENT_INSTRUCTION_EXPIRY_SQL, [])).rows;
+  if (rows.length === 0) return { version: 1, outcome: 'payment_instruction_expiry_none' };
+  const row = oneRow(rows);
+  if (
+    Object.keys(row).length !== 5 ||
+    typeof row.instruction_event_id !== 'string' ||
+    !UUID_PATTERN.test(row.instruction_event_id) ||
+    typeof row.instruction_lease_token !== 'string' ||
+    !UUID_PATTERN.test(row.instruction_lease_token) ||
+    typeof row.instruction_private_chat_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.instruction_private_chat_id) ||
+    BigInt(row.instruction_private_chat_id) > 9007199254740991n ||
+    typeof row.instruction_message_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.instruction_message_id) ||
+    BigInt(row.instruction_message_id) > 9007199254740991n ||
+    typeof row.instruction_suppress_menu !== 'boolean'
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return {
+    version: 1,
+    outcome: 'payment_instruction_expiry_delivery',
+    instructionEventId: row.instruction_event_id,
+    leaseToken: row.instruction_lease_token,
+    privateChatId: row.instruction_private_chat_id,
+    telegramMessageId: Number(row.instruction_message_id),
+    suppressMenu: row.instruction_suppress_menu,
+  };
+}
+
+async function handlePaymentInstructionExpiryComplete(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'payment_instruction_expiry_complete' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(COMPLETE_PAYMENT_INSTRUCTION_EXPIRY_SQL, [
+        action.instructionEventId,
+        action.leaseToken,
+        action.expiryResult,
+      ])
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'payment_instruction_expiry_completed', accepted: row.accepted };
+}
+
 async function recordInbound(
   database: TelegramPlayerActionDatabase,
   action: Exclude<
@@ -407,7 +499,10 @@ async function recordInbound(
         | 'deposit_temporary_record'
         | 'deposit_temporary_cancel'
         | 'deposit_temporary_cleanup_claim'
-        | 'deposit_temporary_cleanup_complete';
+        | 'deposit_temporary_cleanup_complete'
+        | 'payment_instruction_record'
+        | 'payment_instruction_expiry_claim'
+        | 'payment_instruction_expiry_complete';
     }
   >,
   rawBody: Buffer,
@@ -1186,6 +1281,15 @@ export function createPostgresTelegramPlayerActionRuntime(
       try {
         if (action.kind === 'deposit_outcome_claim') {
           return await handleDepositOutcomeClaim(pool);
+        }
+        if (action.kind === 'payment_instruction_record') {
+          return await handlePaymentInstructionRecord(pool, action);
+        }
+        if (action.kind === 'payment_instruction_expiry_claim') {
+          return await handlePaymentInstructionExpiryClaim(pool);
+        }
+        if (action.kind === 'payment_instruction_expiry_complete') {
+          return await handlePaymentInstructionExpiryComplete(pool, action);
         }
         if (action.kind === 'deposit_outcome_complete') {
           return await handleDepositOutcomeComplete(pool, action);

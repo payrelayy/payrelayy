@@ -4,6 +4,7 @@ import type {
   TelegramPrivateActionEnvelope,
   TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
+import { processOneTelegramPaymentInstructionExpiry } from './telegram-payment-instruction-expiry.js';
 
 type Delivery = Extract<
   TelegramPrivateActionResult,
@@ -18,6 +19,7 @@ export interface TelegramDepositOutcomeNotifierDependencies {
     showDepositButton: boolean,
   ) => Promise<{ readonly message_id: number }>;
   readonly delete: (privateChatId: number, messageId: number) => Promise<boolean>;
+  readonly sendMenu?: (privateChatId: number) => Promise<unknown>;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -68,6 +70,13 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
       '❌ Invalid TeleBirr reference',
       `The official receipt page did not recognize the reference ending ${delivery.referenceMasked.slice(-4)}. No Player credit was made.`,
       'Check the reference. If money left your wallet, do not pay again—contact support.',
+    ].join('\n');
+  }
+  if (delivery.outcomeCode === 'manual_review') {
+    return [
+      '⚠️ Deposit needs review',
+      `The receiving number changed while your instructions were open. We have not automatically credited submission ending ${delivery.referenceMasked.slice(-4)}.`,
+      'Do not pay again. Contact support with your reference so the payment can be checked.',
     ].join('\n');
   }
   if (delivery.outcomeCode === 'rejected') {
@@ -208,7 +217,14 @@ export async function runTelegramDepositOutcomeNotifier(
     try {
       const outcome = await processOneTelegramDepositOutcome(dependencies);
       const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
-      pause = outcome === 'none' && cleanup === 'none' ? 10_000 : 0;
+      const instruction = dependencies.sendMenu
+        ? await processOneTelegramPaymentInstructionExpiry({
+            request: dependencies.request,
+            delete: dependencies.delete,
+            sendMenu: dependencies.sendMenu,
+          })
+        : 'none';
+      pause = outcome === 'none' && cleanup === 'none' && instruction === 'none' ? 10_000 : 0;
     } catch {
       console.warn('Telegram deposit outcome delivery is temporarily unavailable.');
       pause = 5_000;

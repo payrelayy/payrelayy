@@ -52,6 +52,24 @@ export interface TelegramPrivateActionIdentity {
 export type TelegramPrivateActionEnvelope =
   | {
       readonly version: 1;
+      readonly kind: 'payment_instruction_record';
+      readonly updateId: string;
+      readonly privateChatId: string;
+      readonly telegramMessageId: number;
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'payment_instruction_expiry_claim';
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'payment_instruction_expiry_complete';
+      readonly instructionEventId: string;
+      readonly leaseToken: string;
+      readonly expiryResult: 'complete' | 'retry' | 'unavailable';
+    }
+  | {
+      readonly version: 1;
       /** Bot process only; records the ID of its own temporary private-chat message. */
       readonly kind: 'deposit_temporary_record';
       readonly updateId: string;
@@ -161,6 +179,29 @@ export type TelegramPrivateActionEnvelope =
 export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
+      readonly outcome: 'payment_instruction_recorded';
+      readonly accepted: boolean;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'payment_instruction_expiry_none';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'payment_instruction_expiry_delivery';
+      readonly instructionEventId: string;
+      readonly leaseToken: string;
+      readonly privateChatId: string;
+      readonly telegramMessageId: number;
+      readonly suppressMenu: boolean;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'payment_instruction_expiry_completed';
+      readonly accepted: boolean;
+    }
+  | {
+      readonly version: 1;
       readonly outcome: 'deposit_temporary_recorded' | 'deposit_temporary_cancelled';
       readonly accepted: boolean;
     }
@@ -198,6 +239,7 @@ export type TelegramPrivateActionResult =
         | 'rejected'
         | 'wrong_receiver'
         | 'invalid_reference'
+        | 'manual_review'
         | 'not_credited'
         | 'not_verified'
         | 'already_used';
@@ -432,19 +474,12 @@ export function redactTelegramPrivateActionForLog(action: TelegramPrivateActionE
   return {
     version: action.version,
     kind: action.kind,
-    preferredLocale:
-      action.kind === 'deposit_outcome_claim' ||
-      action.kind === 'deposit_outcome_complete' ||
-      action.kind === 'deposit_temporary_record' ||
-      action.kind === 'deposit_temporary_cancel' ||
-      action.kind === 'deposit_temporary_cleanup_claim' ||
-      action.kind === 'deposit_temporary_cleanup_complete'
-        ? 'en'
-        : action.preferredLocale,
+    preferredLocale: 'preferredLocale' in action ? action.preferredLocale : 'en',
     customerInputPresent:
       action.kind !== 'root_menu' &&
       action.kind !== 'deposit_outcome_claim' &&
       action.kind !== 'deposit_outcome_complete' &&
-      !action.kind.startsWith('deposit_temporary_'),
+      !action.kind.startsWith('deposit_temporary_') &&
+      !action.kind.startsWith('payment_instruction_'),
   };
 }

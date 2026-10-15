@@ -128,6 +128,26 @@ const COMPLETE_TELEGRAM_DEPOSIT_OUTCOME_SQL = `
     $1::uuid, $2::uuid, $3::text, $4::bigint
   ) as accepted
 `;
+const RECORD_TELEGRAM_DEPOSIT_TEMPORARY_SQL = `
+  select app.record_telegram_deposit_temporary_message(
+    $1::bigint, $2::bigint, $3::bigint
+  ) as accepted
+`;
+const CANCEL_TELEGRAM_DEPOSIT_TEMPORARY_SQL = `
+  select app.cancel_telegram_deposit_temporary_message(
+    $1::bigint, $2::bigint, $3::bigint
+  ) as accepted
+`;
+const CLAIM_TELEGRAM_DEPOSIT_TEMPORARY_CLEANUP_SQL = `
+  select cleanup_update_id, cleanup_lease_token,
+         cleanup_private_chat_id, cleanup_message_id
+  from app.claim_telegram_deposit_temporary_deletion()
+`;
+const COMPLETE_TELEGRAM_DEPOSIT_TEMPORARY_CLEANUP_SQL = `
+  select app.complete_telegram_deposit_temporary_deletion(
+    $1::bigint, $2::uuid, $3::text
+  ) as accepted
+`;
 
 const DEPOSIT_STATUSES = new Set<DepositStatus>([
   'intake_received',
@@ -292,11 +312,103 @@ async function handleDepositOutcomeComplete(
   return { version: 1, outcome: 'deposit_outcome_completed', accepted: row.accepted };
 }
 
+async function handleDepositTemporaryRecord(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'deposit_temporary_record' | 'deposit_temporary_cancel' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(
+        action.kind === 'deposit_temporary_record'
+          ? RECORD_TELEGRAM_DEPOSIT_TEMPORARY_SQL
+          : CANCEL_TELEGRAM_DEPOSIT_TEMPORARY_SQL,
+        [action.updateId, action.privateChatId, action.telegramMessageId],
+      )
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return {
+    version: 1,
+    outcome:
+      action.kind === 'deposit_temporary_record'
+        ? 'deposit_temporary_recorded'
+        : 'deposit_temporary_cancelled',
+    accepted: row.accepted,
+  };
+}
+
+async function handleDepositTemporaryCleanupClaim(
+  database: TelegramPlayerActionDatabase,
+): Promise<TelegramPrivateActionResult> {
+  const rows = (await database.query(CLAIM_TELEGRAM_DEPOSIT_TEMPORARY_CLEANUP_SQL, [])).rows;
+  if (rows.length === 0) return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
+  const row = oneRow(rows);
+  if (
+    Object.keys(row).length !== 4 ||
+    typeof row.cleanup_update_id !== 'string' ||
+    !/^(?:0|[1-9][0-9]{0,15})$/u.test(row.cleanup_update_id) ||
+    BigInt(row.cleanup_update_id) > 9007199254740991n ||
+    typeof row.cleanup_lease_token !== 'string' ||
+    !UUID_PATTERN.test(row.cleanup_lease_token) ||
+    typeof row.cleanup_private_chat_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.cleanup_private_chat_id) ||
+    BigInt(row.cleanup_private_chat_id) > 9007199254740991n ||
+    typeof row.cleanup_message_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.cleanup_message_id) ||
+    BigInt(row.cleanup_message_id) > 9007199254740991n
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return {
+    version: 1,
+    outcome: 'deposit_temporary_cleanup_delivery',
+    updateId: row.cleanup_update_id,
+    leaseToken: row.cleanup_lease_token,
+    privateChatId: row.cleanup_private_chat_id,
+    telegramMessageId: Number(row.cleanup_message_id),
+  };
+}
+
+async function handleDepositTemporaryCleanupComplete(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'deposit_temporary_cleanup_complete' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(COMPLETE_TELEGRAM_DEPOSIT_TEMPORARY_CLEANUP_SQL, [
+        action.updateId,
+        action.leaseToken,
+        action.deletionResult,
+      ])
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'deposit_temporary_cleanup_completed', accepted: row.accepted };
+}
+
 async function recordInbound(
   database: TelegramPlayerActionDatabase,
   action: Exclude<
     TelegramPrivateActionEnvelope,
-    { readonly kind: 'deposit_outcome_claim' | 'deposit_outcome_complete' }
+    {
+      readonly kind:
+        | 'deposit_outcome_claim'
+        | 'deposit_outcome_complete'
+        | 'deposit_temporary_record'
+        | 'deposit_temporary_cancel'
+        | 'deposit_temporary_cleanup_claim'
+        | 'deposit_temporary_cleanup_complete';
+    }
   >,
   rawBody: Buffer,
   secret: string,
@@ -1077,6 +1189,18 @@ export function createPostgresTelegramPlayerActionRuntime(
         }
         if (action.kind === 'deposit_outcome_complete') {
           return await handleDepositOutcomeComplete(pool, action);
+        }
+        if (
+          action.kind === 'deposit_temporary_record' ||
+          action.kind === 'deposit_temporary_cancel'
+        ) {
+          return await handleDepositTemporaryRecord(pool, action);
+        }
+        if (action.kind === 'deposit_temporary_cleanup_claim') {
+          return await handleDepositTemporaryCleanupClaim(pool);
+        }
+        if (action.kind === 'deposit_temporary_cleanup_complete') {
+          return await handleDepositTemporaryCleanupComplete(pool, action);
         }
         const inboundEventId = await recordInbound(
           pool,

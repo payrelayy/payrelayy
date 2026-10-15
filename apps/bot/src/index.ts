@@ -9,6 +9,13 @@ import {
   selectTelegramProofMedia,
 } from './telegram-deposit-media.js';
 import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
+import {
+  cancelTelegramTemporaryMessage,
+  startTelegramTemporaryMessage,
+  TELEGRAM_TEMPORARY_MEDIA_TEXT,
+  TELEGRAM_TEMPORARY_PAYMENT_TEXT,
+  type TelegramTemporaryMessageHandle,
+} from './telegram-deposit-temporary-message.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
 import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './telegram-support.js';
@@ -70,6 +77,14 @@ bot.api.config.use(pollingReadiness.transformer);
 const betaAdmission = config.telegramBetaAdmission;
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
+const temporaryMessageDependencies = {
+  request: (action: TelegramPrivateActionEnvelope) => {
+    if (!playerActions.enabled) throw new Error('Telegram player actions are disabled.');
+    return deliverTelegramPrivateActionWithRetry(action, playerActions);
+  },
+  send: (chatId: number, text: string) => bot.api.sendMessage(chatId, text),
+  delete: (chatId: number, messageId: number) => bot.api.deleteMessage(chatId, messageId),
+};
 
 async function deliverPlayerAction(
   action: TelegramPrivateActionEnvelope,
@@ -78,8 +93,21 @@ async function deliverPlayerAction(
     keyboard?: InlineKeyboard,
     forceReplyPlaceholder?: string,
   ) => Promise<unknown>,
+  temporaryAttempt?: { readonly handle: TelegramTemporaryMessageHandle | undefined },
 ): Promise<void> {
   if (!playerActions.enabled) return;
+  const temporary =
+    temporaryAttempt?.handle ??
+    (temporaryAttempt === undefined &&
+    (action.kind === 'saved_telebirr_proof_command' ||
+      (action.kind === 'deposit_proof_command' && action.providerCode === 'telebirr'))
+      ? await startTelegramTemporaryMessage(
+          temporaryMessageDependencies,
+          action.updateId,
+          action.privateChatId,
+          TELEGRAM_TEMPORARY_PAYMENT_TEXT,
+        )
+      : undefined);
   try {
     const presentation = presentTelegramPlayerIdFlowResult(
       await deliverTelegramPrivateActionWithRetry(action, playerActions),
@@ -88,6 +116,7 @@ async function deliverPlayerAction(
         : {},
     );
     if (presentation.kind === 'deferred') return;
+    await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     if (presentation.kind === 'message') {
       await reply(presentation.text);
       return;
@@ -103,6 +132,7 @@ async function deliverPlayerAction(
     }
     await reply(presentation.menu.text, keyboard);
   } catch {
+    await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     console.warn(
       { playerActionKind: action.kind },
       'Telegram Player-ID action delivery was unavailable.',
@@ -257,11 +287,27 @@ bot.on('message', async (context) => {
         );
         return;
       }
-      const extracted = await extractTelegramProofMediaText(selection.media, {
-        token: telegramToken,
-        getFile: (fileId) => bot.api.getFile(fileId),
-      });
+      const temporary = await startTelegramTemporaryMessage(
+        temporaryMessageDependencies,
+        String(metadata.updateId),
+        String(context.chat.id),
+        TELEGRAM_TEMPORARY_MEDIA_TEXT,
+      );
+      let extracted: Awaited<ReturnType<typeof extractTelegramProofMediaText>>;
+      try {
+        extracted = await extractTelegramProofMediaText(selection.media, {
+          token: telegramToken,
+          getFile: (fileId) => bot.api.getFile(fileId),
+        });
+      } catch {
+        await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
+        await context.reply(
+          'I could not read this receipt. Please try again or type the transaction number. Nothing was submitted.',
+        );
+        return;
+      }
       if (extracted.kind !== 'text') {
+        await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply(
           extracted.kind === 'busy'
             ? 'Receipt reading is busy. Please try again shortly or type the transaction number.'
@@ -278,6 +324,7 @@ bot.on('message', async (context) => {
         sourceKind: selection.media.kind === 'pdf' ? ('pdf_text' as const) : ('ocr_text' as const),
       };
       if (isCbeBirrReceiptText(extracted.text) || isCbeBirrReceiptText(mediaMetadata.caption)) {
+        await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
         return;
       }
@@ -285,10 +332,14 @@ bot.on('message', async (context) => {
         ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
         : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
       if (mediaSubmission?.kind === 'action') {
-        await deliverPlayerAction(mediaSubmission.action, (replyText, keyboard) =>
-          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        await deliverPlayerAction(
+          mediaSubmission.action,
+          (replyText, keyboard) =>
+            context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+          { handle: temporary },
         );
       } else {
+        await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply(
           mediaSubmission?.kind === 'selection_required'
             ? TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT
@@ -535,6 +586,7 @@ await runTelegramPolling(
                     }
                   : undefined,
               ),
+            delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
           },
           outcomeNotifierAbort.signal,
         );

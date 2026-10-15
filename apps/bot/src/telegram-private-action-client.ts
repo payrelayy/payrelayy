@@ -70,6 +70,37 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.outcome !== 'string')
     return undefined;
   const keys = Object.keys(value);
+  if (
+    (value.outcome === 'deposit_temporary_recorded' ||
+      value.outcome === 'deposit_temporary_cancelled' ||
+      value.outcome === 'deposit_temporary_cleanup_completed') &&
+    keys.length === 3 &&
+    typeof value.accepted === 'boolean'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (value.outcome === 'deposit_temporary_cleanup_none' && keys.length === 2) {
+    return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
+  }
+  if (
+    value.outcome === 'deposit_temporary_cleanup_delivery' &&
+    keys.length === 6 &&
+    typeof value.updateId === 'string' &&
+    /^(?:0|[1-9][0-9]{0,15})$/u.test(value.updateId) &&
+    BigInt(value.updateId) <= 9007199254740991n &&
+    typeof value.leaseToken === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.leaseToken,
+    ) &&
+    typeof value.privateChatId === 'string' &&
+    /^[1-9][0-9]{0,15}$/u.test(value.privateChatId) &&
+    BigInt(value.privateChatId) <= 9007199254740991n &&
+    typeof value.telegramMessageId === 'number' &&
+    Number.isSafeInteger(value.telegramMessageId) &&
+    value.telegramMessageId > 0
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
   if (value.outcome === 'deposit_outcome_none' && keys.length === 2) {
     return { version: 1, outcome: 'deposit_outcome_none' };
   }

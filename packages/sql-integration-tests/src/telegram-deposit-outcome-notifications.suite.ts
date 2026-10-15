@@ -4,6 +4,120 @@ import { describe, expect, it } from 'vitest';
 
 export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: () => Client): void {
   describe('Telegram deposit outcome notifications', () => {
+    it('keeps temporary notice IDs private with no customer or direct runtime table access', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        relforcerowsecurity: boolean;
+        relrowsecurity: boolean;
+        runtime_select: boolean;
+        anon_select: boolean;
+        runtime_record: boolean;
+        anon_record: boolean;
+      }>(`select relation.relrowsecurity, relation.relforcerowsecurity,
+          has_table_privilege('fetanagent_player_actions_runtime', relation.oid, 'SELECT')
+            as runtime_select,
+          has_table_privilege('anon', relation.oid, 'SELECT') as anon_select,
+          has_function_privilege('fetanagent_player_actions_runtime',
+            'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)', 'EXECUTE')
+            as runtime_record,
+          has_function_privilege('anon',
+            'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)', 'EXECUTE')
+            as anon_record
+        from pg_catalog.pg_class relation
+       where relation.oid = 'app.telegram_deposit_temporary_messages'::regclass`);
+      expect(catalog.rows).toEqual([
+        {
+          relforcerowsecurity: true,
+          relrowsecurity: true,
+          runtime_select: false,
+          anon_select: false,
+          runtime_record: true,
+          anon_record: false,
+        },
+      ]);
+    });
+
+    it('deletes a cancelled or expired no-candidate notice with one bounded lease', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const updateId = 987654321;
+        const recorded = await client.query<{ accepted: boolean }>(
+          `select app.record_telegram_deposit_temporary_message($1,123456789,42) as accepted`,
+          [updateId],
+        );
+        expect(recorded.rows).toEqual([{ accepted: true }]);
+        const repeated = await client.query<{ accepted: boolean }>(
+          `select app.record_telegram_deposit_temporary_message($1,123456789,42) as accepted`,
+          [updateId],
+        );
+        expect(repeated.rows).toEqual([{ accepted: true }]);
+        const wrongMessage = await client.query<{ accepted: boolean }>(
+          `select app.record_telegram_deposit_temporary_message($1,123456789,43) as accepted`,
+          [updateId],
+        );
+        expect(wrongMessage.rows).toEqual([{ accepted: false }]);
+        const cancelled = await client.query<{ accepted: boolean }>(
+          `select app.cancel_telegram_deposit_temporary_message($1,123456789,42) as accepted`,
+          [updateId],
+        );
+        expect(cancelled.rows).toEqual([{ accepted: true }]);
+        const claimed = await client.query<{
+          cleanup_update_id: string;
+          cleanup_lease_token: string;
+          cleanup_private_chat_id: string;
+          cleanup_message_id: string;
+        }>('select * from app.claim_telegram_deposit_temporary_deletion()');
+        expect(claimed.rows).toMatchObject([
+          {
+            cleanup_update_id: String(updateId),
+            cleanup_private_chat_id: '123456789',
+            cleanup_message_id: '42',
+          },
+        ]);
+        const token = claimed.rows[0]!.cleanup_lease_token;
+        const wrongToken = await client.query<{ accepted: boolean }>(
+          `select app.complete_telegram_deposit_temporary_deletion($1,$2,'deleted') as accepted`,
+          [updateId, randomUUID()],
+        );
+        expect(wrongToken.rows).toEqual([{ accepted: false }]);
+        const completed = await client.query<{ accepted: boolean }>(
+          `select app.complete_telegram_deposit_temporary_deletion($1,$2,'deleted') as accepted`,
+          [updateId, token],
+        );
+        expect(completed.rows).toEqual([{ accepted: true }]);
+        const repeatCompletion = await client.query<{ accepted: boolean }>(
+          `select app.complete_telegram_deposit_temporary_deletion($1,$2,'deleted') as accepted`,
+          [updateId, token],
+        );
+        expect(repeatCompletion.rows).toEqual([{ accepted: true }]);
+        const empty = await client.query(
+          'select * from app.claim_telegram_deposit_temporary_deletion()',
+        );
+        expect(empty.rows).toEqual([]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('does not delete a recent active notice before a status or cancellation', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const updateId = 987654322;
+        await client.query(
+          `select app.record_telegram_deposit_temporary_message($1,123456789,43)`,
+          [updateId],
+        );
+        const claim = await client.query(
+          'select * from app.claim_telegram_deposit_temporary_deletion()',
+        );
+        expect(claim.rows).toEqual([]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('keeps the delivery queue private and grants only the narrow bot action runtime', async () => {
       const client = getClient();
       const catalog = await client.query<{

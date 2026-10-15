@@ -130,6 +130,20 @@ const OUTCOME_COMPLETE_KEYS = new Set([
   'deliveryResult',
   'telegramMessageId',
 ]);
+const TEMPORARY_RECORD_KEYS = new Set([
+  'version',
+  'kind',
+  'updateId',
+  'privateChatId',
+  'telegramMessageId',
+]);
+const TEMPORARY_CLEANUP_COMPLETE_KEYS = new Set([
+  'version',
+  'kind',
+  'updateId',
+  'leaseToken',
+  'deletionResult',
+]);
 
 function oneHeaderValue(request: TelegramPrivateActionRequest, name: string): string | undefined {
   const values: string[] = [];
@@ -258,6 +272,59 @@ export function parseTelegramPrivateActionEnvelope(
   if (!isRecord(parsed) || typeof parsed.kind !== 'string') return undefined;
 
   switch (parsed.kind) {
+    case 'deposit_temporary_record':
+    case 'deposit_temporary_cancel': {
+      if (
+        parsed.version !== 1 ||
+        !hasOnlyKeys(parsed, TEMPORARY_RECORD_KEYS) ||
+        Object.keys(parsed).length !== TEMPORARY_RECORD_KEYS.size
+      )
+        return undefined;
+      const updateId = canonicalTelegramIdentifier(parsed.updateId, true);
+      const privateChatId = canonicalTelegramIdentifier(parsed.privateChatId, false);
+      if (
+        updateId === undefined ||
+        privateChatId === undefined ||
+        typeof parsed.telegramMessageId !== 'number' ||
+        !Number.isSafeInteger(parsed.telegramMessageId) ||
+        parsed.telegramMessageId <= 0
+      ) {
+        return undefined;
+      }
+      return {
+        version: 1,
+        kind: parsed.kind,
+        updateId,
+        privateChatId,
+        telegramMessageId: parsed.telegramMessageId,
+      };
+    }
+    case 'deposit_temporary_cleanup_claim':
+      return parsed.version === 1 &&
+        Object.keys(parsed).length === 2 &&
+        hasOnlyKeys(parsed, OUTCOME_CLAIM_KEYS)
+        ? { version: 1, kind: 'deposit_temporary_cleanup_claim' }
+        : undefined;
+    case 'deposit_temporary_cleanup_complete': {
+      if (
+        parsed.version !== 1 ||
+        !hasOnlyKeys(parsed, TEMPORARY_CLEANUP_COMPLETE_KEYS) ||
+        Object.keys(parsed).length !== TEMPORARY_CLEANUP_COMPLETE_KEYS.size ||
+        canonicalTelegramIdentifier(parsed.updateId, true) === undefined ||
+        typeof parsed.leaseToken !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.leaseToken) ||
+        !['deleted', 'retry', 'unavailable'].includes(parsed.deletionResult as string)
+      ) {
+        return undefined;
+      }
+      return {
+        version: 1,
+        kind: 'deposit_temporary_cleanup_complete',
+        updateId: parsed.updateId as string,
+        leaseToken: parsed.leaseToken,
+        deletionResult: parsed.deletionResult as 'deleted' | 'retry' | 'unavailable',
+      };
+    }
     case 'deposit_outcome_claim':
       return parsed.version === 1 &&
         Object.keys(parsed).length === 2 &&

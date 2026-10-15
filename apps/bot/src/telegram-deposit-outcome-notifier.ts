@@ -17,6 +17,7 @@ export interface TelegramDepositOutcomeNotifierDependencies {
     text: string,
     showDepositButton: boolean,
   ) => Promise<{ readonly message_id: number }>;
+  readonly delete: (privateChatId: number, messageId: number) => Promise<boolean>;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -153,6 +154,46 @@ export async function processOneTelegramDepositOutcome(
   return 'processed';
 }
 
+/** Cleanup runs only after the database observes a sent status or a cancelled intake. */
+export async function processOneTelegramDepositTemporaryCleanup(
+  dependencies: TelegramDepositOutcomeNotifierDependencies,
+): Promise<'none' | 'processed'> {
+  const claimed = await dependencies.request({
+    version: 1,
+    kind: 'deposit_temporary_cleanup_claim',
+  });
+  if (claimed.outcome === 'deposit_temporary_cleanup_none') return 'none';
+  if (claimed.outcome !== 'deposit_temporary_cleanup_delivery') {
+    throw new Error('Unexpected Telegram temporary cleanup response.');
+  }
+  let deletionResult: 'deleted' | 'retry' | 'unavailable' = 'retry';
+  try {
+    if (await dependencies.delete(Number(claimed.privateChatId), claimed.telegramMessageId)) {
+      deletionResult = 'deleted';
+    }
+  } catch (error) {
+    deletionResult = [400, 403].includes(telegramErrorCode(error) ?? 0) ? 'unavailable' : 'retry';
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const completed = await dependencies.request({
+        version: 1,
+        kind: 'deposit_temporary_cleanup_complete',
+        updateId: claimed.updateId,
+        leaseToken: claimed.leaseToken,
+        deletionResult,
+      });
+      if (completed.outcome !== 'deposit_temporary_cleanup_completed' || !completed.accepted) {
+        throw new Error('Telegram temporary cleanup completion was not accepted.');
+      }
+      return 'processed';
+    } catch {
+      if (attempt === 1) throw new Error('Telegram temporary cleanup completion failed.');
+    }
+  }
+  return 'processed';
+}
+
 export async function runTelegramDepositOutcomeNotifier(
   dependencies: TelegramDepositOutcomeNotifierDependencies,
   signal: AbortSignal,
@@ -165,7 +206,9 @@ export async function runTelegramDepositOutcomeNotifier(
   while (!signal.aborted) {
     let pause = 0;
     try {
-      pause = (await processOneTelegramDepositOutcome(dependencies)) === 'none' ? 10_000 : 0;
+      const outcome = await processOneTelegramDepositOutcome(dependencies);
+      const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
+      pause = outcome === 'none' && cleanup === 'none' ? 10_000 : 0;
     } catch {
       console.warn('Telegram deposit outcome delivery is temporarily unavailable.');
       pause = 5_000;

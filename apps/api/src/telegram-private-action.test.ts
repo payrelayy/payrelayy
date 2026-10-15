@@ -65,6 +65,43 @@ describe('bot-only deposit outcome actions', () => {
     }
   });
 });
+describe('bot-only temporary deposit message actions', () => {
+  it('accepts only exact, bounded message tracking and deletion leases', () => {
+    const record = {
+      version: 1,
+      kind: 'deposit_temporary_record',
+      updateId: '123',
+      privateChatId: '123456789',
+      telegramMessageId: 42,
+    };
+    const cancel = { ...record, kind: 'deposit_temporary_cancel' };
+    const claim = { version: 1, kind: 'deposit_temporary_cleanup_claim' };
+    const complete = {
+      version: 1,
+      kind: 'deposit_temporary_cleanup_complete',
+      updateId: '123',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      deletionResult: 'deleted',
+    };
+    for (const action of [record, cancel, claim, complete]) {
+      expect(parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(action)))).toEqual(
+        action,
+      );
+    }
+    for (const invalid of [
+      { ...record, privateChatId: '0' },
+      { ...record, telegramMessageId: 0 },
+      { ...record, receiptReference: 'should-not-be-here' },
+      { ...claim, telegramUserId: '123456789' },
+      { ...complete, leaseToken: 'not-a-uuid' },
+      { ...complete, deletionResult: 'credited' },
+    ]) {
+      expect(
+        parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(invalid))),
+      ).toBeUndefined();
+    }
+  });
+});
 const proofReferenceProfile = JSON.stringify({
   encryptionMasterFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from('1'.repeat(64), 'hex'))

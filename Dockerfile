@@ -373,7 +373,7 @@ CMD ["node", "apps/executor/dist/index.js"]
 
 # Public HTTPS is a separately selected deployment profile. This image contains only the reviewed
 # gateway configuration and static landing-page assets; it receives no application secret.
-FROM --platform=linux/amd64 public.ecr.aws/docker/library/caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway
+FROM --platform=linux/amd64 docker.io/library/caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648 AS gateway
 
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="fetanagent-gateway" \

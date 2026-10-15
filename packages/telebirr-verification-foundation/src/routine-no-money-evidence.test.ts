@@ -24,6 +24,7 @@ import {
 } from './routine-no-money-evidence.js';
 import { assessRoutineTelebirrPaidPhoneEvidence } from './routine-paid-phone-evidence.js';
 import { assessRoutineTelebirrDirectOldReceiverGrace } from './routine-receiver-grace-policy.js';
+import { assessRoutineTelebirrReceiverGraceSignedFacts } from './routine-receiver-grace-signed-facts.js';
 
 const sha = (character: string): string => `sha256:${character.repeat(64)}`;
 const hash = (bytes: Uint8Array): string =>
@@ -463,6 +464,212 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
       }),
     ).toMatchObject({
       disposition: 'would_match_one_instruction',
+      financialActionAllowed: false,
+    });
+  });
+
+  it('extracts review-only old-receiver facts from a valid signed v3 receipt mismatch', () => {
+    const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
+      fixture(true, true);
+    const oldReceiverFacts = {
+      ...facts,
+      creditedPartyNameDigest: sha('f'),
+      receiverMatch: 'mismatched',
+    };
+    const oldReceiverObservation = signedObservation(
+      observationBody(oldReceiverFacts),
+      deviceKey.privateKey,
+    );
+    const paid = {
+      ...input,
+      trustedIssuanceMode: 'paid',
+      signedObservation: oldReceiverObservation,
+    };
+    const assessment = assessRoutineTelebirrReceiverGraceSignedFacts(paid, signerSpki, deviceSpki);
+    expect(assessment).toMatchObject({
+      advisoryOnly: true,
+      sourceAuthenticationPerformed: false,
+      financialActionAllowed: false,
+      disposition: 'would_preview_receiver_grace',
+      reasonCode: 'signed_grace_facts_available',
+      facts: {
+        candidateId: input.trustedLookup.candidateId,
+        challengeId: input.trustedLookup.challengeId,
+        creditedPartyNameDigest: sha('f'),
+        creditedPartyVisibleSuffix: '1234',
+        amountMinor: 2_500,
+      },
+    });
+    expect(JSON.stringify(assessment)).not.toContain(input.trustedRawReference);
+    expect(JSON.stringify(assessment)).not.toContain(oldReceiverObservation.signature);
+    if (assessment.facts) {
+      expect(
+        assessRoutineTelebirrDirectOldReceiverGrace({
+          customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+          playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+          privateChatId: '123456789',
+          paymentOccurredAt: assessment.facts.occurredAt,
+          referenceSubmittedAt: assessment.facts.submittedAt,
+          // Simulates the separate official-source acceptance gate. The signed-facts
+          // adapter itself explicitly reports sourceAuthenticationPerformed=false.
+          officialReceiptAuthenticated: true,
+          officialReceiptCompleted: true,
+          receiptReceiverNameDigest: assessment.facts.creditedPartyNameDigest,
+          receiptVisibleSuffix: assessment.facts.creditedPartyVisibleSuffix,
+          configuredReceiverRevisions: [
+            {
+              revisionId: '764ff964-e184-4bd7-8b63-78a896a1b675',
+              receiverNameDigest: sha('f'),
+              visibleSuffix: '1234',
+            },
+            {
+              revisionId: input.trustedLookup.receiverRevisionId,
+              receiverNameDigest: input.trustedLookup.expectedReceiverNameDigest,
+              visibleSuffix: '5678',
+            },
+          ],
+          instructions: [
+            {
+              instructionEventId: '939e637f-ac4a-43ad-bb8d-5b1e9bc822db',
+              customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+              playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+              privateChatId: '123456789',
+              receiverRevisionId: '764ff964-e184-4bd7-8b63-78a896a1b675',
+              issuedAt: '2026-10-05T17:45:00.000Z',
+              expiresAt: '2026-10-05T18:45:00.000Z',
+              receiverRetiredAt: '2026-10-05T17:50:00.000Z',
+              emergencyRevokedAt: null,
+            },
+          ],
+        }),
+      ).toMatchObject({
+        disposition: 'would_match_one_instruction',
+        financialActionAllowed: false,
+      });
+    }
+    expect(assessRoutineTelebirrPaidPhoneEvidence(paid, signerSpki, deviceSpki)).toMatchObject({
+      disposition: 'review',
+      evidence: null,
+    });
+
+    for (const changed of [
+      { ...oldReceiverFacts, providerFinalStatus: 'reversed' },
+      { ...oldReceiverFacts, referenceMatch: 'mismatched' },
+      { ...oldReceiverFacts, paymentChannel: 'other' },
+      { ...oldReceiverFacts, receiverMatch: 'unknown' },
+    ]) {
+      expect(
+        assessRoutineTelebirrReceiverGraceSignedFacts(
+          {
+            ...paid,
+            signedObservation: signedObservation(observationBody(changed), deviceKey.privateKey),
+          },
+          signerSpki,
+          deviceSpki,
+        ),
+      ).toMatchObject({
+        disposition: 'would_review',
+        reasonCode: 'receipt_not_qualifying',
+        facts: null,
+      });
+    }
+    expect(
+      assessRoutineTelebirrReceiverGraceSignedFacts(
+        {
+          ...paid,
+          signedObservation: {
+            ...oldReceiverObservation,
+            body: {
+              ...oldReceiverObservation.body,
+              facts: { ...oldReceiverFacts, creditedPartyVisibleSuffix: '5678' },
+            },
+          },
+        },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'signed_evidence_unverified',
+      facts: null,
+    });
+    expect(
+      assessRoutineTelebirrReceiverGraceSignedFacts(
+        { ...paid, trustedIssuanceMode: 'no_money' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'would_review', reasonCode: 'no_money_challenge' });
+    expect(
+      assessRoutineTelebirrReceiverGraceSignedFacts(
+        { ...paid, assessedAt: '2026-10-05T18:18:00.000Z' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'would_review', reasonCode: 'upload_expired' });
+  });
+
+  it('does not derive receiver-grace facts from a v2 phone observation', () => {
+    const { input, signerSpki, deviceSpki } = fixture(true);
+    expect(
+      assessRoutineTelebirrReceiverGraceSignedFacts(
+        { ...input, trustedIssuanceMode: 'paid' },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({ disposition: 'would_review', reasonCode: 'version_3_required', facts: null });
+  });
+
+  it('keeps same-name old and active wallets distinct by the signed credited-party suffix', () => {
+    const { input, signerSpki, deviceSpki } = fixture(true, true);
+    const assessment = assessRoutineTelebirrReceiverGraceSignedFacts(
+      { ...input, trustedIssuanceMode: 'paid' },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(assessment.disposition).toBe('would_preview_receiver_grace');
+    if (!assessment.facts) return;
+    expect(
+      assessRoutineTelebirrDirectOldReceiverGrace({
+        customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+        playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+        privateChatId: '123456789',
+        paymentOccurredAt: assessment.facts.occurredAt,
+        referenceSubmittedAt: assessment.facts.submittedAt,
+        // This source gate is simulated, not granted by the signed-facts adapter.
+        officialReceiptAuthenticated: true,
+        officialReceiptCompleted: true,
+        receiptReceiverNameDigest: assessment.facts.creditedPartyNameDigest,
+        receiptVisibleSuffix: assessment.facts.creditedPartyVisibleSuffix,
+        configuredReceiverRevisions: [
+          {
+            revisionId: '764ff964-e184-4bd7-8b63-78a896a1b675',
+            receiverNameDigest: input.trustedLookup.expectedReceiverNameDigest,
+            visibleSuffix: '1234',
+          },
+          {
+            revisionId: input.trustedLookup.receiverRevisionId,
+            receiverNameDigest: input.trustedLookup.expectedReceiverNameDigest,
+            visibleSuffix: '5678',
+          },
+        ],
+        instructions: [
+          {
+            instructionEventId: '939e637f-ac4a-43ad-bb8d-5b1e9bc822db',
+            customerIdentityId: 'bb7792bc-f9fe-4a6a-a4cd-c197fdb8df96',
+            playerAccountId: 'cd572038-4822-4ffc-b62f-14d9acfde564',
+            privateChatId: '123456789',
+            receiverRevisionId: '764ff964-e184-4bd7-8b63-78a896a1b675',
+            issuedAt: '2026-10-05T17:45:00.000Z',
+            expiresAt: '2026-10-05T18:45:00.000Z',
+            receiverRetiredAt: '2026-10-05T17:50:00.000Z',
+            emergencyRevokedAt: null,
+          },
+        ],
+      }),
+    ).toMatchObject({
+      disposition: 'would_match_one_instruction',
+      matchedReceiverRevisionId: '764ff964-e184-4bd7-8b63-78a896a1b675',
       financialActionAllowed: false,
     });
   });

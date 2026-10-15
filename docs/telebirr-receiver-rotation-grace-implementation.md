@@ -22,6 +22,17 @@ signature-verified version-3 observation. It projects `null` for the suffix on v
 never grants money authority. The direct-instruction selector consumes these projected facts in a
 cross-component test; production does not call that selector or emit version 3.
 
+An additional review-only adapter can extract a completed receipt's name digest and credited-party
+suffix when a valid signed v3 observation is rejected by the **current** receiver policy. It
+requires the server assignment signature, device signature, matched challenge snapshot, phone's
+official-origin attestation, reference match, completed status, ETB amount, and bounded times.
+This accommodates an old wallet without treating a policy mismatch as a paid acceptance. It
+does not authenticate the receipt independently of the paired phone, call the SQL preview, stage
+an observation, or permit a claim. The operational paid path remains v2 and unchanged.
+An unchanged receiver name is insufficient to distinguish a newly active wallet from the retired
+wallet when both belong to the same person; the paid v3 path must compare the signed credited-party
+suffix against the exact revision selected by the transactional instruction match before a claim.
+
 A separate postgres-only database preview now reads the immutable candidate, same-private-chat
 instruction message, one-hour receipt, all configured TeleBirr receiver revisions, and a private
 emergency-revocation veto. It returns a possible unique instruction and

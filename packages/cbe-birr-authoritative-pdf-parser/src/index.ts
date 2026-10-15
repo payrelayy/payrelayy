@@ -30,9 +30,9 @@ import {
  * matching a locally supplied identifier does not attest that the PDF was fetched from CBE.
  *
  * Runtime composition remains deliberately unresolved: the transport's public safe result omits
- * raw PDF bytes. A future, separately reviewed internal one-fetch orchestration must pass the same
- * response bytes directly into this byte-only API (or own a protected single-use byte callback).
- * It must never refetch the receipt or expose raw PDF bytes through a public transport result.
+ * raw PDF bytes. A package-internal, unwired one-fetch composition passes the same response bytes
+ * directly into this byte-only API. It does not refetch the receipt or expose raw PDF bytes through
+ * the public transport result, and it confers no production verification authority.
  */
 export const CBE_BIRR_AUTHORITATIVE_PDF_PARSER_CONTRACT_VERSION = 1 as const;
 export const CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION = 1 as const;

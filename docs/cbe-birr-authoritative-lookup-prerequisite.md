@@ -62,12 +62,13 @@ lookup HTTP/browser client. The compiled route has HTTPS, an exact host/port/pat
 closed on TLS, redirect, timeout, size, content-type, outage, and incident-stop failures.
 
 An isolated sibling package now implements those bounded one-shot transport mechanics plus an
-opaque PDF-envelope observation. It has no receipt-field parser, and its public success disposition
-is `opaque_pdf_observation`. This does not clear the blocker for the authoritative lookup: no
-application or worker imports the package, no protected material can reach it, no trusted source
-authorization or incident-stop owner is wired, and the exact PDF field contract remains
-unattested. The prerequisite package itself still contains no network client and every capability
-remains literal `false`. See
+opaque PDF-envelope observation. Its public success disposition is `opaque_pdf_observation`; a
+separate package-internal composition can pass the same one-fetch bytes to the isolated advisory
+parser without exposing them through the public result. This does not clear the blocker for the
+authoritative lookup: no application or worker imports the composition, no protected material can
+reach it, no trusted source authorization or incident-stop owner is wired, and the exact PDF field
+contract remains unattested. The prerequisite package itself still contains no network client and
+every capability remains literal `false`. See
 [cbe-birr-authoritative-receipt-transport.md](cbe-birr-authoritative-receipt-transport.md).
 
 ## Other unresolved prerequisite groups

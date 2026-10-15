@@ -25,15 +25,19 @@ uncertainty goes to review. A payer-number suffix must never be used as a fallba
 
 ## Required end-to-end sequence
 
-1. The issued Telegram instruction records its immutable receiver revision, Player ID, chat,
-   issuance time, expiry, and bot message ID. It lasts exactly one hour. A reply to its exact bot
-   message can bind a submitted reference to that instruction; an unrelated direct submission
-   cannot claim an old-receiver grace instruction by guessing an ID.
-2. Candidate intake verifies the instruction binding under the same identity and Player. The
-   database chooses the instructed receiver revision before its insert trigger runs. If several
-   instructions could match and the submission is not an exact reply, route to review. A late
-   submission for a payment made within an expired instruction is retained for review, not
-   discarded or auto-credited under the expired instruction.
+1. The issued Telegram instruction records its immutable receiver revision, Player ID, identity,
+   chat, issuance time, expiry, and bot message ID. It lasts exactly one hour. A direct reference
+   submission does **not** need to reply to that message: after the signed receipt arrives, the
+   database may associate it with exactly one unexpired instruction for that same Telegram
+   identity, private chat, and Player, using the receipt's credited-party name and visible suffix.
+   The user cannot select an old receiver by supplying an instruction ID or copying message text.
+2. The current intake trigger always binds the active receiver before receipt verification; that
+   must be replaced with a fail-closed two-stage binding. Intake preserves the submission and
+   identity without assuming an old receiver. Only the signed-receipt decision can choose an
+   instructed retired revision. More than one matching instruction (even for the same receiver)
+   stays in review. A late submission for a payment made within an expired instruction is retained
+   for review, not discarded or auto-credited under the expired instruction. The advisory selector
+   in the foundation package expresses this rule but does not grant credit authority.
 3. The paired phone's next **versioned** signed observation carries the credited-party suffix,
    with the exact field label and mask grammar above. The signer and server verify the same
    canonical transcript. Existing v2 observations remain valid for their existing path but cannot
@@ -41,7 +45,9 @@ uncertainty goes to review. A payer-number suffix must never be used as a fallba
 4. Challenge issuance, enrollment, staging, and the atomic claim preserve the exact instructed
    old receiver revision during ordinary rotation, without treating it as the globally active
    revision. The database independently checks the signed receipt's full-name digest and suffix
-   against all relevant immutable receiver revisions and requires a unique pair.
+   against all relevant immutable receiver revisions and requires a unique pair **and** a unique
+   matching instruction for this Telegram identity and Player. No bot-side or advisory match is
+   accepted as the financial decision.
 5. The database also checks completed status, exact reference, settled principal, occurrence and
    submission times, instruction window, Owner policy, one-use claim, current Player eligibility,
    and the unchanged sequential-credit boundary. Emergency revocation blocks new grace claims

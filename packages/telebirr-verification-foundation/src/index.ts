@@ -11,8 +11,12 @@ export {
   type TelebirrCandidateSourceKind,
 } from './candidate-extraction.js';
 export {
+  assessRoutineTelebirrDirectOldReceiverGrace,
   assessRoutineTelebirrOldReceiverGrace,
   type RoutineReceiverGraceAssessment,
+  type RoutineReceiverGraceDirectAssessment,
+  type RoutineReceiverGraceDirectInput,
+  type RoutineReceiverGraceInstruction,
   type RoutineReceiverGraceInput,
   type RoutineReceiverGraceReason,
   type RoutineReceiverGraceRevision,

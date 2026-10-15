@@ -47,6 +47,50 @@ export interface RoutineReceiverGraceAssessment {
   readonly reasonCode: RoutineReceiverGraceReason;
 }
 
+/**
+ * Read-only candidate set for a reference sent directly to the bot. These identifiers and
+ * timestamps must come from durable instruction rows, never from Telegram message text.
+ */
+export interface RoutineReceiverGraceInstruction {
+  readonly instructionEventId: string;
+  readonly customerIdentityId: string;
+  readonly playerAccountId: string;
+  readonly privateChatId: string;
+  readonly receiverRevisionId: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly receiverRetiredAt: string;
+  readonly emergencyRevokedAt: string | null;
+}
+
+export interface RoutineReceiverGraceDirectInput {
+  readonly customerIdentityId: string;
+  readonly playerAccountId: string;
+  readonly privateChatId: string;
+  readonly paymentOccurredAt: string;
+  readonly referenceSubmittedAt: string;
+  readonly officialReceiptAuthenticated: boolean;
+  readonly officialReceiptCompleted: boolean;
+  readonly receiptReceiverNameDigest: string;
+  readonly receiptVisibleSuffix: string | null;
+  readonly configuredReceiverRevisions: readonly RoutineReceiverGraceRevision[];
+  readonly instructions: readonly RoutineReceiverGraceInstruction[];
+}
+
+export interface RoutineReceiverGraceDirectAssessment {
+  readonly advisoryOnly: true;
+  readonly financialActionAllowed: false;
+  readonly disposition: 'would_review' | 'would_match_one_instruction';
+  readonly reasonCode:
+    | 'invalid_input'
+    | 'instruction_not_found'
+    | 'instruction_ambiguous'
+    | 'no_qualifying_instruction'
+    | 'one_instruction_matches';
+  readonly matchedInstructionEventId: string | null;
+  readonly matchedReceiverRevisionId: string | null;
+}
+
 function result(
   disposition: RoutineReceiverGraceAssessment['disposition'],
   reasonCode: RoutineReceiverGraceReason,
@@ -131,4 +175,72 @@ export function assessRoutineTelebirrOldReceiverGrace(
     return result('would_review', 'receiver_identity_mismatch');
   }
   return result('would_match_grace', 'grace_facts_match');
+}
+
+function directResult(
+  reasonCode: RoutineReceiverGraceDirectAssessment['reasonCode'],
+  instruction: RoutineReceiverGraceInstruction | null = null,
+): RoutineReceiverGraceDirectAssessment {
+  return Object.freeze({
+    advisoryOnly: true,
+    financialActionAllowed: false,
+    disposition: instruction === null ? 'would_review' : 'would_match_one_instruction',
+    reasonCode,
+    matchedInstructionEventId: instruction?.instructionEventId ?? null,
+    matchedReceiverRevisionId: instruction?.receiverRevisionId ?? null,
+  });
+}
+
+/**
+ * A direct submission can only identify a retired receiver through exactly one same-chat,
+ * same-Player, unexpired instruction and a signed official credited-party name/suffix match.
+ * This selector is advisory: the paid database claim must repeat every check under a lock.
+ */
+export function assessRoutineTelebirrDirectOldReceiverGrace(
+  input: RoutineReceiverGraceDirectInput,
+): RoutineReceiverGraceDirectAssessment {
+  if (
+    !UUID_V4.test(input.customerIdentityId) ||
+    !UUID_V4.test(input.playerAccountId) ||
+    !/^[1-9][0-9]{0,15}$/u.test(input.privateChatId) ||
+    BigInt(input.privateChatId) > 9007199254740991n ||
+    utcMs(input.paymentOccurredAt) === null ||
+    utcMs(input.referenceSubmittedAt) === null ||
+    input.instructions.length > 32 ||
+    new Set(input.instructions.map((instruction) => instruction.instructionEventId)).size !==
+      input.instructions.length
+  )
+    return directResult('invalid_input');
+
+  const sameContext = input.instructions.filter(
+    (instruction) =>
+      instruction.customerIdentityId === input.customerIdentityId &&
+      instruction.playerAccountId === input.playerAccountId &&
+      instruction.privateChatId === input.privateChatId,
+  );
+  if (sameContext.length === 0) return directResult('instruction_not_found');
+
+  const matches: RoutineReceiverGraceInstruction[] = [];
+  for (const instruction of sameContext) {
+    if (!UUID_V4.test(instruction.instructionEventId)) return directResult('invalid_input');
+    const assessment = assessRoutineTelebirrOldReceiverGrace({
+      instructionIssuedAt: instruction.issuedAt,
+      instructionExpiresAt: instruction.expiresAt,
+      oldReceiverRetiredAt: instruction.receiverRetiredAt,
+      paymentOccurredAt: input.paymentOccurredAt,
+      referenceSubmittedAt: input.referenceSubmittedAt,
+      emergencyRevokedAt: instruction.emergencyRevokedAt,
+      oldReceiverRevisionId: instruction.receiverRevisionId,
+      officialReceiptAuthenticated: input.officialReceiptAuthenticated,
+      officialReceiptCompleted: input.officialReceiptCompleted,
+      receiptReceiverNameDigest: input.receiptReceiverNameDigest,
+      receiptVisibleSuffix: input.receiptVisibleSuffix,
+      configuredReceiverRevisions: input.configuredReceiverRevisions,
+    });
+    if (assessment.reasonCode === 'invalid_input') return directResult('invalid_input');
+    if (assessment.disposition === 'would_match_grace') matches.push(instruction);
+  }
+  if (matches.length === 0) return directResult('no_qualifying_instruction');
+  if (matches.length !== 1) return directResult('instruction_ambiguous');
+  return directResult('one_instruction_matches', matches[0]!);
 }

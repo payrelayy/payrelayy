@@ -50,14 +50,60 @@ class RoutineDualModeStatusTest {
     assertEquals(true, pacer.shouldAttempt())
   }
 
-  @Test fun `only a paid receipt network failure selects the fast retry`() {
+  @Test fun `paid receipt network and review retries keep distinct fast statuses`() {
     val network = RoutinePaidCycleStatus.fromResults(
       listOf(RoutinePaidPhonePreparationResult.Review("network_unavailable")), false)
     assertEquals(attention("paid_receipt_network_retry"), network)
     assertEquals(network, RoutineDualModeStatus.select(ready("no_assignment"), network))
-    assertEquals(attention("receipt_review"), RoutinePaidCycleStatus.fromResults(
+    assertEquals(attention("paid_receipt_review_retry"), RoutinePaidCycleStatus.fromResults(
       listOf(RoutinePaidPhonePreparationResult.Review("receipt_review")), false))
     assertEquals(attention("paid_observation_retry"),
       RoutinePaidCycleStatus.fromResults(emptyList(), true))
+  }
+
+  @Test fun `a stale rejected upload cannot hide a newer signed receipt result`() {
+    val results = listOf(
+      RoutinePaidPhonePreparationResult.Review("server_rejected"),
+      RoutinePaidPhonePreparationResult.NoAssignment,
+      RoutinePaidPhonePreparationResult.SubmittedForReview,
+    )
+    assertEquals(ready("paid_observation_staged"), RoutinePaidCycleStatus.fromResults(results, false))
+  }
+
+  @Test fun `a rejected lane cools down independently without blocking healthy lanes`() {
+    var now = 1_000L
+    val pacer = RoutinePaidRejectedLanePacer(4) { now }
+    assertEquals(true, pacer.shouldAttempt(0))
+    pacer.record(0, RoutinePaidPhonePreparationResult.Review("server_rejected"))
+    assertEquals(false, pacer.shouldAttempt(0))
+    assertEquals(true, pacer.shouldAttempt(1))
+    assertEquals(true, pacer.hasCoolingLanes())
+    now += 59_999L
+    assertEquals(false, pacer.shouldAttempt(0))
+    now += 1L
+    assertEquals(true, pacer.shouldAttempt(0))
+    pacer.record(0, RoutinePaidPhonePreparationResult.NoAssignment)
+    assertEquals(false, pacer.hasCoolingLanes())
+  }
+
+  @Test fun `other lanes keep polling while a sealed lane is rejected`() {
+    val status = RoutinePaidCycleStatus.fromResults(listOf(
+      RoutinePaidPhonePreparationResult.Review("server_rejected"),
+      RoutinePaidPhonePreparationResult.NoAssignment,
+    ), false)
+    assertEquals(ready("paid_partial_lane_recovery"), status)
+    assertEquals(status, RoutineDualModeStatus.select(ready("no_assignment"), status))
+    assertEquals(attention("server_rejected"), RoutinePaidCycleStatus.fromResults(listOf(
+      RoutinePaidPhonePreparationResult.Review("server_rejected")), false))
+  }
+
+  @Test fun `an unattested transient page stays review only and retries promptly`() {
+    val status = RoutinePaidCycleStatus.fromResults(listOf(
+      RoutinePaidPhonePreparationResult.Review("server_rejected"),
+      RoutinePaidPhonePreparationResult.Review("invalid_page_unattested")), false)
+    assertEquals(attention("paid_receipt_review_retry"), status)
+    assertEquals(status, RoutineDualModeStatus.select(ready("no_assignment"), status))
+    assertEquals(attention("paid_receipt_review_retry"), RoutinePaidCycleStatus.fromResults(listOf(
+      RoutinePaidPhonePreparationResult.Review("unknown_layout_invoice_number")), false))
   }
 }

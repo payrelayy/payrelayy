@@ -316,7 +316,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|FETANTEST|uuid|token|amount/iu);
   });
 
-  it('renders a paid candidate acknowledgment without claiming verification or credit', () => {
+  it('defers a paid candidate reply until its signed outcome or delayed progress notice', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,
       outcome: 'telebirr_routine_candidate_recorded_paid_pending',
@@ -326,16 +326,7 @@ describe('Telegram Player-ID flow presentation', () => {
       verificationMode: 'phone_receipt_pending',
     });
 
-    expect(presentation).toEqual({
-      kind: 'menu',
-      menu: {
-        text: [
-          '🔎 TeleBirr reference received. We’re checking the payment.',
-          'This submission has not credited a Player account. We’ll send an update here.',
-        ].join('\n'),
-        buttons: [{ text: '💰 Deposit', callbackData: 'gd1.telebirr' }],
-      },
-    });
+    expect(presentation).toEqual({ kind: 'deferred' });
     expect(JSON.stringify(presentation)).not.toMatch(/AB12CD34EF|uuid|token|amount/iu);
   });
 

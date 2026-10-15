@@ -112,7 +112,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
       ]);
     });
 
-    it('atomically retires the old CBE revision, creates one protected revision, and replays exactly', async () => {
+    it('creates one protected CBE revision, retires any old revision, and replays exactly', async () => {
       const client = getClient();
       await client.query('begin');
       try {

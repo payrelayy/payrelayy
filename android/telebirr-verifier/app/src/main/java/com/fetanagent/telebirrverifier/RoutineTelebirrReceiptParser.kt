@@ -123,7 +123,7 @@ internal class RoutineTelebirrReceiptParser(
   ): RoutineTelebirrParsedReceipt {
     if (document is ProviderDocument.ExplicitInvalidReference) {
       if (document.originAttestation != ProviderDocumentOriginAttestation.OFFICIAL_TLS_ORIGIN ||
-        document.sourceDocumentDigest != SafeOfficialReceiptTransport.EXPLICIT_INVALID_BODY_DIGEST
+        !SafeOfficialReceiptTransport.isPinnedExplicitInvalidDigest(document.sourceDocumentDigest)
       ) return RoutineTelebirrParsedReceipt.Review("invalid_page_unattested", document.sourceDocumentDigest)
       return RoutineTelebirrParsedReceipt.Observed(
         facts = RoutineTelebirrObservedReceiptFacts(

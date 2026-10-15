@@ -11,9 +11,11 @@ silently rebound to the new receiver or auto-credited.
 The official TeleBirr page visibly distinguishes `Payer telebirr no.` from
 `Credited party account no`. The observed credited-party value has the shape
 `[four digits]****[four visible digits]`. Only the latter field may supply the receiver suffix.
-The current Android parser retains that suffix locally without adding it to the v2 signed receipt
-facts or changing any financial decision. No full phone number, name, receipt, or reference belongs
-in diagnostics or application logs.
+The Android parser retains that suffix locally. A domain-separated version-3 transcript can sign
+it in a test-only, opt-in path. The operational collector still emits version 2 because the paid
+staging table and atomic claim accept only version 2. This draft cannot be merged or deployed as
+old-receiver auto-credit until those downstream guards are implemented. No full phone number, name,
+receipt, or reference belongs in diagnostics or application logs.
 
 The Owner chose automatic grace matching by the exact normalized official credited-party full name
 **and** the visible four-digit suffix when that pair identifies exactly one configured immutable

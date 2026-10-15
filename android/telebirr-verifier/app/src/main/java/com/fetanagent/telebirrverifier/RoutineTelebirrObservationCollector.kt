@@ -9,9 +9,11 @@ import java.time.format.DateTimeFormatterBuilder
  * this class does not poll for assignments, upload observations, write to a database, or act on a
  * payment. Its signer and enrollment inputs must come from independently trusted material; its
  * transport must be the reviewed official HTTPS transport before any operational use. Only that
- * transport can make this collector sign a version-2 phone-origin assertion. A test transport
- * can claim false origin but produces only version-1 review evidence. Neither version authorizes
- * a financial action on the phone; the server must verify the enrollment and signed transcript.
+ * transport can make this collector sign a version-2 phone-origin assertion. Version 3's
+ * credited-party suffix signer is deliberately not selected here until the paid database path is
+ * updated. A test transport can claim false origin but produces only version-1 review evidence.
+ * No observation version authorizes a financial action on the phone; the server must verify the
+ * enrollment and signed transcript.
  */
 internal class RoutineTelebirrObservationCollector(
   private val transport: ProviderTransport,

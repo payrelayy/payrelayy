@@ -93,6 +93,8 @@ internal data class RoutineTelebirrObservedReceiptFacts(
   val retrievedAt: String,
   val sourceProfile: String,
   val sourceOriginAttestation: String? = null,
+  /** Signed only in observation v3, after the official TLS-origin check. */
+  val creditedPartyVisibleSuffix: String? = null,
 ) {
   override fun toString(): String = "RoutineTelebirrObservedReceiptFacts(<redacted>)"
 }
@@ -101,7 +103,7 @@ internal sealed interface RoutineTelebirrParsedReceipt {
   data class Observed(
     val facts: RoutineTelebirrObservedReceiptFacts,
     val sourceDocumentDigest: String,
-    /** Local-only until a versioned signed observation carries this fact end to end. */
+    /** The official credited-party field, never the payer-number field. */
     val creditedPartyVisibleSuffix: String? = null,
   ) : RoutineTelebirrParsedReceipt {
     override fun toString(): String = "RoutineTelebirrParsedReceipt.Observed(<redacted>)"

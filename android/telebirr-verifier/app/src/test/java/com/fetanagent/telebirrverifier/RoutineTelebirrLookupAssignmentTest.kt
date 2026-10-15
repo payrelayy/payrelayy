@@ -212,6 +212,53 @@ class RoutineTelebirrLookupAssignmentTest {
   }
 
   @Test
+  fun `dormant v3 signer includes only the official credited-party suffix`() {
+    val authenticated = requireNotNull(verify().authenticatedAssignment)
+    val html = livePilotHtml()
+      .replace("20-08-2026 21:01:45", "05-10-2026 21:01:45")
+      .replace(
+        "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>",
+        "<tr><td>Credited Party name</td><td>PILOT RECEIVER</td></tr>" +
+          "<tr><td>Credited party account no</td><td>2519****1234</td></tr>",
+      )
+    val document = livePilotProviderFound(html)
+      .copy(retrievedAt = "2026-10-05T18:03:00.000Z")
+    val parsed = RoutineTelebirrReceiptParser()
+      .parse(document, authenticated.receiptExpectation()) as RoutineTelebirrParsedReceipt.Observed
+    assertEquals("1234", parsed.creditedPartyVisibleSuffix)
+
+    val current = RoutineTelebirrSignedObservationFactory.create(
+      authenticated, enrollment, parsed, device, officialOriginFromSafeTransport = true,
+    )
+    assertEquals(2, current.contractVersion)
+    assertFalse(String(RoutineTelebirrJsonCodec.encodeSignedObservation(current),
+      StandardCharsets.UTF_8).contains("creditedPartyVisibleSuffix"))
+
+    val v3 = RoutineTelebirrSignedObservationFactory.create(
+      authenticated, enrollment, parsed, device,
+      officialOriginFromSafeTransport = true,
+      signReceiverSuffix = true,
+    )
+    assertEquals(3, v3.contractVersion)
+    assertEquals("routine_signed_observation_v3", v3.protocolMode)
+    assertEquals("1234", v3.body.facts.creditedPartyVisibleSuffix)
+    val wire = StrictJson.parse(RoutineTelebirrJsonCodec.encodeSignedObservation(v3))
+      .requireObject(setOf(
+        "contractVersion", "providerCode", "protocolMode", "transcriptVersion",
+        "bodyDigestAlgorithm", "bodyDigest", "signatureAlgorithm", "signatureEncoding",
+        "body", "signature",
+      ))
+    val encodedBody = wire.value("body") as JsonValue.Object
+    val encodedFacts = encodedBody.value("facts") as JsonValue.Object
+    assertEquals("1234", encodedFacts.string("creditedPartyVisibleSuffix"))
+    assertFails {
+      RoutineTelebirrSignedObservationFactory.create(
+        authenticated, enrollment, parsed, device, signReceiverSuffix = true,
+      )
+    }
+  }
+
+  @Test
   fun `verifies a TypeScript signed assignment with the same synthetic body`() {
     val signerSpki =
       Base64.getUrlDecoder().decode(

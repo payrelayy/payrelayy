@@ -221,6 +221,51 @@ export function registerRoutineTelebirrRotatedInstructionReviewSqlTests(
               reason_code: 'receiver_changed_during_instruction',
             },
           ]);
+          const ownerQueue = await client.query<{
+            case_id: string;
+            player_id: string;
+            reference_masked: string;
+            instructed_receiver_masked: string;
+            candidate_receiver_masked: string;
+            reason_code: string;
+          }>(
+            'select case_id, player_id, reference_masked, ' +
+              'instructed_receiver_masked, candidate_receiver_masked, reason_code ' +
+              'from app.list_owner_routine_telebirr_receiver_change_reviews($1::uuid, 25) ' +
+              'where case_id = $2::uuid',
+            [owner.rows[0]!.auth_user_id, candidate.rows[0]!.id],
+          );
+          expect(ownerQueue.rows).toEqual([
+            {
+              case_id: candidate.rows[0]!.id,
+              player_id: playerId,
+              reference_masked: '***AB12',
+              instructed_receiver_masked: '***7494',
+              candidate_receiver_masked:
+                rotationTiming === 'before_submission' ? '***7002' : '***7494',
+              reason_code: 'receiver_changed_during_instruction',
+            },
+          ]);
+          const olderPage = await client.query<{ case_id: string }>(
+            'select case_id ' +
+              'from app.list_owner_routine_telebirr_receiver_change_reviews($1::uuid, 25, $2::uuid) ' +
+              'where case_id = $2::uuid',
+            [owner.rows[0]!.auth_user_id, candidate.rows[0]!.id],
+          );
+          expect(olderPage.rows).toEqual([]);
+          const ownerAcl = await client.query<{ owner_allowed: boolean; public_allowed: boolean }>(
+            'select has_function_privilege(' +
+              "'fetanagent_owner_control', " +
+              "'app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)', " +
+              "'execute') as owner_allowed, " +
+              'exists (select 1 from pg_proc procedure, ' +
+              'lateral aclexplode(coalesce(procedure.proacl, acldefault(' +
+              "'f', procedure.proowner))) acl " +
+              'where procedure.oid = ' +
+              "'app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)'::regprocedure " +
+              "and acl.grantee = 0 and acl.privilege_type = 'EXECUTE') as public_allowed",
+          );
+          expect(ownerAcl.rows).toEqual([{ owner_allowed: true, public_allowed: false }]);
           expect(newReceiverId).toBeTruthy();
           const notification = await client.query<{ outcome_code: string; amount_minor: null }>(
             `select outcome_code, amount_minor

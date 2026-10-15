@@ -986,6 +986,7 @@ describe('Owner-control HTTP boundary', () => {
       '/v1/owner/player-registration-association-candidates?limit=25',
     );
     expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
+    expect(response.body).toContain('/v1/owner/routine-telebirr-receiver-change-reviews?limit=25');
     expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
     expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
     expect(response.body).toContain('/v1/owner/private-live-deposit-pilots/current');
@@ -1394,6 +1395,71 @@ describe('Owner-control HTTP boundary', () => {
       deposits: [{ playerId: '28379330', submittedReferenceMasked: '***A1B2' }],
     });
     expect(response.body).not.toContain('ciphertext');
+    await app.close();
+  });
+
+  it('exposes only a bounded authenticated read-only receiver-change review queue', async () => {
+    let observed: readonly (number | string | undefined)[] = [];
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receiverChangeReviews: {
+          list: async (actor, limit, beforeCaseId) => {
+            observed = [actor, limit ?? -1, beforeCaseId];
+            return [
+              {
+                caseId: inviteId,
+                playerId: '28379330',
+                referenceMasked: '***AB12',
+                instructedReceiverMasked: '***7494',
+                candidateReceiverMasked: '***7002',
+                submittedAt: '2026-10-15T12:01:00.000Z',
+                recordedAt: '2026-10-15T12:01:01.000Z',
+                reasonCode: 'receiver_changed_during_instruction',
+              },
+            ];
+          },
+        },
+      }),
+    });
+    const url = '/v1/owner/routine-telebirr-receiver-change-reviews?limit=20';
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: url + '&unexpected=true',
+          headers: { authorization: 'Bearer ' + bearer },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const response = await app.inject({
+      method: 'GET',
+      url,
+      headers: { authorization: 'Bearer ' + bearer },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      reviews: [{ referenceMasked: '***AB12', reasonCode: 'receiver_changed_during_instruction' }],
+    });
+    expect(response.body).not.toMatch(/ciphertext|fingerprint|private_chat_id/iu);
+    expect(observed).toEqual([authUserId, 20, undefined]);
+    const older = await app.inject({
+      method: 'GET',
+      url: url + '&beforeCaseId=' + inviteId,
+      headers: { authorization: 'Bearer ' + bearer },
+    });
+    expect(older.statusCode).toBe(200);
+    expect(observed).toEqual([authUserId, 20, inviteId]);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: url + '&beforeCaseId=bad',
+          headers: { authorization: 'Bearer ' + bearer },
+        })
+      ).statusCode,
+    ).toBe(400);
     await app.close();
   });
 

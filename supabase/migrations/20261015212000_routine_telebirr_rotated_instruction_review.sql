@@ -27,6 +27,9 @@ create table app.routine_telebirr_rotated_instruction_reviews (
   player_account_id uuid not null,
   instructed_receiver_account_id uuid not null,
   candidate_receiver_account_id uuid not null,
+  candidate_reference_masked text not null
+    check (candidate_reference_masked ~ '^\*{3}[A-Z0-9]{4}$'),
+  submitted_at timestamptz not null,
   reason_code text not null
     check (reason_code = 'receiver_changed_during_instruction'),
   recorded_at timestamptz not null default pg_catalog.clock_timestamp()
@@ -108,11 +111,13 @@ begin
   insert into app.routine_telebirr_rotated_instruction_reviews (
     candidate_id, instruction_event_id, origin_identity_id,
     player_account_id, instructed_receiver_account_id,
-    candidate_receiver_account_id, reason_code
+    candidate_receiver_account_id, candidate_reference_masked,
+    submitted_at, reason_code
   ) values (
     new.id, v_instruction.origin_inbound_event_id, new.origin_identity_id,
     new.player_account_id, v_instruction.receiver_account_id,
-    new.receiver_account_id, 'receiver_changed_during_instruction'
+    new.receiver_account_id, new.candidate_reference_masked,
+    new.submitted_at, 'receiver_changed_during_instruction'
   );
   insert into app.audit_events (
     actor_kind, action, resource_type, resource_id, metadata
@@ -201,7 +206,8 @@ begin
   for v_candidate in
     select distinct on (candidate.id)
            candidate.id, candidate.origin_identity_id, candidate.player_account_id,
-           candidate.candidate_reference_masked, receipt.origin_inbound_event_id,
+           candidate.candidate_reference_masked, candidate.submitted_at,
+           receipt.origin_inbound_event_id,
            telegram.private_chat_id
       from app.routine_telebirr_untrusted_proof_requests candidate
       join app.telegram_telebirr_destination_receipts receipt
@@ -233,11 +239,13 @@ begin
   loop
     insert into app.routine_telebirr_rotated_instruction_reviews (
       candidate_id, instruction_event_id, origin_identity_id, player_account_id,
-      instructed_receiver_account_id, candidate_receiver_account_id, reason_code
+      instructed_receiver_account_id, candidate_receiver_account_id,
+      candidate_reference_masked, submitted_at, reason_code
     ) values (
       v_candidate.id, v_candidate.origin_inbound_event_id,
       v_candidate.origin_identity_id, v_candidate.player_account_id,
-      new.id, new.id, 'receiver_changed_during_instruction'
+      new.id, new.id, v_candidate.candidate_reference_masked,
+      v_candidate.submitted_at, 'receiver_changed_during_instruction'
     ) on conflict (candidate_id) do nothing;
     insert into app.audit_events (
       actor_kind, action, resource_type, resource_id, metadata

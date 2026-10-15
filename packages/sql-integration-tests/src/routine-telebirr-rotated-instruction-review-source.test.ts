@@ -22,6 +22,8 @@ describe('rotated-instruction review migration', () => {
       'alter table app.routine_telebirr_rotated_instruction_reviews force row level security',
     );
     expect(source).toContain('routine_rotated_instruction_reviews_immutable');
+    expect(source).toContain('candidate_reference_masked text not null');
+    expect(source).toContain('submitted_at timestamptz not null');
     expect(source).not.toMatch(/(?:update|insert into|delete from)\s+app\.feature_switches/iu);
   });
 

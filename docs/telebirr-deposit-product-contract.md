@@ -117,6 +117,11 @@ retained for review rather than discarded. Already completed credits are not rev
 receiver change. The visible receiver-number suffix is only supporting review evidence, not
 authority to auto-credit.
 
+The Owner review queue must remain read-only and paginated, with only masked reference and
+receiver details, Player ID, timestamps, and an opaque case ID. A queue entry is not evidence that
+money arrived. It must not offer a credit, refund, retry, or case-resolution control; those actions
+need a separate reviewed policy and authorization.
+
 Name comparison uses a versioned conservative normalization profile: Unicode normalization,
 case-folding where defined, whitespace normalization, and narrowly reviewed harmless punctuation
 normalization. It preserves word content and order, supports Ethiopic text, and does not perform

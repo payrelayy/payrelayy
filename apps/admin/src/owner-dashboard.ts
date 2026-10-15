@@ -659,6 +659,25 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
         </section>
 
+        <section class="review-section" aria-labelledby="receiver-change-review-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Read-only financial review</p>
+              <h2 id="receiver-change-review-title">TeleBirr receiver-change cases</h2>
+            </div>
+            <button class="secondary" id="receiver-change-review-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">
+            Submissions fenced because a receiving wallet changed during a displayed
+            one-hour instruction. A case is not proof of payment. Inspect official provider evidence
+            separately before any audited resolution; this page cannot credit, refund, or retry.
+          </p>
+          <div class="request-list" id="receiver-change-review-list"></div>
+          <button class="secondary" id="receiver-change-review-older" type="button" hidden>
+            Older cases
+          </button>
+        </section>
+
         <section class="review-section" aria-labelledby="deposit-intake-title">
           <div class="panel-heading">
             <div>
@@ -882,6 +901,9 @@ const companionLookupButton = document.querySelector('#companion-lookup-button')
 const companionLookupStatus = document.querySelector('#companion-lookup-status');
 const companionLookupResult = document.querySelector('#companion-lookup-result');
 const depositIntakeList = document.querySelector('#deposit-intake-list');
+const receiverChangeReviewList = document.querySelector('#receiver-change-review-list');
+const receiverChangeReviewRefresh = document.querySelector('#receiver-change-review-refresh');
+const receiverChangeReviewOlder = document.querySelector('#receiver-change-review-older');
 
 let accessToken;
 let refreshToken;
@@ -891,6 +913,7 @@ let accessTokenRefreshAt;
 let ownerRefreshTimer;
 let ownerRefreshPromise;
 let ownerAuthGeneration = 0;
+let receiverChangeReviewCursor;
 let supportContactRevision;
 let supportContactSavedUsername;
 let supportContactRequest = 0;
@@ -2466,6 +2489,12 @@ function clearDepositIntake() {
   depositIntakeList.replaceChildren();
 }
 
+function clearReceiverChangeReviews() {
+  receiverChangeReviewList.replaceChildren();
+  receiverChangeReviewCursor = undefined;
+  receiverChangeReviewOlder.hidden = true;
+}
+
 function clearOwnerRefreshTimer() {
   if (ownerRefreshTimer !== undefined) window.clearTimeout(ownerRefreshTimer);
   ownerRefreshTimer = undefined;
@@ -2802,6 +2831,7 @@ function signOut(message = 'Signed out.') {
   clearExecutionReadiness();
   clearExecutionApprovals();
   clearDepositIntake();
+  clearReceiverChangeReviews();
   invitePanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -4841,6 +4871,79 @@ function validDepositIntake(value) {
     playerId, receiverAccountMasked, reference };
 }
 
+function validReceiverChangeReview(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const maskedReceiver = /^\\*{3,}[A-Za-z0-9._-]{2,16}$/;
+  if (typeof value.caseId !== 'string' || !uuid.test(value.caseId) ||
+      typeof value.playerId !== 'string' || !/^[^\\s\\u0000-\\u001f\\u007f]{1,64}$/.test(value.playerId) ||
+      typeof value.referenceMasked !== 'string' || !/^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) ||
+      typeof value.instructedReceiverMasked !== 'string' || !maskedReceiver.test(value.instructedReceiverMasked) ||
+      typeof value.candidateReceiverMasked !== 'string' || !maskedReceiver.test(value.candidateReceiverMasked) ||
+      typeof value.submittedAt !== 'string' || !Number.isFinite(Date.parse(value.submittedAt)) ||
+      typeof value.recordedAt !== 'string' || !Number.isFinite(Date.parse(value.recordedAt)) ||
+      value.reasonCode !== 'receiver_changed_during_instruction') return undefined;
+  return value;
+}
+
+function renderReceiverChangeReviews(reviews, olderPage) {
+  if (!olderPage) clearReceiverChangeReviews();
+  if (reviews.length === 0) {
+    if (olderPage) return;
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = 'No receiver-change cases in the latest results.';
+    receiverChangeReviewList.append(empty);
+    return;
+  }
+  for (const review of reviews) {
+    const card = document.createElement('article');
+    card.className = 'request-card';
+    const title = document.createElement('h3');
+    title.textContent = 'Player ' + review.playerId + ' · reference ' + review.referenceMasked;
+    const metadata = document.createElement('p');
+    metadata.className = 'request-meta';
+    metadata.textContent = 'Instruction receiver ' + review.instructedReceiverMasked +
+      ' · submission receiver ' + review.candidateReceiverMasked +
+      ' · submitted ' + new Date(review.submittedAt).toLocaleString() +
+      ' · case ' + review.caseId;
+    const warning = document.createElement('p');
+    warning.className = 'pilot-warning';
+    warning.textContent = 'Manual evidence required. No automatic Player credit is permitted for this submission.';
+    card.append(title, metadata, warning);
+    receiverChangeReviewList.append(card);
+  }
+}
+
+async function loadReceiverChangeReviews(beforeCaseId) {
+  const olderPage = typeof beforeCaseId === 'string';
+  receiverChangeReviewRefresh.disabled = true;
+  receiverChangeReviewOlder.disabled = true;
+  try {
+    const url = '/v1/owner/routine-telebirr-receiver-change-reviews?limit=25' +
+      (olderPage ? '&beforeCaseId=' + encodeURIComponent(beforeCaseId) : '');
+    const response = await ownerRequest(url, {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('receiver_change_reviews');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.reviews) || payload.reviews.length > 25) {
+      throw new Error('receiver_change_reviews');
+    }
+    const reviews = payload.reviews.map(validReceiverChangeReview);
+    if (reviews.some((review) => !review)) throw new Error('receiver_change_reviews');
+    renderReceiverChangeReviews(reviews, olderPage);
+    receiverChangeReviewCursor = reviews.length === 25 ? reviews[24].caseId : undefined;
+    receiverChangeReviewOlder.hidden = receiverChangeReviewCursor === undefined;
+  } catch (error) {
+    if (!olderPage) clearReceiverChangeReviews();
+    if (!isSignedOutError(error)) setNotice('TeleBirr receiver-change cases are unavailable. No review action was taken.');
+  } finally {
+    receiverChangeReviewRefresh.disabled = false;
+    receiverChangeReviewOlder.disabled = false;
+  }
+}
+
 const dryRunFixtureChoices = [
   ['valid-completed', 'Completed fixture'],
   ['wrong-receiver', 'Wrong receiver fixture'],
@@ -5655,6 +5758,7 @@ async function loadOwnerPlayerQueues() {
       loadPlayerEligibility(),
       loadReceivers(),
       loadDepositIntake(),
+      loadReceiverChangeReviews(),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),
@@ -5856,6 +5960,10 @@ logoutButton.addEventListener('click', async () => {
   signOut();
 });
 refreshRequestsButton.addEventListener('click', loadOwnerPlayerQueues);
+receiverChangeReviewRefresh.addEventListener('click', () => loadReceiverChangeReviews());
+receiverChangeReviewOlder.addEventListener('click', () => {
+  if (receiverChangeReviewCursor) loadReceiverChangeReviews(receiverChangeReviewCursor);
+});
 supportContactRefresh.addEventListener('click', loadSupportContact);
 supportContactUsername.addEventListener('input', () => {
   supportContactDirty = true;

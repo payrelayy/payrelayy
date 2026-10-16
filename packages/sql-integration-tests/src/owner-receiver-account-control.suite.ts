@@ -279,6 +279,19 @@ export function registerOwnerReceiverAccountControlSqlTests(
         );
         expect(prior).toHaveLength(1);
 
+        const deployedGrant = await client.query<{ readonly owner_function: boolean }>(`
+          select has_function_privilege(
+            'fetanagent_owner_control',
+            'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
+            'EXECUTE') as owner_function
+        `);
+        expect(deployedGrant.rows).toEqual([{ owner_function: false }]);
+        // Exercise the future Owner path under a transaction-only grant; rollback removes it.
+        await client.query(`grant execute on function
+          app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text
+          ) to fetanagent_owner_control`);
+
         const requestId = randomUUID();
         const receiverRevisionId = randomUUID();
         const lookupCiphertext = `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`;

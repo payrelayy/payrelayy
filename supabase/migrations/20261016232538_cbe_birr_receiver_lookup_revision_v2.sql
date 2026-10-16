@@ -1,6 +1,7 @@
 -- A fresh Owner-confirmed CBE Birr receiver revision may carry independently protected
 -- lookup material. Existing v1 revisions are never inferred, updated, or backfilled.
--- This function has no application caller, provider client, proof lease, or money path.
+-- The rotation function remains ungranted until its Owner runtime and keys are reviewed.
+-- It has no application caller, provider client, proof lease, or money path.
 
 begin;
 set local lock_timeout = '3s';
@@ -311,15 +312,11 @@ revoke all on function app.reject_cbe_birr_receiver_lookup_revision_mutation(),
          fetanagent_deposit_executor, fetanagent_deposit_executor_runtime,
          fetanagent_verification_settlement, fetanagent_verification_settlement_runtime;
 
-grant execute on function app.rotate_owner_cbe_birr_receiver_lookup_v2(
-  uuid, uuid, uuid, integer, text, text, text, text, text, text, text, text
-) to fetanagent_owner_control;
-
 comment on table app.cbe_birr_receiver_lookup_revisions is
   'Private immutable v2 lookup protection for newly Owner-confirmed CBE Birr receiver revisions; no direct application table grants.';
 comment on function app.rotate_owner_cbe_birr_receiver_lookup_v2(
   uuid, uuid, uuid, integer, text, text, text, text, text, text, text, text
 ) is
-  'Owner-only atomic CBE Birr receiver rotation with fresh, revision-bound v2 lookup protection. All financial switches must remain disabled. No lookup or credit authority.';
+  'Ungranted-by-default Owner rotation candidate for fresh revision-bound v2 lookup protection. All financial switches must remain disabled. No lookup or credit authority.';
 
 commit;

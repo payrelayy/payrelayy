@@ -23,7 +23,8 @@ loaded the ciphertext from the Owner's immutable revision. No existing receiver 
 backfilled. Existing v1 revisions remain unusable for authoritative CBE Birr lookup.
 
 The private SQL migration `20261016232538_cbe_birr_receiver_lookup_revision_v2.sql` adds a
-separate, immutable v2 lookup row and an Owner-only atomic rotation function. It requires a newly
+separate, immutable v2 lookup row and an atomic rotation function **not granted to any application
+role yet**. It requires a newly
 assigned UUID/version, matching v1/v2 display masks, and all payment switches disabled. An
 existing v1 account may only gain v2 material through a **new** same-account receiver revision
 with reason `protection_upgrade`; it cannot be updated in place. No application calls this function

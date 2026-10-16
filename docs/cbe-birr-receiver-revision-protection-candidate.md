@@ -32,6 +32,13 @@ yet, and SQL can validate only envelope shape, not cryptographic authenticity or
 provenance. The migration does not upgrade an existing receiver, grant a worker access, make a
 provider request, enable CBE Birr, or move money.
 
+The internal `cbe-birr-receiver-rotation.ts` candidate prepares the existing v1 display-protected
+receiver and the revision-bound v2 lookup envelope from one exact full phone. It rejects reuse of
+any master across those two domains and requires matching display masks. Its tests use synthetic
+phones and keys only. It is **not** exported from the package, wired to the Owner app, or allowed
+to call the ungranted SQL function. Syntactic key separation still cannot establish independent
+provisioning, an approved key lifecycle, or Owner authorization.
+
 Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker

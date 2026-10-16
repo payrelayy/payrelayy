@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE } from '@fetanagent/agent-platform-companion-contracts';
+import {
+  AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+} from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_AUTHORITY_PATH,
   COMPANION_EXECUTION_POLL_PATH,
@@ -132,6 +136,40 @@ describe('companion device bridge application lifecycle', () => {
       expect(response.statusCode).toBe(401);
       expect(JSON.parse(Buffer.from(response.body).toString('utf8'))).toEqual({
         code: 'invalid_request',
+      });
+    }
+    expect(postgres.runtime.state.claimPairing).not.toHaveBeenCalled();
+    await application.close();
+  });
+
+  it('keeps both Telegram Player-validation routes dormant until one-use state is wired', async () => {
+    const postgres = postgresRuntime();
+    const server = serverRuntime();
+    let handler: CompanionDeviceBridgeHandler | undefined;
+    const application = await startCompanionDeviceBridgeApplication(enabledConfig, {
+      createPostgresRuntime: async () => postgres.runtime,
+      createServer: (candidate) => {
+        handler = candidate;
+        return server.runtime;
+      },
+    });
+    if (!handler) throw new Error('expected the application handler');
+    for (const path of [
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+    ]) {
+      const response = await handler({
+        method: 'POST',
+        path,
+        headers: [
+          ['content-type', AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE],
+          ['accept', AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE],
+        ],
+        body: Buffer.from('{}', 'utf8'),
+      });
+      expect(response.statusCode).toBe(503);
+      expect(JSON.parse(Buffer.from(response.body).toString('utf8'))).toEqual({
+        code: 'temporarily_unavailable',
       });
     }
     expect(postgres.runtime.state.claimPairing).not.toHaveBeenCalled();

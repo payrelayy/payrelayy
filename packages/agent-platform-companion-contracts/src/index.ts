@@ -2461,6 +2461,22 @@ export function deriveKemerBetPlayerValidationAssignmentReplayIdentity(
     : undefined;
 }
 
+export function deriveKemerBetPlayerValidationResultReplayIdentity(
+  candidate: unknown,
+): string | undefined {
+  const result = decodeSignedKemerBetPlayerValidationResult(candidate);
+  return result && digestKemerBetPlayerValidationResultBody(result.body) === result.bodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:telegram-player-validation-result-replay:v1', [
+          ['resultId', result.body.resultId],
+          ['assignmentId', result.body.assignmentId],
+          ['validationRequestId', result.body.validationRequestId],
+          ['resultBodyDigest', result.bodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
 export function digestCompanionPlayerValidationPollContent(
   certificateBodyDigestCandidate: unknown,
 ): string | undefined {

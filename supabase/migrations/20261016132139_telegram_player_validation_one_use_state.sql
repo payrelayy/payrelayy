@@ -741,7 +741,7 @@ revoke all on function app.reject_telegram_player_validation_evidence_mutation()
   app.complete_telegram_player_validation_assignment(text,jsonb),
   app.release_telegram_player_validation_assignment(text),
   app.accept_telegram_player_validation_result(
-    text,text,text,text,text,text,text,text,text,text,text,text,
+    text,text,text,text,text,text,text,text,text,text,text,
     timestamptz,timestamptz,timestamptz,jsonb,jsonb)
   from public, anon, authenticated, service_role,
        fetanagent_player_actions, fetanagent_player_actions_runtime,

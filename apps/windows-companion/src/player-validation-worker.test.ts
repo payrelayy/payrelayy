@@ -33,6 +33,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { CompanionDeviceSigningRuntime } from './device-enrollment.js';
 import {
+  createCompanionPlayerValidationWorker,
   runCompanionPlayerValidationWorker,
   type CompanionPlayerValidationWorkerEvent,
 } from './lookup-worker.js';
@@ -287,6 +288,57 @@ async function seedProtected(
 }
 
 describe('dormant Windows companion single-Player validation worker', () => {
+  it('runs exactly one idle poll without using Find or starting a second loop', async () => {
+    const root = await temporaryRoot();
+    const value = runtimeFixture();
+    const controller = new AbortController();
+    const reports = reporter(controller);
+    const executeSingleLookup = vi.fn();
+    const fetchImplementation = vi.fn(async () => new Response(null, { status: 204 }));
+    const worker = await createCompanionPlayerValidationWorker({
+      dataRoot: root,
+      device: value.runtime,
+      session: { executeSingleLookup },
+      signal: controller.signal,
+      report: reports.report,
+      fetch: fetchImplementation as unknown as typeof fetch,
+      now: () => new Date(now),
+      pollIntervalMs: 100,
+      protector: protector(),
+    });
+    await expect(worker.runOnce()).resolves.toBe('idle');
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    expect(executeSingleLookup).not.toHaveBeenCalled();
+    expect(reports.events.map(({ state }) => state)).toEqual(['waiting_for_assignment']);
+  });
+
+  it('refuses a concurrent Find cycle even while its first poll is pending', async () => {
+    const root = await temporaryRoot();
+    const value = runtimeFixture();
+    const controller = new AbortController();
+    let finishPoll!: (response: Response) => void;
+    const fetchImplementation = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishPoll = resolve;
+        }),
+    );
+    const worker = await createCompanionPlayerValidationWorker({
+      dataRoot: root,
+      device: value.runtime,
+      session: { executeSingleLookup: vi.fn() },
+      signal: controller.signal,
+      report: vi.fn(),
+      fetch: fetchImplementation as unknown as typeof fetch,
+      now: () => new Date(now),
+      protector: protector(),
+    });
+    const first = worker.runOnce();
+    await expect(worker.runOnce()).rejects.toThrow('failed closed');
+    await vi.waitFor(() => expect(fetchImplementation).toHaveBeenCalledOnce());
+    finishPoll(new Response(null, { status: 204 }));
+    await expect(first).resolves.toBe('idle');
+  });
   it('finds one exact Player, submits a bound signed result, and clears its ledger', async () => {
     const root = await temporaryRoot();
     const value = runtimeFixture();

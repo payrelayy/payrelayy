@@ -23,6 +23,7 @@ export interface WindowsCompanionConfig {
   readonly executionV2ExpectedPlatformAgentAccountId?: string;
   readonly routineDepositsEnabled: boolean;
   readonly playerValidationEnabled: boolean;
+  readonly routinePlayerValidationEnabled: boolean;
   readonly routineExpectedPlatformAgentAccountId?: string;
   readonly routineNoMoneyPreflight?: {
     readonly playerId: string;
@@ -108,6 +109,15 @@ export function loadWindowsCompanionConfig(
   if (playerValidationEnabled && (executionV2Enabled || routineDepositsEnabled)) {
     throw new Error('FetanAgent Companion Player validation requires a no-money launch.');
   }
+  const routinePlayerValidationFlag =
+    environment.INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED;
+  if (routinePlayerValidationFlag !== undefined && routinePlayerValidationFlag !== 'true') {
+    throw new Error('FetanAgent Companion routine Player validation feature state is invalid.');
+  }
+  const routinePlayerValidationEnabled = routinePlayerValidationFlag === 'true';
+  if (routinePlayerValidationEnabled && !routineDepositsEnabled) {
+    throw new Error('FetanAgent Companion routine Player validation requires the routine queue.');
+  }
   const executionV2ExpectedPlatformAgentAccountId =
     environment.FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID;
   if (
@@ -159,6 +169,7 @@ export function loadWindowsCompanionConfig(
       : { executionV2ExpectedPlatformAgentAccountId }),
     routineDepositsEnabled,
     playerValidationEnabled,
+    routinePlayerValidationEnabled,
     ...(routineExpectedPlatformAgentAccountId === undefined
       ? {}
       : { routineExpectedPlatformAgentAccountId }),
@@ -188,6 +199,7 @@ export function redactedWindowsCompanionConfig(config: WindowsCompanionConfig) {
       config.executionV2ExpectedPlatformAgentAccountId !== undefined,
     routineDepositsEnabled: config.routineDepositsEnabled,
     playerValidationEnabled: config.playerValidationEnabled,
+    routinePlayerValidationEnabled: config.routinePlayerValidationEnabled,
     routineExpectedAccountConfigured: config.routineExpectedPlatformAgentAccountId !== undefined,
     routineNoMoneyPreflight: config.routineNoMoneyPreflight !== undefined,
     expectedAgentIdentityProvided: config.expectedAgentIdentityProvided,

@@ -105,6 +105,7 @@ export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv)
         preflightAmountMinor > DEPOSIT_MAXIMUM_MINOR)) ||
     environment.INTERNAL_COMPANION_EXECUTION_V2_ENABLED !== undefined ||
     environment.INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED !== undefined ||
+    environment.INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED !== undefined ||
     environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID !== undefined ||
     environment.INTERNAL_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR !== undefined ||
     environment.NODE_OPTIONS !== undefined

@@ -43,6 +43,7 @@ describe('protected routine launcher no-money rehearsal', () => {
       FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '02500',
     },
     { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER' },
+    { INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true' },
   ])('rejects incomplete, invalid, or ambient protected inputs', (override) => {
     expect(() => parseRoutineDepositLauncherInput({ ...BASE, ...override })).toThrow(
       'protected routine-deposit launcher is unavailable',

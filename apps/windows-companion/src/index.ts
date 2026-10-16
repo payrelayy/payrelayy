@@ -38,6 +38,7 @@ import {
   type GuardedPrePermitShutdown,
 } from './guarded-pre-permit-shutdown.js';
 import {
+  createCompanionPlayerValidationWorker,
   runCompanionLookupWorker,
   runCompanionPlayerValidationWorker,
   type CompanionLookupWorkerEvent,
@@ -436,6 +437,15 @@ export async function runWindowsCompanion(): Promise<void> {
           );
         }
         if (config.routineDepositsEnabled) {
+          const routinePlayerValidation = config.routinePlayerValidationEnabled
+            ? await createCompanionPlayerValidationWorker({
+                dataRoot: config.dataRoot,
+                device,
+                session,
+                signal: lookupAbort.signal,
+                report: reportPlayerValidation,
+              })
+            : undefined;
           const queue = startRoutineDepositQueue({
             store: createRoutineDepositHttpStore({
               device,
@@ -451,6 +461,9 @@ export async function runWindowsCompanion(): Promise<void> {
             session,
             signal: lookupAbort.signal,
             report: reportRoutineDeposit,
+            ...(routinePlayerValidation === undefined
+              ? {}
+              : { runReadOnlyIdleWorkOnce: () => routinePlayerValidation.runOnce() }),
           });
           workers.push(
             queue.done.then((result) => {

@@ -643,7 +643,7 @@ async function submitPlayerValidationResult(
   }
 }
 
-/** Dormant until the dedicated route and permission boundary is reviewed and enabled. */
+/** Opt-in no-money worker for one signed, read-only Player-ID Find at a time. */
 export async function runCompanionPlayerValidationWorker(
   options: CompanionPlayerValidationWorkerOptions,
 ): Promise<void> {

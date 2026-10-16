@@ -428,4 +428,24 @@ assert.match(
 );
 assert.match(windowsPackageWorkflow, /gh release edit \$tag --repo \$repository --latest/u);
 
+const [windowsEntry, windowsConfig, workerMode, routineLauncher] = await Promise.all([
+  readFile(new URL('apps/windows-companion/src/index.ts', root), 'utf8'),
+  readFile(new URL('apps/windows-companion/src/config.ts', root), 'utf8'),
+  readFile(new URL('apps/windows-companion/src/worker-mode.ts', root), 'utf8'),
+  readFile(
+    new URL('apps/windows-companion/release/Start FetanAgent Automatic Deposits.ps1', root),
+    'utf8',
+  ),
+]);
+assert.match(windowsConfig, /INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED/u);
+assert.match(windowsConfig, /Player validation requires a no-money launch/u);
+assert.match(workerMode, /return !routineDepositsEnabled && !playerValidationEnabled/u);
+assert.match(
+  workerMode,
+  /return playerValidationEnabled && !routineDepositsEnabled && !executionV2Enabled/u,
+);
+assert.match(windowsEntry, /runCompanionPlayerValidationWorker\(\{/u);
+assert.match(windowsEntry, /shouldRunPlayerValidation\([\s\S]*?config\.playerValidationEnabled/u);
+assert.match(routineLauncher, /'INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED'/u);
+
 console.log('Companion pairing and signed read-only lookup deployment contract verified.');

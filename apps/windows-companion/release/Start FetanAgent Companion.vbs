@@ -3,6 +3,7 @@ Option Explicit
 Dim shell, fileSystem, packageRoot, nodePath, entryPath, releasePath, pairingDialogPath
 Dim dataRoot, releaseSha, identityBindingPath, enrollmentPath, expectedIdentity
 Dim pairingPackage, pairingCommand, pairingProcess, command, stream, exitCode, executionMode
+Dim playerValidationMode
 
 Set shell = CreateObject("WScript.Shell")
 Set fileSystem = CreateObject("Scripting.FileSystemObject")
@@ -61,6 +62,7 @@ End If
 shell.Environment("Process")("FETANAGENT_COMPANION_DATA_ROOT") = dataRoot
 shell.Environment("Process")("FETANAGENT_COMPANION_RELEASE_SHA") = releaseSha
 executionMode = (LCase(Trim(shell.Environment("Process")("INTERNAL_COMPANION_EXECUTION_V2_ENABLED"))) = "true")
+playerValidationMode = (shell.Environment("Process")("INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED") = "true")
 
 identityBindingPath = fileSystem.BuildPath(fileSystem.BuildPath(dataRoot, "identity"), "kemerbet-primary.binding.json")
 If Not fileSystem.FileExists(identityBindingPath) Then
@@ -82,6 +84,12 @@ If executionMode Then
     "Automatic Deposit was requested for this paired account, but the internal switch alone cannot enable it." & vbCrLf & _
     "A current signed local handoff, matching release and pairing, and separate server authority are required before any execution worker starts." & vbCrLf & _
     "A timeout, duplicate, changed page, or uncertain response stops the action and requires server reconciliation; it is never retried blindly.", 64, "FetanAgent Companion"
+ElseIf playerValidationMode Then
+  MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
+    "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _
+    "After local identity verification, only server-signed single-Player Find assignments can run." & vbCrLf & _
+    "This mode is read-only and cannot run alongside Automatic Deposits." & vbCrLf & _
+    "Amount, Notes, Transfer, settlement, and money movement remain disabled.", 64, "FetanAgent Companion"
 Else
   MsgBox "FetanAgent Companion is starting a separate protected Chrome window." & vbCrLf & vbCrLf & _
     "Enter your KemerBet username, password, and CAPTCHA only in that Chrome window." & vbCrLf & _

@@ -93,6 +93,52 @@ describe('Windows companion configuration', () => {
     ).toThrow('mutually exclusive');
   });
 
+  it('enables single-Player validation only as an explicit no-money mode', () => {
+    const base = {
+      NODE_ENV: 'test',
+      FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+    };
+    expect(loadWindowsCompanionConfig(base).playerValidationEnabled).toBe(false);
+    const config = loadWindowsCompanionConfig({
+      ...base,
+      INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED: 'true',
+    });
+    expect(config.playerValidationEnabled).toBe(true);
+    expect(config.executionV2Enabled).toBe(false);
+    expect(config.routineDepositsEnabled).toBe(false);
+    expect(redactedWindowsCompanionConfig(config)).toMatchObject({
+      playerValidationEnabled: true,
+      executionV2Enabled: false,
+      routineDepositsEnabled: false,
+    });
+    for (const invalid of ['', 'false', 'TRUE', '1']) {
+      expect(() =>
+        loadWindowsCompanionConfig({
+          ...base,
+          INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED: invalid,
+        }),
+      ).toThrow('feature state is invalid');
+    }
+    expect(() =>
+      loadWindowsCompanionConfig({
+        ...base,
+        INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED: 'true',
+        INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+        FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID:
+          'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      }),
+    ).toThrow('requires a no-money launch');
+    expect(() =>
+      loadWindowsCompanionConfig({
+        ...base,
+        INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED: 'true',
+        INTERNAL_COMPANION_EXECUTION_V2_ENABLED: 'true',
+        FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID:
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      }),
+    ).toThrow('requires a no-money launch');
+  });
+
   it('accepts only a complete, redacted no-money preflight in the protected routine lane', () => {
     const base = {
       NODE_ENV: 'test',

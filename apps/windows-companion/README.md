@@ -53,6 +53,14 @@ Returning to the actual login page resets the state and starts a new non-sliding
 window within the overall session cap. A separately signed exact-five Player-ID lookup can run
 after pairing; it remains read-only.
 
+The single-Player ID validation worker is a separate, default-off Find-only mode. The literal
+`INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED=true` replaces the exact-five poll with signed
+single-Player assignments in the standard no-money Companion launcher. It is rejected if either
+financial execution mode is enabled; the protected Automatic Deposits launcher also rejects the
+ambient flag. Because the guarded Chrome profile permits one Companion session, this is not a
+concurrent live-deposit feature or an instruction to restart the production worker. No production
+activation or payment permission is conferred by installing this code.
+
 The opt-in execution-v2 worker requires the literal `INTERNAL_COMPANION_EXECUTION_V2_ENABLED=true`,
 one exact UUID account binding, and a current signed local activation handoff that matches the
 paired certificate and companion release. The internal flag alone cannot start the worker. The

@@ -22,6 +22,7 @@ export interface WindowsCompanionConfig {
   readonly executionV2Enabled: boolean;
   readonly executionV2ExpectedPlatformAgentAccountId?: string;
   readonly routineDepositsEnabled: boolean;
+  readonly playerValidationEnabled: boolean;
   readonly routineExpectedPlatformAgentAccountId?: string;
   readonly routineNoMoneyPreflight?: {
     readonly playerId: string;
@@ -99,6 +100,14 @@ export function loadWindowsCompanionConfig(
   if (executionV2Enabled && routineDepositsEnabled) {
     throw new Error('FetanAgent Companion financial execution modes are mutually exclusive.');
   }
+  const playerValidationFlag = environment.INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED;
+  if (playerValidationFlag !== undefined && playerValidationFlag !== 'true') {
+    throw new Error('FetanAgent Companion Player validation feature state is invalid.');
+  }
+  const playerValidationEnabled = playerValidationFlag === 'true';
+  if (playerValidationEnabled && (executionV2Enabled || routineDepositsEnabled)) {
+    throw new Error('FetanAgent Companion Player validation requires a no-money launch.');
+  }
   const executionV2ExpectedPlatformAgentAccountId =
     environment.FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID;
   if (
@@ -149,6 +158,7 @@ export function loadWindowsCompanionConfig(
       ? {}
       : { executionV2ExpectedPlatformAgentAccountId }),
     routineDepositsEnabled,
+    playerValidationEnabled,
     ...(routineExpectedPlatformAgentAccountId === undefined
       ? {}
       : { routineExpectedPlatformAgentAccountId }),
@@ -177,6 +187,7 @@ export function redactedWindowsCompanionConfig(config: WindowsCompanionConfig) {
     executionV2ExpectedAccountConfigured:
       config.executionV2ExpectedPlatformAgentAccountId !== undefined,
     routineDepositsEnabled: config.routineDepositsEnabled,
+    playerValidationEnabled: config.playerValidationEnabled,
     routineExpectedAccountConfigured: config.routineExpectedPlatformAgentAccountId !== undefined,
     routineNoMoneyPreflight: config.routineNoMoneyPreflight !== undefined,
     expectedAgentIdentityProvided: config.expectedAgentIdentityProvided,

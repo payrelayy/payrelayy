@@ -107,7 +107,7 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
               { x: 300, text: value },
             ],
     });
-    return [
+    const rows: SyntheticTextRow[] = [
       row(760, 'Commercial Bank of Ethiopia'),
       row(740, 'VAT Invoice/ Customer Receipt'),
       row(710, 'Transaction Information'),
@@ -135,6 +135,8 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
       row(240, 'Payment Reason', options.paymentReason ?? 'Send Money'),
       row(215, 'Payment Channel', options.paymentChannel ?? 'USSD'),
     ];
+    if (options.extraText) rows.push(row(190, options.extraText));
+    return rows;
   }
   const summaryAmount = options.summaryAmount ?? options.paidAmount ?? '100.00 ETB';
   const rows: SyntheticTextRow[] = [
@@ -582,6 +584,33 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
   });
 
+  it('allows a non-financial footer without weakening the critical-field check', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', extraText: 'SYNTHETIC BANK FOOTER' }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+    });
+  });
+
+  it.each([
+    'VAT Registration No 011140',
+    'VAT Reg. Date 01/01/2003',
+    'VAT Invoice No SYNTHETIC-INVOICE',
+    'VAT Receipt No SYNTHETIC-RECEIPT',
+  ])('does not confuse %s metadata with a second VAT amount', async (extraText) => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', extraText }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+    });
+  });
+
   it('rejects a different Credit Account and reviews conflicting account fields', async () => {
     const wrongReceiver = await parseCbeBirrAuthoritativePdf(
       syntheticReceiptPdf({ layout: 'credit_account_v2' }),
@@ -604,6 +633,26 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       reasonCode: 'pdf_field_conflict',
     });
     expect(Reflect.ownKeys(conflictingPdf)).not.toContain('facts');
+  });
+
+  it.each([
+    'Credit Account 251900000009 - SYNTHETIC RECEIVER',
+    'Receiver Name 251900000009 - SYNTHETIC RECEIVER',
+    'Order ID OTHERREF1234',
+    'Transaction Status Completed',
+    'Paid amount 999.00',
+    'VAT 0.00',
+    'VAT Invoice/ Customer Receipt',
+  ])('reviews a second critical field outside the expected section: %s', async (extraText) => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', extraText }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'pdf_field_duplicate',
+    });
+    expect(Reflect.ownKeys(result)).not.toContain('facts');
   });
 
   it.each([

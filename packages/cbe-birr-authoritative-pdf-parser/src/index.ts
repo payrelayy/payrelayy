@@ -1156,6 +1156,36 @@ function parseNewLayoutTimestamp(value: string): string | undefined {
  * account) is compared to the configured receiver. No account digits leave this parser.
  */
 function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedReceiptResult {
+  // The detail section can contain a footer, but it cannot carry a second account, reference,
+  // status, or amount field. Checking only the expected section would allow a contradictory
+  // field elsewhere on the same PDF to be silently ignored by this advisory parser.
+  const criticalLabels = [
+    'Debit Account',
+    'Credit Account',
+    'Receiver Name',
+    'Order ID',
+    'Transaction Status',
+    'Reference',
+    'Paid amount',
+    'Service Charge',
+    'VAT',
+    'Total Paid Amount',
+    'Payment Reason',
+    'Payment Channel',
+  ] as const;
+  for (const label of criticalLabels) {
+    // The bank's VAT registration/invoice metadata is not the monetary VAT field.
+    const count = rows.filter(({ text }, index) =>
+      label === 'VAT'
+        ? index !== 1 &&
+          !/^VAT (?:Registration|Reg\.|Invoice No|Receipt No)(?=\s|:|$)/u.test(text) &&
+          (text === label || text.startsWith(`${label} `))
+        : text === label || text.startsWith(`${label} `),
+    ).length;
+    if (count === 0) return { ok: false, reasonCode: 'pdf_field_missing' };
+    if (count > 1) return { ok: false, reasonCode: 'pdf_field_duplicate' };
+  }
+
   const infoIndexes = rows.flatMap((row, index) =>
     row.text === 'Transaction Information' ? [index] : [],
   );

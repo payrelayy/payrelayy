@@ -415,6 +415,7 @@ describe('runtime configuration isolation', () => {
       apiIngress: { enabled: true, secretsConfigured: true },
       telegramBetaAdmission: { enabled: false, secretsConfigured: false },
       telegramActionChannel: { enabled: false, secretsConfigured: false },
+      playerValidationIntakeEnabled: false,
     });
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(token);
     expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain(transportHmacSecret);

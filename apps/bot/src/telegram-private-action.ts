@@ -58,6 +58,7 @@ export interface TelegramDepositCommandMetadata extends TelegramPrivateActionMet
 export interface TelegramGuidedDepositReplyMetadata extends TelegramPrivateActionMetadata {
   readonly text: unknown;
   readonly replyToMessage: unknown;
+  readonly playerValidationEnabled?: boolean;
 }
 
 export interface TelegramGuidedDepositMediaMetadata extends TelegramPrivateActionMetadata {
@@ -72,7 +73,7 @@ export type TelegramGuidedDepositDestinationSubmission =
       readonly kind: 'action';
       readonly action: Extract<
         TelegramPrivateActionEnvelope,
-        { kind: 'save_player_selection_command' }
+        { kind: 'save_player_selection_command' | 'player_validation_request_command' }
       >;
     }
   | { readonly kind: 'invalid_input' };
@@ -278,7 +279,9 @@ export function reduceTelegramGuidedDepositDestinationSubmission(
     kind: 'action',
     action: {
       ...identity,
-      kind: 'save_player_selection_command',
+      kind: metadata.playerValidationEnabled
+        ? 'player_validation_request_command'
+        : 'save_player_selection_command',
       playerId,
     },
   };

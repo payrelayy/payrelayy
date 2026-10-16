@@ -127,8 +127,11 @@ async function deliverPlayerAction(
     const presentation = presentTelegramPlayerIdFlowResult(
       result,
       action.kind === 'telebirr_deposit_destination_command'
-        ? { selectedPlayerId: action.playerId }
-        : {},
+        ? {
+            selectedPlayerId: action.playerId,
+            playerValidationEnabled: config.playerValidationIntakeEnabled,
+          }
+        : { playerValidationEnabled: config.playerValidationIntakeEnabled },
     );
     if (presentation.kind === 'deferred') return;
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
@@ -278,6 +281,7 @@ bot.on('message', async (context) => {
       ...metadata,
       text,
       replyToMessage,
+      playerValidationEnabled: config.playerValidationIntakeEnabled,
     });
     if (destinationSubmission) {
       if (destinationSubmission.kind === 'action') {
@@ -459,7 +463,10 @@ bot.on('message', async (context) => {
       }
       return;
     }
-    if (!(typeof text === 'string' && text.startsWith('/'))) {
+    if (
+      !config.playerValidationIntakeEnabled &&
+      !(typeof text === 'string' && text.startsWith('/'))
+    ) {
       const playerIdAction = reduceTelegramPlayerIdTextAction({ ...metadata, text });
       if (playerIdAction) {
         await deliverPlayerAction(playerIdAction, (replyText, keyboard) =>
@@ -549,6 +556,16 @@ if (playerActions.enabled) {
       return;
     }
     if (changePlayer) {
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
+        reply_markup: {
+          force_reply: true,
+          selective: true,
+          input_field_placeholder: 'KemerBet Player ID',
+        },
+      });
+      return;
+    }
+    if (config.playerValidationIntakeEnabled && action?.kind === 'player_registration_callback') {
       await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
         reply_markup: {
           force_reply: true,

@@ -21,6 +21,7 @@ export type TelegramPlayerIdFlowPresentation =
 
 export interface TelegramPlayerIdFlowContext {
   readonly selectedPlayerId?: string;
+  readonly playerValidationEnabled?: boolean;
 }
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
@@ -62,7 +63,11 @@ export function presentTelegramPlayerIdFlowResult(
     case 'menu':
       return {
         kind: 'menu',
-        menu: renderPlayerRegistrationMenu(result.callbackData, result.selectedPlayerId),
+        menu: renderPlayerRegistrationMenu(
+          result.callbackData,
+          result.selectedPlayerId,
+          context.playerValidationEnabled,
+        ),
       };
     case 'player_selection_missing':
       return {

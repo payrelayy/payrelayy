@@ -63,6 +63,7 @@ export interface BotConfig extends RuntimeConfig {
   readonly apiIngress: BotApiIngressConfig;
   readonly telegramBetaAdmission: BotTelegramBetaAdmissionConfig;
   readonly telegramActionChannel: BotTelegramActionChannelConfig;
+  readonly playerValidationIntakeEnabled: boolean;
   readonly supportContactUrl: string | undefined;
 }
 
@@ -348,6 +349,14 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     enabled,
     actionChannelEnabled,
   );
+  const playerValidationIntakeEnabled = booleanFromEnv(
+    environment.INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED,
+    false,
+    'INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED',
+  );
+  if (playerValidationIntakeEnabled && (!enabled || !telegramActionChannel.enabled)) {
+    throw new Error('Player validation intake requires the private Telegram action channel.');
+  }
 
   if (!enabled) {
     return {
@@ -363,6 +372,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       },
       telegramBetaAdmission,
       telegramActionChannel,
+      playerValidationIntakeEnabled,
       supportContactUrl,
     };
   }
@@ -400,6 +410,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     apiIngress,
     telegramBetaAdmission,
     telegramActionChannel,
+    playerValidationIntakeEnabled,
     supportContactUrl,
   };
 }
@@ -423,6 +434,7 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
     readonly enabled: boolean;
     readonly secretsConfigured: boolean;
   };
+  readonly playerValidationIntakeEnabled: boolean;
 } {
   return {
     nodeEnv: config.nodeEnv,
@@ -444,5 +456,6 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
       enabled: config.telegramActionChannel.enabled,
       secretsConfigured: config.telegramActionChannel.enabled,
     },
+    playerValidationIntakeEnabled: config.playerValidationIntakeEnabled,
   };
 }

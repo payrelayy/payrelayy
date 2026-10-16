@@ -77,6 +77,7 @@ export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv)
   readonly accountId: string;
   readonly dataRoot: string;
   readonly releaseSha: string;
+  readonly routinePlayerValidationEnabled: boolean;
   readonly noMoneyPreflight?: { readonly playerId: string; readonly amountMinor: number };
 } {
   const accountId = environment.FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID;
@@ -84,6 +85,7 @@ export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv)
   const releaseSha = environment.FETANAGENT_COMPANION_RELEASE_SHA;
   const preflightPlayerId = environment.FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID;
   const preflightAmountText = environment.FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR;
+  const playerFindFlag = environment.FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED;
   const preflightAmountMinor =
     preflightAmountText && PREFLIGHT_AMOUNT.test(preflightAmountText)
       ? Number(preflightAmountText)
@@ -97,6 +99,9 @@ export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv)
     /[\u0000-\u001f\u007f]/u.test(dataRoot) ||
     !releaseSha ||
     !RELEASE.test(releaseSha) ||
+    (playerFindFlag !== undefined && playerFindFlag !== 'true') ||
+    (playerFindFlag === 'true' &&
+      (preflightPlayerId !== undefined || preflightAmountText !== undefined)) ||
     ((preflightPlayerId !== undefined || preflightAmountText !== undefined) &&
       (!preflightPlayerId ||
         !PLAYER_ID.test(preflightPlayerId) ||
@@ -116,6 +121,7 @@ export function parseRoutineDepositLauncherInput(environment: NodeJS.ProcessEnv)
     accountId,
     dataRoot: win32.normalize(dataRoot),
     releaseSha,
+    routinePlayerValidationEnabled: playerFindFlag === 'true',
     ...(preflightPlayerId === undefined || preflightAmountMinor === undefined
       ? {}
       : {
@@ -183,6 +189,9 @@ async function main(): Promise<void> {
         FETANAGENT_COMPANION_DATA_ROOT: input.dataRoot,
         FETANAGENT_COMPANION_RELEASE_SHA: input.releaseSha,
         INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+        ...(input.routinePlayerValidationEnabled
+          ? { INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true' }
+          : {}),
         FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID: input.accountId,
         ...(input.noMoneyPreflight === undefined
           ? {}

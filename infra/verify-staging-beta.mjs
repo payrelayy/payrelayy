@@ -830,6 +830,7 @@ assert.match(botService, /target: bot/);
 assert.match(botService, /TELEGRAM_BOT_ENABLED: 'true'/);
 assert.match(botService, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/);
 assert.match(botService, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/);
+assert.match(botService, /INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'false'/);
 assert.match(botService, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'/);
 assert.match(botService, /BOT_TO_BETA_ADMISSION_BASE_URL: http:\/\/beta-admission:3001\//);
 assert.match(botService, /BOT_TO_API_ACTION_BASE_URL: http:\/\/api:3000\//);

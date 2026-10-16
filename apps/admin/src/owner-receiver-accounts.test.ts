@@ -4,6 +4,7 @@ import {
   OwnerReceiverAccountRejectedError,
   OwnerReceiverAccountUnavailableError,
   PostgresOwnerReceiverAccounts,
+  validOwnerReceiverAccountReference,
   type OwnerReceiverDatabase,
 } from './owner-receiver-accounts.js';
 
@@ -90,7 +91,7 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
       const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
       const result = await control.rotate(authUserId, {
         accountHolderName: 'FetanAgent Receiver',
-        accountReference: '0000003456',
+        accountReference: providerCode === 'cbe_birr' ? '251000003456' : '0000003456',
         providerCode,
         requestId,
         rotationReason: 'account_rotation',
@@ -100,6 +101,36 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
       expect(JSON.stringify(result)).not.toMatch(/cipher|fingerprint|0000003456/iu);
     },
   );
+
+  it('requires a full 251 phone for new CBE Birr revisions without changing TeleBirr rules', async () => {
+    expect(validOwnerReceiverAccountReference('cbe_birr', '251000003456')).toBe(true);
+    expect(validOwnerReceiverAccountReference('telebirr', '0000003456')).toBe(true);
+    expect(validOwnerReceiverAccountReference('telebirr', '251000003456')).toBe(true);
+    for (const invalid of [
+      '000003456',
+      '0000003456',
+      '25100000345',
+      '2510000034567',
+      '+251000003456',
+      '25100000345 ',
+      '251０００００３４５６',
+    ]) {
+      expect(validOwnerReceiverAccountReference('cbe_birr', invalid)).toBe(false);
+      const query = vi.fn<OwnerReceiverDatabase['query']>();
+      const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
+      await expect(
+        control.rotate(authUserId, {
+          accountHolderName: 'FetanAgent Receiver',
+          accountReference: invalid,
+          providerCode: 'cbe_birr',
+          requestId,
+          rotationReason: 'owner_correction',
+        }),
+      ).rejects.toBeInstanceOf(OwnerReceiverAccountRejectedError);
+      expect(query).not.toHaveBeenCalled();
+    }
+    expect(validOwnerReceiverAccountReference('other', '251000003456')).toBe(false);
+  });
 
   it('still rejects missing or mismatched provider display names in history', async () => {
     for (const value of [rotationRow(), row({ provider_display_name: 'Other provider' })]) {

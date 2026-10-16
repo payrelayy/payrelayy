@@ -24,6 +24,9 @@ class FakeElement {
   height = 720;
   hidden = false;
   href = '';
+  maxLength = 0;
+  minLength = 0;
+  pattern = '';
   tabIndex = 0;
   textContent = '';
   type = '';
@@ -1571,6 +1574,32 @@ describe('Owner dashboard browser authentication boundary', () => {
       'Sign in to check the companion connection.',
     );
     expect(browser.element('#companion-connection-refresh').disabled).toBe(true);
+  });
+
+  it('shows the provider-specific receiver format and clears a number when switching providers', async () => {
+    const browser = ownerBrowserHarness(503);
+    const provider = browser.element('#receiver-provider');
+    const number = browser.element('#receiver-account-reference');
+    const label = browser.element('#receiver-account-reference-label');
+    expect(number.pattern).toBe('[0-9]{9,24}');
+    expect(label.textContent).toContain('TeleBirr');
+
+    number.value = '0000003456';
+    browser.element('#receiver-confirmation').checked = true;
+    provider.value = 'cbe_birr';
+    await provider.listeners.get('change')?.({ preventDefault() {} });
+    expect(number.value).toBe('');
+    expect(browser.element('#receiver-confirmation').checked).toBe(false);
+    expect(number.pattern).toBe('251[0-9]{9}');
+    expect(number.minLength).toBe(12);
+    expect(number.maxLength).toBe(12);
+    expect(label.textContent).toContain('251 + nine digits');
+
+    provider.value = 'telebirr';
+    await provider.listeners.get('change')?.({ preventDefault() {} });
+    expect(number.pattern).toBe('[0-9]{9,24}');
+    expect(number.minLength).toBe(9);
+    expect(number.maxLength).toBe(24);
   });
 
   it.each([201, 503])(

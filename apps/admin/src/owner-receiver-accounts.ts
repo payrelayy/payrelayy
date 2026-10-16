@@ -58,7 +58,8 @@ const HOLDER_PATTERN =
 const CURRENT_MASK_PATTERN = /^\*\*\*[0-9]{4}$/u;
 const LEGACY_MASK_PATTERN = /^\*\*\*\*[0-9]{4}$/u;
 const LEGACY_SYNTHETIC_MASK = '****TEST';
-const REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
+const TELEBIRR_REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
+const CBE_BIRR_RECEIVER_PHONE_PATTERN = /^251[0-9]{9}$/u;
 const PROVIDERS = new Set<OwnerReceiverProvider>(['cbe_birr', 'telebirr']);
 const ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'account_rotation',
@@ -66,6 +67,23 @@ const ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'owner_correction',
   'provider_incident_recovery',
 ]);
+
+/**
+ * A CBE Birr receiver is a full Ethiopian wallet phone, not a local nine-digit value.
+ * The official receipt lookup's PH selector needs the full value, but PH alone never
+ * proves the receipt credited this receiver. Existing revisions are not rewritten.
+ */
+export function validOwnerReceiverAccountReference(
+  providerCode: unknown,
+  accountReference: unknown,
+): boolean {
+  if (typeof accountReference !== 'string') return false;
+  return providerCode === 'cbe_birr'
+    ? CBE_BIRR_RECEIVER_PHONE_PATTERN.test(accountReference)
+    : providerCode === 'telebirr'
+      ? TELEBIRR_REFERENCE_PATTERN.test(accountReference)
+      : false;
+}
 
 const LIST_SQL = `
   select provider_code,
@@ -182,7 +200,7 @@ function validateRotation(authUserId: string, request: RotateOwnerReceiverAccoun
     !UUID_V4_PATTERN.test(request.requestId) ||
     !PROVIDERS.has(request.providerCode) ||
     !HOLDER_PATTERN.test(request.accountHolderName) ||
-    !REFERENCE_PATTERN.test(request.accountReference) ||
+    !validOwnerReceiverAccountReference(request.providerCode, request.accountReference) ||
     !ROTATION_REASONS.has(request.rotationReason)
   ) {
     throw new OwnerReceiverAccountRejectedError();

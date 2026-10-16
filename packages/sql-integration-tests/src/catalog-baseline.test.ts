@@ -9984,6 +9984,7 @@ registerTelegramPlayerValidationRequestSqlTests(() => client);
 registerTelegramPlayerValidationStateSqlTests(
   () => client,
   () => ownerAdminId,
+  () => createSqlIntegrationClient(environment),
 );
 registerStagingContinuousAvailabilitySqlTests(() => client);
 registerStagingTelebirrShadowVerifierLifecycleSqlTests(

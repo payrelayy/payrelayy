@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Client, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
 
+import { processOneTelegramPlayerValidationOutcome } from '../../../apps/bot/src/telegram-player-validation-notifier.js';
 import { createPairedDevice } from './companion-exact-five-lookup.suite.js';
 import { createPilotPrerequisites } from './private-live-money-pilot.suite.js';
 
@@ -249,6 +250,7 @@ async function acceptedFound(
 export function registerTelegramPlayerValidationStateSqlTests(
   getClient: () => Client,
   getOwnerAdminId: () => string,
+  createClient: () => Client,
 ): void {
   describe('dormant one-use Telegram Player validation state', () => {
     it('grants only the atomic signed Find surface to the bridge, never direct finalization', async () => {
@@ -409,6 +411,103 @@ export function registerTelegramPlayerValidationStateSqlTests(
       }
     });
 
+    it('serializes competing requests for one Telegram identity across database sessions', async () => {
+      const observer = getClient();
+      await observer.query('begin');
+      let oldEvent: string;
+      let newEvent: string;
+      try {
+        oldEvent = await inbound(observer, '89660000030', '89650000030');
+        newEvent = await inbound(observer, '89660000031', '89650000030');
+        await observer.query('commit');
+      } catch (error) {
+        await observer.query('rollback');
+        throw error;
+      }
+
+      const before = (
+        await observer.query(`select
+          (select count(*)::text from app.deposit_intents) as intents,
+          (select count(*)::text from app.deposit_jobs) as jobs`)
+      ).rows;
+      const left = createClient();
+      const right = createClient();
+      let pending: Promise<string> | undefined;
+      await Promise.all([left.connect(), right.connect()]);
+      try {
+        for (const session of [left, right]) {
+          await session.query('begin');
+          await session.query("set local statement_timeout = '8s'");
+        }
+        const leftPid = (await left.query<{ pid: number }>('select pg_backend_pid() as pid'))
+          .rows[0]!.pid;
+        const rightPid = (await right.query<{ pid: number }>('select pg_backend_pid() as pid'))
+          .rows[0]!.pid;
+        const oldRequest = await requestValidation(left, oldEvent, 'RACE-OLD-PLAYER');
+        pending = requestValidation(right, newEvent, 'RACE-NEW-PLAYER');
+        void pending.catch(() => undefined);
+        let blocked = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const lock = await observer.query<{ blocked: boolean }>(
+            'select $1::integer = any(pg_blocking_pids($2::integer)) as blocked',
+            [leftPid, rightPid],
+          );
+          if (lock.rows[0]!.blocked) {
+            blocked = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(blocked).toBe(true);
+        expect(
+          (
+            await observer.query(
+              'select id from app.telegram_player_validation_requests where id=$1::uuid',
+              [oldRequest],
+            )
+          ).rows,
+        ).toEqual([]);
+
+        await left.query('commit');
+        const newRequest = await pending;
+        await right.query('commit');
+        expect(newRequest).not.toBe(oldRequest);
+        expect(
+          (
+            await observer.query<{ id: string; status: string }>(
+              `select id, status from app.telegram_player_validation_requests
+                where id in ($1::uuid, $2::uuid) order by id`,
+              [oldRequest, newRequest],
+            )
+          ).rows,
+        ).toEqual(
+          [
+            { id: oldRequest, status: 'superseded' },
+            { id: newRequest, status: 'pending' },
+          ].sort((a, b) => a.id.localeCompare(b.id)),
+        );
+        expect(
+          (
+            await observer.query(`select
+              (select count(*)::text from app.deposit_intents) as intents,
+              (select count(*)::text from app.deposit_jobs) as jobs`)
+          ).rows,
+        ).toEqual(before);
+      } finally {
+        await Promise.allSettled([left.query('rollback'), right.query('rollback')]);
+        await Promise.allSettled([left.end(), right.end()]);
+        if (pending) await pending.catch(() => undefined);
+        // The fixture is committed so both sessions can see it; do not leave a
+        // pending Find for the later assignment tests in this disposable database.
+        await observer.query(
+          `update app.telegram_player_validation_requests
+              set status = 'superseded', completed_at = pg_catalog.clock_timestamp()
+            where origin_inbound_event_id in ($1::uuid, $2::uuid) and status = 'pending'`,
+          [oldEvent, newEvent],
+        );
+      }
+    });
+
     it('keeps bot results off by default, then leases one signed selection after an explicit cutover', async () => {
       const client = getClient();
       await client.query('begin');
@@ -511,6 +610,129 @@ export function registerTelegramPlayerValidationStateSqlTests(
             )
           ).rows,
         ).toEqual([{ validation_request_id: requestId }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('delivers one final bot message for each signed selection or review, then drains the queue', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`update app.telegram_player_validation_notification_cutover
+          set enabled_at = pg_catalog.clock_timestamp() - interval '1 second'
+          where singleton = true`);
+        const before = (
+          await client.query(`select
+            (select count(*)::text from app.deposit_intents) as intents,
+            (select count(*)::text from app.deposit_jobs) as jobs`)
+        ).rows;
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        for (const [updateId, userId, playerId, outcome, finalizationState] of [
+          ['89660000032', '89650000032', 'E2E-FOUND-PLAYER', 'found', 'selected'],
+          ['89660000033', '89650000033', 'E2E-REVIEW-PLAYER', 'review_required', 'review_required'],
+        ] as const) {
+          const eventId = await inbound(client, updateId, userId);
+          await requestValidation(client, eventId, playerId);
+          const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+          expect(claimed[0]?.claim_state).toBe('claimed');
+          const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+          expect(
+            (
+              await client.query(
+                'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb) as completed',
+                [assignment.bodyDigest, assignment],
+              )
+            ).rows,
+          ).toEqual([{ completed: true }]);
+          expect(
+            await accept(client, assignment, resultEnvelope(assignment, outcome), true),
+          ).toEqual([{ accepted: true, replayed: false, finalization_state: finalizationState }]);
+        }
+
+        const sent: { chatId: number; text: string; showDepositButton: boolean }[] = [];
+        const request: Parameters<
+          typeof processOneTelegramPlayerValidationOutcome
+        >[0]['request'] = async (action) => {
+          if (action.kind === 'player_validation_outcome_claim') {
+            const rows = (
+              await client.query<{
+                notification_id: string;
+                notification_lease_token: string;
+                notification_private_chat_id: string;
+                notification_outcome_code: 'selected' | 'review_required';
+              }>('select * from app.claim_telegram_player_validation_notification()')
+            ).rows;
+            if (rows.length === 0) {
+              return { version: 1, outcome: 'player_validation_outcome_none' };
+            }
+            const row = rows[0]!;
+            return {
+              version: 1,
+              outcome: 'player_validation_outcome_delivery',
+              notificationId: row.notification_id,
+              leaseToken: row.notification_lease_token,
+              privateChatId: row.notification_private_chat_id,
+              outcomeCode: row.notification_outcome_code,
+            };
+          }
+          if (action.kind !== 'player_validation_outcome_complete') {
+            throw new Error('Unexpected bot action in Player validation delivery test.');
+          }
+          const rows = (
+            await client.query<{ accepted: boolean }>(
+              `select app.complete_telegram_player_validation_notification(
+                   $1::uuid,$2::uuid,$3::text,$4::bigint) as accepted`,
+              [
+                action.notificationId,
+                action.leaseToken,
+                action.deliveryResult,
+                action.telegramMessageId,
+              ],
+            )
+          ).rows;
+          return {
+            version: 1,
+            outcome: 'player_validation_outcome_completed',
+            accepted: rows[0]!.accepted,
+          };
+        };
+        const dependencies = {
+          request,
+          send: async (chatId: number, text: string, showDepositButton: boolean) => {
+            sent.push({ chatId, text, showDepositButton });
+            return { message_id: 100 + sent.length };
+          },
+        };
+        expect(await processOneTelegramPlayerValidationOutcome(dependencies)).toBe('processed');
+        expect(await processOneTelegramPlayerValidationOutcome(dependencies)).toBe('processed');
+        expect(await processOneTelegramPlayerValidationOutcome(dependencies)).toBe('none');
+        expect(sent).toHaveLength(2);
+        expect(sent.map((message) => message.chatId).sort()).toEqual([89650000032, 89650000033]);
+        expect(sent.every((message) => message.showDepositButton)).toBe(true);
+        expect(sent.find((message) => message.chatId === 89650000032)?.text).toContain(
+          'Player ID verified and saved',
+        );
+        expect(sent.find((message) => message.chatId === 89650000033)?.text).toContain(
+          'saved Player ID has not changed',
+        );
+        expect(sent.map((message) => message.text).join(' ')).not.toMatch(
+          /E2E-(FOUND|REVIEW)-PLAYER/u,
+        );
+        expect(
+          (
+            await client.query<{ status: string }>(
+              'select status from app.telegram_player_validation_notifications order by id',
+            )
+          ).rows,
+        ).toEqual([{ status: 'sent' }, { status: 'sent' }]);
+        expect(
+          (
+            await client.query(`select
+              (select count(*)::text from app.deposit_intents) as intents,
+              (select count(*)::text from app.deposit_jobs) as jobs`)
+          ).rows,
+        ).toEqual(before);
       } finally {
         await client.query('rollback');
       }

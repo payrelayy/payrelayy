@@ -96,6 +96,12 @@ customer-facing rejection or a financial decision. No live response, real receip
 identifier, name, phone number, field value, or provider document is stored in this package or
 its tests.
 
+The newer PDF layout prints transaction time only to the minute. Parser version 2 marks its
+`occurredAt` value as `occurredAtPrecision: minute`; the older seconds-bearing layout is marked
+`second`. A future financial policy must treat the displayed timestamp as the start of a possible
+interval, not an exact payment instant. If that interval overlaps a one-hour freshness boundary,
+instruction expiry, or receiver rotation, the result needs review rather than automatic credit.
+
 ## Test and runtime isolation
 
 All tests use clearly marked synthetic references, 12-digit synthetic selectors, byte envelopes,

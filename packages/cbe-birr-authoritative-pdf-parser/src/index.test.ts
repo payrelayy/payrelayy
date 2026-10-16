@@ -508,7 +508,7 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       contractVersion: 1,
       providerCode: 'cbe_birr',
       sourceProfile: 'cbe_birr_official_receipt_lookup_v1',
-      parserVersion: 1,
+      parserVersion: 2,
       advisoryOnly: true,
       safeFactsOnly: true,
       sqlAuthorizationAllowed: false,
@@ -550,6 +550,7 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
         feeArithmetic: 'consistent',
         additionalFeesMinor: '0',
         occurredAt: '2024-02-29T14:05:09+03:00',
+        occurredAtPrecision: 'second',
         occurredAtTimeZone: 'Africa/Addis_Ababa',
       },
     });
@@ -579,9 +580,35 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
         principalAmountMinor: '10000',
         additionalFeesMinor: '0',
         feeArithmetic: 'consistent',
+        occurredAt: '2026-10-15T00:03:00+03:00',
+        occurredAtPrecision: 'minute',
       },
     });
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('preserves newer-layout minute uncertainty across an instruction deadline', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2' }),
+      expectations(),
+    );
+    if (!('facts' in result)) throw new Error('Synthetic receipt was not parsed.');
+
+    expect(result.facts.occurredAtPrecision).toBe('minute');
+    const earliestPossiblePayment = Date.parse(result.facts.occurredAt);
+    const latestPossiblePaymentExclusive = earliestPossiblePayment + 60_000;
+    const instructionExpiresAt = Date.parse('2026-10-15T00:03:30+03:00');
+    expect(earliestPossiblePayment).toBeLessThan(instructionExpiresAt);
+    expect(latestPossiblePaymentExclusive).toBeGreaterThan(instructionExpiresAt);
+
+    for (const forgedFacts of [
+      { ...result.facts, occurredAtPrecision: 'second' },
+      { ...result.facts, occurredAt: '2026-10-15T00:03:30+03:00' },
+    ]) {
+      expect(
+        redactedCbeBirrAuthoritativePdfParserResultForLog({ ...result, facts: forgedFacts }),
+      ).toMatchObject({ disposition: 'invalid_result', reasonCode: 'invalid_result' });
+    }
   });
 
   it('allows a non-financial footer without weakening the critical-field check', async () => {
@@ -975,7 +1002,7 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     expect(projection).toEqual({
       contractVersion: 1,
       providerCode: 'cbe_birr',
-      parserVersion: 1,
+      parserVersion: 2,
       disposition: 'would_review',
       reasonCode: 'receiver_identity_unavailable',
       advisoryOnly: true,
@@ -1169,7 +1196,7 @@ describe('dependency, fixture, and runtime boundary', () => {
     expect(manifest.dependencies).toEqual({ 'pdfjs-dist': '6.2.108' });
     expect(manifest.devDependencies).toBeUndefined();
     expect(manifest.optionalDependencies).toBeUndefined();
-    expect(CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION).toBe(1);
+    expect(CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION).toBe(2);
     expect(CBE_BIRR_AUTHORITATIVE_PDFJS_VERSION).toBe('6.2.108');
   });
 

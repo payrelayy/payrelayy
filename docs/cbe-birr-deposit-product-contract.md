@@ -118,6 +118,10 @@ following without ambiguity:
     receiver revision. That revision is still active at submission; a retired receiver goes to
     review even if its instruction has not expired. A narrowly bounded provider-clock tolerance
     may accept a time no more than five minutes ahead; anything else goes to review.
+    When the official receipt displays only a minute, the full possible minute must fit the
+    freshness and instruction windows. A minute that straddles a cutoff is uncertain and goes to
+    review; the parser's `:00` representation is not proof that the transaction occurred at that
+    exact second.
 11. The selected KemerBet Player ID exists, is active, and is currently deposit-eligible at the
     settlement and execution boundaries.
 12. The canonical provider reference has not already funded or been conclusively claimed by another

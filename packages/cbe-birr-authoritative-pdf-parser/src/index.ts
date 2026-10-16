@@ -35,7 +35,7 @@ import {
  * the public transport result, and it confers no production verification authority.
  */
 export const CBE_BIRR_AUTHORITATIVE_PDF_PARSER_CONTRACT_VERSION = 1 as const;
-export const CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION = 1 as const;
+export const CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION = 2 as const;
 export const CBE_BIRR_AUTHORITATIVE_PDFJS_VERSION = '6.2.108' as const;
 export const CBE_BIRR_AUTHORITATIVE_PDF_SOURCE_PROFILE =
   'cbe_birr_official_receipt_lookup_v1' as const;
@@ -193,6 +193,7 @@ const safeFactKeys = [
   'feeArithmetic',
   'additionalFeesMinor',
   'occurredAt',
+  'occurredAtPrecision',
   'occurredAtTimeZone',
 ] as const;
 
@@ -290,7 +291,9 @@ export interface CbeBirrAuthoritativePdfSafeFacts {
   readonly totalPaidAmountMinor: string;
   readonly feeArithmetic: 'consistent' | 'mismatched';
   readonly additionalFeesMinor: string;
+  /** The receipt's displayed time is a lower bound, not an exact instant. */
   readonly occurredAt: string;
+  readonly occurredAtPrecision: 'second' | 'minute';
   readonly occurredAtTimeZone: typeof CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE;
 }
 
@@ -1382,6 +1385,10 @@ function safeFacts(
     feeArithmetic: arithmeticMatches ? ('consistent' as const) : ('mismatched' as const),
     additionalFeesMinor: fields.additionalFeesMinor ?? '0',
     occurredAt: fields.occurredAt,
+    occurredAtPrecision:
+      fields.documentTopology === 'cbe_birr_vat_customer_receipt_credit_account_v2'
+        ? ('minute' as const)
+        : ('second' as const),
     occurredAtTimeZone: CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE,
   });
 }
@@ -1561,6 +1568,7 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
   const feeArithmetic = ownDataValue(candidate, 'feeArithmetic');
   const additionalFeesMinor = ownDataValue(candidate, 'additionalFeesMinor');
   const occurredAt = ownDataValue(candidate, 'occurredAt');
+  const occurredAtPrecision = ownDataValue(candidate, 'occurredAtPrecision');
   const documentTopology = ownDataValue(candidate, 'documentTopology');
   const receiverIdentifierEvidence = ownDataValue(candidate, 'receiverIdentifierEvidence');
   const receiverIdentityMatch = ownDataValue(candidate, 'receiverIdentityMatch');
@@ -1598,6 +1606,9 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
     (documentTopology === 'cbe_birr_vat_customer_receipt_v1' && additionalFeesMinor !== '0') ||
     (feeArithmetic !== 'consistent' && feeArithmetic !== 'mismatched') ||
     !isCanonicalAddisTimestamp(occurredAt) ||
+    (documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+      ? occurredAtPrecision !== 'second'
+      : occurredAtPrecision !== 'minute' || !occurredAt.endsWith(':00+03:00')) ||
     ownDataValue(candidate, 'occurredAtTimeZone') !== CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE
   ) {
     return undefined;
@@ -1641,6 +1652,10 @@ function parseSafeFactsCandidate(candidate: unknown): CbeBirrAuthoritativePdfSaf
     feeArithmetic,
     additionalFeesMinor,
     occurredAt,
+    occurredAtPrecision:
+      documentTopology === 'cbe_birr_vat_customer_receipt_v1'
+        ? ('second' as const)
+        : ('minute' as const),
     occurredAtTimeZone: CBE_BIRR_AUTHORITATIVE_PDF_TIME_ZONE,
   });
 }

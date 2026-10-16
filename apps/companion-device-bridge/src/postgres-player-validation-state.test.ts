@@ -105,7 +105,7 @@ describe('private companion Player validation PostgreSQL adapter (dormant)', () 
         return { rows: [{ released: true }] };
       }
       if (sql === ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL) {
-        return { rows: [{ accepted: true, replayed: false }] };
+        return { rows: [{ accepted: true, replayed: false, finalization_state: 'selected' }] };
       }
       throw new Error('unexpected SQL');
     });
@@ -230,6 +230,8 @@ describe('private companion Player validation PostgreSQL adapter (dormant)', () 
       { accepted: false, replayed: false },
       { accepted: true, replayed: 'false' },
       { accepted: true, replayed: false, extra: true },
+      { accepted: true, replayed: false, finalization_state: 'pending' },
+      { accepted: true, replayed: false, finalization_state: null },
     ]) {
       const state = new PostgresCompanionDeviceState(
         { query: async () => ({ rows: [row] }) },

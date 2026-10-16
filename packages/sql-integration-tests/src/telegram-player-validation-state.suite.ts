@@ -185,11 +185,16 @@ async function accept(
   client: Client,
   assignment: ReturnType<typeof assignmentEnvelope>,
   result: ReturnType<typeof resultEnvelope>,
-): Promise<readonly { accepted: boolean; replayed: boolean }[]> {
+  atomically = false,
+): Promise<readonly { accepted: boolean; replayed: boolean; finalization_state?: string }[]> {
   const now = canonicalNow();
   return (
-    await client.query<{ accepted: boolean; replayed: boolean }>(
-      `select * from app.accept_telegram_player_validation_result(
+    await client.query<{ accepted: boolean; replayed: boolean; finalization_state?: string }>(
+      `select * from app.${
+        atomically
+          ? 'accept_and_finalize_telegram_player_validation_result'
+          : 'accept_telegram_player_validation_result'
+      }(
         $1::text,$2::text,$3::text,$4::text,$5::text,$6::text,
         $7::text,$8::text,$9::text,$10::text,$11::text,
         $12::timestamptz,$13::timestamptz,$14::timestamptz,$15::jsonb,$16::jsonb
@@ -246,7 +251,7 @@ export function registerTelegramPlayerValidationStateSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('dormant one-use Telegram Player validation state', () => {
-    it('grants only the four signed Find functions to the bridge, never finalization', async () => {
+    it('grants only the atomic signed Find surface to the bridge, never direct finalization', async () => {
       const client = getClient();
       const digest = await client.query<{ digest: string }>(
         'select app.telegram_player_validation_player_digest($1::text) as digest',
@@ -255,12 +260,18 @@ export function registerTelegramPlayerValidationStateSqlTests(
       expect(digest.rows[0]!.digest).toBe(playerDigest('28379330'));
       const acl = await client.query<{
         bridge_allowed: boolean;
+        old_accept_denied: boolean;
         anon_denied: boolean;
         authenticated_denied: boolean;
         player_actions_denied: boolean;
         public_denied: boolean;
       }>(`
-        select bool_and(has_function_privilege(
+        select not has_function_privilege(
+          'fetanagent_companion_device_bridge_runtime',
+          'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)',
+          'EXECUTE'
+        ) as old_accept_denied,
+        bool_and(has_function_privilege(
           'fetanagent_companion_device_bridge_runtime', signature, 'EXECUTE'
         )) as bridge_allowed,
         bool_and(not has_function_privilege('anon', signature, 'EXECUTE')) as anon_denied,
@@ -281,12 +292,13 @@ export function registerTelegramPlayerValidationStateSqlTests(
           'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'::regprocedure,
           'app.complete_telegram_player_validation_assignment(text,jsonb)'::regprocedure,
           'app.release_telegram_player_validation_assignment(text)'::regprocedure,
-          'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'::regprocedure
+          'app.accept_and_finalize_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'::regprocedure
         ]) as granted(signature)
       `);
       expect(acl.rows).toEqual([
         {
           bridge_allowed: true,
+          old_accept_denied: true,
           anon_denied: true,
           authenticated_denied: true,
           player_actions_denied: true,
@@ -307,6 +319,69 @@ export function registerTelegramPlayerValidationStateSqlTests(
         where oid = 'app.telegram_player_validation_finalizations'::regclass
       `);
       expect(selectionAcl.rows).toEqual([{ allowed: true, rls: true }]);
+    });
+
+    it('atomically selects an exact signed Find, replays once, and leaves money ledgers untouched', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const eventId = await inbound(client, '89660000018', '89650000018');
+        const requestId = await requestValidation(client, eventId, 'ATOMIC-PLAYER-SQL');
+        const before = (
+          await client.query(`select
+            (select count(*)::text from app.deposit_intents) as intents,
+            (select count(*)::text from app.deposit_jobs) as jobs`)
+        ).rows;
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        expect(claimed[0]?.claim_state).toBe('claimed');
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        expect(
+          (
+            await client.query(
+              'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb) as completed',
+              [assignment.bodyDigest, assignment],
+            )
+          ).rows,
+        ).toEqual([{ completed: true }]);
+        const found = resultEnvelope(assignment, 'found');
+        expect(await accept(client, assignment, found, true)).toEqual([
+          { accepted: true, replayed: false, finalization_state: 'selected' },
+        ]);
+        expect(await accept(client, assignment, found, true)).toEqual([
+          { accepted: true, replayed: true, finalization_state: 'already_selected' },
+        ]);
+        expect(
+          (
+            await client.query<{ player_id: string }>(
+              `select player.player_id
+                 from app.telegram_player_selections selection
+                 join app.customer_platform_players player
+                   on player.id = selection.player_account_id
+                where selection.origin_inbound_event_id = $1::uuid`,
+              [eventId],
+            )
+          ).rows,
+        ).toEqual([{ player_id: 'ATOMIC-PLAYER-SQL' }]);
+        expect(
+          (
+            await client.query(
+              `select (select count(*)::text from app.deposit_intents) as intents,
+                      (select count(*)::text from app.deposit_jobs) as jobs`,
+            )
+          ).rows,
+        ).toEqual(before);
+        expect(
+          (
+            await client.query<{ status: string }>(
+              'select status from app.telegram_player_validation_requests where id=$1::uuid',
+              [requestId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'validated' }]);
+      } finally {
+        await client.query('rollback');
+      }
     });
 
     it('stores one current signed result without changing the selected Player or money ledgers', async () => {

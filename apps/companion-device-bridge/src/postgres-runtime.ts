@@ -33,7 +33,7 @@ const COMPLETE_PLAYER_VALIDATION_FUNCTION =
 const RELEASE_PLAYER_VALIDATION_FUNCTION =
   'app.release_telegram_player_validation_assignment(text)';
 const ACCEPT_PLAYER_VALIDATION_FUNCTION =
-  'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
+  'app.accept_and_finalize_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
 const CLAIM_EXECUTION_ASSIGNMENT_FUNCTION =
   'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,text,text,text)';
 const COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION =
@@ -127,7 +127,8 @@ const BASELINE_CONTRACT_ROWS_SQL = `
         (pg_catalog.to_regprocedure('${RELEASE_PLAYER_VALIDATION_FUNCTION}'), 1, false,
           'pg_catalog.bool', 'boolean'),
         (pg_catalog.to_regprocedure('${ACCEPT_PLAYER_VALIDATION_FUNCTION}'), 16, true,
-          'pg_catalog.record', 'table(accepted boolean, replayed boolean)')`;
+          'pg_catalog.record',
+          'table(accepted boolean, replayed boolean, finalization_state text)')`;
 
 const EXECUTION_CONTRACT_ROWS_SQL = `
         (pg_catalog.to_regprocedure('${CLAIM_EXECUTION_ASSIGNMENT_FUNCTION}'), 13, true,

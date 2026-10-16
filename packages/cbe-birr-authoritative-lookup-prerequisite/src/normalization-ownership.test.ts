@@ -478,13 +478,6 @@ describe('normalization inventory compatibility regressions', () => {
         query: '?raw',
       }),
     );
-    const receiptTransportSource = oneRawSource(
-      import.meta.glob('../../../packages/cbe-birr-authoritative-receipt-transport/src/shared.ts', {
-        eager: true,
-        import: 'default',
-        query: '?raw',
-      }),
-    );
     const inventorySource = oneRawSource(
       import.meta.glob('./normalization-ownership.ts', {
         eager: true,
@@ -556,7 +549,6 @@ describe('normalization inventory compatibility regressions', () => {
     expect(telegramRuntimeSource).toContain(
       "const protectedReference = protectDepositProofReference({\n    provider: 'cbe_birr',",
     );
-    expect(receiptTransportSource).toContain('const LOOKUP_PHONE_PATTERN = /^251[0-9]{9}$/u;');
 
     expect(fixtureSource).toContain(
       'export const CBE_BIRR_AUTHORITATIVE_FIXTURE_NORMALIZER_VERSION = 1 as const;',

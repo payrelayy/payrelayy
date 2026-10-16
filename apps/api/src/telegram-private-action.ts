@@ -409,6 +409,15 @@ export function parseTelegramPrivateActionEnvelope(
         ? { ...identity, kind: 'save_player_selection_command', playerId: parsed.playerId }
         : undefined;
     }
+    case 'player_validation_request_command': {
+      if (!hasOnlyKeys(parsed, PLAYER_ID_TEXT_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity &&
+        typeof parsed.playerId === 'string' &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(parsed.playerId)
+        ? { ...identity, kind: 'player_validation_request_command', playerId: parsed.playerId }
+        : undefined;
+    }
     case 'saved_telebirr_proof_command': {
       if (!hasOnlyKeys(parsed, SAVED_PROOF_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);

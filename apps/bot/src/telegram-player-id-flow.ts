@@ -51,6 +51,8 @@ export function presentTelegramPlayerIdFlowResult(
       throw new Error(
         'A bot-only notification operation cannot be presented as a customer action.',
       );
+    case 'player_validation_queued':
+      throw new Error('The dormant Player validation queue has no customer-facing result yet.');
     case 'menu':
       return {
         kind: 'menu',

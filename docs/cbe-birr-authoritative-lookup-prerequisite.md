@@ -114,7 +114,9 @@ The remaining blockers preserve the existing safety design:
    receiver phones to be exactly `251` plus nine digits, without changing the broader TeleBirr
    rule or retroactively rewriting stored revisions. This format check alone does not establish
    protection provenance, identify which existing revision is conforming, or prove that an official
-   receipt credited the configured receiver.
+   receipt credited the configured receiver. An
+   [offline revision-bound protection candidate](cbe-birr-receiver-revision-protection-candidate.md)
+   is internal-only and does not change that result or upgrade any v1 revision.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Submitted capture, synthetic fixture reduction, receiver lookup,

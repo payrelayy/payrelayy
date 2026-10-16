@@ -13,7 +13,7 @@ import {
   type CbeBirrAuthoritativeReceiptFailedResult,
   type CbeBirrAuthoritativeReceiptOpaquePdfResult,
 } from './runner.js';
-import type { CbeBirrAuthoritativeReceiptInternalTransport } from './shared.js';
+import { parseLookupInput, type CbeBirrAuthoritativeReceiptInternalTransport } from './shared.js';
 
 /**
  * Package-internal advisory seam. Neither this module nor its raw-byte fetch is exported from
@@ -56,20 +56,21 @@ const base = Object.freeze({
   financialActionAllowed: false as const,
 });
 
-/** Internal test seam; the receiver expectation must eventually come from an immutable revision. */
+/**
+ * Internal test seam. The caller must eventually source the lookup input from an immutable
+ * receiver revision; the validated receiver phone is the single source for both PH and the
+ * independent PDF Credit Account comparison.
+ */
 export async function retrieveAndParseCbeBirrReceiptWithTransportAndParser(
   inputCandidate: unknown,
   controlCandidate: unknown,
-  configuredReceiverAccountIdentifierCandidate: unknown,
   transport: CbeBirrAuthoritativeReceiptInternalTransport,
   parser: AdvisoryPdfParser,
 ): Promise<CbeBirrOneFetchAdvisoryResult> {
-  // PH is only a lookup selector, never receiver proof. Validate the separate expected account
-  // before even constructing a request; the PDF parser will compare it to Credit Account.
-  if (
-    typeof configuredReceiverAccountIdentifierCandidate !== 'string' ||
-    !/^[0-9]{12}$/u.test(configuredReceiverAccountIdentifierCandidate)
-  ) {
+  // Snapshot exact input before any await. PH locates a receipt, but only the independent PDF
+  // Credit Account comparison can establish which configured wallet it actually credits.
+  const input = parseLookupInput(inputCandidate);
+  if (!input) {
     return Object.freeze({
       ...base,
       disposition: 'transport_failed_closed' as const,
@@ -78,7 +79,7 @@ export async function retrieveAndParseCbeBirrReceiptWithTransportAndParser(
   }
 
   const fetched = await fetchCbeBirrAuthoritativeReceiptInternallyWithTransport(
-    inputCandidate,
+    input,
     controlCandidate,
     transport,
   );
@@ -96,7 +97,7 @@ export async function retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       providerCode: 'cbe_birr',
       sourceProfile: CBE_BIRR_AUTHORITATIVE_PDF_SOURCE_PROFILE,
       canonicalReference: fetched.input.requestedReference,
-      configuredReceiverAccountIdentifier: configuredReceiverAccountIdentifierCandidate,
+      configuredReceiverAccountIdentifier: fetched.input.receiverLookupPhone,
     });
     if (
       redactedCbeBirrAuthoritativePdfParserResultForLog(parserResult).disposition ===
@@ -127,12 +128,10 @@ export async function retrieveAndParseCbeBirrReceiptWithTransportAndParser(
 export function retrieveAndParseCbeBirrReceiptAdvisoryOnly(
   inputCandidate: unknown,
   controlCandidate: unknown,
-  configuredReceiverAccountIdentifierCandidate: unknown,
 ): Promise<CbeBirrOneFetchAdvisoryResult> {
   return retrieveAndParseCbeBirrReceiptWithTransportAndParser(
     inputCandidate,
     controlCandidate,
-    configuredReceiverAccountIdentifierCandidate,
     cbeBirrNodeHttpsTransport,
     parseCbeBirrAuthoritativePdf,
   );

@@ -156,3 +156,11 @@ operational telemetry,
 receiver-material protection, worker decryption, normalization ownership, prelease-safe protected
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of
 those capabilities is implied by an opaque PDF observation.
+
+The internal one-fetch composition now validates and snapshots a single full `251…` receiver
+phone before the request. Its nine local digits select the official `PH` lookup, while the same
+full configured value is independently compared with the PDF's Credit Account field. Callers
+cannot pass a different receiver expectation for the PDF. This removes a split-input ambiguity;
+it does not make `PH` proof of receipt ownership or establish that the caller loaded the phone
+from an immutable Owner receiver revision. That provenance remains a prerequisite for runtime
+wiring and any financial decision.

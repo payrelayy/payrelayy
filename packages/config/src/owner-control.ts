@@ -5,6 +5,10 @@ import {
   loadAndVerifyDepositProofReferenceProfile,
   type DepositProofReferenceProfile,
 } from './deposit-proof-reference-profile.js';
+import {
+  loadAndVerifyOwnerCbeBirrLookupProfile,
+  type OwnerCbeBirrLookupProfile,
+} from './owner-cbe-birr-lookup-profile.js';
 import { booleanFromEnv, loadRuntimeConfig, type RuntimeConfig } from './shared.js';
 
 export const OWNER_CONTROL_STAGING_PROJECT_REFERENCE = 'spzpiyxheappsfyswewl';
@@ -54,6 +58,8 @@ const PRODUCTION_SECRET_PATHS: Readonly<Record<string, string>> = {
     '/run/secrets/owner_receiver_reference_encryption_master',
   OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER:
     '/run/secrets/owner_receiver_reference_fingerprint_master',
+  OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: '/run/secrets/owner_cbe_birr_lookup_encryption_master',
+  OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: '/run/secrets/owner_cbe_birr_lookup_fingerprint_master',
   OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY: '/run/secrets/owner_control_supabase_publishable_key',
   OWNER_ROUTINE_ENROLLMENT_SIGNER_PRIVATE_KEY: '/run/secrets/owner_routine_enrollment_signer_pkcs8',
 };
@@ -74,6 +80,7 @@ export type OwnerControlRuntimeConfig =
   | {
       readonly enabled: false;
       readonly companionDevicePairing: undefined;
+      readonly cbeBirrLookupKeyMaterial: undefined;
       readonly connection: undefined;
       readonly deploymentTarget: undefined;
       readonly devicePairing: undefined;
@@ -95,6 +102,19 @@ export type OwnerControlRuntimeConfig =
         | {
             readonly serverSignerKeyId: string;
             readonly configured: true;
+          };
+      readonly cbeBirrLookupKeyMaterial:
+        | {
+            readonly configured: false;
+            readonly encryptionSecret: undefined;
+            readonly fingerprintSecret: undefined;
+            readonly masterProfile: undefined;
+          }
+        | {
+            readonly configured: true;
+            readonly encryptionSecret: string;
+            readonly fingerprintSecret: string;
+            readonly masterProfile: OwnerCbeBirrLookupProfile;
           };
       readonly connection: OwnerControlDatabaseConnection;
       readonly deploymentTarget: OwnerControlDeploymentTarget;
@@ -272,6 +292,7 @@ export function loadOwnerControlConfig(
       runtime: {
         enabled: false,
         companionDevicePairing: undefined,
+        cbeBirrLookupKeyMaterial: undefined,
         connection: undefined,
         deploymentTarget: undefined,
         devicePairing: undefined,
@@ -346,6 +367,58 @@ export function loadOwnerControlConfig(
     },
     dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
   );
+  const cbeBirrLookupKeyLoadingEnabled = booleanFromEnv(
+    environment.INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED,
+    false,
+    'INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED',
+  );
+  let cbeBirrLookupKeyMaterial: Extract<
+    OwnerControlRuntimeConfig,
+    { enabled: true }
+  >['cbeBirrLookupKeyMaterial'] = {
+    configured: false,
+    encryptionSecret: undefined,
+    fingerprintSecret: undefined,
+    masterProfile: undefined,
+  };
+  if (cbeBirrLookupKeyLoadingEnabled) {
+    const encryptionSecret = readSecret(
+      environment,
+      'OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER',
+      dependencies,
+    );
+    const fingerprintSecret = readSecret(
+      environment,
+      'OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER',
+      dependencies,
+    );
+    if (
+      !encryptionSecret ||
+      !fingerprintSecret ||
+      !/^[0-9a-f]{64}$/u.test(encryptionSecret) ||
+      !/^[0-9a-f]{64}$/u.test(fingerprintSecret) ||
+      new Set([
+        encryptionSecret,
+        fingerprintSecret,
+        receiverReferenceEncryptionMaster,
+        receiverReferenceFingerprintMaster,
+      ]).size !== 4
+    ) {
+      throw new Error('Owner CBE Birr lookup masters are missing, malformed, or reused.');
+    }
+    const masterProfile = loadAndVerifyOwnerCbeBirrLookupProfile(
+      environment,
+      environment.NODE_ENV,
+      { encryptionSecret, fingerprintSecret },
+      dependencies.readSecretFile === undefined ? {} : { readFile: dependencies.readSecretFile },
+    );
+    cbeBirrLookupKeyMaterial = {
+      configured: true,
+      encryptionSecret,
+      fingerprintSecret,
+      masterProfile,
+    };
+  }
   const assignmentSignerKeyId = environment.OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID;
   if (
     assignmentSignerKeyId !== undefined &&
@@ -373,6 +446,7 @@ export function loadOwnerControlConfig(
     ...common,
     runtime: {
       enabled: true,
+      cbeBirrLookupKeyMaterial,
       companionDevicePairing:
         companionServerSignerKeyId === undefined
           ? { serverSignerKeyId: undefined, configured: false }
@@ -420,6 +494,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       databaseConfigured: config.runtime.enabled,
       companionDevicePairingConfigured:
         config.runtime.enabled && config.runtime.companionDevicePairing.configured,
+      cbeBirrLookupKeyMaterialConfigured:
+        config.runtime.enabled && config.runtime.cbeBirrLookupKeyMaterial.configured,
       telebirrDevicePairingConfigured:
         config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,
@@ -429,6 +505,10 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
       receiverReferenceMasterProfileVersion: config.runtime.enabled
         ? config.runtime.receiverReferenceProtection.masterProfile.version
         : undefined,
+      cbeBirrLookupMasterProfileVersion:
+        config.runtime.enabled && config.runtime.cbeBirrLookupKeyMaterial.configured
+          ? config.runtime.cbeBirrLookupKeyMaterial.masterProfile.version
+          : undefined,
     },
   } as const;
 }

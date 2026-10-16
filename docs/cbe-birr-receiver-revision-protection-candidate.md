@@ -39,6 +39,16 @@ phones and keys only. It is **not** exported from the package, wired to the Owne
 to call the ungranted SQL function. Syntactic key separation still cannot establish independent
 provisioning, an approved key lifecycle, or Owner authorization.
 
+The Owner configuration also has a **default-off key-loading contract** for two dedicated CBE
+Birr lookup masters. When explicitly enabled, it requires distinct 64-character hex keys that
+do not equal either existing Owner receiver-reference master, plus an exact version-2,
+purpose-bound profile whose SHA-256 fingerprints match the loaded keys. Production accepts only
+the approved private secret and profile paths. The runtime log reports configuration state, not
+key material. No application route, worker, or SQL function consumes these new keys yet; the
+configuration flag must remain off. Matching profile fingerprints do **not** prove that the
+masters were independently generated, provisioned, or stored. This code does not install real
+secrets or authorize a receiving-wallet change.
+
 Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker

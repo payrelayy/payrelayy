@@ -26,6 +26,14 @@ const COMPLETE_LOOKUP_FUNCTION =
 const RELEASE_LOOKUP_FUNCTION = 'app.release_agent_platform_companion_lookup_assignment(text)';
 const ACCEPT_LOOKUP_RESULT_FUNCTION =
   'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
+const CLAIM_PLAYER_VALIDATION_FUNCTION =
+  'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)';
+const COMPLETE_PLAYER_VALIDATION_FUNCTION =
+  'app.complete_telegram_player_validation_assignment(text,jsonb)';
+const RELEASE_PLAYER_VALIDATION_FUNCTION =
+  'app.release_telegram_player_validation_assignment(text)';
+const ACCEPT_PLAYER_VALIDATION_FUNCTION =
+  'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)';
 const CLAIM_EXECUTION_ASSIGNMENT_FUNCTION =
   'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text,text,text,text)';
 const COMPLETE_EXECUTION_ASSIGNMENT_FUNCTION =
@@ -48,6 +56,10 @@ const BASELINE_ALLOWED_FUNCTIONS = [
   COMPLETE_LOOKUP_FUNCTION,
   RELEASE_LOOKUP_FUNCTION,
   ACCEPT_LOOKUP_RESULT_FUNCTION,
+  CLAIM_PLAYER_VALIDATION_FUNCTION,
+  COMPLETE_PLAYER_VALIDATION_FUNCTION,
+  RELEASE_PLAYER_VALIDATION_FUNCTION,
+  ACCEPT_PLAYER_VALIDATION_FUNCTION,
 ] as const;
 const EXECUTION_ALLOWED_FUNCTIONS = [
   CLAIM_EXECUTION_ASSIGNMENT_FUNCTION,
@@ -106,6 +118,15 @@ const BASELINE_CONTRACT_ROWS_SQL = `
         (pg_catalog.to_regprocedure('${RELEASE_LOOKUP_FUNCTION}'), 1, false,
           'pg_catalog.bool', 'boolean'),
         (pg_catalog.to_regprocedure('${ACCEPT_LOOKUP_RESULT_FUNCTION}'), 16, true,
+          'pg_catalog.record', 'table(accepted boolean, replayed boolean)'),
+        (pg_catalog.to_regprocedure('${CLAIM_PLAYER_VALIDATION_FUNCTION}'), 10, true,
+          'pg_catalog.record',
+          'table(claim_state text, assignment_body jsonb, signed_assignment jsonb)'),
+        (pg_catalog.to_regprocedure('${COMPLETE_PLAYER_VALIDATION_FUNCTION}'), 2, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${RELEASE_PLAYER_VALIDATION_FUNCTION}'), 1, false,
+          'pg_catalog.bool', 'boolean'),
+        (pg_catalog.to_regprocedure('${ACCEPT_PLAYER_VALIDATION_FUNCTION}'), 16, true,
           'pg_catalog.record', 'table(accepted boolean, replayed boolean)')`;
 
 const EXECUTION_CONTRACT_ROWS_SQL = `
@@ -132,6 +153,7 @@ function catalogPreflightSql(
   capabilityGroup: string,
   allowedFunctionsSql: string,
   contractRowsSql: string,
+  expectedFunctionCount: 7 | 11,
 ): string {
   const runtimeExpiryPredicate =
     runtimeRole === COMPANION_DEVICE_BRIDGE_EXECUTION_DATABASE_ROLE
@@ -313,7 +335,7 @@ function catalogPreflightSql(
         )
     ) as no_non_system_base_object_access,
     (
-      select count(*) = 7
+      select count(*) = ${expectedFunctionCount}
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
       where namespace.nspname not in ('pg_catalog', 'information_schema')
@@ -340,7 +362,7 @@ function catalogPreflightSql(
         and routine.prosecdef and routine.oid not in (${allowedFunctionsSql})
     ) as no_reachable_unallowlisted_security_definer,
     (
-      select count(*) = 7 and pg_catalog.bool_and(
+      select count(*) = ${expectedFunctionCount} and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'
@@ -350,7 +372,7 @@ function catalogPreflightSql(
       where routine.oid in (${allowedFunctionsSql})
     ) as allowed_functions_hardened,
     (
-      select count(*) = 7 and pg_catalog.bool_and(
+      select count(*) = ${expectedFunctionCount} and pg_catalog.bool_and(
         routine.pronargs = expected.argument_count
         and routine.pronargdefaults = 0
         and routine.proretset = expected.returns_set
@@ -392,6 +414,7 @@ export const COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql
   COMPANION_DEVICE_BRIDGE_GROUP_ROLE,
   ALLOWED_FUNCTIONS_SQL,
   BASELINE_CONTRACT_ROWS_SQL,
+  11,
 );
 
 export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL = catalogPreflightSql(
@@ -399,6 +422,7 @@ export const COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL = catalogPr
   COMPANION_DEVICE_BRIDGE_EXECUTION_GROUP_ROLE,
   EXECUTION_ALLOWED_FUNCTIONS_SQL,
   EXECUTION_CONTRACT_ROWS_SQL,
+  7,
 );
 
 interface CompanionDeviceBridgePostgresQuery {

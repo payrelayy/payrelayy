@@ -175,7 +175,7 @@ where granted.rolname in (
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 7
+select count(*) = 11
     and pg_catalog.bool_and(
       routine.prosecdef
       and routine.prokind = 'f'
@@ -205,6 +205,14 @@ where namespace.nspname = 'app'
     pg_catalog.to_regprocedure('app.release_agent_platform_companion_lookup_assignment(text)'),
     pg_catalog.to_regprocedure(
       'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
+    ),
+    pg_catalog.to_regprocedure(
+      'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'
+    ),
+    pg_catalog.to_regprocedure('app.complete_telegram_player_validation_assignment(text,jsonb)'),
+    pg_catalog.to_regprocedure('app.release_telegram_player_validation_assignment(text)'),
+    pg_catalog.to_regprocedure(
+      'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
     )
   )
 \gset
@@ -262,6 +270,14 @@ select (
       pg_catalog.to_regprocedure('app.release_agent_platform_companion_lookup_assignment(text)'),
       pg_catalog.to_regprocedure(
         'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
+      ),
+      pg_catalog.to_regprocedure(
+        'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'
+      ),
+      pg_catalog.to_regprocedure('app.complete_telegram_player_validation_assignment(text,jsonb)'),
+      pg_catalog.to_regprocedure('app.release_telegram_player_validation_assignment(text)'),
+      pg_catalog.to_regprocedure(
+        'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'
       )
     )
 ) and not exists (

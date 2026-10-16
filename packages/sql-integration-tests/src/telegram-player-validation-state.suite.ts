@@ -246,22 +246,58 @@ export function registerTelegramPlayerValidationStateSqlTests(
   getOwnerAdminId: () => string,
 ): void {
   describe('dormant one-use Telegram Player validation state', () => {
-    it('matches the signed contract Player digest and exposes no runtime ACL', async () => {
+    it('grants only the four signed Find functions to the bridge, never finalization', async () => {
       const client = getClient();
       const digest = await client.query<{ digest: string }>(
         'select app.telegram_player_validation_player_digest($1::text) as digest',
         ['28379330'],
       );
       expect(digest.rows[0]!.digest).toBe(playerDigest('28379330'));
-      const acl = await client.query<{ allowed: boolean; rls: boolean }>(`
-        select not has_function_privilege(
-          'fetanagent_companion_device_bridge_runtime',
-          'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)',
-          'EXECUTE') as allowed,
-          relrowsecurity and relforcerowsecurity as rls
+      const acl = await client.query<{
+        bridge_allowed: boolean;
+        anon_denied: boolean;
+        authenticated_denied: boolean;
+        player_actions_denied: boolean;
+        public_denied: boolean;
+      }>(`
+        select bool_and(has_function_privilege(
+          'fetanagent_companion_device_bridge_runtime', signature, 'EXECUTE'
+        )) as bridge_allowed,
+        bool_and(not has_function_privilege('anon', signature, 'EXECUTE')) as anon_denied,
+        bool_and(not has_function_privilege('authenticated', signature, 'EXECUTE'))
+          as authenticated_denied,
+        bool_and(not has_function_privilege(
+          'fetanagent_player_actions_runtime', signature, 'EXECUTE'
+        )) as player_actions_denied,
+        bool_and(not exists (
+          select 1 from pg_proc procedure
+          cross join lateral aclexplode(coalesce(
+            procedure.proacl, acldefault('f', procedure.proowner)
+          )) privilege
+          where procedure.oid = signature and privilege.grantee = 0
+            and privilege.privilege_type = 'EXECUTE'
+        )) as public_denied
+        from unnest(array[
+          'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,text)'::regprocedure,
+          'app.complete_telegram_player_validation_assignment(text,jsonb)'::regprocedure,
+          'app.release_telegram_player_validation_assignment(text)'::regprocedure,
+          'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,timestamptz,jsonb,jsonb)'::regprocedure
+        ]) as granted(signature)
+      `);
+      expect(acl.rows).toEqual([
+        {
+          bridge_allowed: true,
+          anon_denied: true,
+          authenticated_denied: true,
+          player_actions_denied: true,
+          public_denied: true,
+        },
+      ]);
+      const rls = await client.query<{ rls: boolean }>(`
+        select relrowsecurity and relforcerowsecurity as rls
         from pg_class where oid = 'app.telegram_player_validation_results'::regclass
       `);
-      expect(acl.rows).toEqual([{ allowed: true, rls: true }]);
+      expect(rls.rows).toEqual([{ rls: true }]);
       const selectionAcl = await client.query<{ allowed: boolean; rls: boolean }>(`
         select not has_function_privilege(
           'fetanagent_companion_device_bridge_runtime',

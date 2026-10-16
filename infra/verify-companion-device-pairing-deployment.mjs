@@ -206,12 +206,16 @@ assert.match(workflow, /staging-companion-server-signer-provision\.sql/u);
 assert.match(workflow, /staging-companion-bridge-runtime-enable-continuous\.sql/u);
 assert.match(workflow, /staging-companion-bridge-runtime-disable\.sql/u);
 assert.match(workflow, /staging-companion-pairing-inspect\.sql/u);
-assert.match(inspection, /select count\(\*\) = 7/u);
+assert.match(inspection, /select count\(\*\) = 11/u);
 for (const routine of [
   'claim_agent_platform_companion_lookup_assignment',
   'complete_agent_platform_companion_lookup_assignment',
   'release_agent_platform_companion_lookup_assignment',
   'accept_agent_platform_companion_lookup_result',
+  'claim_telegram_player_validation_assignment',
+  'complete_telegram_player_validation_assignment',
+  'release_telegram_player_validation_assignment',
+  'accept_telegram_player_validation_result',
 ]) {
   assert.equal(
     (inspection.match(new RegExp(routine, 'gu')) ?? []).length,
@@ -383,7 +387,15 @@ assert.match(databasePreflight, /function-only target-bound runtime configuratio
 assert.doesNotMatch(databasePreflight, /listen\(8085|money|transfer/iu);
 assert.match(postgresRuntime, /owner\.rolname = 'postgres' and defaults\.defaclnamespace = 0/u);
 assert.doesNotMatch(postgresRuntime, /namespace\.oid = defaults\.defaclnamespace/u);
-assert.match(postgresRuntime, /select count\(\*\) = 7/u);
+assert.match(postgresRuntime, /select count\(\*\) = \$\{expectedFunctionCount\}/u);
+assert.match(
+  postgresRuntime,
+  /COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  11,\n\);/u,
+);
+assert.match(
+  postgresRuntime,
+  /COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL = catalogPreflightSql\([\s\S]*?\n  7,\n\);/u,
+);
 assert.match(postgresRuntime, /idleTimeoutMillis: 30_000/u);
 assert.match(postgresRuntime, /min: 0/u);
 assert.match(postgresRuntime, /discardIdleClientError/u);

@@ -53,6 +53,7 @@ function postgresRuntime(initiallyReady = true) {
       claimPairing: vi.fn(),
       completePairing: vi.fn(),
       releasePairing: vi.fn(),
+      claimPlayerValidationAssignment: vi.fn(),
     },
   } as unknown as CompanionDeviceBridgePostgresRuntime;
   return { close, runtime };
@@ -142,7 +143,7 @@ describe('companion device bridge application lifecycle', () => {
     await application.close();
   });
 
-  it('keeps both Telegram Player-validation routes dormant until one-use state is wired', async () => {
+  it('routes Telegram Player validation through signed-envelope checks, never pairing', async () => {
     const postgres = postgresRuntime();
     const server = serverRuntime();
     let handler: CompanionDeviceBridgeHandler | undefined;
@@ -167,12 +168,13 @@ describe('companion device bridge application lifecycle', () => {
         ],
         body: Buffer.from('{}', 'utf8'),
       });
-      expect(response.statusCode).toBe(503);
+      expect(response.statusCode).toBe(401);
       expect(JSON.parse(Buffer.from(response.body).toString('utf8'))).toEqual({
-        code: 'temporarily_unavailable',
+        code: 'invalid_request',
       });
     }
     expect(postgres.runtime.state.claimPairing).not.toHaveBeenCalled();
+    expect(postgres.runtime.state.claimPlayerValidationAssignment).not.toHaveBeenCalled();
     await application.close();
   });
 

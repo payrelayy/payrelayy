@@ -2,6 +2,7 @@ import { CBE_BIRR_OFFICIAL_SOURCE_PROFILE } from '@fetanagent/cbe-birr-official-
 import { isProxy } from 'node:util/types';
 
 export * from './normalization-ownership.js';
+export * from './receipt-time-window.js';
 export * from './receiver-revision-metadata.js';
 
 /**

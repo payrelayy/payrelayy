@@ -89,8 +89,9 @@ parser now recognizes one newer receipt layout containing `Credit Account`, `Rec
 `Order ID`, completed status, minute-precision time, principal, and fee rows. Matching those
 fields is an advisory parsing result only. The internal one-fetch composition now passes bounded
 raw PDF bytes directly to that parser and derives its reference expectation from the canonical
-request. The expected receiver account is supplied separately from `PH`; the parser compares it
-to the PDF's `Credit Account` field. A second critical account, reference, status, or amount label
+request. The caller supplies one validated full receiver phone. Its local digits select `PH`,
+while the parser compares the same full phone to the PDF's `Credit Account` field; `PH` itself is
+not receiver evidence. A second critical account, reference, status, or amount label
 anywhere in the newer-layout PDF now yields advisory review, while unrelated footer text remains
 permitted. This is still **not** end-to-end authoritative verification:
 no trusted immutable receiver revision, live response contract, production source permission,

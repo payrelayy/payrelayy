@@ -168,8 +168,8 @@ export const ACCEPT_COMPANION_LOOKUP_RESULT_SQL = `
     )
 `;
 
-// These private functions are not granted to the live bridge role yet. The public
-// player-validation routes remain dormant until a separate exact-ACL rollout.
+// Signed, Find-only Player validation. The protected Companion scheduler remains
+// default-off; this bridge does not receive direct Player finalizer authority.
 export const CLAIM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL = `
   select claim_state, assignment_body, signed_assignment
     from app.claim_telegram_player_validation_assignment(
@@ -190,8 +190,8 @@ export const RELEASE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL = `
 `;
 
 export const ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL = `
-  select accepted, replayed
-    from app.accept_telegram_player_validation_result(
+  select accepted, replayed, finalization_state
+    from app.accept_and_finalize_telegram_player_validation_result(
       $1::text, $2::text, $3::text, $4::text,
       $5::text, $6::text, $7::text, $8::text,
       $9::text, $10::text, $11::text,
@@ -715,9 +715,12 @@ export class PostgresCompanionDeviceState {
       ]);
       if (result.rows.length !== 1) return undefined;
       const row = rowObject(result.rows[0]);
-      return exactKeys(row, ['accepted', 'replayed']) &&
+      return exactKeys(row, ['accepted', 'replayed', 'finalization_state']) &&
         row.accepted === true &&
-        typeof row.replayed === 'boolean'
+        typeof row.replayed === 'boolean' &&
+        (row.finalization_state === 'selected' ||
+          row.finalization_state === 'already_selected' ||
+          row.finalization_state === 'review_required')
         ? Object.freeze({ accepted: true, replayed: row.replayed })
         : undefined;
     } catch {

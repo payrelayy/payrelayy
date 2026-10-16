@@ -93,7 +93,7 @@ describe('companion device bridge PostgreSQL runtime', () => {
       'claim_telegram_player_validation_assignment',
       'complete_telegram_player_validation_assignment',
       'release_telegram_player_validation_assignment',
-      'accept_telegram_player_validation_result',
+      'accept_and_finalize_telegram_player_validation_result',
     ]) {
       expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
         `pg_catalog.to_regprocedure('app.${functionName}`,
@@ -104,6 +104,9 @@ describe('companion device bridge PostgreSQL runtime', () => {
     }
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
       "pg_catalog.to_regprocedure('app.finalize_telegram_player_validation",
+    );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      "pg_catalog.to_regprocedure('app.accept_telegram_player_validation_result",
     );
     const fake = fakePool();
     let observedConfig: Readonly<Record<string, unknown>> | undefined;

@@ -191,8 +191,9 @@ export async function startCompanionDeviceBridgeApplication(
           assessedAt,
         ),
     });
-    // Signed Find evidence may be stored through the exact one-use SQL boundary.
-    // This route cannot finalize a Player selection or initiate a Transfer.
+    // A signed Find result commits with its one-use Player selection/review
+    // decision. The protected Companion scheduler remains default-off, and this
+    // route has no Transfer or other financial authority.
     const playerValidationHandler = createCompanionPlayerValidationHandler({
       signer: config.signer,
       now: dependencies.now ?? (() => new Date().toISOString()),

@@ -10,19 +10,25 @@ import {
   AGENT_PLATFORM_COMPANION_DEVICE_PLATFORM,
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
   canonicalCompanionEnrollmentCertificateSignatureBytes,
   canonicalKemerBetExactFiveLookupAssignmentSignatureBytes,
+  canonicalKemerBetPlayerValidationAssignmentSignatureBytes,
   digestCompanionEnrollmentCertificateBody,
   digestKemerBetExactFiveLookupAssignmentBody,
+  digestKemerBetPlayerValidationAssignmentBody,
+  verifyKemerBetPlayerValidationExchange,
   verifySignedCompanionPairingRequest,
   type CompanionEnrollmentCertificateBody,
   type CompanionNoMoneySafety,
   type KemerBetExactFiveLookupAssignmentBody,
+  type KemerBetPlayerValidationAssignmentBody,
   type SignedCompanionEnrollmentCertificate,
   type SignedCompanionPairingRequest,
   type SignedKemerBetExactFiveLookupAssignment,
+  type SignedKemerBetPlayerValidationAssignment,
 } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_ACTION_KIND,
@@ -213,6 +219,50 @@ function signedLookupAssignment(
     contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
     protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
     transcriptVersion: AGENT_PLATFORM_COMPANION_ASSIGNMENT_TRANSCRIPT_VERSION,
+    bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+    bodyDigest,
+    signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+    signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+    signerKeyId,
+    body,
+    signature: sign('sha256', transcript, {
+      key: privateKey,
+      dsaEncoding: 'ieee-p1363',
+    }).toString('base64url'),
+  });
+}
+
+function signedPlayerValidationAssignment(
+  certificate: SignedCompanionEnrollmentCertificate,
+  privateKey: KeyObject,
+  playerId = '28379330',
+): SignedKemerBetPlayerValidationAssignment {
+  const body: KemerBetPlayerValidationAssignmentBody = Object.freeze({
+    contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    assignmentId: 'player-validation-assignment-0001',
+    validationRequestId: 'player-validation-request-0001',
+    certificateId: certificate.body.certificateId,
+    deviceId: certificate.body.deviceId,
+    deviceKeyId: certificate.body.deviceKeyId,
+    platformCode: 'kemerbet',
+    assignmentKind: 'single_telegram_player_validation',
+    lookupMode: 'find_only',
+    playerId,
+    currencyCode: 'ETB',
+    leaseNonceDigest: `sha256:${'6'.repeat(64)}`,
+    oneUse: true,
+    issuedAt: new Date(now.getTime() + 1_000).toISOString(),
+    expiresAt: new Date(now.getTime() + 5 * 60 * 1_000).toISOString(),
+    ...safety,
+  });
+  const bodyDigest = digestKemerBetPlayerValidationAssignmentBody(body);
+  const transcript = canonicalKemerBetPlayerValidationAssignmentSignatureBytes(body, signerKeyId);
+  if (!bodyDigest || !transcript) throw new Error('invalid synthetic Player validation assignment');
+  return Object.freeze({
+    contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
     bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
     bodyDigest,
     signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
@@ -610,6 +660,72 @@ describe('Windows companion device enrollment', () => {
     );
     expect(runtime.verifyLookupExchange(assignment, result, assessedAt)).toBe(true);
     expect(runtime.verifyLookupExchange(otherAssignment, result, assessedAt)).toBe(false);
+  });
+
+  it('signs one Player validation observation only for the exact server assignment', async () => {
+    const dataRoot = await root();
+    const server = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const serverPublicKey = Buffer.from(server.publicKey.export({ format: 'der', type: 'spki' }));
+    const selectedProtector = protector();
+    await ensureCompanionDeviceEnrollment({
+      dataRoot,
+      pairingPackage: pairingPackage(serverPublicKey),
+      releaseSha,
+      fetch: successfulFetch(server.privateKey) as unknown as typeof fetch,
+      now: () => now,
+      protector: selectedProtector,
+    });
+    const runtime = await loadCompanionDeviceSigningRuntime({
+      dataRoot,
+      now: () => new Date(now.getTime() + 30_000),
+      protector: selectedProtector,
+    });
+    const assignment = signedPlayerValidationAssignment(runtime.certificate, server.privateKey);
+    const observedAt = new Date(now.getTime() + 20_000);
+    expect(runtime.decodeAndVerifyPlayerValidationAssignment(assignment, observedAt)).toEqual(
+      assignment,
+    );
+    const found = runtime.createSignedPlayerValidationResult(assignment, 'found', observedAt);
+    expect(found.body).toMatchObject({
+      playerIdDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      outcome: 'found',
+      evidenceKind: 'exact_id_empty_etb_form',
+      transferAllowed: false,
+      moneyMoved: false,
+    });
+    expect(
+      verifyKemerBetPlayerValidationExchange(
+        {
+          assessedAt: new Date(now.getTime() + 30_000).toISOString(),
+          certificate: runtime.certificate,
+          signedAssignment: assignment,
+          signedResult: found,
+        },
+        serverPublicKey,
+      ),
+    ).toBe('verified_found');
+    const inconclusive = runtime.createSignedPlayerValidationResult(
+      assignment,
+      'review_required',
+      observedAt,
+    );
+    expect(inconclusive.body.evidenceKind).toBe('inconclusive');
+    expect(
+      runtime.decodeAndVerifyPlayerValidationAssignment(
+        {
+          ...assignment,
+          body: { ...assignment.body, playerId: '28379331' },
+        },
+        observedAt,
+      ),
+    ).toBeUndefined();
+    expect(() =>
+      runtime.createSignedPlayerValidationResult(
+        assignment,
+        'found',
+        new Date(now.getTime() + 5 * 60 * 1_000),
+      ),
+    ).toThrow();
   });
 
   it('verifies the independently pinned execution chain and signs only a bound result', async () => {

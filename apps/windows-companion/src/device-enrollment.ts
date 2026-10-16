@@ -24,6 +24,9 @@ import {
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
   AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX,
   AGENT_PLATFORM_COMPANION_PAIRING_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
@@ -31,24 +34,31 @@ import {
   canonicalCompanionHttpRequestSignatureBytes,
   canonicalCompanionPairingSignatureBytes,
   canonicalKemerBetExactFiveLookupResultSignatureBytes,
+  canonicalKemerBetPlayerValidationResultSignatureBytes,
   certificateMatchesPairingRequest,
   decodeSignedCompanionEnrollmentCertificate,
   decodeSignedCompanionHttpRequest,
   decodeSignedCompanionPairingRequest,
   decodeKemerBetExactFiveLookupResultBody,
+  decodeKemerBetPlayerValidationResultBody,
   decodeSignedKemerBetExactFiveLookupAssignment,
   decodeSignedKemerBetExactFiveLookupResult,
+  decodeSignedKemerBetPlayerValidationAssignment,
+  decodeSignedKemerBetPlayerValidationResult,
   digestCompanionHttpRequestBody,
   digestCompanionLookupEmptyQuery,
   digestCompanionPairingPublicPayload,
   digestCompanionPlayerId,
   digestKemerBetExactFiveLookupResultBody,
+  digestKemerBetPlayerValidationResultBody,
   verifyKemerBetExactFiveLookupExchange,
+  verifyKemerBetPlayerValidationExchange,
   verifySignedCompanionEnrollmentCertificate,
   verifySignedCompanionHttpRequest,
   verifySignedCompanionPairingRequest,
   verifySignedKemerBetExactFiveLookupAssignment,
   verifySignedKemerBetExactFiveLookupResult,
+  verifySignedKemerBetPlayerValidationAssignment,
   type CompanionNoMoneySafety,
   type CompanionPlayerLookupOutcome,
   type CompanionHttpRequestBody,
@@ -60,6 +70,8 @@ import {
   type SignedCompanionPairingRequest,
   type SignedKemerBetExactFiveLookupAssignment,
   type SignedKemerBetExactFiveLookupResult,
+  type SignedKemerBetPlayerValidationAssignment,
+  type SignedKemerBetPlayerValidationResult,
 } from '@fetanagent/agent-platform-companion-contracts';
 
 import {
@@ -936,6 +948,8 @@ export type CompanionLookupRequestPath =
 
 export type CompanionDeviceRequestPath =
   | CompanionLookupRequestPath
+  | typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH
+  | typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH
   | CompanionExecutionRequestPath
   | typeof ROUTINE_DEPOSIT_COMMAND_PATH
   | typeof COMPANION_EXECUTION_HANDOFF_SIGN_PATH
@@ -954,6 +968,8 @@ export interface CompanionDeviceSigningRuntime {
   readonly certificate: SignedCompanionEnrollmentCertificate;
   readonly pollEndpoint: string;
   readonly resultEndpoint: string;
+  readonly playerValidationPollEndpoint: string;
+  readonly playerValidationResultEndpoint: string;
   readonly execution?: CompanionExecutionSigningRuntime;
   createSignedLaunchProof(
     context: Omit<
@@ -986,6 +1002,15 @@ export interface CompanionDeviceSigningRuntime {
     outcomes: ExactFiveCompanionLookupOutcomes,
     observedAt?: Date,
   ): SignedKemerBetExactFiveLookupResult;
+  decodeAndVerifyPlayerValidationAssignment(
+    candidate: unknown,
+    assessedAt?: Date,
+  ): SignedKemerBetPlayerValidationAssignment | undefined;
+  createSignedPlayerValidationResult(
+    assignment: SignedKemerBetPlayerValidationAssignment,
+    outcome: 'found' | 'review_required',
+    observedAt?: Date,
+  ): SignedKemerBetPlayerValidationResult;
 }
 
 export interface CompanionExecutionRuntimeConfiguration {
@@ -1315,6 +1340,92 @@ export async function loadCompanionDeviceSigningRuntime(
     return result;
   };
 
+  const decodeAndVerifyPlayerValidationAssignment = (
+    candidate: unknown,
+    assessedAt = nowProvider(),
+  ): SignedKemerBetPlayerValidationAssignment | undefined => {
+    const assessedAtIso = validRuntimeDate(assessedAt);
+    const assignment = decodeSignedKemerBetPlayerValidationAssignment(candidate);
+    return assignment &&
+      assignment.signerKeyId === enrollment.serverSignerKeyId &&
+      assignment.body.certificateId === certificate.body.certificateId &&
+      assignment.body.deviceId === certificate.body.deviceId &&
+      assignment.body.deviceKeyId === certificate.body.deviceKeyId &&
+      Date.parse(assessedAtIso) >= Date.parse(assignment.body.issuedAt) &&
+      Date.parse(assessedAtIso) < Date.parse(assignment.body.expiresAt) &&
+      verifySignedKemerBetPlayerValidationAssignment(assignment, serverPublicKey)
+      ? assignment
+      : undefined;
+  };
+
+  const createSignedPlayerValidationResult = (
+    assignment: SignedKemerBetPlayerValidationAssignment,
+    outcome: 'found' | 'review_required',
+    observedAt = nowProvider(),
+  ): SignedKemerBetPlayerValidationResult => {
+    const observedAtIso = validRuntimeDate(observedAt);
+    if (
+      !decodeAndVerifyPlayerValidationAssignment(assignment, observedAt) ||
+      (outcome !== 'found' && outcome !== 'review_required')
+    )
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const playerIdDigest = digestCompanionPlayerId(assignment.body.playerId);
+    if (!playerIdDigest) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const body = decodeKemerBetPlayerValidationResultBody({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      resultId: randomUUID(),
+      assignmentId: assignment.body.assignmentId,
+      assignmentBodyDigest: assignment.bodyDigest,
+      validationRequestId: assignment.body.validationRequestId,
+      certificateId: certificate.body.certificateId,
+      deviceId: certificate.body.deviceId,
+      deviceKeyId: certificate.body.deviceKeyId,
+      platformCode: 'kemerbet',
+      assignmentKind: 'single_telegram_player_validation',
+      lookupMode: 'find_only',
+      currencyCode: 'ETB',
+      playerIdDigest,
+      outcome,
+      evidenceKind: outcome === 'found' ? 'exact_id_empty_etb_form' : 'inconclusive',
+      observedAt: observedAtIso,
+      ...noMoneySafety,
+    });
+    const bodyDigest = body && digestKemerBetPlayerValidationResultBody(body);
+    const transcript = body && canonicalKemerBetPlayerValidationResultSignatureBytes(body);
+    if (!body || !bodyDigest || !transcript) fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    const result = decodeSignedKemerBetPlayerValidationResult({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION,
+      bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+      bodyDigest,
+      signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+      signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+      deviceKeyId: certificate.body.deviceKeyId,
+      body,
+      signature: sign('sha256', transcript, {
+        key: privateKey,
+        dsaEncoding: 'ieee-p1363',
+      }).toString('base64url'),
+    });
+    if (
+      !result ||
+      verifyKemerBetPlayerValidationExchange(
+        {
+          assessedAt: observedAtIso,
+          certificate,
+          signedAssignment: assignment,
+          signedResult: result,
+        },
+        serverPublicKey,
+      ) !== (outcome === 'found' ? 'verified_found' : 'verified_inconclusive')
+    ) {
+      fail('FETANAGENT_DEVICE_ENROLLMENT_UNAVAILABLE');
+    }
+    return result;
+  };
+
   let execution: CompanionExecutionSigningRuntime | undefined;
   if (options.execution !== undefined) {
     const executionSignerKey = p256PublicKey(options.execution.trustedExecutionSignerPublicKeySpki);
@@ -1443,6 +1554,14 @@ export async function loadCompanionDeviceSigningRuntime(
     certificate,
     pollEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH),
     resultEndpoint: endpointFor(enrollment.endpoint, AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH),
+    playerValidationPollEndpoint: endpointFor(
+      enrollment.endpoint,
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+    ),
+    playerValidationResultEndpoint: endpointFor(
+      enrollment.endpoint,
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+    ),
     ...(execution === undefined ? {} : { execution }),
     createSignedLaunchProof(
       context: Omit<
@@ -1484,5 +1603,7 @@ export async function loadCompanionDeviceSigningRuntime(
     decodeAndVerifyAssignment,
     verifyLookupExchange,
     createSignedLookupResult,
+    decodeAndVerifyPlayerValidationAssignment,
+    createSignedPlayerValidationResult,
   });
 }

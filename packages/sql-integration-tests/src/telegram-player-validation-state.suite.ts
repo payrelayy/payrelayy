@@ -216,6 +216,31 @@ async function accept(
   ).rows;
 }
 
+async function acceptedFound(
+  client: Client,
+  certificate: Record<string, unknown>,
+  signerKeyId: string,
+  updateId: string,
+  userId: string,
+  playerId: string,
+): Promise<{ readonly eventId: string; readonly requestId: string }> {
+  const eventId = await inbound(client, updateId, userId);
+  const requestId = await requestValidation(client, eventId, playerId);
+  const claimed = await claim(client, certificate, signerKeyId);
+  expect(claimed).toHaveLength(1);
+  expect(claimed[0]!.claim_state).toBe('claimed');
+  const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, signerKeyId);
+  const complete = await client.query<{ completed: boolean }>(
+    'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb) as completed',
+    [assignment.bodyDigest, assignment],
+  );
+  expect(complete.rows).toEqual([{ completed: true }]);
+  expect(await accept(client, assignment, resultEnvelope(assignment, 'found'))).toEqual([
+    { accepted: true, replayed: false },
+  ]);
+  return { eventId, requestId };
+}
+
 export function registerTelegramPlayerValidationStateSqlTests(
   getClient: () => Client,
   getOwnerAdminId: () => string,
@@ -346,6 +371,139 @@ export function registerTelegramPlayerValidationStateSqlTests(
             )
           ).rows,
         ).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('selects one neutral beneficiary for several Telegram identities, but never overrides revocation', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const before = (
+          await client.query(`select
+            (select count(*)::text from app.deposit_intents) as intents,
+            (select count(*)::text from app.deposit_jobs) as jobs`)
+        ).rows;
+        const first = await acceptedFound(
+          client,
+          paired.certificateBody,
+          paired.signerKeyId,
+          '89660000005',
+          '89650000003',
+          'SHARED-PLAYER-SQL',
+        );
+        const firstFinalization = await client.query<{
+          finalization_state: string;
+          selected_player_id: string;
+        }>('select * from app.finalize_telegram_player_validation($1::uuid)', [first.requestId]);
+        expect(firstFinalization.rows).toEqual([
+          { finalization_state: 'selected', selected_player_id: 'SHARED-PLAYER-SQL' },
+        ]);
+        expect(
+          (
+            await client.query('select * from app.finalize_telegram_player_validation($1::uuid)', [
+              first.requestId,
+            ])
+          ).rows,
+        ).toEqual([
+          { finalization_state: 'already_selected', selected_player_id: 'SHARED-PLAYER-SQL' },
+        ]);
+        const second = await acceptedFound(
+          client,
+          paired.certificateBody,
+          paired.signerKeyId,
+          '89660000006',
+          '89650000004',
+          'SHARED-PLAYER-SQL',
+        );
+        const secondFinalization = await client.query(
+          'select * from app.finalize_telegram_player_validation($1::uuid)',
+          [second.requestId],
+        );
+        expect(secondFinalization.rows).toEqual([
+          { finalization_state: 'selected', selected_player_id: 'SHARED-PLAYER-SQL' },
+        ]);
+        const selections = await client.query<{
+          player_account_id: string;
+          selected_count: string;
+        }>(`select selection.player_account_id,
+             count(*)::text as selected_count
+          from app.telegram_player_selections selection
+          join app.customer_platform_players player
+            on player.id = selection.player_account_id
+         where player.player_id = 'SHARED-PLAYER-SQL'
+         group by selection.player_account_id`);
+        expect(selections.rows).toHaveLength(1);
+        expect(selections.rows[0]!.selected_count).toBe('2');
+        const playerAccountId = selections.rows[0]!.player_account_id;
+        const provenance = await client.query<{
+          beneficiary_customer_id: string;
+          player_customer_id: string;
+          identity_count: string;
+        }>(
+          `select origin.beneficiary_customer_id,
+            player.customer_id as player_customer_id,
+            (select count(*)::text from app.customer_identities identity
+              where identity.customer_id = origin.beneficiary_customer_id) as identity_count
+          from app.telegram_player_validation_created_beneficiaries origin
+          join app.customer_platform_players player
+            on player.id = origin.player_account_id
+          where origin.player_account_id = $1::uuid`,
+          [playerAccountId],
+        );
+        expect(provenance.rows).toHaveLength(1);
+        expect(provenance.rows[0]!.beneficiary_customer_id).toBe(
+          provenance.rows[0]!.player_customer_id,
+        );
+        expect(provenance.rows[0]!.identity_count).toBe('0');
+
+        await client.query(
+          `insert into app.player_deposit_eligibility_decisions (
+            player_account_id, decision_version, decision, reason_code, actor_kind,
+            player_account_updated_at_snapshot, decided_at, created_at
+          ) values ($1::uuid, 2, 'revoked', 'financial_eligibility_revoked', 'system',
+                    now(), now(), now())`,
+          [playerAccountId],
+        );
+        const third = await acceptedFound(
+          client,
+          paired.certificateBody,
+          paired.signerKeyId,
+          '89660000007',
+          '89650000005',
+          'SHARED-PLAYER-SQL',
+        );
+        expect(
+          (
+            await client.query('select * from app.finalize_telegram_player_validation($1::uuid)', [
+              third.requestId,
+            ])
+          ).rows,
+        ).toEqual([{ finalization_state: 'review_required', selected_player_id: null }]);
+        expect(
+          (
+            await client.query<{ status: string }>(
+              'select status from app.telegram_player_validation_requests where id=$1::uuid',
+              [third.requestId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'review_required' }]);
+        expect(
+          (
+            await client.query<{ count: string }>(
+              'select count(*)::text as count from app.telegram_player_validation_finalizations',
+            )
+          ).rows,
+        ).toEqual([{ count: '2' }]);
+        expect(
+          (
+            await client.query(`select
+              (select count(*)::text from app.deposit_intents) as intents,
+              (select count(*)::text from app.deposit_jobs) as jobs`)
+          ).rows,
+        ).toEqual(before);
       } finally {
         await client.query('rollback');
       }

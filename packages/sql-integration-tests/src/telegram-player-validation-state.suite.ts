@@ -262,6 +262,15 @@ export function registerTelegramPlayerValidationStateSqlTests(
         from pg_class where oid = 'app.telegram_player_validation_results'::regclass
       `);
       expect(acl.rows).toEqual([{ allowed: true, rls: true }]);
+      const selectionAcl = await client.query<{ allowed: boolean; rls: boolean }>(`
+        select not has_function_privilege(
+          'fetanagent_companion_device_bridge_runtime',
+          'app.finalize_telegram_player_validation(uuid)', 'EXECUTE') as allowed,
+          relrowsecurity and relforcerowsecurity as rls
+        from pg_class
+        where oid = 'app.telegram_player_validation_finalizations'::regclass
+      `);
+      expect(selectionAcl.rows).toEqual([{ allowed: true, rls: true }]);
     });
 
     it('stores one current signed result without changing the selected Player or money ledgers', async () => {
@@ -504,6 +513,48 @@ export function registerTelegramPlayerValidationStateSqlTests(
               (select count(*)::text from app.deposit_jobs) as jobs`)
           ).rows,
         ).toEqual(before);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('does not select a signed result after the Telegram account asks for a newer ID', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const old = await acceptedFound(
+          client,
+          paired.certificateBody,
+          paired.signerKeyId,
+          '89660000008',
+          '89650000006',
+          'OLD-SIGNED-PLAYER',
+        );
+        const newEvent = await inbound(client, '89660000009', '89650000006');
+        await requestValidation(client, newEvent, 'NEW-WANTED-PLAYER');
+        expect(
+          (
+            await client.query<{ status: string }>(
+              'select status from app.telegram_player_validation_requests where id=$1::uuid',
+              [old.requestId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'superseded' }]);
+        expect(
+          (
+            await client.query('select * from app.finalize_telegram_player_validation($1::uuid)', [
+              old.requestId,
+            ])
+          ).rows,
+        ).toEqual([]);
+        expect(
+          (
+            await client.query<{ count: string }>(
+              'select count(*)::text as count from app.telegram_player_selections',
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
       } finally {
         await client.query('rollback');
       }

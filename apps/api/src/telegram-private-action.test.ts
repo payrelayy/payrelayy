@@ -65,6 +65,33 @@ describe('bot-only deposit outcome actions', () => {
     }
   });
 });
+describe('bot-only Player validation outcome actions', () => {
+  it('accepts only exact claim and lease-completion envelopes', () => {
+    const claim = { version: 1, kind: 'player_validation_outcome_claim' };
+    const complete = {
+      version: 1,
+      kind: 'player_validation_outcome_complete',
+      notificationId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      deliveryResult: 'sent',
+      telegramMessageId: 42,
+    };
+    expect(parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(claim)))).toEqual(claim);
+    expect(parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(complete)))).toEqual(
+      complete,
+    );
+    for (const invalid of [
+      { ...claim, telegramUserId: '123' },
+      { ...complete, deliveryResult: 'sent', telegramMessageId: null },
+      { ...complete, deliveryResult: 'retry', telegramMessageId: 42 },
+      { ...complete, notificationId: 'not-a-uuid' },
+    ]) {
+      expect(
+        parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(invalid))),
+      ).toBeUndefined();
+    }
+  });
+});
 describe('bot-only temporary deposit message actions', () => {
   it('accepts only exact, bounded message tracking and deletion leases', () => {
     const record = {

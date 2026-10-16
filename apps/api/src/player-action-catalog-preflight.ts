@@ -20,6 +20,8 @@ const ALLOWED_FUNCTIONS = [
   'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
   'app.claim_telegram_deposit_outcome_notification()',
   'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)',
+  'app.claim_telegram_player_validation_notification()',
+  'app.complete_telegram_player_validation_notification(uuid,uuid,text,bigint)',
   'app.get_telegram_saved_player_selection(uuid)',
   'app.save_telegram_player_selection(uuid,text)',
   'app.request_telegram_player_validation(uuid,text)',
@@ -142,6 +144,12 @@ function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean):
             ),
             pg_catalog.to_regprocedure(
               'app.complete_telegram_deposit_outcome_notification(uuid,uuid,text,bigint)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.claim_telegram_player_validation_notification()'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.complete_telegram_player_validation_notification(uuid,uuid,text,bigint)'
             ),
             pg_catalog.to_regprocedure(
               'app.get_telegram_saved_player_selection(uuid)'

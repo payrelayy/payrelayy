@@ -179,6 +179,34 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }
+  if (value.outcome === 'player_validation_outcome_none' && keys.length === 2) {
+    return { version: 1, outcome: 'player_validation_outcome_none' };
+  }
+  if (
+    value.outcome === 'player_validation_outcome_delivery' &&
+    keys.length === 6 &&
+    typeof value.notificationId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.notificationId,
+    ) &&
+    typeof value.leaseToken === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value.leaseToken,
+    ) &&
+    typeof value.privateChatId === 'string' &&
+    /^[1-9][0-9]{0,15}$/u.test(value.privateChatId) &&
+    BigInt(value.privateChatId) <= 9007199254740991n &&
+    (value.outcomeCode === 'selected' || value.outcomeCode === 'review_required')
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'player_validation_outcome_completed' &&
+    keys.length === 3 &&
+    typeof value.accepted === 'boolean'
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
   if (value.outcome === 'menu') {
     return keys.length === 4 &&
       parseTelegramPlayerRegistrationCapabilityCallback(value.callbackData) &&

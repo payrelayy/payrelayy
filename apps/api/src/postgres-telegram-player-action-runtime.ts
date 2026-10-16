@@ -132,6 +132,16 @@ const COMPLETE_TELEGRAM_DEPOSIT_OUTCOME_SQL = `
     $1::uuid, $2::uuid, $3::text, $4::bigint
   ) as accepted
 `;
+const CLAIM_PLAYER_VALIDATION_OUTCOME_SQL = `
+  select notification_id, notification_lease_token,
+         notification_private_chat_id, notification_outcome_code
+  from app.claim_telegram_player_validation_notification()
+`;
+const COMPLETE_PLAYER_VALIDATION_OUTCOME_SQL = `
+  select app.complete_telegram_player_validation_notification(
+    $1::uuid, $2::uuid, $3::text, $4::bigint
+  ) as accepted
+`;
 const RECORD_TELEGRAM_DEPOSIT_TEMPORARY_SQL = `
   select app.record_telegram_deposit_temporary_message(
     $1::bigint, $2::bigint, $3::bigint
@@ -334,6 +344,59 @@ async function handleDepositOutcomeComplete(
   return { version: 1, outcome: 'deposit_outcome_completed', accepted: row.accepted };
 }
 
+async function handlePlayerValidationOutcomeClaim(
+  database: TelegramPlayerActionDatabase,
+): Promise<TelegramPrivateActionResult> {
+  const rows = (await database.query(CLAIM_PLAYER_VALIDATION_OUTCOME_SQL, [])).rows;
+  if (rows.length === 0) return { version: 1, outcome: 'player_validation_outcome_none' };
+  const row = oneRow(rows);
+  if (
+    Object.keys(row).length !== 4 ||
+    typeof row.notification_id !== 'string' ||
+    !UUID_PATTERN.test(row.notification_id) ||
+    typeof row.notification_lease_token !== 'string' ||
+    !UUID_PATTERN.test(row.notification_lease_token) ||
+    typeof row.notification_private_chat_id !== 'string' ||
+    !/^[1-9][0-9]{0,15}$/u.test(row.notification_private_chat_id) ||
+    BigInt(row.notification_private_chat_id) > 9007199254740991n ||
+    (row.notification_outcome_code !== 'selected' &&
+      row.notification_outcome_code !== 'review_required')
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return {
+    version: 1,
+    outcome: 'player_validation_outcome_delivery',
+    notificationId: row.notification_id,
+    leaseToken: row.notification_lease_token,
+    privateChatId: row.notification_private_chat_id,
+    outcomeCode: row.notification_outcome_code,
+  };
+}
+
+async function handlePlayerValidationOutcomeComplete(
+  database: TelegramPlayerActionDatabase,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'player_validation_outcome_complete' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (
+      await database.query(COMPLETE_PLAYER_VALIDATION_OUTCOME_SQL, [
+        action.notificationId,
+        action.leaseToken,
+        action.deliveryResult,
+        action.telegramMessageId,
+      ])
+    ).rows,
+  );
+  if (Object.keys(row).length !== 1 || typeof row.accepted !== 'boolean') {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'player_validation_outcome_completed', accepted: row.accepted };
+}
+
 async function handleDepositTemporaryRecord(
   database: TelegramPlayerActionDatabase,
   action: Extract<
@@ -500,6 +563,8 @@ async function recordInbound(
       readonly kind:
         | 'deposit_outcome_claim'
         | 'deposit_outcome_complete'
+        | 'player_validation_outcome_claim'
+        | 'player_validation_outcome_complete'
         | 'deposit_temporary_record'
         | 'deposit_temporary_cancel'
         | 'deposit_temporary_cleanup_claim'
@@ -1308,6 +1373,9 @@ export function createPostgresTelegramPlayerActionRuntime(
         if (action.kind === 'deposit_outcome_claim') {
           return await handleDepositOutcomeClaim(pool);
         }
+        if (action.kind === 'player_validation_outcome_claim') {
+          return await handlePlayerValidationOutcomeClaim(pool);
+        }
         if (action.kind === 'payment_instruction_record') {
           return await handlePaymentInstructionRecord(pool, action);
         }
@@ -1319,6 +1387,9 @@ export function createPostgresTelegramPlayerActionRuntime(
         }
         if (action.kind === 'deposit_outcome_complete') {
           return await handleDepositOutcomeComplete(pool, action);
+        }
+        if (action.kind === 'player_validation_outcome_complete') {
+          return await handlePlayerValidationOutcomeComplete(pool, action);
         }
         if (
           action.kind === 'deposit_temporary_record' ||

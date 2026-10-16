@@ -9,10 +9,17 @@ import {
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
-  it('does not present the dormant validation queue as an approved Player ID', () => {
-    expect(() =>
-      presentTelegramPlayerIdFlowResult({ version: 1, outcome: 'player_validation_queued' }),
-    ).toThrow('dormant Player validation queue');
+  it('acknowledges a queued Find without claiming Player approval', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'player_validation_queued',
+    });
+    expect(presentation.kind).toBe('message');
+    if (presentation.kind === 'message') {
+      expect(presentation.text).toContain('Checking your Player ID');
+      expect(presentation.text).toContain('saved ID stays unchanged');
+      expect(presentation.text).not.toContain('verified and saved');
+    }
   });
 
   it('presents the saved selection and a one-tap repeat deposit', () => {

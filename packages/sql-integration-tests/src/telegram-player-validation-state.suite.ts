@@ -384,6 +384,207 @@ export function registerTelegramPlayerValidationStateSqlTests(
       }
     });
 
+    it('does not notify a pending Find even after delivery is enabled', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`update app.telegram_player_validation_notification_cutover
+          set enabled_at = pg_catalog.clock_timestamp()
+          where singleton = true`);
+        const eventId = await inbound(client, '89660000018', '89650000018');
+        await requestValidation(client, eventId, 'PENDING-PLAYER-SQL');
+        expect(
+          (await client.query('select * from app.claim_telegram_player_validation_notification()'))
+            .rows,
+        ).toEqual([]);
+        expect(
+          (
+            await client.query(
+              'select count(*)::text as count from app.telegram_player_validation_notifications',
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('keeps bot results off by default, then leases one signed selection after an explicit cutover', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const acl = await client.query<{
+          bridge_denied: boolean;
+          player_actions_allowed: boolean;
+          anon_denied: boolean;
+          table_rls: boolean;
+        }>(`
+          select not has_function_privilege(
+                   'fetanagent_companion_device_bridge_runtime',
+                   'app.claim_telegram_player_validation_notification()', 'EXECUTE'
+                 ) as bridge_denied,
+                 has_function_privilege(
+                   'fetanagent_player_actions_runtime',
+                   'app.claim_telegram_player_validation_notification()', 'EXECUTE'
+                 ) as player_actions_allowed,
+                 not has_function_privilege(
+                   'anon', 'app.claim_telegram_player_validation_notification()', 'EXECUTE'
+                 ) as anon_denied,
+                 relrowsecurity and relforcerowsecurity as table_rls
+            from pg_class
+           where oid = 'app.telegram_player_validation_notifications'::regclass
+        `);
+        expect(acl.rows).toEqual([
+          {
+            bridge_denied: true,
+            player_actions_allowed: true,
+            anon_denied: true,
+            table_rls: true,
+          },
+        ]);
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const eventId = await inbound(client, '89660000019', '89650000019');
+        const requestId = await requestValidation(client, eventId, 'NOTIFY-PLAYER-SQL');
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        await client.query(
+          'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb)',
+          [assignment.bodyDigest, assignment],
+        );
+        expect(await accept(client, assignment, resultEnvelope(assignment, 'found'), true)).toEqual(
+          [{ accepted: true, replayed: false, finalization_state: 'selected' }],
+        );
+        expect(
+          (await client.query('select * from app.claim_telegram_player_validation_notification()'))
+            .rows,
+        ).toEqual([]);
+        expect(
+          (
+            await client.query(
+              'select count(*)::text as count from app.telegram_player_validation_notifications',
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+
+        await client.query(`update app.telegram_player_validation_notification_cutover
+          set enabled_at = pg_catalog.clock_timestamp() - interval '1 minute'
+          where singleton = true`);
+        const delivery = (
+          await client.query<{
+            notification_id: string;
+            notification_lease_token: string;
+            notification_private_chat_id: string;
+            notification_outcome_code: string;
+          }>('select * from app.claim_telegram_player_validation_notification()')
+        ).rows;
+        expect(delivery).toHaveLength(1);
+        expect(delivery[0]).toMatchObject({
+          notification_private_chat_id: '89650000019',
+          notification_outcome_code: 'selected',
+        });
+        expect(
+          (
+            await client.query(
+              `select app.complete_telegram_player_validation_notification(
+                 $1::uuid,$2::uuid,'sent',42::bigint) as accepted`,
+              [delivery[0]!.notification_id, delivery[0]!.notification_lease_token],
+            )
+          ).rows,
+        ).toEqual([{ accepted: true }]);
+        expect(
+          (
+            await client.query(
+              `select app.complete_telegram_player_validation_notification(
+                 $1::uuid,$2::uuid,'sent',42::bigint) as accepted`,
+              [delivery[0]!.notification_id, delivery[0]!.notification_lease_token],
+            )
+          ).rows,
+        ).toEqual([{ accepted: true }]);
+        expect(
+          (await client.query('select * from app.claim_telegram_player_validation_notification()'))
+            .rows,
+        ).toEqual([]);
+        expect(
+          (
+            await client.query(
+              'select validation_request_id from app.telegram_player_validation_notifications',
+            )
+          ).rows,
+        ).toEqual([{ validation_request_id: requestId }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('reports an inconclusive signed Find as review, never as an approved Player', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const eventId = await inbound(client, '89660000020', '89650000020');
+        await requestValidation(client, eventId, 'INCONCLUSIVE-SQL');
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        await client.query(
+          'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb)',
+          [assignment.bodyDigest, assignment],
+        );
+        expect(
+          await accept(client, assignment, resultEnvelope(assignment, 'review_required'), true),
+        ).toEqual([{ accepted: true, replayed: false, finalization_state: 'review_required' }]);
+        await client.query(`update app.telegram_player_validation_notification_cutover
+          set enabled_at = pg_catalog.clock_timestamp() - interval '1 minute'
+          where singleton = true`);
+        expect(
+          (
+            await client.query<{
+              notification_outcome_code: string;
+            }>('select * from app.claim_telegram_player_validation_notification()')
+          ).rows[0]?.notification_outcome_code,
+        ).toBe('review_required');
+        expect(
+          (
+            await client.query(
+              'select count(*)::text as count from app.telegram_player_selections where origin_inbound_event_id=$1::uuid',
+              [eventId],
+            )
+          ).rows,
+        ).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('does not send an old selection result after a newer Player request', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`update app.telegram_player_validation_notification_cutover
+          set enabled_at = pg_catalog.clock_timestamp()
+          where singleton = true`);
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const oldEvent = await inbound(client, '89660000021', '89650000021');
+        await requestValidation(client, oldEvent, 'OLD-NOTIFY-PLAYER');
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        await client.query(
+          'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb)',
+          [assignment.bodyDigest, assignment],
+        );
+        expect(await accept(client, assignment, resultEnvelope(assignment, 'found'), true)).toEqual(
+          [{ accepted: true, replayed: false, finalization_state: 'selected' }],
+        );
+        const newerEvent = await inbound(client, '89660000022', '89650000021');
+        await requestValidation(client, newerEvent, 'NEW-NOTIFY-PLAYER');
+        expect(
+          (await client.query('select * from app.claim_telegram_player_validation_notification()'))
+            .rows,
+        ).toEqual([]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('stores one current signed result without changing the selected Player or money ledgers', async () => {
       const client = getClient();
       await client.query('begin');

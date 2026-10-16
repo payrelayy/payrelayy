@@ -11,6 +11,8 @@ import {
   CBE_BIRR_NORMALIZATION_OWNERSHIP_INVALID_RESULT,
   CBE_BIRR_NORMALIZATION_OWNERSHIP_REMAINING_BLOCKERS,
   CBE_BIRR_NORMALIZATION_PROFILE_INVENTORY,
+  CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION,
+  CBE_BIRR_RECEIVER_REFERENCE_PROTECTION_SOURCE_ATTESTATION,
   CBE_BIRR_SUBMITTED_REFERENCE_CAPTURE_SOURCE_ATTESTATION,
   evaluateCbeBirrNormalizationOwnership,
   redactedCbeBirrNormalizationOwnershipForLog,
@@ -88,20 +90,78 @@ function submittedReferenceCaptureSource(source: string): string {
   ].join('\n\n');
 }
 
+function providerAwareProofCaptureSource(source: string): string {
+  return [
+    exactSourceSlice(source, 'const DIRECT_PROOF_REFERENCE_PATTERN', 'const SECRET_PATTERN'),
+    exactSourceSlice(
+      source,
+      'export const DEPOSIT_PROOF_REFERENCE_KEY_VERSION',
+      'export const RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION',
+    ),
+    exactSourceSlice(
+      source,
+      'function validDepositProofReference',
+      'function validReceiverAccountReference',
+    ),
+    exactSourceSlice(
+      source,
+      'function exactDataProperties',
+      '/**\n * Protects a customer-entered CBE Birr reference',
+    ),
+    exactSourceSlice(
+      source,
+      '/**\n * Protects a provider receipt reference',
+      '/**\n * Protects an Owner-configured receiver wallet/account number',
+    ),
+  ].join('\n\n');
+}
+
+function receiverReferenceProtectionSource(source: string): string {
+  const unprotectMarker = '/**\n * Opens one Owner-protected receiver wallet/account number';
+  const unprotectStart = source.indexOf(unprotectMarker);
+  if (unprotectStart < 0)
+    throw new Error('The reviewed receiver unprotect boundary is unavailable.');
+  return [
+    exactSourceSlice(
+      source,
+      'export const RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION',
+      'export type DepositProofReferenceProvider',
+    ),
+    exactSourceSlice(source, 'function validReceiverAccountReference', 'function exactNonce'),
+    exactSourceSlice(
+      source,
+      'function exactDataProperties',
+      '/**\n * Protects a customer-entered CBE Birr reference',
+    ),
+    exactSourceSlice(
+      source,
+      '/**\n * Protects an Owner-configured receiver wallet/account number',
+      unprotectMarker,
+    ),
+    source.slice(unprotectStart).trimEnd(),
+  ].join('\n\n');
+}
+
 describe('CBE Birr normalization ownership inventory', () => {
   it('returns one deeply frozen blocked inventory for the exact current metadata', () => {
     const result = evaluateCbeBirrNormalizationOwnership(
       CBE_BIRR_NORMALIZATION_OWNERSHIP_CURRENT_REQUEST,
     );
 
-    expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION).toBe(1);
+    expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION).toBe(2);
     expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CURRENT_REQUEST).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       providerCode: 'cbe_birr',
       submittedReferenceNormalizationVersion: null,
       submittedReferenceProtectionKeyVersion: 1,
       submittedReferenceSourceAttestation:
         'sha256:56a14b1b377a2d64de345ae03d390d0a01fa46f91a3af8017ed2137e74671195',
+      providerAwareProofProtectionKeyVersion: 2,
+      providerAwareProofProfileVersion: 2,
+      providerAwareProofSourceAttestation: CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION,
+      receiverReferenceProtectionKeyVersion: 1,
+      receiverReferenceProfileVersion: 1,
+      receiverReferenceSourceAttestation: CBE_BIRR_RECEIVER_REFERENCE_PROTECTION_SOURCE_ATTESTATION,
       fixtureSchemaLabel: 'FETANAGENT_CBE_BIRR_AUTHORITATIVE_FIXTURE_V1',
       fixtureSchemaVersion: 1,
       fixtureNormalizerVersion: 1,
@@ -114,7 +174,7 @@ describe('CBE Birr normalization ownership inventory', () => {
     });
     expect(result).toBe(CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT);
     expect(result).toMatchObject({
-      contractVersion: 1,
+      contractVersion: 2,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'blocked',
@@ -141,10 +201,10 @@ describe('CBE Birr normalization ownership inventory', () => {
     expect(evaluateCbeBirrNormalizationOwnership(nullPrototypeRequest)).toBe(result);
   });
 
-  it('records the three existing boundaries without assigning authoritative ownership', () => {
+  it('records legacy, current proof, receiver, fixture, and settlement boundaries without ownership', () => {
     expect(CBE_BIRR_NORMALIZATION_PROFILE_INVENTORY).toEqual([
       {
-        profileId: 'submitted_reference_capture',
+        profileId: 'legacy_submitted_reference_capture',
         observedCodeBoundary: '@fetanagent/deposit-reference-protection',
         scope: 'submission_capture_protection_only',
         normalizationVersionLabel: null,
@@ -159,6 +219,41 @@ describe('CBE Birr normalization ownership inventory', () => {
           'map_ascii_lowercase_to_uppercase_with_string_to_upper_case',
         ],
         outputClass: 'uppercase_reference_inside_protection_boundary',
+        authoritativeLookupEligible: false,
+      },
+      {
+        profileId: 'provider_aware_proof_capture',
+        observedCodeBoundary: '@fetanagent/deposit-reference-protection',
+        scope: 'dry_run_provider_scoped_submission_capture_only',
+        normalizationVersionLabel: null,
+        versionStatus: 'normalization_version_absent',
+        authoritativeOwner: 'unassigned',
+        jointReviewStatus: 'not_completed',
+        sourceAttestation: CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION,
+        exactTransformations: [
+          'reject_input_changed_by_trim',
+          'require_8_to_32_ascii_alphanumeric_characters',
+          'map_ascii_lowercase_to_uppercase_inside_protection',
+          'bind_provider_to_ciphertext_and_fingerprint',
+        ],
+        outputClass: 'uppercase_reference_inside_provider_bound_v2_protection',
+        authoritativeLookupEligible: false,
+      },
+      {
+        profileId: 'owner_receiver_reference_protection',
+        observedCodeBoundary: '@fetanagent/deposit-reference-protection',
+        scope: 'owner_configured_receiver_storage_and_presentation_only',
+        normalizationVersionLabel: null,
+        versionStatus: 'normalization_version_absent',
+        authoritativeOwner: 'unassigned',
+        jointReviewStatus: 'not_completed',
+        sourceAttestation: CBE_BIRR_RECEIVER_REFERENCE_PROTECTION_SOURCE_ATTESTATION,
+        exactTransformations: [
+          'require_9_to_24_ascii_decimal_digits',
+          'preserve_exact_digits_without_country_prefix_inference',
+          'bind_provider_to_ciphertext_fingerprint_and_unprotect',
+        ],
+        outputClass: 'exact_digits_inside_receiver_protection_boundary',
         authoritativeLookupEligible: false,
       },
       {
@@ -207,29 +302,19 @@ describe('CBE Birr normalization ownership inventory', () => {
   });
 
   it('makes every cross-profile comparison and positive capability fail closed', () => {
-    expect(CBE_BIRR_NORMALIZATION_COMPATIBILITY_INVENTORY).toEqual([
-      {
-        leftProfileId: 'submitted_reference_capture',
-        rightProfileId: 'offline_synthetic_fixture_reduction',
-        status: 'not_established',
-        equivalenceAllowed: false,
-        transformationReuseAllowed: false,
-      },
-      {
-        leftProfileId: 'submitted_reference_capture',
-        rightProfileId: 'shadow_settlement_metadata_label',
-        status: 'not_established',
-        equivalenceAllowed: false,
-        transformationReuseAllowed: false,
-      },
-      {
-        leftProfileId: 'offline_synthetic_fixture_reduction',
-        rightProfileId: 'shadow_settlement_metadata_label',
-        status: 'not_established',
-        equivalenceAllowed: false,
-        transformationReuseAllowed: false,
-      },
-    ]);
+    const profiles = CBE_BIRR_NORMALIZATION_PROFILE_INVENTORY.map((entry) => entry.profileId);
+    expect(CBE_BIRR_NORMALIZATION_COMPATIBILITY_INVENTORY).toHaveLength(10);
+    expect(CBE_BIRR_NORMALIZATION_COMPATIBILITY_INVENTORY).toEqual(
+      profiles.flatMap((leftProfileId, index) =>
+        profiles.slice(index + 1).map((rightProfileId) => ({
+          leftProfileId,
+          rightProfileId,
+          status: 'not_established',
+          equivalenceAllowed: false,
+          transformationReuseAllowed: false,
+        })),
+      ),
+    );
     expectDeeplyFrozen(CBE_BIRR_NORMALIZATION_COMPATIBILITY_INVENTORY);
 
     expectTypeOf<
@@ -299,6 +384,12 @@ describe('CBE Birr normalization ownership inventory', () => {
       { ...request, submittedReferenceNormalizationVersion: 'v1' },
       { ...request, submittedReferenceProtectionKeyVersion: 2 },
       { ...request, submittedReferenceSourceAttestation: 'sha256:unreviewed' },
+      { ...request, providerAwareProofProtectionKeyVersion: 1 },
+      { ...request, providerAwareProofProfileVersion: 1 },
+      { ...request, providerAwareProofSourceAttestation: 'sha256:unreviewed' },
+      { ...request, receiverReferenceProtectionKeyVersion: 2 },
+      { ...request, receiverReferenceProfileVersion: 2 },
+      { ...request, receiverReferenceSourceAttestation: 'sha256:unreviewed' },
       { ...request, fixtureSchemaLabel: 'FETANAGENT_CBE_BIRR_AUTHORITATIVE_FIXTURE_V2' },
       { ...request, fixtureSchemaVersion: 2 },
       { ...request, fixtureNormalizerVersion: 2 },
@@ -330,20 +421,20 @@ describe('CBE Birr normalization ownership inventory', () => {
       CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT,
     );
     expect(blockedProjection).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'blocked',
       reasonCode: 'normalization_ownership_review_incomplete',
-      profileCount: 3,
-      compatibilityPairCount: 3,
+      profileCount: 5,
+      compatibilityPairCount: 10,
     });
     expectDeeplyFrozen(blockedProjection);
 
     const ordinaryClone = { ...CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT };
     const invalidProjection = redactedCbeBirrNormalizationOwnershipForLog(ordinaryClone);
     expect(invalidProjection).toEqual({
-      contractVersion: 1,
+      contractVersion: 2,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'invalid_result',
@@ -380,6 +471,20 @@ describe('normalization inventory compatibility regressions', () => {
         },
       ),
     );
+    const telegramRuntimeSource = oneRawSource(
+      import.meta.glob('../../../apps/api/src/postgres-telegram-player-action-runtime.ts', {
+        eager: true,
+        import: 'default',
+        query: '?raw',
+      }),
+    );
+    const receiptTransportSource = oneRawSource(
+      import.meta.glob('../../../packages/cbe-birr-authoritative-receipt-transport/src/shared.ts', {
+        eager: true,
+        import: 'default',
+        query: '?raw',
+      }),
+    );
     const inventorySource = oneRawSource(
       import.meta.glob('./normalization-ownership.ts', {
         eager: true,
@@ -406,6 +511,52 @@ describe('normalization inventory compatibility regressions', () => {
     expect(normalizedSourceAttestation(submittedReferenceSource)).toBe(
       CBE_BIRR_SUBMITTED_REFERENCE_CAPTURE_SOURCE_ATTESTATION,
     );
+
+    const providerAwareSource = providerAwareProofCaptureSource(protectionSource);
+    expect(providerAwareSource).toContain(
+      'const DIRECT_PROOF_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;',
+    );
+    expect(providerAwareSource).toContain(
+      'export const DEPOSIT_PROOF_REFERENCE_KEY_VERSION = 2 as const;',
+    );
+    expect(providerAwareSource).toContain(
+      'export const DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION = 2 as const;',
+    );
+    expect(providerAwareSource).toContain(
+      'export const DEPOSIT_PROOF_REFERENCE_MIN_CODE_POINTS = 8;',
+    );
+    expect(providerAwareSource).toContain(
+      'export const DEPOSIT_PROOF_REFERENCE_MAX_CODE_POINTS = 32;',
+    );
+    expect(providerAwareSource).toContain(
+      'const normalizedReference = inputProperties.reference.toUpperCase();',
+    );
+    expect(providerAwareSource).toContain('provider:${provider}');
+    expect(normalizedSourceAttestation(providerAwareSource)).toBe(
+      CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION,
+    );
+
+    const receiverSource = receiverReferenceProtectionSource(protectionSource);
+    expect(receiverSource).toContain(
+      'export const RECEIVER_ACCOUNT_REFERENCE_KEY_VERSION = 1 as const;',
+    );
+    expect(receiverSource).toContain(
+      'export const RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION = 1 as const;',
+    );
+    expect(receiverSource).toContain('export const RECEIVER_ACCOUNT_REFERENCE_MIN_DIGITS = 9;');
+    expect(receiverSource).toContain('export const RECEIVER_ACCOUNT_REFERENCE_MAX_DIGITS = 24;');
+    expect(receiverSource).toContain('return reference;');
+    expect(receiverSource).toContain('provider:${provider}');
+    expect(normalizedSourceAttestation(receiverSource)).toBe(
+      CBE_BIRR_RECEIVER_REFERENCE_PROTECTION_SOURCE_ATTESTATION,
+    );
+    expect(telegramRuntimeSource).toContain(
+      'const protectedReference = protectCbeBirrDepositReference(action.transactionReference, {',
+    );
+    expect(telegramRuntimeSource).toContain(
+      "const protectedReference = protectDepositProofReference({\n    provider: 'cbe_birr',",
+    );
+    expect(receiptTransportSource).toContain('const LOOKUP_PHONE_PATTERN = /^251[0-9]{9}$/u;');
 
     expect(fixtureSource).toContain(
       'export const CBE_BIRR_AUTHORITATIVE_FIXTURE_NORMALIZER_VERSION = 1 as const;',

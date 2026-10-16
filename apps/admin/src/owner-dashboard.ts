@@ -237,7 +237,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <label for="receiver-holder-name">Official receiver full name</label>
             <input id="receiver-holder-name" name="accountHolderName" type="text"
               minlength="2" maxlength="160" autocomplete="off" required />
-            <label for="receiver-account-reference">Wallet or account number (digits only)</label>
+            <label id="receiver-account-reference-label" for="receiver-account-reference">TeleBirr receiving number (digits only)</label>
             <input id="receiver-account-reference" name="accountReference" type="password"
               inputmode="numeric" pattern="[0-9]{9,24}" minlength="9" maxlength="24"
               autocomplete="new-password" required />
@@ -804,6 +804,7 @@ const receiverForm = document.querySelector('#receiver-form');
 const receiverFeedback = document.querySelector('#receiver-feedback');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
 const receiverAccountReference = document.querySelector('#receiver-account-reference');
+const receiverAccountReferenceLabel = document.querySelector('#receiver-account-reference-label');
 const receiverConfirmation = document.querySelector('#receiver-confirmation');
 const kemerbetAgentProfileList = document.querySelector('#kemerbet-agent-profile-list');
 const kemerbetAgentProfileForm = document.querySelector('#kemerbet-agent-profile-form');
@@ -3206,14 +3207,33 @@ function receiverMutationHeaders(requestId) {
   };
 }
 
+function updateReceiverAccountReferenceFormat() {
+  const cbeBirr = receiverForm.elements.providerCode.value === 'cbe_birr';
+  receiverAccountReferenceLabel.textContent = cbeBirr
+    ? 'CBE Birr receiving phone (251 + nine digits)'
+    : 'TeleBirr receiving number (digits only)';
+  receiverAccountReference.pattern = cbeBirr ? '251[0-9]{9}' : '[0-9]{9,24}';
+  receiverAccountReference.minLength = cbeBirr ? 12 : 9;
+  receiverAccountReference.maxLength = cbeBirr ? 12 : 24;
+  receiverAccountReference.value = '';
+  receiverConfirmation.checked = false;
+}
+
 async function rotateReceiver() {
   if (!requireOrdinaryKemerbetMutation()) return;
   const providerCode = receiverForm.elements.providerCode.value;
   const accountHolderName = receiverForm.elements.accountHolderName.value;
   const accountReference = receiverForm.elements.accountReference.value;
   const rotationReason = receiverForm.elements.rotationReason.value;
-  if (!receiverConfirmation.checked || !['cbe_birr', 'telebirr'].includes(providerCode) ||
-      !/^[0-9]{9,24}$/.test(accountReference)) return;
+  const validReference = providerCode === 'cbe_birr'
+    ? /^251[0-9]{9}$/.test(accountReference)
+    : providerCode === 'telebirr' && /^[0-9]{9,24}$/.test(accountReference);
+  if (!receiverConfirmation.checked || !validReference) {
+    setReceiverFeedback(providerCode === 'cbe_birr'
+      ? 'Enter the full CBE Birr receiving phone: 251 followed by nine digits.'
+      : 'Check the TeleBirr receiving number and confirmation.');
+    return;
+  }
   if (!window.confirm(
     'Create a new active ' + (providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
     ' receiver revision for ' + accountHolderName + ' ending ' + accountReference.slice(-4) +
@@ -6006,6 +6026,8 @@ kemerbetReadinessCohortForm.addEventListener('submit', async (event) => {
   await prepareKemerbetReadinessCohort();
 });
 receiverRefreshButton.addEventListener('click', loadReceivers);
+receiverForm.elements.providerCode.addEventListener('change', updateReceiverAccountReferenceFormat);
+updateReceiverAccountReferenceFormat();
 receiverForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await rotateReceiver();

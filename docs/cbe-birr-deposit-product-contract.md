@@ -66,7 +66,7 @@ The server constructs the lookup itself using:
 - the compiled allowlisted official CBE receipt host;
 - the fixed official receipt path;
 - the normalized candidate transaction ID; and
-- FetanAgent's protected, configured receiver-wallet number as the lookup phone.
+- FetanAgent's protected, configured full `251` receiver-wallet phone as the lookup selector.
 
 The lookup phone is a selector, not evidence that the configured wallet received the payment. The
 returned receipt must independently identify the credited receiver wallet or account.
@@ -78,9 +78,12 @@ arbitrary redirect target.
 
 ## Owner-configured receiver revisions
 
-The Owner may replace the active CBE Birr receiver with another personal or merchant receiver
-account. Each revision contains exactly one official full receiver name and one protected wallet or
-account number. Aliases, fuzzy name lists, and silent in-place edits are not allowed.
+The Owner may replace the active CBE Birr receiver with another personal or merchant wallet whose
+receiving identifier is a full `251` phone number. Each newly saved revision contains exactly one
+official full receiver name and one protected 12-digit phone (`251` plus nine digits). A local
+nine-digit number is not silently prefixed. Previously saved revisions are not rewritten or
+assumed lookup-ready; a nonconforming one needs a separately confirmed fresh revision before
+future CBE Birr activation. Aliases, fuzzy name lists, and silent in-place edits are not allowed.
 
 A change creates a new immutable revision with its activation time, deactivation time, Owner actor,
 reason, and audit record. Earlier revisions remain available for verification history and are never

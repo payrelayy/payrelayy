@@ -15,3 +15,9 @@ clear any authoritative-lookup blocker. Its relationship to current submitted-re
 receiver revision protection, receipt parsing, and settlement still needs an explicit joint review.
 It must not be imported into the bot, API, Companion, or verifier as an authorization decision.
 No live CBE Birr reference, account, receipt, or other personal data is stored here.
+
+The Owner receiver form and API independently reject newly submitted CBE Birr receiver phones
+that are not full `251` plus nine-digit values. That storage-boundary check follows the Owner's
+confirmed receiver format; it is not a runtime use of this offline candidate and does not prove
+that the `PH` selector identifies the credited account on a particular PDF. Existing revisions
+remain unchanged and require separate review before CBE Birr can be enabled.

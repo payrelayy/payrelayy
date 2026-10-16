@@ -2259,6 +2259,14 @@ describe('Owner-control HTTP boundary', () => {
         payload: { ...base, accountReference: '+0000003456' },
         headers: receiverMutationHeaders(),
       },
+      {
+        payload: { ...base, providerCode: 'cbe_birr', accountReference: '0000003456' },
+        headers: receiverMutationHeaders(),
+      },
+      {
+        payload: { ...base, providerCode: 'cbe_birr', accountReference: '25100000345' },
+        headers: receiverMutationHeaders(),
+      },
       { payload: { ...base, amount: 25 }, headers: receiverMutationHeaders() },
       { payload: base, headers: { ...receiverMutationHeaders(), origin: 'https://evil.example' } },
       {

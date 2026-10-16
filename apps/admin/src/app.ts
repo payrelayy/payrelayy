@@ -85,6 +85,7 @@ import {
 import {
   OwnerReceiverAccountRejectedError,
   OwnerReceiverAccountUnavailableError,
+  validOwnerReceiverAccountReference,
   type OwnerReceiverProvider,
   type OwnerReceiverRotationReason,
 } from './owner-receiver-accounts.js';
@@ -285,7 +286,6 @@ const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
 ]);
 const OWNER_RECEIVER_HOLDER_PATTERN =
   /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,158}[^\s\u0000-\u001f\u007f])?$/u;
-const OWNER_RECEIVER_REFERENCE_PATTERN = /^[0-9]{9,24}$/u;
 const INTERACTIVE_SESSION_CACHE_TTL_MS = 5_000;
 const INTERACTIVE_SESSION_CACHE_MAX_ENTRIES = 8;
 
@@ -1323,7 +1323,7 @@ export function buildOwnerControlApp(
         typeof body.accountHolderName !== 'string' ||
         !OWNER_RECEIVER_HOLDER_PATTERN.test(body.accountHolderName) ||
         typeof body.accountReference !== 'string' ||
-        !OWNER_RECEIVER_REFERENCE_PATTERN.test(body.accountReference) ||
+        !validOwnerReceiverAccountReference(providerCode, body.accountReference) ||
         !validReceiverMutationHeaders(request.raw.rawHeaders, body.requestId)
       ) {
         return reply.code(400).send({ error: 'invalid_request' });

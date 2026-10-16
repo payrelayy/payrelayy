@@ -99,7 +99,11 @@ The remaining blockers preserve the existing safety design:
 
 1. **Receiver protection and provenance.** Existing receiver lookup material lacks independently
    established protection metadata and key provenance. Metadata cannot be inferred or backfilled;
-   a fresh immutable receiver revision is required.
+   a fresh immutable receiver revision is required. The Owner API now requires newly saved CBE Birr
+   receiver phones to be exactly `251` plus nine digits, without changing the broader TeleBirr
+   rule or retroactively rewriting stored revisions. This format check alone does not establish
+   protection provenance, identify which existing revision is conforming, or prove that an official
+   receipt credited the configured receiver.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Submitted capture, synthetic fixture reduction, receiver lookup,

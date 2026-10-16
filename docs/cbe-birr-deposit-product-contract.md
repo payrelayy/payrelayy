@@ -122,6 +122,9 @@ following without ambiguity:
     freshness and instruction windows. A minute that straddles a cutoff is uncertain and goes to
     review; the parser's `:00` representation is not proof that the transaction occurred at that
     exact second.
+    A pure, unwired advisory preflight now tests these time-window boundaries using the parser's
+    precision flag and server-time candidates. Passing that preflight is not payment verification
+    or permission to credit a Player.
 11. The selected KemerBet Player ID exists, is active, and is currently deposit-eligible at the
     settlement and execution boundaries.
 12. The canonical provider reference has not already funded or been conclusively claimed by another

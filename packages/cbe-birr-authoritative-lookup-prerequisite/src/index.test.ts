@@ -496,7 +496,7 @@ describe('dependency and production-source boundary', () => {
     expect(manifest.peerDependencies).toBeUndefined();
   });
 
-  it('imports only the Stage 1E policy, trap-free proxy detector, and pure inventory modules', () => {
+  it('imports only the Stage 1E policy, trap-free proxy detector, and pure preflight modules', () => {
     const source = oneRawSource(
       import.meta.glob('./index.ts', {
         eager: true,
@@ -513,6 +513,7 @@ describe('dependency and production-source boundary', () => {
       '@fetanagent/cbe-birr-official-source-policy',
       'node:util/types',
       './normalization-ownership.js',
+      './receipt-time-window.js',
       './receiver-revision-metadata.js',
     ]);
     expect(source).not.toMatch(/\bimport\s*\(/u);
@@ -539,6 +540,26 @@ describe('dependency and production-source boundary', () => {
         expect(specifier.toLowerCase()).not.toContain(fragment);
       }
     }
+  });
+
+  it('keeps the receipt time-window preflight free of network, secrets, SQL, and money movement', () => {
+    const source = oneRawSource(
+      import.meta.glob('./receipt-time-window.ts', {
+        eager: true,
+        import: 'default',
+        query: '?raw',
+      }),
+    );
+    const staticSpecifiers = Array.from(
+      source.matchAll(/\b(?:import|export)\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]/gu),
+      (match) => match[1],
+    ).filter((specifier): specifier is string => specifier !== undefined);
+    expect(staticSpecifiers).toEqual(['node:util/types']);
+    expect(source).not.toMatch(/\bimport\s*\(/u);
+    expect(source).not.toMatch(/\brequire\s*\(/u);
+    expect(source).not.toMatch(/\bfetch\s*\(/u);
+    expect(source).not.toMatch(/\bprocess\s*\.\s*env\b/u);
+    expect(source).not.toMatch(/\b(?:readFile|writeFile|open|connect|query)\s*\(/u);
   });
 
   it('keeps receiver metadata inspection free of secrets, SQL, and network dependencies', () => {

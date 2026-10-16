@@ -14,6 +14,17 @@ no account number, holder name, ciphertext, fingerprint, secret, or revision ide
 application or SQL lease calls it. A newly configured receiver therefore does not clear the
 authoritative-lookup blockers by itself.
 
+A separate pure receipt time-window preflight consumes only the parser's canonical Addis Ababa
+timestamp and its `second` or `minute` precision, plus server-recorded instruction and submission
+times. It requires parser version 2 and the expected layout/precision pairing; drift goes to
+review. It treats a displayed minute as the entire possible minute and a displayed second as the
+entire possible second. That full interval must fit the exact one-hour instruction, the one-hour
+freshness period, and the five-minute provider-clock tolerance; a late submission or overlap with
+any boundary returns `would_review`. Even a `window_consistent_advisory` result fixes
+`authoritativeVerificationAllowed` and `financialActionAllowed` to `false`: it does not attest the
+receipt source, receiver, duplicate state, or Player eligibility. No application, SQL lease, or
+financial path imports or calls it, and its input times require a future trusted immutable source.
+
 A separate database preflight now covers the newer, provider-aware dry-run proof records. It takes
 one opaque proof-request UUID, requires the CBE Birr verification switch to remain disabled, and
 reads only the proof's provider/status/version labels and the active receiver's status/protection

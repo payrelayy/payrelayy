@@ -3,13 +3,18 @@ import { isProxy } from 'node:util/types';
 import {
   decodeCompanionEnrollmentCertificateBody,
   decodeKemerBetExactFiveLookupAssignmentBody,
+  decodeKemerBetPlayerValidationAssignmentBody,
   decodeSignedCompanionEnrollmentCertificate,
   decodeSignedKemerBetExactFiveLookupAssignment,
+  decodeSignedKemerBetPlayerValidationAssignment,
+  digestKemerBetPlayerValidationAssignmentBody,
   type SignedCompanionHttpRequest,
   type SignedCompanionEnrollmentCertificate,
   type SignedCompanionPairingRequest,
   type SignedKemerBetExactFiveLookupAssignment,
   type SignedKemerBetExactFiveLookupResult,
+  type SignedKemerBetPlayerValidationAssignment,
+  type SignedKemerBetPlayerValidationResult,
 } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_ACTION_KIND,
@@ -59,6 +64,10 @@ import type {
   CompanionExecutionStatusClaim,
 } from './execution-handler.js';
 import type { CompanionPairingClaim } from './pairing-handler.js';
+import type {
+  CompanionPlayerValidationAcceptance,
+  CompanionPlayerValidationClaim,
+} from './player-validation-handler.js';
 
 export interface CompanionDeviceStateDatabase {
   query(sql: string, values: readonly string[]): Promise<{ readonly rows: readonly unknown[] }>;
@@ -156,6 +165,38 @@ export const ACCEPT_COMPANION_LOOKUP_RESULT_SQL = `
       $14::timestamptz,
       $15::jsonb,
       $16::jsonb
+    )
+`;
+
+// These private functions are not granted to the live bridge role yet. The public
+// player-validation routes remain dormant until a separate exact-ACL rollout.
+export const CLAIM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL = `
+  select claim_state, assignment_body, signed_assignment
+    from app.claim_telegram_player_validation_assignment(
+      $1::text, $2::text, $3::text, $4::text, $5::text,
+      $6::text, $7::timestamptz, $8::timestamptz,
+      $9::timestamptz, $10::text
+    )
+`;
+
+export const COMPLETE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL = `
+  select app.complete_telegram_player_validation_assignment(
+    $1::text, $2::jsonb
+  ) as completed
+`;
+
+export const RELEASE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL = `
+  select app.release_telegram_player_validation_assignment($1::text) as released
+`;
+
+export const ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL = `
+  select accepted, replayed
+    from app.accept_telegram_player_validation_result(
+      $1::text, $2::text, $3::text, $4::text,
+      $5::text, $6::text, $7::text, $8::text,
+      $9::text, $10::text, $11::text,
+      $12::timestamptz, $13::timestamptz, $14::timestamptz,
+      $15::jsonb, $16::jsonb
     )
 `;
 
@@ -552,6 +593,134 @@ export class PostgresCompanionDeviceState {
         : undefined;
     } catch (error) {
       if (error instanceof CompanionDeviceStateUnavailableError) throw error;
+      throw new CompanionDeviceStateUnavailableError();
+    }
+  }
+
+  async claimPlayerValidationAssignment(
+    certificate: SignedCompanionEnrollmentCertificate,
+    request: SignedCompanionHttpRequest,
+    httpReplayIdentity: string,
+    assessedAt: string,
+  ): Promise<CompanionPlayerValidationClaim | undefined> {
+    try {
+      const result = await this.database.query(CLAIM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL, [
+        httpReplayIdentity,
+        request.bodyDigest,
+        request.body.requestId,
+        certificate.body.certificateId,
+        certificate.body.deviceId,
+        certificate.body.deviceKeyId,
+        request.body.issuedAt,
+        request.body.expiresAt,
+        assessedAt,
+        this.signerKeyId,
+      ]);
+      if (result.rows.length !== 1) return undefined;
+      const row = rowObject(result.rows[0]);
+      if (!exactKeys(row, ['claim_state', 'assignment_body', 'signed_assignment'])) {
+        throw new CompanionDeviceStateUnavailableError();
+      }
+      if (
+        (row.claim_state === 'none' || row.claim_state === 'in_progress') &&
+        row.assignment_body === null &&
+        row.signed_assignment === null
+      ) {
+        return Object.freeze({ kind: row.claim_state });
+      }
+      if (row.claim_state === 'claimed' && row.signed_assignment === null) {
+        const assignmentBody = decodeKemerBetPlayerValidationAssignmentBody(row.assignment_body);
+        if (!assignmentBody) throw new CompanionDeviceStateUnavailableError();
+        return Object.freeze({ kind: 'claimed', assignmentBody });
+      }
+      if (row.claim_state === 'completed' && row.assignment_body !== null) {
+        const assignment = decodeSignedKemerBetPlayerValidationAssignment(row.signed_assignment);
+        const assignmentBody = decodeKemerBetPlayerValidationAssignmentBody(row.assignment_body);
+        if (
+          !assignment ||
+          !assignmentBody ||
+          digestKemerBetPlayerValidationAssignmentBody(assignmentBody) !== assignment.bodyDigest
+        ) {
+          throw new CompanionDeviceStateUnavailableError();
+        }
+        return Object.freeze({ kind: 'completed', assignment });
+      }
+      throw new CompanionDeviceStateUnavailableError();
+    } catch (error) {
+      if (error instanceof CompanionDeviceStateUnavailableError) throw error;
+      throw new CompanionDeviceStateUnavailableError();
+    }
+  }
+
+  async completePlayerValidationAssignment(
+    assignmentBodyDigest: string,
+    assignment: SignedKemerBetPlayerValidationAssignment,
+  ): Promise<boolean> {
+    try {
+      const result = await this.database.query(
+        COMPLETE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL,
+        [assignmentBodyDigest, JSON.stringify(assignment)],
+      );
+      if (result.rows.length !== 1) return false;
+      const row = rowObject(result.rows[0]);
+      return exactKeys(row, ['completed']) && row.completed === true;
+    } catch {
+      throw new CompanionDeviceStateUnavailableError();
+    }
+  }
+
+  async releasePlayerValidationAssignment(assignmentId: string): Promise<void> {
+    try {
+      const result = await this.database.query(RELEASE_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_SQL, [
+        assignmentId,
+      ]);
+      if (result.rows.length !== 1) throw new CompanionDeviceStateUnavailableError();
+      const row = rowObject(result.rows[0]);
+      if (!exactKeys(row, ['released']) || typeof row.released !== 'boolean') {
+        throw new CompanionDeviceStateUnavailableError();
+      }
+    } catch (error) {
+      if (error instanceof CompanionDeviceStateUnavailableError) throw error;
+      throw new CompanionDeviceStateUnavailableError();
+    }
+  }
+
+  async acceptPlayerValidationResult(
+    certificate: SignedCompanionEnrollmentCertificate,
+    request: SignedCompanionHttpRequest,
+    httpReplayIdentity: string,
+    assignment: SignedKemerBetPlayerValidationAssignment,
+    resultEnvelope: SignedKemerBetPlayerValidationResult,
+    resultReplayIdentity: string,
+    assessedAt: string,
+  ): Promise<CompanionPlayerValidationAcceptance | undefined> {
+    try {
+      const result = await this.database.query(ACCEPT_COMPANION_PLAYER_VALIDATION_RESULT_SQL, [
+        httpReplayIdentity,
+        request.bodyDigest,
+        request.body.requestId,
+        resultReplayIdentity,
+        assignment.body.assignmentId,
+        assignment.bodyDigest,
+        resultEnvelope.body.resultId,
+        resultEnvelope.bodyDigest,
+        certificate.body.certificateId,
+        certificate.body.deviceId,
+        certificate.body.deviceKeyId,
+        request.body.issuedAt,
+        request.body.expiresAt,
+        assessedAt,
+        JSON.stringify(assignment),
+        JSON.stringify(resultEnvelope),
+      ]);
+      if (result.rows.length !== 1) return undefined;
+      const row = rowObject(result.rows[0]);
+      return exactKeys(row, ['accepted', 'replayed']) &&
+        row.accepted === true &&
+        typeof row.replayed === 'boolean'
+        ? Object.freeze({ accepted: true, replayed: row.replayed })
+        : undefined;
+    } catch {
       throw new CompanionDeviceStateUnavailableError();
     }
   }

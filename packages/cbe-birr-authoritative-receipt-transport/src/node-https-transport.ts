@@ -289,13 +289,14 @@ function parseResponseHeaders(
     return { ok: false, reasonCode: 'response_headers_rejected' };
   }
 
-  if (
-    values.has('location') ||
-    values.has('set-cookie') ||
-    (values.has('content-length') && values.has('transfer-encoding'))
-  ) {
+  if (values.has('location') || (values.has('content-length') && values.has('transfer-encoding'))) {
     return { ok: false, reasonCode: 'response_headers_rejected' };
   }
+
+  // CBE can set a response cookie on its public receipt route. It is untrusted, bounded by
+  // the generic header checks above, and intentionally ignored: this one-shot transport has
+  // no cookie jar, sends no Cookie header, and never returns response headers to a caller.
+  values.delete('set-cookie');
 
   const contentLengths = values.get('content-length');
   let contentLength: number | undefined;

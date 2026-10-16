@@ -357,10 +357,6 @@ describe('bounded Node HTTPS transport', () => {
       'response_headers_rejected',
     ],
     [
-      ['Content-Type', 'application/pdf', 'Set-Cookie', 'synthetic=value'],
-      'response_headers_rejected',
-    ],
-    [
       [
         'Content-Type',
         'application/pdf',
@@ -418,6 +414,46 @@ describe('bounded Node HTTPS transport', () => {
 
     expect(result).toEqual({ ok: true, body: syntheticPdfEnvelope() });
     expect(result).not.toHaveProperty('headers');
+  });
+
+  it('ignores bounded response cookies without sending, retaining, or exposing them', async () => {
+    const fake = dependencies({
+      async open() {
+        return response({
+          rawHeaders: [
+            'Content-Type',
+            'application/pdf',
+            'Set-Cookie',
+            'synthetic-one=private; Secure; HttpOnly',
+            'Set-Cookie',
+            'synthetic-two=private; Secure; HttpOnly',
+            'Transfer-Encoding',
+            'chunked',
+          ],
+        });
+      },
+    });
+
+    const result = await createCbeBirrNodeHttpsTransport(fake.dependencies)(plan);
+
+    expect(result).toEqual({ ok: true, body: syntheticPdfEnvelope() });
+    expect(result).not.toHaveProperty('headers');
+    expect(plan.headers).not.toHaveProperty('cookie');
+  });
+
+  it('still rejects a response cookie with control characters', async () => {
+    const fake = dependencies({
+      async open() {
+        return response({
+          rawHeaders: ['Content-Type', 'application/pdf', 'Set-Cookie', 'synthetic=bad\r\nvalue'],
+        });
+      },
+    });
+
+    await expect(createCbeBirrNodeHttpsTransport(fake.dependencies)(plan)).resolves.toEqual({
+      ok: false,
+      reasonCode: 'response_headers_rejected',
+    });
   });
 
   it.each(['application/pdf', ' Application/PDF '])(

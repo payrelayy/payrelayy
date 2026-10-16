@@ -49,7 +49,8 @@ The transport enforces:
   hostname for SNI and certificate-identity validation;
 - normal certificate validation, a minimum TLS version of 1.2, no custom CA or credential, and a
   fresh non-pooled connection;
-- no redirects, cookies, authorization, decompression, browser session, or response location;
+- no redirects, request cookies, cookie jar, authorization, decompression, browser session, or
+  response location; a bounded `Set-Cookie` response is ignored and never sent or exposed;
 - at most one bounded `Content-Disposition` value containing no ASCII control character, including
   horizontal tab, accepted only as ignored metadata and never returned, logged, parsed, or trusted;
 - at most 32 response-header pairs and 8,192 encoded header bytes;
@@ -130,9 +131,17 @@ one request, no parse on incident stop or malformed response, and no leakage on 
 ## Remaining blockers and next boundary
 
 One bounded read-only diagnostic using an already-completed Owner receipt reached
-`response_headers_rejected` before any PDF body or field could be accepted. Raw headers and
-receipt contents were not retained. The exact header discrepancy and live response contract
-remain unattested; this result must not be used to relax transport checks or activate CBE Birr.
+`response_headers_rejected` before any PDF body or field could be accepted. A second bounded,
+headers-only diagnostic isolated the cause to CBE's `Set-Cookie` response header. It observed a
+200 PDF response with one allowed `Content-Type`, no content encoding or redirect location, and
+chunked transfer without a conflicting content length. It did not retain response headers or
+receipt content. The transport now ignores bounded response cookies without sending or storing
+them. This narrow compatibility change does not itself attest the live PDF response contract or
+activate CBE Birr. One subsequent bounded, read-only one-fetch diagnostic returned an opaque PDF
+observation and the parser's advisory `would_review` / `receiver_identity_observed` result. That
+proves the response reaches the parser for this one previously completed receipt; it is not
+provider-wide contract attestation, immutable receiver-revision evidence, or authorization to
+credit a Player.
 
 The existing `official_receipt_live_response_contract_unattested` blocker remains because this
 slice deliberately makes no claim about PDF field layout, labels, values, signatures, encryption,

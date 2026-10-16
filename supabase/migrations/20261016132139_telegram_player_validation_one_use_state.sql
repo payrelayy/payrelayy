@@ -272,7 +272,7 @@ begin
         return query select 'in_progress'::text, null::jsonb, null::jsonb;
       else
         update app.telegram_player_validation_assignments assignment
-           set claim_lease_expires_at = pg_catalog.least(
+           set claim_lease_expires_at = least(
              p_assessed_at + interval '30 seconds', assignment.expires_at)
          where assignment.assignment_id = v_assignment.assignment_id;
         return query select 'claimed'::text, v_assignment.assignment_body, null::jsonb;
@@ -313,7 +313,7 @@ begin
     return;
   end if;
   v_assignment_id := pg_catalog.gen_random_uuid();
-  v_expires_at := pg_catalog.least(
+  v_expires_at := least(
     p_assessed_at + interval '5 minutes', v_certificate.valid_until);
   v_body := pg_catalog.jsonb_build_object(
     'contractVersion', 1,
@@ -356,7 +356,7 @@ begin
     v_assignment_id, v_request.id, v_certificate_id, v_certificate.server_signer_id,
     p_device_id, p_device_key_id, v_body ->> 'leaseNonceDigest',
     p_assessed_at, v_expires_at,
-    pg_catalog.least(p_assessed_at + interval '30 seconds', v_expires_at), v_body
+    least(p_assessed_at + interval '30 seconds', v_expires_at), v_body
   );
   return query select 'claimed'::text, v_body, null::jsonb;
 end;

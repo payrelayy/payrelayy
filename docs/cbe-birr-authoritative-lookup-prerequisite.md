@@ -14,6 +14,19 @@ no account number, holder name, ciphertext, fingerprint, secret, or revision ide
 application or SQL lease calls it. A newly configured receiver therefore does not clear the
 authoritative-lookup blockers by itself.
 
+A separate database preflight now covers the newer, provider-aware dry-run proof records. It takes
+one opaque proof-request UUID, requires the CBE Birr verification switch to remain disabled, and
+reads only the proof's provider/status/version labels and the active receiver's status/protection
+version labels. It returns either `receiver_revision_unavailable` or
+`receiver_v1_metadata_only`, always with `eligibility = blocked` and literal false lease and
+protected-material flags. It never selects or returns a reference, ciphertext, fingerprint, receiver
+ID, account number, key, or holder name, and never locks or changes a row. Only a distinct NOLOGIN
+preflight role can call it; that role has no direct table or legacy lease access. There is no
+application/worker wiring, lookup, decryption, production migration, or financial activation in
+this change. This metadata probe does **not** clear `prelease_prerequisite_gate_absent`: a future
+lease path must prove it actually consumes a complete prerequisite decision before acquiring a
+lease, and still needs an opaque handle and separately reviewed callback-scoped material access.
+
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:
 

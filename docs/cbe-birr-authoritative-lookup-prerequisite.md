@@ -130,6 +130,11 @@ implicit upgrades remain false. In particular, neither the older v1 reference fo
 official 12-digit lookup selector. This inventory accepts no references, receiver digits,
 ciphertext, or keys, and it authorizes no decrypt, lookup, lease, or credit.
 
+An [offline normalization candidate](cbe-birr-normalization-candidate.md) now specifies and tests
+the narrow reference and lookup-selector formats with synthetic values only. It has no runtime
+consumer and does not assign ownership, establish cross-profile compatibility, or clear any of the
+three normalization blockers above.
+
 ## Pure boundary
 
 The prerequisite package accepts only exact public metadata labels. It contains no raw reference,

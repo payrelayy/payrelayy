@@ -129,6 +129,8 @@ assert.match(companionMatcher, /method POST/u);
 assert.match(companionMatcher, /path \/v1\/companion\/device\/enrollments:pair/u);
 assert.match(companionMatcher, /\/v1\/companion\/device\/lookup-assignments:poll/u);
 assert.match(companionMatcher, /\/v1\/companion\/device\/lookup-results:submit/u);
+assert.match(companionMatcher, /\/v1\/companion\/device\/player-validations:poll/u);
+assert.match(companionMatcher, /\/v1\/companion\/device\/player-validations:submit/u);
 assert.match(companionMatcher, /\/v2\/companion\/device\/execution-assignments:poll/u);
 assert.match(companionMatcher, /\/v2\/companion\/device\/execution-authorities:consume/u);
 assert.match(companionMatcher, /\/v2\/companion\/device\/execution-results:submit/u);

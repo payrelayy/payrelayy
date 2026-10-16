@@ -19,15 +19,19 @@ const mediaType = 'application/vnd.fetanagent.telebirr-device-bridge+json';
 const routineMediaType = 'application/vnd.fetanagent.telebirr-routine-no-money.v1+json';
 const paidPollMediaType = 'application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json';
 const paidUploadMediaType = 'application/vnd.fetanagent.telebirr-routine-paid-observation.v1+json';
+const companionMediaType = 'application/vnd.fetanagent.companion-device-bridge+json';
 const targetHeader = 'X-FetanAgent-Deployment-Target';
 const routePath = '/v1/telebirr/device/heartbeat';
 const routinePollPath = '/v1/telebirr/routine/assignments:poll';
 const routineUploadPath = '/v1/telebirr/routine/observations:upload';
 const paidPollPath = '/v1/telebirr/routine/paid/assignments:poll';
 const paidUploadPath = '/v1/telebirr/routine/paid/observations:upload';
+const companionFindPollPath = '/v1/companion/device/player-validations:poll';
+const companionFindSubmitPath = '/v1/companion/device/player-validations:submit';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await readFile(path.join(repositoryRoot, 'infra/gateway/Caddyfile'), 'utf8');
 const beginMarker = '# BEGIN exact TeleBirr device routing contract';
+const companionBeginMarker = '\t@companion_device_bridge {';
 const endMarker = '# END exact TeleBirr device routing contract';
 const routineBeginMarker = '# BEGIN exact routine no-money routing contract';
 const routineEndMarker = '# END exact routine no-money routing contract';
@@ -36,6 +40,7 @@ const paidEndMarker = '# END exact routine paid-poll routing contract';
 const paidUploadBeginMarker = '# BEGIN exact routine paid-observation routing contract';
 const paidUploadEndMarker = '# END exact routine paid-observation routing contract';
 const begin = source.indexOf(beginMarker);
+const companionBegin = source.indexOf(companionBeginMarker);
 const end = source.indexOf(endMarker);
 const routineBegin = source.indexOf(routineBeginMarker);
 const routineEnd = source.indexOf(routineEndMarker);
@@ -44,6 +49,8 @@ const paidEnd = source.indexOf(paidEndMarker);
 const paidUploadBegin = source.indexOf(paidUploadBeginMarker);
 const paidUploadEnd = source.indexOf(paidUploadEndMarker);
 assert.ok(begin >= 0 && end > begin, 'the exact TeleBirr routing block is absent');
+assert.ok(companionBegin >= 0 && companionBegin < begin, 'the Companion routing block is absent');
+assert.equal(source.indexOf(companionBeginMarker, companionBegin + 1), -1);
 assert.ok(routineBegin > end && routineEnd > routineBegin, 'the routine routing block is absent');
 assert.ok(paidBegin > routineEnd && paidEnd > paidBegin, 'the paid poll routing block is absent');
 assert.ok(
@@ -59,6 +66,7 @@ assert.equal(source.indexOf(paidEndMarker, paidEnd + 1), -1);
 assert.equal(source.indexOf(paidUploadBeginMarker, paidUploadBegin + 1), -1);
 assert.equal(source.indexOf(paidUploadEndMarker, paidUploadEnd + 1), -1);
 
+const companion = await startUpstream(203);
 const staging = await startUpstream(204);
 const production = await startUpstream(202);
 const gatewayPort = await reservePort();
@@ -70,6 +78,14 @@ let caddy;
 let caddyOutput = '';
 
 try {
+  let companionRoutingBlock = source.slice(companionBegin, begin);
+  const companionUpstream =
+    'reverse_proxy {$FETANAGENT_COMPANION_BRIDGE_UPSTREAM:companion-device-bridge:8085}';
+  assert.equal(occurrences(companionRoutingBlock, companionUpstream), 1);
+  companionRoutingBlock = companionRoutingBlock.replace(
+    companionUpstream,
+    `reverse_proxy 127.0.0.1:${companion.port}`,
+  );
   let routingBlock = source.slice(begin, end + endMarker.length);
   assert.equal(
     occurrences(routingBlock, 'staging-device-pilot-bridge:8084'),
@@ -118,6 +134,7 @@ try {
 }
 
 http://127.0.0.1:${gatewayPort} {
+${companionRoutingBlock}
 ${routingBlock}
 ${routineRoutingBlock}
 ${paidRoutingBlock}
@@ -168,6 +185,36 @@ ${paidUploadRoutingBlock}
     caddyOutput = appendBounded(caddyOutput, chunk);
   });
   await waitUntilReady(gatewayPort, caddy);
+
+  for (const path of [companionFindPollPath, companionFindSubmitPath]) {
+    await expectRoute(
+      gatewayPort,
+      [],
+      203,
+      ['Accept', companionMediaType],
+      path,
+      companionMediaType,
+    );
+    await expectRoute(gatewayPort, [], 404, [], path, companionMediaType);
+    await expectRoute(
+      gatewayPort,
+      [],
+      404,
+      ['Accept', 'application/json'],
+      path,
+      companionMediaType,
+    );
+    await expectRoute(gatewayPort, [], 404, ['Accept', companionMediaType], path, mediaType);
+  }
+  await expectRoute(
+    gatewayPort,
+    [],
+    404,
+    ['Accept', companionMediaType],
+    '/v1/companion/device/player-validations:delete',
+    companionMediaType,
+  );
+  assert.equal(companion.hits, 2, 'an unapproved Companion Find request reached the bridge');
 
   await expectRoute(gatewayPort, ['staging'], 204);
   await expectRoute(gatewayPort, ['production'], 202);
@@ -263,7 +310,7 @@ ${paidUploadRoutingBlock}
     'a rejected paid upload reached an upstream',
   );
   console.log(
-    'TeleBirr Caddy routing verified: exact device, no-money, paid poll, and paid upload routes; invalid targets and duplicate headers fail closed.',
+    'Caddy routing verified: signed Companion Find and exact TeleBirr device, no-money, paid poll, and paid upload routes; invalid targets and duplicate headers fail closed.',
   );
 } catch (error) {
   if (caddyOutput) {
@@ -280,7 +327,11 @@ ${paidUploadRoutingBlock}
     await Promise.race([onceExit(caddy), delay(5_000)]);
     if (caddy.exitCode === null) caddy.kill('SIGKILL');
   }
-  await Promise.all([closeServer(staging.server), closeServer(production.server)]);
+  await Promise.all([
+    closeServer(companion.server),
+    closeServer(staging.server),
+    closeServer(production.server),
+  ]);
   await rm(temporaryDirectory, { recursive: true });
 }
 

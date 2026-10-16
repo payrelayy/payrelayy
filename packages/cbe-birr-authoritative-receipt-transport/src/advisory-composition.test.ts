@@ -12,8 +12,6 @@ import {
   syntheticPdfEnvelope,
 } from './test-helpers.js';
 
-const DIFFERENT_SYNTHETIC_RECEIVER = '251000000001';
-
 describe('package-only CBE Birr one-fetch advisory composition', () => {
   it('passes the same observed PDF bytes to the isolated parser after exactly one official-host request', async () => {
     const body = syntheticPdfEnvelope();
@@ -23,7 +21,6 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     const result = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       syntheticLookupInput,
       allowedTransportControl,
-      DIFFERENT_SYNTHETIC_RECEIVER,
       async (plan) => {
         requests += 1;
         expect(plan.host).toBe('cbepay1.cbe.com.et');
@@ -41,7 +38,7 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
           providerCode: 'cbe_birr',
           sourceProfile: 'cbe_birr_official_receipt_lookup_v1',
           canonicalReference: SYNTHETIC_REFERENCE,
-          configuredReceiverAccountIdentifier: DIFFERENT_SYNTHETIC_RECEIVER,
+          configuredReceiverAccountIdentifier: SYNTHETIC_PHONE,
         });
         return parseCbeBirrAuthoritativePdf(parserBody, expectations);
       },
@@ -64,18 +61,23 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     expect(Object.isFrozen(result)).toBe(true);
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_REFERENCE);
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_PHONE);
-    expect(JSON.stringify(result)).not.toContain(DIFFERENT_SYNTHETIC_RECEIVER);
     expect(JSON.stringify(result)).not.toContain('%PDF-');
   });
 
-  it('refuses a missing or malformed configured receiver before the network or parser', async () => {
+  it('refuses a missing or malformed lookup receiver before the network or parser', async () => {
     let requests = 0;
     let parses = 0;
-    for (const receiver of [undefined, null, '25100000000', '251000000001x', 251000000001]) {
+    for (const receiver of [
+      undefined,
+      null,
+      '25100000000',
+      '251000000001x',
+      251000000001,
+      '000000000001',
+    ]) {
       const result = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
-        syntheticLookupInput,
+        { ...syntheticLookupInput, receiverLookupPhone: receiver },
         allowedTransportControl,
-        receiver,
         async () => {
           requests += 1;
           return { ok: true, body: syntheticPdfEnvelope() };
@@ -94,6 +96,35 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     expect(parses).toBe(0);
   });
 
+  it('uses one frozen receiver snapshot for both the lookup and PDF comparison', async () => {
+    const mutableInput = { ...syntheticLookupInput };
+    let requests = 0;
+    let parses = 0;
+    const result = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
+      mutableInput,
+      allowedTransportControl,
+      async (plan) => {
+        requests += 1;
+        mutableInput.receiverLookupPhone = '251000000001';
+        expect(plan.pathAndQuery).toContain(`PH=${SYNTHETIC_PHONE.slice(3)}`);
+        return { ok: true, body: syntheticPdfEnvelope() };
+      },
+      async (body, expectations) => {
+        parses += 1;
+        expect(body).toBeInstanceOf(Uint8Array);
+        expect(expectations).toMatchObject({
+          configuredReceiverAccountIdentifier: SYNTHETIC_PHONE,
+        });
+        return parseCbeBirrAuthoritativePdf(body, expectations);
+      },
+    );
+    expect(requests).toBe(1);
+    expect(parses).toBe(1);
+    expect(result.disposition).toBe('parsed_advisory');
+    expect(JSON.stringify(result)).not.toContain(SYNTHETIC_PHONE);
+    expect(JSON.stringify(result)).not.toContain(mutableInput.receiverLookupPhone);
+  });
+
   it('honors the incident stop and never parses a failed or malformed response', async () => {
     let requests = 0;
     let parses = 0;
@@ -104,7 +135,6 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     const stopped = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       syntheticLookupInput,
       { ...allowedTransportControl, incidentStop: 'open' },
-      SYNTHETIC_PHONE,
       async () => {
         requests += 1;
         return { ok: true, body: syntheticPdfEnvelope() };
@@ -118,7 +148,6 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     const malformed = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       syntheticLookupInput,
       allowedTransportControl,
-      SYNTHETIC_PHONE,
       async () => {
         requests += 1;
         return { ok: true, body: new TextEncoder().encode('<html>not a PDF</html>') };
@@ -137,7 +166,6 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     const result = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       syntheticLookupInput,
       allowedTransportControl,
-      SYNTHETIC_PHONE,
       async () => ({ ok: true, body: syntheticPdfEnvelope() }),
       async () => {
         throw new Error('SYNTHETIC PRIVATE PARSER ERROR');
@@ -156,7 +184,6 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
     const result = await retrieveAndParseCbeBirrReceiptWithTransportAndParser(
       syntheticLookupInput,
       allowedTransportControl,
-      SYNTHETIC_PHONE,
       async () => ({ ok: true, body: syntheticPdfEnvelope() }),
       async () =>
         ({

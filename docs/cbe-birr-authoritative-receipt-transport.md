@@ -89,8 +89,9 @@ parser now recognizes one newer receipt layout containing `Credit Account`, `Rec
 `Order ID`, completed status, minute-precision time, principal, and fee rows. Matching those
 fields is an advisory parsing result only. The internal one-fetch composition now passes bounded
 raw PDF bytes directly to that parser and derives its reference expectation from the canonical
-request. The expected receiver account is supplied separately from `PH`; the parser compares it
-to the PDF's `Credit Account` field. A second critical account, reference, status, or amount label
+request. The caller supplies one validated full receiver phone. Its local digits select `PH`,
+while the parser compares the same full phone to the PDF's `Credit Account` field; `PH` itself is
+not receiver evidence. A second critical account, reference, status, or amount label
 anywhere in the newer-layout PDF now yields advisory review, while unrelated footer text remains
 permitted. This is still **not** end-to-end authoritative verification:
 no trusted immutable receiver revision, live response contract, production source permission,
@@ -156,3 +157,11 @@ operational telemetry,
 receiver-material protection, worker decryption, normalization ownership, prelease-safe protected
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of
 those capabilities is implied by an opaque PDF observation.
+
+The internal one-fetch composition now validates and snapshots a single full `251…` receiver
+phone before the request. Its nine local digits select the official `PH` lookup, while the same
+full configured value is independently compared with the PDF's Credit Account field. Callers
+cannot pass a different receiver expectation for the PDF. This removes a split-input ambiguity;
+it does not make `PH` proof of receipt ownership or establish that the caller loaded the phone
+from an immutable Owner receiver revision. That provenance remains a prerequisite for runtime
+wiring and any financial decision.

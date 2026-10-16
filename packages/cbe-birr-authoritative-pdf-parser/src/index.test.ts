@@ -595,6 +595,22 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     });
   });
 
+  it.each([
+    'VAT Registration No 011140',
+    'VAT Reg. Date 01/01/2003',
+    'VAT Invoice No SYNTHETIC-INVOICE',
+    'VAT Receipt No SYNTHETIC-RECEIPT',
+  ])('does not confuse %s metadata with a second VAT amount', async (extraText) => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', extraText }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+    });
+  });
+
   it('rejects a different Credit Account and reviews conflicting account fields', async () => {
     const wrongReceiver = await parseCbeBirrAuthoritativePdf(
       syntheticReceiptPdf({ layout: 'credit_account_v2' }),

@@ -1174,9 +1174,12 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
     'Payment Channel',
   ] as const;
   for (const label of criticalLabels) {
+    // The bank's VAT registration/invoice metadata is not the monetary VAT field.
     const count = rows.filter(({ text }, index) =>
       label === 'VAT'
-        ? index !== 1 && (text === label || text.startsWith(`${label} `))
+        ? index !== 1 &&
+          !/^VAT (?:Registration|Reg\.|Invoice No|Receipt No)(?=\s|:|$)/u.test(text) &&
+          (text === label || text.startsWith(`${label} `))
         : text === label || text.startsWith(`${label} `),
     ).length;
     if (count === 0) return { ok: false, reasonCode: 'pdf_field_missing' };

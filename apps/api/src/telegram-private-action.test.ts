@@ -377,6 +377,7 @@ describe('private Telegram action transport contract', () => {
     };
     const actions: TelegramPrivateActionEnvelope[] = [
       { ...identity, kind: 'save_player_selection_command', playerId: 'PLAYER-DEMO-42' },
+      { ...identity, kind: 'player_validation_request_command', playerId: 'PLAYER-DEMO-42' },
       { ...identity, kind: 'saved_telebirr_destination_command' },
       { ...identity, kind: 'saved_telebirr_proof_command', transactionReference: 'SYNTB00000001' },
     ];
@@ -407,6 +408,20 @@ describe('private Telegram action transport contract', () => {
         verificationOptions(),
       ),
     ).resolves.toBeUndefined();
+    for (const playerId of [' PLAYER-DEMO-42', 'PLAYER DEMO', 'PLAYER/DEMO', '']) {
+      const invalidRequest = signedRequest({
+        ...identity,
+        kind: 'player_validation_request_command',
+        playerId,
+      });
+      await expect(
+        verifyTelegramPrivateActionRequest(
+          invalidRequest.request,
+          invalidRequest.rawBody,
+          verificationOptions(),
+        ),
+      ).resolves.toBeUndefined();
+    }
   });
 
   it('accepts only strict deposit, protected-reference, and status commands', async () => {

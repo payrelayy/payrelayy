@@ -114,6 +114,10 @@ const SAVE_PLAYER_SELECTION_SQL = `
   select selected_player_id, request_replayed
   from app.save_telegram_player_selection($1::uuid, $2::text)
 `;
+const REQUEST_PLAYER_VALIDATION_SQL = `
+  select request_id, request_replayed
+  from app.request_telegram_player_validation($1::uuid, $2::text)
+`;
 const GET_CUSTOMER_LIVE_TELEBIRR_PROOF_SQL = `
   select live_proof_id, provider_code, deposit_status, amount_minor, currency_code, submitted_at
   from app.get_telegram_customer_live_telebirr_proof($1::uuid, $2::uuid)
@@ -625,6 +629,28 @@ async function handleSavePlayerSelection(
     throw new TelegramPlayerActionRuntimeUnavailableError();
   }
   return { version: 1, outcome: 'player_selection_saved', playerId: action.playerId };
+}
+
+async function handlePlayerValidationRequest(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'player_validation_request_command' }
+  >,
+): Promise<TelegramPrivateActionResult> {
+  const row = oneRow(
+    (await database.query(REQUEST_PLAYER_VALIDATION_SQL, [originInboundEventId, action.playerId]))
+      .rows,
+  );
+  if (
+    typeof row.request_id !== 'string' ||
+    !UUID_PATTERN.test(row.request_id) ||
+    typeof row.request_replayed !== 'boolean'
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  return { version: 1, outcome: 'player_validation_queued' };
 }
 
 async function handleSavedTelebirrDestination(
@@ -1317,6 +1343,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleRootMenu(pool, inboundEventId, config);
           case 'save_player_selection_command':
             return await handleSavePlayerSelection(pool, inboundEventId, action);
+          case 'player_validation_request_command':
+            return await handlePlayerValidationRequest(pool, inboundEventId, action);
           case 'saved_telebirr_destination_command':
             return await handleSavedTelebirrDestination(pool, inboundEventId, action, config);
           case 'saved_telebirr_proof_command':

@@ -9,6 +9,12 @@ import {
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
+  it('does not present the dormant validation queue as an approved Player ID', () => {
+    expect(() =>
+      presentTelegramPlayerIdFlowResult({ version: 1, outcome: 'player_validation_queued' }),
+    ).toThrow('dormant Player validation queue');
+  });
+
   it('presents the saved selection and a one-tap repeat deposit', () => {
     const saved = presentTelegramPlayerIdFlowResult({
       version: 1,

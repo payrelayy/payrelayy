@@ -115,6 +115,11 @@ export type TelegramPrivateActionEnvelope =
       readonly playerId: string;
     })
   | (TelegramPrivateActionIdentity & {
+      /** Dormant intake only: a signed read-only Companion Find must decide this request later. */
+      readonly kind: 'player_validation_request_command';
+      readonly playerId: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'saved_telebirr_destination_command';
     })
   | (TelegramPrivateActionIdentity & {
@@ -261,6 +266,11 @@ export type TelegramPrivateActionResult =
       readonly version: 1;
       readonly outcome: 'player_selection_saved';
       readonly playerId: string;
+    }
+  | {
+      readonly version: 1;
+      /** The existing selected Player is unchanged. This is not KemerBet approval. */
+      readonly outcome: 'player_validation_queued';
     }
   | {
       readonly version: 1;

@@ -110,6 +110,29 @@ describe('Telegram private-action bot client', () => {
     ).resolves.toEqual({ version: 1, outcome: 'player_id_exists' });
   });
 
+  it('accepts only the minimal queued Player validation result', async () => {
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({ version: 1, outcome: 'player_validation_queued' }),
+        }),
+      }),
+    ).resolves.toEqual({ version: 1, outcome: 'player_validation_queued' });
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({
+          status: 200,
+          json: async () => ({
+            version: 1,
+            outcome: 'player_validation_queued',
+            playerId: 'PLAYER-DEMO-42',
+          }),
+        }),
+      }),
+    ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+  });
+
   it('accepts exact one-hour instruction record and expiry responses', async () => {
     const recordAction: TelegramPrivateActionEnvelope = {
       version: 1,

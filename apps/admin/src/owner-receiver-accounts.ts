@@ -6,7 +6,11 @@ import {
 
 export type OwnerReceiverProvider = DepositProofReferenceProvider;
 export type OwnerReceiverRotationReason =
-  'account_rotation' | 'initial_configuration' | 'owner_correction' | 'provider_incident_recovery';
+  | 'account_rotation'
+  | 'initial_configuration'
+  | 'owner_correction'
+  | 'provider_incident_recovery'
+  | 'protection_upgrade';
 
 export interface OwnerReceiverAccount {
   readonly accountHolderName: string;
@@ -66,6 +70,7 @@ const ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'initial_configuration',
   'owner_correction',
   'provider_incident_recovery',
+  'protection_upgrade',
 ]);
 
 /**
@@ -201,7 +206,8 @@ function validateRotation(authUserId: string, request: RotateOwnerReceiverAccoun
     !PROVIDERS.has(request.providerCode) ||
     !HOLDER_PATTERN.test(request.accountHolderName) ||
     !validOwnerReceiverAccountReference(request.providerCode, request.accountReference) ||
-    !ROTATION_REASONS.has(request.rotationReason)
+    !ROTATION_REASONS.has(request.rotationReason) ||
+    request.rotationReason === 'protection_upgrade'
   ) {
     throw new OwnerReceiverAccountRejectedError();
   }

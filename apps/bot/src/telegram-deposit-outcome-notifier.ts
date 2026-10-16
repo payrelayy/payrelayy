@@ -5,6 +5,7 @@ import type {
   TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
 import { processOneTelegramPaymentInstructionExpiry } from './telegram-payment-instruction-expiry.js';
+import { processOneTelegramPlayerValidationOutcome } from './telegram-player-validation-notifier.js';
 
 type Delivery = Extract<
   TelegramPrivateActionResult,
@@ -216,6 +217,7 @@ export async function runTelegramDepositOutcomeNotifier(
     let pause = 0;
     try {
       const outcome = await processOneTelegramDepositOutcome(dependencies);
+      const playerValidation = await processOneTelegramPlayerValidationOutcome(dependencies);
       const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
       const instruction = dependencies.sendMenu
         ? await processOneTelegramPaymentInstructionExpiry({
@@ -224,7 +226,13 @@ export async function runTelegramDepositOutcomeNotifier(
             sendMenu: dependencies.sendMenu,
           })
         : 'none';
-      pause = outcome === 'none' && cleanup === 'none' && instruction === 'none' ? 10_000 : 0;
+      pause =
+        outcome === 'none' &&
+        playerValidation === 'none' &&
+        cleanup === 'none' &&
+        instruction === 'none'
+          ? 10_000
+          : 0;
     } catch {
       console.warn('Telegram deposit outcome delivery is temporarily unavailable.');
       pause = 5_000;

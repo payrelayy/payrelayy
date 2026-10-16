@@ -392,6 +392,39 @@ export function parseTelegramPrivateActionEnvelope(
         deliveryResult: parsed.deliveryResult as 'sent' | 'retry' | 'unavailable',
         telegramMessageId: parsed.telegramMessageId as number | null,
       };
+    case 'player_validation_outcome_claim':
+      return parsed.version === 1 &&
+        Object.keys(parsed).length === 2 &&
+        hasOnlyKeys(parsed, OUTCOME_CLAIM_KEYS)
+        ? { version: 1, kind: 'player_validation_outcome_claim' }
+        : undefined;
+    case 'player_validation_outcome_complete':
+      if (
+        parsed.version !== 1 ||
+        Object.keys(parsed).length !== OUTCOME_COMPLETE_KEYS.size ||
+        !hasOnlyKeys(parsed, OUTCOME_COMPLETE_KEYS) ||
+        typeof parsed.notificationId !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.notificationId) ||
+        typeof parsed.leaseToken !== 'string' ||
+        !NOTIFICATION_UUID_PATTERN.test(parsed.leaseToken) ||
+        !['sent', 'retry', 'unavailable'].includes(parsed.deliveryResult as string) ||
+        !(
+          parsed.telegramMessageId === null ||
+          (typeof parsed.telegramMessageId === 'number' &&
+            Number.isSafeInteger(parsed.telegramMessageId) &&
+            parsed.telegramMessageId > 0)
+        ) ||
+        (parsed.deliveryResult === 'sent') !== (parsed.telegramMessageId !== null)
+      )
+        return undefined;
+      return {
+        version: 1,
+        kind: 'player_validation_outcome_complete',
+        notificationId: parsed.notificationId,
+        leaseToken: parsed.leaseToken,
+        deliveryResult: parsed.deliveryResult as 'sent' | 'retry' | 'unavailable',
+        telegramMessageId: parsed.telegramMessageId as number | null,
+      };
     case 'root_menu': {
       if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);

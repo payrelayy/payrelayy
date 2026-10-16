@@ -264,6 +264,93 @@ describe('bot-only Telegram deposit outcome runtime', () => {
   });
 });
 
+describe('bot-only Telegram Player validation outcome runtime', () => {
+  it('claims and completes only a bounded private notification without an inbound event', async () => {
+    const calls: { query: string; values: readonly unknown[] }[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('claim_telegram_player_validation_notification')) {
+          return {
+            rows: [
+              {
+                notification_id: '7e868cac-6ef2-4203-ad6e-449043111937',
+                notification_lease_token: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+                notification_private_chat_id: '123456789',
+                notification_outcome_code: 'selected',
+              },
+            ],
+          };
+        }
+        if (query.includes('complete_telegram_player_validation_notification')) {
+          return { rows: [{ accepted: true }] };
+        }
+        throw new Error('Unexpected customer-action statement.');
+      },
+      async end() {},
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(actionConfig, database);
+    const claim: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'player_validation_outcome_claim',
+    };
+    expect(await runtime.handle(claim, Buffer.from(JSON.stringify(claim)))).toEqual({
+      version: 1,
+      outcome: 'player_validation_outcome_delivery',
+      notificationId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      privateChatId: '123456789',
+      outcomeCode: 'selected',
+    });
+    const complete: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'player_validation_outcome_complete',
+      notificationId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      deliveryResult: 'sent',
+      telegramMessageId: 42,
+    };
+    expect(await runtime.handle(complete, Buffer.from(JSON.stringify(complete)))).toEqual({
+      version: 1,
+      outcome: 'player_validation_outcome_completed',
+      accepted: true,
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.values).toEqual([complete.notificationId, complete.leaseToken, 'sent', 42]);
+    expect(calls.map((call) => call.query).join('\n')).not.toContain(
+      'record_public_telegram_action_inbound_event',
+    );
+  });
+
+  it('rejects a malformed or invented approval outcome', async () => {
+    const database: TelegramPlayerActionDatabase = {
+      async query() {
+        return {
+          rows: [
+            {
+              notification_id: '7e868cac-6ef2-4203-ad6e-449043111937',
+              notification_lease_token: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+              notification_private_chat_id: '123456789',
+              notification_outcome_code: 'approved_without_find',
+            },
+          ],
+        };
+      },
+      async end() {},
+    };
+    const claim: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'player_validation_outcome_claim',
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        claim,
+        Buffer.from(JSON.stringify(claim)),
+      ),
+    ).rejects.toThrow('unavailable');
+  });
+});
+
 describe('bot-only Telegram temporary deposit message runtime', () => {
   it('records, claims, and completes a deletion without recording a customer inbound event', async () => {
     const calls: { query: string; values: readonly unknown[] }[] = [];
@@ -1574,7 +1661,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(1);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 29');
+    expect(queries[0]).toContain('select count(*) = 31');
   });
 
   it('keeps an inactive candidate route ready across only the exact grant handoff', async () => {
@@ -1585,7 +1672,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         const row = Object.fromEntries(
           Array.from({ length: 12 }, (_, index) => [`catalog_${index}`, true]),
         );
-        if (query.includes('select count(*) = 28')) row.catalog_7 = false;
+        if (query.includes('select count(*) = 30')) row.catalog_7 = false;
         return { rows: [row] };
       },
       async end() {},
@@ -1595,8 +1682,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       createPostgresTelegramPlayerActionRuntime(actionConfig, database).ready(),
     ).resolves.toBe(true);
     expect(queries).toHaveLength(2);
-    expect(queries[0]).toContain('select count(*) = 28');
-    expect(queries[1]).toContain('select count(*) = 29');
+    expect(queries[0]).toContain('select count(*) = 30');
+    expect(queries[1]).toContain('select count(*) = 31');
   });
 
   it('does not fall back to shadow intake for a non-synthetic routine candidate', async () => {
@@ -1667,7 +1754,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(1);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 29');
+    expect(queries[0]).toContain('select count(*) = 31');
   });
 
   it('disables payment-proof submission while receiver review is enabled', async () => {

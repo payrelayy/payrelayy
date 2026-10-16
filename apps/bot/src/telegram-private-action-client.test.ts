@@ -133,6 +133,45 @@ describe('Telegram private-action bot client', () => {
     ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
   });
 
+  it('accepts only a bounded bot-only Player validation delivery', async () => {
+    const claim: TelegramPrivateActionEnvelope = {
+      version: 1,
+      kind: 'player_validation_outcome_claim',
+    };
+    const delivery = {
+      version: 1,
+      outcome: 'player_validation_outcome_delivery',
+      notificationId: '7e868cac-6ef2-4203-ad6e-449043111937',
+      leaseToken: '03618c2d-47d4-44ea-b681-9c4a0a4d1fab',
+      privateChatId: '123456789',
+      outcomeCode: 'selected',
+    } as const;
+    for (const response of [
+      { version: 1, outcome: 'player_validation_outcome_none' },
+      delivery,
+      { ...delivery, outcomeCode: 'review_required' },
+      { version: 1, outcome: 'player_validation_outcome_completed', accepted: true },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(claim, config, {
+          fetch: async () => ({ status: 200, json: async () => response }),
+        }),
+      ).resolves.toEqual(response);
+    }
+    for (const invalid of [
+      { ...delivery, outcomeCode: 'approved_without_find' },
+      { ...delivery, privateChatId: '0' },
+      { ...delivery, playerId: '28379330' },
+      { ...delivery, notificationId: 'not-a-uuid' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(claim, config, {
+          fetch: async () => ({ status: 200, json: async () => invalid }),
+        }),
+      ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+    }
+  });
+
   it('accepts exact one-hour instruction record and expiry responses', async () => {
     const recordAction: TelegramPrivateActionEnvelope = {
       version: 1,

@@ -107,6 +107,19 @@ export type TelegramPrivateActionEnvelope =
       readonly deliveryResult: 'sent' | 'retry' | 'unavailable';
       readonly telegramMessageId: number | null;
     }
+  | {
+      readonly version: 1;
+      /** Bot process only; the database cutover is independently default-off. */
+      readonly kind: 'player_validation_outcome_claim';
+    }
+  | {
+      readonly version: 1;
+      readonly kind: 'player_validation_outcome_complete';
+      readonly notificationId: string;
+      readonly leaseToken: string;
+      readonly deliveryResult: 'sent' | 'retry' | 'unavailable';
+      readonly telegramMessageId: number | null;
+    }
   | (TelegramPrivateActionIdentity & {
       readonly kind: 'root_menu';
     })
@@ -254,6 +267,23 @@ export type TelegramPrivateActionResult =
   | {
       readonly version: 1;
       readonly outcome: 'deposit_outcome_completed';
+      readonly accepted: boolean;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_validation_outcome_none';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_validation_outcome_delivery';
+      readonly notificationId: string;
+      readonly leaseToken: string;
+      readonly privateChatId: string;
+      readonly outcomeCode: 'selected' | 'review_required';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'player_validation_outcome_completed';
       readonly accepted: boolean;
     }
   | {
@@ -489,6 +519,8 @@ export function redactTelegramPrivateActionForLog(action: TelegramPrivateActionE
       action.kind !== 'root_menu' &&
       action.kind !== 'deposit_outcome_claim' &&
       action.kind !== 'deposit_outcome_complete' &&
+      action.kind !== 'player_validation_outcome_claim' &&
+      action.kind !== 'player_validation_outcome_complete' &&
       !action.kind.startsWith('deposit_temporary_') &&
       !action.kind.startsWith('payment_instruction_'),
   };

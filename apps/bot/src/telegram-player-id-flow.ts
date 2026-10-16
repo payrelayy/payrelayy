@@ -39,6 +39,9 @@ export function presentTelegramPlayerIdFlowResult(
     case 'deposit_outcome_none':
     case 'deposit_outcome_delivery':
     case 'deposit_outcome_completed':
+    case 'player_validation_outcome_none':
+    case 'player_validation_outcome_delivery':
+    case 'player_validation_outcome_completed':
     case 'deposit_temporary_recorded':
     case 'deposit_temporary_cancelled':
     case 'deposit_temporary_cleanup_none':
@@ -52,7 +55,10 @@ export function presentTelegramPlayerIdFlowResult(
         'A bot-only notification operation cannot be presented as a customer action.',
       );
     case 'player_validation_queued':
-      throw new Error('The dormant Player validation queue has no customer-facing result yet.');
+      return {
+        kind: 'message',
+        text: '🔎 Checking your Player ID. We’ll confirm it here. Your saved ID stays unchanged until verified.',
+      };
     case 'menu':
       return {
         kind: 'menu',

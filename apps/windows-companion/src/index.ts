@@ -37,14 +37,19 @@ import {
   installGuardedPrePermitShutdown,
   type GuardedPrePermitShutdown,
 } from './guarded-pre-permit-shutdown.js';
-import { runCompanionLookupWorker, type CompanionLookupWorkerEvent } from './lookup-worker.js';
+import {
+  runCompanionLookupWorker,
+  runCompanionPlayerValidationWorker,
+  type CompanionLookupWorkerEvent,
+  type CompanionPlayerValidationWorkerEvent,
+} from './lookup-worker.js';
 import {
   createRoutineDepositHttpStore,
   type RoutineDepositHttpStoreDiagnostic,
 } from './routine-deposit-http-store.js';
 import { startRoutineDepositQueue } from './routine-deposit-runner.js';
 import type { RoutineDepositWorkerResult } from './routine-deposit-worker.js';
-import { shouldRunExactFiveLookup } from './worker-mode.js';
+import { shouldRunExactFiveLookup, shouldRunPlayerValidation } from './worker-mode.js';
 
 function report(event: LocalKemerBetSessionEvent): void {
   const messages: Record<LocalKemerBetSessionEvent['state'], string> = {
@@ -148,8 +153,8 @@ function reportEnrollment(result: CompanionDeviceEnrollmentResult | undefined): 
   if (state === 'paired') {
     console.info(
       result?.alreadyPaired
-        ? 'The local companion device certificate is verified. Signed exact-five read-only lookup is ready.'
-        : 'The local companion device is paired with a signed no-money certificate. Signed exact-five read-only lookup is ready.',
+        ? 'The local companion device certificate is verified. Signed read-only lookup is ready.'
+        : 'The local companion device is paired with a signed no-money certificate. Signed read-only lookup is ready.',
     );
   } else if (state === 'pairing_required') {
     console.info(
@@ -172,6 +177,21 @@ function reportLookup(event: CompanionLookupWorkerEvent): void {
       ...(event.reviewRequiredCount === undefined
         ? {}
         : { reviewRequiredCount: event.reviewRequiredCount }),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+      moneyMoved: false,
+    }),
+  );
+}
+
+function reportPlayerValidation(event: CompanionPlayerValidationWorkerEvent): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'single_player_validation_state_changed',
+      state: event.state,
+      ...(event.outcome === undefined ? {} : { outcome: event.outcome }),
       detailsRedacted: true,
       identifiersRedacted: true,
       transferDisabled: true,
@@ -372,7 +392,9 @@ export async function runWindowsCompanion(): Promise<void> {
       let routineReviewHeld = false;
       try {
         const workers: Promise<void>[] = [];
-        if (shouldRunExactFiveLookup(config.routineDepositsEnabled)) {
+        if (
+          shouldRunExactFiveLookup(config.routineDepositsEnabled, config.playerValidationEnabled)
+        ) {
           workers.push(
             runCompanionLookupWorker({
               dataRoot: config.dataRoot,
@@ -380,6 +402,23 @@ export async function runWindowsCompanion(): Promise<void> {
               session,
               signal: lookupAbort.signal,
               report: reportLookup,
+            }),
+          );
+        }
+        if (
+          shouldRunPlayerValidation(
+            config.routineDepositsEnabled,
+            config.executionV2Enabled,
+            config.playerValidationEnabled,
+          )
+        ) {
+          workers.push(
+            runCompanionPlayerValidationWorker({
+              dataRoot: config.dataRoot,
+              device,
+              session,
+              signal: lookupAbort.signal,
+              report: reportPlayerValidation,
             }),
           );
         }

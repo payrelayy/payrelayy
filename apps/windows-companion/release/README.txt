@@ -22,6 +22,10 @@ FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable relea
    redacted outcomes and aggregate counts.
 10. Close the companion Chrome window to stop it.
 
+A separate internal, default-off single-Player validation mode accepts only signed Find-only
+assignments. It cannot run with either financial execution mode or another Companion session.
+Installing this release does not enable it or change live deposit settings.
+
 The standard Companion launcher remains Find-only. Money-capable modes require a separate launcher,
 the exact paired device and account, a measured installed release, and independently enabled server
 authority. Setting an internal switch or account ID yourself cannot replace those inputs.

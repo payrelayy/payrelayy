@@ -44,6 +44,7 @@ const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
   executionV2Enabled: false,
   routineDepositsEnabled: false,
+  playerValidationEnabled: false,
   expectedAgentIdentityProvided: false,
   pairingPackageProvided: false,
   profileRoot: resolve('test-fixtures', 'local-companion', 'profile'),

@@ -312,7 +312,7 @@ function compileRequest(
 ): CbeBirrCompiledSyntheticRequest {
   return Object.freeze({
     method: 'GET' as const,
-    url: `https://cbepay1.cbe.com.et:443/aureceipt?TID=${input.requestedReference}&PH=${input.receiverLookupPhone}`,
+    url: `https://cbepay1.cbe.com.et:443/aureceipt?TID=${input.requestedReference}&PH=${input.receiverLookupPhone.slice(3)}`,
     redirectPolicy: 'reject_all' as const,
     queryParameterOrder: Object.freeze(['TID', 'PH'] as const),
   });

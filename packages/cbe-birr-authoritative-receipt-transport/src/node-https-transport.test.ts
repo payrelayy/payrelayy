@@ -89,7 +89,7 @@ describe('bounded Node HTTPS transport', () => {
       servername: 'cbepay1.cbe.com.et',
       port: 443,
       method: 'GET',
-      path: `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE}`,
+      path: `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE.slice(3)}`,
       headers: {
         accept: 'application/pdf',
         'accept-encoding': 'identity',

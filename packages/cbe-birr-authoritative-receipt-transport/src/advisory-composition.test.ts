@@ -28,7 +28,7 @@ describe('package-only CBE Birr one-fetch advisory composition', () => {
         requests += 1;
         expect(plan.host).toBe('cbepay1.cbe.com.et');
         expect(plan.pathAndQuery).toBe(
-          `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE}`,
+          `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE.slice(3)}`,
         );
         return { ok: true, body };
       },

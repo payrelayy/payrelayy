@@ -39,7 +39,7 @@ describe('offline-only CBE Birr official receipt plan', () => {
       reasonCode: 'live_transport_absent',
       request: {
         method: 'GET',
-        url: 'https://cbepay1.cbe.com.et:443/aureceipt?TID=SYNTHCBE00001&PH=251900000001',
+        url: 'https://cbepay1.cbe.com.et:443/aureceipt?TID=SYNTHCBE00001&PH=900000001',
         redirectPolicy: 'reject_all',
         queryParameterOrder: ['TID', 'PH'],
       },

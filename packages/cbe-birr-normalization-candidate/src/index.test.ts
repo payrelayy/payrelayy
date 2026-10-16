@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CBE_BIRR_NORMALIZATION_CANDIDATE_VERSION,
+  deriveCbeBirrReceiptPhSelectorCandidate,
   isCanonicalCbeBirrReferenceCandidate,
-  isCbeBirrReceiverLookupSelectorCandidate,
+  isCbeBirrConfiguredReceiverPhoneCandidate,
   normalizeCbeBirrSubmittedReferenceCandidate,
 } from './index.js';
 
 describe('offline CBE Birr normalization candidate', () => {
   it('case-folds only exact ASCII submitted references', () => {
-    expect(CBE_BIRR_NORMALIZATION_CANDIDATE_VERSION).toBe(1);
+    expect(CBE_BIRR_NORMALIZATION_CANDIDATE_VERSION).toBe(2);
     expect(normalizeCbeBirrSubmittedReferenceCandidate('synthetic123')).toBe('SYNTHETIC123');
     expect(normalizeCbeBirrSubmittedReferenceCandidate('SYNTHETIC123')).toBe('SYNTHETIC123');
     expect(normalizeCbeBirrSubmittedReferenceCandidate('a'.repeat(8))).toBe('A'.repeat(8));
@@ -45,8 +46,9 @@ describe('offline CBE Birr normalization candidate', () => {
     expect(isCanonicalCbeBirrReferenceCandidate('A'.repeat(33))).toBe(false);
   });
 
-  it('requires an exact full receiver lookup selector without prefix inference', () => {
-    expect(isCbeBirrReceiverLookupSelectorCandidate('251900000001')).toBe(true);
+  it('derives the nine-digit PH selector only from an exact full receiver phone', () => {
+    expect(isCbeBirrConfiguredReceiverPhoneCandidate('251900000001')).toBe(true);
+    expect(deriveCbeBirrReceiptPhSelectorCandidate('251900000001')).toBe('900000001');
     for (const candidate of [
       '900000001',
       '0251900000001',
@@ -58,7 +60,8 @@ describe('offline CBE Birr normalization candidate', () => {
       null,
       251900000001,
     ]) {
-      expect(isCbeBirrReceiverLookupSelectorCandidate(candidate)).toBe(false);
+      expect(isCbeBirrConfiguredReceiverPhoneCandidate(candidate)).toBe(false);
+      expect(deriveCbeBirrReceiptPhSelectorCandidate(candidate)).toBeNull();
     }
   });
 });

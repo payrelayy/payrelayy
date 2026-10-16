@@ -255,7 +255,9 @@ export function compileSensitiveRequestPlan(
     scheme: CBE_BIRR_AUTHORITATIVE_RECEIPT_TRANSPORT_POLICY.scheme,
     host: CBE_BIRR_AUTHORITATIVE_RECEIPT_TRANSPORT_POLICY.host,
     port: CBE_BIRR_AUTHORITATIVE_RECEIPT_TRANSPORT_POLICY.port,
-    pathAndQuery: `${CBE_BIRR_AUTHORITATIVE_RECEIPT_TRANSPORT_POLICY.path}?TID=${input.requestedReference}&PH=${input.receiverLookupPhone}`,
+    // The official SMS receipt link uses the nine local digits for PH. Input remains the
+    // exact 251-prefixed receiver phone; PH is only a selector, never receiver evidence.
+    pathAndQuery: `${CBE_BIRR_AUTHORITATIVE_RECEIPT_TRANSPORT_POLICY.path}?TID=${input.requestedReference}&PH=${input.receiverLookupPhone.slice(3)}`,
     headers: Object.freeze({
       accept: CBE_BIRR_AUTHORITATIVE_RECEIPT_CONTENT_TYPE,
       'accept-encoding': 'identity' as const,

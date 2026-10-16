@@ -11,6 +11,8 @@ import {
   AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
   canonicalCompanionEnrollmentCertificateSignatureBytes,
@@ -680,6 +682,18 @@ describe('Windows companion device enrollment', () => {
       now: () => new Date(now.getTime() + 30_000),
       protector: selectedProtector,
     });
+    for (const path of [
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+      AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+    ]) {
+      expect(
+        runtime.createSignedHttpRequest(
+          path,
+          `sha256:${'f'.repeat(64)}`,
+          new Date(now.getTime() + 30_000),
+        ).body.canonicalPath,
+      ).toBe(path);
+    }
     const assignment = signedPlayerValidationAssignment(runtime.certificate, server.privateKey);
     const observedAt = new Date(now.getTime() + 20_000);
     expect(runtime.decodeAndVerifyPlayerValidationAssignment(assignment, observedAt)).toEqual(

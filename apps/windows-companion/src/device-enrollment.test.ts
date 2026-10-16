@@ -686,6 +686,16 @@ describe('Windows companion device enrollment', () => {
       assignment,
     );
     const found = runtime.createSignedPlayerValidationResult(assignment, 'found', observedAt);
+    expect(
+      runtime.verifyPlayerValidationExchange(assignment, found, new Date(now.getTime() + 30_000)),
+    ).toBe(true);
+    expect(
+      runtime.verifyPlayerValidationExchange(
+        { ...assignment, body: { ...assignment.body, playerId: '28379331' } },
+        found,
+        new Date(now.getTime() + 30_000),
+      ),
+    ).toBe(false);
     expect(found.body).toMatchObject({
       playerIdDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       outcome: 'found',

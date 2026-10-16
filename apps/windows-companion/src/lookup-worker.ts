@@ -6,11 +6,18 @@ import {
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
   decodeSignedKemerBetExactFiveLookupResult,
+  decodeSignedKemerBetPlayerValidationResult,
   digestCompanionLookupPollContent,
   digestCompanionLookupResultContent,
+  digestCompanionPlayerValidationPollContent,
+  digestCompanionPlayerValidationResultContent,
   type SignedKemerBetExactFiveLookupAssignment,
   type SignedKemerBetExactFiveLookupResult,
+  type SignedKemerBetPlayerValidationAssignment,
+  type SignedKemerBetPlayerValidationResult,
 } from '@fetanagent/agent-platform-companion-contracts';
 
 import type {
@@ -26,6 +33,9 @@ import {
 const ASSIGNMENT_FILE = 'lookup-primary.assignment.secure.json';
 const STARTED_FILE = 'lookup-primary.started.json';
 const RESULT_FILE = 'lookup-primary.result.secure.json';
+const PLAYER_VALIDATION_ASSIGNMENT_FILE = 'player-validation.assignment.secure.json';
+const PLAYER_VALIDATION_STARTED_FILE = 'player-validation.started.json';
+const PLAYER_VALIDATION_RESULT_FILE = 'player-validation.result.secure.json';
 const MAXIMUM_LEDGER_BYTES = 4_096;
 const MAXIMUM_RESPONSE_BYTES = 64 * 1_024;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
@@ -62,9 +72,30 @@ export interface CompanionLookupWorkerOptions {
   readonly protector?: WindowsCurrentUserDataProtector;
 }
 
+export interface CompanionPlayerValidationWorkerOptions {
+  readonly dataRoot: string;
+  readonly device: CompanionDeviceSigningRuntime;
+  readonly session: Pick<LocalKemerBetSession, 'executeSingleLookup'>;
+  readonly signal: AbortSignal;
+  readonly report: (event: CompanionPlayerValidationWorkerEvent) => void;
+  readonly fetch?: typeof fetch;
+  readonly now?: () => Date;
+  readonly pollIntervalMs?: number;
+  readonly protector?: WindowsCurrentUserDataProtector;
+}
+
+export interface CompanionPlayerValidationWorkerEvent {
+  readonly state: CompanionLookupWorkerState;
+  readonly outcome?: 'found' | 'review_required';
+  readonly detailsRedacted: true;
+  readonly identifiersRedacted: true;
+  readonly transferDisabled: true;
+  readonly moneyMoved: false;
+}
+
 export class CompanionLookupWorkerError extends Error {
   constructor() {
-    super('The signed exact-five companion lookup failed closed.');
+    super('The signed read-only companion lookup failed closed.');
     this.name = 'CompanionLookupWorkerError';
   }
 }
@@ -378,6 +409,16 @@ async function clearLedger(deviceRoot: string): Promise<void> {
   );
 }
 
+async function clearPlayerValidationLedger(deviceRoot: string): Promise<void> {
+  await Promise.all(
+    [
+      PLAYER_VALIDATION_ASSIGNMENT_FILE,
+      PLAYER_VALIDATION_STARTED_FILE,
+      PLAYER_VALIDATION_RESULT_FILE,
+    ].map((name) => rm(resolve(deviceRoot, name), { force: true })),
+  );
+}
+
 function allReviewRequired(): ExactFiveCompanionLookupOutcomes {
   return Object.freeze([
     'review_required',
@@ -529,6 +570,202 @@ export async function runCompanionLookupWorker(
         transferDisabled: true,
         moneyMoved: false,
       });
+      await waitFor(Math.max(pollIntervalMs, 5_000), options.signal);
+    }
+  }
+}
+
+async function pollPlayerValidationAssignment(
+  device: CompanionDeviceSigningRuntime,
+  fetchImplementation: typeof fetch,
+  signal: AbortSignal,
+  now: Date,
+): Promise<SignedKemerBetPlayerValidationAssignment | undefined> {
+  const contentDigest = digestCompanionPlayerValidationPollContent(device.certificate.bodyDigest);
+  if (!contentDigest) unavailable();
+  const httpRequest = device.createSignedHttpRequest(
+    AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+    contentDigest,
+    now,
+  );
+  const response = await post(
+    device.playerValidationPollEndpoint,
+    { certificate: device.certificate, httpRequest },
+    fetchImplementation,
+    signal,
+  );
+  if (response.status === 204) {
+    if (response.body !== null || response.headers.get('content-type') !== null) unavailable();
+    return undefined;
+  }
+  if (response.status !== 200) unavailable();
+  const parsed = await parsedResponse(response);
+  if (!exactKeys(parsed, ['assignment'])) unavailable();
+  return device.decodeAndVerifyPlayerValidationAssignment(parsed.assignment, now) ?? unavailable();
+}
+
+async function submitPlayerValidationResult(
+  device: CompanionDeviceSigningRuntime,
+  assignment: SignedKemerBetPlayerValidationAssignment,
+  result: SignedKemerBetPlayerValidationResult,
+  fetchImplementation: typeof fetch,
+  signal: AbortSignal,
+  now: Date,
+): Promise<void> {
+  const contentDigest = digestCompanionPlayerValidationResultContent(assignment, result);
+  if (!contentDigest || !device.verifyPlayerValidationExchange(assignment, result, now)) {
+    unavailable();
+  }
+  const httpRequest = device.createSignedHttpRequest(
+    AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+    contentDigest,
+    now,
+  );
+  const response = await post(
+    device.playerValidationResultEndpoint,
+    {
+      certificate: device.certificate,
+      httpRequest,
+      signedAssignment: assignment,
+      signedResult: result,
+    },
+    fetchImplementation,
+    signal,
+  );
+  if (response.status !== 200 && response.status !== 201) unavailable();
+  const parsed = await parsedResponse(response);
+  if (
+    !exactKeys(parsed, ['accepted', 'replayed']) ||
+    parsed.accepted !== true ||
+    typeof parsed.replayed !== 'boolean'
+  ) {
+    unavailable();
+  }
+}
+
+/** Dormant until the dedicated route and permission boundary is reviewed and enabled. */
+export async function runCompanionPlayerValidationWorker(
+  options: CompanionPlayerValidationWorkerOptions,
+): Promise<void> {
+  const fetchImplementation = options.fetch ?? fetch;
+  const nowProvider = options.now ?? (() => new Date());
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  if (!Number.isSafeInteger(pollIntervalMs) || pollIntervalMs < 100 || pollIntervalMs > 60_000) {
+    unavailable();
+  }
+  const protector =
+    options.protector ??
+    createWindowsCurrentUserDataProtector(process.env, 'player-validation-ledger');
+  const deviceRoot = await stableDeviceRoot(options.dataRoot);
+  const assignmentPath = resolve(deviceRoot, PLAYER_VALIDATION_ASSIGNMENT_FILE);
+  const startedPath = resolve(deviceRoot, PLAYER_VALIDATION_STARTED_FILE);
+  const resultPath = resolve(deviceRoot, PLAYER_VALIDATION_RESULT_FILE);
+  const report = (
+    state: CompanionLookupWorkerState,
+    outcome?: 'found' | 'review_required',
+  ): void => {
+    options.report({
+      state,
+      ...(outcome === undefined ? {} : { outcome }),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+      moneyMoved: false,
+    });
+  };
+
+  while (!options.signal.aborted) {
+    try {
+      const now = nowProvider();
+      let assignmentCandidate = await unprotectValue(assignmentPath, 'assignment', protector);
+      let assignment =
+        assignmentCandidate === undefined
+          ? undefined
+          : options.device.decodeAndVerifyPlayerValidationAssignment(assignmentCandidate, now);
+      assignmentCandidate = undefined;
+      if (!assignment && (await readOptional(assignmentPath)) !== undefined) {
+        report('assignment_expired');
+        await clearPlayerValidationLedger(deviceRoot);
+      }
+
+      if (!assignment) {
+        assignment = await pollPlayerValidationAssignment(
+          options.device,
+          fetchImplementation,
+          options.signal,
+          now,
+        );
+        if (!assignment) {
+          report('waiting_for_assignment');
+          await waitFor(pollIntervalMs, options.signal);
+          continue;
+        }
+        await protectValue(assignmentPath, 'assignment', assignment, protector);
+        report('assignment_verified');
+      }
+
+      const storedResultCandidate = await unprotectValue(resultPath, 'result', protector);
+      let result = decodeSignedKemerBetPlayerValidationResult(storedResultCandidate);
+      if (
+        storedResultCandidate !== undefined &&
+        (!result || !options.device.verifyPlayerValidationExchange(assignment, result, now))
+      ) {
+        unavailable();
+      }
+      if (!result) {
+        const startedRaw = await readOptional(startedPath);
+        let outcome: 'found' | 'review_required' = 'review_required';
+        if (startedRaw !== undefined) {
+          let started: unknown;
+          try {
+            started = JSON.parse(startedRaw);
+          } catch {
+            unavailable();
+          }
+          if (
+            !plainRecord(started) ||
+            !exactKeys(started, ['assignmentBodyDigest', 'ledgerVersion']) ||
+            started.ledgerVersion !== 1 ||
+            started.assignmentBodyDigest !== assignment.bodyDigest ||
+            typeof started.assignmentBodyDigest !== 'string' ||
+            !DIGEST_PATTERN.test(started.assignmentBodyDigest)
+          ) {
+            unavailable();
+          }
+        } else {
+          await writeExclusive(startedPath, {
+            ledgerVersion: 1,
+            assignmentBodyDigest: assignment.bodyDigest,
+          });
+          try {
+            const observed = await options.session.executeSingleLookup(assignment.body.playerId);
+            if (observed === 'found') outcome = 'found';
+          } catch {
+            // A busy, disconnected, or uncertain local session is never positive evidence.
+          }
+        }
+        result = options.device.createSignedPlayerValidationResult(
+          assignment,
+          outcome,
+          nowProvider(),
+        );
+        await protectValue(resultPath, 'result', result, protector);
+        report('lookup_completed', result.body.outcome);
+      }
+
+      await submitPlayerValidationResult(
+        options.device,
+        assignment,
+        result,
+        fetchImplementation,
+        options.signal,
+        nowProvider(),
+      );
+      report('result_accepted', result.body.outcome);
+      await clearPlayerValidationLedger(deviceRoot);
+    } catch {
+      if (options.signal.aborted) return;
+      report('temporarily_unavailable');
       await waitFor(Math.max(pollIntervalMs, 5_000), options.signal);
     }
   }

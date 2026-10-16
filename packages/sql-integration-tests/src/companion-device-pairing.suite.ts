@@ -16,6 +16,10 @@ const baselineBridgeFunctions = [
   'app.complete_agent_platform_companion_lookup_assignment(text,text,text,jsonb)',
   'app.release_agent_platform_companion_lookup_assignment(text)',
   'app.accept_agent_platform_companion_lookup_result(text,text,text,text,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb)',
+  'app.claim_telegram_player_validation_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text)',
+  'app.complete_telegram_player_validation_assignment(text,jsonb)',
+  'app.release_telegram_player_validation_assignment(text)',
+  'app.accept_telegram_player_validation_result(text,text,text,text,text,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,jsonb,jsonb)',
 ] as const;
 const executionBridgeFunctions = [
   'app.claim_agent_platform_companion_execution_assignment(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,text)',

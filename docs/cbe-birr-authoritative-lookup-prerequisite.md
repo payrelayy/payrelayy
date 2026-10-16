@@ -129,20 +129,20 @@ The remaining blockers preserve the existing safety design:
 The metadata-only inventory now distinguishes five existing boundaries. Version 2 of the inventory
 records these facts without promoting either protection key version to a normalization version:
 
-| Boundary                              | Current status                                                                                                                                                                                                                               |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `legacy_submitted_reference_capture`  | Legacy CBE-only v1 accepts 5–128 ASCII alphanumeric, dot, underscore, or hyphen characters and uppercases inside protection. It is not the current provider-aware proof envelope.                                                            |
-| `provider_aware_proof_capture`        | Current dry-run v2 proof capture accepts 8–32 ASCII alphanumeric characters, uppercases inside protection, and binds the provider to its ciphertext and fingerprint. It has no reviewed worker decrypt lifecycle or live CBE Birr authority. |
-| `owner_receiver_reference_protection` | Owner receiver v1 preserves exactly 9–24 decimal digits inside provider-bound protection. It does not infer a country prefix or prove that its digits meet the official lookup's exact 12-digit `PH` selector.                               |
-| `offline_synthetic_fixture_reduction` | Fixture-only safe-fact reduction; not a live provider normalizer.                                                                                                                                                                            |
-| `shadow_settlement_metadata_label`    | Metadata label only; no bound canonical normalizer.                                                                                                                                                                                          |
+| Boundary                              | Current status                                                                                                                                                                                                                                                       |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `legacy_submitted_reference_capture`  | Legacy CBE-only v1 accepts 5–128 ASCII alphanumeric, dot, underscore, or hyphen characters and uppercases inside protection. It is not the current provider-aware proof envelope.                                                                                    |
+| `provider_aware_proof_capture`        | Current dry-run v2 proof capture accepts 8–32 ASCII alphanumeric characters, uppercases inside protection, and binds the provider to its ciphertext and fingerprint. It has no reviewed worker decrypt lifecycle or live CBE Birr authority.                         |
+| `owner_receiver_reference_protection` | Owner receiver v1 preserves exactly 9–24 decimal digits inside provider-bound protection. It does not infer a country prefix or prove that its digits are a full 12-digit configured receiver phone from which the official nine-digit `PH` selector can be derived. |
+| `offline_synthetic_fixture_reduction` | Fixture-only safe-fact reduction; not a live provider normalizer.                                                                                                                                                                                                    |
+| `shadow_settlement_metadata_label`    | Metadata label only; no bound canonical normalizer.                                                                                                                                                                                                                  |
 
 Each observed source boundary is independently pinned by a source attestation in tests. Every
 boundary remains `authoritativeOwner: unassigned` and `jointReviewStatus: not_completed`.
 All ten pairwise compatibility relationships remain `not_established`; transformation reuse and
 implicit upgrades remain false. In particular, neither the older v1 reference format nor a
 9-digit receiver value may be silently converted into the provider-aware v2 reference or the
-official 12-digit lookup selector. This inventory accepts no references, receiver digits,
+full 12-digit receiver input or the resulting nine-digit official lookup selector. This inventory accepts no references, receiver digits,
 ciphertext, or keys, and it authorizes no decrypt, lookup, lease, or credit.
 
 An [offline normalization candidate](cbe-birr-normalization-candidate.md) now specifies and tests

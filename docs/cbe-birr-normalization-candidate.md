@@ -4,11 +4,12 @@
 the three value formats needed by a future official receipt lookup. It has no application or worker
 consumer, transport, secret, database access, or financial action.
 
-| Boundary                                            | Candidate rule                                                       | Important exclusion                                                                 |
-| --------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Customer-submitted reference                        | Exactly 8–32 ASCII letters/digits; ASCII lowercase maps to uppercase | No trim, punctuation removal, Unicode conversion, or legacy 5–128-character upgrade |
-| Canonical reference from an independent observation | Already uppercase ASCII letters/digits, 8–32 characters              | A format match is not proof that the provider issued it                             |
-| Official `PH` lookup selector                       | Exactly `251` plus nine ASCII digits                                 | No inference from a 9-digit Owner value; `PH` is not receiver evidence              |
+| Boundary                                            | Candidate rule                                                       | Important exclusion                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Customer-submitted reference                        | Exactly 8–32 ASCII letters/digits; ASCII lowercase maps to uppercase | No trim, punctuation removal, Unicode conversion, or legacy 5–128-character upgrade   |
+| Canonical reference from an independent observation | Already uppercase ASCII letters/digits, 8–32 characters              | A format match is not proof that the provider issued it                               |
+| Configured receiver phone                           | Exactly `251` plus nine ASCII digits                                 | No inference from a 9-digit Owner value                                               |
+| Official receipt `PH` selector                      | Last nine digits of that validated full receiver phone               | `PH` is not receiver evidence; the PDF credit account needs an independent comparison |
 
 The candidate deliberately does not update the existing normalization-ownership inventory or
 clear any authoritative-lookup blocker. Its relationship to current submitted-reference protection,

@@ -3,11 +3,11 @@
  * provider authority. Its outputs must not be used to fetch a receipt, settle a proof, or credit
  * a Player until the separate ownership, key-lifecycle, source, and lease reviews are complete.
  */
-export const CBE_BIRR_NORMALIZATION_CANDIDATE_VERSION = 1 as const;
+export const CBE_BIRR_NORMALIZATION_CANDIDATE_VERSION = 2 as const;
 
 const SUBMITTED_REFERENCE_PATTERN = /^[A-Za-z0-9]{8,32}$/u;
 const CANONICAL_REFERENCE_PATTERN = /^[A-Z0-9]{8,32}$/u;
-const RECEIVER_LOOKUP_SELECTOR_PATTERN = /^251[0-9]{9}$/u;
+const CONFIGURED_RECEIVER_PHONE_PATTERN = /^251[0-9]{9}$/u;
 
 /**
  * Candidate for customer-entered references only. Accepts ASCII case variation, but never trims,
@@ -28,10 +28,17 @@ export function isCanonicalCbeBirrReferenceCandidate(value: unknown): value is s
 }
 
 /**
- * The official PH lookup selector is exactly 251 plus nine ASCII digits. A 9-digit Owner value
- * is not silently upgraded; the full value must be provisioned and independently reviewed.
- * PH is a lookup selector, never proof that the receipt's credit account matches the receiver.
+ * The configured receiving wallet must be a full 251-prefixed phone. A nine-digit Owner value
+ * is not silently upgraded. This format check does not prove the phone's provenance.
  */
-export function isCbeBirrReceiverLookupSelectorCandidate(value: unknown): value is string {
-  return typeof value === 'string' && RECEIVER_LOOKUP_SELECTOR_PATTERN.test(value);
+export function isCbeBirrConfiguredReceiverPhoneCandidate(value: unknown): value is string {
+  return typeof value === 'string' && CONFIGURED_RECEIVER_PHONE_PATTERN.test(value);
+}
+
+/**
+ * Official SMS links use the nine local digits in PH. Derive them only from a validated full
+ * receiver phone; PH is a lookup selector, never evidence that the PDF credited that receiver.
+ */
+export function deriveCbeBirrReceiptPhSelectorCandidate(value: unknown): string | null {
+  return isCbeBirrConfiguredReceiverPhoneCandidate(value) ? value.slice(3) : null;
 }

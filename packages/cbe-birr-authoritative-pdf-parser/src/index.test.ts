@@ -42,10 +42,15 @@ declare global {
 
 interface SyntheticReceiptOptions {
   readonly layout?: 'credit_account_v2';
+  readonly debitAccount?: string;
   readonly creditAccount?: string;
   readonly receiverAccount?: string;
   readonly summaryReference?: string;
   readonly disasterFee?: string;
+  readonly omitDisasterFeePair?: boolean;
+  readonly wrappedDebitName?: string;
+  readonly wrappedCreditName?: string;
+  readonly wrappedReceiverName?: string;
   readonly tip?: string;
   readonly reference?: string;
   readonly status?: string;
@@ -111,9 +116,12 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
       row(760, 'Commercial Bank of Ethiopia'),
       row(740, 'VAT Invoice/ Customer Receipt'),
       row(710, 'Transaction Information'),
-      row(680, 'Debit Account', '251900000002 - SYNTHETIC PAYER'),
+      row(680, 'Debit Account', `${options.debitAccount ?? '251900000002'} - SYNTHETIC PAYER`),
+      ...(options.wrappedDebitName ? [row(668, options.wrappedDebitName)] : []),
       row(655, 'Credit Account', `${creditAccount} - SYNTHETIC RECEIVER`),
+      ...(options.wrappedCreditName ? [row(642, options.wrappedCreditName)] : []),
       row(630, 'Receiver Name', `${receiverAccount} - SYNTHETIC RECEIVER`),
+      ...(options.wrappedReceiverName ? [row(618, options.wrappedReceiverName)] : []),
       row(605, 'Order ID', reference),
       row(580, 'Transaction Status', options.status ?? 'Completed'),
       row(555, 'Reference', ':'),
@@ -125,9 +133,13 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
       ),
       row(450, 'Paid amount', options.paidAmount ?? '100.00'),
       row(425, 'Service Charge', options.serviceCharge ?? '0.00'),
-      row(400, 'Disaster Response'),
-      row(388, options.disasterFee ?? '0.00'),
-      row(375, 'Fee'),
+      ...(options.omitDisasterFeePair
+        ? []
+        : [
+            row(400, 'Disaster Response'),
+            row(388, options.disasterFee ?? '0.00'),
+            row(375, 'Fee'),
+          ]),
       row(350, 'VAT', options.vat ?? '0.00'),
       row(325, 'Tip', options.tip ?? '0.00'),
       row(300, 'Total Paid Amount', options.totalPaid ?? '100.00'),
@@ -585,6 +597,105 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('parses the compact official layout with wrapped account names and no disaster-fee pair', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        omitDisasterFeePair: true,
+        debitAccount: '0900000002',
+        wrappedDebitName: 'SYNTHETIC PAYER CONTINUED',
+        wrappedCreditName: 'SYNTHETIC RECEIVER CONTINUED',
+        wrappedReceiverName: 'SYNTHETIC RECEIVER CONTINUED',
+      }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      advisoryOnly: true,
+      financialActionAllowed: false,
+      facts: {
+        documentTopology: 'cbe_birr_vat_customer_receipt_credit_account_v2',
+        referenceMatched: true,
+        receiverIdentityMatch: 'matched',
+        additionalFeesMinor: '0',
+        feeArithmetic: 'consistent',
+        occurredAtPrecision: 'minute',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it.each([
+    [{ omitDisasterFeePair: true, extraText: 'Disaster Response' }, 'pdf_layout_drift'],
+    [{ omitDisasterFeePair: true, extraText: 'Fee' }, 'pdf_layout_drift'],
+    [{ omitDisasterFeePair: true, extraText: 'Tip 0.00' }, 'pdf_field_duplicate'],
+    [{ omitDisasterFeePair: true, wrappedDebitName: 'SYNTHETIC 123' }, 'pdf_layout_drift'],
+  ] as const)('keeps compact-layout ambiguity %# in review', async (options, reasonCode) => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', ...options }),
+      expectations(),
+    );
+    expect(result).toMatchObject({ disposition: 'would_review', reasonCode });
+    expect(Reflect.ownKeys(result)).not.toContain('facts');
+  });
+
+  it('reviews an unlisted fee in the compact topology rather than treating its absence as zero', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        omitDisasterFeePair: true,
+        totalPaid: '100.01',
+      }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'fee_arithmetic_mismatch',
+      financialActionAllowed: false,
+    });
+  });
+
+  it('never treats a local-format credit account as an exact receiver match', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        omitDisasterFeePair: true,
+        creditAccount: '0900000001',
+        receiverAccount: '0900000001',
+      }),
+      expectations(),
+    );
+    expect(result).toMatchObject({ disposition: 'would_review', reasonCode: 'pdf_value_invalid' });
+    expect(Reflect.ownKeys(result)).not.toContain('facts');
+  });
+
+  it('keeps compact-layout reference and receiver mismatches advisory-only', async () => {
+    const compactPdf = syntheticReceiptPdf({
+      layout: 'credit_account_v2',
+      omitDisasterFeePair: true,
+      debitAccount: '0900000002',
+    });
+    const wrongReference = await parseCbeBirrAuthoritativePdf(compactPdf, {
+      ...expectations(),
+      canonicalReference: 'OTHERREF1234',
+    });
+    const wrongReceiver = await parseCbeBirrAuthoritativePdf(compactPdf, {
+      ...expectations(),
+      configuredReceiverAccountIdentifier: '251900000009',
+    });
+    expect(wrongReference).toMatchObject({
+      disposition: 'would_reject',
+      reasonCode: 'reference_mismatch',
+      financialActionAllowed: false,
+    });
+    expect(wrongReceiver).toMatchObject({
+      disposition: 'would_reject',
+      reasonCode: 'receiver_mismatch',
+      financialActionAllowed: false,
+    });
   });
 
   it('preserves newer-layout minute uncertainty across an instruction deadline', async () => {

@@ -20,13 +20,15 @@ settled receipt.
 The request target remains compiled from the Stage 1E source policy:
 
 ```text
-GET https://cbepay1.cbe.com.et:443/aureceipt?TID=<REFERENCE>&PH=<RECEIVER_PHONE>
+GET https://cbepay1.cbe.com.et:443/aureceipt?TID=<REFERENCE>&PH=<NINE_LOCAL_DIGITS>
 ```
 
 Callers can supply only a canonical uppercase 8--32 character ASCII-alphanumeric reference and
-the exact 12-digit international receiver selector (`251` plus nine decimal digits). There is no
-receiver-name input. Callers cannot select the method, scheme, host, port, path, query names, query
-order, headers, redirect target, TLS policy, timeout, response bounds, or retry count.
+the exact full 12-digit international receiver phone (`251` plus nine decimal digits). The
+transport emits only its final nine digits as `PH`, matching the Owner-provided official SMS link.
+It will not infer the full phone from a nine-digit input. There is no receiver-name input. Callers
+cannot select the method, scheme, host, port, path, query names, query order, headers, redirect
+target, TLS policy, timeout, response bounds, or retry count.
 
 The `PH` selector is **not receiver evidence**. A privacy-controlled example showed that the
 sender and receiver phone selectors for one transaction can open the same PDF. Any future
@@ -47,7 +49,8 @@ The transport enforces:
   hostname for SNI and certificate-identity validation;
 - normal certificate validation, a minimum TLS version of 1.2, no custom CA or credential, and a
   fresh non-pooled connection;
-- no redirects, cookies, authorization, decompression, browser session, or response location;
+- no redirects, request cookies, cookie jar, authorization, decompression, browser session, or
+  response location; a bounded `Set-Cookie` response is ignored and never sent or exposed;
 - at most one bounded `Content-Disposition` value containing no ASCII control character, including
   horizontal tab, accepted only as ignored metadata and never returned, logged, parsed, or trusted;
 - at most 32 response-header pairs and 8,192 encoded header bytes;
@@ -96,6 +99,14 @@ customer-facing rejection or a financial decision. No live response, real receip
 identifier, name, phone number, field value, or provider document is stored in this package or
 its tests.
 
+The observed newer PDF has two bounded sublayouts: one includes the paired `Disaster Response`
+and `Fee` rows, while a compact variant omits both. The compact variant can also wrap the payer,
+credited-account, and receiver display names; a payer phone may be local `0` plus nine digits.
+The credited account and receiver rows still require exact full `251` plus nine digits, and the
+principal, service charge, VAT, tip, optional disaster fee, and total must reconcile. Partial fee
+rows, duplicate critical fields, ambiguous wrapped lines, and arithmetic drift stay in advisory
+review. Local PDF samples and actual values are not committed.
+
 The newer PDF layout prints transaction time only to the minute. Parser version 2 marks its
 `occurredAt` value as `occurredAtPrecision: minute`; the older seconds-bearing layout is marked
 `second`. A future financial policy must treat the displayed timestamp as the start of a possible
@@ -104,7 +115,7 @@ instruction expiry, or receiver rotation, the result needs review rather than au
 
 ## Test and runtime isolation
 
-All tests use clearly marked synthetic references, 12-digit synthetic selectors, byte envelopes,
+All tests use clearly marked synthetic references, full 12-digit receiver inputs, nine-digit `PH` selectors, byte envelopes,
 DNS answers, streams, and errors. The lower-level DNS/HTTPS seam is available only by a relative
 module import in package tests; it is not re-exported by the package entry point. No test contacts
 CBE or any other network destination.
@@ -118,6 +129,19 @@ raw bytes, request URL, reference, and receiver account do not appear in the res
 one request, no parse on incident stop or malformed response, and no leakage on parser failure.
 
 ## Remaining blockers and next boundary
+
+One bounded read-only diagnostic using an already-completed Owner receipt reached
+`response_headers_rejected` before any PDF body or field could be accepted. A second bounded,
+headers-only diagnostic isolated the cause to CBE's `Set-Cookie` response header. It observed a
+200 PDF response with one allowed `Content-Type`, no content encoding or redirect location, and
+chunked transfer without a conflicting content length. It did not retain response headers or
+receipt content. The transport now ignores bounded response cookies without sending or storing
+them. This narrow compatibility change does not itself attest the live PDF response contract or
+activate CBE Birr. One subsequent bounded, read-only one-fetch diagnostic returned an opaque PDF
+observation and the parser's advisory `would_review` / `receiver_identity_observed` result. That
+proves the response reaches the parser for this one previously completed receipt; it is not
+provider-wide contract attestation, immutable receiver-revision evidence, or authorization to
+credit a Player.
 
 The existing `official_receipt_live_response_contract_unattested` blocker remains because this
 slice deliberately makes no claim about PDF field layout, labels, values, signatures, encryption,

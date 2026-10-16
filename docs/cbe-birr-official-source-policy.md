@@ -9,7 +9,7 @@ reason `live_transport_absent`. It is not a live adapter and does not make a pro
 The route is fixed in source:
 
 ```text
-GET https://cbepay1.cbe.com.et:443/aureceipt?TID=<REFERENCE>&PH=<RECEIVER_PHONE>
+GET https://cbepay1.cbe.com.et:443/aureceipt?TID=<REFERENCE>&PH=<NINE_LOCAL_DIGITS>
 ```
 
 The compiled profile fixes all of the following:
@@ -17,7 +17,8 @@ The compiled profile fixes all of the following:
 - HTTPS, host `cbepay1.cbe.com.et`, explicit port `443`, and path `/aureceipt`;
 - query parameters in the exact order `TID` then `PH`;
 - transaction references as canonical uppercase 8--32 ASCII alphanumeric values;
-- receiver lookup phones in the exact `251` plus nine decimal digits form; and
+- input receiver phones in the exact `251` plus nine decimal digits form, with only the final
+  nine local digits emitted as the official `PH` query selector; and
 - redirect policy `reject_all`.
 
 Runtime input cannot choose the method, scheme, host, port, path, parameter names, parameter order,

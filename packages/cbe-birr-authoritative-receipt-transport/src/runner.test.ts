@@ -43,7 +43,7 @@ describe('CBE Birr authoritative receipt PDF transport runner', () => {
       scheme: 'https',
       host: 'cbepay1.cbe.com.et',
       port: 443,
-      pathAndQuery: `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE}`,
+      pathAndQuery: `/aureceipt?TID=${SYNTHETIC_REFERENCE}&PH=${SYNTHETIC_PHONE.slice(3)}`,
       headers: {
         accept: 'application/pdf',
         'accept-encoding': 'identity',

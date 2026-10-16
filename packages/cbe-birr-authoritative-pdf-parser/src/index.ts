@@ -1172,6 +1172,7 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
     'Paid amount',
     'Service Charge',
     'VAT',
+    'Tip',
     'Total Paid Amount',
     'Payment Reason',
     'Payment Channel',
@@ -1200,6 +1201,18 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
   }
   const infoIndex = infoIndexes[0]!;
   const detailIndex = detailIndexes[0]!;
+  const disasterLabelCount = rows.filter(
+    ({ text }) => text === 'Disaster Response' || text.startsWith('Disaster Response '),
+  ).length;
+  const disasterFeeLabelCount = rows.filter(
+    ({ text }) => text === 'Fee' || text.startsWith('Fee '),
+  ).length;
+  if (disasterLabelCount > 1 || disasterFeeLabelCount > 1) {
+    return { ok: false, reasonCode: 'pdf_field_duplicate' };
+  }
+  if (disasterLabelCount !== disasterFeeLabelCount) {
+    return { ok: false, reasonCode: 'pdf_layout_drift' };
+  }
   if (
     rows[0]?.text !== EXPECTED_BANK_HEADING ||
     rows[1]?.text !== 'VAT Invoice/ Customer Receipt' ||
@@ -1228,9 +1241,9 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
   const positions = labelled.map((indexes) => indexes[0]!);
   if (
     information.length < 6 ||
-    information.length > 8 ||
+    information.length > 9 ||
     positions[0] !== 0 ||
-    positions[1] !== 1 ||
+    (positions[1] !== 1 && positions[1] !== 2) ||
     positions.some((position, index) => index > 0 && position <= positions[index - 1]!) ||
     positions[5] !== information.length - 1
   )
@@ -1240,7 +1253,7 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
     // At most one wrapped display-name line after each account row is admitted. It can never
     // supply receiver digits or override the exact account-bearing row.
     if (
-      (index !== positions[1]! + 1 && index !== positions[2]! + 1) ||
+      (index !== positions[0]! + 1 && index !== positions[1]! + 1 && index !== positions[2]! + 1) ||
       !/^[A-Za-z][A-Za-z ]{0,79}$/u.test(information[index]!.text)
     )
       return { ok: false, reasonCode: 'pdf_layout_drift' };
@@ -1252,10 +1265,13 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
   const orderId = valueAfterLabel(information[positions[3]!]!, 'Order ID');
   const status = valueAfterLabel(information[positions[4]!]!, 'Transaction Status');
   const referencePlaceholder = valueAfterLabel(information[positions[5]!]!, 'Reference');
-  const accountPattern = /^(251[0-9]{9}) - (.{1,100})$/u;
-  const debitMatch = debit ? accountPattern.exec(debit) : null;
-  const creditMatch = credit ? accountPattern.exec(credit) : null;
-  const receiverMatch = receiver ? accountPattern.exec(receiver) : null;
+  // Payer account presentation can use a local 0-prefixed ten-digit phone. This never
+  // relaxes the exact 251-prefixed twelve-digit credited receiver comparison.
+  const debitAccountPattern = /^((?:251[0-9]{9}|0[0-9]{9})) - (.{1,100})$/u;
+  const creditedAccountPattern = /^(251[0-9]{9}) - (.{1,100})$/u;
+  const debitMatch = debit ? debitAccountPattern.exec(debit) : null;
+  const creditMatch = credit ? creditedAccountPattern.exec(credit) : null;
+  const receiverMatch = receiver ? creditedAccountPattern.exec(receiver) : null;
   if (
     !debitMatch ||
     !creditMatch ||
@@ -1274,13 +1290,19 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
   }
 
   const details = rows.slice(detailIndex + 1);
+  // Official PDFs have appeared with and without the paired Disaster Response / Fee rows.
+  // Absence is allowed only for the exact compact topology. Fee arithmetic below still has
+  // to balance; a missing charged amount cannot silently become a successful observation.
+  const hasDisasterFee = disasterLabelCount === 1;
+  const totalAmountIndex = hasDisasterFee ? 10 : 7;
+  const paymentReasonIndex = hasDisasterFee ? 11 : 8;
+  const paymentChannelIndex = hasDisasterFee ? 12 : 9;
   if (
-    details.length < 13 ||
+    details.length < paymentChannelIndex + 1 ||
     details[0]?.text !== EXPECTED_SUMMARY_HEADING ||
-    details[4]?.text !== 'Disaster Response' ||
-    details[6]?.text !== 'Fee' ||
-    details[10]?.text.startsWith('Total Amount in word ') !== true ||
-    !/\bETB\b/u.test(details[10]!.text)
+    (hasDisasterFee && (details[4]?.text !== 'Disaster Response' || details[6]?.text !== 'Fee')) ||
+    details[totalAmountIndex]?.text.startsWith('Total Amount in word ') !== true ||
+    !/\bETB\b/u.test(details[totalAmountIndex]!.text)
   )
     return { ok: false, reasonCode: 'pdf_layout_drift' };
   const summary =
@@ -1293,12 +1315,16 @@ function extractCreditAccountReceiptFields(rows: readonly TextRow[]): ExtractedR
   const summaryAmount = summary?.groups ? parseBareMoney(summary.groups.amount!) : undefined;
   const principal = parseBareMoney(valueAfterLabel(details[2]!, 'Paid amount') ?? '');
   const serviceCharge = parseBareMoney(valueAfterLabel(details[3]!, 'Service Charge') ?? '');
-  const disasterFee = parseBareMoney(details[5]!.text);
-  const vat = parseBareMoney(valueAfterLabel(details[7]!, 'VAT') ?? '');
-  const tip = parseBareMoney(valueAfterLabel(details[8]!, 'Tip') ?? '');
-  const totalPaid = parseBareMoney(valueAfterLabel(details[9]!, 'Total Paid Amount') ?? '');
-  const paymentReason = valueAfterLabel(details[11]!, 'Payment Reason');
-  const paymentChannel = valueAfterLabel(details[12]!, 'Payment Channel');
+  const disasterFee = hasDisasterFee
+    ? parseBareMoney(details[5]!.text)
+    : ({ minor: '0', currency: 'ETB' } as const);
+  const vat = parseBareMoney(valueAfterLabel(details[hasDisasterFee ? 7 : 4]!, 'VAT') ?? '');
+  const tip = parseBareMoney(valueAfterLabel(details[hasDisasterFee ? 8 : 5]!, 'Tip') ?? '');
+  const totalPaid = parseBareMoney(
+    valueAfterLabel(details[hasDisasterFee ? 9 : 6]!, 'Total Paid Amount') ?? '',
+  );
+  const paymentReason = valueAfterLabel(details[paymentReasonIndex]!, 'Payment Reason');
+  const paymentChannel = valueAfterLabel(details[paymentChannelIndex]!, 'Payment Channel');
   if (
     !summary?.groups ||
     summary.groups.reference !== orderId ||

@@ -206,6 +206,10 @@ function runtimeFixture() {
     certificate: { bodyDigest: sha('c') } as SignedCompanionEnrollmentCertificate,
     pollEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH}`,
     resultEndpoint: `https://device.fetanagent.com${AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH}`,
+    playerValidationPollEndpoint:
+      'https://device.fetanagent.com/v1/companion/device/player-validations:poll',
+    playerValidationResultEndpoint:
+      'https://device.fetanagent.com/v1/companion/device/player-validations:submit',
     createSignedLaunchProof: () => {
       throw new Error('The lookup test cannot create a launch proof.');
     },
@@ -225,6 +229,10 @@ function runtimeFixture() {
     verifyLookupExchange,
     createSignedLookupResult: (selectedAssignment, outcomes) =>
       resultFixture(selectedAssignment, device.privateKey, outcomes),
+    decodeAndVerifyPlayerValidationAssignment: () => undefined,
+    createSignedPlayerValidationResult: () => {
+      throw new Error('The exact-five lookup test cannot sign a Player validation result.');
+    },
   };
   return { assignment, device, runtime, server, verifyLookupExchange };
 }

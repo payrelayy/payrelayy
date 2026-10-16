@@ -4,6 +4,8 @@ import type { Server } from 'node:http';
 import {
   AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH,
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
 } from '@fetanagent/agent-platform-companion-contracts';
 import {
   COMPANION_EXECUTION_AUTHORITY_PATH,
@@ -20,6 +22,7 @@ import {
 } from './execution-handler.js';
 import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
+import { createDormantCompanionPlayerValidationHandler } from './player-validation-handler.js';
 import {
   createDormantRoutineDepositHandler,
   createRoutineDepositHandler,
@@ -188,6 +191,9 @@ export async function startCompanionDeviceBridgeApplication(
           assessedAt,
         ),
     });
+    // Do not issue or accept beneficiary changes until their separate, one-use SQL
+    // state boundary and its dedicated catalog preflight are installed.
+    const playerValidationHandler = createDormantCompanionPlayerValidationHandler();
     const executionConfig = config.execution;
     const executionState = executionPostgres?.state;
     if (executionConfig.enabled && executionState === undefined) throw new Error();
@@ -306,17 +312,20 @@ export async function startCompanionDeviceBridgeApplication(
           })
         : createDormantRoutineDepositHandler();
     const handler: CompanionDeviceBridgeHandler = (request) =>
-      request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
-      request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
-        ? lookupHandler(request)
-        : request.path === COMPANION_EXECUTION_POLL_PATH ||
-            request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
-            request.path === COMPANION_EXECUTION_RESULT_PATH ||
-            request.path === COMPANION_EXECUTION_STATUS_PATH
-          ? executionHandler(request)
-          : request.path === ROUTINE_DEPOSIT_COMMAND_PATH
-            ? routineHandler(request)
-            : pairingHandler(request);
+      request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH ||
+      request.path === AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH
+        ? playerValidationHandler(request)
+        : request.path === AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH ||
+            request.path === AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH
+          ? lookupHandler(request)
+          : request.path === COMPANION_EXECUTION_POLL_PATH ||
+              request.path === COMPANION_EXECUTION_AUTHORITY_PATH ||
+              request.path === COMPANION_EXECUTION_RESULT_PATH ||
+              request.path === COMPANION_EXECUTION_STATUS_PATH
+            ? executionHandler(request)
+            : request.path === ROUTINE_DEPOSIT_COMMAND_PATH
+              ? routineHandler(request)
+              : pairingHandler(request);
     server = createServer(handler);
     await server.listen();
     if (

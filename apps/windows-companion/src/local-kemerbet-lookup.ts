@@ -327,6 +327,26 @@ async function lookupOne(
   await verifyRenderedResultAndReset(page);
 }
 
+/** A single server-assigned Player ID. Only positive provider and empty-form evidence is usable. */
+export async function executeSingleLocalKemerBetLookup(
+  page: Page,
+  playerId: string,
+  authorization: MutableLocalKemerBetLookupAuthorization,
+): Promise<LocalKemerBetLookupOutcome> {
+  if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
+  try {
+    await openSearchSurface(page);
+    await lookupOne(page, playerId, authorization);
+    return 'found';
+  } catch {
+    // A missing page, non-200 response, mismatched identity, or session loss is not proof that
+    // the Player does not exist. Never turn those failures into an authoritative rejection.
+    return 'review_required';
+  } finally {
+    authorization.clear();
+  }
+}
+
 /** Execute only the exact five server-assigned GET lookups; no amount or final action is exposed. */
 export async function executeExactFiveLocalKemerBetLookup(
   page: Page,

@@ -25,6 +25,10 @@ export const AGENT_PLATFORM_COMPANION_LOOKUP_POLL_PATH =
   '/v1/companion/device/lookup-assignments:poll' as const;
 export const AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH =
   '/v1/companion/device/lookup-results:submit' as const;
+export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH =
+  '/v1/companion/device/player-validations:poll' as const;
+export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH =
+  '/v1/companion/device/player-validations:submit' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_CONTENT_TYPE =
   'application/vnd.fetanagent.companion-device-bridge+json' as const;
 export const AGENT_PLATFORM_COMPANION_PAIRING_PACKAGE_PREFIX =
@@ -39,6 +43,10 @@ export const AGENT_PLATFORM_COMPANION_ASSIGNMENT_TRANSCRIPT_VERSION =
   'agent-platform-companion-lookup-assignment-transcript-v1' as const;
 export const AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION =
   'agent-platform-companion-lookup-result-transcript-v1' as const;
+export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION =
+  'agent-platform-companion-player-validation-assignment-transcript-v1' as const;
+export const AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION =
+  'agent-platform-companion-player-validation-result-transcript-v1' as const;
 export const AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS = 30_000 as const;
 
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$/u;
@@ -1961,5 +1969,610 @@ export function verifyKemerBetExactFiveLookupExchange(
     );
   } catch {
     return exchangeResult('invalid_request', 'invalid_request');
+  }
+}
+
+/**
+ * A separate, single-ID, read-only protocol for Telegram beneficiary changes.
+ * Its signed result is evidence for a later database decision, never payment
+ * authority or proof that the Telegram payer owns the Player ID.
+ */
+export interface KemerBetPlayerValidationAssignmentBody extends CompanionNoMoneySafety {
+  readonly contractVersion: typeof AGENT_PLATFORM_COMPANION_CONTRACT_VERSION;
+  readonly protocolMode: typeof AGENT_PLATFORM_COMPANION_PROTOCOL_MODE;
+  readonly assignmentId: string;
+  readonly validationRequestId: string;
+  readonly certificateId: string;
+  readonly deviceId: string;
+  readonly deviceKeyId: string;
+  readonly platformCode: 'kemerbet';
+  readonly assignmentKind: 'single_telegram_player_validation';
+  readonly lookupMode: 'find_only';
+  readonly playerId: string;
+  readonly currencyCode: 'ETB';
+  readonly leaseNonceDigest: string;
+  readonly oneUse: true;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+}
+
+export interface SignedKemerBetPlayerValidationAssignment {
+  readonly contractVersion: typeof AGENT_PLATFORM_COMPANION_CONTRACT_VERSION;
+  readonly protocolMode: typeof AGENT_PLATFORM_COMPANION_PROTOCOL_MODE;
+  readonly transcriptVersion: typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION;
+  readonly bodyDigestAlgorithm: typeof AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM;
+  readonly bodyDigest: string;
+  readonly signatureAlgorithm: typeof AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM;
+  readonly signatureEncoding: typeof AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING;
+  readonly signerKeyId: string;
+  readonly body: KemerBetPlayerValidationAssignmentBody;
+  readonly signature: string;
+}
+
+export interface KemerBetPlayerValidationResultBody extends CompanionNoMoneySafety {
+  readonly contractVersion: typeof AGENT_PLATFORM_COMPANION_CONTRACT_VERSION;
+  readonly protocolMode: typeof AGENT_PLATFORM_COMPANION_PROTOCOL_MODE;
+  readonly resultId: string;
+  readonly assignmentId: string;
+  readonly assignmentBodyDigest: string;
+  readonly validationRequestId: string;
+  readonly certificateId: string;
+  readonly deviceId: string;
+  readonly deviceKeyId: string;
+  readonly platformCode: 'kemerbet';
+  readonly assignmentKind: 'single_telegram_player_validation';
+  readonly lookupMode: 'find_only';
+  readonly currencyCode: 'ETB';
+  readonly playerIdDigest: string;
+  readonly outcome: 'found' | 'review_required';
+  readonly evidenceKind: 'exact_id_empty_etb_form' | 'inconclusive';
+  readonly observedAt: string;
+}
+
+export interface SignedKemerBetPlayerValidationResult {
+  readonly contractVersion: typeof AGENT_PLATFORM_COMPANION_CONTRACT_VERSION;
+  readonly protocolMode: typeof AGENT_PLATFORM_COMPANION_PROTOCOL_MODE;
+  readonly transcriptVersion: typeof AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION;
+  readonly bodyDigestAlgorithm: typeof AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM;
+  readonly bodyDigest: string;
+  readonly signatureAlgorithm: typeof AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM;
+  readonly signatureEncoding: typeof AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING;
+  readonly deviceKeyId: string;
+  readonly body: KemerBetPlayerValidationResultBody;
+  readonly signature: string;
+}
+
+const playerValidationAssignmentBodyKeys = [
+  'contractVersion',
+  'protocolMode',
+  'assignmentId',
+  'validationRequestId',
+  'certificateId',
+  'deviceId',
+  'deviceKeyId',
+  'platformCode',
+  'assignmentKind',
+  'lookupMode',
+  'playerId',
+  'currencyCode',
+  'leaseNonceDigest',
+  'oneUse',
+  'issuedAt',
+  'expiresAt',
+  ...safetyKeys,
+] as const;
+
+const playerValidationResultBodyKeys = [
+  'contractVersion',
+  'protocolMode',
+  'resultId',
+  'assignmentId',
+  'assignmentBodyDigest',
+  'validationRequestId',
+  'certificateId',
+  'deviceId',
+  'deviceKeyId',
+  'platformCode',
+  'assignmentKind',
+  'lookupMode',
+  'currencyCode',
+  'playerIdDigest',
+  'outcome',
+  'evidenceKind',
+  'observedAt',
+  ...safetyKeys,
+] as const;
+
+export function decodeKemerBetPlayerValidationAssignmentBody(
+  candidate: unknown,
+): KemerBetPlayerValidationAssignmentBody | undefined {
+  try {
+    if (
+      !isPlainNonProxyRecord(candidate) ||
+      !hasExactEnumerableDataKeys(candidate, playerValidationAssignmentBodyKeys) ||
+      !header(candidate) ||
+      !hasSafeLiterals(candidate)
+    )
+      return undefined;
+    const assignmentId = opaque(ownDataValue(candidate, 'assignmentId'));
+    const validationRequestId = opaque(ownDataValue(candidate, 'validationRequestId'));
+    const certificateId = opaque(ownDataValue(candidate, 'certificateId'));
+    const deviceId = opaque(ownDataValue(candidate, 'deviceId'));
+    const deviceKeyId = opaque(ownDataValue(candidate, 'deviceKeyId'));
+    const playerId = ownDataValue(candidate, 'playerId');
+    const leaseNonceDigest = digest(ownDataValue(candidate, 'leaseNonceDigest'));
+    const issuedAt = timestamp(ownDataValue(candidate, 'issuedAt'));
+    const expiresAt = timestamp(ownDataValue(candidate, 'expiresAt'));
+    if (
+      !assignmentId ||
+      !validationRequestId ||
+      !certificateId ||
+      !deviceId ||
+      !deviceKeyId ||
+      ownDataValue(candidate, 'platformCode') !== 'kemerbet' ||
+      ownDataValue(candidate, 'assignmentKind') !== 'single_telegram_player_validation' ||
+      ownDataValue(candidate, 'lookupMode') !== 'find_only' ||
+      typeof playerId !== 'string' ||
+      !PLAYER_ID_PATTERN.test(playerId) ||
+      ownDataValue(candidate, 'currencyCode') !== 'ETB' ||
+      !leaseNonceDigest ||
+      ownDataValue(candidate, 'oneUse') !== true ||
+      !issuedAt ||
+      !expiresAt ||
+      !validLifetime(issuedAt, expiresAt, 5 * 60 * 1_000)
+    )
+      return undefined;
+    return Object.freeze({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      assignmentId,
+      validationRequestId,
+      certificateId,
+      deviceId,
+      deviceKeyId,
+      platformCode: 'kemerbet',
+      assignmentKind: 'single_telegram_player_validation',
+      lookupMode: 'find_only',
+      playerId,
+      currencyCode: 'ETB',
+      leaseNonceDigest,
+      oneUse: true,
+      issuedAt,
+      expiresAt,
+      ...safety,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export function canonicalKemerBetPlayerValidationAssignmentBodyBytes(
+  candidate: unknown,
+): Buffer | undefined {
+  const body = decodeKemerBetPlayerValidationAssignmentBody(candidate);
+  return body
+    ? encodeFields('fetanagent:companion:telegram-player-validation-assignment-body:v1', [
+        ['contractVersion', body.contractVersion],
+        ['protocolMode', body.protocolMode],
+        ['assignmentId', body.assignmentId],
+        ['validationRequestId', body.validationRequestId],
+        ['certificateId', body.certificateId],
+        ['deviceId', body.deviceId],
+        ['deviceKeyId', body.deviceKeyId],
+        ['platformCode', body.platformCode],
+        ['assignmentKind', body.assignmentKind],
+        ['lookupMode', body.lookupMode],
+        ['playerId', body.playerId],
+        ['currencyCode', body.currencyCode],
+        ['leaseNonceDigest', body.leaseNonceDigest],
+        ['oneUse', body.oneUse],
+        ['issuedAt', body.issuedAt],
+        ['expiresAt', body.expiresAt],
+        ...safetyFields(body),
+      ])
+    : undefined;
+}
+
+export function digestKemerBetPlayerValidationAssignmentBody(
+  candidate: unknown,
+): string | undefined {
+  const bytes = canonicalKemerBetPlayerValidationAssignmentBodyBytes(candidate);
+  return bytes ? sha256(bytes) : undefined;
+}
+
+export function canonicalKemerBetPlayerValidationAssignmentSignatureBytes(
+  candidate: unknown,
+  signerKeyIdCandidate: unknown,
+): Buffer | undefined {
+  const bodyDigest = digestKemerBetPlayerValidationAssignmentBody(candidate);
+  const signerKeyId = opaque(signerKeyIdCandidate);
+  return bodyDigest && signerKeyId
+    ? encodeFields('fetanagent:companion:telegram-player-validation-assignment-signature:v1', [
+        [
+          'transcriptVersion',
+          AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
+        ],
+        ['bodyDigest', bodyDigest],
+        ['signerKeyId', signerKeyId],
+      ])
+    : undefined;
+}
+
+export function decodeSignedKemerBetPlayerValidationAssignment(
+  candidate: unknown,
+): SignedKemerBetPlayerValidationAssignment | undefined {
+  try {
+    if (
+      !isPlainNonProxyRecord(candidate) ||
+      !hasExactEnumerableDataKeys(candidate, serverSignedEnvelopeKeys) ||
+      !header(candidate)
+    )
+      return undefined;
+    const body = decodeKemerBetPlayerValidationAssignmentBody(ownDataValue(candidate, 'body'));
+    const bodyDigest = digest(ownDataValue(candidate, 'bodyDigest'));
+    const signerKeyId = opaque(ownDataValue(candidate, 'signerKeyId'));
+    const encodedSignature = signature(ownDataValue(candidate, 'signature'));
+    if (
+      !body ||
+      !bodyDigest ||
+      !signerKeyId ||
+      !encodedSignature ||
+      ownDataValue(candidate, 'transcriptVersion') !==
+        AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION ||
+      ownDataValue(candidate, 'bodyDigestAlgorithm') !==
+        AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM ||
+      ownDataValue(candidate, 'signatureAlgorithm') !==
+        AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM ||
+      ownDataValue(candidate, 'signatureEncoding') !== AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING
+    )
+      return undefined;
+    return Object.freeze({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
+      bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+      bodyDigest,
+      signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+      signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+      signerKeyId,
+      body,
+      signature: encodedSignature,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export function verifySignedKemerBetPlayerValidationAssignment(
+  candidate: unknown,
+  trustedServerPublicKeySpkiDer: unknown,
+): boolean {
+  const envelope = decodeSignedKemerBetPlayerValidationAssignment(candidate);
+  const key = parseExternalP256Spki(trustedServerPublicKeySpkiDer);
+  return Boolean(
+    envelope &&
+    digestKemerBetPlayerValidationAssignmentBody(envelope.body) === envelope.bodyDigest &&
+    verifyP1363(
+      canonicalKemerBetPlayerValidationAssignmentSignatureBytes(
+        envelope.body,
+        envelope.signerKeyId,
+      ),
+      envelope.signature,
+      key,
+    ),
+  );
+}
+
+export function decodeKemerBetPlayerValidationResultBody(
+  candidate: unknown,
+): KemerBetPlayerValidationResultBody | undefined {
+  try {
+    if (
+      !isPlainNonProxyRecord(candidate) ||
+      !hasExactEnumerableDataKeys(candidate, playerValidationResultBodyKeys) ||
+      !header(candidate) ||
+      !hasSafeLiterals(candidate)
+    )
+      return undefined;
+    const resultId = opaque(ownDataValue(candidate, 'resultId'));
+    const assignmentId = opaque(ownDataValue(candidate, 'assignmentId'));
+    const assignmentBodyDigest = digest(ownDataValue(candidate, 'assignmentBodyDigest'));
+    const validationRequestId = opaque(ownDataValue(candidate, 'validationRequestId'));
+    const certificateId = opaque(ownDataValue(candidate, 'certificateId'));
+    const deviceId = opaque(ownDataValue(candidate, 'deviceId'));
+    const deviceKeyId = opaque(ownDataValue(candidate, 'deviceKeyId'));
+    const playerIdDigest = digest(ownDataValue(candidate, 'playerIdDigest'));
+    const outcome = ownDataValue(candidate, 'outcome');
+    const evidenceKind = ownDataValue(candidate, 'evidenceKind');
+    const observedAt = timestamp(ownDataValue(candidate, 'observedAt'));
+    if (
+      !resultId ||
+      !assignmentId ||
+      !assignmentBodyDigest ||
+      !validationRequestId ||
+      !certificateId ||
+      !deviceId ||
+      !deviceKeyId ||
+      !playerIdDigest ||
+      !observedAt ||
+      ownDataValue(candidate, 'platformCode') !== 'kemerbet' ||
+      ownDataValue(candidate, 'assignmentKind') !== 'single_telegram_player_validation' ||
+      ownDataValue(candidate, 'lookupMode') !== 'find_only' ||
+      ownDataValue(candidate, 'currencyCode') !== 'ETB' ||
+      !(
+        (outcome === 'found' && evidenceKind === 'exact_id_empty_etb_form') ||
+        (outcome === 'review_required' && evidenceKind === 'inconclusive')
+      )
+    )
+      return undefined;
+    return Object.freeze({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      resultId,
+      assignmentId,
+      assignmentBodyDigest,
+      validationRequestId,
+      certificateId,
+      deviceId,
+      deviceKeyId,
+      platformCode: 'kemerbet',
+      assignmentKind: 'single_telegram_player_validation',
+      lookupMode: 'find_only',
+      currencyCode: 'ETB',
+      playerIdDigest,
+      outcome,
+      evidenceKind,
+      observedAt,
+      ...safety,
+    }) as KemerBetPlayerValidationResultBody;
+  } catch {
+    return undefined;
+  }
+}
+
+export function canonicalKemerBetPlayerValidationResultBodyBytes(
+  candidate: unknown,
+): Buffer | undefined {
+  const body = decodeKemerBetPlayerValidationResultBody(candidate);
+  return body
+    ? encodeFields('fetanagent:companion:telegram-player-validation-result-body:v1', [
+        ['contractVersion', body.contractVersion],
+        ['protocolMode', body.protocolMode],
+        ['resultId', body.resultId],
+        ['assignmentId', body.assignmentId],
+        ['assignmentBodyDigest', body.assignmentBodyDigest],
+        ['validationRequestId', body.validationRequestId],
+        ['certificateId', body.certificateId],
+        ['deviceId', body.deviceId],
+        ['deviceKeyId', body.deviceKeyId],
+        ['platformCode', body.platformCode],
+        ['assignmentKind', body.assignmentKind],
+        ['lookupMode', body.lookupMode],
+        ['currencyCode', body.currencyCode],
+        ['playerIdDigest', body.playerIdDigest],
+        ['outcome', body.outcome],
+        ['evidenceKind', body.evidenceKind],
+        ['observedAt', body.observedAt],
+        ...safetyFields(body),
+      ])
+    : undefined;
+}
+
+export function digestKemerBetPlayerValidationResultBody(candidate: unknown): string | undefined {
+  const bytes = canonicalKemerBetPlayerValidationResultBodyBytes(candidate);
+  return bytes ? sha256(bytes) : undefined;
+}
+
+export function canonicalKemerBetPlayerValidationResultSignatureBytes(
+  candidate: unknown,
+): Buffer | undefined {
+  const body = decodeKemerBetPlayerValidationResultBody(candidate);
+  const bodyDigest = body && digestKemerBetPlayerValidationResultBody(body);
+  return body && bodyDigest
+    ? encodeFields('fetanagent:companion:telegram-player-validation-result-signature:v1', [
+        ['transcriptVersion', AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION],
+        ['bodyDigest', bodyDigest],
+        ['deviceKeyId', body.deviceKeyId],
+      ])
+    : undefined;
+}
+
+export function decodeSignedKemerBetPlayerValidationResult(
+  candidate: unknown,
+): SignedKemerBetPlayerValidationResult | undefined {
+  try {
+    if (
+      !isPlainNonProxyRecord(candidate) ||
+      !hasExactEnumerableDataKeys(candidate, deviceSignedEnvelopeKeys) ||
+      !header(candidate)
+    )
+      return undefined;
+    const body = decodeKemerBetPlayerValidationResultBody(ownDataValue(candidate, 'body'));
+    const bodyDigest = digest(ownDataValue(candidate, 'bodyDigest'));
+    const deviceKeyId = opaque(ownDataValue(candidate, 'deviceKeyId'));
+    const encodedSignature = signature(ownDataValue(candidate, 'signature'));
+    if (
+      !body ||
+      !bodyDigest ||
+      !deviceKeyId ||
+      deviceKeyId !== body.deviceKeyId ||
+      !encodedSignature ||
+      ownDataValue(candidate, 'transcriptVersion') !==
+        AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION ||
+      ownDataValue(candidate, 'bodyDigestAlgorithm') !==
+        AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM ||
+      ownDataValue(candidate, 'signatureAlgorithm') !==
+        AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM ||
+      ownDataValue(candidate, 'signatureEncoding') !== AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING
+    )
+      return undefined;
+    return Object.freeze({
+      contractVersion: AGENT_PLATFORM_COMPANION_CONTRACT_VERSION,
+      protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+      transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION,
+      bodyDigestAlgorithm: AGENT_PLATFORM_COMPANION_DIGEST_ALGORITHM,
+      bodyDigest,
+      signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+      signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+      deviceKeyId,
+      body,
+      signature: encodedSignature,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export function verifySignedKemerBetPlayerValidationResult(
+  candidate: unknown,
+  certificateCandidate: unknown,
+): boolean {
+  const envelope = decodeSignedKemerBetPlayerValidationResult(candidate);
+  const certificate = decodeSignedCompanionEnrollmentCertificate(certificateCandidate);
+  if (!envelope || !certificate || certificate.body.state !== 'active') return false;
+  const key = parseP256Spki(certificate.body.devicePublicKeySpki)?.key;
+  return (
+    certificate.body.certificateId === envelope.body.certificateId &&
+    certificate.body.deviceId === envelope.body.deviceId &&
+    certificate.body.deviceKeyId === envelope.body.deviceKeyId &&
+    digestKemerBetPlayerValidationResultBody(envelope.body) === envelope.bodyDigest &&
+    verifyP1363(
+      canonicalKemerBetPlayerValidationResultSignatureBytes(envelope.body),
+      envelope.signature,
+      key,
+    )
+  );
+}
+
+export function deriveKemerBetPlayerValidationAssignmentReplayIdentity(
+  candidate: unknown,
+): string | undefined {
+  const assignment = decodeSignedKemerBetPlayerValidationAssignment(candidate);
+  return assignment &&
+    digestKemerBetPlayerValidationAssignmentBody(assignment.body) === assignment.bodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:telegram-player-validation-replay:v1', [
+          ['assignmentId', assignment.body.assignmentId],
+          ['validationRequestId', assignment.body.validationRequestId],
+          ['leaseNonceDigest', assignment.body.leaseNonceDigest],
+          ['bodyDigest', assignment.bodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+export function deriveKemerBetPlayerValidationResultReplayIdentity(
+  candidate: unknown,
+): string | undefined {
+  const result = decodeSignedKemerBetPlayerValidationResult(candidate);
+  return result && digestKemerBetPlayerValidationResultBody(result.body) === result.bodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:telegram-player-validation-result-replay:v1', [
+          ['resultId', result.body.resultId],
+          ['assignmentId', result.body.assignmentId],
+          ['validationRequestId', result.body.validationRequestId],
+          ['resultBodyDigest', result.bodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+export function digestCompanionPlayerValidationPollContent(
+  certificateBodyDigestCandidate: unknown,
+): string | undefined {
+  const certificateBodyDigest = digest(certificateBodyDigestCandidate);
+  return certificateBodyDigest
+    ? sha256(
+        encodeFields('fetanagent:companion:telegram-player-validation-poll-content:v1', [
+          ['certificateBodyDigest', certificateBodyDigest],
+        ]),
+      )
+    : undefined;
+}
+
+export function digestCompanionPlayerValidationResultContent(
+  assignmentCandidate: unknown,
+  resultCandidate: unknown,
+): string | undefined {
+  const assignment = decodeSignedKemerBetPlayerValidationAssignment(assignmentCandidate);
+  const result = decodeSignedKemerBetPlayerValidationResult(resultCandidate);
+  if (
+    !assignment ||
+    !result ||
+    digestKemerBetPlayerValidationAssignmentBody(assignment.body) !== assignment.bodyDigest ||
+    digestKemerBetPlayerValidationResultBody(result.body) !== result.bodyDigest
+  )
+    return undefined;
+  return sha256(
+    encodeFields('fetanagent:companion:telegram-player-validation-result-content:v1', [
+      ['assignmentBodyDigest', assignment.bodyDigest],
+      ['resultBodyDigest', result.bodyDigest],
+      ['resultId', result.body.resultId],
+    ]),
+  );
+}
+
+/** Pure cryptographic verification; the database must still atomically check current request and replay state. */
+export function verifyKemerBetPlayerValidationExchange(
+  input: {
+    readonly assessedAt: unknown;
+    readonly certificate: unknown;
+    readonly signedAssignment: unknown;
+    readonly signedResult: unknown;
+    readonly consumedReplayIdentities?: readonly string[];
+  },
+  trustedServerPublicKeySpkiDer: unknown,
+): 'verified_found' | 'verified_inconclusive' | 'review_required' {
+  try {
+    const assessedAt = timestamp(input.assessedAt);
+    const certificate = decodeSignedCompanionEnrollmentCertificate(input.certificate);
+    const assignment = decodeSignedKemerBetPlayerValidationAssignment(input.signedAssignment);
+    const result = decodeSignedKemerBetPlayerValidationResult(input.signedResult);
+    if (
+      !assessedAt ||
+      !certificate ||
+      !assignment ||
+      !result ||
+      certificate.body.state !== 'active' ||
+      !verifySignedCompanionEnrollmentCertificate(certificate, trustedServerPublicKeySpkiDer) ||
+      !verifySignedKemerBetPlayerValidationAssignment(assignment, trustedServerPublicKeySpkiDer) ||
+      !verifySignedKemerBetPlayerValidationResult(result, certificate)
+    )
+      return 'review_required';
+    const now = Date.parse(assessedAt);
+    const issued = Date.parse(assignment.body.issuedAt);
+    const expires = Date.parse(assignment.body.expiresAt);
+    const observed = Date.parse(result.body.observedAt);
+    if (
+      now < Date.parse(certificate.body.validFrom) ||
+      now >= Date.parse(certificate.body.validUntil) ||
+      issued + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS <
+        Date.parse(certificate.body.validFrom) ||
+      issued > now + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      now >= expires ||
+      observed + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS < issued ||
+      observed >=
+        Date.parse(certificate.body.validUntil) +
+          AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      observed >= expires + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      observed > now + AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS ||
+      assignment.body.certificateId !== certificate.body.certificateId ||
+      assignment.body.deviceId !== certificate.body.deviceId ||
+      assignment.body.deviceKeyId !== certificate.body.deviceKeyId ||
+      result.body.assignmentId !== assignment.body.assignmentId ||
+      result.body.assignmentBodyDigest !== assignment.bodyDigest ||
+      result.body.validationRequestId !== assignment.body.validationRequestId ||
+      result.body.certificateId !== assignment.body.certificateId ||
+      result.body.deviceId !== assignment.body.deviceId ||
+      result.body.deviceKeyId !== assignment.body.deviceKeyId ||
+      result.body.playerIdDigest !== digestCompanionPlayerId(assignment.body.playerId)
+    )
+      return 'review_required';
+    const replayIdentity = deriveKemerBetPlayerValidationAssignmentReplayIdentity(assignment);
+    if (!replayIdentity || input.consumedReplayIdentities?.includes(replayIdentity))
+      return 'review_required';
+    return result.body.outcome === 'found' ? 'verified_found' : 'verified_inconclusive';
+  } catch {
+    return 'review_required';
   }
 }

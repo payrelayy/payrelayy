@@ -6,6 +6,7 @@ import type { ExactFivePlayerIds } from '@fetanagent/agent-platform-companion-co
 import {
   createLocalKemerBetLookupAuthorization,
   executeExactFiveLocalKemerBetLookup,
+  executeSingleLocalKemerBetLookup,
 } from './local-kemerbet-lookup.js';
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
@@ -161,6 +162,104 @@ describe.skipIf(process.platform !== 'win32')(
 
       expect(outcomes).toEqual(['found', 'found', 'found', 'found', 'found']);
       expect(requestedPlayerIds).toEqual(PLAYER_IDS);
+    }, 30_000);
+
+    it('accepts one exact successful Find as read-only evidence', async () => {
+      const requestedPlayerIds: string[] = [];
+      context = await browser.newContext({ serviceWorkers: 'block' });
+      await context.route('**/*', async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() === 'GET' && url.href === AGENTS_URL) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: delayedDepositFixture,
+          });
+          return;
+        }
+        if (
+          request.method() === 'GET' &&
+          url.origin === API_ORIGIN &&
+          url.pathname === LOOKUP_PATH
+        ) {
+          const playerId = url.searchParams.get('externalId');
+          if (playerId !== PLAYER_IDS[0] || [...url.searchParams.keys()].length !== 1) {
+            await route.abort('blockedbyclient');
+            return;
+          }
+          requestedPlayerIds.push(playerId);
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json; charset=utf-8',
+            headers: { 'access-control-allow-origin': '*' },
+            body: JSON.stringify({
+              value: {
+                id: 1,
+                externalId: playerId,
+                currencyCode: 'ETB',
+                userName: 'fixture',
+                email: null,
+              },
+            }),
+          });
+          return;
+        }
+        await route.abort('blockedbyclient');
+      });
+      const page = await context.newPage();
+      await page.goto(AGENTS_URL, { waitUntil: 'domcontentloaded' });
+      expect(
+        await executeSingleLocalKemerBetLookup(
+          page,
+          PLAYER_IDS[0],
+          createLocalKemerBetLookupAuthorization(),
+        ),
+      ).toBe('found');
+      expect(requestedPlayerIds).toEqual([PLAYER_IDS[0]]);
+      expect(
+        await page.locator('.ant-modal-content [data-placeholder="Enter Amount"] input').count(),
+      ).toBe(0);
+    }, 30_000);
+
+    it('does not approve an inconclusive provider response for one Player ID', async () => {
+      context = await browser.newContext({ serviceWorkers: 'block' });
+      await context.route('**/*', async (route) => {
+        const url = new URL(route.request().url());
+        if (url.href === AGENTS_URL) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'text/html',
+            body: delayedDepositFixture,
+          });
+        } else if (url.origin === API_ORIGIN && url.pathname === LOOKUP_PATH) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json; charset=utf-8',
+            headers: { 'access-control-allow-origin': '*' },
+            body: JSON.stringify({
+              value: {
+                id: 1,
+                externalId: PLAYER_IDS[1],
+                currencyCode: 'ETB',
+                userName: 'fixture',
+                email: null,
+              },
+            }),
+          });
+        } else {
+          await route.abort('blockedbyclient');
+        }
+      });
+      const page = await context.newPage();
+      await page.goto(AGENTS_URL, { waitUntil: 'domcontentloaded' });
+      expect(
+        await executeSingleLocalKemerBetLookup(
+          page,
+          PLAYER_IDS[0],
+          createLocalKemerBetLookupAuthorization(),
+        ),
+      ).toBe('review_required');
     }, 30_000);
   },
 );

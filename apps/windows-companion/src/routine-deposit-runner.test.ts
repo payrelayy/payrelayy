@@ -81,6 +81,74 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).not.toHaveBeenCalled();
   });
 
+  it('runs one read-only Find only after an idle lease and before the next credit claim', async () => {
+    const { options, session } = fixture();
+    const order: string[] = [];
+    let completeLookup!: () => void;
+    selected.runOnce
+      .mockImplementationOnce(async () => {
+        order.push('financial_idle');
+        return { status: 'idle' };
+      })
+      .mockImplementationOnce(async () => {
+        order.push('financial_stop');
+        return { status: 'paused', reason: 'operator_stopped' };
+      });
+    const runReadOnlyIdleWorkOnce = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          order.push('find_started');
+          completeLookup = () => {
+            order.push('find_completed');
+            resolve();
+          };
+        }),
+    );
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.waitFor(() => expect(runReadOnlyIdleWorkOnce).toHaveBeenCalledOnce());
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(session.stop).not.toHaveBeenCalled();
+    completeLookup();
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(order).toEqual(['financial_idle', 'find_started', 'find_completed', 'financial_stop']);
+  });
+
+  it('does not run read-only work while a credit is completed, uncertain, or signed out', async () => {
+    vi.useFakeTimers();
+    const { options, session } = fixture();
+    const runReadOnlyIdleWorkOnce = vi.fn(async () => undefined);
+    selected.runOnce
+      .mockResolvedValueOnce({ status: 'completed' })
+      .mockResolvedValueOnce({ status: 'awaiting_reconciliation' })
+      .mockImplementationOnce(async () => {
+        session.isSignedInVerified.mockReturnValue(false);
+        return { status: 'idle' };
+      });
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(selected.runOnce).toHaveBeenCalledTimes(3);
+    expect(runReadOnlyIdleWorkOnce).not.toHaveBeenCalled();
+    await queue.stop();
+  });
+
+  it('never claims another credit after stopping during an idle Find', async () => {
+    const { options, controller } = fixture();
+    let completeLookup!: () => void;
+    selected.runOnce.mockResolvedValue({ status: 'idle' });
+    const runReadOnlyIdleWorkOnce = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          completeLookup = resolve;
+        }),
+    );
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.waitFor(() => expect(runReadOnlyIdleWorkOnce).toHaveBeenCalledOnce());
+    controller.abort();
+    completeLookup();
+    await expect(queue.done).resolves.toEqual({ status: 'stopped' });
+    expect(selected.runOnce).toHaveBeenCalledOnce();
+  });
+
   it('processes a burst of 100 queued credits in one ordered lane', async () => {
     const { options } = fixture();
     const order: number[] = [];

@@ -139,6 +139,38 @@ describe('Windows companion configuration', () => {
     ).toThrow('requires a no-money launch');
   });
 
+  it('keeps routine Player Find default-off and requires the financial queue for opt-in', () => {
+    const base = {
+      NODE_ENV: 'test',
+      FETANAGENT_COMPANION_DATA_ROOT: 'D:\\FetanAgent Companion Test',
+      INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true',
+      FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID:
+        'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    };
+    expect(loadWindowsCompanionConfig({ ...base }).routinePlayerValidationEnabled).toBe(false);
+    const enabled = loadWindowsCompanionConfig({
+      ...base,
+      INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true',
+    });
+    expect(enabled.routinePlayerValidationEnabled).toBe(true);
+    expect(enabled.playerValidationEnabled).toBe(false);
+    for (const invalid of ['', 'false', 'TRUE', '1']) {
+      expect(() =>
+        loadWindowsCompanionConfig({
+          ...base,
+          INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: invalid,
+        }),
+      ).toThrow('feature state is invalid');
+    }
+    expect(() =>
+      loadWindowsCompanionConfig({
+        NODE_ENV: 'test',
+        FETANAGENT_COMPANION_DATA_ROOT: base.FETANAGENT_COMPANION_DATA_ROOT,
+        INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true',
+      }),
+    ).toThrow('requires the routine queue');
+  });
+
   it('accepts only a complete, redacted no-money preflight in the protected routine lane', () => {
     const base = {
       NODE_ENV: 'test',

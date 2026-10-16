@@ -29,6 +29,8 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
+  /** Runs at most once after an empty financial lease; the next lease waits for its completion. */
+  readonly runReadOnlyIdleWorkOnce?: () => Promise<unknown>;
 }
 
 /** Explicitly invoked, never started by the read-only/v2 entry points. No deposit-count limit. */
@@ -78,6 +80,16 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           continue;
         }
         consecutiveUnavailable = 0;
+        if (
+          result.status === 'idle' &&
+          options.runReadOnlyIdleWorkOnce &&
+          !controller.signal.aborted &&
+          options.session.isSignedInVerified()
+        ) {
+          // No financial lease or reconciliation is in progress. Await the read-only Find
+          // before claiming another deposit so both operations share one guarded page.
+          await options.runReadOnlyIdleWorkOnce();
+        }
         if (result.status !== 'completed') await delay(idleDelayMs, controller.signal);
       }
       return Object.freeze({ status: 'stopped' });

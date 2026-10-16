@@ -643,10 +643,13 @@ async function submitPlayerValidationResult(
   }
 }
 
-/** Opt-in no-money worker for one signed, read-only Player-ID Find at a time. */
-export async function runCompanionPlayerValidationWorker(
+export type CompanionPlayerValidationRunOutcome =
+  'idle' | 'accepted' | 'temporarily_unavailable' | 'stopped';
+
+/** One signed, read-only Find cycle; the routine queue can await it without browser overlap. */
+export async function createCompanionPlayerValidationWorker(
   options: CompanionPlayerValidationWorkerOptions,
-): Promise<void> {
+): Promise<{ runOnce(): Promise<CompanionPlayerValidationRunOutcome> }> {
   const fetchImplementation = options.fetch ?? fetch;
   const nowProvider = options.now ?? (() => new Date());
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -674,7 +677,11 @@ export async function runCompanionPlayerValidationWorker(
     });
   };
 
-  while (!options.signal.aborted) {
+  let inFlight = false;
+  const runOnce = async (): Promise<CompanionPlayerValidationRunOutcome> => {
+    if (options.signal.aborted) return 'stopped';
+    if (inFlight) unavailable();
+    inFlight = true;
     try {
       const now = nowProvider();
       let assignmentCandidate = await unprotectValue(assignmentPath, 'assignment', protector);
@@ -697,8 +704,7 @@ export async function runCompanionPlayerValidationWorker(
         );
         if (!assignment) {
           report('waiting_for_assignment');
-          await waitFor(pollIntervalMs, options.signal);
-          continue;
+          return 'idle';
         }
         await protectValue(assignmentPath, 'assignment', assignment, protector);
         report('assignment_verified');
@@ -763,10 +769,32 @@ export async function runCompanionPlayerValidationWorker(
       );
       report('result_accepted', result.body.outcome);
       await clearPlayerValidationLedger(deviceRoot);
+      return 'accepted';
     } catch {
-      if (options.signal.aborted) return;
+      if (options.signal.aborted) return 'stopped';
       report('temporarily_unavailable');
-      await waitFor(Math.max(pollIntervalMs, 5_000), options.signal);
+      return 'temporarily_unavailable';
+    } finally {
+      inFlight = false;
+    }
+  };
+  return { runOnce };
+}
+
+/** Standalone no-money mode; routine deposits call runOnce only at a verified idle boundary. */
+export async function runCompanionPlayerValidationWorker(
+  options: CompanionPlayerValidationWorkerOptions,
+): Promise<void> {
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const worker = await createCompanionPlayerValidationWorker(options);
+  while (!options.signal.aborted) {
+    const outcome = await worker.runOnce();
+    if (outcome === 'stopped') return;
+    if (outcome !== 'accepted') {
+      await waitFor(
+        outcome === 'temporarily_unavailable' ? Math.max(pollIntervalMs, 5_000) : pollIntervalMs,
+        options.signal,
+      );
     }
   }
 }

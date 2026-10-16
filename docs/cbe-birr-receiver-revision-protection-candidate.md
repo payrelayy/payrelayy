@@ -22,12 +22,23 @@ provisioned, whether either equals a legacy API secret, who can read them, or wh
 loaded the ciphertext from the Owner's immutable revision. No existing receiver is re-encrypted or
 backfilled. Existing v1 revisions remain unusable for authoritative CBE Birr lookup.
 
+The private SQL migration `20261016232538_cbe_birr_receiver_lookup_revision_v2.sql` adds a
+separate, immutable v2 lookup row and an atomic rotation function **not granted to any application
+role yet**. It requires a newly
+assigned UUID/version, matching v1/v2 display masks, and all payment switches disabled. An
+existing v1 account may only gain v2 material through a **new** same-account receiver revision
+with reason `protection_upgrade`; it cannot be updated in place. No application calls this function
+yet, and SQL can validate only envelope shape, not cryptographic authenticity or independent key
+provenance. The migration does not upgrade an existing receiver, grant a worker access, make a
+provider request, enable CBE Birr, or move money.
+
 Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker
    receiving only the minimum decryption material and an audited rotation/recovery path.
-2. Assign the new revision UUID and version before protection, persist the v2 metadata atomically
-   in an immutable Owner-controlled revision, and reject mixed v1/v2 fields.
+2. Wire a reviewed Owner flow to assign the new revision UUID and version before protection and
+   use the private atomic rotation function. Check the saved result without exposing the phone or
+   lookup material; do not treat SQL envelope-shape checks as proof of a valid key or phone.
 3. Bind each new CBE Birr payment instruction and proof to that exact revision. A lookup must not
    substitute whichever receiver happens to be active later.
 4. Add a narrow, prelease-safe worker access boundary that returns only the needed protected

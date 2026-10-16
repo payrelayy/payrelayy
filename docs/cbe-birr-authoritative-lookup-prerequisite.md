@@ -116,7 +116,9 @@ The remaining blockers preserve the existing safety design:
    protection provenance, identify which existing revision is conforming, or prove that an official
    receipt credited the configured receiver. An
    [offline revision-bound protection candidate](cbe-birr-receiver-revision-protection-candidate.md)
-   is internal-only and does not change that result or upgrade any v1 revision.
+   is internal-only. A private v2 revision storage/rotation contract now exists, but no runtime
+   calls it, no independent keys have been provisioned, and no v1 receiver was upgraded. The
+   receiver-provenance blocker therefore remains.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Submitted capture, synthetic fixture reduction, receiver lookup,

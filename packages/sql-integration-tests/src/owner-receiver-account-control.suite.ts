@@ -253,6 +253,172 @@ export function registerOwnerReceiverAccountControlSqlTests(
       }
     });
 
+    it('creates a fresh same-account CBE lookup revision only with money switches off', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid and role = 'owner' and status = 'active'`,
+          [getOwnerAdminId()],
+        );
+        expect(owner.rows).toHaveLength(1);
+        const authUserId = owner.rows[0]!.auth_user_id;
+        const legacyFingerprint = 'a'.repeat(64);
+        const legacyCiphertext = `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`;
+        const prior = await queryAsOwnerControl<{
+          readonly receiver_revision_id: string;
+          readonly revision: number;
+        }>(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+            $1::uuid, $2::uuid, 'cbe_birr', 'Synthetic SQL Receiver',
+            $3::text, $4::text, '***6789', 1::smallint, 1::smallint, 1::smallint,
+            'initial_configuration'
+          )`,
+          [authUserId, randomUUID(), legacyCiphertext, legacyFingerprint],
+        );
+        expect(prior).toHaveLength(1);
+
+        const deployedGrant = await client.query<{ readonly owner_function: boolean }>(`
+          select has_function_privilege(
+            'fetanagent_owner_control',
+            'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
+            'EXECUTE') as owner_function
+        `);
+        expect(deployedGrant.rows).toEqual([{ owner_function: false }]);
+        // Exercise the future Owner path under a transaction-only grant; rollback removes it.
+        await client.query(`grant execute on function
+          app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text
+          ) to fetanagent_owner_control`);
+
+        const requestId = randomUUID();
+        const receiverRevisionId = randomUUID();
+        const lookupCiphertext = `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`;
+        const lookupFingerprint = 'b'.repeat(64);
+        const rotateSql = `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+          $1::uuid, $2::uuid, $3::uuid, $4::integer, 'Synthetic SQL Receiver',
+          $5::text, $6::text, '***6789', $7::text, $8::text, '***6789',
+          'protection_upgrade'
+        )`;
+        const values = [
+          authUserId,
+          requestId,
+          receiverRevisionId,
+          prior[0]!.revision + 1,
+          legacyCiphertext,
+          legacyFingerprint,
+          lookupCiphertext,
+          lookupFingerprint,
+        ];
+
+        await client.query(`update app.feature_switches set mode = 'dry_run'
+          where feature_key = 'payment_verification'`);
+        await expectFailure(client, rotateSql, values, /requires every payment switch disabled/u);
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key = 'payment_verification'`);
+
+        const created = await queryAsOwnerControl<{
+          readonly lookup_protected: boolean;
+          readonly receiver_revision_id: string;
+          readonly receiver_status: string;
+          readonly revision: number;
+        }>(client, rotateSql, values);
+        expect(created).toHaveLength(1);
+        expect(created[0]).toMatchObject({
+          lookup_protected: true,
+          receiver_revision_id: receiverRevisionId,
+          receiver_status: 'active',
+          revision: prior[0]!.revision + 1,
+        });
+        expect(await queryAsOwnerControl(client, rotateSql, values)).toEqual(created);
+        await expectFailure(
+          client,
+          rotateSql,
+          [
+            authUserId,
+            requestId,
+            receiverRevisionId,
+            prior[0]!.revision + 1,
+            legacyCiphertext,
+            legacyFingerprint,
+            lookupCiphertext,
+            'c'.repeat(64),
+          ],
+          /conflicts with its original use/u,
+        );
+
+        const lineage = await client.query<{
+          readonly exact_boundary: boolean;
+          readonly lookup_count: number;
+          readonly prior_retired: boolean;
+        }>(
+          `select prior.status = 'inactive' and prior.retired_at is not null as prior_retired,
+                  prior.retired_at = current.active_from as exact_boundary,
+                  (select count(*)::integer from app.cbe_birr_receiver_lookup_revisions lookup
+                    where lookup.receiver_revision_id = current.id
+                      and lookup.receiver_version = current.version
+                      and lookup.lookup_fingerprint = $3::text
+                      and lookup.lookup_masked = '***6789') as lookup_count
+             from app.receiver_accounts prior
+             join app.receiver_accounts current on current.id = $2::uuid
+            where prior.id = $1::uuid`,
+          [prior[0]!.receiver_revision_id, receiverRevisionId, lookupFingerprint],
+        );
+        expect(lineage.rows).toEqual([
+          { exact_boundary: true, lookup_count: 1, prior_retired: true },
+        ]);
+
+        const privileges = await client.query<{
+          readonly owner_function: boolean;
+          readonly public_function: boolean;
+          readonly runtime_table: boolean;
+          readonly worker_table: boolean;
+        }>(`
+          select has_function_privilege(
+                   'fetanagent_owner_control',
+                   'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
+                   'EXECUTE') as owner_function,
+                 exists (
+                   select 1
+                     from pg_proc routine,
+                          aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+                    where routine.oid =
+                      'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)'::regprocedure
+                      and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+                 ) as public_function,
+                 has_table_privilege(
+                   'fetanagent_owner_control_runtime',
+                   'app.cbe_birr_receiver_lookup_revisions', 'SELECT,INSERT,UPDATE,DELETE'
+                 ) as runtime_table,
+                 has_table_privilege(
+                   'fetanagent_cbe_birr_shadow_worker',
+                   'app.cbe_birr_receiver_lookup_revisions', 'SELECT,INSERT,UPDATE,DELETE'
+                 ) as worker_table
+        `);
+        expect(privileges.rows).toEqual([
+          {
+            owner_function: true,
+            public_function: false,
+            runtime_table: false,
+            worker_table: false,
+          },
+        ]);
+
+        await client.query('savepoint immutable_lookup');
+        await expect(
+          client.query(
+            `update app.cbe_birr_receiver_lookup_revisions set lookup_masked = '***0000'
+              where receiver_revision_id = $1::uuid`,
+            [receiverRevisionId],
+          ),
+        ).rejects.toThrow(/immutable/u);
+        await client.query('rollback to savepoint immutable_lookup');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('permits only first CBE setup with other payment switches non-disabled and leaves TeleBirr untouched', async () => {
       const client = getClient();
       await client.query('begin');

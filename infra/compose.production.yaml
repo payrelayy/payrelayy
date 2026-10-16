@@ -386,6 +386,7 @@ services:
       TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
       BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
+      INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'false'
       BOT_TO_API_ACTION_BASE_URL: http://api:3000/
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/bot_beta_admission_transport_hmac

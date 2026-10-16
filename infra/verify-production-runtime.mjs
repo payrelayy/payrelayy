@@ -292,6 +292,7 @@ assert.equal(
 );
 assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
+assert.match(bot, /INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'false'/u);
 assert.match(bot, /condition: service_healthy/u);
 assert.match(
   bot,

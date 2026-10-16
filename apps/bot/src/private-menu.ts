@@ -39,6 +39,7 @@ export function renderTelegramQuickMenu(): PrivateTelegramMenu {
 export function renderPlayerRegistrationMenu(
   capabilityCallbackData: string,
   selectedPlayerId: string | null = null,
+  playerValidationEnabled = false,
 ): PrivateTelegramMenu {
   if (!parseTelegramPlayerRegistrationCapabilityCallback(capabilityCallbackData)) {
     throw new Error('The Player ID menu requires a valid opaque capability callback.');
@@ -58,10 +59,9 @@ export function renderPlayerRegistrationMenu(
         text: selectedPlayerId === null ? '🎮 Set Player ID' : '🔄 Change Player ID',
         callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
       },
-      {
-        text: '➕ Request Player ID review',
-        callbackData: capabilityCallbackData,
-      },
+      ...(playerValidationEnabled
+        ? []
+        : [{ text: '➕ Request Player ID review', callbackData: capabilityCallbackData }]),
     ],
   };
 }

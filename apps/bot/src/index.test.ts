@@ -138,12 +138,17 @@ function messageContext(text: string): TestMessageContext {
   };
 }
 
-function botConfig(betaAdmissionEnabled: boolean, actionChannelEnabled: boolean) {
+function botConfig(
+  betaAdmissionEnabled: boolean,
+  actionChannelEnabled: boolean,
+  playerValidationIntakeEnabled = false,
+) {
   return {
     nodeEnv: 'test',
     logLevel: 'silent',
     telegram: { enabled: true, token: '123456:test-token' },
     supportContactUrl: undefined as string | undefined,
+    playerValidationIntakeEnabled,
     apiIngress: betaAdmissionEnabled
       ? { enabled: false, baseUrl: undefined, transportHmacSecret: undefined }
       : {
@@ -168,8 +173,16 @@ function botConfig(betaAdmissionEnabled: boolean, actionChannelEnabled: boolean)
   };
 }
 
-async function loadComposition(betaAdmissionEnabled: boolean, actionChannelEnabled: boolean) {
-  runtime.config = botConfig(betaAdmissionEnabled, actionChannelEnabled);
+async function loadComposition(
+  betaAdmissionEnabled: boolean,
+  actionChannelEnabled: boolean,
+  playerValidationIntakeEnabled = false,
+) {
+  runtime.config = botConfig(
+    betaAdmissionEnabled,
+    actionChannelEnabled,
+    playerValidationIntakeEnabled,
+  );
   await import('./index.js');
   expect(runtime.messageHandler).toBeTypeOf('function');
   expect(runtime.startOptions).toBeDefined();
@@ -526,6 +539,42 @@ describe('Telegram admission, private action, and ingress composition', () => {
     ]);
   });
 
+  it('hides manual review in the opt-in menu and does not send a stale review callback', async () => {
+    await loadComposition(false, true, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: null,
+    };
+    let keyboard: { buttons: { text: string; callbackData: string }[] } | undefined;
+    await runtime.messageHandler!({
+      ...messageContext('/menu'),
+      reply: async (_text: string, options?: { reply_markup: typeof keyboard }) => {
+        keyboard = options?.reply_markup;
+      },
+    });
+    expect(keyboard?.buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+    ]);
+
+    runtime.actionDeliveries = [];
+    const replies: string[] = [];
+    await runtime.callbackHandler!({
+      update: { update_id: 123457 },
+      chat: { id: 123456789, type: 'private' },
+      from: { id: 123456789, is_bot: false, language_code: 'en' },
+      callbackQuery: { data: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w' },
+      answerCallbackQuery: async () => {},
+      reply: async (text: string) => {
+        replies.push(text);
+      },
+    });
+    expect(replies).toEqual([TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
   it('preserves beta invite-token admission as a handled short-circuit', async () => {
     runtime.admissionOutcome = 'admitted';
     await loadComposition(true, true);
@@ -653,6 +702,38 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]?.text).toContain('Player ID PLAYER-DEMO-42 saved');
     expect(replies[0]?.options).toBeDefined();
     expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('queues a guided Player ID for signed Find only with the explicit opt-in', async () => {
+    await loadComposition(false, true, true);
+    runtime.actionResult = { version: 1, outcome: 'player_validation_queued' };
+    const context = messageContext('PLAYER-DEMO-42');
+    await runtime.messageHandler!({
+      ...context,
+      message: {
+        text: 'PLAYER-DEMO-42',
+        reply_to_message: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+      },
+    });
+
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'player_validation_request_command',
+        playerId: 'PLAYER-DEMO-42',
+      }),
+    ]);
+    expect(context.replies).toEqual([expect.stringContaining('Checking your Player ID')]);
+    expect(context.replies[0]).not.toContain('✅ Player ID');
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('does not reinterpret unrelated free text as a Player-ID Find request', async () => {
+    await loadComposition(false, true, true);
+    await runtime.messageHandler!(messageContext('NOT-A-PLAYER-ID'));
+    expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
   it('accepts only the transaction number after the displayed payment details', async () => {

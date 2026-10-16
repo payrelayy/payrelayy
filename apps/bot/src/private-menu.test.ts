@@ -31,6 +31,13 @@ describe('English-only private customer menu', () => {
     );
   });
 
+  it('hides the manual-review entry only for the automatic Find menu', () => {
+    expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+    ]);
+  });
+
   it('shows a neutral, compact menu after cleanup without an expiry alert or unavailable action', () => {
     expect(renderTelegramQuickMenu()).toEqual({
       text: 'FetanAgent',

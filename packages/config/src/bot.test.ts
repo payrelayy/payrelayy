@@ -296,3 +296,50 @@ describe('Telegram admission and action transport composition', () => {
     },
   );
 });
+
+describe('Player-ID Find intake cutover', () => {
+  const enabledBot: NodeJS.ProcessEnv = {
+    NODE_ENV: 'test',
+    TELEGRAM_BOT_ENABLED: 'true',
+    TELEGRAM_BOT_TOKEN: '123456:test-token',
+    TELEGRAM_BETA_ADMISSION_ENABLED: 'true',
+    BOT_TO_BETA_ADMISSION_BASE_URL: 'http://beta-admission:3001/',
+    BOT_TO_BETA_ADMISSION_HMAC_SECRET: 'b'.repeat(64),
+    INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+    BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+    BOT_TO_API_ACTION_HMAC_SECRET: 'c'.repeat(64),
+  };
+
+  it('defaults off and reports only its non-secret state', () => {
+    const config = loadBotConfig(enabledBot);
+    expect(config.playerValidationIntakeEnabled).toBe(false);
+    expect(redactedBotConfigForLog(config).playerValidationIntakeEnabled).toBe(false);
+  });
+
+  it('requires the exact opt-in and an enabled private action channel', () => {
+    const config = loadBotConfig({
+      ...enabledBot,
+      INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true',
+    });
+    expect(config.playerValidationIntakeEnabled).toBe(true);
+    expect(() =>
+      loadBotConfig({
+        ...enabledBot,
+        INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'yes',
+      }),
+    ).toThrow();
+    expect(() =>
+      loadBotConfig({
+        ...enabledBot,
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false',
+        INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true',
+      }),
+    ).toThrow('Player validation intake requires the private Telegram action channel.');
+    expect(() =>
+      loadBotConfig({
+        NODE_ENV: 'test',
+        INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true',
+      }),
+    ).toThrow('Player validation intake requires the private Telegram action channel.');
+  });
+});

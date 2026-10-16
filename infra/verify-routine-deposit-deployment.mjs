@@ -120,6 +120,8 @@ assert.match(windowsLauncher, /verifyWindowsCompanionInstallationTree/u);
 assert.match(windowsLauncher, /verifyCompanionLaunchProof/u);
 assert.match(windowsLauncher, /startedAtMs < childStartedAt/u);
 assert.match(windowsLauncher, /INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED: 'true'/u);
+assert.match(windowsLauncher, /routinePlayerValidationEnabled: playerFindFlag === 'true'/u);
+assert.match(windowsLauncher, /INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true'/u);
 assert.match(windowsLauncher, /stdio: \['ignore', 'inherit', 'inherit', 'ipc'\]/u);
 assert.match(windowsStore, /verifySignedRoutineDepositResponse/u);
 assert.match(windowsStore, /redirect: 'error'/u);
@@ -202,6 +204,8 @@ assert.match(packageBuilder, /routine-deposit-launcher-cli\.js/u);
 assert.match(localPreparation, /-CheckOnly -CheckDataRoot/u);
 assert.match(releaseLauncher, /routine-deposit-launch\.json/u);
 assert.match(releaseLauncher, /if \(\$CheckOnly\)/u);
+assert.match(releaseLauncher, /\[switch\] \$EnablePlayerIdFind/u);
+assert.match(releaseLauncher, /'FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED'/u);
 assert.match(releaseLauncher, /'NODE_OPTIONS'/u);
 assert.match(releaseLauncher, /\$document -cne \$canonicalDocument/u);
 

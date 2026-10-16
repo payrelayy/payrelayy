@@ -1,6 +1,7 @@
 param(
   [switch] $CheckOnly,
   [string] $CheckDataRoot,
+  [switch] $EnablePlayerIdFind,
   [string] $NoMoneyPreflightPlayerId,
   [int] $NoMoneyPreflightAmountMinor
 )
@@ -11,7 +12,8 @@ try {
   $preflightPlayerProvided = $PSBoundParameters.ContainsKey('NoMoneyPreflightPlayerId')
   $preflightAmountProvided = $PSBoundParameters.ContainsKey('NoMoneyPreflightAmountMinor')
   if ($preflightPlayerProvided -ne $preflightAmountProvided -or
-      ($CheckOnly -and $preflightPlayerProvided)) {
+      ($CheckOnly -and ($preflightPlayerProvided -or $EnablePlayerIdFind)) -or
+      ($EnablePlayerIdFind -and $preflightPlayerProvided)) {
     throw 'A complete no-money preflight is required for this mode.'
   }
   if ($preflightPlayerProvided -and (
@@ -29,6 +31,7 @@ try {
     'INTERNAL_COMPANION_ROUTINE_DEPOSITS_ENABLED',
     'INTERNAL_COMPANION_PLAYER_VALIDATION_ENABLED',
     'INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED',
+    'FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED',
     'FETANAGENT_COMPANION_EXECUTION_PLATFORM_AGENT_ACCOUNT_ID',
     'FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID',
     'FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID',
@@ -114,6 +117,9 @@ try {
   $env:FETANAGENT_COMPANION_RELEASE_SHA = $releaseSha
   $env:FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID =
     $parsed.platformAgentAccountId
+  if ($EnablePlayerIdFind) {
+    $env:FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED = 'true'
+  }
   if ($preflightPlayerProvided) {
     $env:FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID = $NoMoneyPreflightPlayerId
     $env:FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR =

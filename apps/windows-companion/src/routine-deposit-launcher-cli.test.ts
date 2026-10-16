@@ -11,6 +11,16 @@ const BASE = Object.freeze({
 describe('protected routine launcher no-money rehearsal', () => {
   it('keeps the normal launch unchanged when no rehearsal is requested', () => {
     expect(parseRoutineDepositLauncherInput(BASE).noMoneyPreflight).toBeUndefined();
+    expect(parseRoutineDepositLauncherInput(BASE).routinePlayerValidationEnabled).toBe(false);
+  });
+
+  it('allows one explicit read-only Find opt-in without changing the routine launch', () => {
+    const input = parseRoutineDepositLauncherInput({
+      ...BASE,
+      FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED: 'true',
+    });
+    expect(input.routinePlayerValidationEnabled).toBe(true);
+    expect(input.noMoneyPreflight).toBeUndefined();
   });
 
   it('accepts a complete, bounded rehearsal target', () => {
@@ -44,6 +54,13 @@ describe('protected routine launcher no-money rehearsal', () => {
     },
     { INTERNAL_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER' },
     { INTERNAL_COMPANION_ROUTINE_PLAYER_VALIDATION_ENABLED: 'true' },
+    { FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED: 'false' },
+    { FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED: 'TRUE' },
+    {
+      FETANAGENT_COMPANION_ROUTINE_PLAYER_FIND_ENABLED: 'true',
+      FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_PLAYER_ID: 'SAMPLE-PLAYER',
+      FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR: '2500',
+    },
   ])('rejects incomplete, invalid, or ambient protected inputs', (override) => {
     expect(() => parseRoutineDepositLauncherInput({ ...BASE, ...override })).toThrow(
       'protected routine-deposit launcher is unavailable',

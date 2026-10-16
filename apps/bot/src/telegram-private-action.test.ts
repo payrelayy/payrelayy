@@ -185,6 +185,26 @@ describe('private Telegram action reducers', () => {
     });
   });
 
+  it('routes a guided Player ID to signed Find only when explicitly enabled', () => {
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42',
+        replyToMessage: {
+          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
+          from: { is_bot: true },
+        },
+        playerValidationEnabled: true,
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'player_validation_request_command',
+        playerId: 'PLAYER-DEMO-42',
+      },
+    });
+  });
+
   it('still accepts a reply to the previous Player ID question', () => {
     const priorPlayerPrompt = [
       '🎮 Choose Player ID',

@@ -210,7 +210,7 @@ async function createExactFivePlayers(
   };
 }
 
-async function createPairedDevice(
+export async function createPairedDevice(
   client: Client,
   ownerAdminId: string,
 ): Promise<{

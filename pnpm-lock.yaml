@@ -339,6 +339,8 @@ importers:
 
   packages/cbe-birr-fixtures: {}
 
+  packages/cbe-birr-normalization-candidate: {}
+
   packages/cbe-birr-official-source-policy:
     dependencies:
       parse5:

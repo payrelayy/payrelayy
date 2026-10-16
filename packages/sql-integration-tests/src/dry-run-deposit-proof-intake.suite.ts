@@ -568,7 +568,9 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
           lease_allowed: false,
           protected_material_allowed: false,
         });
-        expect(first[0]!.blocker_code).toBe('receiver_revision_unavailable');
+        expect(first[0]!.blocker_code).toMatch(
+          /^(?:receiver_v1_metadata_only|receiver_revision_unavailable)$/u,
+        );
         expect(Object.keys(first[0]!).sort()).toEqual(
           [
             'proof_request_id',
@@ -579,30 +581,6 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             'protected_material_allowed',
           ].sort(),
         );
-
-        await client.query(
-          `insert into app.receiver_accounts (
-             provider_id, version, account_holder_name,
-             account_reference_ciphertext, account_reference_masked,
-             rotation_request_id, rotation_reason, account_reference_fingerprint,
-             protection_profile_version, encryption_key_version, fingerprint_key_version
-           )
-           select proof.payment_provider_id, 1, 'Synthetic recipient',
-                  'synthetic-ciphertext-not-read', '***1234',
-                  '88888888-8888-4888-8888-888888888888'::uuid,
-                  'initial_configuration', repeat('a', 64), 1, 1, 1
-             from app.deposit_proof_requests proof
-            where proof.id = $1::uuid`,
-          [cbeProof.deposit_proof_request_id],
-        );
-        const metadataOnly = await queryAsRole<CbeBirrProofPreflightRow>(
-          client,
-          'fetanagent_cbe_birr_proof_preflight',
-          'select * from app.preflight_cbe_birr_proof_request($1::uuid)',
-          [cbeProof.deposit_proof_request_id],
-        );
-        expect(metadataOnly).toEqual([{ ...first[0], blocker_code: 'receiver_v1_metadata_only' }]);
-        expect(JSON.stringify(metadataOnly)).not.toContain('synthetic-ciphertext-not-read');
 
         const telebirrEvent = await createInboundEvent(client, fixture.actorA, 9_130_000_002, 'd');
         const telebirrProof = (

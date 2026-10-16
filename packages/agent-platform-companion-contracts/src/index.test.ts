@@ -12,6 +12,10 @@ import {
   AGENT_PLATFORM_COMPANION_LOOKUP_RESULT_PATH,
   AGENT_PLATFORM_COMPANION_MAX_FORWARD_CLOCK_SKEW_MS,
   AGENT_PLATFORM_COMPANION_PAIRING_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH,
+  AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
   AGENT_PLATFORM_COMPANION_RESULT_TRANSCRIPT_VERSION,
   AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
@@ -25,12 +29,16 @@ import {
   canonicalKemerBetExactFiveLookupAssignmentSignatureBytes,
   canonicalKemerBetExactFiveLookupResultBodyBytes,
   canonicalKemerBetExactFiveLookupResultSignatureBytes,
+  canonicalKemerBetPlayerValidationAssignmentSignatureBytes,
+  canonicalKemerBetPlayerValidationResultSignatureBytes,
   certificateMatchesPairingRequest,
   decodeCompanionEnrollmentCertificateBody,
   decodeCompanionHttpRequestBody,
   decodeCompanionPairingPublicPayload,
   decodeKemerBetExactFiveLookupAssignmentBody,
   decodeKemerBetExactFiveLookupResultBody,
+  decodeKemerBetPlayerValidationAssignmentBody,
+  decodeKemerBetPlayerValidationResultBody,
   decodeSignedCompanionEnrollmentCertificate,
   decodeSignedCompanionHttpRequest,
   decodeSignedCompanionPairingRequest,
@@ -39,21 +47,29 @@ import {
   deriveCompanionHttpRequestReplayIdentity,
   deriveCompanionPairingReplayIdentity,
   deriveKemerBetExactFiveLookupAssignmentReplayIdentity,
+  deriveKemerBetPlayerValidationAssignmentReplayIdentity,
   digestCompanionEnrollmentCertificateBody,
   digestCompanionHttpRequestBody,
   digestCompanionLookupEmptyQuery,
   digestCompanionLookupPollContent,
   digestCompanionLookupResultContent,
+  digestCompanionPlayerValidationPollContent,
+  digestCompanionPlayerValidationResultContent,
   digestCompanionPairingPublicPayload,
   digestCompanionPlayerId,
   digestKemerBetExactFiveLookupAssignmentBody,
   digestKemerBetExactFiveLookupResultBody,
+  digestKemerBetPlayerValidationAssignmentBody,
+  digestKemerBetPlayerValidationResultBody,
   verifyKemerBetExactFiveLookupExchange,
+  verifyKemerBetPlayerValidationExchange,
   verifySignedCompanionEnrollmentCertificate,
   verifySignedCompanionHttpRequest,
   verifySignedCompanionPairingRequest,
   verifySignedKemerBetExactFiveLookupAssignment,
   verifySignedKemerBetExactFiveLookupResult,
+  verifySignedKemerBetPlayerValidationAssignment,
+  verifySignedKemerBetPlayerValidationResult,
   type CompanionEnrollmentCertificateBody,
   type CompanionHttpRequestBody,
   type CompanionNoMoneySafety,
@@ -61,6 +77,10 @@ import {
   type CompanionPlayerLookupResultItem,
   type KemerBetExactFiveLookupAssignmentBody,
   type KemerBetExactFiveLookupResultBody,
+  type KemerBetPlayerValidationAssignmentBody,
+  type KemerBetPlayerValidationResultBody,
+  type SignedKemerBetPlayerValidationAssignment,
+  type SignedKemerBetPlayerValidationResult,
   type SignedCompanionEnrollmentCertificate,
   type SignedCompanionHttpRequest,
   type SignedCompanionPairingRequest,
@@ -918,5 +938,192 @@ describe('agent-platform companion contracts', () => {
     const inherited = Object.create({ inherited: true }) as Record<string, unknown>;
     Object.assign(inherited, value.result.body);
     expect(decodeKemerBetExactFiveLookupResultBody(inherited)).toBeUndefined();
+  });
+});
+
+function playerValidationFixture() {
+  const base = fixture();
+  const body: KemerBetPlayerValidationAssignmentBody = {
+    contractVersion: 1,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    assignmentId: 'player-validation-assignment-0001',
+    validationRequestId: 'player-validation-request-0001',
+    certificateId: base.certificate.body.certificateId,
+    deviceId: base.certificate.body.deviceId,
+    deviceKeyId: base.certificate.body.deviceKeyId,
+    platformCode: 'kemerbet',
+    assignmentKind: 'single_telegram_player_validation',
+    lookupMode: 'find_only',
+    playerId: '28379330',
+    currencyCode: 'ETB',
+    leaseNonceDigest: sha('7'),
+    oneUse: true,
+    issuedAt: '2026-09-02T10:01:00.000Z',
+    expiresAt: '2026-09-02T10:05:00.000Z',
+    ...safe,
+  };
+  const assignment: SignedKemerBetPlayerValidationAssignment = {
+    contractVersion: 1,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_ASSIGNMENT_TRANSCRIPT_VERSION,
+    bodyDigestAlgorithm: 'sha256',
+    bodyDigest: digestKemerBetPlayerValidationAssignmentBody(body)!,
+    signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+    signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+    signerKeyId: 'server-signing-key-0001',
+    body,
+    signature: p1363(
+      base.server.privateKey,
+      canonicalKemerBetPlayerValidationAssignmentSignatureBytes(body, 'server-signing-key-0001')!,
+    ),
+  };
+  const resultBody: KemerBetPlayerValidationResultBody = {
+    contractVersion: 1,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    resultId: 'player-validation-result-0001',
+    assignmentId: body.assignmentId,
+    assignmentBodyDigest: assignment.bodyDigest,
+    validationRequestId: body.validationRequestId,
+    certificateId: body.certificateId,
+    deviceId: body.deviceId,
+    deviceKeyId: body.deviceKeyId,
+    platformCode: 'kemerbet',
+    assignmentKind: 'single_telegram_player_validation',
+    lookupMode: 'find_only',
+    currencyCode: 'ETB',
+    playerIdDigest: digestCompanionPlayerId(body.playerId)!,
+    outcome: 'found',
+    evidenceKind: 'exact_id_empty_etb_form',
+    observedAt: '2026-09-02T10:02:00.000Z',
+    ...safe,
+  };
+  const signedResult = (
+    value: KemerBetPlayerValidationResultBody,
+  ): SignedKemerBetPlayerValidationResult => ({
+    contractVersion: 1,
+    protocolMode: AGENT_PLATFORM_COMPANION_PROTOCOL_MODE,
+    transcriptVersion: AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_TRANSCRIPT_VERSION,
+    bodyDigestAlgorithm: 'sha256',
+    bodyDigest: digestKemerBetPlayerValidationResultBody(value)!,
+    signatureAlgorithm: AGENT_PLATFORM_COMPANION_SIGNATURE_ALGORITHM,
+    signatureEncoding: AGENT_PLATFORM_COMPANION_SIGNATURE_ENCODING,
+    deviceKeyId: value.deviceKeyId,
+    body: value,
+    signature: p1363(
+      base.device.privateKey,
+      canonicalKemerBetPlayerValidationResultSignatureBytes(value)!,
+    ),
+  });
+  return { ...base, assignment, result: signedResult(resultBody), signedResult };
+}
+
+describe('single Telegram Player validation contract', () => {
+  it('accepts only a bound signed read-only Find result, without granting payment authority', () => {
+    const value = playerValidationFixture();
+    expect(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH).toBe(
+      '/v1/companion/device/player-validations:poll',
+    );
+    expect(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_RESULT_PATH).toBe(
+      '/v1/companion/device/player-validations:submit',
+    );
+    expect(digestCompanionPlayerValidationPollContent(value.certificate.bodyDigest)).not.toBe(
+      digestCompanionLookupPollContent(value.certificate.bodyDigest),
+    );
+    expect(digestCompanionPlayerValidationResultContent(value.assignment, value.result)).toMatch(
+      /^sha256:[0-9a-f]{64}$/u,
+    );
+    expect(
+      verifySignedKemerBetPlayerValidationAssignment(value.assignment, value.server.spki),
+    ).toBe(true);
+    expect(verifySignedKemerBetPlayerValidationResult(value.result, value.certificate)).toBe(true);
+    expect(
+      verifyKemerBetPlayerValidationExchange(
+        {
+          assessedAt: '2026-09-02T10:02:30.000Z',
+          certificate: value.certificate,
+          signedAssignment: value.assignment,
+          signedResult: value.result,
+        },
+        value.server.spki,
+      ),
+    ).toBe('verified_found');
+    expect(value.assignment.body.transferAllowed).toBe(false);
+    expect(value.result.body.moneyMoved).toBe(false);
+  });
+
+  it('keeps inconclusive and mismatched results out of automatic approval', () => {
+    const value = playerValidationFixture();
+    const verify = (
+      result: SignedKemerBetPlayerValidationResult,
+      consumedReplayIdentities?: readonly string[],
+      assessedAt = '2026-09-02T10:02:30.000Z',
+    ) =>
+      verifyKemerBetPlayerValidationExchange(
+        {
+          assessedAt,
+          certificate: value.certificate,
+          signedAssignment: value.assignment,
+          signedResult: result,
+          consumedReplayIdentities,
+        },
+        value.server.spki,
+      );
+    expect(
+      verify(
+        value.signedResult({
+          ...value.result.body,
+          outcome: 'review_required',
+          evidenceKind: 'inconclusive',
+        }),
+      ),
+    ).toBe('verified_inconclusive');
+    expect(verify(value.signedResult({ ...value.result.body, playerIdDigest: sha('8') }))).toBe(
+      'review_required',
+    );
+    expect(
+      verify(
+        value.signedResult({
+          ...value.result.body,
+          validationRequestId: 'player-validation-request-0002',
+        }),
+      ),
+    ).toBe('review_required');
+    expect(verify({ ...value.result, signature: 'A'.repeat(86) })).toBe('review_required');
+    expect(
+      verify(value.result, [
+        deriveKemerBetPlayerValidationAssignmentReplayIdentity(value.assignment)!,
+      ]),
+    ).toBe('review_required');
+    expect(verify(value.result, undefined, '2026-09-02T10:05:00.000Z')).toBe('review_required');
+  });
+
+  it('rejects money fields, forged safety literals, and invalid outcome/evidence pairs', () => {
+    const value = playerValidationFixture();
+    for (const field of ['amount', 'notes', 'transfer', 'deposit', 'withdraw']) {
+      expect(
+        decodeKemerBetPlayerValidationAssignmentBody({ ...value.assignment.body, [field]: 'x' }),
+      ).toBeUndefined();
+      expect(
+        decodeKemerBetPlayerValidationResultBody({ ...value.result.body, [field]: 'x' }),
+      ).toBeUndefined();
+    }
+    expect(
+      decodeKemerBetPlayerValidationAssignmentBody({
+        ...value.assignment.body,
+        transferAllowed: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeKemerBetPlayerValidationResultBody({
+        ...value.result.body,
+        outcome: 'review_required',
+      }),
+    ).toBeUndefined();
+    const getter = { ...value.assignment.body } as Record<string, unknown>;
+    Object.defineProperty(getter, 'playerId', { enumerable: true, get: () => '28379330' });
+    expect(decodeKemerBetPlayerValidationAssignmentBody(getter)).toBeUndefined();
+    expect(
+      decodeKemerBetPlayerValidationResultBody(new Proxy(value.result.body, {})),
+    ).toBeUndefined();
   });
 });

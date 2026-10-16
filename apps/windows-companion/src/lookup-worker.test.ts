@@ -233,6 +233,7 @@ function runtimeFixture() {
     createSignedPlayerValidationResult: () => {
       throw new Error('The exact-five lookup test cannot sign a Player validation result.');
     },
+    verifyPlayerValidationExchange: () => false,
   };
   return { assignment, device, runtime, server, verifyLookupExchange };
 }

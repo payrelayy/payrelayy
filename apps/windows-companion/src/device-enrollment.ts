@@ -1011,6 +1011,11 @@ export interface CompanionDeviceSigningRuntime {
     outcome: 'found' | 'review_required',
     observedAt?: Date,
   ): SignedKemerBetPlayerValidationResult;
+  verifyPlayerValidationExchange(
+    assignment: SignedKemerBetPlayerValidationAssignment,
+    result: SignedKemerBetPlayerValidationResult,
+    assessedAt?: Date,
+  ): boolean;
 }
 
 export interface CompanionExecutionRuntimeConfiguration {
@@ -1426,6 +1431,30 @@ export async function loadCompanionDeviceSigningRuntime(
     return result;
   };
 
+  const verifyPlayerValidationExchange = (
+    assignment: SignedKemerBetPlayerValidationAssignment,
+    result: SignedKemerBetPlayerValidationResult,
+    assessedAt = nowProvider(),
+  ): boolean => {
+    try {
+      const assessedAtIso = validRuntimeDate(assessedAt);
+      return (
+        Boolean(decodeAndVerifyPlayerValidationAssignment(assignment, assessedAt)) &&
+        verifyKemerBetPlayerValidationExchange(
+          {
+            assessedAt: assessedAtIso,
+            certificate,
+            signedAssignment: assignment,
+            signedResult: result,
+          },
+          serverPublicKey,
+        ) !== 'review_required'
+      );
+    } catch {
+      return false;
+    }
+  };
+
   let execution: CompanionExecutionSigningRuntime | undefined;
   if (options.execution !== undefined) {
     const executionSignerKey = p256PublicKey(options.execution.trustedExecutionSignerPublicKeySpki);
@@ -1605,5 +1634,6 @@ export async function loadCompanionDeviceSigningRuntime(
     createSignedLookupResult,
     decodeAndVerifyPlayerValidationAssignment,
     createSignedPlayerValidationResult,
+    verifyPlayerValidationExchange,
   });
 }

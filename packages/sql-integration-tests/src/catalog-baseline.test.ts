@@ -1185,6 +1185,7 @@ describe('disposable SQL migration baseline', () => {
       publicActionInboundRecorder,
       'app.record_telegram_deposit_temporary_message(bigint,bigint,bigint)',
       'app.record_telegram_payment_instruction_message(bigint,bigint,bigint)',
+      'app.request_telegram_player_validation(uuid,text)',
       'app.reserve_telegram_private_action_nonce(text,timestamp with time zone)',
       'app.save_telegram_player_selection(uuid,text)',
       'app.start_telegram_player_registration_action(uuid,uuid,text,text)',

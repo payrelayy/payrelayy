@@ -22,7 +22,7 @@ import {
 } from './execution-handler.js';
 import { createCompanionLookupHandler } from './lookup-handler.js';
 import { createCompanionPairingHandler } from './pairing-handler.js';
-import { createDormantCompanionPlayerValidationHandler } from './player-validation-handler.js';
+import { createCompanionPlayerValidationHandler } from './player-validation-handler.js';
 import {
   createDormantRoutineDepositHandler,
   createRoutineDepositHandler,
@@ -191,9 +191,35 @@ export async function startCompanionDeviceBridgeApplication(
           assessedAt,
         ),
     });
-    // Do not issue or accept beneficiary changes until their separate, one-use SQL
-    // state boundary and its dedicated catalog preflight are installed.
-    const playerValidationHandler = createDormantCompanionPlayerValidationHandler();
+    // Signed Find evidence may be stored through the exact one-use SQL boundary.
+    // This route cannot finalize a Player selection or initiate a Transfer.
+    const playerValidationHandler = createCompanionPlayerValidationHandler({
+      signer: config.signer,
+      now: dependencies.now ?? (() => new Date().toISOString()),
+      claimAssignment: (certificate, request, replayIdentity, assessedAt) =>
+        state.claimPlayerValidationAssignment(certificate, request, replayIdentity, assessedAt),
+      completeAssignment: (bodyDigest, assignment) =>
+        state.completePlayerValidationAssignment(bodyDigest, assignment),
+      releaseAssignment: (assignmentId) => state.releasePlayerValidationAssignment(assignmentId),
+      acceptResult: (
+        certificate,
+        request,
+        httpReplayIdentity,
+        assignment,
+        result,
+        resultReplayIdentity,
+        assessedAt,
+      ) =>
+        state.acceptPlayerValidationResult(
+          certificate,
+          request,
+          httpReplayIdentity,
+          assignment,
+          result,
+          resultReplayIdentity,
+          assessedAt,
+        ),
+    });
     const executionConfig = config.execution;
     const executionState = executionPostgres?.state;
     if (executionConfig.enabled && executionState === undefined) throw new Error();

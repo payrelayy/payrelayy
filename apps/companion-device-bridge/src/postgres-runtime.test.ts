@@ -88,6 +88,23 @@ describe('companion device bridge PostgreSQL runtime', () => {
     expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
       'namespace.oid = defaults.defaclnamespace',
     );
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain('count(*) = 11');
+    for (const functionName of [
+      'claim_telegram_player_validation_assignment',
+      'complete_telegram_player_validation_assignment',
+      'release_telegram_player_validation_assignment',
+      'accept_telegram_player_validation_result',
+    ]) {
+      expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).toContain(
+        `pg_catalog.to_regprocedure('app.${functionName}`,
+      );
+      expect(COMPANION_DEVICE_BRIDGE_EXECUTION_CATALOG_PREFLIGHT_SQL).not.toContain(
+        `pg_catalog.to_regprocedure('app.${functionName}`,
+      );
+    }
+    expect(COMPANION_DEVICE_BRIDGE_CATALOG_PREFLIGHT_SQL).not.toContain(
+      "pg_catalog.to_regprocedure('app.finalize_telegram_player_validation",
+    );
     const fake = fakePool();
     let observedConfig: Readonly<Record<string, unknown>> | undefined;
     const runtime = await createCompanionDeviceBridgePostgresRuntime(

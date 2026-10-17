@@ -12,9 +12,9 @@ import {
 } from './cbe-birr-receiver-lookup.js';
 
 /**
- * Offline preparation for one fresh, Owner-confirmed CBE Birr receiver revision. This is not
- * exported by the package, called by an application, or allowed to rotate a database row. The
- * caller must independently establish key provenance and allocate the exact revision UUID/version.
+ * Preparation for one fresh, Owner-confirmed CBE Birr receiver revision. The default-off Owner
+ * adapter uses this internal subpath, but the database function remains ungranted. The caller
+ * must independently establish key provenance and allocate the exact revision UUID/version.
  */
 export interface PrepareCbeBirrReceiverRotationInput {
   readonly receiverRevisionId: string;

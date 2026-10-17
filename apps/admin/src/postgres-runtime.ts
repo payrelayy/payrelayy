@@ -10,6 +10,7 @@ import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-a
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot.js';
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
+import { PostgresOwnerCbeBirrLookupRotation } from './owner-cbe-birr-lookup-rotation.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
 import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
@@ -56,6 +57,7 @@ export interface OwnerControlPostgresRuntime {
     'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
   readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
+  readonly cbeBirrLookupRotation?: Pick<PostgresOwnerCbeBirrLookupRotation, 'rotate'> | undefined;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
@@ -439,6 +441,20 @@ export async function createOwnerControlPostgresRuntime(
         fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
       },
     ),
+    cbeBirrLookupRotation:
+      config.cbeBirrLookupRotationEnabled && config.cbeBirrLookupKeyMaterial.configured
+        ? new PostgresOwnerCbeBirrLookupRotation(
+            { query: async (sql, values) => pool.query(sql, [...values]) },
+            {
+              encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
+              fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
+            },
+            {
+              encryptionSecret: config.cbeBirrLookupKeyMaterial.encryptionSecret,
+              fingerprintSecret: config.cbeBirrLookupKeyMaterial.fingerprintSecret,
+            },
+          )
+        : undefined,
     telebirrDevicePairing: config.devicePairing.configured
       ? new PostgresOwnerTelebirrDevicePairing(
           { query: async (sql, values) => pool.query(sql, [...values]) },

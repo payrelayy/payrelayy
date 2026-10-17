@@ -27,16 +27,17 @@ separate, immutable v2 lookup row and an atomic rotation function **not granted 
 role yet**. It requires a newly
 assigned UUID/version, matching v1/v2 display masks, and all payment switches disabled. An
 existing v1 account may only gain v2 material through a **new** same-account receiver revision
-with reason `protection_upgrade`; it cannot be updated in place. No application calls this function
-yet, and SQL can validate only envelope shape, not cryptographic authenticity or independent key
+with reason `protection_upgrade`; it cannot be updated in place. No deployed application can call
+this ungranted function, and SQL can validate only envelope shape, not cryptographic authenticity or independent key
 provenance. The migration does not upgrade an existing receiver, grant a worker access, make a
 provider request, enable CBE Birr, or move money.
 
 The internal `cbe-birr-receiver-rotation.ts` candidate prepares the existing v1 display-protected
 receiver and the revision-bound v2 lookup envelope from one exact full phone. It rejects reuse of
 any master across those two domains and requires matching display masks. Its tests use synthetic
-phones and keys only. It is **not** exported from the package, wired to the Owner app, or allowed
-to call the ungranted SQL function. Syntactic key separation still cannot establish independent
+phones and keys only. It is exported through an internal package subpath for the default-off Owner
+adapter, not the package's public entry point. The adapter cannot call the SQL function without a
+separately reviewed database grant. Syntactic key separation still cannot establish independent
 provisioning, an approved key lifecycle, or Owner authorization.
 
 The Owner configuration also has a **default-off key-loading contract** for two dedicated CBE
@@ -44,8 +45,11 @@ Birr lookup masters. When explicitly enabled, it requires distinct 64-character 
 do not equal either existing Owner receiver-reference master, plus an exact version-2,
 purpose-bound profile whose SHA-256 fingerprints match the loaded keys. Production accepts only
 the approved private secret and profile paths. The runtime log reports configuration state, not
-key material. No application route, worker, or SQL function consumes these new keys yet; the
-configuration flag must remain off. Matching profile fingerprints do **not** prove that the
+key material. The default-off Owner route `/v1/owner/cbe-birr-receiver-lookup/rotate-v2` can
+consume them only if its separate gate is enabled. It accepts a full phone only from an authenticated
+Owner request, constructs both envelopes server-side, and returns a masked receipt. There is no
+Owner dashboard control for it, no database EXECUTE grant, and no deployed activation. Both key
+loading and route gates must remain off. Matching profile fingerprints do **not** prove that the
 masters were independently generated, provisioned, or stored. This code does not install real
 secrets or authorize a receiving-wallet change.
 
@@ -53,9 +57,12 @@ Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker
    receiving only the minimum decryption material and an audited rotation/recovery path.
-2. Wire a reviewed Owner flow to assign the new revision UUID and version before protection and
-   use the private atomic rotation function. Check the saved result without exposing the phone or
-   lookup material; do not treat SQL envelope-shape checks as proof of a valid key or phone.
+2. Complete the reviewed Owner flow: obtain the next revision UUID and version from a trusted
+   source, provide a usable Owner dashboard control, and separately grant the narrow runtime role
+   EXECUTE on the private atomic rotation function. The default-off API adapter is only a tested
+   code path; it does not establish version freshness, database permission, or key authenticity.
+   Check the saved result without exposing the phone or lookup material; do not treat SQL
+   envelope-shape checks as proof of a valid key or phone.
 3. Bind each new CBE Birr payment instruction and proof to that exact revision. A lookup must not
    substitute whichever receiver happens to be active later.
 4. Add a narrow, prelease-safe worker access boundary that returns only the needed protected

@@ -81,6 +81,7 @@ export type OwnerControlRuntimeConfig =
       readonly enabled: false;
       readonly companionDevicePairing: undefined;
       readonly cbeBirrLookupKeyMaterial: undefined;
+      readonly cbeBirrLookupRotationEnabled: undefined;
       readonly connection: undefined;
       readonly deploymentTarget: undefined;
       readonly devicePairing: undefined;
@@ -116,6 +117,7 @@ export type OwnerControlRuntimeConfig =
             readonly fingerprintSecret: string;
             readonly masterProfile: OwnerCbeBirrLookupProfile;
           };
+      readonly cbeBirrLookupRotationEnabled: boolean;
       readonly connection: OwnerControlDatabaseConnection;
       readonly deploymentTarget: OwnerControlDeploymentTarget;
       readonly devicePairing:
@@ -293,6 +295,7 @@ export function loadOwnerControlConfig(
         enabled: false,
         companionDevicePairing: undefined,
         cbeBirrLookupKeyMaterial: undefined,
+        cbeBirrLookupRotationEnabled: undefined,
         connection: undefined,
         deploymentTarget: undefined,
         devicePairing: undefined,
@@ -419,6 +422,14 @@ export function loadOwnerControlConfig(
       masterProfile,
     };
   }
+  const cbeBirrLookupRotationEnabled = booleanFromEnv(
+    environment.INTERNAL_OWNER_CBE_BIRR_LOOKUP_ROTATION_ENABLED,
+    false,
+    'INTERNAL_OWNER_CBE_BIRR_LOOKUP_ROTATION_ENABLED',
+  );
+  if (cbeBirrLookupRotationEnabled && !cbeBirrLookupKeyMaterial.configured) {
+    throw new Error('Owner CBE Birr lookup rotation requires configured lookup keys.');
+  }
   const assignmentSignerKeyId = environment.OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID;
   if (
     assignmentSignerKeyId !== undefined &&
@@ -447,6 +458,7 @@ export function loadOwnerControlConfig(
     runtime: {
       enabled: true,
       cbeBirrLookupKeyMaterial,
+      cbeBirrLookupRotationEnabled,
       companionDevicePairing:
         companionServerSignerKeyId === undefined
           ? { serverSignerKeyId: undefined, configured: false }
@@ -496,6 +508,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
         config.runtime.enabled && config.runtime.companionDevicePairing.configured,
       cbeBirrLookupKeyMaterialConfigured:
         config.runtime.enabled && config.runtime.cbeBirrLookupKeyMaterial.configured,
+      cbeBirrLookupRotationEnabled:
+        config.runtime.enabled && config.runtime.cbeBirrLookupRotationEnabled,
       telebirrDevicePairingConfigured:
         config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,

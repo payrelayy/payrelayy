@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { processOneTelegramPlayerValidationOutcome } from '../../../apps/bot/src/telegram-player-validation-notifier.js';
 import { createPairedDevice } from './companion-exact-five-lookup.suite.js';
+import { prepareActiveReadinessClaimForTest } from './owner-kemerbet-readiness-cohort.suite.js';
 import { createPilotPrerequisites } from './private-live-money-pilot.suite.js';
 
 const sha = (value: string): string => `sha256:${createHash('sha256').update(value).digest('hex')}`;
@@ -381,6 +382,96 @@ export function registerTelegramPlayerValidationStateSqlTests(
             )
           ).rows,
         ).toEqual([{ status: 'validated' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('finalizes a new signed Player during the frozen legacy claim without changing its five members', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const claimId = await prepareActiveReadinessClaimForTest(client, getOwnerAdminId());
+        const eventId = await inbound(client, '89660000118', '89650000118');
+        const requestId = await requestValidation(client, eventId, 'NEW-FROZEN-CLAIM-SQL');
+        const before = (
+          await client.query(`select
+            (select count(*)::text from app.deposit_intents) as intents,
+            (select count(*)::text from app.deposit_jobs) as jobs`)
+        ).rows;
+        const claimed = await claim(client, paired.certificateBody, paired.signerKeyId);
+        expect(claimed[0]?.claim_state).toBe('claimed');
+        const assignment = assignmentEnvelope(claimed[0]!.assignment_body!, paired.signerKeyId);
+        await client.query(
+          'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb)',
+          [assignment.bodyDigest, assignment],
+        );
+        await client.query('set session authorization fetanagent_companion_device_bridge_runtime');
+        let selected: readonly {
+          accepted: boolean;
+          replayed: boolean;
+          finalization_state?: string;
+        }[];
+        try {
+          selected = await accept(client, assignment, resultEnvelope(assignment, 'found'), true);
+        } finally {
+          await client.query('reset session authorization');
+        }
+        expect(selected).toEqual([
+          { accepted: true, replayed: false, finalization_state: 'selected' },
+        ]);
+        const state = await client.query<{
+          readonly selected_player_id: string;
+          readonly associated: boolean;
+          readonly gate_closed: boolean;
+        }>(
+          `
+          select player.player_id as selected_player_id,
+                 exists (
+                   select 1 from app.player_registration_request_associations association
+                    where association.player_account_id = player.id
+                 ) as associated,
+                 (gate.pilot_mutation_mode is null
+                   and gate.player_validation_request_id is null) as gate_closed
+            from app.telegram_player_validation_finalizations finalization
+            join app.customer_platform_players player
+              on player.id = finalization.player_account_id
+            cross join app.private_owner_kemerbet_readiness_cohort_gate gate
+           where finalization.validation_request_id = $1::uuid
+             and gate.singleton`,
+          [requestId],
+        );
+        expect(state.rows).toEqual([
+          {
+            selected_player_id: 'NEW-FROZEN-CLAIM-SQL',
+            associated: false,
+            gate_closed: true,
+          },
+        ]);
+        await client.query(
+          'select app.require_private_owner_kemerbet_readiness_claim_current($1::uuid)',
+          [claimId],
+        );
+        expect(
+          (
+            await client.query(`select (select count(*)::text from app.deposit_intents) as intents,
+                                        (select count(*)::text from app.deposit_jobs) as jobs`)
+          ).rows,
+        ).toEqual(before);
+
+        await client.query('savepoint frozen_direct_write');
+        let directWriteError: unknown;
+        try {
+          await client.query(`update app.customer_platform_players
+                              set validation_status = validation_status
+                            where false`);
+        } catch (error) {
+          directWriteError = error;
+        }
+        expect(String(directWriteError)).toMatch(/fixed KemerBet readiness cohort is frozen/iu);
+        await client.query('rollback to savepoint frozen_direct_write');
+        await client.query('release savepoint frozen_direct_write');
       } finally {
         await client.query('rollback');
       }

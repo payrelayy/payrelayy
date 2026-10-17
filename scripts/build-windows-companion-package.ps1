@@ -76,6 +76,8 @@ Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent One-Job Operator.cmd') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Automatic Deposits.ps1') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Start FetanAgent Automatic Deposits.cmd') -Destination $packageRoot
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Open FetanAgent.cmd') -Destination $packageRoot
+Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Add FetanAgent Desktop Shortcut.vbs') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\Enter FetanAgent Pairing Package.ps1') -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $workspaceRoot 'apps\windows-companion\release\README.txt') -Destination $packageRoot
 Set-Content -LiteralPath (Join-Path $packageRoot 'RELEASE_SHA') -Value $ReleaseSha -Encoding ascii -NoNewline

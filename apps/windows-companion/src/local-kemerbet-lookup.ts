@@ -1,3 +1,5 @@
+import { performance } from 'node:perf_hooks';
+
 import {
   KEMERBET_AGENT_API_ORIGIN,
   KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL,
@@ -28,6 +30,29 @@ const selectors = Object.freeze({
 } as const);
 
 export type LocalKemerBetLookupOutcome = 'found' | 'review_required';
+export type LocalKemerBetLookupStage =
+  'open_search' | 'prepare_find' | 'provider_response' | 'render_and_reset';
+export type LocalKemerBetLookupTiming = (
+  stage: LocalKemerBetLookupStage,
+  elapsedMs: number,
+) => void;
+
+async function timedStage<T>(
+  stage: LocalKemerBetLookupStage,
+  observe: LocalKemerBetLookupTiming | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const started = performance.now();
+  try {
+    return await operation();
+  } finally {
+    try {
+      observe?.(stage, Math.round(performance.now() - started));
+    } catch {
+      // Diagnostics cannot change Player validation or browser safety.
+    }
+  }
+}
 
 export interface MutableLocalKemerBetLookupAuthorization extends LocalKemerBetLookupAuthorization {
   begin(playerId: string): void;
@@ -277,54 +302,60 @@ async function lookupOne(
   page: Page,
   playerId: string,
   authorization: MutableLocalKemerBetLookupAuthorization,
+  observe?: LocalKemerBetLookupTiming,
 ): Promise<void> {
-  await requireSearchOnlySurface(page);
-  const input = await requireEnabled(page.locator(selectors.playerIdInput));
-  await input.fill('', { timeout: LOOKUP_TIMEOUT_MS });
-  await input.pressSequentially(playerId, { delay: 10, timeout: LOOKUP_TIMEOUT_MS });
-  if ((await input.inputValue()) !== playerId) unavailable();
-  await input.blur({ timeout: LOOKUP_TIMEOUT_MS });
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
-  await requireSearchOnlySurface(page);
-  const find = await requireEnabled(modalRole(page, 'button', 'Find'));
-  await find.click({ trial: true, timeout: LOOKUP_TIMEOUT_MS });
-  await requireSearchOnlySurface(page);
-  if (
-    (await (await requireEnabled(page.locator(selectors.playerIdInput))).inputValue()) !== playerId
-  ) {
-    unavailable();
-  }
-  const exactFind = await requireEnabled(modalRole(page, 'button', 'Find'));
+  const exactFind = await timedStage('prepare_find', observe, async () => {
+    await requireSearchOnlySurface(page);
+    const input = await requireEnabled(page.locator(selectors.playerIdInput));
+    await input.fill('', { timeout: LOOKUP_TIMEOUT_MS });
+    await input.pressSequentially(playerId, { delay: 10, timeout: LOOKUP_TIMEOUT_MS });
+    if ((await input.inputValue()) !== playerId) unavailable();
+    await input.blur({ timeout: LOOKUP_TIMEOUT_MS });
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
+    await requireSearchOnlySurface(page);
+    if (
+      (await (await requireEnabled(page.locator(selectors.playerIdInput))).inputValue()) !==
+      playerId
+    ) {
+      unavailable();
+    }
+    return requireEnabled(modalRole(page, 'button', 'Find'));
+  });
   authorization.begin(playerId);
   let responsePromise: Promise<Response> | undefined;
   try {
-    responsePromise = page.waitForResponse((response) => exactLookupResponse(response, playerId), {
-      timeout: LOOKUP_TIMEOUT_MS,
-    });
-    await exactFind.click({ timeout: LOOKUP_TIMEOUT_MS });
-    const response = await responsePromise;
-    let body: Buffer | undefined;
-    try {
-      body = await response.body();
-      if (
-        !validateKemerBetReadOnlyPlayerLookupResponse({
-          body,
-          requestedPlayerId: playerId,
-          statusCode: response.status(),
-        })
-      ) {
-        unavailable();
+    await timedStage('provider_response', observe, async () => {
+      responsePromise = page.waitForResponse(
+        (response) => exactLookupResponse(response, playerId),
+        {
+          timeout: LOOKUP_TIMEOUT_MS,
+        },
+      );
+      await exactFind.click({ timeout: LOOKUP_TIMEOUT_MS, noWaitAfter: true });
+      const response = await responsePromise;
+      let body: Buffer | undefined;
+      try {
+        body = await response.body();
+        if (
+          !validateKemerBetReadOnlyPlayerLookupResponse({
+            body,
+            requestedPlayerId: playerId,
+            statusCode: response.status(),
+          })
+        ) {
+          unavailable();
+        }
+      } finally {
+        body?.fill(0);
       }
-    } finally {
-      body?.fill(0);
-    }
+    });
   } catch {
     void responsePromise?.catch(() => undefined);
     unavailable();
   } finally {
     authorization.clear();
   }
-  await verifyRenderedResultAndReset(page);
+  await timedStage('render_and_reset', observe, () => verifyRenderedResultAndReset(page));
 }
 
 /** A single server-assigned Player ID. Only positive provider and empty-form evidence is usable. */
@@ -332,11 +363,12 @@ export async function executeSingleLocalKemerBetLookup(
   page: Page,
   playerId: string,
   authorization: MutableLocalKemerBetLookupAuthorization,
+  observe?: LocalKemerBetLookupTiming,
 ): Promise<LocalKemerBetLookupOutcome> {
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
   try {
-    await openSearchSurface(page);
-    await lookupOne(page, playerId, authorization);
+    await timedStage('open_search', observe, () => openSearchSurface(page));
+    await lookupOne(page, playerId, authorization, observe);
     return 'found';
   } catch {
     // A missing page, non-200 response, mismatched identity, or session loss is not proof that

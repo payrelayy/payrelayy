@@ -1,5 +1,6 @@
 import { lstat, mkdir, open, readFile, realpath, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { isProxy } from 'node:util/types';
 
 import {
@@ -25,6 +26,7 @@ import type {
   ExactFiveCompanionLookupOutcomes,
 } from './device-enrollment.js';
 import type { LocalKemerBetSession } from './local-kemerbet-session.js';
+import type { LocalKemerBetLookupStage } from './local-kemerbet-lookup.js';
 import {
   createWindowsCurrentUserDataProtector,
   type WindowsCurrentUserDataProtector,
@@ -78,10 +80,20 @@ export interface CompanionPlayerValidationWorkerOptions {
   readonly session: Pick<LocalKemerBetSession, 'executeSingleLookup'>;
   readonly signal: AbortSignal;
   readonly report: (event: CompanionPlayerValidationWorkerEvent) => void;
+  readonly reportTiming?: (event: CompanionPlayerValidationTimingEvent) => void;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
   readonly pollIntervalMs?: number;
   readonly protector?: WindowsCurrentUserDataProtector;
+}
+
+export interface CompanionPlayerValidationTimingEvent {
+  readonly stage: LocalKemerBetLookupStage | 'assignment_poll' | 'result_submit';
+  readonly elapsedMs: number;
+  readonly detailsRedacted: true;
+  readonly identifiersRedacted: true;
+  readonly transferDisabled: true;
+  readonly moneyMoved: false;
 }
 
 export interface CompanionPlayerValidationWorkerEvent {
@@ -676,6 +688,23 @@ export async function createCompanionPlayerValidationWorker(
       moneyMoved: false,
     });
   };
+  const reportTiming = (
+    stage: CompanionPlayerValidationTimingEvent['stage'],
+    elapsedMs: number,
+  ) => {
+    try {
+      options.reportTiming?.({
+        stage,
+        elapsedMs,
+        detailsRedacted: true,
+        identifiersRedacted: true,
+        transferDisabled: true,
+        moneyMoved: false,
+      });
+    } catch {
+      // Local diagnostics cannot change the signed Find or its result.
+    }
+  };
 
   let inFlight = false;
   const runOnce = async (): Promise<CompanionPlayerValidationRunOutcome> => {
@@ -696,12 +725,18 @@ export async function createCompanionPlayerValidationWorker(
       }
 
       if (!assignment) {
-        assignment = await pollPlayerValidationAssignment(
-          options.device,
-          fetchImplementation,
-          options.signal,
-          now,
-        );
+        const pollStarted = performance.now();
+        try {
+          assignment = await pollPlayerValidationAssignment(
+            options.device,
+            fetchImplementation,
+            options.signal,
+            now,
+          );
+        } finally {
+          const elapsedMs = Math.round(performance.now() - pollStarted);
+          if (assignment || elapsedMs >= 2_000) reportTiming('assignment_poll', elapsedMs);
+        }
         if (!assignment) {
           report('waiting_for_assignment');
           return 'idle';
@@ -744,7 +779,10 @@ export async function createCompanionPlayerValidationWorker(
             assignmentBodyDigest: assignment.bodyDigest,
           });
           try {
-            const observed = await options.session.executeSingleLookup(assignment.body.playerId);
+            const observed = await options.session.executeSingleLookup(
+              assignment.body.playerId,
+              (stage, elapsedMs) => reportTiming(stage, elapsedMs),
+            );
             if (observed === 'found') outcome = 'found';
           } catch {
             // A busy, disconnected, or uncertain local session is never positive evidence.
@@ -759,14 +797,19 @@ export async function createCompanionPlayerValidationWorker(
         report('lookup_completed', result.body.outcome);
       }
 
-      await submitPlayerValidationResult(
-        options.device,
-        assignment,
-        result,
-        fetchImplementation,
-        options.signal,
-        nowProvider(),
-      );
+      const submitStarted = performance.now();
+      try {
+        await submitPlayerValidationResult(
+          options.device,
+          assignment,
+          result,
+          fetchImplementation,
+          options.signal,
+          nowProvider(),
+        );
+      } finally {
+        reportTiming('result_submit', Math.round(performance.now() - submitStarted));
+      }
       report('result_accepted', result.body.outcome);
       await clearPlayerValidationLedger(deviceRoot);
       return 'accepted';

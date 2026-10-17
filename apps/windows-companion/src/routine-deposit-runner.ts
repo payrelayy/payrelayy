@@ -29,7 +29,7 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
-  /** Runs at most once after an empty financial lease; the next lease waits for its completion. */
+  /** Runs only after an empty financial lease; the next lease waits for its completion. */
   readonly runReadOnlyIdleWorkOnce?: () => Promise<unknown>;
 }
 
@@ -47,16 +47,28 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
   let reviewHeld = false;
   const done = (async (): Promise<RoutineDepositWorkerResult> => {
     let consecutiveUnavailable = 0;
+    let lastLeaseWasIdle = false;
     try {
       while (!controller.signal.aborted) {
         // A signed launch proof does not mean KemerBet is still authenticated. Stop claiming
         // work when its page returns to login; verified payments remain queued in the database.
         if (!options.session.isSignedInVerified()) {
+          lastLeaseWasIdle = false;
           await delay(idleDelayMs, controller.signal);
           continue;
         }
+        if (lastLeaseWasIdle && options.runReadOnlyIdleWorkOnce) {
+          // The previous financial poll proved the account idle. Give an already queued
+          // read-only Find the next browser slot before another potentially slow lease
+          // request. A completed/uncertain lease never enters this path.
+          lastLeaseWasIdle = false;
+          await options.runReadOnlyIdleWorkOnce();
+          if (controller.signal.aborted) break;
+          if (!options.session.isSignedInVerified()) continue;
+        }
         // The await is the execution sequence: reconciliation finishes before the next run.
         const result = await worker.runOnce();
+        lastLeaseWasIdle = result.status === 'idle';
         try {
           options.report?.(result);
         } catch {
@@ -80,16 +92,6 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
           continue;
         }
         consecutiveUnavailable = 0;
-        if (
-          result.status === 'idle' &&
-          options.runReadOnlyIdleWorkOnce &&
-          !controller.signal.aborted &&
-          options.session.isSignedInVerified()
-        ) {
-          // No financial lease or reconciliation is in progress. Await the read-only Find
-          // before claiming another deposit so both operations share one guarded page.
-          await options.runReadOnlyIdleWorkOnce();
-        }
         if (result.status !== 'completed') await delay(idleDelayMs, controller.signal);
       }
       return Object.freeze({ status: 'stopped' });

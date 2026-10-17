@@ -9,6 +9,7 @@ import {
   KEMERBET_MAX_LOGIN_LIFETIME_SECONDS,
 } from '@fetanagent/agent-platform-kemerbet';
 import type { ExactFivePlayerIds } from '@fetanagent/agent-platform-companion-contracts';
+import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-companion-execution-contracts';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 
 import type { WindowsCompanionConfig } from './config.js';
@@ -110,7 +111,11 @@ export interface LocalKemerBetSession {
     amountMinor: number,
     acquireFinalAction: () => Promise<LocalKemerBetRoutineFinalAction>,
   ): Promise<LocalKemerBetRoutineDepositDispatchOutcome>;
-  scanRoutineDepositHistory(playerId: string, amountMinor: number): Promise<RoutineHistoryScan>;
+  scanRoutineDepositHistory(
+    playerId: string,
+    amountMinor: number,
+    window: RoutineDepositHistoryWindow,
+  ): Promise<RoutineHistoryScan>;
   rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number): Promise<void>;
   /** Permanently disarm this routine launch after an uncertain attempt without hiding Chrome. */
   pauseForReview(): void;
@@ -739,7 +744,11 @@ export async function startLocalKemerBetSession(
         operationInProgress = false;
       }
     },
-    async scanRoutineDepositHistory(playerId: string, amountMinor: number) {
+    async scanRoutineDepositHistory(
+      playerId: string,
+      amountMinor: number,
+      window: RoutineDepositHistoryWindow,
+    ) {
       const page = localPage;
       if (
         !config.routineDepositsEnabled ||
@@ -758,7 +767,7 @@ export async function startLocalKemerBetSession(
       disarmSignedInReload();
       report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
       try {
-        return await scanRoutineKemerBetHistory(page, playerId, amountMinor);
+        return await scanRoutineKemerBetHistory(page, playerId, amountMinor, window);
       } finally {
         historyReadAuthorized = false;
         try {

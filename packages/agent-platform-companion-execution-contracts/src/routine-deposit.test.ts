@@ -113,6 +113,36 @@ function signedLeaseResponse(command: RoutineDepositCommand) {
 }
 
 describe('routine deposit protocol', () => {
+  it('requires a signed server time fence before a pending history scan', () => {
+    const envelope = {
+      contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
+      protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
+      capability: ROUTINE_DEPOSIT_CAPABILITY,
+      requestId,
+      operation: 'reconcile',
+      requestContentDigest: `sha256:${'a'.repeat(64)}`,
+      serverIssuedAt: '2026-10-17T14:01:00.000Z',
+    } as const;
+    const window = {
+      from: '2026-10-17T14:00:20.845915Z',
+      until: '2026-10-17T14:00:21.785742Z',
+    } as const;
+    expect(
+      decodeRoutineDepositResponseBody({
+        ...envelope,
+        result: { outcome: 'pending', historyWindow: window },
+      })?.result,
+    ).toEqual({ outcome: 'pending', historyWindow: window });
+    for (const result of [
+      { outcome: 'pending' },
+      { outcome: 'pending', historyWindow: { ...window, until: window.from, extra: true } },
+      { outcome: 'pending', historyWindow: { ...window, from: '2026-10-17T14:00:20Z' } },
+      { outcome: 'pending', historyWindow: { ...window, until: '2026-10-17T13:59:00.000000Z' } },
+    ]) {
+      expect(decodeRoutineDepositResponseBody({ ...envelope, result })).toBeUndefined();
+    }
+  });
+
   it('keeps routine amount authority variable and strictly bounded', () => {
     const commandBase = {
       contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,

@@ -6,6 +6,11 @@ import {
   scanRoutineKemerBetHistory,
 } from './routine-kemerbet-history.js';
 
+const window = {
+  from: '2026-10-12T18:33:14.000000Z',
+  until: '2026-10-12T18:33:14.999999Z',
+} as const;
+
 function response(overrides: Record<string, unknown> = {}) {
   return {
     value: {
@@ -31,23 +36,45 @@ function response(overrides: Record<string, unknown> = {}) {
 
 function fakeHistoryPage(rows: readonly Record<string, unknown>[], total = rows.length): Page {
   const providerNow = 'Mon, 12 Oct 2026 18:34:00 GMT';
-  const apiResponse = {
-    status: () => 200,
-    headers: () => ({ date: providerNow }),
-    body: async () => Buffer.from(JSON.stringify({ value: { item1: total, item2: rows } })),
-    url: () => 'https://admin-api.agt-digi.com/Transaction/DepositHistory?page=1&limit=10',
-    request: () => ({ method: () => 'GET' }),
-  } as unknown as Response;
+  const filteredUrl = new URL('https://admin-api.agt-digi.com/Transaction/DepositHistory');
+  filteredUrl.searchParams.set('page', '1');
+  filteredUrl.searchParams.set('limit', '10');
+  filteredUrl.searchParams.set('playerExternalId', '28379330');
+  filteredUrl.searchParams.set('from', '2026-10-12T18:32:00.000Z');
+  filteredUrl.searchParams.set('to', '2026-10-12T18:35:00.000Z');
+  const makeResponse = (url: string) =>
+    ({
+      status: () => 200,
+      headers: () => ({ date: providerNow }),
+      body: async () => Buffer.from(JSON.stringify({ value: { item1: total, item2: rows } })),
+      url: () => url,
+      request: () => ({ method: () => 'GET' }),
+    }) as unknown as Response;
+  const initialResponse = makeResponse(
+    'https://admin-api.agt-digi.com/Transaction/DepositHistory?page=1&limit=10',
+  );
+  const filteredResponse = makeResponse(filteredUrl.toString());
   let currentUrl = 'https://agentsystem.admindigi.com/agents';
+  let responseNumber = 0;
+  const target = {
+    click: async () => undefined,
+    fill: async () => undefined,
+    nth: () => target,
+    locator: () => target,
+    getByRole: () => target,
+  };
   return {
     waitForResponse: async (predicate: (value: Response) => boolean) => {
-      if (!predicate(apiResponse)) throw new Error('Unexpected History response');
-      return apiResponse;
+      const candidate = responseNumber++ === 0 ? initialResponse : filteredResponse;
+      if (!predicate(candidate)) throw new Error('Unexpected History response');
+      return candidate;
     },
     goto: async (url: string) => {
       currentUrl = url;
     },
     url: () => currentUrl,
+    locator: () => target,
+    getByRole: () => target,
   } as unknown as Page;
 }
 
@@ -70,11 +97,15 @@ describe('read-only KemerBet deposit history parser', () => {
     });
   });
 
-  it('normalizes KemerBet five-digit fractional seconds to the six-digit history contract', () => {
+  it('normalizes KemerBet variable-width fractional seconds to the six-digit history contract', () => {
     expect(
       parseRoutineKemerBetHistoryPage(response({ transactionTime: '2026-10-12T18:33:14.25772' }))
         ?.rows[0]?.occurredAt,
     ).toBe('2026-10-12T18:33:14.257720Z');
+    expect(
+      parseRoutineKemerBetHistoryPage(response({ transactionTime: '2026-10-12T18:33:14.2575' }))
+        ?.rows[0]?.occurredAt,
+    ).toBe('2026-10-12T18:33:14.257500Z');
   });
 
   it('does not treat a rejected, non-EPOS, or unrelated operation as approved', () => {
@@ -97,7 +128,7 @@ describe('read-only KemerBet deposit history parser', () => {
       { amount: Number.NaN },
       { transactionTime: '2026-10-12 09:33 PM' },
       { transactionTime: '2026-10-12T18:33:14' },
-      { transactionTime: '2026-10-12T18:33:14.2577' },
+      { transactionTime: '2026-10-12T18:33:14.' },
       { transactionTime: '2026-10-12T18:33:14.2577280' },
       { transactionTime: '2026-10-12T18:33:14.25772Z' },
       { walletTransactionId: 0 },
@@ -111,7 +142,9 @@ describe('read-only KemerBet deposit history parser', () => {
 
   it('accepts exactly one recent approved match from the reviewed History response', async () => {
     const row = response().value.item2[0]!;
-    expect(await scanRoutineKemerBetHistory(fakeHistoryPage([row]), '28379330', 2900)).toEqual({
+    expect(
+      await scanRoutineKemerBetHistory(fakeHistoryPage([row]), '28379330', 2900, window),
+    ).toEqual({
       outcome: 'exact_match',
       observation: {
         transactionId: '110891902',
@@ -125,17 +158,17 @@ describe('read-only KemerBet deposit history parser', () => {
     });
   });
 
-  it('finds a recent exact match even when an older page row has five fractional digits', async () => {
+  it('finds the fenced exact match when an unrelated row has four fractional digits', async () => {
     const recent = response().value.item2[0]!;
     const older = {
       ...recent,
       walletTransactionId: 110891901,
       transactionId: 19686410,
-      transactionTime: '2026-10-12T18:32:14.25772',
+      transactionTime: '2026-10-12T18:32:14.2575',
       playerId: 'another-player',
     };
     expect(
-      await scanRoutineKemerBetHistory(fakeHistoryPage([recent, older]), '28379330', 2900),
+      await scanRoutineKemerBetHistory(fakeHistoryPage([recent, older]), '28379330', 2900, window),
     ).toEqual({
       outcome: 'exact_match',
       observation: {
@@ -157,10 +190,16 @@ describe('read-only KemerBet deposit history parser', () => {
         fakeHistoryPage([row, { ...row, walletTransactionId: 110891903, transactionId: 19686412 }]),
         '28379330',
         2900,
+        window,
       ),
     ).toEqual({ outcome: 'ambiguous' });
     expect(
-      await scanRoutineKemerBetHistory(fakeHistoryPage([{ ...row, state: 2 }]), '28379330', 2900),
+      await scanRoutineKemerBetHistory(
+        fakeHistoryPage([{ ...row, state: 2 }]),
+        '28379330',
+        2900,
+        window,
+      ),
     ).toEqual({ outcome: 'not_observed' });
   });
 });

@@ -1,12 +1,16 @@
 import type { Page, Response } from 'playwright-core';
+import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-companion-execution-contracts';
 
 const HISTORY_URL = 'https://agentsystem.admindigi.com/payments/history';
 const HISTORY_API_ORIGIN = 'https://admin-api.agt-digi.com';
 const HISTORY_API_PATH = '/Transaction/DepositHistory';
 const MAX_PAGES = 20;
 const MAX_RESPONSE_BYTES = 256 * 1024;
-const RECENT_HISTORY_MS = 5 * 60_000;
-const UTC_FRACTIONAL_MICROSECOND = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{5,6})$/u;
+const MAX_HISTORY_WINDOW_MS = 10 * 60_000;
+const HISTORY_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u;
+// KemerBet serializes UTC fractional seconds without fixed-width zero padding. A valid
+// unrelated row with four digits must not invalidate the entire reconciliation page.
+const UTC_FRACTIONAL_MICROSECOND = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d{1,6})$/u;
 const NUMERIC_ID = /^[0-9]{6,20}$/u;
 const PLAYER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
@@ -90,8 +94,7 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
       !timeMatch
     )
       return undefined;
-    // KemerBet returns five or six fractional digits. Keep the wire contract's
-    // six-digit UTC precision without rounding the provider's timestamp.
+    // Preserve the provider's UTC instant at the six-digit wire precision, without rounding.
     const occurredAt = `${timeMatch[1]}.${timeMatch[2]!.padEnd(6, '0')}Z`;
     const occurredAtMs = Date.parse(occurredAt);
     if (!Number.isSafeInteger(occurredAtMs) || occurredAtMs <= 0) return undefined;
@@ -115,7 +118,13 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
   return Object.freeze({ total: total as number, rows });
 }
 
-function isHistoryResponse(response: Response, pageNumber: number): boolean {
+function isHistoryResponse(
+  response: Response,
+  pageNumber: number,
+  playerId?: string,
+  from?: string,
+  until?: string,
+): boolean {
   try {
     const url = new URL(response.url());
     return (
@@ -123,11 +132,49 @@ function isHistoryResponse(response: Response, pageNumber: number): boolean {
       url.origin === HISTORY_API_ORIGIN &&
       url.pathname === HISTORY_API_PATH &&
       url.searchParams.get('page') === String(pageNumber) &&
-      url.searchParams.get('limit') === '10'
+      url.searchParams.get('limit') === '10' &&
+      (playerId === undefined ||
+        (url.searchParams.get('playerExternalId') === playerId &&
+          url.searchParams.get('from') === from &&
+          url.searchParams.get('to') === until))
     );
   } catch {
     return false;
   }
+}
+
+function localMinute(ms: number): string {
+  const value = new Date(ms);
+  const hours = value.getHours();
+  const hour12 = hours % 12 || 12;
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')} ${String(hour12).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')} ${hours < 12 ? 'AM' : 'PM'}`;
+}
+
+async function applyHistoryWindowFilter(
+  page: Page,
+  playerId: string,
+  fromMs: number,
+  untilMs: number,
+): Promise<{ readonly from: string; readonly until: string; readonly response: Response }> {
+  // KemerBet's picker displays local browser time and sends UTC ISO query parameters.
+  // Include one full minute on each side; exact matching below still uses the server fence.
+  const fromMinute = Math.floor(fromMs / 60_000) * 60_000 - 60_000;
+  const untilMinute = Math.ceil(untilMs / 60_000) * 60_000 + 60_000;
+  const from = new Date(fromMinute).toISOString();
+  const until = new Date(untilMinute).toISOString();
+  await page.locator('.rt--filters-button').click({ timeout: 5_000 });
+  const drawer = page.locator('.ant-drawer-content.rt--filters-drawer');
+  await drawer.locator('#playerExternalId').fill(playerId);
+  await drawer.locator('input[date-range="start"]').nth(1).fill(localMinute(fromMinute));
+  await page.getByRole('button', { name: 'OK', exact: true }).click({ timeout: 5_000 });
+  await drawer.locator('input[date-range="end"]').nth(1).fill(localMinute(untilMinute));
+  await page.getByRole('button', { name: 'OK', exact: true }).click({ timeout: 5_000 });
+  const responsePromise = page.waitForResponse(
+    (response) => isHistoryResponse(response, 1, playerId, from, until),
+    { timeout: 15_000 },
+  );
+  await drawer.getByRole('button', { name: 'Apply' }).click({ timeout: 5_000 });
+  return { from, until, response: await responsePromise };
 }
 
 async function readHistoryPage(response: Response): Promise<HistoryPage> {
@@ -154,41 +201,54 @@ export async function scanRoutineKemerBetHistory(
   page: Page,
   playerId: string,
   amountMinor: number,
+  window: RoutineDepositHistoryWindow,
 ): Promise<RoutineHistoryScan> {
+  const fromMs = Date.parse(window?.from ?? '');
+  const untilMs = Date.parse(window?.until ?? '');
   if (
     !PLAYER_ID.test(playerId) ||
     !Number.isSafeInteger(amountMinor) ||
     amountMinor < 2_500 ||
-    amountMinor > 2_500_000
+    amountMinor > 2_500_000 ||
+    !HISTORY_TIME.test(window?.from ?? '') ||
+    !HISTORY_TIME.test(window?.until ?? '') ||
+    !Number.isSafeInteger(fromMs) ||
+    !Number.isSafeInteger(untilMs) ||
+    fromMs <= 0 ||
+    untilMs < fromMs ||
+    untilMs - fromMs > MAX_HISTORY_WINDOW_MS
   )
     throw new Error('The protected history window is invalid.');
 
-  let scanFromMs: number | undefined;
-  let scanUntilMs: number | undefined;
+  const initialResponse = page.waitForResponse((response) => isHistoryResponse(response, 1), {
+    timeout: 15_000,
+  });
+  await page.goto(HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+  await initialResponse;
+  if (page.url().split('#')[0] !== HISTORY_URL) throw new Error('KemerBet history redirected.');
+  const filter = await applyHistoryWindowFilter(page, playerId, fromMs, untilMs);
   let expectedTotal: number | undefined;
   let previousOldestMs = Number.POSITIVE_INFINITY;
   const matches: HistoryRow[] = [];
   for (let pageNumber = 1; pageNumber <= MAX_PAGES; pageNumber += 1) {
-    const responsePromise = page.waitForResponse(
-      (response) => isHistoryResponse(response, pageNumber),
-      { timeout: 15_000 },
-    );
+    let response: Response;
     if (pageNumber === 1) {
-      await page.goto(HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+      response = filter.response;
     } else {
+      const responsePromise = page.waitForResponse(
+        (candidate) =>
+          isHistoryResponse(candidate, pageNumber, playerId, filter.from, filter.until),
+        { timeout: 15_000 },
+      );
       const next = page.locator('.ant-pagination-next:not(.ant-pagination-disabled)');
       if ((await next.count()) !== 1) throw new Error('KemerBet history pagination changed.');
       await next.click({ timeout: 5_000 });
+      response = await responsePromise;
     }
-    const response = await responsePromise;
-    if (scanFromMs === undefined) {
-      const providerDate = response.headers()['date'];
-      const providerNowMs = providerDate === undefined ? Number.NaN : Date.parse(providerDate);
-      if (!Number.isSafeInteger(providerNowMs) || providerNowMs <= 0)
-        throw new Error('KemerBet history clock is unavailable.');
-      scanFromMs = providerNowMs - RECENT_HISTORY_MS;
-      scanUntilMs = providerNowMs + 1_000;
-    }
+    const providerDate = response.headers()['date'];
+    const providerNowMs = providerDate === undefined ? Number.NaN : Date.parse(providerDate);
+    if (!Number.isSafeInteger(providerNowMs) || providerNowMs <= 0 || providerNowMs < untilMs)
+      throw new Error('KemerBet history clock is unavailable.');
     const historyPage = await readHistoryPage(response);
     if (page.url().split('#')[0] !== HISTORY_URL) throw new Error('KemerBet history redirected.');
     if (expectedTotal === undefined) expectedTotal = historyPage.total;
@@ -208,15 +268,15 @@ export async function scanRoutineKemerBetHistory(
     previousOldestMs = oldestMs;
     for (const row of historyPage.rows) {
       if (
-        row.occurredAtMs >= scanFromMs &&
-        row.occurredAtMs <= scanUntilMs! &&
+        row.occurredAt >= window.from &&
+        row.occurredAt <= window.until &&
         row.playerId === playerId &&
         row.amountMinor === amountMinor &&
         row.approvedDeposit
       )
         matches.push(row);
     }
-    if (oldestMs < scanFromMs || pageNumber * 10 >= historyPage.total) {
+    if (pageNumber * 10 >= historyPage.total) {
       if (matches.length === 0) return { outcome: 'not_observed' };
       if (matches.length !== 1) return { outcome: 'ambiguous' };
       const match = matches[0]!;

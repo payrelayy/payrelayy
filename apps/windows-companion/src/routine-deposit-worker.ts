@@ -1,5 +1,7 @@
 import { performance } from 'node:perf_hooks';
 
+import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-companion-execution-contracts';
+
 import type { LocalKemerBetSession } from './local-kemerbet-session.js';
 import {
   isRoutineDepositAmountMinor,
@@ -60,7 +62,8 @@ export interface RoutineDepositFence extends RoutineDepositBinding {
 }
 
 export type RoutineDepositReconciliation =
-  | { readonly outcome: 'pending' | 'uncertain' }
+  | { readonly outcome: 'pending'; readonly historyWindow: RoutineDepositHistoryWindow }
+  | { readonly outcome: 'uncertain' }
   | (RoutineDepositBinding & {
       readonly outcome: 'confirmed_executed';
       readonly reconciliationId: string;
@@ -225,7 +228,11 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     if (outcome.outcome === 'pending') {
       let scan: Awaited<ReturnType<LocalKemerBetSession['scanRoutineDepositHistory']>>;
       try {
-        scan = await options.session.scanRoutineDepositHistory(lease.playerId, lease.amountMinor);
+        scan = await options.session.scanRoutineDepositHistory(
+          lease.playerId,
+          lease.amountMinor,
+          outcome.historyWindow,
+        );
         historyScanFailures = 0;
       } catch {
         historyScanFailures += 1;

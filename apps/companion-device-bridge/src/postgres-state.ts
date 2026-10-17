@@ -336,6 +336,12 @@ export const CONFIRM_ROUTINE_DEPOSIT_HISTORY_SQL = `
   ) as result
 `;
 
+export const PENDING_ROUTINE_HISTORY_WINDOW_SQL = `
+  select app.routine_telebirr_pending_history_window(
+    $1::uuid, $2::uuid
+  ) as history_window
+`;
+
 function rowObject(row: unknown): Record<string, unknown> {
   if (typeof row !== 'object' || row === null || Array.isArray(row) || isProxy(row)) {
     throw new CompanionDeviceStateUnavailableError();
@@ -1156,6 +1162,24 @@ export class PostgresCompanionDeviceState {
       if (result.rows.length !== 1) return undefined;
       const row = rowObject(result.rows[0]);
       if (!exactKeys(row, ['result'])) throw new CompanionDeviceStateUnavailableError();
+      let resultBody = row.result;
+      if (
+        command.operation === 'reconcile' &&
+        typeof resultBody === 'object' &&
+        resultBody !== null &&
+        !Array.isArray(resultBody) &&
+        (resultBody as { outcome?: unknown }).outcome === 'pending'
+      ) {
+        const history = await this.database.query(PENDING_ROUTINE_HISTORY_WINDOW_SQL, [
+          command.binding.attemptId,
+          certificate.body.certificateId,
+        ]);
+        if (history.rows.length !== 1) throw new CompanionDeviceStateUnavailableError();
+        const historyRow = rowObject(history.rows[0]);
+        if (!exactKeys(historyRow, ['history_window']))
+          throw new CompanionDeviceStateUnavailableError();
+        resultBody = { outcome: 'pending', historyWindow: historyRow.history_window };
+      }
       const response = decodeRoutineDepositResponseBody({
         contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
         protocolMode: ROUTINE_DEPOSIT_PROTOCOL_MODE,
@@ -1164,7 +1188,7 @@ export class PostgresCompanionDeviceState {
         operation: command.operation,
         requestContentDigest: commandDigest,
         serverIssuedAt: assessedAt,
-        result: row.result,
+        result: resultBody,
       });
       return response?.result;
     } catch (error) {

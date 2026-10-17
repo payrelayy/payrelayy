@@ -83,8 +83,14 @@ export interface RoutineDepositProtocolFence extends RoutineDepositProtocolBindi
   readonly validUntilMs: number;
 }
 
+export interface RoutineDepositHistoryWindow {
+  readonly from: string;
+  readonly until: string;
+}
+
 export type RoutineDepositProtocolReconciliation =
-  | { readonly outcome: 'pending' | 'uncertain' }
+  | { readonly outcome: 'pending'; readonly historyWindow: RoutineDepositHistoryWindow }
+  | { readonly outcome: 'uncertain' }
   | (RoutineDepositProtocolBinding & {
       readonly outcome: 'confirmed_executed';
       readonly reconciliationId: string;
@@ -527,9 +533,30 @@ function decodeResult(
     if (
       plainRecord(candidate) &&
       exactKeys(candidate, ['outcome']) &&
-      (candidate.outcome === 'pending' || candidate.outcome === 'uncertain')
+      candidate.outcome === 'uncertain'
     ) {
-      return Object.freeze({ outcome: candidate.outcome });
+      return Object.freeze({ outcome: 'uncertain' });
+    }
+    if (
+      operation === 'reconcile' &&
+      plainRecord(candidate) &&
+      exactKeys(candidate, ['outcome', 'historyWindow']) &&
+      candidate.outcome === 'pending' &&
+      plainRecord(candidate.historyWindow) &&
+      exactKeys(candidate.historyWindow, ['from', 'until']) &&
+      typeof candidate.historyWindow.from === 'string' &&
+      typeof candidate.historyWindow.until === 'string' &&
+      HISTORY_TIME.test(candidate.historyWindow.from) &&
+      HISTORY_TIME.test(candidate.historyWindow.until) &&
+      Date.parse(candidate.historyWindow.from) <= Date.parse(candidate.historyWindow.until)
+    ) {
+      return Object.freeze({
+        outcome: 'pending' as const,
+        historyWindow: Object.freeze({
+          from: candidate.historyWindow.from,
+          until: candidate.historyWindow.until,
+        }),
+      });
     }
     if (
       !plainRecord(candidate) ||

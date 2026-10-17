@@ -135,3 +135,84 @@ describe('local KemerBet exact-deposit route boundary', () => {
     expect(selected.route.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('local KemerBet fenced History route boundary', () => {
+  it('forwards only the observed filtered GET for the approved Player and time window', async () => {
+    let handler: ((route: Route) => Promise<void>) | undefined;
+    const context = {
+      route: vi.fn(async (_matcher, selectedHandler: (route: Route) => Promise<void>) => {
+        handler = selectedHandler;
+      }),
+    } as unknown as BrowserContext;
+    const authorization = {
+      playerId: '28379330',
+      from: '2026-10-12T18:32:00.000Z',
+      to: '2026-10-12T18:35:00.000Z',
+    } as const;
+    const query = new URLSearchParams([
+      ['page', '1'],
+      ['limit', '10'],
+      ['orderBy', 'CreatedAt'],
+      ['orderDirection', '2'],
+      ['transactionId', ''],
+      ['walletTransactionId', ''],
+      ['playerExternalId', authorization.playerId],
+      ['paymentType', ''],
+      ['state', ''],
+      ['from', authorization.from],
+      ['to', authorization.to],
+      ['userNameOrId', ''],
+    ]).toString();
+    const approvedUrl = `https://admin-api.agt-digi.com/Transaction/DepositHistory?${query}`;
+    const blocked: string[] = [];
+    await installProviderMutationBoundary(
+      context,
+      () => 'signed_in_read_only',
+      (reason) => blocked.push(reason),
+      undefined,
+      undefined,
+      () => authorization,
+    );
+    const dispatch = async (url: string) => {
+      const response = {
+        status: () => 200,
+        headers: () => ({}),
+        dispose: vi.fn(async () => undefined),
+      };
+      const route = {
+        request: () => ({
+          method: () => 'GET',
+          url: () => url,
+          headerValue: async () => null,
+          isNavigationRequest: () => false,
+        }),
+        fetch: vi.fn(async () => response),
+        fulfill: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+      } as unknown as Route;
+      if (!handler) throw new Error('route not installed');
+      await handler(route);
+      return route;
+    };
+
+    const approved = await dispatch(approvedUrl);
+    expect(approved.fetch).toHaveBeenCalledWith({
+      url: approvedUrl,
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: expect.any(Number),
+    });
+    expect(approved.fulfill).toHaveBeenCalledTimes(1);
+    expect(approved.abort).not.toHaveBeenCalled();
+
+    for (const unapprovedUrl of [
+      approvedUrl.replace(authorization.playerId, '28379331'),
+      approvedUrl.replace('18%3A32', '18%3A31'),
+    ]) {
+      const rejected = await dispatch(unapprovedUrl);
+      expect(rejected.fetch).not.toHaveBeenCalled();
+      expect(rejected.abort).toHaveBeenCalledExactlyOnceWith('blockedbyclient');
+    }
+    expect(blocked).toEqual(['mutation_attempt_blocked', 'mutation_attempt_blocked']);
+  });
+});

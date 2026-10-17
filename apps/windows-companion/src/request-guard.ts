@@ -120,7 +120,7 @@ export function decideLocalKemerBetRequest(
       return { action: 'allow', reason: 'provider_read' };
     }
     const query = [...url.searchParams.entries()];
-    const historyKeys = [
+    const initialHistoryKeys = [
       'page',
       'limit',
       'orderBy',
@@ -136,34 +136,52 @@ export function decideLocalKemerBetRequest(
       'createdAtFrom',
       'createdAtTo',
     ];
+    // The KemerBet History page uses a different, shorter query after Apply. In particular it
+    // omits the empty creation-date fields and moves userNameOrId to the end. Bind that exact
+    // observed shape to the active Player and fenced time window, not to arbitrary History reads.
+    const filteredHistoryKeys = [
+      'page',
+      'limit',
+      'orderBy',
+      'orderDirection',
+      'transactionId',
+      'walletTransactionId',
+      'playerExternalId',
+      'paymentType',
+      'state',
+      'from',
+      'to',
+      'userNameOrId',
+    ];
+    const initialHistoryRead =
+      query.length === initialHistoryKeys.length &&
+      initialHistoryKeys.every((key, index) => query[index]?.[0] === key) &&
+      url.searchParams.get('playerExternalId') === '' &&
+      url.searchParams.get('page') === '1' &&
+      url.searchParams.get('createdAtFrom') === '' &&
+      url.searchParams.get('createdAtTo') === '';
+    const filteredHistoryRead =
+      query.length === filteredHistoryKeys.length &&
+      filteredHistoryKeys.every((key, index) => query[index]?.[0] === key) &&
+      url.searchParams.get('playerExternalId') === approvedHistoryRead?.playerId &&
+      url.searchParams.get('from') === approvedHistoryRead?.from &&
+      url.searchParams.get('to') === approvedHistoryRead?.to;
     const exactHistoryRead =
       approvedHistoryRead &&
       phase === 'signed_in_read_only' &&
       (method === 'GET' || method === 'OPTIONS') &&
       url.origin === KEMERBET_AGENT_API_ORIGIN &&
       url.pathname === KEMERBET_DEPOSIT_HISTORY_PATH &&
-      query.length === historyKeys.length &&
-      historyKeys.every((key, index) => query[index]?.[0] === key) &&
+      (initialHistoryRead || filteredHistoryRead) &&
       /^(?:[1-9]|1[0-9]|20)$/u.test(url.searchParams.get('page') ?? '') &&
       url.searchParams.get('limit') === '10' &&
       url.searchParams.get('orderBy') === 'CreatedAt' &&
       url.searchParams.get('orderDirection') === '2' &&
-      [
-        'userNameOrId',
-        'transactionId',
-        'walletTransactionId',
-        'paymentType',
-        'state',
-        'createdAtFrom',
-        'createdAtTo',
-      ].every((key) => url.searchParams.get(key) === '') &&
+      ['userNameOrId', 'transactionId', 'walletTransactionId', 'paymentType', 'state'].every(
+        (key) => url.searchParams.get(key) === '',
+      ) &&
       // The provider first loads an unfiltered page, then requests the exact player and
       // narrow time window. Never turn an active reconciliation into arbitrary History access.
-      (url.searchParams.get('playerExternalId') === ''
-        ? url.searchParams.get('page') === '1'
-        : url.searchParams.get('playerExternalId') === approvedHistoryRead.playerId &&
-          url.searchParams.get('from') === approvedHistoryRead.from &&
-          url.searchParams.get('to') === approvedHistoryRead.to) &&
       ['from', 'to'].every((key) => {
         const value = url.searchParams.get(key);
         return (

@@ -393,8 +393,14 @@ export function registerTelegramPlayerValidationStateSqlTests(
       try {
         const paired = await createPairedDevice(client, getOwnerAdminId());
         const claimId = await prepareActiveReadinessClaimForTest(client, getOwnerAdminId());
-        const eventId = await inbound(client, '89660000118', '89650000118');
-        const requestId = await requestValidation(client, eventId, 'NEW-FROZEN-CLAIM-SQL');
+        await client.query('set session authorization fetanagent_player_actions_runtime');
+        let requestId: string;
+        try {
+          const eventId = await inbound(client, '89660000118', '89650000118');
+          requestId = await requestValidation(client, eventId, 'NEW-FROZEN-CLAIM-SQL');
+        } finally {
+          await client.query('reset session authorization');
+        }
         const before = (
           await client.query(`select
             (select count(*)::text from app.deposit_intents) as intents,

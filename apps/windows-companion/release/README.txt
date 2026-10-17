@@ -1,6 +1,22 @@
 FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable release
 =================================================================================
 
+EVERYDAY USE
+------------
+Double-click "Open FetanAgent.cmd" in this extracted folder. It opens one protected Chrome
+window for both Automatic Deposits and read-only Player ID checks. If KemerBet asks you to
+sign in, do so only in that Chrome window. Leave Chrome and the small status window open;
+closing Chrome stops the Companion. Do not open a second Companion at the same time.
+
+For a desktop button, double-click "Add FetanAgent Desktop Shortcut.vbs" once, then use
+"FetanAgent - Deposits and Player ID" on the desktop. Keep this extracted folder in place.
+Do not double-click the similarly named .ps1 files: Windows may open them as text.
+The Owner page shows whether the Companion is connected and whether a deposit needs attention.
+The Companion never enables deposits by itself; server authorization remains separate.
+
+FIRST-TIME PAIRING AND ADVANCED MODES
+-------------------------------------
+
 1. Extract the complete ZIP file.
 2. In the FetanAgent Owner page, create a one-use Windows pairing package. It is valid for twelve
    hours. Keep that page open; do not send the package through Telegram, email, chat, or an issue.
@@ -22,9 +38,10 @@ FetanAgent Windows Companion — paired, guarded Automatic Deposit-capable relea
    redacted outcomes and aggregate counts.
 10. Close the companion Chrome window to stop it.
 
-A separate internal, default-off single-Player validation mode accepts only signed Find-only
-assignments. It cannot run with either financial execution mode or another Companion session.
-Installing this release does not enable it or change live deposit settings.
+A signed, read-only Player ID Find can run inside the guarded routine session opened by
+"Open FetanAgent.cmd". It uses the same Chrome window as Automatic Deposits but never clicks
+Transfer for a Player ID check. Do not start the one-job pilot or a second Companion alongside it.
+Installing this release does not enable deposits or change live deposit settings.
 
 The standard Companion launcher remains Find-only. Money-capable modes require a separate launcher,
 the exact paired device and account, a measured installed release, and independently enabled server

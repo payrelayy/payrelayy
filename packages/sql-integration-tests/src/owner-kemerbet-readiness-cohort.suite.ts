@@ -165,6 +165,24 @@ async function createExactFive(
   return playerAccountIds;
 }
 
+export async function prepareActiveReadinessClaimForTest(
+  client: Client,
+  ownerAdminId: string,
+): Promise<string> {
+  const owner = await client.query<{ readonly auth_user_id: string }>(
+    'select auth_user_id::text from app.admin_users where id = $1::uuid',
+    [ownerAdminId],
+  );
+  const ownerAuthUserId = owner.rows[0]!.auth_user_id;
+  await createExactFive(client, ownerAuthUserId);
+  const prepared = await queryAsOwnerControl<{ readonly cohort_id: string }>(client, PREPARE_SQL, [
+    ownerAuthUserId,
+    randomUUID(),
+  ]);
+  expect(prepared).toHaveLength(5);
+  return prepared[0]!.cohort_id;
+}
+
 const PREPARE_SQL = `
   select *
     from app.prepare_owner_kemerbet_readiness_cohort_claim($1::uuid, $2::uuid)

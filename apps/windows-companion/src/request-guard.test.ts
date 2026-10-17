@@ -109,6 +109,11 @@ describe('local KemerBet request guard', () => {
   });
 
   it('opens only the bounded deposit-history read during an explicit reconciliation scan', () => {
+    const historyAuthorization = {
+      playerId: '28379330',
+      from: '2026-10-12T18:32:00.000Z',
+      to: '2026-10-12T18:35:00.000Z',
+    } as const;
     const query = new URLSearchParams([
       ['page', '1'],
       ['limit', '10'],
@@ -130,22 +135,80 @@ describe('local KemerBet request guard', () => {
       action: 'abort',
       reason: 'unreviewed_read',
     });
-    expect(decideLocalKemerBetRequest('GET', url, 'signed_in_read_only', undefined, true)).toEqual({
+    expect(
+      decideLocalKemerBetRequest(
+        'GET',
+        url,
+        'signed_in_read_only',
+        undefined,
+        historyAuthorization,
+      ),
+    ).toEqual({
       action: 'allow',
       reason: 'provider_read',
     });
     expect(
-      decideLocalKemerBetRequest('OPTIONS', url, 'signed_in_read_only', undefined, true),
+      decideLocalKemerBetRequest(
+        'OPTIONS',
+        url,
+        'signed_in_read_only',
+        undefined,
+        historyAuthorization,
+      ),
     ).toEqual({ action: 'allow', reason: 'provider_read' });
-    expect(decideLocalKemerBetRequest('GET', url, 'manual_login', undefined, true).action).toBe(
-      'abort',
-    );
+    const filteredUrl = url
+      .replace('playerExternalId=', 'playerExternalId=28379330')
+      .replace('2026-10-01T00%3A00%3A00.000Z', '2026-10-12T18%3A32%3A00.000Z')
+      .replace('2026-10-13T00%3A00%3A00.000Z', '2026-10-12T18%3A35%3A00.000Z');
     expect(
-      decideLocalKemerBetRequest('POST', url, 'signed_in_read_only', undefined, true).action,
+      decideLocalKemerBetRequest(
+        'GET',
+        filteredUrl,
+        'signed_in_read_only',
+        undefined,
+        historyAuthorization,
+      ),
+    ).toEqual({
+      action: 'allow',
+      reason: 'provider_read',
+    });
+    for (const unsafeUrl of [
+      filteredUrl.replace('28379330', '28379331'),
+      filteredUrl.replace('18%3A32', '18%3A31'),
+      filteredUrl.replace('18%3A35', '18%3A36'),
+      `${filteredUrl}&amount=25`,
+    ]) {
+      expect(
+        decideLocalKemerBetRequest(
+          'GET',
+          unsafeUrl,
+          'signed_in_read_only',
+          undefined,
+          historyAuthorization,
+        ).action,
+      ).toBe('abort');
+    }
+    expect(
+      decideLocalKemerBetRequest('GET', url, 'manual_login', undefined, historyAuthorization)
+        .action,
     ).toBe('abort');
     expect(
-      decideLocalKemerBetRequest('GET', `${url}&amount=25`, 'signed_in_read_only', undefined, true)
-        .action,
+      decideLocalKemerBetRequest(
+        'POST',
+        url,
+        'signed_in_read_only',
+        undefined,
+        historyAuthorization,
+      ).action,
+    ).toBe('abort');
+    expect(
+      decideLocalKemerBetRequest(
+        'GET',
+        `${url}&amount=25`,
+        'signed_in_read_only',
+        undefined,
+        historyAuthorization,
+      ).action,
     ).toBe('abort');
     expect(
       decideLocalKemerBetRequest(
@@ -153,7 +216,7 @@ describe('local KemerBet request guard', () => {
         url.replace('2026-10-01', '2026-13-01'),
         'signed_in_read_only',
         undefined,
-        true,
+        historyAuthorization,
       ).action,
     ).toBe('abort');
   });

@@ -38,7 +38,7 @@ const LOGIN_RETRY_URL = 'https://agentsystem.admindigi.com/login?et=1';
 const ACCOUNT_INFO_URL = 'https://admin-api.agt-digi.com/Account/Info';
 const DEPOSIT_URL = 'https://admin-api.agt-digi.com/Wallet/PlayerEPOSDeposit';
 const TEN_MINUTES = 10 * 60 * 1_000;
-const ELEVEN_MINUTES = 11 * 60 * 1_000;
+const SEVEN_MINUTES = 7 * 60 * 1_000;
 const TWELVE_HOURS = 12 * 60 * 60 * 1_000;
 const config: WindowsCompanionConfig = {
   dataRoot: resolve('test-fixtures', 'local-companion'),
@@ -314,7 +314,7 @@ describe('local KemerBet enrollment session', () => {
     expect(events.filter((event) => event.state === 'signed_in_candidate')).toHaveLength(1);
   });
 
-  it('pauses Player work during an eleven-minute reload and re-verifies the bound account', async () => {
+  it('pauses Player work during an early idle reload and re-verifies the bound account', async () => {
     const { context, page, session } = await start();
     let completeReload: (() => void) | undefined;
     page.reload.mockImplementationOnce(
@@ -327,7 +327,7 @@ describe('local KemerBet enrollment session', () => {
         }),
     );
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES - 1);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES - 1);
     expect(page.reload).not.toHaveBeenCalled();
     expect(session.isSignedInVerified()).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
@@ -341,7 +341,7 @@ describe('local KemerBet enrollment session', () => {
     expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
     expect(context.close).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(page.reload).toHaveBeenCalledTimes(2);
     expect(session.isSignedInVerified()).toBe(true);
   });
@@ -353,7 +353,7 @@ describe('local KemerBet enrollment session', () => {
       return null;
     });
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)?.state).toBe('login_required');
     expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(1);
@@ -368,7 +368,7 @@ describe('local KemerBet enrollment session', () => {
     const { events, page, session } = await start();
     page.reload.mockRejectedValueOnce(new Error('redacted navigation failure'));
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     await expect(session.done).rejects.toThrow('failed closed');
     expect(session.isSignedInVerified()).toBe(false);
     expect(events.at(-1)?.reason).toBe('provider_request_failed');
@@ -428,7 +428,7 @@ describe('local KemerBet enrollment session', () => {
       }),
     );
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(session.isSignedInVerified()).toBe(false);
     expect(context.close).not.toHaveBeenCalled();
     expect(events.at(-1)).toEqual({
@@ -457,7 +457,7 @@ describe('local KemerBet enrollment session', () => {
       new Error('redacted frame navigation error'),
     );
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(session.isSignedInVerified()).toBe(false);
     expect(context.close).not.toHaveBeenCalled();
     expect(events.at(-1)?.reason).toBe('identity_binding_unavailable');
@@ -476,7 +476,7 @@ describe('local KemerBet enrollment session', () => {
       }),
     );
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     page.navigate(LOGIN_URL);
     await vi.advanceTimersByTimeAsync(15_000);
     expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
@@ -494,7 +494,7 @@ describe('local KemerBet enrollment session', () => {
       }),
     );
 
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     await expect(session.done).rejects.toThrow('failed closed');
     expect(events.at(-1)?.reason).toBe('identity_mismatch');
     expect(context.close).toHaveBeenCalledTimes(1);
@@ -515,7 +515,7 @@ describe('local KemerBet enrollment session', () => {
     await settleIdentityVerification();
     expect(session.isSignedInVerified()).toBe(true);
     expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(ELEVEN_MINUTES);
+    await vi.advanceTimersByTimeAsync(SEVEN_MINUTES);
     expect(page.reload).toHaveBeenCalledTimes(1);
   });
 

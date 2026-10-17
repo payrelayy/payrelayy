@@ -31,12 +31,16 @@ import {
   type LocalKemerBetLookupOutcome,
   type LocalKemerBetLookupTiming,
 } from './local-kemerbet-lookup.js';
-import { scanRoutineKemerBetHistory, type RoutineHistoryScan } from './routine-kemerbet-history.js';
+import {
+  routineHistoryReadAuthorization,
+  scanRoutineKemerBetHistory,
+  type RoutineHistoryScan,
+} from './routine-kemerbet-history.js';
 import {
   installProviderMutationBoundary,
   type LocalKemerBetDepositDispatchOutcome,
 } from './provider-route.js';
-import type { LocalKemerBetGuardPhase } from './request-guard.js';
+import type { LocalKemerBetGuardPhase, RoutineHistoryReadAuthorization } from './request-guard.js';
 import {
   installProviderSessionPassiveDiagnostics,
   type ProviderSessionDiagnosticEvent,
@@ -44,9 +48,9 @@ import {
 import { installProviderSessionWebSocketBoundary } from './provider-websocket.js';
 import { acquireSessionLock, releaseSessionLock, type SessionLock } from './session-lock.js';
 
-// KemerBet's agent client returns to login after 900 seconds without a page-level reset. Reload
-// the same guarded page while its Chrome-held session is still valid, with four minutes to spare.
-const KEMERBET_SIGNED_IN_RELOAD_MS = 11 * 60 * 1_000;
+// KemerBet's agent client can return to login after roughly ten minutes. Refresh the same
+// guarded page at an idle slot with a conservative margin, then verify the bound identity again.
+const KEMERBET_SIGNED_IN_RELOAD_MS = 7 * 60 * 1_000;
 const KEMERBET_BUSY_RELOAD_RETRY_MS = 15 * 1_000;
 const KEMERBET_ROUTINE_IDENTITY_RETRY_MS = 15 * 1_000;
 
@@ -169,7 +173,7 @@ export async function startLocalKemerBetSession(
   const lookupAuthorization = createLocalKemerBetLookupAuthorization();
   const depositAuthorization = createLocalKemerBetDepositAuthorization();
   let operationInProgress = false;
-  let historyReadAuthorized = false;
+  let historyReadAuthorization: RoutineHistoryReadAuthorization | undefined;
   let signedInCandidate = false;
   let signedInVerified = false;
   let reviewPaused = false;
@@ -359,7 +363,7 @@ export async function startLocalKemerBetSession(
       },
       lookupAuthorization,
       depositAuthorization,
-      () => historyReadAuthorized,
+      () => historyReadAuthorization,
     );
 
     const beginIdentityVerification = async (): Promise<void> => {
@@ -760,8 +764,9 @@ export async function startLocalKemerBetSession(
         !page
       )
         throw new Error('The local KemerBet history session is unavailable.');
+      const authorization = routineHistoryReadAuthorization(playerId, window);
       operationInProgress = true;
-      historyReadAuthorized = true;
+      historyReadAuthorization = authorization;
       signedInVerified = false;
       identityVerificationEpoch += 1;
       disarmSignedInReload();
@@ -769,7 +774,7 @@ export async function startLocalKemerBetSession(
       try {
         return await scanRoutineKemerBetHistory(page, playerId, amountMinor, window);
       } finally {
-        historyReadAuthorized = false;
+        historyReadAuthorization = undefined;
         try {
           if (!terminal && !stopping && !reviewPaused) {
             await page.goto(KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL, {

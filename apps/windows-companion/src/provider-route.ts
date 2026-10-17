@@ -8,6 +8,7 @@ import {
   isLocalKemerBetProviderUrl,
   KEMERBET_DEPOSIT_PATH,
   type LocalKemerBetGuardPhase,
+  type RoutineHistoryReadAuthorization,
 } from './request-guard.js';
 
 type BlockReason = 'mutation_attempt_blocked' | 'provider_request_failed';
@@ -155,7 +156,7 @@ async function forwardProviderRequest(
   resetNavigationRedirects: () => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
   depositAuthorization?: LocalKemerBetDepositAuthorization,
-  allowHistoryRead: () => boolean = () => false,
+  allowHistoryRead: () => RoutineHistoryReadAuthorization | undefined = () => undefined,
 ): Promise<void> {
   const request = route.request();
   const method = request.method();
@@ -309,7 +310,7 @@ export async function installProviderMutationBoundary(
   reportBlocked: (reason: BlockReason) => void,
   lookupAuthorization?: LocalKemerBetLookupAuthorization,
   depositAuthorization?: LocalKemerBetDepositAuthorization,
-  allowHistoryRead: () => boolean = () => false,
+  allowHistoryRead: () => RoutineHistoryReadAuthorization | undefined = () => undefined,
 ): Promise<void> {
   // Chrome starts offline; context-wide routing covers initial popup, iframe, and worker
   // requests, with service workers disabled. Unrelated CAPTCHA traffic stays in Chrome.

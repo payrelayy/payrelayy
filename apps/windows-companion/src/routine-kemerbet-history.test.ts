@@ -3,6 +3,7 @@ import type { Page, Response } from 'playwright-core';
 
 import {
   parseRoutineKemerBetHistoryPage,
+  routineHistoryReadAuthorization,
   scanRoutineKemerBetHistory,
 } from './routine-kemerbet-history.js';
 
@@ -79,6 +80,20 @@ function fakeHistoryPage(rows: readonly Record<string, unknown>[], total = rows.
 }
 
 describe('read-only KemerBet deposit history parser', () => {
+  it('binds the read-only browser allowance to the same padded minute window as its UI filter', () => {
+    expect(routineHistoryReadAuthorization('28379330', window)).toEqual({
+      playerId: '28379330',
+      from: '2026-10-12T18:32:00.000Z',
+      to: '2026-10-12T18:35:00.000Z',
+    });
+    expect(() =>
+      routineHistoryReadAuthorization('28379330', {
+        from: '2026-10-12T18:33:14.000000Z',
+        until: '2026-10-12T18:43:14.002000Z',
+      }),
+    ).toThrow('protected history window');
+  });
+
   it('preserves the API timestamp at microsecond precision and maps distinct provider IDs', () => {
     expect(parseRoutineKemerBetHistoryPage(response())).toEqual({
       total: 1,

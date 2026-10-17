@@ -58,14 +58,19 @@ async function asPlayerActions<T extends QueryResultRow>(
   }
 }
 
-async function inbound(client: Client, updateId: string, userId: string): Promise<string> {
-  const rows = await asPlayerActions<{ inbound_event_id: string }>(
-    client,
-    `select inbound_event_id from app.record_public_telegram_action_inbound_event(
+async function inbound(
+  client: Client,
+  updateId: string,
+  userId: string,
+  asRuntime = false,
+): Promise<string> {
+  const sql = `select inbound_event_id from app.record_public_telegram_action_inbound_event(
        $1::bigint, $2::bigint, $2::bigint, $3::text, 'en'::text
-     )`,
-    [updateId, userId, `hmac-sha256-v1:${'b'.repeat(64)}`],
-  );
+     )`;
+  const values = [updateId, userId, `hmac-sha256-v1:${'b'.repeat(64)}`];
+  const rows = asRuntime
+    ? (await client.query<{ inbound_event_id: string }>(sql, values)).rows
+    : await asPlayerActions<{ inbound_event_id: string }>(client, sql, values);
   return rows[0]!.inbound_event_id;
 }
 
@@ -73,12 +78,13 @@ async function requestValidation(
   client: Client,
   eventId: string,
   playerId: string,
+  asRuntime = false,
 ): Promise<string> {
-  const rows = await asPlayerActions<{ request_id: string }>(
-    client,
-    'select request_id from app.request_telegram_player_validation($1::uuid, $2::text)',
-    [eventId, playerId],
-  );
+  const sql = 'select request_id from app.request_telegram_player_validation($1::uuid, $2::text)';
+  const values = [eventId, playerId];
+  const rows = asRuntime
+    ? (await client.query<{ request_id: string }>(sql, values)).rows
+    : await asPlayerActions<{ request_id: string }>(client, sql, values);
   return rows[0]!.request_id;
 }
 
@@ -396,8 +402,8 @@ export function registerTelegramPlayerValidationStateSqlTests(
         await client.query('set session authorization fetanagent_player_actions_runtime');
         let requestId: string;
         try {
-          const eventId = await inbound(client, '89660000118', '89650000118');
-          requestId = await requestValidation(client, eventId, 'NEW-FROZEN-CLAIM-SQL');
+          const eventId = await inbound(client, '89660000118', '89650000118', true);
+          requestId = await requestValidation(client, eventId, 'NEW-FROZEN-CLAIM-SQL', true);
         } finally {
           await client.query('reset session authorization');
         }

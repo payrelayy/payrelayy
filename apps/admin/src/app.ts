@@ -90,6 +90,10 @@ import {
   type OwnerReceiverRotationReason,
 } from './owner-receiver-accounts.js';
 import {
+  OwnerCbeBirrLookupRotationRejectedError,
+  type OwnerCbeBirrLookupRotationRequest,
+} from './owner-cbe-birr-lookup-rotation.js';
+import {
   OwnerCompanionDevicePairingNotReadyError,
   OwnerCompanionDevicePairingRejectedError,
   OwnerCompanionDevicePairingUnavailableError,
@@ -180,6 +184,7 @@ const OWNER_COMPANION_LOOKUP_CSRF_HEADER_VALUE = 'owner-companion-exact-five-loo
 const OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-telebirr-device-pairing-v1';
 const OWNER_ROUTINE_TELEBIRR_PAIRING_CSRF_HEADER_VALUE = 'owner-routine-telebirr-pairing-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
+const OWNER_CBE_BIRR_LOOKUP_ROTATION_CSRF_HEADER_VALUE = 'owner-cbe-birr-lookup-rotation-v2';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
 const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
@@ -284,6 +289,10 @@ const OWNER_RECEIVER_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
   'owner_correction',
   'provider_incident_recovery',
 ]);
+const OWNER_CBE_BIRR_LOOKUP_ROTATION_REASONS = new Set<OwnerReceiverRotationReason>([
+  ...OWNER_RECEIVER_ROTATION_REASONS,
+  'protection_upgrade',
+]);
 const OWNER_RECEIVER_HOLDER_PATTERN =
   /^[^\s\u0000-\u001f\u007f](?:[^\u0000-\u001f\u007f]{0,158}[^\s\u0000-\u001f\u007f])?$/u;
 const INTERACTIVE_SESSION_CACHE_TTL_MS = 5_000;
@@ -348,6 +357,9 @@ export function buildOwnerControlApp(
 ) {
   if (!config.runtime.enabled) throw new Error('The Owner-control runtime is disabled.');
   const runtimeConfig = config.runtime;
+  if (runtimeConfig.cbeBirrLookupRotationEnabled && !dependencies.runtime.cbeBirrLookupRotation) {
+    throw new Error('The Owner CBE Birr lookup rotation adapter is unavailable.');
+  }
   const kemerbetReadinessCohortControl =
     dependencies.kemerbetReadinessCohortControl ?? new FileOwnerKemerbetReadinessCohortControl();
   const kemerbetSessionControl =
@@ -599,6 +611,21 @@ export function buildOwnerControlApp(
       exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_RECEIVER_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validCbeBirrLookupRotationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_CBE_BIRR_LOOKUP_ROTATION_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -1352,6 +1379,72 @@ export function buildOwnerControlApp(
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });
+
+  if (runtimeConfig.cbeBirrLookupRotationEnabled) {
+    app.post('/v1/owner/cbe-birr-receiver-lookup/rotate-v2', async (request, reply) => {
+      try {
+        const body = exactObject(request.body, [
+          'accountHolderName',
+          'accountReference',
+          'confirmation',
+          'receiverRevisionId',
+          'receiverVersion',
+          'requestId',
+          'rotationReason',
+        ]);
+        const rotationReason = body?.rotationReason;
+        if (
+          body?.confirmation !== 'owner_confirmed_cbe_birr_lookup_rotation_v2' ||
+          typeof body.accountHolderName !== 'string' ||
+          body.accountHolderName.length < 2 ||
+          !OWNER_RECEIVER_HOLDER_PATTERN.test(body.accountHolderName) ||
+          typeof body.accountReference !== 'string' ||
+          !validOwnerReceiverAccountReference('cbe_birr', body.accountReference) ||
+          typeof body.receiverRevisionId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.receiverRevisionId) ||
+          body.receiverRevisionId === body.requestId ||
+          !Number.isSafeInteger(body.receiverVersion) ||
+          (body.receiverVersion as number) < 1 ||
+          (body.receiverVersion as number) > 2_147_483_647 ||
+          typeof rotationReason !== 'string' ||
+          !OWNER_CBE_BIRR_LOOKUP_ROTATION_REASONS.has(
+            rotationReason as OwnerReceiverRotationReason,
+          ) ||
+          !validCbeBirrLookupRotationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const rotation = dependencies.runtime.cbeBirrLookupRotation;
+        if (!rotation) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const rotationRequest: OwnerCbeBirrLookupRotationRequest = {
+          accountHolderName: body.accountHolderName as string,
+          accountReference: body.accountReference as string,
+          receiverRevisionId: body.receiverRevisionId as string,
+          receiverVersion: body.receiverVersion as number,
+          requestId: body.requestId as string,
+          rotationReason: rotationReason as OwnerReceiverRotationReason,
+        };
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          rotation.rotate(authUserId, rotationRequest),
+        );
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(201).send({ receiver: mutation.value });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerCbeBirrLookupRotationRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner CBE Birr lookup-protected receiver rotation is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    });
+  }
 
   app.get('/v1/owner/kemerbet-agent-profiles', async (request, reply) => {
     try {

@@ -26,6 +26,7 @@ const config = {
     fingerprintSecret: undefined,
     masterProfile: undefined,
   },
+  cbeBirrLookupRotationEnabled: false,
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   routineEnrollmentReceiptSigner: {
     signerKeyId: undefined,

@@ -75,6 +75,18 @@ const receiverMasterProfile = JSON.stringify({
     .digest('hex')}`,
   version: 2,
 });
+const cbeBirrLookupEncryptionMaster = 'e'.repeat(64);
+const cbeBirrLookupFingerprintMaster = 'f'.repeat(64);
+const cbeBirrLookupMasterProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeBirrLookupEncryptionMaster, 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeBirrLookupFingerprintMaster, 'hex'))
+    .digest('hex')}`,
+  purpose: 'cbe_birr_receiver_lookup',
+  version: 2,
+});
 
 function pilotStatus(overrides: Partial<PrivateLivePilotStatus> = {}): PrivateLivePilotStatus {
   return {
@@ -114,6 +126,16 @@ function receiverMutationHeaders(requestId = pilotRequestId) {
     'content-type': 'application/json',
     origin: 'http://127.0.0.1:3002',
     'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+    'x-idempotency-key': requestId,
+  };
+}
+
+function cbeBirrLookupRotationHeaders(requestId = pilotRequestId) {
+  return {
+    authorization: `Bearer ${bearer}`,
+    'content-type': 'application/json',
+    origin: 'http://127.0.0.1:3002',
+    'x-fetanagent-owner-csrf': 'owner-cbe-birr-lookup-rotation-v2',
     'x-idempotency-key': requestId,
   };
 }
@@ -312,6 +334,7 @@ function config(
   companionDevicePairingConfigured = false,
   deploymentTarget: OwnerControlDeploymentTarget = 'staging',
   routineReceiptSignerConfigured = false,
+  cbeBirrLookupRotationEnabled = false,
 ) {
   const target = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   return loadOwnerControlConfig({
@@ -325,6 +348,15 @@ function config(
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
     OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
+    ...(cbeBirrLookupRotationEnabled
+      ? {
+          INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true',
+          INTERNAL_OWNER_CBE_BIRR_LOOKUP_ROTATION_ENABLED: 'true',
+          OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: cbeBirrLookupEncryptionMaster,
+          OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: cbeBirrLookupFingerprintMaster,
+          OWNER_CBE_BIRR_LOOKUP_PROFILE: cbeBirrLookupMasterProfile,
+        }
+      : {}),
     ...(devicePairingConfigured
       ? { OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01' }
       : {}),
@@ -2286,6 +2318,177 @@ describe('Owner-control HTTP boundary', () => {
       expect(response.statusCode).toBe(400);
     }
     expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('does not expose the CBE Birr lookup-protected receiver route by default', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime(),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/cbe-birr-receiver-lookup/rotate-v2',
+      headers: cbeBirrLookupRotationHeaders(),
+      payload: {},
+    });
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('requires a CBE Birr lookup-protected receiver adapter when explicitly enabled', () => {
+    expect(() =>
+      buildOwnerControlApp(config(false, false, 'staging', false, true), {
+        fetch: verifiedAuthFetch(),
+        runtime: runtime(),
+      }),
+    ).toThrow('The Owner CBE Birr lookup rotation adapter is unavailable.');
+  });
+
+  it('accepts a bounded authenticated CBE Birr lookup-protected receiver request', async () => {
+    const receiverRevisionId = '66666666-6666-4666-8666-666666666666';
+    const receiver = {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReferenceMasked: '***7494',
+      activeFrom: '2026-10-17T12:00:00.000Z',
+      lookupProtected: true as const,
+      providerCode: 'cbe_birr' as const,
+      receiverRevisionId,
+      receiverStatus: 'active' as const,
+      revision: 2,
+      rotationReason: 'protection_upgrade' as const,
+    };
+    let observed: unknown;
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        cbeBirrLookupRotation: {
+          rotate: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            observed = request;
+            return receiver;
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/cbe-birr-receiver-lookup/rotate-v2',
+      headers: cbeBirrLookupRotationHeaders(),
+      payload: {
+        accountHolderName: 'FetanAgent Receiver',
+        accountReference: '251944477494',
+        confirmation: 'owner_confirmed_cbe_birr_lookup_rotation_v2',
+        receiverRevisionId,
+        receiverVersion: 2,
+        requestId: pilotRequestId,
+        rotationReason: 'protection_upgrade',
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(observed).toEqual({
+      accountHolderName: 'FetanAgent Receiver',
+      accountReference: '251944477494',
+      receiverRevisionId,
+      receiverVersion: 2,
+      requestId: pilotRequestId,
+      rotationReason: 'protection_upgrade',
+    });
+    expect(response.json()).toEqual({ receiver });
+    expect(response.body).not.toContain('251944477494');
+    await app.close();
+  });
+
+  it('rejects malformed CBE Birr lookup-protected receiver requests before authentication', async () => {
+    let authenticationCalls = 0;
+    let rotationCalls = 0;
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime({
+        cbeBirrLookupRotation: {
+          rotate: async () => {
+            rotationCalls += 1;
+            throw new Error('rotation must not run');
+          },
+        },
+      }),
+    });
+    const base = {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReference: '251944477494',
+      confirmation: 'owner_confirmed_cbe_birr_lookup_rotation_v2',
+      receiverRevisionId: '66666666-6666-4666-8666-666666666666',
+      receiverVersion: 2,
+      requestId: pilotRequestId,
+      rotationReason: 'protection_upgrade',
+    };
+    for (const candidate of [
+      {
+        payload: { ...base, accountReference: '25194447749' },
+        headers: cbeBirrLookupRotationHeaders(),
+      },
+      {
+        payload: { ...base, receiverRevisionId: pilotRequestId },
+        headers: cbeBirrLookupRotationHeaders(),
+      },
+      { payload: { ...base, receiverVersion: 0 }, headers: cbeBirrLookupRotationHeaders() },
+      { payload: { ...base, extra: true }, headers: cbeBirrLookupRotationHeaders() },
+      {
+        payload: base,
+        headers: { ...cbeBirrLookupRotationHeaders(), origin: 'https://evil.example' },
+      },
+      {
+        payload: base,
+        headers: {
+          ...cbeBirrLookupRotationHeaders(),
+          'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+        },
+      },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/cbe-birr-receiver-lookup/rotate-v2',
+        headers: candidate.headers,
+        payload: candidate.payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    expect(rotationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('does not expose the submitted CBE Birr phone when the private rotation is unavailable', async () => {
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        cbeBirrLookupRotation: {
+          rotate: async () => {
+            throw new Error('permission denied');
+          },
+        },
+      }),
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/cbe-birr-receiver-lookup/rotate-v2',
+      headers: cbeBirrLookupRotationHeaders(),
+      payload: {
+        accountHolderName: 'FetanAgent Receiver',
+        accountReference: '251944477494',
+        confirmation: 'owner_confirmed_cbe_birr_lookup_rotation_v2',
+        receiverRevisionId: '66666666-6666-4666-8666-666666666666',
+        receiverVersion: 2,
+        requestId: pilotRequestId,
+        rotationReason: 'protection_upgrade',
+      },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ error: 'owner_control_unavailable' });
+    expect(response.body).not.toContain('251944477494');
     await app.close();
   });
 

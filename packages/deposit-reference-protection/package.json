@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./internal/cbe-birr-receiver-rotation": {
+      "types": "./dist/cbe-birr-receiver-rotation.d.ts",
+      "default": "./dist/cbe-birr-receiver-rotation.js"
     }
   },
   "scripts": {

@@ -36,6 +36,7 @@ import {
   createCompanionPlayerValidationWorker,
   runCompanionPlayerValidationWorker,
   type CompanionPlayerValidationWorkerEvent,
+  type CompanionPlayerValidationTimingEvent,
 } from './lookup-worker.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
@@ -344,7 +345,13 @@ describe('dormant Windows companion single-Player validation worker', () => {
     const value = runtimeFixture();
     const controller = new AbortController();
     const reports = reporter(controller);
-    const executeSingleLookup = vi.fn(async () => 'found' as const);
+    const timings: CompanionPlayerValidationTimingEvent[] = [];
+    const executeSingleLookup = vi.fn(
+      async (_id: string, observe?: (stage: 'provider_response', elapsedMs: number) => void) => {
+        observe?.('provider_response', 12);
+        return 'found' as const;
+      },
+    );
     const fetchImplementation = vi.fn(async (input: string | URL | Request) => {
       const endpoint = String(input);
       if (endpoint.endsWith(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH)) {
@@ -361,13 +368,14 @@ describe('dormant Windows companion single-Player validation worker', () => {
       session: { executeSingleLookup },
       signal: controller.signal,
       report: reports.report,
+      reportTiming: (event) => timings.push(event),
       fetch: fetchImplementation as unknown as typeof fetch,
       now: () => new Date(now),
       pollIntervalMs: 100,
       protector: protector(),
     });
     expect(executeSingleLookup).toHaveBeenCalledOnce();
-    expect(executeSingleLookup).toHaveBeenCalledWith(playerId);
+    expect(executeSingleLookup).toHaveBeenCalledWith(playerId, expect.any(Function));
     expect(fetchImplementation).toHaveBeenCalledTimes(2);
     expect(reports.events.map(({ state }) => state)).toEqual([
       'assignment_verified',
@@ -376,6 +384,12 @@ describe('dormant Windows companion single-Player validation worker', () => {
     ]);
     expect(reports.events[1]?.outcome).toBe('found');
     expect(JSON.stringify(reports.events)).not.toContain(playerId);
+    expect(timings.map((event) => event.stage)).toEqual([
+      'assignment_poll',
+      'provider_response',
+      'result_submit',
+    ]);
+    expect(JSON.stringify(timings)).not.toContain(playerId);
     expect(await readdir(join(root, 'device'))).toEqual([]);
   });
 

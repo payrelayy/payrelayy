@@ -43,6 +43,7 @@ import {
   runCompanionPlayerValidationWorker,
   type CompanionLookupWorkerEvent,
   type CompanionPlayerValidationWorkerEvent,
+  type CompanionPlayerValidationTimingEvent,
 } from './lookup-worker.js';
 import {
   createRoutineDepositHttpStore,
@@ -193,6 +194,21 @@ function reportPlayerValidation(event: CompanionPlayerValidationWorkerEvent): vo
       event: 'single_player_validation_state_changed',
       state: event.state,
       ...(event.outcome === undefined ? {} : { outcome: event.outcome }),
+      detailsRedacted: true,
+      identifiersRedacted: true,
+      transferDisabled: true,
+      moneyMoved: false,
+    }),
+  );
+}
+
+function reportPlayerValidationTiming(event: CompanionPlayerValidationTimingEvent): void {
+  console.info(
+    JSON.stringify({
+      component: 'fetanagent_windows_companion',
+      event: 'single_player_validation_stage_timing',
+      stage: event.stage,
+      elapsedMs: event.elapsedMs,
       detailsRedacted: true,
       identifiersRedacted: true,
       transferDisabled: true,
@@ -420,6 +436,7 @@ export async function runWindowsCompanion(): Promise<void> {
               session,
               signal: lookupAbort.signal,
               report: reportPlayerValidation,
+              reportTiming: reportPlayerValidationTiming,
             }),
           );
         }
@@ -444,6 +461,7 @@ export async function runWindowsCompanion(): Promise<void> {
                 session,
                 signal: lookupAbort.signal,
                 report: reportPlayerValidation,
+                reportTiming: reportPlayerValidationTiming,
               })
             : undefined;
           const queue = startRoutineDepositQueue({

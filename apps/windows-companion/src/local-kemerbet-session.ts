@@ -28,6 +28,7 @@ import {
   executeExactFiveLocalKemerBetLookup,
   executeSingleLocalKemerBetLookup,
   type LocalKemerBetLookupOutcome,
+  type LocalKemerBetLookupTiming,
 } from './local-kemerbet-lookup.js';
 import { scanRoutineKemerBetHistory, type RoutineHistoryScan } from './routine-kemerbet-history.js';
 import {
@@ -85,7 +86,10 @@ export interface LocalKemerBetSession {
   readonly done: Promise<void>;
   readonly verified: Promise<boolean>;
   isSignedInVerified(): boolean;
-  executeSingleLookup(playerId: string): Promise<LocalKemerBetLookupOutcome>;
+  executeSingleLookup(
+    playerId: string,
+    observe?: LocalKemerBetLookupTiming,
+  ): Promise<LocalKemerBetLookupOutcome>;
   executeExactFiveLookup(
     playerIds: ExactFivePlayerIds,
   ): Promise<
@@ -627,7 +631,7 @@ export async function startLocalKemerBetSession(
       !reviewPaused &&
       signedInVerified &&
       phase === 'signed_in_read_only',
-    async executeSingleLookup(playerId: string) {
+    async executeSingleLookup(playerId: string, observe?: LocalKemerBetLookupTiming) {
       const page = localPage;
       if (
         terminal ||
@@ -641,7 +645,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
-        return await executeSingleLocalKemerBetLookup(page, playerId, lookupAuthorization);
+        return await executeSingleLocalKemerBetLookup(page, playerId, lookupAuthorization, observe);
       } finally {
         lookupAuthorization.clear();
         operationInProgress = false;

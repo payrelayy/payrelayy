@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { decideLocalKemerBetRequest, isLocalKemerBetProviderUrl } from './request-guard.js';
+import { routineHistoryReadAuthorization } from './routine-kemerbet-history.js';
 
 describe('local KemerBet request guard', () => {
   it('allows only the exact provider login mutation during manual sign-in', () => {
@@ -109,11 +110,10 @@ describe('local KemerBet request guard', () => {
   });
 
   it('opens only the bounded deposit-history read during an explicit reconciliation scan', () => {
-    const historyAuthorization = {
-      playerId: '28379330',
-      from: '2026-10-12T18:32:00.000Z',
-      to: '2026-10-12T18:35:00.000Z',
-    } as const;
+    const historyAuthorization = routineHistoryReadAuthorization('28379330', {
+      from: '2026-10-12T18:33:14.000000Z',
+      until: '2026-10-12T18:33:14.999999Z',
+    });
     const query = new URLSearchParams([
       ['page', '1'],
       ['limit', '10'],

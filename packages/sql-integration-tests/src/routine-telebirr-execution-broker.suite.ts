@@ -11,6 +11,7 @@ const commandSignature =
   'app.execute_agent_platform_routine_deposit_command(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,jsonb)';
 const historyCommandSignature =
   'app.execute_agent_platform_routine_deposit_history_confirmation(text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,text,text,jsonb)';
+const historyWindowSignature = 'app.routine_telebirr_pending_history_window(uuid,uuid)';
 const digest = (seed = randomUUID()): string =>
   `sha256:${createHash('sha256').update(seed, 'utf8').digest('hex')}`;
 
@@ -202,7 +203,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
   createRuntimeClient: (password: string) => Client,
 ): void {
   describe('routine TeleBirr execution broker', () => {
-    it('is dormant after migration and exposes only the two hardened routine commands', async () => {
+    it('is dormant after migration and exposes only three hardened routine functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         rolcanlogin: boolean;
@@ -294,6 +295,29 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
           hardened: true,
         },
       ]);
+      const windowPrivileges = await client.query<{
+        broker_execute: boolean;
+        runtime_execute: boolean;
+        public_execute: boolean;
+        hardened: boolean;
+      }>(
+        `select
+        has_function_privilege($1::text, $3::text, 'execute') as broker_execute,
+        has_function_privilege($2::text, $3::text, 'execute') as runtime_execute,
+        has_function_privilege('public', $3::text, 'execute') as public_execute,
+        (select procedure.prosecdef and procedure.proowner = 'postgres'::regrole
+          and procedure.proconfig = array['search_path=pg_catalog']::text[]
+          from pg_proc procedure where procedure.oid = $3::regprocedure) as hardened`,
+        [brokerRole, runtimeRole, historyWindowSignature],
+      );
+      expect(windowPrivileges.rows).toEqual([
+        {
+          broker_execute: true,
+          runtime_execute: false,
+          public_execute: false,
+          hardened: true,
+        },
+      ]);
       const ledgers = await client.query<{
         relforcerowsecurity: boolean;
         relname: string;
@@ -357,7 +381,7 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
                end
             ) as relation_privileges
         `);
-        expect(runtimeSurface.rows).toEqual([{ callable_functions: 2, relation_privileges: 0 }]);
+        expect(runtimeSurface.rows).toEqual([{ callable_functions: 3, relation_privileges: 0 }]);
         const command = leaseCommand(policy.accountId);
         const first = await execute(runtime, certificate, command);
         expect(first.result).toBeNull();
@@ -511,6 +535,30 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         expect(
           (await execute(runtime, certificate, boundCommand(command, 'reconcile', binding))).result,
         ).toEqual({ outcome: 'pending' });
+
+        const fencedWindow = await client.query<{ from: string; until: string }>(
+          `select
+             to_char(attempt.final_action_fenced_at at time zone 'UTC',
+               'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "from",
+             to_char(attempt.reconciliation_required_at at time zone 'UTC',
+               'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as "until"
+           from app.deposit_execution_attempts attempt where attempt.id = $1::uuid`,
+          [binding.attemptId],
+        );
+        const signedWindow = await runtime.query<{
+          history_window: { from: string; until: string };
+        }>(
+          `select app.routine_telebirr_pending_history_window($1::uuid, $2::uuid)
+             as history_window`,
+          [binding.attemptId, certificate.certificateId],
+        );
+        expect(signedWindow.rows[0]!.history_window).toEqual(fencedWindow.rows[0]);
+        await expect(
+          runtime.query(`select app.routine_telebirr_pending_history_window($1::uuid, $2::uuid)`, [
+            binding.attemptId,
+            randomUUID(),
+          ]),
+        ).rejects.toThrow('activation is unavailable');
 
         const matchedHistory = await client.query<{ matched_at: string }>(
           `select to_char(

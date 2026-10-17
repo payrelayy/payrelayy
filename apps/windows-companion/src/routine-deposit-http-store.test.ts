@@ -29,6 +29,10 @@ const accountId = 'b7cf4f59-4d2f-4e1a-9148-0d07d2d04810';
 const workerInstanceId = 'a2870310-8f08-487c-b1c0-e7dd467ad1dd';
 const signerKeyId = 'routine-execution-key-0001';
 const serverIssuedAt = '2026-10-05T12:00:10.000Z';
+const historyWindow = {
+  from: '2026-10-05T12:00:00.000000Z',
+  until: '2026-10-05T12:00:01.000000Z',
+} as const;
 const leaseBinding = {
   jobId: '11111111-1111-4111-8111-111111111111',
   intentId: '22222222-2222-4222-8222-222222222222',
@@ -95,7 +99,7 @@ function fixture(tamperSignature = false, returnLease = false) {
           : command.operation === 'record_dispatch' || command.operation === 'complete'
             ? command.binding
             : command.operation === 'reconcile'
-              ? { outcome: 'pending' }
+              ? { outcome: 'pending', historyWindow }
               : null;
     const body = decodeRoutineDepositResponseBody({
       contractVersion: ROUTINE_DEPOSIT_CONTRACT_VERSION,
@@ -169,7 +173,10 @@ describe('routine deposit HTTP store', () => {
         exactPlayerCreditMatch: true,
       }),
     ).resolves.toBeUndefined();
-    await expect(selected.store.reconcile(lease)).resolves.toEqual({ outcome: 'pending' });
+    await expect(selected.store.reconcile(lease)).resolves.toEqual({
+      outcome: 'pending',
+      historyWindow,
+    });
     await expect(
       selected.store.completeConfirmed(lease, '55555555-5555-4555-8555-555555555555'),
     ).resolves.toMatchObject({ attemptId: lease.attemptId });
@@ -309,7 +316,10 @@ describe('routine deposit HTTP store', () => {
       new Response('private-provider-response', { status: 503 }),
     );
 
-    await expect(selected.store.reconcile(leaseBinding)).resolves.toEqual({ outcome: 'pending' });
+    await expect(selected.store.reconcile(leaseBinding)).resolves.toEqual({
+      outcome: 'pending',
+      historyWindow,
+    });
     expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
     expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
     expect(selected.fetchImplementation.mock.calls[0]?.[1]?.body).toBe(

@@ -12,6 +12,11 @@ import {
   type RoutineDepositReconciliation,
 } from './routine-deposit-worker.js';
 
+const historyWindow = {
+  from: '2026-10-12T18:33:14.000000Z',
+  until: '2026-10-12T18:33:14.999999Z',
+} as const;
+
 const NOW = 1_800_000_000_000;
 const policy: RoutineDepositPolicy = Object.freeze({
   mode: 'routine_production',
@@ -173,8 +178,8 @@ describe('routine production serial deposit worker', () => {
   it('does not confuse HTTP submission success with credit confirmation', async () => {
     const { worker, store, session } = fixture();
     store.reconcile
-      .mockResolvedValueOnce({ outcome: 'pending' })
-      .mockResolvedValueOnce({ outcome: 'pending' });
+      .mockResolvedValueOnce({ outcome: 'pending', historyWindow })
+      .mockResolvedValueOnce({ outcome: 'pending', historyWindow });
     expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
     expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
     expect(await worker.runOnce()).toEqual({ status: 'completed' });
@@ -186,7 +191,7 @@ describe('routine production serial deposit worker', () => {
 
   it('confirms exactly one approved history row after dispatch without a second Transfer', async () => {
     const { worker, store, session, lease } = fixture();
-    store.reconcile.mockResolvedValueOnce({ outcome: 'pending' });
+    store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
     session.scanRoutineDepositHistory.mockResolvedValueOnce({
       outcome: 'exact_match',
       observation: {
@@ -204,6 +209,7 @@ describe('routine production serial deposit worker', () => {
     expect(session.scanRoutineDepositHistory).toHaveBeenCalledWith(
       lease.playerId,
       lease.amountMinor,
+      historyWindow,
     );
     expect(store.confirmHistory).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch.mock.invocationCallOrder[0]).toBeLessThan(
@@ -216,7 +222,7 @@ describe('routine production serial deposit worker', () => {
 
   it('pauses an ambiguous history without crediting or retrying Transfer', async () => {
     const { worker, store, session } = fixture();
-    store.reconcile.mockResolvedValueOnce({ outcome: 'pending' });
+    store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
     session.scanRoutineDepositHistory.mockResolvedValueOnce({ outcome: 'ambiguous' });
     expect(await worker.runOnce()).toEqual({
       status: 'paused',
@@ -229,7 +235,7 @@ describe('routine production serial deposit worker', () => {
 
   it('pauses after three unreadable history scans without retrying Transfer', async () => {
     const { worker, store, session } = fixture();
-    store.reconcile.mockResolvedValue({ outcome: 'pending' });
+    store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
     session.scanRoutineDepositHistory.mockRejectedValue(new Error('history unavailable'));
     expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
     expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });

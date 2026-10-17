@@ -20,6 +20,12 @@ const config = {
     user: 'fetanagent_owner_control_runtime',
   },
   companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
+  cbeBirrLookupKeyMaterial: {
+    configured: false,
+    encryptionSecret: undefined,
+    fingerprintSecret: undefined,
+    masterProfile: undefined,
+  },
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   routineEnrollmentReceiptSigner: {
     signerKeyId: undefined,

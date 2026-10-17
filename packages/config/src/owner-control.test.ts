@@ -19,6 +19,8 @@ const poolerDatabaseUrl = `postgresql://${OWNER_CONTROL_DATABASE_POOLER_RUNTIME_
 const publishableKey = 'sb_publishable_test_key_for_staging_only';
 const receiverReferenceEncryptionMaster = 'c'.repeat(64);
 const receiverReferenceFingerprintMaster = 'd'.repeat(64);
+const cbeBirrLookupEncryptionMaster = 'e'.repeat(64);
+const cbeBirrLookupFingerprintMaster = 'f'.repeat(64);
 const receiverReferenceProfile = JSON.stringify({
   encryptionMasterFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from(receiverReferenceEncryptionMaster, 'hex'))
@@ -26,6 +28,16 @@ const receiverReferenceProfile = JSON.stringify({
   fingerprintMasterFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from(receiverReferenceFingerprintMaster, 'hex'))
     .digest('hex')}`,
+  version: 2,
+});
+const cbeBirrLookupProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeBirrLookupEncryptionMaster, 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeBirrLookupFingerprintMaster, 'hex'))
+    .digest('hex')}`,
+  purpose: 'cbe_birr_receiver_lookup',
   version: 2,
 });
 
@@ -70,6 +82,7 @@ describe('Owner-control configuration', () => {
   it('accepts only the exact staging project, dedicated role, pinned database routes, and verify-full URL', () => {
     expect(loadOwnerControlConfig(enabledEnvironment()).runtime).toMatchObject({
       enabled: true,
+      cbeBirrLookupKeyMaterial: { configured: false },
       companionDevicePairing: { serverSignerKeyId: undefined, configured: false },
       devicePairing: { assignmentSignerKeyId: undefined, configured: false },
       deploymentTarget: 'staging',
@@ -109,6 +122,81 @@ describe('Owner-control configuration', () => {
         loadOwnerControlConfig({ ...enabledEnvironment(), OWNER_CONTROL_DATABASE_URL: unsafe }),
       ).toThrow();
     }
+  });
+
+  it('keeps the separate CBE Birr lookup keys default-off and rejects reuse or profile drift', () => {
+    const unreadEnvironment = new Proxy(enabledEnvironment(), {
+      get(target, property, receiver) {
+        if (typeof property === 'string' && property.startsWith('OWNER_CBE_BIRR_LOOKUP_')) {
+          throw new Error('Default-off lookup keys were read.');
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(loadOwnerControlConfig(unreadEnvironment).runtime).toMatchObject({
+      cbeBirrLookupKeyMaterial: { configured: false },
+    });
+    const enabled = {
+      ...enabledEnvironment(),
+      INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true',
+      OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: cbeBirrLookupEncryptionMaster,
+      OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: cbeBirrLookupFingerprintMaster,
+      OWNER_CBE_BIRR_LOOKUP_PROFILE: cbeBirrLookupProfile,
+    };
+    const configured = loadOwnerControlConfig(enabled);
+    expect(configured.runtime).toMatchObject({
+      cbeBirrLookupKeyMaterial: {
+        configured: true,
+        encryptionSecret: cbeBirrLookupEncryptionMaster,
+        fingerprintSecret: cbeBirrLookupFingerprintMaster,
+        masterProfile: { purpose: 'cbe_birr_receiver_lookup', version: 2 },
+      },
+    });
+    const redacted = JSON.stringify(redactedOwnerControlConfigForLog(configured));
+    expect(redacted).toContain('"cbeBirrLookupKeyMaterialConfigured":true');
+    for (const secret of [
+      cbeBirrLookupEncryptionMaster,
+      cbeBirrLookupFingerprintMaster,
+      receiverReferenceEncryptionMaster,
+      receiverReferenceFingerprintMaster,
+    ]) {
+      expect(redacted).not.toContain(secret);
+    }
+    for (const override of [
+      { OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: receiverReferenceEncryptionMaster },
+      { OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: receiverReferenceFingerprintMaster },
+      { OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: receiverReferenceFingerprintMaster },
+      { OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: cbeBirrLookupEncryptionMaster },
+      { OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: 'short' },
+    ]) {
+      expect(() => loadOwnerControlConfig({ ...enabled, ...override })).toThrow(
+        'missing, malformed, or reused',
+      );
+    }
+    for (const override of [
+      { OWNER_CBE_BIRR_LOOKUP_PROFILE: undefined },
+      { OWNER_CBE_BIRR_LOOKUP_PROFILE: receiverReferenceProfile },
+      {
+        OWNER_CBE_BIRR_LOOKUP_PROFILE: JSON.stringify({
+          ...JSON.parse(cbeBirrLookupProfile),
+          encryptionMasterFingerprint: `sha256:${'0'.repeat(64)}`,
+        }),
+      },
+    ]) {
+      expect(() => loadOwnerControlConfig({ ...enabled, ...override })).toThrow();
+    }
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabled,
+        OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: '/tmp/duplicate-profile.json',
+      }),
+    ).toThrow('mutually exclusive');
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabled,
+        INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'yes',
+      }),
+    ).toThrow('INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED');
   });
 
   it('binds the exact production Auth and database routes only when production is explicit', () => {
@@ -286,8 +374,11 @@ describe('Owner-control configuration', () => {
       '/run/secrets/owner_control_supabase_publishable_key': `${publishableKey}\n`,
       '/run/secrets/owner_receiver_reference_encryption_master': `${receiverReferenceEncryptionMaster}\n`,
       '/run/secrets/owner_receiver_reference_fingerprint_master': `${receiverReferenceFingerprintMaster}\n`,
+      '/run/secrets/owner_cbe_birr_lookup_encryption_master': `${cbeBirrLookupEncryptionMaster}\n`,
+      '/run/secrets/owner_cbe_birr_lookup_fingerprint_master': `${cbeBirrLookupFingerprintMaster}\n`,
       '/run/secrets/owner_routine_enrollment_signer_pkcs8': `${routineSignerKey}\n`,
       '/etc/fetanagent/deposit-proof-reference-profile.v2.json': receiverReferenceProfile,
+      '/etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json': cbeBirrLookupProfile,
     };
     const config = loadOwnerControlConfig(
       {
@@ -319,5 +410,49 @@ describe('Owner-control configuration', () => {
     expect(
       config.runtime.enabled && config.runtime.receiverReferenceProtection.masterProfile.version,
     ).toBe(2);
+    const cbeProductionEnvironment: NodeJS.ProcessEnv = {
+      NODE_ENV: 'production',
+      INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true',
+      INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true',
+      OWNER_CONTROL_DEPLOYMENT_TARGET: 'staging',
+      OWNER_CONTROL_DATABASE_URL_FILE: '/run/secrets/owner_control_database_url',
+      OWNER_CONTROL_SUPABASE_URL: `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
+      OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:
+        '/run/secrets/owner_control_supabase_publishable_key',
+      OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE:
+        '/run/secrets/owner_receiver_reference_encryption_master',
+      OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE:
+        '/run/secrets/owner_receiver_reference_fingerprint_master',
+      OWNER_RECEIVER_REFERENCE_PROFILE_FILE:
+        '/etc/fetanagent/deposit-proof-reference-profile.v2.json',
+      OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE:
+        '/run/secrets/owner_cbe_birr_lookup_encryption_master',
+      OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE:
+        '/run/secrets/owner_cbe_birr_lookup_fingerprint_master',
+      OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE:
+        '/etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json',
+    };
+    const cbeConfigured = loadOwnerControlConfig(cbeProductionEnvironment, {
+      readSecretFile: (path) => values[path] ?? '',
+    });
+    expect(cbeConfigured.runtime).toMatchObject({
+      cbeBirrLookupKeyMaterial: { configured: true },
+    });
+    expect(JSON.stringify(redactedOwnerControlConfigForLog(cbeConfigured))).not.toContain(
+      cbeBirrLookupEncryptionMaster,
+    );
+    for (const override of [
+      { OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE: '/tmp/lookup-secret' },
+      { OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE: '/tmp/lookup-secret' },
+      { OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: '/tmp/lookup-profile.json' },
+      { OWNER_CBE_BIRR_LOOKUP_PROFILE: cbeBirrLookupProfile },
+    ]) {
+      expect(() =>
+        loadOwnerControlConfig(
+          { ...cbeProductionEnvironment, ...override },
+          { readSecretFile: (path) => values[path] ?? '' },
+        ),
+      ).toThrow();
+    }
   });
 });

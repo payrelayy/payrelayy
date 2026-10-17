@@ -3,9 +3,11 @@
 # This file intentionally has no published ports, mounted filesystems, environment-file loading,
 # secrets, or Docker socket access. Its database hostname is resolvable only on the internal
 # Compose network and the entire project is removed by scripts/run-sql-integration.mjs.
+# Use the official Docker Hub manifests at the same immutable digests as the
+# former ECR mirror, which can reject CI pulls with a registry data-limit error.
 services:
   postgres:
-    image: public.ecr.aws/docker/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    image: docker.io/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
     platform: linux/amd64
     environment:
       POSTGRES_DB: postgres
@@ -25,7 +27,7 @@ services:
       - sql_integration
 
   staging-ledger-postgres:
-    image: public.ecr.aws/docker/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
+    image: docker.io/library/postgres:17.4-alpine@sha256:0ae695e3d11c7cc82cbed8f3e506233f18cdd40e3fc7622893f6a4d0772a5a09
     platform: linux/amd64
     environment:
       POSTGRES_DB: postgres

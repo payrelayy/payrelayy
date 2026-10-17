@@ -419,6 +419,10 @@ export function registerTelegramPlayerValidationStateSqlTests(
           'select app.complete_telegram_player_validation_assignment($1::text,$2::jsonb)',
           [assignment.bodyDigest, assignment],
         );
+        // Production activates this dedicated login after pairing. The
+        // disposable catalog keeps it NOLOGIN unless a test opts in.
+        await client.query('alter role fetanagent_companion_device_bridge_runtime login');
+        await client.query('savepoint signed_find');
         await client.query('set session authorization fetanagent_companion_device_bridge_runtime');
         let selected: readonly {
           accepted: boolean;
@@ -427,8 +431,12 @@ export function registerTelegramPlayerValidationStateSqlTests(
         }[];
         try {
           selected = await accept(client, assignment, resultEnvelope(assignment, 'found'), true);
-        } finally {
           await client.query('reset session authorization');
+          await client.query('release savepoint signed_find');
+        } catch (error) {
+          await client.query('rollback to savepoint signed_find');
+          await client.query('release savepoint signed_find');
+          throw error;
         }
         expect(selected).toEqual([
           { accepted: true, replayed: false, finalization_state: 'selected' },

@@ -26,7 +26,6 @@ record the result in one database transaction.
 | `v2.cbe_birr` protected submitted-reference envelopes                  | `packages/deposit-reference-protection`             |
 | v2 receiver lookup envelopes and Owner rotation (PR #831)              | `cbe_birr_receiver_lookup_revisions`, Owner app     |
 | Bot CBE receipt detection and reference extraction from text and links | `apps/bot/src/telegram-deposit-proof-input.ts`      |
-| Feature switch `cbe_birr_authoritative_verification`                   | `app.feature_switches` (disabled)                   |
 
 ## Target flow
 
@@ -57,13 +56,13 @@ Each pull request is independently reviewable, ships default-off, keeps the mone
 and must pass `pnpm test`, `pnpm lint`, and the disposable SQL integration suite.
 
 1. **Plan** (this document).
-2. **Candidate and verification ledger (database).** `app.routine_cbe_birr_candidates` (protected
-   reference, Player, receiver revision snapshot, instruction window, lease state) and immutable
-   `app.routine_cbe_birr_verification_results`. A dedicated `NOLOGIN` verifier group and runtime
-   role with exactly three security-definer functions: lease, record result, and release after a
-   transient provider failure. Candidates can only be recorded while
-   `cbe_birr_authoritative_verification` is `dry_run` or `live`; in this pull request a verified
-   result is recorded only, never settled.
+2. **Candidate and verification ledger (database).** A CBE-only processing control that starts
+   disabled, `app.routine_cbe_birr_candidates` (protected reference, Player, receiver revision
+   snapshot, lease state), and immutable `app.routine_cbe_birr_verification_results`. A dedicated
+   `NOLOGIN` verifier group and runtime role with exactly three security-definer functions:
+   lease, record result, and release after a transient provider failure. Every server-owned
+   fact is rechecked in PostgreSQL. In this pull request a verified result is a dry-run record
+   only, never settled.
 3. **Verifier service.** A new `apps/cbe-birr-verifier` that composes the existing transport,
    parser, and time-window check with a pure, exhaustively tested decision function. It holds
    only a CBE-scoped reference-opening child key and the receiver-lookup decryption key, has a
@@ -74,9 +73,9 @@ and must pass `pnpm test`, `pnpm lint`, and the disposable SQL integration suite
    update for the Player-action role.
 5. **Owner visibility.** CBE Birr results and review queue, and a dashboard control for the
    lookup-protected receiver rotation from PR #831.
-6. **Shadow run (no money).** With `cbe_birr_authoritative_verification = dry_run`, real CBE
-   receipts are verified end to end and recorded, but nothing is claimed or credited. The Owner
-   compares each result with the CBE app before continuing.
+6. **Shadow run (no money).** With the CBE processing control in `dry_run`, real CBE receipts
+   are verified end to end and recorded, but nothing is claimed or credited. The Owner compares
+   each result with the CBE app before continuing.
 7. **Settlement and execution lane.** A separate CBE Birr Owner processing authorization and stop,
    atomic claim-to-job settlement for verified results, a CBE execution binding, and a narrow
    broker change so the existing signed lease can also serve CBE Birr jobs. This is the only
@@ -96,6 +95,9 @@ and must pass `pnpm test`, `pnpm lint`, and the disposable SQL integration suite
   payment-claim boundary in PostgreSQL.
 - Provider outages, layout drift, minute-precision times that straddle a cutoff, and every
   ambiguous field go to review, never to automatic credit or a blind retry.
+- CBE Birr has its own processing control. It does not use the shared
+  `cbe_birr_authoritative_verification` feature switch, because many existing TeleBirr and
+  Companion boundaries require that switch to stay disabled.
 - Stopping CBE Birr does not stop TeleBirr, and vice versa. Either provider's emergency stop
   leaves already-fenced KemerBet attempts in reconciliation.
 - No raw reference, receiver phone, receipt bytes, or Player ID is logged.

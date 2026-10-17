@@ -156,10 +156,23 @@ describe('local KemerBet request guard', () => {
         historyAuthorization,
       ),
     ).toEqual({ action: 'allow', reason: 'provider_read' });
-    const filteredUrl = url
-      .replace('playerExternalId=', 'playerExternalId=28379330')
-      .replace('2026-10-01T00%3A00%3A00.000Z', '2026-10-12T18%3A32%3A00.000Z')
-      .replace('2026-10-13T00%3A00%3A00.000Z', '2026-10-12T18%3A35%3A00.000Z');
+    // Captured from KemerBet's read-only History Apply action. It is not the same key order or
+    // field set as the page's initial unfiltered request.
+    const filteredQuery = new URLSearchParams([
+      ['page', '1'],
+      ['limit', '10'],
+      ['orderBy', 'CreatedAt'],
+      ['orderDirection', '2'],
+      ['transactionId', ''],
+      ['walletTransactionId', ''],
+      ['playerExternalId', '28379330'],
+      ['paymentType', ''],
+      ['state', ''],
+      ['from', '2026-10-12T18:32:00.000Z'],
+      ['to', '2026-10-12T18:35:00.000Z'],
+      ['userNameOrId', ''],
+    ]).toString();
+    const filteredUrl = `https://admin-api.agt-digi.com/Transaction/DepositHistory?${filteredQuery}`;
     expect(
       decideLocalKemerBetRequest(
         'GET',
@@ -172,11 +185,36 @@ describe('local KemerBet request guard', () => {
       action: 'allow',
       reason: 'provider_read',
     });
+    for (const permitted of [
+      ['OPTIONS', filteredUrl],
+      ['GET', filteredUrl.replace('page=1', 'page=2')],
+    ] as const) {
+      expect(
+        decideLocalKemerBetRequest(
+          permitted[0],
+          permitted[1],
+          'signed_in_read_only',
+          undefined,
+          historyAuthorization,
+        ),
+      ).toEqual({ action: 'allow', reason: 'provider_read' });
+    }
     for (const unsafeUrl of [
       filteredUrl.replace('28379330', '28379331'),
       filteredUrl.replace('18%3A32', '18%3A31'),
       filteredUrl.replace('18%3A35', '18%3A36'),
+      filteredUrl.replace('page=1', 'page=21'),
       `${filteredUrl}&amount=25`,
+      `${filteredUrl}&createdAtFrom=`,
+      filteredUrl.replace(
+        'transactionId=&walletTransactionId=',
+        'walletTransactionId=&transactionId=',
+      ),
+      filteredUrl.replace('userNameOrId=', 'userNameOrId=another-agent'),
+      url
+        .replace('playerExternalId=', 'playerExternalId=28379330')
+        .replace('2026-10-01T00%3A00%3A00.000Z', '2026-10-12T18%3A32%3A00.000Z')
+        .replace('2026-10-13T00%3A00%3A00.000Z', '2026-10-12T18%3A35%3A00.000Z'),
     ]) {
       expect(
         decideLocalKemerBetRequest(

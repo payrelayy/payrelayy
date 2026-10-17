@@ -350,11 +350,13 @@ export async function startLocalKemerBetSession(
           // A refused notification or other unapproved request must not destroy the login
           // window. Its network operation stays blocked while the owner retains visible feedback.
           report({
-            state: signedInVerified
-              ? 'signed_in_verified'
-              : signedInCandidate
-                ? 'signed_in_candidate'
-                : 'login_required',
+            state: reviewPaused
+              ? 'review_paused'
+              : signedInVerified
+                ? 'signed_in_verified'
+                : signedInCandidate
+                  ? 'signed_in_candidate'
+                  : 'login_required',
             transferDisabled: true,
             detailsRedacted: true,
             reason,

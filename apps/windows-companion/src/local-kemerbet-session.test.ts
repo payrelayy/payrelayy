@@ -410,6 +410,13 @@ describe('local KemerBet enrollment session', () => {
     page.navigate(LOGIN_URL);
     page.navigate(AGENTS_URL);
     await settleIdentityVerification();
+    const blockedAfterSignIn = await context.dispatch(DEPOSIT_URL, 'POST');
+    expect(blockedAfterSignIn.abort).toHaveBeenCalledTimes(1);
+    expect(blockedAfterSignIn.fetch).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({
+      state: 'review_paused',
+      reason: 'mutation_attempt_blocked',
+    });
     await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
     expect(context.close).not.toHaveBeenCalled();
     expect(page.reload).not.toHaveBeenCalled();

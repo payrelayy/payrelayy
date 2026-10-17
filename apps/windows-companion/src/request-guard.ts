@@ -38,6 +38,11 @@ export function isLocalKemerBetProviderUrl(url: URL): boolean {
 }
 
 export type LocalKemerBetGuardPhase = 'manual_login' | 'signed_in_read_only';
+export interface RoutineHistoryReadAuthorization {
+  readonly playerId: string;
+  readonly from: string;
+  readonly to: string;
+}
 export type LocalKemerBetRequestDecision =
   | {
       readonly action: 'allow';
@@ -73,7 +78,7 @@ export function decideLocalKemerBetRequest(
   rawUrl: string,
   phase: LocalKemerBetGuardPhase,
   approvedLookupPlayerId?: string,
-  approvedHistoryRead = false,
+  approvedHistoryRead?: RoutineHistoryReadAuthorization,
 ): LocalKemerBetRequestDecision {
   const method = methodCandidate.toUpperCase();
   let url: URL;
@@ -148,11 +153,17 @@ export function decideLocalKemerBetRequest(
         'transactionId',
         'walletTransactionId',
         'paymentType',
-        'playerExternalId',
         'state',
         'createdAtFrom',
         'createdAtTo',
       ].every((key) => url.searchParams.get(key) === '') &&
+      // The provider first loads an unfiltered page, then requests the exact player and
+      // narrow time window. Never turn an active reconciliation into arbitrary History access.
+      (url.searchParams.get('playerExternalId') === ''
+        ? url.searchParams.get('page') === '1'
+        : url.searchParams.get('playerExternalId') === approvedHistoryRead.playerId &&
+          url.searchParams.get('from') === approvedHistoryRead.from &&
+          url.searchParams.get('to') === approvedHistoryRead.to) &&
       ['from', 'to'].every((key) => {
         const value = url.searchParams.get(key);
         return (

@@ -1,6 +1,8 @@
 import type { Page, Response } from 'playwright-core';
 import type { RoutineDepositHistoryWindow } from '@fetanagent/agent-platform-companion-execution-contracts';
 
+import type { RoutineHistoryReadAuthorization } from './request-guard.js';
+
 const HISTORY_URL = 'https://agentsystem.admindigi.com/payments/history';
 const HISTORY_API_ORIGIN = 'https://admin-api.agt-digi.com';
 const HISTORY_API_PATH = '/Transaction/DepositHistory';
@@ -150,27 +152,52 @@ function localMinute(ms: number): string {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')} ${String(hour12).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')} ${hours < 12 ? 'AM' : 'PM'}`;
 }
 
+export function routineHistoryReadAuthorization(
+  playerId: string,
+  window: RoutineDepositHistoryWindow,
+): RoutineHistoryReadAuthorization {
+  const fromMs = Date.parse(window?.from ?? '');
+  const untilMs = Date.parse(window?.until ?? '');
+  if (
+    !PLAYER_ID.test(playerId) ||
+    !HISTORY_TIME.test(window?.from ?? '') ||
+    !HISTORY_TIME.test(window?.until ?? '') ||
+    !Number.isSafeInteger(fromMs) ||
+    !Number.isSafeInteger(untilMs) ||
+    fromMs <= 0 ||
+    untilMs < fromMs ||
+    untilMs - fromMs > MAX_HISTORY_WINDOW_MS
+  )
+    throw new Error('The protected history window is invalid.');
+
+  // The History picker has minute precision. Bind the browser allowance to precisely the
+  // same padded window that the scan will select, rather than to an arbitrary Player query.
+  return Object.freeze({
+    playerId,
+    from: new Date(Math.floor(fromMs / 60_000) * 60_000 - 60_000).toISOString(),
+    to: new Date(Math.ceil(untilMs / 60_000) * 60_000 + 60_000).toISOString(),
+  });
+}
+
 async function applyHistoryWindowFilter(
   page: Page,
-  playerId: string,
-  fromMs: number,
-  untilMs: number,
+  authorization: RoutineHistoryReadAuthorization,
 ): Promise<{ readonly from: string; readonly until: string; readonly response: Response }> {
   // KemerBet's picker displays local browser time and sends UTC ISO query parameters.
   // Include one full minute on each side; exact matching below still uses the server fence.
-  const fromMinute = Math.floor(fromMs / 60_000) * 60_000 - 60_000;
-  const untilMinute = Math.ceil(untilMs / 60_000) * 60_000 + 60_000;
-  const from = new Date(fromMinute).toISOString();
-  const until = new Date(untilMinute).toISOString();
+  const fromMinute = Date.parse(authorization.from);
+  const untilMinute = Date.parse(authorization.to);
+  const from = authorization.from;
+  const until = authorization.to;
   await page.locator('.rt--filters-button').click({ timeout: 5_000 });
   const drawer = page.locator('.ant-drawer-content.rt--filters-drawer');
-  await drawer.locator('#playerExternalId').fill(playerId);
+  await drawer.locator('#playerExternalId').fill(authorization.playerId);
   await drawer.locator('input[date-range="start"]').nth(1).fill(localMinute(fromMinute));
   await page.getByRole('button', { name: 'OK', exact: true }).click({ timeout: 5_000 });
   await drawer.locator('input[date-range="end"]').nth(1).fill(localMinute(untilMinute));
   await page.getByRole('button', { name: 'OK', exact: true }).click({ timeout: 5_000 });
   const responsePromise = page.waitForResponse(
-    (response) => isHistoryResponse(response, 1, playerId, from, until),
+    (response) => isHistoryResponse(response, 1, authorization.playerId, from, until),
     { timeout: 15_000 },
   );
   await drawer.getByRole('button', { name: 'Apply' }).click({ timeout: 5_000 });
@@ -203,21 +230,9 @@ export async function scanRoutineKemerBetHistory(
   amountMinor: number,
   window: RoutineDepositHistoryWindow,
 ): Promise<RoutineHistoryScan> {
-  const fromMs = Date.parse(window?.from ?? '');
-  const untilMs = Date.parse(window?.until ?? '');
-  if (
-    !PLAYER_ID.test(playerId) ||
-    !Number.isSafeInteger(amountMinor) ||
-    amountMinor < 2_500 ||
-    amountMinor > 2_500_000 ||
-    !HISTORY_TIME.test(window?.from ?? '') ||
-    !HISTORY_TIME.test(window?.until ?? '') ||
-    !Number.isSafeInteger(fromMs) ||
-    !Number.isSafeInteger(untilMs) ||
-    fromMs <= 0 ||
-    untilMs < fromMs ||
-    untilMs - fromMs > MAX_HISTORY_WINDOW_MS
-  )
+  const authorization = routineHistoryReadAuthorization(playerId, window);
+  const untilMs = Date.parse(window.until);
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 2_500 || amountMinor > 2_500_000)
     throw new Error('The protected history window is invalid.');
 
   const initialResponse = page.waitForResponse((response) => isHistoryResponse(response, 1), {
@@ -226,7 +241,7 @@ export async function scanRoutineKemerBetHistory(
   await page.goto(HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 15_000 });
   await initialResponse;
   if (page.url().split('#')[0] !== HISTORY_URL) throw new Error('KemerBet history redirected.');
-  const filter = await applyHistoryWindowFilter(page, playerId, fromMs, untilMs);
+  const filter = await applyHistoryWindowFilter(page, authorization);
   let expectedTotal: number | undefined;
   let previousOldestMs = Number.POSITIVE_INFINITY;
   const matches: HistoryRow[] = [];

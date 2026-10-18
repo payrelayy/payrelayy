@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import {
-  openCbeBirrReceiverLookup,
+  deriveCbeBirrReceiverLookupChildKey,
   protectCbeBirrReceiverLookup,
+  withOpenedCbeBirrReceiverLookup,
 } from '../../../packages/deposit-reference-protection/dist/cbe-birr-receiver-lookup.js';
 import {
   deriveCbeBirrReceiptPhSelectorCandidate,
@@ -17,6 +19,33 @@ const receiverPhone = '251900000001';
 const encryptionSecret = 'c'.repeat(64);
 const fingerprintSecret = 'd'.repeat(64);
 const nonce = () => Buffer.alloc(12, 8);
+const fingerprint = (secret: string) =>
+  `sha256:${createHash('sha256').update(Buffer.from(secret, 'hex')).digest('hex')}`;
+
+function openingMaterial() {
+  const key = deriveCbeBirrReceiverLookupChildKey({
+    receiverRevisionId,
+    receiverVersion,
+    encryptionSecret,
+  });
+  const root = {
+    encryptionMasterFingerprint: fingerprint(encryptionSecret),
+    fingerprintMasterFingerprint: fingerprint(fingerprintSecret),
+    purpose: 'cbe_birr_receiver_lookup' as const,
+    version: 2 as const,
+  };
+  const profile = {
+    version: 1 as const,
+    providerCode: 'cbe_birr' as const,
+    purpose: 'receiver-lookup-opening' as const,
+    receiverRevisionId,
+    receiverVersion,
+    keyId: key.keyId,
+    rootEncryptionMasterFingerprint: root.encryptionMasterFingerprint,
+    rootFingerprintMasterFingerprint: root.fingerprintMasterFingerprint,
+  };
+  return { key, profile, root };
+}
 
 function lookupInput(phone: string) {
   return {
@@ -39,35 +68,39 @@ describe('offline CBE Birr v2 receiver revision-to-PH compatibility', () => {
       },
       { nonce },
     );
-    const opened = openCbeBirrReceiverLookup({
+    const { key, profile, root } = openingMaterial();
+    const protectedInput = {
       receiverRevisionId,
       receiverVersion,
       ciphertext: protectedReceiver.ciphertext,
       masked: protectedReceiver.masked,
       protectionProfileVersion: protectedReceiver.protectionProfileVersion,
       encryptionKeyVersion: protectedReceiver.encryptionKeyVersion,
-      encryptionSecret,
-    });
-
-    expect(opened).toBe(receiverPhone);
-    expect(isCbeBirrConfiguredReceiverPhoneCandidate(opened)).toBe(true);
-    expect(deriveCbeBirrReceiptPhSelectorCandidate(opened)).toBe('900000001');
-    const parsed = parseLookupInput(lookupInput(opened));
-    expect(parsed?.receiverLookupPhone).toBe(receiverPhone);
-    expect(compileSensitiveRequestPlan(parsed!).pathAndQuery).toBe(
-      '/aureceipt?TID=SYNTHETIC123&PH=900000001',
+    };
+    const pathAndQuery = withOpenedCbeBirrReceiverLookup(
+      protectedInput,
+      key,
+      profile,
+      root,
+      (phone) => {
+        expect(phone).toBe(receiverPhone);
+        expect(isCbeBirrConfiguredReceiverPhoneCandidate(phone)).toBe(true);
+        expect(deriveCbeBirrReceiptPhSelectorCandidate(phone)).toBe('900000001');
+        const parsed = parseLookupInput(lookupInput(phone));
+        expect(parsed?.receiverLookupPhone).toBe(receiverPhone);
+        return compileSensitiveRequestPlan(parsed!).pathAndQuery;
+      },
     );
+    expect(pathAndQuery).toBe('/aureceipt?TID=SYNTHETIC123&PH=900000001');
 
     expect(() =>
-      openCbeBirrReceiverLookup({
-        receiverRevisionId: '123e4567-e89b-42d3-a456-426614174001',
-        receiverVersion,
-        ciphertext: protectedReceiver.ciphertext,
-        masked: protectedReceiver.masked,
-        protectionProfileVersion: protectedReceiver.protectionProfileVersion,
-        encryptionKeyVersion: protectedReceiver.encryptionKeyVersion,
-        encryptionSecret,
-      }),
+      withOpenedCbeBirrReceiverLookup(
+        { ...protectedInput, receiverRevisionId: '123e4567-e89b-42d3-a456-426614174001' },
+        key,
+        profile,
+        root,
+        (phone) => phone.slice(-4),
+      ),
     ).toThrow();
   });
 

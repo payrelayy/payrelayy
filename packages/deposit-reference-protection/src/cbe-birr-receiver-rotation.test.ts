@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import * as publicProtection from './index.js';
 import {
   CbeBirrReceiverLookupProtectionError,
-  openCbeBirrReceiverLookup,
+  deriveCbeBirrReceiverLookupChildKey,
+  withOpenedCbeBirrReceiverLookup,
 } from './cbe-birr-receiver-lookup.js';
 import { prepareCbeBirrReceiverRotation } from './cbe-birr-receiver-rotation.js';
 
@@ -53,17 +55,43 @@ describe('offline CBE Birr Owner rotation preparation', () => {
     expect(prepared.reference.fingerprint).not.toBe(prepared.lookup.fingerprint);
     expect(Object.isFrozen(prepared)).toBe(true);
     expect(JSON.stringify(prepared)).not.toContain(receiverPhone);
+    const key = deriveCbeBirrReceiverLookupChildKey({
+      receiverRevisionId,
+      receiverVersion: 3,
+      encryptionSecret: lookupSecrets.encryptionSecret,
+    });
+    const rootEncryptionMasterFingerprint = `sha256:${createHash('sha256').update(Buffer.from(lookupSecrets.encryptionSecret, 'hex')).digest('hex')}`;
+    const rootFingerprintMasterFingerprint = `sha256:${createHash('sha256').update(Buffer.from(lookupSecrets.fingerprintSecret, 'hex')).digest('hex')}`;
     expect(
-      openCbeBirrReceiverLookup({
-        receiverRevisionId,
-        receiverVersion: 3,
-        ciphertext: prepared.lookup.ciphertext,
-        masked: prepared.lookup.masked,
-        protectionProfileVersion: 2,
-        encryptionKeyVersion: 2,
-        encryptionSecret: lookupSecrets.encryptionSecret,
-      }),
-    ).toBe(receiverPhone);
+      withOpenedCbeBirrReceiverLookup(
+        {
+          receiverRevisionId,
+          receiverVersion: 3,
+          ciphertext: prepared.lookup.ciphertext,
+          masked: prepared.lookup.masked,
+          protectionProfileVersion: 2,
+          encryptionKeyVersion: 2,
+        },
+        key,
+        {
+          version: 1,
+          providerCode: 'cbe_birr',
+          purpose: 'receiver-lookup-opening',
+          receiverRevisionId,
+          receiverVersion: 3,
+          keyId: key.keyId,
+          rootEncryptionMasterFingerprint,
+          rootFingerprintMasterFingerprint,
+        },
+        {
+          encryptionMasterFingerprint: rootEncryptionMasterFingerprint,
+          fingerprintMasterFingerprint: rootFingerprintMasterFingerprint,
+          purpose: 'cbe_birr_receiver_lookup',
+          version: 2,
+        },
+        (phone) => phone === receiverPhone,
+      ),
+    ).toBe(true);
   });
 
   it('rejects reused masters even across the two protection domains', () => {

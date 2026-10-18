@@ -19,10 +19,10 @@ authorize a migration apply, payment switch, receiver change, payment, or Player
   is uploaded; plaintext exists only in the temporary job workspace and is removed when the dump
   step ends. The artifact expires after seven days.
 - The checked-in certificate is a **public encryption recipient**, not a credential. Its SHA-256
-  file digest is pinned in the workflow. The corresponding private key is in the current Windows
-  user's restricted `C:\Users\hp\.codex\backup-keys\cbe-staging-20261018\private-key.pem`, outside
-  Git. Do not upload, paste, or commit that key. Preserve the key separately from any encrypted
-  backup; losing it makes the artifact unrecoverable.
+  file digest is pinned in the workflow. The corresponding private key is in a restricted
+  `%USERPROFILE%\.codex\backup-keys\cbe-staging-20261018\private-key.pem` directory, outside Git.
+  Do not upload, paste, or commit that key. Preserve the key separately from any encrypted backup;
+  losing it makes the artifact unrecoverable.
 - A logical dump made in five commands is not by itself a proved restore point. Verify the
   post-stop preflight before and after export, compare the encrypted artifact SHA-256 with the
   workflow log, decrypt outside the repository, verify `SHA256SUMS`, and restore into an isolated

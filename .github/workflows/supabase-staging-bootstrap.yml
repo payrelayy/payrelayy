@@ -184,8 +184,10 @@ jobs:
           migration_list="$(supabase migration list --linked 2>&1)"
           printf '%s\n' "$migration_list"
           # Preview older missing versions too; this never applies them.
-          supabase db push --linked --dry-run --include-all
-          printf '%s\n' "$migration_list" | node infra/staging-migration-gap-guard.mjs "$REQUESTED_MODE"
+          dry_run_file="$(mktemp)"
+          trap 'rm -f "$dry_run_file"' EXIT
+          supabase db push --linked --dry-run --include-all 2>&1 | tee "$dry_run_file"
+          printf '%s\n' "$migration_list" | node infra/staging-migration-gap-guard.mjs "$REQUESTED_MODE" "$dry_run_file"
 
       - name: Apply canonical migrations to staging
         if: inputs.mode == 'apply'

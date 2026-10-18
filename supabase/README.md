@@ -27,27 +27,30 @@ Run `plan` first and enter the reviewed full SHA in `confirm_main_commit_sha`. B
 that `main` still points to that same reviewed commit, then dispatch `apply` from and confirm the
 same full SHA. Every dispatch verifies the checked-out commit and staging ref, lists migration
 state, and runs `supabase db push --linked --dry-run --include-all` so the preview includes older
-missing migrations without executing them. The `apply` mode performs that same complete plan
-before running the ordinary `supabase db push --linked --yes` and listing the resulting migration
-state. It intentionally does not use `--include-all` for the actual push: an older migration
+missing migrations without executing them. The guard requires the preview's filenames and order to
+match every pending canonical migration in the linked ledger. The `apply` mode performs that same
+complete plan before running the ordinary `supabase db push --linked --yes` and listing the resulting
+migration state. It intentionally does not use `--include-all` for the actual push: an older migration
 backlog remains a stop, not an authorization to replay it. The read-only migration-gap guard
 compares the linked ledger with every checked-out SQL file and fails `apply` before any push if
 an older migration is missing, any migration in the unrehearsed catch-up through
-`20261005180558` is pending, or the CLI listing cannot be reconciled. On 6 October 2026,
-staging had 87 applied and 106 pending canonical migrations, including four older than its latest
-applied version. A successful `plan` is not permission to run `apply` while this gap remains.
-Review pending SQL effects, backup and restore readiness, and an explicit staged application
-path before changing that guard. The workflow
+`20261005180558` is pending, or the CLI listing or dry-run order cannot be reconciled. On 18 October
+2026, staging still had 87 applied and now had 185 pending canonical migrations, including four
+older than its latest applied version. A successful `plan` does not lift the apply guard. The
+reviewed sequence and remaining gates are in
+[`cbe-birr-staging-catch-up-plan.md`](../infra/operations/cbe-birr-staging-catch-up-plan.md).
+Review pending SQL effects, backup and restore readiness, and an explicit staged application path
+before changing that guard. The workflow
 never includes seed data, targets production, deploys an application, starts Telegram, or enables a
 payment flow. Review the staging project's security and performance advisors separately after the
 first successful apply.
 
 The disposable SQL integration suite separately replays a **staging-ledger-shaped** history in a
-fresh, internal-only PostgreSQL server: the 87 migrations listed as applied in the 6 October 2026
-read-only staging plan, followed by its 106 pending migrations in filename order. The four older
-gaps are included in that pending phase. This tests migration ordering against synthetic, empty
-application data; it does not copy staging schema or data, reproduce staging-specific configuration,
-prove recovery from a backup, or authorize lifting the staging apply guard.
+fresh, internal-only PostgreSQL server: the 87 migrations listed as applied in the 18 October 2026
+read-only staging check, followed by its 185 pending migrations in filename order. The four older
+gaps are included in that pending phase. This tests ordering with synthetic CBE Birr history rows
+and switch settings; it does not copy staging schema or data, prove recovery from a backup, or
+authorize lifting the staging apply guard.
 
 ## Production database release
 

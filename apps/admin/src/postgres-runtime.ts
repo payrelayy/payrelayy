@@ -247,7 +247,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 36
+      select count(*) = 37
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)') is not null)::integer
         + (to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)') is not null)::integer

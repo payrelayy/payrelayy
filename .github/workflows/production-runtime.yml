@@ -219,6 +219,7 @@ jobs:
           set -euo pipefail
           node infra/verify-production-runtime.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
+          bash -n infra/operations/fetanagent-production-deploy-helper-v2.sh
 
       - name: Build commit-labelled images without runtime secrets
         shell: bash
@@ -367,6 +368,9 @@ jobs:
           CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
           DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
           DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+          OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET: ${{ secrets.OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET }}
+          OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET: ${{ secrets.OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET }}
+          OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON: ${{ vars.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON }}
           DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
           OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
           OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL: ${{ secrets.OWNER_ROUTINE_ENROLLMENT_SIGNER_PKCS8_BASE64URL }}
@@ -450,6 +454,8 @@ jobs:
             "$CUSTOMER_WEB_RUNTIME_PASSWORD"
             "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET"
             "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET"
+            "$OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET"
+            "$OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET"
             "$OWNER_CONTROL_RUNTIME_PASSWORD"
             "$PLAYER_ACTION_RUNTIME_PASSWORD"
             "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD"
@@ -480,10 +486,11 @@ jobs:
 
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto';
-          function verifyProfile(encoded, version, fields, secrets) {
+          function verifyProfile(encoded, version, fields, secrets, purpose) {
             const profile = JSON.parse(encoded);
-            const names = [...fields, 'version'].sort().join(',');
+            const names = [...fields, 'version', ...(purpose ? ['purpose'] : [])].sort().join(',');
             if (Object.keys(profile).sort().join(',') !== names || profile.version !== version) throw new Error('invalid key profile');
+            if (purpose && profile.purpose !== purpose) throw new Error('invalid key profile purpose');
             for (let index = 0; index < fields.length; index += 1) {
               const actual = `sha256:${createHash('sha256').update(Buffer.from(secrets[index], 'hex')).digest('hex')}`;
               if (profile[fields[index]] !== actual) throw new Error('key profile fingerprint mismatch');
@@ -496,6 +503,10 @@ jobs:
           verifyProfile(process.env.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON, 2,
             ['encryptionMasterFingerprint', 'fingerprintMasterFingerprint'],
             [process.env.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET, process.env.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET]);
+          verifyProfile(process.env.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON, 2,
+            ['encryptionMasterFingerprint', 'fingerprintMasterFingerprint'],
+            [process.env.OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET, process.env.OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET],
+            'cbe_birr_receiver_lookup');
           const token = process.env.PRODUCTION_TELEGRAM_BOT_TOKEN;
           if (!/^[0-9]{8,12}:[A-Za-z0-9_-]{35,}$/u.test(token)) throw new Error('invalid Telegram token');
           const digest = `sha256:${createHash('sha256').update(token).digest('hex')}`;
@@ -562,6 +573,9 @@ jobs:
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-encryption-master"
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET" >"$secret_dir/deposit-proof-reference-fingerprint-master"
           printf '%s\n' "$DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON" >"$secret_dir/deposit-proof-reference-profile.v2.json"
+          printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET" >"$secret_dir/owner-cbe-birr-lookup-encryption-master"
+          printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET" >"$secret_dir/owner-cbe-birr-lookup-fingerprint-master"
+          printf '%s\n' "$OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON" >"$secret_dir/owner-cbe-birr-receiver-lookup-profile.v2.json"
           telebirr_reference_opening_key_id="$(
             node infra/operations/derive-telebirr-reference-opening-key.mjs \
               "$secret_dir/deposit-proof-reference-encryption-master" \
@@ -669,7 +683,7 @@ jobs:
           rm -f -- "$secret_dir/telebirr-assignment-derived.spki.der" \
             "$secret_dir/telebirr-bridge.spki.der" "$secret_dir/telebirr-bridge-derived.spki.der"
           node infra/operations/prepare-production-companion-bundle.mjs "$secret_dir"
-          helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)"
+          helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper-v2.sh | cut -d ' ' -f 1)"
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-production-images.tar")"
           [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
           echo "secret_dir=$secret_dir" >>"$GITHUB_OUTPUT"
@@ -942,7 +956,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           remote="fetanagent-admin@$VM_HOST"
-          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
           runtime_deployment_mode="$(<"$RUNNER_TEMP/release/runtime-deployment-mode")"
           case "$runtime_deployment_mode" in
             operational|shadow-review|inert-maintenance) ;;
@@ -1036,7 +1050,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           remote="fetanagent-admin@$VM_HOST"
-          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
           incoming="/tmp/fetanagent-production-$GITHUB_SHA"
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' prepare-incoming '$GITHUB_SHA'"
@@ -1049,7 +1063,7 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
           )
           case "$REQUESTED_MODE" in
             deploy|deploy-shadow|deploy-shadow-intake)
@@ -1092,7 +1106,7 @@ jobs:
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper activate '$GITHUB_SHA'"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 activate '$GITHUB_SHA'"
           echo 'completed=true' >>"$GITHUB_OUTPUT"
 
       - name: Verify live public production services
@@ -1148,7 +1162,7 @@ jobs:
           set -euo pipefail
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           remote="fetanagent-admin@$VM_HOST"
-          helper='/usr/local/sbin/fetanagent-production-deploy-helper'
+          helper='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
           if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
@@ -1185,9 +1199,9 @@ jobs:
           rollback_status=0
           database_status=0
           if [[ -n "$SECRET_DIR" && -n "$VM_HOST" ]]; then
-            recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper cleanup-incoming '$GITHUB_SHA'"
+            recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 cleanup-incoming '$GITHUB_SHA'"
             if [[ "$ACTIVATION_ATTEMPTED" == 'true' ]]; then
-              recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper rollback '$GITHUB_SHA' && $recovery"
+              recovery="sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 rollback '$GITHUB_SHA' && $recovery"
             fi
             ssh -F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes \
               -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts" \

@@ -49,6 +49,11 @@ services:
       OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
       OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
       OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+      INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true'
+      OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE: /run/secrets/owner_cbe_birr_lookup_encryption_master
+      OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE: /run/secrets/owner_cbe_birr_lookup_fingerprint_master
+      OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: /etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json
+      INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'false'
       OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:?set the reviewed production assignment signer key ID}
       OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
@@ -89,6 +94,16 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
+      - source: owner_cbe_birr_lookup_encryption_master
+        target: owner_cbe_birr_lookup_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: owner_cbe_birr_lookup_fingerprint_master
+        target: owner_cbe_birr_lookup_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
     configs:
       - source: supabase_ca_certificate
         target: /run/configs/supabase_ca_certificate
@@ -97,6 +112,11 @@ services:
         mode: 0444
       - source: deposit_proof_reference_profile
         target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: owner_cbe_birr_lookup_profile
+        target: /etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json
         uid: '10001'
         gid: '10001'
         mode: 0444
@@ -769,6 +789,8 @@ configs:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/cbe-deposit-reference-key-profile.v1.json
   deposit_proof_reference_profile:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-profile.v2.json
+  owner_cbe_birr_lookup_profile:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-receiver-lookup-profile.v2.json
   telebirr_device_bridge_assignment_signer:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment.spki.der
   telebirr_device_bridge_runtime_manifest:
@@ -811,6 +833,10 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-encryption-master
   deposit_proof_reference_fingerprint_master:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/deposit-proof-reference-fingerprint-master
+  owner_cbe_birr_lookup_encryption_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-lookup-encryption-master
+  owner_cbe_birr_lookup_fingerprint_master:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-lookup-fingerprint-master
   telegram_bot_token:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-token
   bot_beta_admission_transport_hmac:

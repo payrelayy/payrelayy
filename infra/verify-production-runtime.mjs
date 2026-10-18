@@ -17,6 +17,8 @@ const [
   workflow,
   helper,
   sudoers,
+  predecessorHelper,
+  predecessorSudoers,
   provisionSql,
   disableSql,
   assignmentRuntimeInputSql,
@@ -42,6 +44,8 @@ const [
   read('infra/production-telebirr-operational-promotion.sha256'),
   read('infra/compose.production.inert-maintenance.yaml'),
   read('.github/workflows/production-runtime.yml'),
+  read('infra/operations/fetanagent-production-deploy-helper-v2.sh'),
+  read('infra/operations/fetanagent-production-deploy-helper-v2.sudoers'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -221,6 +225,33 @@ assert.match(owner, /INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'/u);
 assert.match(owner, /FINANCIAL_ACTIONS_MODE: dry_run/u);
 assert.match(owner, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
 assert.match(owner, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
+assert.match(owner, /INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true'/u);
+assert.match(owner, /INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'false'/u);
+assert.match(
+  owner,
+  /OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE: \/run\/secrets\/owner_cbe_birr_lookup_encryption_master/u,
+);
+assert.match(
+  owner,
+  /OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE: \/run\/secrets\/owner_cbe_birr_lookup_fingerprint_master/u,
+);
+assert.match(
+  owner,
+  /OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: \/etc\/fetanagent\/owner-cbe-birr-receiver-lookup-profile\.v2\.json/u,
+);
+for (const name of ['encryption', 'fingerprint']) {
+  assert.match(
+    owner,
+    new RegExp(
+      `source: owner_cbe_birr_lookup_${name}_master\\s+target: owner_cbe_birr_lookup_${name}_master\\s+uid: '10001'\\s+gid: '10001'\\s+mode: 0400`,
+      'u',
+    ),
+  );
+}
+assert.match(
+  owner,
+  /source: owner_cbe_birr_lookup_profile\s+target: \/etc\/fetanagent\/owner-cbe-birr-receiver-lookup-profile\.v2\.json\s+uid: '10001'\s+gid: '10001'\s+mode: 0444/u,
+);
 assert.match(
   owner,
   /source: kemerbet_readiness_control\s+target: \/run\/fetanagent-kemerbet-session-control/u,
@@ -448,11 +479,11 @@ assert.match(
   /telebirr_device_state_database_egress:\s*\r?\n    driver: bridge\s*\r?\n    enable_ipv6: true/u,
 );
 const configs = topLevelSection(compose, 'configs');
-assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 6);
-assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 6);
+assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 7);
+assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 7);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 33);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 33);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 35);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 35);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -477,6 +508,14 @@ assert.match(
   /TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256: \$\{\{ vars\.TELEBIRR_ROUTINE_RECEIPT_SIGNER_PUBLIC_SPKI_SHA256 \}\}/u,
 );
 assert.match(workflow, /owner-routine-enrollment-signer-pkcs8/u);
+for (const name of [
+  'OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET',
+  'OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET',
+]) {
+  assert.match(workflow, new RegExp(`secrets\\.${name}`, 'u'));
+}
+assert.match(workflow, /vars\.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON/u);
+assert.match(workflow, /'cbe_birr_receiver_lookup'/u);
 assert.match(
   workflow,
   /PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'/u,
@@ -776,7 +815,7 @@ assert.match(helper, /\[\[ "\$\(id -u\)" == '0' \]\]/u);
 assert.match(helper, /readonly ROOT='\/srv\/fetanagent\/production'/u);
 assert.match(
   helper,
-  /readonly HELPER_PATH='\/usr\/local\/sbin\/fetanagent-production-deploy-helper'/u,
+  /readonly HELPER_PATH='\/usr\/local\/sbin\/fetanagent-production-deploy-helper-v2'/u,
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
 assert.match(helper, /release_deployment_mode\(\)/u);
@@ -889,7 +928,8 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=34/u);
+assert.match(helper, /expected_count=37/u);
+assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
 assert.equal((helper.match(/expected_count=\$\(\(expected_count \+ 4\)\)/gu) ?? []).length, 2);
@@ -964,8 +1004,22 @@ assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0
 const helperDigest = createHash('sha256').update(helper).digest('hex');
 assert.equal(
   sudoers,
-  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,
   'sudoers must bind the restricted deploy account to this exact helper digest',
+);
+const predecessorDigest = createHash('sha256').update(predecessorHelper).digest('hex');
+assert.equal(
+  predecessorSudoers,
+  `fetanagent-admin ALL=(root) NOPASSWD: sha256:${predecessorDigest} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
+  'the existing production status and stop helper must remain digest pinned',
+);
+assert.match(
+  workflow,
+  /helper_sha="\$\(sha256sum infra\/operations\/fetanagent-production-deploy-helper-v2\.sh/u,
+);
+assert.match(
+  workflow,
+  /helper_sha=\$\(sha256sum infra\/operations\/fetanagent-production-deploy-helper\.sh/u,
 );
 
 for (const role of [

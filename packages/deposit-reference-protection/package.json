@@ -19,6 +19,10 @@
     "./cbe-birr-receiver-opening": {
       "types": "./dist/cbe-birr-receiver-opening.d.ts",
       "default": "./dist/cbe-birr-receiver-opening.js"
+    },
+    "./cbe-birr-receiver-provisioning": {
+      "types": "./dist/cbe-birr-receiver-provisioning.d.ts",
+      "default": "./dist/cbe-birr-receiver-provisioning.js"
     }
   },
   "scripts": {

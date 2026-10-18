@@ -10,8 +10,9 @@ import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 
 // The 18 October 2026 read-only staging check showed 87/272 applied,
 // 185 pending, and these four older gaps before the latest applied version.
-// It also showed only the private pilot in dry_run; all four financial switches
-// remain disabled. This fixture contains no staging schema, data, or credentials.
+// It also showed only the private pilot in dry_run with a three-field manifest;
+// the other six switches remain disabled. This fixture contains no staging
+// schema, data, manifest values, or credentials.
 const latestAppliedVersion = '20260915190000';
 const observedLatestRepositoryVersion = '20261018170000';
 const allDisabledPreflightMigration =
@@ -89,11 +90,25 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     );
     const pilot = await client.query<{ feature_key: string; mode: string }>(`
       update app.feature_switches
-         set mode = 'dry_run'
+         set mode = 'dry_run',
+             settings = pg_catalog.jsonb_build_object(
+               'contract_version', 1,
+               'pilot_revision_id', '00000000-0000-4000-8000-000000000001',
+               'configuration_digest', 'sha256:' || pg_catalog.repeat('0', 64)
+             )
        where feature_key = 'private_live_deposit_pilot'
       returning feature_key, mode::text
     `);
     expect(pilot.rows).toEqual([{ feature_key: 'private_live_deposit_pilot', mode: 'dry_run' }]);
+    const syntheticManifest = await client.query<{ keys: string[] }>(`
+      select pg_catalog.array_agg(manifest_key.key_name order by manifest_key.key_name) as keys
+        from app.feature_switches feature_switch,
+             pg_catalog.jsonb_object_keys(feature_switch.settings) as manifest_key(key_name)
+       where feature_switch.feature_key = 'private_live_deposit_pilot'
+    `);
+    expect(syntheticManifest.rows).toEqual([
+      { keys: ['configuration_digest', 'contract_version', 'pilot_revision_id'] },
+    ]);
     await applyMigrationFiles(
       client,
       environment.migrationsDirectory,
@@ -117,7 +132,7 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     // This is a required staging change, not an action performed by this test.
     const pausedPilot = await client.query<{ feature_key: string; mode: string }>(`
       update app.feature_switches
-         set mode = 'disabled'
+         set mode = 'disabled', settings = '{}'::jsonb
        where feature_key = 'private_live_deposit_pilot'
       returning feature_key, mode::text
     `);
@@ -143,6 +158,12 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     `);
     expect(switches.rows).toHaveLength(7);
     expect(switches.rows.every((row) => row.mode === 'disabled')).toBe(true);
+    const settingsCount = await client.query<{ count: number }>(`
+      select pg_catalog.count(*)::integer as count
+        from app.feature_switches
+       where settings <> '{}'::jsonb
+    `);
+    expect(settingsCount.rows).toEqual([{ count: 0 }]);
 
     const moneyRows = await client.query<{ intents: number; attempts: number }>(`
       select

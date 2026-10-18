@@ -253,7 +253,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
       }
     });
 
-    it('creates a fresh same-account CBE lookup revision only with money switches off', async () => {
+    it('permits only a first same-account CBE v2 upgrade beside the exact live TeleBirr switches', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -328,6 +328,92 @@ export function registerOwnerReceiverAccountControlSqlTests(
           /Only a fresh protection revision of the same v1 CBE Birr receiver is allowed/u,
         );
 
+        await client.query('savepoint cbe_lineage_before_live_upgrade');
+        const customer = await client.query<{ readonly id: string }>(
+          'insert into app.customers default values returning id',
+        );
+        const platform = await client.query<{ readonly id: string }>(
+          `select id from app.platforms where code = 'kemerbet'`,
+        );
+        const player = await client.query<{ readonly id: string }>(
+          `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+           values ($1::uuid, $2::uuid, $3::text) returning id`,
+          [customer.rows[0]!.id, platform.rows[0]!.id, `CBE-UPGRADE-${requestId}`],
+        );
+        await client.query(
+          `insert into app.player_validation_attempts (
+             player_account_id, attempt_number, outcome, reason_code, adapter_version,
+             started_at, completed_at, result_digest
+           ) values (
+             $1::uuid, 1, 'valid', 'sql_eligibility_fixture', 'sql_eligibility_fixture_v1',
+             clock_timestamp() - interval '1 second', clock_timestamp(),
+             'sql-eligibility-fixture'
+           )`,
+          [player.rows[0]!.id],
+        );
+        await client.query(
+          `update app.customer_platform_players set validation_status = 'valid'
+            where id = $1::uuid`,
+          [player.rows[0]!.id],
+        );
+        await client.query(
+          `insert into app.player_deposit_eligibility_decisions (
+             player_account_id, decision_version, decision, reason_code, actor_kind
+           ) values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
+          [player.rows[0]!.id],
+        );
+        await client.query(
+          `insert into app.deposit_intents (
+             customer_id, platform_id, player_account_id, payment_provider_id,
+             receiver_account_id, expected_amount_minor
+           ) values (
+             $1::uuid, $2::uuid, $3::uuid,
+             (select id from app.payment_providers where code = 'cbe_birr'),
+             $4::uuid, 2500
+           )`,
+          [
+            customer.rows[0]!.id,
+            platform.rows[0]!.id,
+            player.rows[0]!.id,
+            prior[0]!.receiver_revision_id,
+          ],
+        );
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        await expectFailure(
+          client,
+          rotateSql,
+          values,
+          /requires no prior CBE deposit or v2 lookup lineage/u,
+        );
+        await client.query('rollback to savepoint cbe_lineage_before_live_upgrade');
+        await client.query('release savepoint cbe_lineage_before_live_upgrade');
+
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        await expectFailure(
+          client,
+          rotateSql.replace("'protection_upgrade'", "'account_rotation'"),
+          values,
+          /requires every payment switch disabled/u,
+        );
+        for (const [key, mode] of [
+          ['cbe_birr_authoritative_verification', 'dry_run'],
+          ['private_live_deposit_pilot', 'dry_run'],
+          ['telebirr_authoritative_verification', 'dry_run'],
+          ['payment_verification', 'dry_run'],
+        ] as const) {
+          await client.query(
+            'update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text',
+            [key, mode],
+          );
+          await expectFailure(client, rotateSql, values, /requires every payment switch disabled/u);
+          await client.query(
+            'update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text',
+            [key, key === 'payment_verification' ? 'live' : 'disabled'],
+          );
+        }
+
         const created = await queryAsOwnerControl<{
           readonly lookup_protected: boolean;
           readonly receiver_revision_id: string;
@@ -341,6 +427,18 @@ export function registerOwnerReceiverAccountControlSqlTests(
           receiver_status: 'active',
           revision: prior[0]!.revision + 1,
         });
+        const preservedSwitches = await client.query<{
+          readonly feature_key: string;
+          readonly mode: string;
+        }>(
+          `select feature_key, mode from app.feature_switches
+            where feature_key in ('payment_verification', 'deposit_execution')
+            order by feature_key`,
+        );
+        expect(preservedSwitches.rows).toEqual([
+          { feature_key: 'deposit_execution', mode: 'live' },
+          { feature_key: 'payment_verification', mode: 'live' },
+        ]);
         expect(await queryAsOwnerControl(client, rotateSql, values)).toEqual(created);
         await expectFailure(
           client,
@@ -430,6 +528,37 @@ export function registerOwnerReceiverAccountControlSqlTests(
           ),
         ).rejects.toThrow(/immutable/u);
         await client.query('rollback to savepoint immutable_lookup');
+
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const laterV1Ciphertext = `receiver-v1.cbe_birr.${'G'.repeat(16)}.${'H'.repeat(22)}.${'I'.repeat(16)}`;
+        const laterV1 = await queryAsOwnerControl<{ readonly revision: number }>(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+            $1::uuid, $2::uuid, 'cbe_birr', 'Synthetic SQL Receiver',
+            $3::text, $4::text, '***6789', 1::smallint, 1::smallint, 1::smallint,
+            'account_rotation'
+          )`,
+          [authUserId, randomUUID(), laterV1Ciphertext, 'c'.repeat(64)],
+        );
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const laterRequestId = randomUUID();
+        await expectFailure(
+          client,
+          rotateSql,
+          [
+            authUserId,
+            laterRequestId,
+            laterRequestId,
+            laterV1[0]!.revision + 1,
+            laterV1Ciphertext,
+            'c'.repeat(64),
+            `cbe-receiver-v2.${'J'.repeat(16)}.${'K'.repeat(22)}.${'L'.repeat(16)}`,
+            'd'.repeat(64),
+          ],
+          /requires no prior CBE deposit or v2 lookup lineage/u,
+        );
       } finally {
         await client.query('rollback');
       }

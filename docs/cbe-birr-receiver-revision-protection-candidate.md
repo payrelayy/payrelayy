@@ -27,7 +27,13 @@ separate, immutable v2 lookup row and an atomic rotation function. A follow-up g
 gives only the Owner-control role execution access. The function requires a newly
 assigned UUID/version, matching v1/v2 display masks, and all payment switches disabled. An
 existing v1 account may only gain v2 material through a **new** same-account receiver revision
-with reason `protection_upgrade`; it cannot be updated in place. SQL can validate only envelope
+with reason `protection_upgrade`; it cannot be updated in place. A later migration permits that
+one-time upgrade while the exact two shared TeleBirr deposit switches are live, only if CBE
+verification, the private pilot, and TeleBirr's legacy verifier remain disabled and there are no
+CBE deposit intents, proofs, instructions, routine candidates, or earlier v2 lookup revisions. The existing switch lock order,
+Owner-only grant, same-account check, immutable revision, and idempotent replay remain in place.
+Other rotations still require all payment switches disabled. The migration changes no receiver or
+switch by itself. SQL can validate only envelope
 shape, not cryptographic authenticity or independent key provenance. The migration does not
 upgrade an existing receiver, grant a worker access, make a
 provider request, enable CBE Birr, or move money.

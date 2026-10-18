@@ -34,7 +34,34 @@ staging step; the pre-stop check above is now expected to fail.
 The staging project currently has no scheduled backup or point-in-time recovery in its Supabase
 dashboard. The old staging VM is unreachable, while the current DigitalOcean inventory shows the
 former staging Droplet ID running the production stack. A fresh encrypted backup and a verified
-isolated restore remain prerequisites for migration apply.
+isolated restore were set as prerequisites for migration apply. The export is complete; the full
+restore gate remains open.
+
+## Encrypted export and local rehearsal, 18 October 2026
+
+The approved encrypted export (GitHub Actions run `39131122213`)
+passed its before/after post-stop gates. Its seven-day public Actions artifact contains only CMS
+ciphertext. The downloaded ciphertext SHA-256 is
+`7abbc7c5f432976d9d7ca855a956c26c371a54b0161c3fa613b5aebd44b3a3ad`.
+Authenticated local decryption, the fixed seven-file archive list, six file hashes, and exact
+staging/commit manifest passed. This is an export integrity check, **not a proved Supabase restore**.
+
+A network-isolated local PostgreSQL 17 rehearsal restored the 110 `app` data blocks and 87
+migration-history entries. It used minimal Supabase platform stubs and omitted the unavailable
+`supabase_vault` extension; it cannot establish full platform recoverability. The exact post-stop
+aggregate matched the live staging values. The first 59 pending migrations passed, then migration
+`20260920090000` stopped on its no-money role guard: the expired
+`fetanagent_telebirr_shadow_verifier_runtime` credential still has `LOGIN` in both the backup and
+live staging. With that role set to `NOLOGIN` **only in the isolated copy**, all 185 pending
+migrations, including the four older gaps, passed. The SQL-integration marker bypassed local
+`pg_cron` installation in the plain PostgreSQL image; the hosted migration creates that extension.
+After rehearsal, all seven switches remained disabled, all three historical CBE intents and two
+submissions remained, and there were no deposit jobs or execution attempts.
+
+The guarded [`staging-cbe-shadow-verifier-role-lock.sql`](../sql/staging-cbe-shadow-verifier-role-lock.sql)
+and [manual workflow](../../.github/workflows/staging-cbe-shadow-role-lock.yml) prepare the exact
+staging role prerequisite. They require separate approval to merge and run. No role change has
+been applied to staging. A full isolated Supabase restore remains required before migration apply.
 
 ## Required sequence before a staging catch-up
 

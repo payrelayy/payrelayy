@@ -1,0 +1,107 @@
+name: Staging CBE shadow verifier role lock
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_role_lock:
+        description: Type REVOKE EXPIRED STAGING SHADOW LOGIN after approval
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-cbe-shadow-role-lock
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+
+jobs:
+  validate-target:
+    name: Validate exact staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_ROLE_LOCK: ${{ inputs.confirm_role_lock }}
+    steps:
+      - name: Reject any other branch, project, commit, or action
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_ROLE_LOCK" == 'REVOKE EXPIRED STAGING SHADOW LOGIN' ]]
+
+  lock-role:
+    name: Revoke expired staging shadow login
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: staging
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check staging state and revoke only the expired role login
+        shell: bash
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ -n "$SUPABASE_DB_PASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          command -v psql >/dev/null
+
+          ca_file="$(mktemp "$RUNNER_TEMP/cbe-staging-role-ca.XXXXXXXX")"
+          trap 'rm -f -- "$ca_file"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          export PGHOST="$STAGING_POOLER_HOST"
+          export PGPORT=5432 PGDATABASE=postgres
+          export PGUSER="postgres.$STAGING_PROJECT_REF"
+          export PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file"
+          export PGCONNECT_TIMEOUT=5 PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+
+          assert_post_stop() {
+            local result
+            result="$(psql -X -qAt -v ON_ERROR_STOP=1 \
+              --file=infra/sql/staging-cbe-post-stop-preflight.sql)"
+            if [[ -z "$result" || "$result" == *$'\n'* || "${result##*|}" != 't' ]]; then
+              echo '::error::The exact staging post-stop snapshot changed.'
+              exit 1
+            fi
+          }
+          assert_post_stop
+          psql -X -q -v ON_ERROR_STOP=1 --single-transaction \
+            --file=infra/sql/staging-cbe-shadow-verifier-role-lock.sql
+          assert_post_stop
+
+          locked="$(psql -X -qAt -v ON_ERROR_STOP=1 -c \
+            "select (not role.rolcanlogin and not exists (select 1 from pg_catalog.pg_stat_activity activity where activity.usename = role.rolname and activity.pid <> pg_catalog.pg_backend_pid())) from pg_catalog.pg_roles role where role.rolname = 'fetanagent_telebirr_shadow_verifier_runtime'")"
+          [[ "$locked" == 't' ]]
+          echo 'The expired staging shadow verifier runtime is NOLOGIN and idle.'

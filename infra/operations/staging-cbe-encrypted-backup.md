@@ -50,3 +50,14 @@ Supabase [documents](https://supabase.com/docs/guides/platform/backups) that phy
 not include Storage objects and that restoring a backup can cause downtime. This database dump is
 for the staging migration gate; any needed Storage objects require their own reviewed recovery
 plan. The staging VM/runtime is a separate blocker and must not be replaced by the production host.
+
+## First export result, 18 October 2026
+
+The approved manual GitHub Actions run `39131122213`
+completed on `main` commit `cc368c297456eacba1831549983f2a9d4fcd0f1f`. Its ciphertext
+digest is `7abbc7c5f432976d9d7ca855a956c26c371a54b0161c3fa613b5aebd44b3a3ad`, and the
+artifact expires on 25 October 2026 at 13:23 UTC. The private local key authenticated decryption;
+the archive member list, all six file hashes, and target manifest matched. A local PostgreSQL
+rehearsal restored the `app` data and migration ledger with platform stubs, then ran the 185
+pending migrations after an isolated role lock. This does not prove a full Supabase restore;
+continue the restore gate before any staging migration apply.

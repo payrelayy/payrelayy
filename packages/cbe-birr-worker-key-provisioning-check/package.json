@@ -1,0 +1,22 @@
+{
+  "name": "@fetanagent/cbe-birr-worker-key-provisioning-check",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@fetanagent/cbe-birr-reference-opening": "workspace:*"
+  },
+  "devDependencies": {
+    "@fetanagent/deposit-reference-protection": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run src --passWithNoTests"
+  }
+}

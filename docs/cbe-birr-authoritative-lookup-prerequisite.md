@@ -102,6 +102,10 @@ envelopes. No deployment pins the worker profile or provides independent key cus
 worker, lease, provider lookup, or financial action is permitted; blockers 7, 8, 10, and 11 remain
 open.
 
+An offline provisioning check now compares a proposed worker child with the v2 producer-root
+derivation and returns only nonsecret consistency metadata. No real keys are provisioned, and the
+worker still has no trusted file custody or deployment binding. The same blockers remain open.
+
 The local `receiver_lookup_normalization_unreviewed` blocker is closed only for a synthetic v2
 envelope bound to a supplied receiver-revision UUID and version, then passed as the
 full `251` plus nine-digit phone to the unwired receipt transport. A synthetic cross-package test

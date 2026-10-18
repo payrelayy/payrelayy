@@ -230,6 +230,7 @@ environment file.
 | `packages/cbe-birr-official-source-policy`                  | Pure source-permission policy; fixed `unproven` and blocked                                                                          |
 | `packages/cbe-birr-authoritative-lookup-prerequisite`       | Pure blocked lookup-prerequisite inventory; every capability is false                                                                |
 | `packages/cbe-birr-reference-opening`                       | Dormant CBE Birr-only scoped-key proof-reference opening boundary                                                                    |
+| `packages/cbe-birr-worker-key-provisioning-check`           | Offline consistency check for a proposed CBE child key and approved producer roots                                                   |
 | `packages/customer-web-access-foundation`                   | Historical pure web/PWA decision record; no runtime or authentication                                                                |
 | `packages/customer-web-auth-runtime`                        | Server-only Supabase Auth adapter; disabled by configuration                                                                         |
 | `packages/customer-web-workspace-runtime`                   | Seven-function account, Player-ID, deposit, status, and durable throttle BFF                                                         |

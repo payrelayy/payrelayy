@@ -30,3 +30,10 @@ derive another provider key. No application imports this package. Independent pr
 worker key provisioning, rotation, recovery, deployment binding, prelease authorization, and
 callback use inside a reviewed worker are still absent; the inventory blockers and all
 lookup/financial gates remain unchanged.
+
+The separate offline `@fetanagent/cbe-birr-worker-key-provisioning-check` package verifies that a
+proposed worker child is derived from the approved v2 producer encryption root, that both producer
+roots match their nonsecret identities, and that the proposed worker profile matches the child and
+root pair. It returns only a nonsecret consistency witness and handles no files or live secrets in
+tests. Actual private-file provisioning, independent custody, rotation, recovery, and deployment
+pinning remain unimplemented; the blockers remain open.

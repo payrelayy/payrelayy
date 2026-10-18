@@ -44,6 +44,13 @@ application/worker wiring, lookup, decryption, payment, or financial activation.
 complete prerequisite decision before acquiring a lease, then use an opaque handle and separately
 reviewed callback-scoped material access.
 
+An ungranted Telegram capture candidate can atomically record a dry-run CBE Birr proof and bind it
+to one previously issued instruction. It refuses an instruction for another customer or Player,
+rejects a late or retired receiver, and cannot attach an older unbound proof on replay. Its API
+adapter protects the reference and binds the instruction ID into the semantic HMAC, but no action
+route imports the adapter and no runtime role can execute the SQL function. Instruction issuance,
+v2 receiver provisioning, and customer presentation remain separate future work.
+
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:
 

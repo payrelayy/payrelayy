@@ -23,6 +23,7 @@ export type TelegramActionSemanticConsumer =
   | 'open_dry_run_deposit_intent'
   | 'capture_dry_run_deposit_reference'
   | 'capture_dry_run_deposit_proof'
+  | 'capture_telegram_cbe_birr_bound_dry_run_proof'
   | 'capture_telegram_telebirr_shadow_proof'
   | 'capture_telegram_live_telebirr_proof'
   | 'capture_telegram_routine_telebirr_untrusted_proof'
@@ -99,6 +100,15 @@ type DepositProofSemanticInput = {
   readonly semanticHmacSecret: string;
 };
 
+type CbeBirrBoundProofSemanticInput = Omit<
+  DepositProofSemanticInput,
+  'consumer' | 'providerCode'
+> & {
+  readonly consumer: 'capture_telegram_cbe_birr_bound_dry_run_proof';
+  readonly providerCode: 'cbe_birr';
+  readonly instructionId: string;
+};
+
 export type TelegramActionSemanticHmacInput =
   | CapabilityBoundSemanticInput
   | PlayerIdSubmissionSemanticInput
@@ -106,7 +116,8 @@ export type TelegramActionSemanticHmacInput =
   | PlayerIdExpirySemanticInput
   | DepositIntentSemanticInput
   | DepositReferenceSemanticInput
-  | DepositProofSemanticInput;
+  | DepositProofSemanticInput
+  | CbeBirrBoundProofSemanticInput;
 
 export interface TelegramActionCapabilityKeys {
   /** API-only 32-byte hexadecimal key; never send it to the bot or database. */
@@ -335,6 +346,7 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
       });
       break;
     case 'capture_dry_run_deposit_proof':
+    case 'capture_telegram_cbe_birr_bound_dry_run_proof':
     case 'capture_telegram_telebirr_shadow_proof':
     case 'capture_telegram_live_telebirr_proof':
     case 'capture_telegram_routine_telebirr_untrusted_proof':
@@ -344,6 +356,8 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
           input.consumer === 'capture_telegram_live_telebirr_proof' ||
           input.consumer === 'capture_telegram_routine_telebirr_untrusted_proof') &&
           input.providerCode !== 'telebirr') ||
+        (input.consumer === 'capture_telegram_cbe_birr_bound_dry_run_proof' &&
+          input.providerCode !== 'cbe_birr') ||
         !/^[0-9a-f]{64}$/u.test(input.referenceFingerprint) ||
         !/^\*{3}[A-Z0-9]{4}$/u.test(input.referenceMasked) ||
         !Number.isSafeInteger(input.keyVersion) ||
@@ -358,6 +372,9 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         platformCode: 'kemerbet',
         normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
         providerCode: input.providerCode,
+        ...(input.consumer === 'capture_telegram_cbe_birr_bound_dry_run_proof'
+          ? { instructionId: canonicalUuid(input.instructionId, 'The CBE Birr instruction ID') }
+          : {}),
         referenceFingerprint: input.referenceFingerprint,
         referenceMasked: input.referenceMasked,
         keyVersion: input.keyVersion,

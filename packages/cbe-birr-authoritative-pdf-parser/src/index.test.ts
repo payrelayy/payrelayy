@@ -54,6 +54,8 @@ interface SyntheticReceiptOptions {
   readonly wrappedDebitName?: string;
   readonly wrappedCreditName?: string;
   readonly wrappedReceiverName?: string;
+  readonly headerMetadata?: readonly string[];
+  readonly footerNotes?: readonly string[];
   readonly tip?: string;
   readonly reference?: string;
   readonly status?: string;
@@ -118,6 +120,7 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
     const rows: SyntheticTextRow[] = [
       row(760, 'Commercial Bank of Ethiopia'),
       row(740, 'VAT Invoice/ Customer Receipt'),
+      ...(options.headerMetadata ?? []).map((text, index) => row(733 - index * 8, text)),
       row(710, 'Transaction Information'),
       row(680, 'Debit Account', `${options.debitAccount ?? '251900000002'} - SYNTHETIC PAYER`),
       ...(options.wrappedDebitName ? [row(668, options.wrappedDebitName)] : []),
@@ -149,6 +152,7 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
       row(270, 'Total Amount in word One Hundred ETB and zero Cents .'),
       row(240, 'Payment Reason', options.paymentReason ?? 'Send Money'),
       row(215, 'Payment Channel', options.paymentChannel ?? 'USSD'),
+      ...(options.footerNotes ?? []).map((text, index) => row(195 - index * 12, text)),
     ];
     if (options.extraText) rows.push(row(190, options.extraText));
     return rows;
@@ -693,6 +697,36 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('keeps a metadata-rich, wrapped synthetic receipt advisory without retaining source values', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        headerMetadata: ['SYNTHETIC ISSUER METADATA', 'SYNTHETIC INVOICE METADATA'],
+        wrappedCreditName: 'SYNTHETIC RECEIVER CONTINUED',
+        wrappedReceiverName: 'SYNTHETIC RECEIVER CONTINUED',
+        footerNotes: ['SYNTHETIC INFORMATIONAL FOOTER A', 'SYNTHETIC INFORMATIONAL FOOTER B'],
+      }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      advisoryOnly: true,
+      financialActionAllowed: false,
+      facts: {
+        documentTopology: 'cbe_birr_vat_customer_receipt_credit_account_v2',
+        receiverIdentityMatch: 'matched',
+        referenceMatched: true,
+        feeArithmetic: 'consistent',
+        occurredAtPrecision: 'minute',
+      },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(SYNTHETIC_REFERENCE);
+    expect(serialized).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+    expect(serialized).not.toContain(SYNTHETIC_RECEIVER_NAME);
   });
 
   it.each([

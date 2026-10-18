@@ -10,7 +10,8 @@
     }
   },
   "dependencies": {
-    "@fetanagent/cbe-birr-reference-opening": "workspace:*"
+    "@fetanagent/cbe-birr-reference-opening": "workspace:*",
+    "@fetanagent/deposit-reference-protection": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

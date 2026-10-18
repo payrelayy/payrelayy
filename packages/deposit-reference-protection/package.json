@@ -15,6 +15,10 @@
     "./cbe-birr-receiver-rotation": {
       "types": "./dist/cbe-birr-receiver-rotation.d.ts",
       "default": "./dist/cbe-birr-receiver-rotation.js"
+    },
+    "./cbe-birr-receiver-opening": {
+      "types": "./dist/cbe-birr-receiver-opening.d.ts",
+      "default": "./dist/cbe-birr-receiver-opening.js"
     }
   },
   "scripts": {

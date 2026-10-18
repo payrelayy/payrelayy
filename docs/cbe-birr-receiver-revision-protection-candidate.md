@@ -18,14 +18,21 @@ independently approved identity for the Owner lookup-key profile; it never accep
 It checks the child-key identity before opening and exposes the phone only inside a synchronous
 trusted callback. It rejects altered revision identifiers, ciphertext, masks, versions, keys,
 manifests, and legacy v1 envelopes. All errors are fixed and omit the phone and ciphertext.
-JavaScript strings cannot be erased, so the trusted callback must not retain the phone.
+JavaScript strings cannot be erased, so the trusted callback must not retain the phone. A narrow
+verifier-facing package subpath exports the opener without exporting Owner key derivation.
 
 This is deliberately **not** proof of key provenance. The pure code can check that its two
 provided secrets differ, but it cannot tell whether they were freshly and independently
 provisioned, whether either equals a legacy API secret, who can read them, or whether the caller
 loaded the ciphertext from the Owner's immutable revision. The opening manifest and approved
 root identity still need an audited, immutable delivery path. No child key has been provisioned or
-mounted in a worker, and no app imports this opener. No existing receiver is re-encrypted or
+mounted in a worker, and no app imports this opener. A separate default-off worker custody
+candidate can read one receiver-revision child key from a guarded Linux file, require a matching
+opening profile and independently supplied release pins, and reject Owner masters in its
+environment. Synthetic tests exercise opening and reject stale revisions, altered keys, profile
+drift, and unsafe files. No real key or approved pin is installed, and the loader is not imported
+by an app. It does not prove derivation from the Owner master or active SQL-revision identity.
+No existing receiver is re-encrypted or
 backfilled. Existing v1 revisions remain unusable for authoritative CBE Birr lookup.
 
 The private SQL migration `20261016232538_cbe_birr_receiver_lookup_revision_v2.sql` adds a

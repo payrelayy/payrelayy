@@ -44,7 +44,95 @@ async function applyMigrationFiles(
   }
 }
 
-it('rehearses a staging-ledger-shaped catch-up with no staging connection or customer data', async () => {
+async function seedSyntheticCbeHistory(client: Client): Promise<void> {
+  const receiver = await client.query<{ id: string; provider_id: string }>(`
+    insert into app.receiver_accounts (
+      provider_id, version, account_holder_name, account_reference_ciphertext,
+      account_reference_masked, account_reference_fingerprint,
+      protection_profile_version, encryption_key_version, fingerprint_key_version,
+      rotation_request_id, rotation_reason, instructions
+    )
+    select provider.id, 2, 'Synthetic CBE Receiver',
+           'receiver-v1.cbe_birr.' || repeat('A', 16) || '.' || repeat('B', 22) || '.' || repeat('C', 16),
+           '***9001', repeat('7', 64), 1, 1, 1,
+           gen_random_uuid(), 'initial_configuration',
+           jsonb_build_object('customer_message', 'Synthetic SQL fixture only')
+      from app.payment_providers provider
+     where provider.code = 'cbe_birr'
+    returning id, provider_id
+  `);
+  expect(receiver.rows).toHaveLength(1);
+
+  const customer = await client.query<{ id: string }>(`
+    insert into app.customers default values returning id
+  `);
+  const player = await client.query<{ id: string; platform_id: string }>(
+    `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+     select $1::uuid, platform.id, 'SYNTHETIC-CBE-STAGING-HISTORY'
+       from app.platforms platform where platform.code = 'kemerbet'
+     returning id, platform_id`,
+    [customer.rows[0]!.id],
+  );
+  expect(player.rows).toHaveLength(1);
+  await client.query(
+    `insert into app.player_validation_attempts (
+       player_account_id, attempt_number, outcome, reason_code, adapter_version,
+       started_at, completed_at, result_digest
+     ) values (
+       $1::uuid, 1, 'valid', 'synthetic_rehearsal', 'fixture_v1',
+       clock_timestamp() - interval '1 second', clock_timestamp(),
+       'synthetic-cbe-staging-validation'
+     )`,
+    [player.rows[0]!.id],
+  );
+  await client.query(
+    `update app.customer_platform_players
+        set validation_status = 'valid'
+      where id = $1::uuid`,
+    [player.rows[0]!.id],
+  );
+  await client.query(
+    `insert into app.player_deposit_eligibility_decisions (
+       player_account_id, decision_version, decision, reason_code, actor_kind
+     ) values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
+    [player.rows[0]!.id],
+  );
+
+  for (let index = 1; index <= 3; index += 1) {
+    const intent = await client.query<{ id: string }>(
+      `insert into app.deposit_intents (
+         customer_id, platform_id, player_account_id, payment_provider_id,
+         receiver_account_id, expected_amount_minor
+       ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
+       returning id`,
+      [
+        customer.rows[0]!.id,
+        player.rows[0]!.platform_id,
+        player.rows[0]!.id,
+        receiver.rows[0]!.provider_id,
+        receiver.rows[0]!.id,
+      ],
+    );
+    expect(intent.rows).toHaveLength(1);
+    if (index <= 2) {
+      await client.query(
+        `insert into app.deposit_submissions (
+           deposit_intent_id, submission_number, submitted_reference_ciphertext,
+           submitted_reference_fingerprint, submitted_reference_masked,
+           reference_encryption_key_version
+         ) values ($1::uuid, 1, $2::text, $3::text, $4::text, 1)`,
+        [
+          intent.rows[0]!.id,
+          `synthetic-cbe-ciphertext-${index}`,
+          String(index).repeat(64),
+          `***900${index}`,
+        ],
+      );
+    }
+  }
+}
+
+it('rehearses a staging-ledger-shaped catch-up with no staging connection or real customer data', async () => {
   const environment = readSqlIntegrationEnvironment();
   const migrations = await listMigrationsLexically(environment.migrationsDirectory);
   const version = (name: string): string => name.slice(0, 14);
@@ -88,6 +176,8 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       alreadyApplied,
       'staging-ledger baseline',
     );
+    // Match the aggregate legacy CBE row shapes seen in staging, using invented values only.
+    await seedSyntheticCbeHistory(client);
     const pilot = await client.query<{ feature_key: string; mode: string }>(`
       update app.feature_switches
          set mode = 'dry_run',
@@ -165,12 +255,19 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
     `);
     expect(settingsCount.rows).toEqual([{ count: 0 }]);
 
-    const moneyRows = await client.query<{ intents: number; attempts: number }>(`
+    const moneyRows = await client.query<{
+      intents: number;
+      submissions: number;
+      attempts: number;
+      jobs: number;
+    }>(`
       select
         (select count(*)::integer from app.deposit_intents) as intents,
-        (select count(*)::integer from app.deposit_execution_attempts) as attempts
+        (select count(*)::integer from app.deposit_submissions) as submissions,
+        (select count(*)::integer from app.deposit_execution_attempts) as attempts,
+        (select count(*)::integer from app.deposit_jobs) as jobs
     `);
-    expect(moneyRows.rows).toEqual([{ intents: 0, attempts: 0 }]);
+    expect(moneyRows.rows).toEqual([{ intents: 3, submissions: 2, attempts: 0, jobs: 0 }]);
   } finally {
     await client.end();
     // The one-use Compose project removes this entire server after the suite.

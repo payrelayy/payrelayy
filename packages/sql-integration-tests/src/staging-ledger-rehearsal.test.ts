@@ -176,6 +176,55 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or rea
       alreadyApplied,
       'staging-ledger baseline',
     );
+    const catalogFingerprintSql = await readFile(
+      new URL('../../../infra/sql/staging-cbe-catalog-fingerprint.sql', import.meta.url),
+      'utf8',
+    );
+    const catalogFingerprint = await client.query<{
+      category: string;
+      object_count: number;
+      definition_md5: string;
+    }>(catalogFingerprintSql);
+    // The expected hashes were observed through the read-only query against
+    // staging on 18 October 2026. No schema body or customer row is copied.
+    expect(catalogFingerprint.rows).toEqual([
+      {
+        category: 'columns',
+        object_count: 1265,
+        definition_md5: 'a372f8008f2ac92a21163ebfeffc85cc',
+      },
+      {
+        category: 'constraints',
+        object_count: 1172,
+        definition_md5: 'ddad031c3c9ce4b21117f58023af9fb5',
+      },
+      { category: 'enums', object_count: 97, definition_md5: '89b3f78fc049863fc64e99e027b79806' },
+      {
+        category: 'functions',
+        object_count: 333,
+        definition_md5: '6c36754b59f1a17967581ef048a2a507',
+      },
+      {
+        category: 'indexes',
+        object_count: 549,
+        definition_md5: 'd00ec89a7d1c18a7fe7c6dee860b1972',
+      },
+      {
+        category: 'policies',
+        object_count: 12,
+        definition_md5: 'a0f42b0b324203205e87ce680fbfcb81',
+      },
+      {
+        category: 'relations',
+        object_count: 113,
+        definition_md5: '0b3ab3766c9e2d9466b519ea3d5aaacd',
+      },
+      {
+        category: 'triggers',
+        object_count: 291,
+        definition_md5: '6839548c09245fee0d444186cecd78cf',
+      },
+    ]);
     // Match the aggregate legacy CBE row shapes seen in staging, using invented values only.
     await seedSyntheticCbeHistory(client);
     const pilot = await client.query<{ feature_key: string; mode: string }>(`

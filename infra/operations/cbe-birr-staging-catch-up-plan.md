@@ -37,6 +37,10 @@ Player credit, or production state changes in this plan.
 4. Rehearse the **exact** reviewed migration set, in the linked preview's order, against a suitable
    privacy-controlled isolated staging copy that preserves relevant schema and data shapes. The
    disposable synthetic SQL suite is useful evidence but does not replace this check.
+   The read-only [`staging-cbe-catalog-fingerprint.sql`](../sql/staging-cbe-catalog-fingerprint.sql)
+   compares eight `app` catalog categories with the disposable 87-migration baseline without
+   copying customer rows or function bodies. A matching fingerprint narrows schema drift; it is
+   still not a staging data copy or a restore rehearsal.
 5. Prepare a separately reviewed, fail-closed catch-up apply path for the four older versions.
    The current ordinary `db push --linked --yes` would skip them. Bind the apply to the exact
    commit, staging project, freshly checked ledger and preview, all-disabled switch state, and

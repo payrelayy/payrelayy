@@ -114,6 +114,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       exact_app_execute_count: true,
       all_other_app_functions_denied: true,
       cbe_birr_receiver_v2_rotate_allowed: false,
+      cbe_birr_provisioning_snapshot_catalog_safe: true,
     };
     expect(ownerControlCatalogReady(safeCatalog, false)).toBe(true);
     expect(ownerControlCatalogReady(safeCatalog, true)).toBe(false);
@@ -123,6 +124,12 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(ownerControlCatalogReady({ ...safeCatalog, receiver_list_allowed: false }, false)).toBe(
       false,
     );
+    expect(
+      ownerControlCatalogReady(
+        { ...safeCatalog, cbe_birr_provisioning_snapshot_catalog_safe: false },
+        false,
+      ),
+    ).toBe(false);
     expect(
       ownerControlCatalogReady(
         { ...safeCatalog, cbe_birr_receiver_v2_rotate_allowed: null },

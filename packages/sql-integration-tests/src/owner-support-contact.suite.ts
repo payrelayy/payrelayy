@@ -154,6 +154,40 @@ export function registerOwnerSupportContactSqlTests(
       });
     });
 
+    it('accepts only the private CBE provisioning snapshot grant across the Owner rollout', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+
+        await client.query('savepoint cbe_snapshot_before_migration');
+        await client.query(`drop function
+          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)`);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+        await client.query('rollback to savepoint cbe_snapshot_before_migration');
+
+        await client.query(`grant execute on function
+          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)
+          to fetanagent_owner_control`);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+
+        await client.query('savepoint cbe_snapshot_grant_boundary');
+        await client.query(`grant execute on function
+          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)
+          to fetanagent_cbe_birr_shadow_worker`);
+        const workerGrant = await runActualOwnerPreflight(client);
+        expect(workerGrant.cbe_birr_provisioning_snapshot_catalog_safe).toBe(false);
+        expect(workerGrant.exact_app_execute_count).toBe(true);
+        await client.query('rollback to savepoint cbe_snapshot_grant_boundary');
+
+        await client.query(`grant execute on function
+          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)
+          to public`);
+        const publicGrant = await runActualOwnerPreflight(client);
+        expect(publicGrant.cbe_birr_provisioning_snapshot_catalog_safe).toBe(false);
+      });
+    });
+
     it.each(supportRoutines)(
       'rejects a missing support grant for %s at actual startup',
       async (signature, check) => {

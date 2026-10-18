@@ -53,7 +53,7 @@ plan. The staging VM/runtime is a separate blocker and must not be replaced by t
 
 ## First export result, 18 October 2026
 
-The approved [manual run](https://github.com/payrelayy/payrelayy/actions/runs/39131122213)
+The approved manual GitHub Actions run `39131122213`
 completed on `main` commit `cc368c297456eacba1831549983f2a9d4fcd0f1f`. Its ciphertext
 digest is `7abbc7c5f432976d9d7ca855a956c26c371a54b0161c3fa613b5aebd44b3a3ad`, and the
 artifact expires on 25 October 2026 at 13:23 UTC. The private local key authenticated decryption;

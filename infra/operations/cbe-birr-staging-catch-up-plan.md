@@ -39,7 +39,7 @@ restore gate remains open.
 
 ## Encrypted export and local rehearsal, 18 October 2026
 
-The approved [encrypted export](https://github.com/payrelayy/payrelayy/actions/runs/39131122213)
+The approved encrypted export (GitHub Actions run `39131122213`)
 passed its before/after post-stop gates. Its seven-day public Actions artifact contains only CMS
 ciphertext. The downloaded ciphertext SHA-256 is
 `7abbc7c5f432976d9d7ca855a956c26c371a54b0161c3fa613b5aebd44b3a3ad`.

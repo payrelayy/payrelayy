@@ -15,6 +15,13 @@ import {
   type CbeBirrScopedReferenceOpeningKey,
 } from '@fetanagent/cbe-birr-reference-opening';
 
+export {
+  CbeBirrReceiverKeyProvisioningCheckError,
+  checkCbeBirrReceiverKeyProvisioning,
+  type CbeBirrReceiverKeyProvisioningCheckInput,
+  type CbeBirrReceiverKeyProvisioningWitness,
+} from './receiver-lookup.js';
+
 const HEX_KEY_PATTERN = /^[0-9a-f]{64}$/u;
 const KEY_ID_PATTERN = /^sha256:[0-9a-f]{64}$/u;
 const CBE_ENCRYPTION_CHILD_DOMAIN =

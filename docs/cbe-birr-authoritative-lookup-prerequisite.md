@@ -196,6 +196,11 @@ The remaining blockers preserve the existing safety design:
    exist, but an active v2 revision by itself does not provision a verifier child key, establish
    worker custody, or prove authoritative receiver credit. The receiver-provenance blocker
    therefore remains for verification.
+   A separate offline receiver-child provisioning check now verifies a proposed key against
+   both approved Owner lookup-master fingerprints and an independently supplied exact revision
+   identity. The guarded receiver-key loader can reject stale release pins. Neither check
+   retrieves the active revision, provisions a real key, or connects a verifier; the blocker
+   remains open.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Synthetic fixture reduction and canonical settlement profiles

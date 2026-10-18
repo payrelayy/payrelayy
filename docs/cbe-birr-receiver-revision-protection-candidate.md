@@ -32,6 +32,11 @@ opening profile and independently supplied release pins, and reject Owner master
 environment. Synthetic tests exercise opening and reject stale revisions, altered keys, profile
 drift, and unsafe files. No real key or approved pin is installed, and the loader is not imported
 by an app. It does not prove derivation from the Owner master or active SQL-revision identity.
+An additional offline check now compares a proposed child and opening profile against both
+approved Owner master fingerprints and a separately approved exact revision UUID/version. It
+derives the expected child from the Owner encryption master and returns only a nonsecret
+consistency witness. A dedicated provisioner subpath exposes the pure derivation; no app imports
+it. This does not retrieve the active SQL revision, deliver a key, or attest custody.
 No existing receiver is re-encrypted or
 backfilled. Existing v1 revisions remain unusable for authoritative CBE Birr lookup.
 

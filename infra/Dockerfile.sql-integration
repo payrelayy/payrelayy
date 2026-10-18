@@ -124,6 +124,7 @@ COPY apps/admin/src/postgres-runtime.ts ./apps/admin/src/postgres-runtime.ts
 COPY packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts \
   ./packages/agent-platform-companion-operator-host/src/activation-diagnostic.ts
 COPY infra/sql/staging-runtimes-enable-continuous.sql ./infra/sql/staging-runtimes-enable-continuous.sql
+COPY infra/sql/staging-cbe-catalog-fingerprint.sql ./infra/sql/staging-cbe-catalog-fingerprint.sql
 COPY infra/sql/staging-telebirr-shadow-verifier-provision.sql \
   ./infra/sql/staging-telebirr-shadow-verifier-provision.sql
 COPY infra/sql/staging-telebirr-shadow-verifier-status.sql \

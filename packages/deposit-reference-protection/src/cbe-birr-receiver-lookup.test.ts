@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 
 import * as publicProtection from './index.js';
 import { protectReceiverAccountReference } from './index.js';
@@ -7,8 +8,9 @@ import {
   CBE_BIRR_RECEIVER_LOOKUP_FINGERPRINT_KEY_VERSION,
   CBE_BIRR_RECEIVER_LOOKUP_PROFILE_VERSION,
   CbeBirrReceiverLookupProtectionError,
-  openCbeBirrReceiverLookup,
+  deriveCbeBirrReceiverLookupChildKey,
   protectCbeBirrReceiverLookup,
+  withOpenedCbeBirrReceiverLookup,
 } from './cbe-birr-receiver-lookup.js';
 
 const REVISION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -32,24 +34,70 @@ function protect(override: Record<string, unknown> = {}, nonce = Buffer.alloc(12
   );
 }
 
-function open(override: Record<string, unknown> = {}) {
-  const protectedReceiver = protect();
-  return openCbeBirrReceiverLookup({
-    receiverRevisionId: REVISION_ID,
-    receiverVersion: 1,
-    ciphertext: protectedReceiver.ciphertext,
-    masked: protectedReceiver.masked,
-    protectionProfileVersion: protectedReceiver.protectionProfileVersion,
-    encryptionKeyVersion: protectedReceiver.encryptionKeyVersion,
+function fingerprint(secret: string): string {
+  return `sha256:${createHash('sha256').update(Buffer.from(secret, 'hex')).digest('hex')}`;
+}
+
+function rootProfile() {
+  return {
+    encryptionMasterFingerprint: fingerprint(SECRETS.encryptionSecret),
+    fingerprintMasterFingerprint: fingerprint(SECRETS.fingerprintSecret),
+    purpose: 'cbe_birr_receiver_lookup' as const,
+    version: 2 as const,
+  };
+}
+
+function childKey(receiverRevisionId = REVISION_ID, receiverVersion = 1) {
+  return deriveCbeBirrReceiverLookupChildKey({
+    receiverRevisionId,
+    receiverVersion,
     encryptionSecret: SECRETS.encryptionSecret,
-    ...override,
   });
+}
+
+function openingProfile(key = childKey()) {
+  return {
+    version: 1 as const,
+    providerCode: 'cbe_birr' as const,
+    purpose: 'receiver-lookup-opening' as const,
+    receiverRevisionId: key.receiverRevisionId,
+    receiverVersion: key.receiverVersion,
+    keyId: key.keyId,
+    rootEncryptionMasterFingerprint: rootProfile().encryptionMasterFingerprint,
+    rootFingerprintMasterFingerprint: rootProfile().fingerprintMasterFingerprint,
+  };
+}
+
+function open(
+  override: Record<string, unknown> = {},
+  key = childKey(),
+  profile = openingProfile(key),
+  root = rootProfile(),
+  callback: (phone: string) => unknown = (phone) => phone === PHONE,
+) {
+  const protectedReceiver = protect();
+  return withOpenedCbeBirrReceiverLookup(
+    {
+      receiverRevisionId: REVISION_ID,
+      receiverVersion: 1,
+      ciphertext: protectedReceiver.ciphertext,
+      masked: protectedReceiver.masked,
+      protectionProfileVersion: protectedReceiver.protectionProfileVersion,
+      encryptionKeyVersion: protectedReceiver.encryptionKeyVersion,
+      ...override,
+    },
+    key,
+    profile,
+    root,
+    callback,
+  );
 }
 
 describe('offline CBE Birr receiver revision protection candidate', () => {
   it('is absent from the package public entry point', () => {
     expect(publicProtection).not.toHaveProperty('protectCbeBirrReceiverLookup');
-    expect(publicProtection).not.toHaveProperty('openCbeBirrReceiverLookup');
+    expect(publicProtection).not.toHaveProperty('withOpenedCbeBirrReceiverLookup');
+    expect(publicProtection).not.toHaveProperty('deriveCbeBirrReceiverLookupChildKey');
   });
 
   it('binds one full phone to the exact revision and protects it without returning the digits', () => {
@@ -66,7 +114,7 @@ describe('offline CBE Birr receiver revision protection candidate', () => {
     });
     expect(Object.isFrozen(protectedReceiver)).toBe(true);
     expect(JSON.stringify(protectedReceiver)).not.toContain(PHONE);
-    expect(open()).toBe(PHONE);
+    expect(open()).toBe(true);
   });
 
   it('uses independent encryption and fingerprint masters and randomized encryption', () => {
@@ -85,9 +133,20 @@ describe('offline CBE Birr receiver revision protection candidate', () => {
       CbeBirrReceiverLookupProtectionError,
     );
     expect(() => open({ receiverVersion: 2 })).toThrow(CbeBirrReceiverLookupProtectionError);
-    expect(() => open({ encryptionSecret: 'c'.repeat(64) })).toThrow(
+    expect(() => open({}, childKey(OTHER_REVISION_ID))).toThrow(
       CbeBirrReceiverLookupProtectionError,
     );
+    expect(() => open({}, childKey(REVISION_ID, 2))).toThrow(CbeBirrReceiverLookupProtectionError);
+    expect(() =>
+      open(
+        {},
+        deriveCbeBirrReceiverLookupChildKey({
+          receiverRevisionId: REVISION_ID,
+          receiverVersion: 1,
+          encryptionSecret: 'c'.repeat(64),
+        }),
+      ),
+    ).toThrow(CbeBirrReceiverLookupProtectionError);
   });
 
   it.each([
@@ -157,6 +216,73 @@ describe('offline CBE Birr receiver revision protection candidate', () => {
     );
   });
 
+  it('checks the child-key identity and independently approved root before exposing a phone', () => {
+    const key = childKey();
+    const callback = (phone: string) => phone === PHONE;
+    for (const changedKey of [
+      { ...key, keyHex: 'c'.repeat(64) },
+      { ...key, keyId: `sha256:${'c'.repeat(64)}` },
+      { ...key, receiverVersion: 2 },
+      { ...key, purpose: 'deposit-proof-reference-opening' },
+      { ...key, encryptionSecret: SECRETS.encryptionSecret },
+    ]) {
+      expect(() =>
+        open({}, changedKey as typeof key, openingProfile(), rootProfile(), callback),
+      ).toThrow(CbeBirrReceiverLookupProtectionError);
+    }
+    for (const changedProfile of [
+      { ...openingProfile(), receiverRevisionId: OTHER_REVISION_ID },
+      { ...openingProfile(), keyId: `sha256:${'c'.repeat(64)}` },
+      { ...openingProfile(), rootEncryptionMasterFingerprint: fingerprint('c'.repeat(64)) },
+    ]) {
+      expect(() => open({}, key, changedProfile, rootProfile(), callback)).toThrow(
+        CbeBirrReceiverLookupProtectionError,
+      );
+    }
+    expect(() =>
+      open(
+        {},
+        key,
+        openingProfile(),
+        {
+          ...rootProfile(),
+          encryptionMasterFingerprint: fingerprint('c'.repeat(64)),
+        },
+        callback,
+      ),
+    ).toThrow(CbeBirrReceiverLookupProtectionError);
+  });
+
+  it('authenticates the ciphertext against a different valid revision before invoking the callback', () => {
+    const callback = vi.fn(() => true);
+    const otherKey = childKey(OTHER_REVISION_ID);
+    expect(() =>
+      open(
+        { receiverRevisionId: OTHER_REVISION_ID },
+        otherKey,
+        openingProfile(otherKey),
+        rootProfile(),
+        callback,
+      ),
+    ).toThrow(CbeBirrReceiverLookupProtectionError);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('permits only a synchronous callback that does not return the raw phone', () => {
+    expect(open({}, childKey(), openingProfile(), rootProfile(), (phone) => phone.slice(-4))).toBe(
+      '0123',
+    );
+    for (const callback of [
+      (phone: string) => phone,
+      async (phone: string) => phone.slice(-4),
+      () => ({ then: () => undefined }),
+    ]) {
+      expect(() => open({}, childKey(), openingProfile(), rootProfile(), callback)).toThrow(
+        CbeBirrReceiverLookupProtectionError,
+      );
+    }
+  });
+
   it('does not reflect plaintext, ciphertext, or malformed input in errors', () => {
     const ciphertext = protect().ciphertext;
     let thrown: unknown;
@@ -192,5 +318,17 @@ describe('offline CBE Birr receiver revision protection candidate', () => {
       CbeBirrReceiverLookupProtectionError,
     );
     expect(() => open({ extra: 'unexpected' })).toThrow(CbeBirrReceiverLookupProtectionError);
+    expect(() =>
+      deriveCbeBirrReceiverLookupChildKey(
+        new Proxy(
+          {
+            receiverRevisionId: REVISION_ID,
+            receiverVersion: 1,
+            encryptionSecret: SECRETS.encryptionSecret,
+          },
+          {},
+        ),
+      ),
+    ).toThrow(CbeBirrReceiverLookupProtectionError);
   });
 });

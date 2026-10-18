@@ -12,14 +12,20 @@ encryption and fingerprint subkeys are derived for that exact revision, and the 
 also authenticates both revision identifiers as AES-GCM additional data. The fingerprint is scoped
 to that revision, so the same phone under a different revision is not a global correlation token.
 Only the last four digits are returned for display.
-Opening the candidate envelope needs the encryption master but not the fingerprint master. It
-rejects altered revision identifiers, ciphertext, masks, versions, keys, and legacy v1 envelopes.
-All errors are fixed and omit the phone and ciphertext.
+The offline candidate now derives a decryption child key for one revision/version from the Owner
+encryption master. Its opener accepts that child key, an exact nonsecret opening manifest, and an
+independently approved identity for the Owner lookup-key profile; it never accepts the master.
+It checks the child-key identity before opening and exposes the phone only inside a synchronous
+trusted callback. It rejects altered revision identifiers, ciphertext, masks, versions, keys,
+manifests, and legacy v1 envelopes. All errors are fixed and omit the phone and ciphertext.
+JavaScript strings cannot be erased, so the trusted callback must not retain the phone.
 
 This is deliberately **not** proof of key provenance. The pure code can check that its two
 provided secrets differ, but it cannot tell whether they were freshly and independently
 provisioned, whether either equals a legacy API secret, who can read them, or whether the caller
-loaded the ciphertext from the Owner's immutable revision. No existing receiver is re-encrypted or
+loaded the ciphertext from the Owner's immutable revision. The opening manifest and approved
+root identity still need an audited, immutable delivery path. No child key has been provisioned or
+mounted in a worker, and no app imports this opener. No existing receiver is re-encrypted or
 backfilled. Existing v1 revisions remain unusable for authoritative CBE Birr lookup.
 
 The private SQL migration `20261016232538_cbe_birr_receiver_lookup_revision_v2.sql` adds a
@@ -50,8 +56,8 @@ do not equal either existing Owner receiver-reference master, plus an exact vers
 purpose-bound profile whose SHA-256 fingerprints match the loaded keys. Production accepts only
 the approved private secret and profile paths. The runtime log reports configuration state, not
 key material. Only the new default-off Owner API route consumes these keys; no worker or provider
-request uses them. The configuration flag must remain off until actual independent key provisioning
-is reviewed. Matching profile fingerprints do **not** prove that the masters were independently
+request uses them. The configuration flag defaults off and is changed only as a separate deployment
+decision. Matching profile fingerprints do **not** prove that the masters were independently
 generated, provisioned, or stored. This code does not install real secrets or authorize a
 receiving-wallet change.
 
@@ -69,15 +75,16 @@ active mask, and clears the phone after a request. The SQL function remains the 
 guard. This dashboard change does not deploy the app, provision keys, change a receiver or switch,
 make a provider request, or credit a Player.
 
-Before any runtime use, a separately reviewed change must:
+Before any verifier runtime use, a separately reviewed change must:
 
-1. Provision fresh, independently managed encryption and fingerprint masters, with the worker
-   receiving only the minimum decryption material and an audited rotation/recovery path.
-2. Review and deploy the private key mounts and default-off Owner configuration before enabling
-   the route. The Owner-only grant is present, but the route and form remain absent while the flag
-   is off. Check the saved result without exposing the phone or lookup material; do not treat SQL
-   envelope-shape checks as proof of a valid key or phone. Obtain separate approval before
-   changing the active receiver revision.
+1. Provision the exact active receiver revision's derived child key to a dedicated verifier, with
+   an independently approved opening manifest, narrow custody, and audited rotation/recovery.
+   The Owner's two lookup masters must remain outside that verifier.
+2. Verify the exact Owner key profile, private mounts, and active receiver revision before
+   provisioning a verifier key. The Owner-only grant and guarded form exist; the form is absent
+   whenever its route flag is off. Check saved results without exposing the phone or lookup
+   material; SQL envelope-shape checks alone do not prove a valid key or phone. Obtain separate
+   approval before changing the active receiver revision.
 3. Bind each new CBE Birr payment instruction and proof to that exact revision. A lookup must not
    substitute whichever receiver happens to be active later.
 4. Add a narrow, prelease-safe worker access boundary that returns only the needed protected

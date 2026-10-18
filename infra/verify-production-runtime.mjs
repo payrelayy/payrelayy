@@ -226,7 +226,7 @@ assert.match(owner, /FINANCIAL_ACTIONS_MODE: dry_run/u);
 assert.match(owner, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
 assert.match(owner, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
 assert.match(owner, /INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true'/u);
-assert.match(owner, /INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'false'/u);
+assert.match(owner, /INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true'/u);
 assert.match(
   owner,
   /OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE: \/run\/secrets\/owner_cbe_birr_lookup_encryption_master/u,

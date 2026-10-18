@@ -66,6 +66,8 @@ const companionPairingPackage =
 const bearer = 'header.payload.signature-with-safe-characters';
 const receiverEncryptionMaster = 'c'.repeat(64);
 const receiverFingerprintMaster = 'd'.repeat(64);
+const cbeLookupEncryptionMaster = 'e'.repeat(64);
+const cbeLookupFingerprintMaster = 'f'.repeat(64);
 const receiverMasterProfile = JSON.stringify({
   encryptionMasterFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from(receiverEncryptionMaster, 'hex'))
@@ -73,6 +75,16 @@ const receiverMasterProfile = JSON.stringify({
   fingerprintMasterFingerprint: `sha256:${createHash('sha256')
     .update(Buffer.from(receiverFingerprintMaster, 'hex'))
     .digest('hex')}`,
+  version: 2,
+});
+const cbeLookupMasterProfile = JSON.stringify({
+  encryptionMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeLookupEncryptionMaster, 'hex'))
+    .digest('hex')}`,
+  fingerprintMasterFingerprint: `sha256:${createHash('sha256')
+    .update(Buffer.from(cbeLookupFingerprintMaster, 'hex'))
+    .digest('hex')}`,
+  purpose: 'cbe_birr_receiver_lookup',
   version: 2,
 });
 
@@ -312,6 +324,7 @@ function config(
   companionDevicePairingConfigured = false,
   deploymentTarget: OwnerControlDeploymentTarget = 'staging',
   routineReceiptSignerConfigured = false,
+  cbeBirrReceiverV2RotationEnabled = false,
 ) {
   const target = OWNER_CONTROL_DATABASE_TARGETS[deploymentTarget];
   return loadOwnerControlConfig({
@@ -325,6 +338,15 @@ function config(
     OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER: receiverEncryptionMaster,
     OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER: receiverFingerprintMaster,
     OWNER_RECEIVER_REFERENCE_PROFILE: receiverMasterProfile,
+    ...(cbeBirrReceiverV2RotationEnabled
+      ? {
+          INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true',
+          INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true',
+          OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: cbeLookupEncryptionMaster,
+          OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER: cbeLookupFingerprintMaster,
+          OWNER_CBE_BIRR_LOOKUP_PROFILE: cbeLookupMasterProfile,
+        }
+      : {}),
     ...(devicePairingConfigured
       ? { OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: 'telebirr_assignment_signer_2026_01' }
       : {}),
@@ -2280,6 +2302,110 @@ describe('Owner-control HTTP boundary', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/v1/owner/receiver-accounts/rotate',
+        headers: candidate.headers,
+        payload: candidate.payload,
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('keeps the CBE Birr v2 receiver upgrade route absent by default and validates its exact Owner request when enabled', async () => {
+    const disabled = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime(),
+    });
+    const disabledResponse = await disabled.inject({
+      method: 'POST',
+      url: '/v1/owner/cbe-birr-receiver-v2/protection-upgrade',
+      headers: receiverMutationHeaders(),
+      payload: {},
+    });
+    expect(disabledResponse.statusCode).toBe(404);
+    await disabled.close();
+
+    let observed: unknown;
+    const receiver = {
+      accountReferenceMasked: '***3456',
+      activeFrom: '2026-10-18T16:30:00.000Z',
+      lookupProtected: true as const,
+      receiverRevisionId: pilotRequestId,
+      receiverStatus: 'active' as const,
+      revision: 2,
+      rotationReason: 'protection_upgrade' as const,
+    };
+    const enabled = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receivers: {
+          list: async () => [],
+          rotate: async () => {
+            throw new Error('legacy rotation must not run');
+          },
+          upgradeCbeBirrProtection: async (actor, request) => {
+            expect(actor).toBe(authUserId);
+            observed = request;
+            return receiver;
+          },
+        },
+      }),
+    });
+    const payload = {
+      accountHolderName: 'Synthetic Receiver',
+      accountReference: '251000003456',
+      confirmation: 'owner_confirmed_cbe_birr_same_receiver_protection_upgrade',
+      expectedVersion: 2,
+      requestId: pilotRequestId,
+    };
+    const valid = await enabled.inject({
+      method: 'POST',
+      url: '/v1/owner/cbe-birr-receiver-v2/protection-upgrade',
+      headers: receiverMutationHeaders(),
+      payload,
+    });
+    expect(valid.statusCode).toBe(201);
+    expect(observed).toEqual({
+      accountHolderName: payload.accountHolderName,
+      accountReference: payload.accountReference,
+      expectedVersion: 2,
+      requestId: pilotRequestId,
+    });
+    expect(valid.json()).toEqual({ receiver });
+    expect(valid.body).not.toContain(payload.accountReference);
+    await enabled.close();
+  });
+
+  it('rejects malformed CBE Birr v2 upgrade requests before Owner authentication', async () => {
+    let authenticationCalls = 0;
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const base = {
+      accountHolderName: 'Synthetic Receiver',
+      accountReference: '251000003456',
+      confirmation: 'owner_confirmed_cbe_birr_same_receiver_protection_upgrade',
+      expectedVersion: 2,
+      requestId: pilotRequestId,
+    };
+    for (const candidate of [
+      { payload: { ...base, accountReference: '000003456' }, headers: receiverMutationHeaders() },
+      { payload: { ...base, expectedVersion: 0 }, headers: receiverMutationHeaders() },
+      { payload: { ...base, expectedVersion: 2.5 }, headers: receiverMutationHeaders() },
+      { payload: { ...base, extra: true }, headers: receiverMutationHeaders() },
+      {
+        payload: { ...base, confirmation: 'owner_confirmed_receiver_rotation' },
+        headers: receiverMutationHeaders(),
+      },
+      { payload: base, headers: { ...receiverMutationHeaders(), origin: 'https://evil.example' } },
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/cbe-birr-receiver-v2/protection-upgrade',
         headers: candidate.headers,
         payload: candidate.payload,
       });

@@ -81,6 +81,7 @@ export type OwnerControlRuntimeConfig =
       readonly enabled: false;
       readonly companionDevicePairing: undefined;
       readonly cbeBirrLookupKeyMaterial: undefined;
+      readonly cbeBirrReceiverV2RotationEnabled: false;
       readonly connection: undefined;
       readonly deploymentTarget: undefined;
       readonly devicePairing: undefined;
@@ -116,6 +117,7 @@ export type OwnerControlRuntimeConfig =
             readonly fingerprintSecret: string;
             readonly masterProfile: OwnerCbeBirrLookupProfile;
           };
+      readonly cbeBirrReceiverV2RotationEnabled: boolean;
       readonly connection: OwnerControlDatabaseConnection;
       readonly deploymentTarget: OwnerControlDeploymentTarget;
       readonly devicePairing:
@@ -293,6 +295,7 @@ export function loadOwnerControlConfig(
         enabled: false,
         companionDevicePairing: undefined,
         cbeBirrLookupKeyMaterial: undefined,
+        cbeBirrReceiverV2RotationEnabled: false,
         connection: undefined,
         deploymentTarget: undefined,
         devicePairing: undefined,
@@ -419,6 +422,14 @@ export function loadOwnerControlConfig(
       masterProfile,
     };
   }
+  const cbeBirrReceiverV2RotationEnabled = booleanFromEnv(
+    environment.INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED,
+    false,
+    'INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED',
+  );
+  if (cbeBirrReceiverV2RotationEnabled && !cbeBirrLookupKeyMaterial.configured) {
+    throw new Error('Owner CBE Birr v2 receiver rotation requires the lookup key profile.');
+  }
   const assignmentSignerKeyId = environment.OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID;
   if (
     assignmentSignerKeyId !== undefined &&
@@ -447,6 +458,7 @@ export function loadOwnerControlConfig(
     runtime: {
       enabled: true,
       cbeBirrLookupKeyMaterial,
+      cbeBirrReceiverV2RotationEnabled,
       companionDevicePairing:
         companionServerSignerKeyId === undefined
           ? { serverSignerKeyId: undefined, configured: false }
@@ -496,6 +508,8 @@ export function redactedOwnerControlConfigForLog(config: OwnerControlConfig) {
         config.runtime.enabled && config.runtime.companionDevicePairing.configured,
       cbeBirrLookupKeyMaterialConfigured:
         config.runtime.enabled && config.runtime.cbeBirrLookupKeyMaterial.configured,
+      cbeBirrReceiverV2RotationEnabled:
+        config.runtime.enabled && config.runtime.cbeBirrReceiverV2RotationEnabled,
       telebirrDevicePairingConfigured:
         config.runtime.enabled && config.runtime.devicePairing.configured,
       publishableKeyConfigured: config.runtime.enabled,

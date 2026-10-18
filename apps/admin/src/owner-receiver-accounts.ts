@@ -3,6 +3,7 @@ import {
   type DepositReferenceProtectionSecrets,
   type DepositProofReferenceProvider,
 } from '@fetanagent/deposit-reference-protection';
+import { prepareCbeBirrReceiverRotation } from '@fetanagent/deposit-reference-protection/cbe-birr-receiver-rotation';
 
 export type OwnerReceiverProvider = DepositProofReferenceProvider;
 export type OwnerReceiverRotationReason =
@@ -32,6 +33,23 @@ export interface RotateOwnerReceiverAccountRequest {
   readonly providerCode: OwnerReceiverProvider;
   readonly requestId: string;
   readonly rotationReason: OwnerReceiverRotationReason;
+}
+
+export interface UpgradeOwnerCbeBirrReceiverProtectionRequest {
+  readonly accountHolderName: string;
+  readonly accountReference: string;
+  readonly expectedVersion: number;
+  readonly requestId: string;
+}
+
+export interface OwnerCbeBirrReceiverV2Revision {
+  readonly accountReferenceMasked: string;
+  readonly activeFrom: string;
+  readonly lookupProtected: true;
+  readonly receiverRevisionId: string;
+  readonly receiverStatus: 'active';
+  readonly revision: number;
+  readonly rotationReason: 'protection_upgrade';
 }
 
 export interface OwnerReceiverDatabase {
@@ -119,6 +137,14 @@ const ROTATE_SQL = `
     from app.rotate_owner_receiver_account(
       $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::text,
       $8::smallint, $9::smallint, $10::smallint, $11::text
+    )
+`;
+
+const ROTATE_CBE_BIRR_V2_SQL = `
+  select receiver_revision_id, revision, receiver_status, active_from, lookup_protected
+    from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+      $1::uuid, $2::uuid, $3::uuid, $4::integer, $5::text, $6::text,
+      $7::text, $8::text, $9::text, $10::text, $11::text, 'protection_upgrade'
     )
 `;
 
@@ -217,6 +243,7 @@ export class PostgresOwnerReceiverAccounts {
   constructor(
     private readonly database: OwnerReceiverDatabase,
     private readonly secrets: DepositReferenceProtectionSecrets,
+    private readonly cbeBirrLookupSecrets?: DepositReferenceProtectionSecrets,
   ) {}
 
   async list(authUserId: string): Promise<readonly OwnerReceiverAccount[]> {
@@ -288,6 +315,70 @@ export class PostgresOwnerReceiverAccounts {
       return Object.freeze(receiver);
     } catch (error) {
       if (error instanceof OwnerReceiverAccountRejectedError) throw error;
+      throw new OwnerReceiverAccountUnavailableError();
+    }
+  }
+
+  async upgradeCbeBirrProtection(
+    authUserId: string,
+    request: UpgradeOwnerCbeBirrReceiverProtectionRequest,
+  ): Promise<OwnerCbeBirrReceiverV2Revision> {
+    if (
+      !UUID_PATTERN.test(authUserId) ||
+      !UUID_V4_PATTERN.test(request.requestId) ||
+      !HOLDER_PATTERN.test(request.accountHolderName) ||
+      request.accountHolderName.length < 2 ||
+      !validOwnerReceiverAccountReference('cbe_birr', request.accountReference) ||
+      !Number.isInteger(request.expectedVersion) ||
+      request.expectedVersion < 1 ||
+      request.expectedVersion > 2_147_483_647
+    ) {
+      throw new OwnerReceiverAccountRejectedError();
+    }
+    if (!this.cbeBirrLookupSecrets) throw new OwnerReceiverAccountUnavailableError();
+    try {
+      // The request UUID is the revision UUID, so a retry presents the same immutable identity.
+      // SQL checks the expected version and the active v1 receiver fingerprint atomically.
+      const prepared = prepareCbeBirrReceiverRotation({
+        receiverRevisionId: request.requestId,
+        receiverVersion: request.expectedVersion,
+        receiverPhone: request.accountReference,
+        referenceSecrets: this.secrets,
+        lookupSecrets: this.cbeBirrLookupSecrets,
+      });
+      const result = await this.database.query(ROTATE_CBE_BIRR_V2_SQL, [
+        authUserId,
+        request.requestId,
+        request.requestId,
+        request.expectedVersion,
+        request.accountHolderName,
+        prepared.reference.ciphertext,
+        prepared.reference.fingerprint,
+        prepared.reference.masked,
+        prepared.lookup.ciphertext,
+        prepared.lookup.fingerprint,
+        prepared.lookup.masked,
+      ]);
+      const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
+      if (
+        !row ||
+        row.receiver_revision_id !== request.requestId ||
+        row.revision !== request.expectedVersion ||
+        row.receiver_status !== 'active' ||
+        row.lookup_protected !== true
+      ) {
+        throw new OwnerReceiverAccountUnavailableError();
+      }
+      return Object.freeze({
+        accountReferenceMasked: prepared.reference.masked,
+        activeFrom: isoDate(row.active_from),
+        lookupProtected: true,
+        receiverRevisionId: request.requestId,
+        receiverStatus: 'active',
+        revision: request.expectedVersion,
+        rotationReason: 'protection_upgrade',
+      });
+    } catch {
       throw new OwnerReceiverAccountUnavailableError();
     }
   }

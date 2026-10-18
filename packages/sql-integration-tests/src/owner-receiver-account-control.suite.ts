@@ -285,15 +285,10 @@ export function registerOwnerReceiverAccountControlSqlTests(
             'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
             'EXECUTE') as owner_function
         `);
-        expect(deployedGrant.rows).toEqual([{ owner_function: false }]);
-        // Exercise the future Owner path under a transaction-only grant; rollback removes it.
-        await client.query(`grant execute on function
-          app.rotate_owner_cbe_birr_receiver_lookup_v2(
-            uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text
-          ) to fetanagent_owner_control`);
+        expect(deployedGrant.rows).toEqual([{ owner_function: true }]);
 
         const requestId = randomUUID();
-        const receiverRevisionId = randomUUID();
+        const receiverRevisionId = requestId;
         const lookupCiphertext = `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`;
         const lookupFingerprint = 'b'.repeat(64);
         const rotateSql = `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
@@ -317,6 +312,21 @@ export function registerOwnerReceiverAccountControlSqlTests(
         await expectFailure(client, rotateSql, values, /requires every payment switch disabled/u);
         await client.query(`update app.feature_switches set mode = 'disabled'
           where feature_key = 'payment_verification'`);
+        await expectFailure(
+          client,
+          rotateSql,
+          [
+            authUserId,
+            requestId,
+            receiverRevisionId,
+            prior[0]!.revision + 1,
+            legacyCiphertext,
+            'c'.repeat(64),
+            lookupCiphertext,
+            lookupFingerprint,
+          ],
+          /Only a fresh protection revision of the same v1 CBE Birr receiver is allowed/u,
+        );
 
         const created = await queryAsOwnerControl<{
           readonly lookup_protected: boolean;
@@ -373,12 +383,17 @@ export function registerOwnerReceiverAccountControlSqlTests(
           readonly owner_function: boolean;
           readonly public_function: boolean;
           readonly runtime_table: boolean;
+          readonly worker_function: boolean;
           readonly worker_table: boolean;
         }>(`
           select has_function_privilege(
                    'fetanagent_owner_control',
                    'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
                    'EXECUTE') as owner_function,
+                 has_function_privilege(
+                   'fetanagent_cbe_birr_shadow_worker',
+                   'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
+                   'EXECUTE') as worker_function,
                  exists (
                    select 1
                      from pg_proc routine,
@@ -401,6 +416,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
             owner_function: true,
             public_function: false,
             runtime_table: false,
+            worker_function: false,
             worker_table: false,
           },
         ]);

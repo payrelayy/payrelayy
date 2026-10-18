@@ -1353,6 +1353,59 @@ export function buildOwnerControlApp(
     }
   });
 
+  if (runtimeConfig.cbeBirrReceiverV2RotationEnabled) {
+    app.post('/v1/owner/cbe-birr-receiver-v2/protection-upgrade', async (request, reply) => {
+      try {
+        const body = exactObject(request.body, [
+          'accountHolderName',
+          'accountReference',
+          'confirmation',
+          'expectedVersion',
+          'requestId',
+        ]);
+        if (
+          body?.confirmation !== 'owner_confirmed_cbe_birr_same_receiver_protection_upgrade' ||
+          typeof body.accountHolderName !== 'string' ||
+          !OWNER_RECEIVER_HOLDER_PATTERN.test(body.accountHolderName) ||
+          body.accountHolderName.length < 2 ||
+          !validOwnerReceiverAccountReference('cbe_birr', body.accountReference) ||
+          typeof body.expectedVersion !== 'number' ||
+          !Number.isInteger(body.expectedVersion) ||
+          body.expectedVersion < 1 ||
+          body.expectedVersion > 2_147_483_647 ||
+          !validReceiverMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receivers = dependencies.runtime.receivers;
+        if (!receivers.upgradeCbeBirrProtection) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const mutation = await runKemerbetStateMutation('ordinary', () =>
+          receivers.upgradeCbeBirrProtection!(authUserId, {
+            accountHolderName: body.accountHolderName as string,
+            accountReference: body.accountReference as string,
+            expectedVersion: body.expectedVersion as number,
+            requestId: body.requestId as string,
+          }),
+        );
+        return mutation.state === 'blocked'
+          ? reply.code(409).send({ error: 'kemerbet_security_recovery_required' })
+          : reply.code(201).send({ receiver: mutation.value });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerReceiverAccountRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner CBE Birr receiver protection upgrade is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    });
+  }
+
   app.get('/v1/owner/kemerbet-agent-profiles', async (request, reply) => {
     try {
       if (

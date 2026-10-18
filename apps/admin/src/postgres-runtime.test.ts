@@ -26,6 +26,7 @@ const config = {
     fingerprintSecret: undefined,
     masterProfile: undefined,
   },
+  cbeBirrReceiverV2RotationEnabled: false,
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   routineEnrollmentReceiptSigner: {
     signerKeyId: undefined,
@@ -90,7 +91,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     const executeCountSql = OWNER_CONTROL_PREFLIGHT_SQL.split(
       'as exact_app_execute_count',
     )[0]!.split('as recorder_denied,')[1]!;
-    expect(executeCountSql).toMatch(/select count\(\*\) = 35\s*\+/u);
+    expect(executeCountSql).toMatch(/select count\(\*\) = 36\s*\+/u);
     for (const signature of [
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',
@@ -215,6 +216,9 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_receiver_accounts(uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_kemerbet_agent_profiles(uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(

@@ -69,6 +69,15 @@ deposit switches to be disabled, but the existing CBE dry-run proof capture stil
 role can call enrollment or read the ledger; there is no verifier lease, result writer, source
 request, claim, or credit. This does not clear the prelease or protected-material blockers.
 
+A separate candidate-ID prelease preflight now rechecks the bound proof and currently active v2
+receiver revision when a routine candidate is examined. It returns only a blocked disposition,
+reason, and literal false lease/material flags; retirement of the bound receiver moves the
+candidate to review. Its only grantee is a dedicated NOLOGIN metadata role with no table access.
+No runtime role is a member, no lease calls it, and no protected ciphertext or key is returned.
+This is an offline prelease building block, not a completed acquisition gate: blockers 10 and 11
+remain open until a later lease path consumes this decision atomically and uses a separately
+reviewed material boundary.
+
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:
 
@@ -183,9 +192,10 @@ The remaining blockers preserve the existing safety design:
    protection provenance, identify which existing revision is conforming, or prove that an official
    receipt credited the configured receiver. An
    [offline revision-bound protection candidate](cbe-birr-receiver-revision-protection-candidate.md)
-   is internal-only. A private v2 revision storage/rotation contract now exists, but no runtime
-   calls it, no independent keys have been provisioned, and no v1 receiver was upgraded. The
-   receiver-provenance blocker therefore remains.
+   is internal-only. A private v2 revision storage/rotation contract and guarded Owner route now
+   exist, but an active v2 revision by itself does not provision a verifier child key, establish
+   worker custody, or prove authoritative receiver credit. The receiver-provenance blocker
+   therefore remains for verification.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Synthetic fixture reduction and canonical settlement profiles

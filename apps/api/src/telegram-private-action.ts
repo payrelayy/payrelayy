@@ -114,6 +114,12 @@ const DEPOSIT_PROOF_KEYS = new Set([
   'playerId',
   'transactionReference',
 ]);
+const CBE_BIRR_BOUND_PROOF_KEYS = new Set([
+  ...ROOT_MENU_KEYS,
+  'instructionToken',
+  'playerId',
+  'transactionReference',
+]);
 const DEPOSIT_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'depositToken']);
 const DEPOSIT_PROOF_STATUS_KEYS = new Set([...ROOT_MENU_KEYS, 'proofToken']);
 const ETB_AMOUNT_PATTERN = /^(?:[1-9][0-9]{0,7})(?:\.[0-9]{1,2})?$/u;
@@ -549,6 +555,37 @@ export function parseTelegramPrivateActionEnvelope(
         ...identity,
         kind: 'deposit_proof_command',
         providerCode: parsed.providerCode,
+        playerId: parsed.playerId,
+        transactionReference: parsed.transactionReference,
+      };
+    }
+    case 'cbe_birr_dry_run_instruction_command': {
+      if (!hasOnlyKeys(parsed, PLAYER_ID_TEXT_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (!identity || !validDestinationPlayerId(parsed.playerId)) return undefined;
+      return {
+        ...identity,
+        kind: 'cbe_birr_dry_run_instruction_command',
+        playerId: parsed.playerId,
+      };
+    }
+    case 'cbe_birr_bound_dry_run_proof_command': {
+      if (!hasOnlyKeys(parsed, CBE_BIRR_BOUND_PROOF_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (
+        !identity ||
+        !validDestinationPlayerId(parsed.playerId) ||
+        typeof parsed.instructionToken !== 'string' ||
+        !COMPACT_UUID_PATTERN.test(parsed.instructionToken) ||
+        typeof parsed.transactionReference !== 'string' ||
+        !/^SYNTHCBE[A-Z0-9]{4,24}$/u.test(parsed.transactionReference)
+      ) {
+        return undefined;
+      }
+      return {
+        ...identity,
+        kind: 'cbe_birr_bound_dry_run_proof_command',
+        instructionToken: parsed.instructionToken,
         playerId: parsed.playerId,
         transactionReference: parsed.transactionReference,
       };

@@ -773,9 +773,9 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             ]);
           }),
         ).rejects.toThrow(/conflicts with its receipt/u);
-        await expect(
-          queryAsRole(client, 'fetanagent_player_actions', instructionSql, instructionValues),
-        ).rejects.toThrow(/permission denied/u);
+        expect(
+          await queryAsRole(client, 'fetanagent_player_actions', instructionSql, instructionValues),
+        ).toMatchObject([{ id: instruction.rows[0]!.id, request_replayed: true }]);
         await expect(
           queryAsRole(
             client,
@@ -1074,9 +1074,9 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             [unboundProof[0]!.deposit_proof_request_id],
           ),
         ).toMatchObject([{ blocker_code: 'instruction_binding_unavailable' }]);
-        await expect(
-          queryAsRole(client, 'fetanagent_player_actions', atomicSql, atomicValues),
-        ).rejects.toThrow(/permission denied/u);
+        expect(
+          await queryAsRole(client, 'fetanagent_player_actions', atomicSql, atomicValues),
+        ).toMatchObject([{ request_replayed: true }]);
         expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
       });
     });

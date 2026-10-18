@@ -148,6 +148,47 @@ const callbackAction: TelegramPrivateActionEnvelope = {
   callbackData,
 };
 
+describe('staging CBE Birr command envelope', () => {
+  const identity = {
+    version: 1,
+    updateId: '123456',
+    telegramUserId: '28379330',
+    privateChatId: '28379330',
+    preferredLocale: 'en',
+  } as const;
+  const instruction = {
+    ...identity,
+    kind: 'cbe_birr_dry_run_instruction_command',
+    playerId: 'PLAYER-DEMO-42',
+  };
+  const proof = {
+    ...identity,
+    kind: 'cbe_birr_bound_dry_run_proof_command',
+    instructionToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+    playerId: 'PLAYER-DEMO-42',
+    transactionReference: 'SYNTHCBE0001',
+  };
+
+  it('accepts only exact synthetic instruction and bound-proof shapes', () => {
+    for (const action of [instruction, proof]) {
+      expect(parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(action)))).toEqual(
+        action,
+      );
+    }
+    for (const action of [
+      { ...instruction, amountEtb: '25' },
+      { ...proof, transactionReference: 'REALREF1234' },
+      { ...proof, transactionReference: 'synthcbe0001' },
+      { ...proof, instructionToken: 'invalid' },
+      { ...proof, receiverAccountReference: '0000000042' },
+    ]) {
+      expect(
+        parseTelegramPrivateActionEnvelope(Buffer.from(JSON.stringify(action))),
+      ).toBeUndefined();
+    }
+  });
+});
+
 function durableNonceStore(
   memoryStore = new InMemoryTelegramPrivateActionNonceStore(),
 ): TelegramPrivateActionNonceStore {

@@ -24,6 +24,8 @@ import {
 } from './telegram-action-capability.js';
 import { PostgresTelegramPrivateActionNonceStore } from './postgres-telegram-private-action-nonce-store.js';
 import { playerActionCatalogPreflightPassed } from './player-action-catalog-preflight.js';
+import { captureTelegramCbeBirrBoundProof } from './telegram-cbe-birr-bound-proof-intake.js';
+import { issueTelegramCbeBirrDryRunInstruction } from './telegram-cbe-birr-dry-run-instruction.js';
 import { captureTelegramRoutineTelebirrCandidate } from './telegram-routine-telebirr-candidate-intake.js';
 import { captureTelegramLiveTelebirrProof } from './telegram-telebirr-live-proof-intake.js';
 import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
@@ -1195,6 +1197,66 @@ async function handleDepositProof(
   };
 }
 
+async function handleCbeBirrDryRunInstruction(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'cbe_birr_dry_run_instruction_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (
+    !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
+    config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
+    config.financialActionsMode !== 'dry_run'
+  ) {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+  const preview = await issueTelegramCbeBirrDryRunInstruction(
+    database,
+    originInboundEventId,
+    action.playerId,
+    config,
+  );
+  return {
+    version: 1,
+    outcome: 'cbe_birr_dry_run_instruction_preview',
+    instructionToken: preview.instructionToken,
+    expiresAt: preview.expiresAt,
+    acceptsPayments: false,
+  };
+}
+
+async function handleCbeBirrBoundDryRunProof(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'cbe_birr_bound_dry_run_proof_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (
+    !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
+    config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
+    config.financialActionsMode !== 'dry_run' ||
+    !/^SYNTHCBE[A-Z0-9]{4,24}$/u.test(action.transactionReference)
+  ) {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+  return captureTelegramCbeBirrBoundProof(
+    database,
+    originInboundEventId,
+    {
+      ...action,
+      kind: 'deposit_proof_command',
+      providerCode: 'cbe_birr',
+    },
+    config,
+  );
+}
+
 async function handleDepositProofStatus(
   database: TelegramPlayerActionDatabase,
   originInboundEventId: string,
@@ -1403,6 +1465,13 @@ export function createPostgresTelegramPlayerActionRuntime(
         if (action.kind === 'deposit_temporary_cleanup_complete') {
           return await handleDepositTemporaryCleanupComplete(pool, action);
         }
+        if (
+          (action.kind === 'cbe_birr_dry_run_instruction_command' ||
+            action.kind === 'cbe_birr_bound_dry_run_proof_command') &&
+          !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled
+        ) {
+          return { version: 1, outcome: 'deposit_unavailable' };
+        }
         const inboundEventId = await recordInbound(
           pool,
           action,
@@ -1432,6 +1501,10 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleDepositReference(pool, inboundEventId, action, config);
           case 'deposit_proof_command':
             return await handleDepositProof(pool, inboundEventId, action, config);
+          case 'cbe_birr_dry_run_instruction_command':
+            return await handleCbeBirrDryRunInstruction(pool, inboundEventId, action, config);
+          case 'cbe_birr_bound_dry_run_proof_command':
+            return await handleCbeBirrBoundDryRunProof(pool, inboundEventId, action, config);
           case 'deposit_proof_status_command':
             return await handleDepositProofStatus(pool, inboundEventId, action);
           case 'deposit_status_command':
@@ -1450,6 +1523,7 @@ export function createPostgresTelegramPlayerActionRuntime(
             config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
           // Permit only the exact candidate grant during the gate-off handoff.
           true,
+          config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled,
         );
       } catch {
         return false;

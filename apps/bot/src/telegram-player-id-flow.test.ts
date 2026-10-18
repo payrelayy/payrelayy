@@ -9,6 +9,27 @@ import {
 } from './telegram-player-id-flow.js';
 
 describe('Telegram Player-ID flow presentation', () => {
+  it('presents an opaque CBE Birr staging token without payable details', () => {
+    const presentation = presentTelegramPlayerIdFlowResult(
+      {
+        version: 1,
+        outcome: 'cbe_birr_dry_run_instruction_preview',
+        instructionToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+        expiresAt: '2026-10-18T01:00:00.000Z',
+        acceptsPayments: false,
+      },
+      { selectedPlayerId: 'PLAYER-DEMO-42' },
+    );
+    expect(presentation.kind).toBe('message');
+    if (presentation.kind === 'message') {
+      expect(presentation.text).toContain('do not send money');
+      expect(presentation.text).toContain(
+        '/cbe_test_proof AAAAAAAAAAAAAAAAAAAAAA PLAYER-DEMO-42 SYNTHCBE0001',
+      );
+      expect(presentation.text).not.toMatch(/send money to|account|receiver.*[0-9]{4}/iu);
+    }
+  });
+
   it('acknowledges a queued Find without claiming Player approval', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,

@@ -164,6 +164,20 @@ export function presentTelegramPlayerIdFlowResult(
                 'No payment is verified or executed in this simulation.',
               ].join('\n'),
       };
+    case 'cbe_birr_dry_run_instruction_preview': {
+      const playerId = context.selectedPlayerId;
+      if (!playerId) throw new Error('The staging Player ID is unavailable.');
+      return {
+        kind: 'message',
+        text: [
+          '🧪 CBE Birr test only — do not send money.',
+          `Test instruction expires: ${result.expiresAt}.`,
+          'No payment receiver is shown or enabled.',
+          `To test a synthetic proof, send /cbe_test_proof ${result.instructionToken} ${playerId} SYNTHCBE0001.`,
+          'No receipt lookup or Player credit will occur.',
+        ].join('\n'),
+      };
+    }
     case 'deposit_reference_received':
       return {
         kind: 'message',

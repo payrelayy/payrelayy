@@ -36,11 +36,20 @@ const ALLOWED_FUNCTIONS = [
 
 const ROUTINE_CANDIDATE_FUNCTION =
   'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)';
+const CBE_BIRR_CANDIDATE_FUNCTIONS = [
+  'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
+  'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
+] as const;
 
-function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean): string {
-  const allowedFunctions = routineCandidateEnabled
-    ? [...ALLOWED_FUNCTIONS, ROUTINE_CANDIDATE_FUNCTION]
-    : ALLOWED_FUNCTIONS;
+function buildPlayerActionCatalogPreflightSql(
+  routineCandidateEnabled: boolean,
+  cbeBirrCandidateEnabled = false,
+): string {
+  const allowedFunctions = [
+    ...ALLOWED_FUNCTIONS,
+    ...(routineCandidateEnabled ? [ROUTINE_CANDIDATE_FUNCTION] : []),
+    ...(cbeBirrCandidateEnabled ? CBE_BIRR_CANDIDATE_FUNCTIONS : []),
+  ];
   const allowedFunctionSql = allowedFunctions
     .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
     .join(',\n        ');
@@ -187,6 +196,15 @@ function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean):
               '${ROUTINE_CANDIDATE_FUNCTION}'
             )`
                 : ''
+            }${
+              cbeBirrCandidateEnabled
+                ? CBE_BIRR_CANDIDATE_FUNCTIONS.map(
+                    (signature) => `,
+            pg_catalog.to_regprocedure(
+              '${signature}'
+            )`,
+                  ).join('')
+                : ''
             }
           ) then array['search_path=pg_catalog']::text[]
           else array['search_path=pg_catalog, app, pg_temp']::text[]
@@ -241,6 +259,12 @@ function buildPlayerActionCatalogPreflightSql(routineCandidateEnabled: boolean):
 export const PLAYER_ACTION_CATALOG_PREFLIGHT_SQL = buildPlayerActionCatalogPreflightSql(false);
 export const PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL =
   buildPlayerActionCatalogPreflightSql(true);
+export const PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL = buildPlayerActionCatalogPreflightSql(
+  false,
+  true,
+);
+export const PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL =
+  buildPlayerActionCatalogPreflightSql(true, true);
 
 export interface PlayerActionCatalogDatabase {
   query(query: string, values: readonly unknown[]): Promise<{ readonly rows: readonly unknown[] }>;
@@ -256,17 +280,27 @@ export async function playerActionCatalogPreflightPassed(
   database: PlayerActionCatalogDatabase,
   routineCandidateEnabled = false,
   allowInactiveCandidateGrant = false,
+  cbeBirrCandidateEnabled = false,
 ): Promise<boolean> {
-  const result = await database.query(
-    routineCandidateEnabled
-      ? PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL
-      : PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
-    [],
-  );
-  if (catalogRowPassed(result.rows)) return true;
-  if (routineCandidateEnabled || !allowInactiveCandidateGrant) return false;
-  // During a code-first rollout, the gate stays off while the exact candidate RPC grant is
-  // applied. Accept only that second complete catalog shape; never accept another extra grant.
-  const prepared = await database.query(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL, []);
-  return catalogRowPassed(prepared.rows);
+  const variants = [
+    { routine: false, cbe: false, sql: PLAYER_ACTION_CATALOG_PREFLIGHT_SQL },
+    { routine: true, cbe: false, sql: PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL },
+    { routine: false, cbe: true, sql: PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL },
+    { routine: true, cbe: true, sql: PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL },
+  ];
+  for (const variant of variants) {
+    if (
+      variant.routine !== routineCandidateEnabled &&
+      (routineCandidateEnabled || !allowInactiveCandidateGrant)
+    )
+      continue;
+    if (
+      variant.cbe !== cbeBirrCandidateEnabled &&
+      (cbeBirrCandidateEnabled || !allowInactiveCandidateGrant)
+    )
+      continue;
+    const result = await database.query(variant.sql, []);
+    if (catalogRowPassed(result.rows)) return true;
+  }
+  return false;
 }

@@ -44,16 +44,22 @@ application/worker wiring, lookup, decryption, payment, or financial activation.
 complete prerequisite decision before acquiring a lease, then use an opaque handle and separately
 reviewed callback-scoped material access.
 
-An ungranted Telegram issuer candidate can create one private, immutable CBE Birr instruction from
+The Telegram issuer candidate can create one private, immutable CBE Birr instruction from
 an admitted inbound event, an eligible Player, and a current v2 receiver revision. It records the
 event-to-instruction retry lineage and an exact one-hour window, but returns no payable receiver
-details. An ungranted capture candidate can then atomically record a dry-run proof and bind it to
+details. The capture candidate can then atomically record a dry-run proof and bind it to
 that instruction. It refuses another customer or Player, rejects a late or retired receiver, and
 cannot attach an older unbound proof on replay. Both candidates require all financial switches
-disabled. Their API adapters bind the event and instruction to separate semantic HMAC consumers,
-but no action route imports either adapter and no runtime role can execute either SQL function.
-V2 receiver provisioning, customer presentation, authoritative lookup, and financial activation
-remain separate work.
+disabled. Their API adapters bind the event and instruction to separate semantic HMAC consumers.
+The private Telegram route now accepts explicit `/cbe_test PLAYER` and
+`/cbe_test_proof TOKEN PLAYER SYNTHCBE0001` staging commands. It is default-off behind
+`TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED`, which requires the staging Player-action target
+and `FINANCIAL_ACTIONS_MODE=dry_run`. The new migration grants only these two RPCs to the
+Player-action group role; it does not grant direct table access. The SQL functions still enforce
+the disabled financial switches independently. This code and migration are in the draft PR, not
+applied to a deployment. The route displays no payment destination, performs no receipt lookup,
+and cannot credit a Player. V2 receiver provisioning, authoritative lookup, and financial
+activation remain separate work.
 
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:

@@ -35,6 +35,7 @@ import {
   reduceTelegramSavedTelebirrMediaSubmission,
   reduceTelegramSavedTelebirrProofSubmission,
   reduceTelegramDepositProofSubmission,
+  reduceTelegramCbeBirrDryRunCommand,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
@@ -126,7 +127,8 @@ async function deliverPlayerAction(
     const result = await deliverTelegramPrivateActionWithRetry(action, playerActions);
     const presentation = presentTelegramPlayerIdFlowResult(
       result,
-      action.kind === 'telebirr_deposit_destination_command'
+      action.kind === 'telebirr_deposit_destination_command' ||
+        action.kind === 'cbe_birr_dry_run_instruction_command'
         ? {
             selectedPlayerId: action.playerId,
             playerValidationEnabled: config.playerValidationIntakeEnabled,
@@ -178,7 +180,9 @@ async function deliverPlayerAction(
         : action.kind === 'deposit_proof_command' ||
             action.kind === 'saved_telebirr_proof_command' ||
             action.kind === 'saved_telebirr_destination_command' ||
-            action.kind === 'telebirr_deposit_destination_command'
+            action.kind === 'telebirr_deposit_destination_command' ||
+            action.kind === 'cbe_birr_dry_run_instruction_command' ||
+            action.kind === 'cbe_birr_bound_dry_run_proof_command'
           ? message('en', 'depositUnavailable')
           : message('en', 'playerActionUnavailable'),
     );
@@ -416,6 +420,13 @@ bot.on('message', async (context) => {
             : TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT,
         );
       }
+      return;
+    }
+    const cbeDryRunAction = reduceTelegramCbeBirrDryRunCommand({ ...metadata, command: text });
+    if (cbeDryRunAction) {
+      await deliverPlayerAction(cbeDryRunAction, (replyText, keyboard) =>
+        context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+      );
       return;
     }
     const proofSubmission = reduceTelegramDepositProofSubmission({ ...metadata, command: text });

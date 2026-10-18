@@ -79,6 +79,115 @@ const rootAction: TelegramPrivateActionEnvelope = {
   preferredLocale: 'en',
 };
 
+describe('staging CBE Birr instruction-bound dry run', () => {
+  const instructionId = '17830f40-ef8f-4fe4-ab6b-57187c93e81e';
+  const reference = 'SYNTHCBE0001';
+  const instruction: TelegramPrivateActionEnvelope = {
+    ...rootAction,
+    kind: 'cbe_birr_dry_run_instruction_command',
+    playerId: 'PLAYER-DEMO-42',
+  };
+  const proof: TelegramPrivateActionEnvelope = {
+    ...rootAction,
+    kind: 'cbe_birr_bound_dry_run_proof_command',
+    instructionToken: encodeTelegramCapabilityId(instructionId),
+    playerId: 'PLAYER-DEMO-42',
+    transactionReference: reference,
+  };
+
+  it.each([instruction, proof])('rejects %s while the staging gate is off', async (action) => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action)),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('issues an opaque instruction and records only a bound synthetic proof when enabled', async () => {
+    const calls: Array<{ query: string; values: readonly unknown[] }> = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query, values) {
+        calls.push({ query, values });
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-10-18T00:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('issue_telegram_cbe_birr_dry_run_instruction')) {
+          return {
+            rows: [
+              {
+                instruction_id: instructionId,
+                issued_at: new Date('2026-10-18T00:00:00.000Z'),
+                expires_at: new Date('2026-10-18T01:00:00.000Z'),
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('capture_telegram_cbe_birr_bound_dry_run_proof')) {
+          return {
+            rows: [
+              {
+                deposit_proof_request_id: depositProofRequestId,
+                provider_code: 'cbe_birr',
+                proof_status: 'proof_received',
+                submitted_at: new Date('2026-10-18T00:01:00.000Z'),
+                request_replayed: false,
+              },
+            ],
+          };
+        }
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const stagingConfig = {
+      ...actionConfig,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        cbeBirrBoundDryRunStagingEnabled: true,
+      },
+    };
+    const runtime = createPostgresTelegramPlayerActionRuntime(stagingConfig, database);
+    await expect(
+      runtime.handle(instruction, Buffer.from(JSON.stringify(instruction))),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'cbe_birr_dry_run_instruction_preview',
+      instructionToken: encodeTelegramCapabilityId(instructionId),
+      expiresAt: '2026-10-18T01:00:00.000Z',
+      acceptsPayments: false,
+    });
+    await expect(runtime.handle(proof, Buffer.from(JSON.stringify(proof)))).resolves.toMatchObject({
+      version: 1,
+      outcome: 'deposit_proof_received',
+      providerCode: 'cbe_birr',
+      financialMode: 'dry_run',
+    });
+    expect(
+      calls.map(({ query }) => query).filter((query) => query.includes('cbe_birr')),
+    ).toHaveLength(2);
+    expect(JSON.stringify(calls)).not.toContain(reference);
+  });
+});
+
 describe('bot-only Telegram deposit outcome runtime', () => {
   it('projects a verified-waiting message without an amount or inbound mutation', async () => {
     const database: TelegramPlayerActionDatabase = {
@@ -1659,9 +1768,11 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     await expect(
       createPostgresTelegramPlayerActionRuntime(productionCandidateConfig, database).ready(),
     ).resolves.toBe(false);
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
     expect(queries[0]).toContain('select count(*) = 31');
+    expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
+    expect(queries[1]).toContain('select count(*) = 33');
   });
 
   it('keeps an inactive candidate route ready across only the exact grant handoff', async () => {
@@ -1752,9 +1863,11 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     await expect(
       createPostgresTelegramPlayerActionRuntime(stagingCandidateConfig, database).ready(),
     ).resolves.toBe(false);
-    expect(queries).toHaveLength(1);
+    expect(queries).toHaveLength(2);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
     expect(queries[0]).toContain('select count(*) = 31');
+    expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
+    expect(queries[1]).toContain('select count(*) = 33');
   });
 
   it('disables payment-proof submission while receiver review is enabled', async () => {

@@ -1163,6 +1163,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(functions.rows.map((row) => row.signature)).toEqual([
       'app.cancel_telegram_deposit_temporary_message(bigint,bigint,bigint)',
+      'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
       'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
       'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
@@ -1181,6 +1182,7 @@ describe('disposable SQL migration baseline', () => {
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
       'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)',
       'app.get_telegram_saved_player_selection(uuid)',
+      'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
       'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',

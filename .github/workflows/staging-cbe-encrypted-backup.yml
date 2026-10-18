@@ -1,0 +1,172 @@
+name: Staging CBE encrypted database backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_export:
+        description: Type EXPORT ENCRYPTED STAGING BACKUP after approval to upload ciphertext to this public repo's Actions artifact
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-cbe-encrypted-backup
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  SUPABASE_CLI_VERSION: 2.113.0
+  RECIPIENT_CERT: infra/keys/cbe-staging-20261018-recipient.crt
+  RECIPIENT_CERT_SHA256: 93ecd9232f34f1f9313c053b08c27bf348c316b56e214ab88ee4e05a3c87778a
+
+jobs:
+  validate-target:
+    name: Validate exact staging target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_EXPORT: ${{ inputs.confirm_export }}
+    steps:
+      - name: Reject any other branch, project, commit, or action
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_EXPORT" == 'EXPORT ENCRYPTED STAGING BACKUP' ]]
+
+  backup:
+    name: Dump and encrypt staging database
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify source and recipient certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          printf '%s  %s\n' "$RECIPIENT_CERT_SHA256" "$RECIPIENT_CERT" | sha256sum --check --status
+          openssl x509 -in "$RECIPIENT_CERT" -noout -checkend 604800 >/dev/null
+
+      - name: Set up pinned Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Link only the staging project
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/fetanagent-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ "$(supabase --version)" == "$SUPABASE_CLI_VERSION" ]]
+          [[ -n "$SUPABASE_ACCESS_TOKEN" && -n "$SUPABASE_DB_PASSWORD" ]]
+          if [[ ! -f supabase/config.toml && ! -f supabase/config.json ]]; then
+            supabase init
+          fi
+          supabase link --project-ref "$STAGING_PROJECT_REF"
+          [[ -f supabase/.temp/project-ref ]]
+          linked_ref="$(tr -d '\r\n' < supabase/.temp/project-ref)"
+          [[ "$linked_ref" == "$STAGING_PROJECT_REF" && "$linked_ref" != "$PRODUCTION_PROJECT_REF" ]]
+
+      - name: Export five files and encrypt before upload
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/fetanagent-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          backup_dir="$(mktemp -d "$RUNNER_TEMP/cbe-staging-backup.XXXXXXXX")"
+          bundle="$RUNNER_TEMP/cbe-staging-backup.tar.gz"
+          encrypted="$RUNNER_TEMP/cbe-staging-backup.cms"
+          ca_file="$RUNNER_TEMP/cbe-staging-backup-ca.crt"
+          trap 'rm -rf -- "$backup_dir"; rm -f -- "$bundle" "$ca_file"' EXIT
+
+          linked_ref="$(tr -d '\r\n' < supabase/.temp/project-ref)"
+          [[ "$linked_ref" == "$STAGING_PROJECT_REF" && "$linked_ref" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          command -v psql >/dev/null
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          assert_post_stop() {
+            local result
+            result="$(PGPASSWORD="$SUPABASE_DB_PASSWORD" \
+              PGHOST="$STAGING_POOLER_HOST" PGPORT=5432 PGDATABASE=postgres \
+              PGUSER="postgres.$STAGING_PROJECT_REF" PGSSLMODE=verify-full \
+              PGSSLROOTCERT="$ca_file" PGCONNECT_TIMEOUT=5 \
+              PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null \
+              psql -X -qAt -v ON_ERROR_STOP=1 \
+              --file=infra/sql/staging-cbe-post-stop-preflight.sql)"
+            if [[ -z "$result" || "$result" == *$'\n'* || "${result##*|}" != 't' ]]; then
+              echo '::error::The exact staging post-stop snapshot changed; discard this backup attempt.'
+              exit 1
+            fi
+          }
+          assert_post_stop
+
+          supabase db dump --linked -f "$backup_dir/roles.sql" --role-only
+          supabase db dump --linked -f "$backup_dir/schema.sql"
+          supabase db dump --linked -f "$backup_dir/data.sql" --use-copy --data-only \
+            -x storage.buckets_vectors -x storage.vector_indexes
+          supabase db dump --linked -f "$backup_dir/history_schema.sql" --schema supabase_migrations
+          supabase db dump --linked -f "$backup_dir/history_data.sql" --use-copy --data-only \
+            --schema supabase_migrations
+
+          for file in roles.sql schema.sql data.sql history_schema.sql history_data.sql; do
+            [[ -s "$backup_dir/$file" ]]
+          done
+          assert_post_stop
+          printf 'staging_project_ref=%s\ncommit_sha=%s\ncreated_utc=%s\nsupabase_cli=%s\n' \
+            "$STAGING_PROJECT_REF" "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$SUPABASE_CLI_VERSION" > "$backup_dir/manifest.txt"
+          (cd "$backup_dir" && sha256sum roles.sql schema.sql data.sql \
+            history_schema.sql history_data.sql manifest.txt > SHA256SUMS)
+          tar -C "$backup_dir" -czf "$bundle" \
+            roles.sql schema.sql data.sql history_schema.sql history_data.sql manifest.txt SHA256SUMS
+          openssl cms -encrypt -aes-256-gcm -binary -stream \
+            -in "$bundle" -out "$encrypted" -outform DER "$RECIPIENT_CERT"
+          [[ -s "$encrypted" ]]
+          chmod 0600 "$encrypted"
+          echo 'Encrypted backup SHA-256:'
+          sha256sum "$encrypted"
+          echo 'Only the encrypted CMS file may be uploaded.'
+
+      - name: Upload encrypted artifact only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cbe-staging-encrypted-backup-${{ github.sha }}
+          path: ${{ runner.temp }}/cbe-staging-backup.cms
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

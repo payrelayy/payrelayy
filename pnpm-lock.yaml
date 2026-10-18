@@ -327,6 +327,13 @@ importers:
       pdfjs-dist:
         specifier: 6.2.108
         version: 6.2.108
+    devDependencies:
+      '@fetanagent/cbe-birr-normalization-candidate':
+        specifier: workspace:*
+        version: link:../cbe-birr-normalization-candidate
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/cbe-birr-authoritative-receipt-transport:
     dependencies:
@@ -336,6 +343,13 @@ importers:
       '@fetanagent/cbe-birr-official-source-policy':
         specifier: workspace:*
         version: link:../cbe-birr-official-source-policy
+    devDependencies:
+      '@fetanagent/cbe-birr-normalization-candidate':
+        specifier: workspace:*
+        version: link:../cbe-birr-normalization-candidate
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/cbe-birr-fixtures: {}
 

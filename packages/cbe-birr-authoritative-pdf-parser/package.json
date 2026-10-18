@@ -18,5 +18,9 @@
   },
   "dependencies": {
     "pdfjs-dist": "6.2.108"
+  },
+  "devDependencies": {
+    "@fetanagent/cbe-birr-normalization-candidate": "workspace:*",
+    "@fetanagent/deposit-reference-protection": "workspace:*"
   }
 }

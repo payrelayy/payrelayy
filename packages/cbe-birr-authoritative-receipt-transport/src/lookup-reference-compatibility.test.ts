@@ -1,17 +1,17 @@
 import {
   protectCbeBirrDepositReference,
   protectDepositProofReference,
-} from '../../../packages/deposit-reference-protection/dist/index.js';
-import { openCbeBirrDepositProofReference } from '../../../packages/deposit-reference-protection/dist/cbe-birr-proof-open.js';
+} from '@fetanagent/deposit-reference-protection';
+import { openCbeBirrDepositProofReference } from '@fetanagent/deposit-reference-protection/cbe-birr-proof-open';
 import {
   isCanonicalCbeBirrReferenceCandidate,
   normalizeCbeBirrSubmittedReferenceCandidate,
-} from '../../../packages/cbe-birr-normalization-candidate/dist/index.js';
+} from '@fetanagent/cbe-birr-normalization-candidate';
 import { describe, expect, it } from 'vitest';
 
 import { compileSensitiveRequestPlan, parseLookupInput } from './shared.js';
 
-// Built local artifacts keep this cross-package review out of all application/runtime imports.
+// Test-only workspace dependencies keep this review out of application/runtime imports.
 const secrets = Object.freeze({
   encryptionSecret: 'a'.repeat(64),
   fingerprintSecret: 'b'.repeat(64),

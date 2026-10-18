@@ -2,9 +2,9 @@ import { Buffer } from 'node:buffer';
 import { once } from 'node:events';
 import { createDeflate } from 'node:zlib';
 
-import { protectDepositProofReference } from '../../../packages/deposit-reference-protection/dist/index.js';
-import { openCbeBirrDepositProofReference } from '../../../packages/deposit-reference-protection/dist/cbe-birr-proof-open.js';
-import { isCanonicalCbeBirrReferenceCandidate } from '../../../packages/cbe-birr-normalization-candidate/dist/index.js';
+import { isCanonicalCbeBirrReferenceCandidate } from '@fetanagent/cbe-birr-normalization-candidate';
+import { protectDepositProofReference } from '@fetanagent/deposit-reference-protection';
+import { openCbeBirrDepositProofReference } from '@fetanagent/deposit-reference-protection/cbe-birr-proof-open';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
@@ -1398,7 +1398,7 @@ describe('isolated child-process supervisor', () => {
 });
 
 describe('dependency, fixture, and runtime boundary', () => {
-  it('pins only pdfjs-dist 6.2.108 as the parser dependency', () => {
+  it('pins only pdfjs-dist 6.2.108 as the runtime dependency', () => {
     const manifests = import.meta.glob('../package.json', {
       eager: true,
       import: 'default',
@@ -1406,7 +1406,10 @@ describe('dependency, fixture, and runtime boundary', () => {
     }) as Record<string, string>;
     const manifest = JSON.parse(Object.values(manifests)[0]!) as Record<string, unknown>;
     expect(manifest.dependencies).toEqual({ 'pdfjs-dist': '6.2.108' });
-    expect(manifest.devDependencies).toBeUndefined();
+    expect(manifest.devDependencies).toEqual({
+      '@fetanagent/cbe-birr-normalization-candidate': 'workspace:*',
+      '@fetanagent/deposit-reference-protection': 'workspace:*',
+    });
     expect(manifest.optionalDependencies).toBeUndefined();
     expect(CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION).toBe(2);
     expect(CBE_BIRR_AUTHORITATIVE_PDFJS_VERSION).toBe('6.2.108');

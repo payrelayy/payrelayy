@@ -257,17 +257,41 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or rea
 
     const moneyRows = await client.query<{
       intents: number;
+      intake_received_intents: number;
       submissions: number;
+      received_submissions: number;
       attempts: number;
       jobs: number;
+      cbe_instructions: number;
+      cbe_proof_bindings: number;
+      cbe_v2_lookup_revisions: number;
     }>(`
       select
         (select count(*)::integer from app.deposit_intents) as intents,
+        (select count(*)::integer from app.deposit_intents
+          where status = 'intake_received') as intake_received_intents,
         (select count(*)::integer from app.deposit_submissions) as submissions,
+        (select count(*)::integer from app.deposit_submissions
+          where status = 'received') as received_submissions,
         (select count(*)::integer from app.deposit_execution_attempts) as attempts,
-        (select count(*)::integer from app.deposit_jobs) as jobs
+        (select count(*)::integer from app.deposit_jobs) as jobs,
+        (select count(*)::integer from app.cbe_birr_payment_instructions) as cbe_instructions,
+        (select count(*)::integer from app.cbe_birr_instruction_proof_bindings) as cbe_proof_bindings,
+        (select count(*)::integer from app.cbe_birr_receiver_lookup_revisions) as cbe_v2_lookup_revisions
     `);
-    expect(moneyRows.rows).toEqual([{ intents: 3, submissions: 2, attempts: 0, jobs: 0 }]);
+    expect(moneyRows.rows).toEqual([
+      {
+        intents: 3,
+        intake_received_intents: 3,
+        submissions: 2,
+        received_submissions: 2,
+        attempts: 0,
+        jobs: 0,
+        cbe_instructions: 0,
+        cbe_proof_bindings: 0,
+        cbe_v2_lookup_revisions: 0,
+      },
+    ]);
   } finally {
     await client.end();
     // The one-use Compose project removes this entire server after the suite.

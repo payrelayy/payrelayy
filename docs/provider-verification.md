@@ -194,7 +194,9 @@ proof-reference-to-`TID`, v2 receiver-envelope-to-`PH`, and proof-reference-to-s
 ciphertext without the fingerprint master. These code paths remain unwired. The blockers still cover
 live response attestation and runtime transport; receiver protection, provenance, and fresh
 provisioning; an independently provisioned worker decrypt lifecycle; canonical-reference ownership;
-and a non-mutating prerequisite gate before any lease.
+and a non-mutating prerequisite gate before any lease. Private default-off CBE instruction and
+proof-binding tables now record exact v2 receiver-revision lineage for future intake. Their
+read-only preflight remains blocked and has no runtime writer or lease consumer.
 The existing legacy lease mutates durable state and returns protected material, so a future boundary
 needs complete prelease authorization and opaque-handle payloads.
 

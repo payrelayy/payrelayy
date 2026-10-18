@@ -25,18 +25,24 @@ any boundary returns `would_review`. Even a `window_consistent_advisory` result 
 receipt source, receiver, duplicate state, or Player eligibility. No application, SQL lease, or
 financial path imports or calls it, and its input times require a future trusted immutable source.
 
-A separate database preflight now covers the newer, provider-aware dry-run proof records. It takes
-one opaque proof-request UUID, requires the CBE Birr verification switch to remain disabled, and
-reads only the proof's provider/status/version labels and the active receiver's status/protection
-version labels. It returns either `receiver_revision_unavailable` or
-`receiver_v1_metadata_only`, always with `eligibility = blocked` and literal false lease and
+A separate database preflight covers provider-aware dry-run proof records. Its v2 schema adds
+private, immutable CBE Birr payment instructions and one-to-one proof bindings. An instruction
+snapshots the exact v2 receiver lookup revision, provider, customer, Player account, channel, and
+one-hour window. Composite foreign keys prevent a proof from being rebound to another customer,
+Player, provider, channel, or receiver revision. No runtime role can write either table; existing
+unbound proofs are never backfilled or assumed to have an instruction.
+
+The preflight takes one opaque proof-request UUID and requires the CBE Birr verification switch to
+remain disabled. It sends instructions created after a proof to time-window review, even if their
+claimed issue time was backdated. It reports an absent binding, time-window review, retired receiver, or exact
+v2 instruction-bound metadata. Every result has `eligibility = blocked` and literal false lease and
 protected-material flags. It never selects or returns a reference, ciphertext, fingerprint, receiver
-ID, account number, key, or holder name, and never locks or changes a row. Only a distinct NOLOGIN
+ID, account number, key, or holder name, and never locks or changes a row. Only the NOLOGIN
 preflight role can call it; that role has no direct table or legacy lease access. There is no
-application/worker wiring, lookup, decryption, production migration, or financial activation in
-this change. This metadata probe does **not** clear `prelease_prerequisite_gate_absent`: a future
-lease path must prove it actually consumes a complete prerequisite decision before acquiring a
-lease, and still needs an opaque handle and separately reviewed callback-scoped material access.
+application/worker wiring, lookup, decryption, payment, or financial activation. This probe does
+**not** clear `prelease_prerequisite_gate_absent`: a future lease path must prove it consumes a
+complete prerequisite decision before acquiring a lease, then use an opaque handle and separately
+reviewed callback-scoped material access.
 
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:

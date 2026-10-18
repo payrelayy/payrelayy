@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 import type { Client, QueryResultRow } from 'pg';
@@ -33,7 +33,12 @@ type CbeBirrProofPreflightRow = {
   readonly proof_request_id: string;
   readonly preflight_version: string;
   readonly eligibility: 'blocked';
-  readonly blocker_code: 'receiver_v1_metadata_only' | 'receiver_revision_unavailable';
+  readonly blocker_code:
+    | 'instruction_binding_unavailable'
+    | 'receiver_revision_unavailable'
+    | 'instruction_time_window_review_required'
+    | 'receiver_revision_retired_at_submission'
+    | 'receiver_v2_instruction_bound_metadata_only';
   readonly lease_allowed: false;
   readonly protected_material_allowed: false;
 };
@@ -563,14 +568,12 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         expect(first).toHaveLength(1);
         expect(first[0]).toMatchObject({
           proof_request_id: cbeProof.deposit_proof_request_id,
-          preflight_version: 'cbe-birr-proof-preflight-v1',
+          preflight_version: 'cbe-birr-proof-preflight-v2',
           eligibility: 'blocked',
           lease_allowed: false,
           protected_material_allowed: false,
         });
-        expect(first[0]!.blocker_code).toMatch(
-          /^(?:receiver_v1_metadata_only|receiver_revision_unavailable)$/u,
-        );
+        expect(first[0]!.blocker_code).toBe('instruction_binding_unavailable');
         expect(Object.keys(first[0]!).sort()).toEqual(
           [
             'proof_request_id',
@@ -657,6 +660,233 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             [cbeProof.deposit_proof_request_id],
           ),
         ).toEqual(before);
+        expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
+      });
+    });
+
+    it('binds a CBE proof to one exact v2 receiver instruction without granting a lease', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '131');
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          `select auth_user_id from app.admin_users
+            where role = 'owner' and status = 'active' limit 1`,
+        );
+        const provider = await client.query<{
+          readonly id: string;
+          readonly next_version: number;
+        }>(`
+          select provider.id,
+                 coalesce(max(receiver.version), 0)::integer + 1 as next_version
+            from app.payment_providers provider
+            left join app.receiver_accounts receiver
+              on receiver.provider_id = provider.id
+           where provider.code = 'cbe_birr'
+           group by provider.id
+        `);
+        expect(owner.rows).toHaveLength(1);
+        expect(provider.rows).toHaveLength(1);
+        const providerId = provider.rows[0]!.id;
+        const receiverRevisionId = randomUUID();
+        const rotationRequestId = randomUUID();
+        const legacyFingerprint = createHash('sha256').update(rotationRequestId).digest('hex');
+        const lookupFingerprint = createHash('sha256').update(receiverRevisionId).digest('hex');
+        const receiver = await client.query<{
+          readonly receiver_revision_id: string;
+          readonly revision: number;
+        }>(
+          `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            $1::uuid, $2::uuid, $3::uuid, $4::integer, 'Synthetic SQL Receiver',
+            $5::text, $6::text, '***0001', $7::text, $8::text, '***0001',
+            'account_rotation'
+          )`,
+          [
+            owner.rows[0]!.auth_user_id,
+            rotationRequestId,
+            receiverRevisionId,
+            provider.rows[0]!.next_version,
+            `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+            legacyFingerprint,
+            `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`,
+            lookupFingerprint,
+          ],
+        );
+        expect(receiver.rows).toMatchObject([{ receiver_revision_id: receiverRevisionId }]);
+
+        const instruction = await client.query<{ readonly id: string }>(
+          `with issued as (select clock_timestamp() as instant)
+           insert into app.cbe_birr_payment_instructions (
+             submitting_customer_id, player_account_id, payment_provider_id,
+             provider_code, origin_channel, receiver_revision_id,
+             receiver_version, receiver_rotation_request_id, issued_at, expires_at
+           )
+           select $1::uuid, $2::uuid, $3::uuid, 'cbe_birr', 'telegram',
+                  $4::uuid, $5::integer, $6::uuid,
+                  issued.instant, issued.instant + interval '1 hour'
+             from issued
+           returning id`,
+          [
+            fixture.actorA.customerId,
+            fixture.playerAccountId,
+            providerId,
+            receiverRevisionId,
+            receiver.rows[0]!.revision,
+            rotationRequestId,
+          ],
+        );
+        const event = await createInboundEvent(client, fixture.actorA, 9_131_000_001, 'e');
+        const proof = (
+          await captureTelegramProof(client, {
+            eventId: event,
+            fingerprint: 'e'.repeat(64),
+            hmac: payloadHmac('e'),
+            masked: '***A131',
+            playerId: fixture.playerId,
+            providerCode: 'cbe_birr',
+          })
+        )[0]!;
+        const proofId = proof.deposit_proof_request_id;
+        const instructionId = instruction.rows[0]!.id;
+        const preflightSql = 'select * from app.preflight_cbe_birr_proof_request($1::uuid)';
+        const beforeFinancial = await readFinancialLedgerSnapshot(client);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [proofId],
+          ),
+        ).toMatchObject([{ blocker_code: 'instruction_binding_unavailable' }]);
+
+        const insertBindingSql = `insert into app.cbe_birr_instruction_proof_bindings (
+          proof_request_id, instruction_id, submitting_customer_id,
+          player_account_id, payment_provider_id, origin_channel,
+          receiver_revision_id, receiver_version, receiver_rotation_request_id
+        ) values (
+          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'telegram',
+          $6::uuid, $7::integer, $8::uuid
+        )`;
+        const bindingValues = [
+          proofId,
+          instructionId,
+          fixture.actorA.customerId,
+          fixture.playerAccountId,
+          providerId,
+          receiverRevisionId,
+          receiver.rows[0]!.revision,
+          rotationRequestId,
+        ];
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(insertBindingSql, [
+              ...bindingValues.slice(0, 6),
+              receiver.rows[0]!.revision + 1,
+              rotationRequestId,
+            ]);
+          }),
+        ).rejects.toThrow(/foreign key/u);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(insertBindingSql, [
+              ...bindingValues.slice(0, 2),
+              fixture.actorB.customerId,
+              ...bindingValues.slice(3),
+            ]);
+          }),
+        ).rejects.toThrow(/foreign key/u);
+        await client.query(insertBindingSql, bindingValues);
+
+        const bound = await queryAsRole<CbeBirrProofPreflightRow>(
+          client,
+          'fetanagent_cbe_birr_proof_preflight',
+          preflightSql,
+          [proofId],
+        );
+        expect(bound).toEqual([
+          {
+            proof_request_id: proofId,
+            preflight_version: 'cbe-birr-proof-preflight-v2',
+            eligibility: 'blocked',
+            blocker_code: 'receiver_v2_instruction_bound_metadata_only',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
+        expect(JSON.stringify(bound)).not.toContain(receiverRevisionId);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(
+              `update app.cbe_birr_instruction_proof_bindings
+                  set receiver_version = receiver_version + 1
+                where proof_request_id = $1::uuid`,
+              [proofId],
+            );
+          }),
+        ).rejects.toThrow(/immutable/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            'select * from app.cbe_birr_instruction_proof_bindings limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
+
+        const lateEvent = await createInboundEvent(client, fixture.actorA, 9_131_000_002, 'f');
+        const lateProof = (
+          await captureTelegramProof(client, {
+            eventId: lateEvent,
+            fingerprint: 'f'.repeat(64),
+            hmac: payloadHmac('f'),
+            masked: '***A132',
+            playerId: fixture.playerId,
+            providerCode: 'cbe_birr',
+          })
+        )[0]!;
+        const lateProofId = lateProof.deposit_proof_request_id;
+        const lateInstruction = await client.query<{ readonly id: string }>(
+          `with proof as (
+             select submitted_at from app.deposit_proof_requests where id = $7::uuid
+           )
+           insert into app.cbe_birr_payment_instructions (
+             submitting_customer_id, player_account_id, payment_provider_id,
+             provider_code, origin_channel, receiver_revision_id,
+             receiver_version, receiver_rotation_request_id, issued_at, expires_at
+           )
+           select $1::uuid, $2::uuid, $3::uuid, 'cbe_birr', 'telegram',
+                  $4::uuid, $5::integer, $6::uuid,
+                  proof.submitted_at - interval '1 minute',
+                  proof.submitted_at + interval '59 minutes'
+             from proof
+           returning id`,
+          [
+            fixture.actorA.customerId,
+            fixture.playerAccountId,
+            providerId,
+            receiverRevisionId,
+            receiver.rows[0]!.revision,
+            rotationRequestId,
+            lateProofId,
+          ],
+        );
+        await client.query(insertBindingSql, [
+          lateProofId,
+          lateInstruction.rows[0]!.id,
+          ...bindingValues.slice(2),
+        ]);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [lateProofId],
+          ),
+        ).toMatchObject([
+          {
+            blocker_code: 'instruction_time_window_review_required',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
         expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
       });
     });

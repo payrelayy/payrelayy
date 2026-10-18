@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   CBE_BIRR_NORMALIZATION_COMPATIBILITY_INVENTORY,
   CBE_BIRR_LOOKUP_REFERENCE_LOCAL_REVIEW,
+  CBE_BIRR_PROOF_TO_PDF_REFERENCE_LOCAL_REVIEW,
   CBE_BIRR_RECEIVER_LOOKUP_LOCAL_REVIEW,
   CBE_BIRR_OFFLINE_FIXTURE_NORMALIZER_SOURCE_ATTESTATION,
   CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT,
@@ -150,9 +151,9 @@ describe('CBE Birr normalization ownership inventory', () => {
       CBE_BIRR_NORMALIZATION_OWNERSHIP_CURRENT_REQUEST,
     );
 
-    expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION).toBe(4);
+    expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION).toBe(5);
     expect(CBE_BIRR_NORMALIZATION_OWNERSHIP_CURRENT_REQUEST).toEqual({
-      contractVersion: 4,
+      contractVersion: 5,
       providerCode: 'cbe_birr',
       submittedReferenceNormalizationVersion: null,
       submittedReferenceProtectionKeyVersion: 1,
@@ -176,14 +177,14 @@ describe('CBE Birr normalization ownership inventory', () => {
     });
     expect(result).toBe(CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT);
     expect(result).toMatchObject({
-      contractVersion: 4,
+      contractVersion: 5,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'blocked',
       reasonCode: 'normalization_ownership_review_incomplete',
       authoritativeOwner: 'unassigned',
       jointReviewStatus: 'not_completed',
-      remainingBlockers: ['canonical_reference_normalization_unreviewed'],
+      remainingBlockers: ['canonical_reference_authoritative_owner_unassigned'],
     });
     if (result.disposition !== 'blocked') throw new Error('expected blocked inventory');
     expect(result.remainingBlockers).toBe(CBE_BIRR_NORMALIZATION_OWNERSHIP_REMAINING_BLOCKERS);
@@ -419,7 +420,7 @@ describe('CBE Birr normalization ownership inventory', () => {
       CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT,
     );
     expect(blockedProjection).toEqual({
-      contractVersion: 4,
+      contractVersion: 5,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'blocked',
@@ -432,7 +433,7 @@ describe('CBE Birr normalization ownership inventory', () => {
     const ordinaryClone = { ...CBE_BIRR_NORMALIZATION_OWNERSHIP_BLOCKED_RESULT };
     const invalidProjection = redactedCbeBirrNormalizationOwnershipForLog(ordinaryClone);
     expect(invalidProjection).toEqual({
-      contractVersion: 4,
+      contractVersion: 5,
       providerCode: 'cbe_birr',
       advisoryOnly: true,
       disposition: 'invalid_result',
@@ -444,6 +445,19 @@ describe('CBE Birr normalization ownership inventory', () => {
 });
 
 describe('normalization inventory compatibility regressions', () => {
+  it('records only a scoped synthetic proof-to-PDF Order ID format review', () => {
+    expect(CBE_BIRR_PROOF_TO_PDF_REFERENCE_LOCAL_REVIEW).toEqual({
+      reviewVersion: 1,
+      scope: 'provider_aware_proof_v2_to_synthetic_pdf_order_id',
+      disposition: 'local_format_compatible',
+      providerOrderIdSemanticsAttested: false,
+      authoritativeOwnerAssigned: false,
+      runtimeWiringAllowed: false,
+      financialActionAllowed: false,
+    });
+    expectDeeplyFrozen(CBE_BIRR_PROOF_TO_PDF_REFERENCE_LOCAL_REVIEW);
+  });
+
   it('records only a scoped local v2 receiver-revision-to-PH format review', () => {
     expect(CBE_BIRR_RECEIVER_LOOKUP_LOCAL_REVIEW).toEqual({
       reviewVersion: 1,

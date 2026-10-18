@@ -189,11 +189,12 @@ financial claim, or KemerBet operation.
 Stage 1F implements the separate pure package
 `@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. Its only valid-request disposition is
 `blocked`, with 11 exact blockers. Synthetic cross-package tests establish narrow local
-proof-reference-to-`TID` and v2 receiver-envelope-to-`PH` format compatibility. An internal CBE-only
-proof-open candidate authenticates v2 ciphertext without the fingerprint master. These code paths
-remain unwired. The blockers still cover live response attestation and runtime transport; receiver
-protection, provenance, and fresh provisioning; an independently provisioned worker decrypt
-lifecycle; canonical-reference ownership; and a non-mutating prerequisite gate before any lease.
+proof-reference-to-`TID`, v2 receiver-envelope-to-`PH`, and proof-reference-to-synthetic-PDF
+`Order ID` format compatibility. An internal CBE-only proof-open candidate authenticates v2
+ciphertext without the fingerprint master. These code paths remain unwired. The blockers still cover
+live response attestation and runtime transport; receiver protection, provenance, and fresh
+provisioning; an independently provisioned worker decrypt lifecycle; canonical-reference ownership;
+and a non-mutating prerequisite gate before any lease.
 The existing legacy lease mutates durable state and returns protected material, so a future boundary
 needs complete prelease authorization and opaque-handle payloads.
 

@@ -5,7 +5,7 @@ import { isProxy } from 'node:util/types';
  * repository. It does not normalize a value, declare the profiles equivalent, select an
  * authoritative profile, or authorize runtime use.
  */
-export const CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION = 4 as const;
+export const CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION = 5 as const;
 export const CBE_BIRR_SUBMITTED_REFERENCE_CAPTURE_SOURCE_ATTESTATION =
   'sha256:56a14b1b377a2d64de345ae03d390d0a01fa46f91a3af8017ed2137e74671195' as const;
 export const CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION =
@@ -16,8 +16,23 @@ export const CBE_BIRR_OFFLINE_FIXTURE_NORMALIZER_SOURCE_ATTESTATION =
   'sha256:362779764454f371171796cc7bf37e604732bad78694c10ebe0917afa8d3ea61' as const;
 
 export const CBE_BIRR_NORMALIZATION_OWNERSHIP_REMAINING_BLOCKERS = Object.freeze([
-  'canonical_reference_normalization_unreviewed',
+  'canonical_reference_authoritative_owner_unassigned',
 ] as const);
+
+/**
+ * Scoped synthetic review of v2 proof capture/open and the PDF parser's exact Order ID comparison.
+ * It verifies local byte compatibility only, not source provenance, provider semantics, or
+ * cross-profile ownership. No runtime imports or financial authority follow from this review.
+ */
+export const CBE_BIRR_PROOF_TO_PDF_REFERENCE_LOCAL_REVIEW = Object.freeze({
+  reviewVersion: 1 as const,
+  scope: 'provider_aware_proof_v2_to_synthetic_pdf_order_id' as const,
+  disposition: 'local_format_compatible' as const,
+  providerOrderIdSemanticsAttested: false as const,
+  authoritativeOwnerAssigned: false as const,
+  runtimeWiringAllowed: false as const,
+  financialActionAllowed: false as const,
+});
 
 /**
  * Scoped source review of the local v2 CBE proof capture and the unwired receipt transport's

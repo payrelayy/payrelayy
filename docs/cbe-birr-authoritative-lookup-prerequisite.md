@@ -70,7 +70,7 @@ The contract returns these 11 blockers in this fixed order:
 6. `receiver_lookup_metadata_inference_or_backfill_forbidden`
 7. `submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root`
 8. `submitted_reference_independent_worker_decrypt_lifecycle_absent`
-9. `canonical_reference_normalization_unreviewed`
+9. `canonical_reference_authoritative_owner_unassigned`
 10. `prelease_prerequisite_gate_absent`
 11. `lease_boundary_returns_protected_material`
 
@@ -90,6 +90,14 @@ pins the exact phone and nine-digit `PH` derivation and rejects truncated, chang
 inputs. This does not establish that an Owner created the revision, that its keys were independently
 provisioned, or that a real PDF credits the configured receiver. All provider and financial
 capabilities remain false.
+
+The local v2 proof-to-PDF reference shape has now been reviewed with a generated synthetic receipt.
+The test captures mixed-case input, opens its authenticated v2 envelope, and compares the exact
+uppercase reference with the PDF `Order ID`. A different `Order ID` would reject; lowercase or
+conflicting PDF values stay in review without facts. This replaces the broad local normalization
+uncertainty with `canonical_reference_authoritative_owner_unassigned`. The test does not attest that
+CBE issued the receipt or defines `Order ID` as an authoritative transaction ID. A joint owner and
+source review is still required before runtime use. Every lookup and financial capability is false.
 
 The obsolete broad `source_permission_unproven` blocker has been replaced, not merely removed. The
 offline route and synthetic parser are now explicit, while the exact live response contract and
@@ -137,16 +145,16 @@ The remaining blockers preserve the existing safety design:
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Synthetic fixture reduction and canonical settlement profiles
-   still require a broader joint compatibility review. The local v2 proof-to-`TID` and
-   receiver-revision-to-`PH` format checks do not establish provider acceptance, receipt credit
-   identity, or profile equivalence.
+   still require a broader joint compatibility review. The local v2 proof-to-`TID`, proof-to-PDF
+   `Order ID`, and receiver-revision-to-`PH` format checks do not establish provider acceptance,
+   receipt credit identity, or profile equivalence.
 4. **Prelease-safe acquisition.** Metadata preflight must complete before lease mutation or any
    protected-material return. Later work requires an opaque handle and a narrow callback-scoped
    decrypt boundary.
 
 ## Normalization ownership inventory
 
-The metadata-only inventory now distinguishes five existing boundaries. Version 4 of the inventory
+The metadata-only inventory now distinguishes five existing boundaries. Version 5 of the inventory
 records these facts without promoting either protection key version to a normalization version:
 
 | Boundary                              | Current status                                                                                                                                                                                                                                                       |
@@ -167,8 +175,8 @@ ciphertext, or keys, and it authorizes no decrypt, lookup, lease, or credit.
 
 An [offline normalization candidate](cbe-birr-normalization-candidate.md) now specifies and tests
 the narrow reference and lookup-selector formats with synthetic values only. Its reference rule is
-now checked against the actual v2 protection and unwired transport validators. The candidate has
-no runtime consumer and does not assign ownership or clear either remaining normalization blocker.
+checked against the actual v2 protection, unwired transport, and synthetic PDF parser boundaries.
+The candidate has no runtime consumer, and authoritative normalization ownership remains unassigned.
 
 ## Pure boundary
 

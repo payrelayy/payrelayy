@@ -90,7 +90,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
 
     expect(result).toBe(CBE_BIRR_AUTHORITATIVE_LOOKUP_BLOCKED_RESULT);
     expect(result).toEqual({
-      contractVersion: 3,
+      contractVersion: 4,
       providerCode: 'cbe_birr',
       sourceProfile: 'cbe_birr_official_receipt_lookup_v1',
       legacyMaterialShape: 'cbe_birr_shadow_protected_lookup_material_legacy',
@@ -106,7 +106,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
         'receiver_lookup_metadata_inference_or_backfill_forbidden',
         'submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root',
         'submitted_reference_independent_worker_decrypt_lifecycle_absent',
-        'canonical_reference_normalization_unreviewed',
+        'canonical_reference_authoritative_owner_unassigned',
         'prelease_prerequisite_gate_absent',
         'lease_boundary_returns_protected_material',
       ],
@@ -230,7 +230,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
       const result = evaluateCbeBirrAuthoritativeLookupPrerequisites(candidate);
       expect(result).toBe(CBE_BIRR_AUTHORITATIVE_LOOKUP_INVALID_RESULT);
       expect(result).toEqual({
-        contractVersion: 3,
+        contractVersion: 4,
         providerCode: 'cbe_birr',
         advisoryOnly: true,
         disposition: 'invalid_request',
@@ -285,7 +285,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
   it('rejects non-enumerable, symbol, and accessor fields without reading accessors', () => {
     let accessorReads = 0;
     const accessorRequest = {
-      contractVersion: 3,
+      contractVersion: 4,
       providerCode: 'cbe_birr',
       sourceProfile,
     } as Record<string, unknown>;
@@ -453,7 +453,7 @@ describe('CBE Birr authoritative lookup prerequisite contract', () => {
     const projections = forgedResults.map(redactedCbeBirrAuthoritativeLookupPrerequisiteForLog);
     for (const projection of projections) {
       expect(projection).toEqual({
-        contractVersion: 3,
+        contractVersion: 4,
         providerCode: 'cbe_birr',
         advisoryOnly: true,
         disposition: 'invalid_result',

@@ -2,6 +2,9 @@ import { Buffer } from 'node:buffer';
 import { once } from 'node:events';
 import { createDeflate } from 'node:zlib';
 
+import { protectDepositProofReference } from '../../../packages/deposit-reference-protection/dist/index.js';
+import { openCbeBirrDepositProofReference } from '../../../packages/deposit-reference-protection/dist/cbe-birr-proof-open.js';
+import { isCanonicalCbeBirrReferenceCandidate } from '../../../packages/cbe-birr-normalization-candidate/dist/index.js';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
@@ -597,6 +600,70 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('matches only the exact canonical v2 proof reference in a synthetic PDF Order ID', async () => {
+    const encryptionSecret = 'a'.repeat(64);
+    const protectedProof = protectDepositProofReference(
+      {
+        provider: 'cbe_birr',
+        reference: 'sYnThEtIc123',
+        secrets: { encryptionSecret, fingerprintSecret: 'b'.repeat(64) },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const openedReference = openCbeBirrDepositProofReference({
+      provider: 'cbe_birr',
+      ciphertext: protectedProof.ciphertext,
+      masked: protectedProof.masked,
+      referenceProfileVersion: 2,
+      encryptionKeyVersion: protectedProof.keyVersion,
+      encryptionSecret,
+    });
+    expect(openedReference).toBe('SYNTHETIC123');
+    expect(isCanonicalCbeBirrReferenceCandidate(openedReference)).toBe(true);
+
+    const parserExpectations = { ...expectations(), canonicalReference: openedReference };
+    const matching = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', reference: openedReference }),
+      parserExpectations,
+    );
+    expect(matching).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      facts: { referenceMatched: true },
+      financialActionAllowed: false,
+    });
+
+    const differentOrderId = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', reference: 'OTHERREF1234' }),
+      parserExpectations,
+    );
+    expect(differentOrderId).toMatchObject({
+      disposition: 'would_reject',
+      reasonCode: 'reference_mismatch',
+      facts: { referenceMatched: false },
+      financialActionAllowed: false,
+    });
+
+    for (const noncanonical of [
+      { reference: 'synthetic123' },
+      { reference: openedReference, summaryReference: 'OTHERREF1234' },
+    ]) {
+      const result = await parseCbeBirrAuthoritativePdf(
+        syntheticReceiptPdf({ layout: 'credit_account_v2', ...noncanonical }),
+        parserExpectations,
+      );
+      expect(result).toMatchObject({
+        disposition: 'would_review',
+        reasonCode: 'pdf_value_invalid',
+        financialActionAllowed: false,
+      });
+      expect(Reflect.ownKeys(result)).not.toContain('facts');
+    }
+    for (const result of [matching, differentOrderId]) {
+      expect(JSON.stringify(result)).not.toContain(openedReference);
+    }
   });
 
   it('parses the compact official layout with wrapped account names and no disaster-fee pair', async () => {

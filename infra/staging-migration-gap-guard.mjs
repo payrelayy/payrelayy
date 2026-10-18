@@ -7,6 +7,12 @@ const MIGRATION_FILE = /^(\d{14})_.+\.sql$/u;
 const ANSI_COLOR = /\u001b\[[0-9;]*m/gu;
 // The 106-file catch-up visible on 6 October 2026 requires a separate reviewed rehearsal.
 const UNREHEARSED_BACKLOG_THROUGH = '20261005180558';
+const REVIEWED_CBE_HISTORICAL_GAPS = [
+  '20260912233000',
+  '20260914030000',
+  '20260914123000',
+  '20260914165043',
+];
 
 export function assessStagingMigrationGap(listOutput, migrationFiles) {
   const localVersions = migrationFiles
@@ -87,6 +93,22 @@ export function requireSafeStagingApply(assessment) {
   }
 }
 
+export function requireReviewedCbeStagingCatchUp(assessment) {
+  if (
+    assessment.localCount !== 272 ||
+    assessment.remoteCount !== 87 ||
+    assessment.latestApplied !== '20260915190000' ||
+    assessment.pending.length !== 185 ||
+    assessment.pending.at(-1) !== '20261018170000' ||
+    assessment.historicalGaps.length !== REVIEWED_CBE_HISTORICAL_GAPS.length ||
+    assessment.historicalGaps.some(
+      (version, index) => version !== REVIEWED_CBE_HISTORICAL_GAPS[index],
+    )
+  ) {
+    throw new Error('The linked staging ledger differs from the reviewed CBE catch-up snapshot.');
+  }
+}
+
 export function requireExactStagingDryRun(dryRunOutput, assessment, migrationFiles) {
   const output = dryRunOutput.replace(ANSI_COLOR, '');
   if (!output.includes('DRY RUN: migrations will *not* be pushed to the database.')) {
@@ -126,8 +148,8 @@ export function requireExactStagingDryRun(dryRunOutput, assessment, migrationFil
 async function main() {
   const mode = process.argv[2];
   const dryRunPath = process.argv[3];
-  if (process.argv.length !== 4 || !['plan', 'apply'].includes(mode)) {
-    throw new Error('Expected a plan or apply mode and one dry-run output file.');
+  if (process.argv.length !== 4 || !['plan', 'apply', 'cbe-catch-up'].includes(mode)) {
+    throw new Error('Expected a plan, apply, or CBE catch-up mode and one dry-run output file.');
   }
   const migrationsDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -148,7 +170,10 @@ async function main() {
       `${assessment.historicalGaps.length} older than ${assessment.latestApplied}.`,
   );
   if (mode === 'apply') requireSafeStagingApply(assessment);
-  else {
+  else if (mode === 'cbe-catch-up') {
+    requireReviewedCbeStagingCatchUp(assessment);
+    console.log('The exact reviewed CBE staging catch-up ledger and dry-run order match.');
+  } else {
     if (assessment.historicalGaps.length > 0) {
       console.warn(
         `::warning::Ordinary staging apply would skip older migrations: ` +

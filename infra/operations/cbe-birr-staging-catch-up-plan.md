@@ -63,8 +63,12 @@ ran successfully on merged commit `43b0a4785441fcb992268296e6f31a5a4ebd71ff` (Ac
 `39134996389`). Independent staging queries confirmed the expired shadow verifier runtime role is
 `NOLOGIN` with zero sessions and the exact post-stop aggregate still matches. A fresh staging
 `plan` on the same commit (Actions run `39135335116`) found 185 pending migrations in the exact
-dry-run order, including the four older gaps. A full isolated Supabase restore remains required
-before migration apply.
+dry-run order, including the four older gaps. A subsequent
+[isolated Supabase database rehearsal](cbe-staging-isolated-restore-rehearsal.md) restored the
+exported content with documented platform-version adjustments and ran all 185 migrations with
+`pg_cron`. This proves the relevant logical database restore and migration path, but not an
+identical hosted-platform rollback. Migration apply remains held pending a guarded apply workflow,
+fresh staging checks, and separate approval.
 
 The read-only [`reviewed-catch-up preflight`](../sql/staging-cbe-reviewed-catch-up-preflight.sql)
 adds the exact 87-version ledger hash and the locked, idle role to the post-stop checks. It passed
@@ -77,26 +81,30 @@ apply. Neither query performs a migration.
 
 1. Review an exact commit and its pending SQL, including data effects, lock timeouts, grants,
    and the four historical gaps. Preserve a recoverable staging backup and verify a restore path.
-2. Recheck the staging ledger, seven switch states, pilot revision, reservations, unresolved
-   transfers, and CBE Birr intent/job counts immediately before any write. If any observation
-   differs from the reviewed plan, stop and revise it. Run the aggregate-only
-   [`staging-cbe-catch-up-preflight.sql`](../sql/staging-cbe-catch-up-preflight.sql) against the
-   exact staging project before the pilot stop. That check passed immediately before the approved
-   Owner stop. For subsequent work, use the post-stop preflight above; neither query authorizes
-   migration apply.
+2. Recheck the exact staging ledger, seven switch states, stopped pilot revision, reservations,
+   and CBE Birr intent/job counts immediately before any write. If any observation differs, stop
+   and revise the plan. Use the read-only
+   [`reviewed-catch-up preflight`](../sql/staging-cbe-reviewed-catch-up-preflight.sql); it also
+   checks the expired shadow role is `NOLOGIN` and idle. The earlier pre-stop query is historical.
 3. Completed: the Owner-controlled pilot stop disabled all five deposit/provider switches and
    left both withdrawal switches disabled. Do not simulate or replay it with a direct switch update.
 4. Rehearse the **exact** reviewed migration set, in the linked preview's order, against a suitable
    privacy-controlled isolated staging copy that preserves relevant schema and data shapes. The
    disposable synthetic SQL suite is useful evidence but does not replace this check.
+   The 18 October isolated Supabase database rehearsal completed this logical-data check with
+   documented local platform-version adjustments; it did not prove recovery of external services.
    The read-only [`staging-cbe-catalog-fingerprint.sql`](../sql/staging-cbe-catalog-fingerprint.sql)
    compares eight `app` catalog categories with the disposable 87-migration baseline without
    copying customer rows or function bodies. A matching fingerprint narrows schema drift; it is
    still not a staging data copy or a restore rehearsal.
-5. Prepare a separately reviewed, fail-closed catch-up apply path for the four older versions.
-   The current ordinary `db push --linked --yes` would skip them. Bind the apply to the exact
-   commit, staging project, freshly checked ledger and preview, all-disabled switch state, and
-   the approved backup/restore point. Run a fresh `plan` before requesting deployment approval.
+5. Review the separate manual
+   [`staging-cbe-migration-catch-up.yml`](../../.github/workflows/staging-cbe-migration-catch-up.yml)
+   workflow before any merge or run. Ordinary `db push --linked --yes` would skip the four older
+   versions; this workflow uses `--include-all` only after checking the exact commit, staging ref,
+   encrypted backup artifact and digest, read-only SQL gate, linked ledger, and 185-file dry-run
+   order. It repeats the SQL gate immediately before apply. The first encrypted artifact expires
+   after seven days; if unavailable, create and review a new recoverable backup. Request separate
+   approval for the workflow merge and for the staging migration apply.
 6. After an approved apply, reconcile every expected migration version and verify all seven
    switches remain disabled, the historical CBE Birr rows did not become jobs or credits, and
    the CBE Birr receiver and authoritative source remain unchanged. Stop on any mismatch.

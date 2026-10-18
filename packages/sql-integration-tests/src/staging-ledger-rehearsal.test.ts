@@ -8,11 +8,12 @@ import { createSqlIntegrationClient, readSqlIntegrationEnvironment } from './env
 import { listMigrationsLexically } from './migration-runner.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 
-// Read-only staging plan 37378337667 on 6 October 2026 showed 87/193 applied,
-// 106 pending, and these four older gaps before the latest applied version.
-// This fixture contains versions only: no staging schema, data, or credentials.
+// The 18 October 2026 read-only staging check showed 87/272 applied,
+// 185 pending, and these four older gaps before the latest applied version.
+// It also showed only the private pilot in dry_run; all four financial switches
+// remain disabled. This fixture contains no staging schema, data, or credentials.
 const latestAppliedVersion = '20260915190000';
-const observedLatestRepositoryVersion = '20261005180558';
+const observedLatestRepositoryVersion = '20261018170000';
 const olderMissingVersions = new Set([
   '20260912233000',
   '20260914030000',
@@ -51,10 +52,10 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
 
   expect(
     migrations.filter((name) => version(name) <= observedLatestRepositoryVersion),
-  ).toHaveLength(193);
+  ).toHaveLength(272);
   expect(alreadyApplied).toHaveLength(87);
   expect(pending.filter((name) => version(name) <= observedLatestRepositoryVersion)).toHaveLength(
-    106,
+    185,
   );
   expect(pending).toHaveLength(migrations.length - alreadyApplied.length);
   expect(pending.filter((name) => version(name) < latestAppliedVersion).map(version)).toEqual(
@@ -82,6 +83,13 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       alreadyApplied,
       'staging-ledger baseline',
     );
+    const pilot = await client.query<{ feature_key: string; mode: string }>(`
+      update app.feature_switches
+         set mode = 'dry_run'
+       where feature_key = 'private_live_deposit_pilot'
+      returning feature_key, mode::text
+    `);
+    expect(pilot.rows).toEqual([{ feature_key: 'private_live_deposit_pilot', mode: 'dry_run' }]);
     await applyMigrationFiles(client, environment.migrationsDirectory, pending, 'pending catch-up');
 
     const applied = await client.query<{ count: number }>(`
@@ -95,7 +103,9 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       order by feature_key
     `);
     expect(switches.rows).toHaveLength(7);
-    expect(switches.rows.every((row) => row.mode === 'disabled')).toBe(true);
+    expect(switches.rows.filter((row) => row.mode !== 'disabled')).toEqual([
+      { feature_key: 'private_live_deposit_pilot', mode: 'dry_run' },
+    ]);
 
     const moneyRows = await client.query<{ intents: number; attempts: number }>(`
       select

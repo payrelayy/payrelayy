@@ -43,6 +43,16 @@ type CbeBirrProofPreflightRow = {
   readonly protected_material_allowed: false;
 };
 
+type CbeBirrCandidatePreleaseRow = {
+  readonly candidate_id: string;
+  readonly preflight_version: 'cbe-birr-candidate-prelease-v1';
+  readonly eligibility: 'blocked';
+  readonly blocker_code:
+    'receiver_v2_candidate_bound_metadata_only' | 'candidate_lineage_review_required';
+  readonly lease_allowed: false;
+  readonly protected_material_allowed: false;
+};
+
 type FinancialLedgerSnapshot = {
   readonly cbe_shadow_jobs: number;
   readonly cbe_shadow_results: number;
@@ -120,6 +130,7 @@ async function withRollback(client: Client, body: () => Promise<void>): Promise<
 async function queryAsRole<T extends QueryResultRow>(
   client: Client,
   role:
+    | 'fetanagent_cbe_birr_candidate_prelease'
     | 'fetanagent_cbe_birr_proof_preflight'
     | 'fetanagent_cbe_birr_shadow_worker'
     | 'fetanagent_customer_web'
@@ -452,6 +463,81 @@ async function readFinancialLedgerSnapshot(client: Client): Promise<FinancialLed
 
 export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client): void {
   describe('private Telegram dry-run deposit proof tracking', () => {
+    it('isolates the CBE candidate prelease function to a metadata-only NOLOGIN role', async () => {
+      const client = getClient();
+      const boundary = await client.query<{
+        readonly hardened: boolean;
+        readonly output_names: readonly string[];
+        readonly public_execute: boolean;
+        readonly role_can_login: boolean;
+        readonly role_has_table_access: boolean;
+        readonly role_has_only_function: boolean;
+        readonly unrelated_roles_can_execute: boolean;
+        readonly source: string;
+      }>(`
+        select procedure.prosecdef
+                 and procedure.provolatile = 's'
+                 and procedure.proowner = 'postgres'::regrole
+                 and procedure.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+                   as hardened,
+               procedure.proargnames[(procedure.pronargs + 1):] as output_names,
+               exists (
+                 select 1
+                   from aclexplode(coalesce(procedure.proacl, acldefault('f', procedure.proowner))) acl
+                  where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+               ) as public_execute,
+               role.rolcanlogin as role_can_login,
+               has_table_privilege(role.rolname, 'app.routine_cbe_birr_candidates', 'select')
+                 or has_table_privilege(role.rolname, 'app.cbe_birr_instruction_proof_bindings', 'select')
+                 or has_table_privilege(role.rolname, 'app.cbe_birr_receiver_lookup_revisions', 'select')
+                 or has_table_privilege(role.rolname, 'app.deposit_proof_requests', 'select')
+                   as role_has_table_access,
+               (
+                 select count(*) = 1
+                   from pg_proc candidate
+                   join pg_namespace namespace on namespace.oid = candidate.pronamespace
+                  where namespace.nspname = 'app'
+                    and has_function_privilege(role.rolname, candidate.oid, 'execute')
+               ) and has_function_privilege(role.rolname, procedure.oid, 'execute')
+                 as role_has_only_function,
+               exists (
+                 select 1 from unnest(array[
+                   'anon', 'authenticated', 'service_role', 'fetanagent_api',
+                   'fetanagent_api_runtime', 'fetanagent_player_actions',
+                   'fetanagent_customer_web', 'fetanagent_cbe_birr_shadow_worker'
+                 ]) denied(role_name)
+                 where has_function_privilege(denied.role_name, procedure.oid, 'execute')
+               ) as unrelated_roles_can_execute,
+               procedure.prosrc as source
+          from pg_proc procedure
+          cross join pg_roles role
+         where procedure.oid = 'app.preflight_routine_cbe_birr_candidate(uuid)'::regprocedure
+           and role.rolname = 'fetanagent_cbe_birr_candidate_prelease'
+      `);
+      expect(boundary.rows).toHaveLength(1);
+      const profile = boundary.rows[0]!;
+      expect({ ...profile, source: undefined }).toEqual({
+        hardened: true,
+        output_names: [
+          'candidate_id',
+          'preflight_version',
+          'eligibility',
+          'blocker_code',
+          'lease_allowed',
+          'protected_material_allowed',
+        ],
+        public_execute: false,
+        role_can_login: false,
+        role_has_table_access: false,
+        role_has_only_function: true,
+        unrelated_roles_can_execute: false,
+        source: undefined,
+      });
+      expect(profile.source).not.toMatch(
+        /candidate_reference_ciphertext|lookup_ciphertext|account_reference_ciphertext|lookup_fingerprint|account_reference_fingerprint|\bfor\s+(?:no\s+)?key\s+update\b|\bfor\s+update\b|\bfor\s+share\b|\b(?:insert|update|delete|merge|truncate|execute|perform)\b/iu,
+      );
+    });
+
     it('preflights v2 CBE Birr proofs without leasing or exposing protected material', async () => {
       const client = getClient();
       const boundary = await client.query<{
@@ -879,6 +965,51 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         expect((await client.query(candidateSql, [proofId])).rows).toEqual([
           { candidate_id: candidate.rows[0]!.candidate_id, already_recorded: true },
         ]);
+        const candidatePreleaseSql =
+          'select * from app.preflight_routine_cbe_birr_candidate($1::uuid)';
+        const candidateId = candidate.rows[0]!.candidate_id;
+        const candidatePrelease = await queryAsRole<CbeBirrCandidatePreleaseRow>(
+          client,
+          'fetanagent_cbe_birr_candidate_prelease',
+          candidatePreleaseSql,
+          [candidateId],
+        );
+        expect(candidatePrelease).toEqual([
+          {
+            candidate_id: candidateId,
+            preflight_version: 'cbe-birr-candidate-prelease-v1',
+            eligibility: 'blocked',
+            blocker_code: 'receiver_v2_candidate_bound_metadata_only',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
+        expect(JSON.stringify(candidatePrelease)).not.toContain(receiverRevisionId);
+        expect(
+          await queryAsRole(
+            client,
+            'fetanagent_cbe_birr_candidate_prelease',
+            candidatePreleaseSql,
+            ['99999999-9999-4999-8999-999999999999'],
+          ),
+        ).toEqual([]);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_candidate_prelease',
+            'select * from app.preflight_routine_cbe_birr_candidate(null::uuid)',
+          ),
+        ).rejects.toThrow(/candidate prelease request is invalid/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_candidate_prelease',
+            'select * from app.cbe_birr_receiver_lookup_revisions limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
+        await expect(
+          queryAsRole(client, 'fetanagent_player_actions', candidatePreleaseSql, [candidateId]),
+        ).rejects.toThrow(/permission denied/u);
         await client.query('savepoint cbe_candidate_live_telebirr');
         try {
           await client.query(
@@ -888,6 +1019,14 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
           expect((await client.query(candidateSql, [proofId])).rows).toEqual([
             { candidate_id: candidate.rows[0]!.candidate_id, already_recorded: true },
           ]);
+          expect(
+            await queryAsRole<CbeBirrCandidatePreleaseRow>(
+              client,
+              'fetanagent_cbe_birr_candidate_prelease',
+              candidatePreleaseSql,
+              [candidateId],
+            ),
+          ).toEqual(candidatePrelease);
         } finally {
           await client.query('rollback to savepoint cbe_candidate_live_telebirr');
           await client.query('release savepoint cbe_candidate_live_telebirr');
@@ -898,9 +1037,14 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             `update app.feature_switches set mode = 'dry_run'
               where feature_key = 'cbe_birr_authoritative_verification'`,
           );
-          await expect(client.query(candidateSql, [proofId])).rejects.toThrow(
-            /requires CBE verification disabled/u,
-          );
+          await expect(
+            withSavepoint(client, async () => client.query(candidateSql, [proofId])),
+          ).rejects.toThrow(/requires CBE verification disabled/u);
+          await expect(
+            queryAsRole(client, 'fetanagent_cbe_birr_candidate_prelease', candidatePreleaseSql, [
+              candidateId,
+            ]),
+          ).rejects.toThrow(/requires verification disabled/u);
         } finally {
           await client.query('rollback to savepoint cbe_candidate_verification_off');
           await client.query('release savepoint cbe_candidate_verification_off');
@@ -1152,6 +1296,38 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         expect(
           await queryAsRole(client, 'fetanagent_player_actions', atomicSql, atomicValues),
         ).toMatchObject([{ request_replayed: true }]);
+        const replacementRequestId = randomUUID();
+        const replacementRevisionId = randomUUID();
+        await client.query(
+          `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            $1::uuid, $2::uuid, $3::uuid, $4::integer, 'Synthetic Rotated SQL Receiver',
+            $5::text, $6::text, '***0002', $7::text, $8::text, '***0002',
+            'account_rotation'
+          )`,
+          [
+            owner.rows[0]!.auth_user_id,
+            replacementRequestId,
+            replacementRevisionId,
+            receiver.rows[0]!.revision + 1,
+            `receiver-v1.cbe_birr.${'G'.repeat(16)}.${'H'.repeat(22)}.${'I'.repeat(16)}`,
+            createHash('sha256').update(replacementRequestId).digest('hex'),
+            `cbe-receiver-v2.${'J'.repeat(16)}.${'K'.repeat(22)}.${'L'.repeat(16)}`,
+            createHash('sha256').update(replacementRevisionId).digest('hex'),
+          ],
+        );
+        expect(
+          await queryAsRole<CbeBirrCandidatePreleaseRow>(
+            client,
+            'fetanagent_cbe_birr_candidate_prelease',
+            candidatePreleaseSql,
+            [candidateId],
+          ),
+        ).toEqual([
+          {
+            ...candidatePrelease[0],
+            blocker_code: 'candidate_lineage_review_required',
+          },
+        ]);
         expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
       });
     });

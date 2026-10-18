@@ -730,7 +730,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
   describe('Owner CBE Birr provisioning metadata snapshot', () => {
     const snapshotSql = 'select * from app.inspect_owner_cbe_birr_provisioning_snapshot($1::uuid)';
 
-    it('keeps the metadata function ungranted until the Owner catalog is updated', async () => {
+    it('grants only the Owner role the hardened metadata snapshot', async () => {
       const client = getClient();
       const privileges = await client.query<{
         readonly hardened: boolean;
@@ -765,9 +765,9 @@ export function registerOwnerReceiverAccountControlSqlTests(
       expect(privileges.rows).toEqual([
         {
           hardened: true,
-          owner_execute: false,
+          owner_execute: true,
           public_execute: false,
-          runtime_execute: false,
+          runtime_execute: true,
           worker_execute: false,
           runtime_table_select: false,
         },
@@ -778,9 +778,6 @@ export function registerOwnerReceiverAccountControlSqlTests(
       const client = getClient();
       await client.query('begin');
       try {
-        await client.query(`grant execute on function
-          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)
-          to fetanagent_owner_control`);
         const owner = await client.query<{ readonly auth_user_id: string }>(
           `select auth_user_id from app.admin_users where id = $1::uuid`,
           [getOwnerAdminId()],

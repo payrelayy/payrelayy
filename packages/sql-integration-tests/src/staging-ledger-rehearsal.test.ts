@@ -14,6 +14,8 @@ import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 // remain disabled. This fixture contains no staging schema, data, or credentials.
 const latestAppliedVersion = '20260915190000';
 const observedLatestRepositoryVersion = '20261018170000';
+const allDisabledPreflightMigration =
+  '20261011183500_routine_paid_poll_idles_with_deposits_disabled.sql';
 const olderMissingVersions = new Set([
   '20260912233000',
   '20260914030000',
@@ -61,6 +63,8 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
   expect(pending.filter((name) => version(name) < latestAppliedVersion).map(version)).toEqual(
     [...olderMissingVersions].sort(),
   );
+  const preflightIndex = pending.indexOf(allDisabledPreflightMigration);
+  expect(preflightIndex).toBeGreaterThanOrEqual(0);
 
   // PostgreSQL roles are cluster-wide, so use a separate one-use server rather
   // than another database on the full clean-replay suite's server.
@@ -90,7 +94,42 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       returning feature_key, mode::text
     `);
     expect(pilot.rows).toEqual([{ feature_key: 'private_live_deposit_pilot', mode: 'dry_run' }]);
-    await applyMigrationFiles(client, environment.migrationsDirectory, pending, 'pending catch-up');
+    await applyMigrationFiles(
+      client,
+      environment.migrationsDirectory,
+      pending.slice(0, preflightIndex),
+      'pending catch-up',
+    );
+    await expect(
+      applyMigrationFiles(
+        client,
+        environment.migrationsDirectory,
+        [allDisabledPreflightMigration],
+        'pending catch-up',
+      ),
+    ).rejects.toMatchObject({
+      message: `pending catch-up failed at ${allDisabledPreflightMigration}`,
+      cause: { message: 'The seven financial switches must remain disabled.' },
+    });
+    await client.query('rollback');
+
+    // The synthetic run can continue only after the private pilot is disabled.
+    // This is a required staging change, not an action performed by this test.
+    const pausedPilot = await client.query<{ feature_key: string; mode: string }>(`
+      update app.feature_switches
+         set mode = 'disabled'
+       where feature_key = 'private_live_deposit_pilot'
+      returning feature_key, mode::text
+    `);
+    expect(pausedPilot.rows).toEqual([
+      { feature_key: 'private_live_deposit_pilot', mode: 'disabled' },
+    ]);
+    await applyMigrationFiles(
+      client,
+      environment.migrationsDirectory,
+      pending.slice(preflightIndex),
+      'pending catch-up',
+    );
 
     const applied = await client.query<{ count: number }>(`
       select count(*)::integer as count from sql_integration.applied_migrations
@@ -103,9 +142,7 @@ it('rehearses a staging-ledger-shaped catch-up with no staging connection or cus
       order by feature_key
     `);
     expect(switches.rows).toHaveLength(7);
-    expect(switches.rows.filter((row) => row.mode !== 'disabled')).toEqual([
-      { feature_key: 'private_live_deposit_pilot', mode: 'dry_run' },
-    ]);
+    expect(switches.rows.every((row) => row.mode === 'disabled')).toBe(true);
 
     const moneyRows = await client.query<{ intents: number; attempts: number }>(`
       select

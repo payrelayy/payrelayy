@@ -2323,6 +2323,8 @@ describe('Owner-control HTTP boundary', () => {
       payload: {},
     });
     expect(disabledResponse.statusCode).toBe(404);
+    const disabledDashboard = await disabled.inject({ method: 'GET', url: '/owner' });
+    expect(disabledDashboard.body).not.toContain('id="cbe-upgrade-form"');
     await disabled.close();
 
     let observed: unknown;
@@ -2351,6 +2353,8 @@ describe('Owner-control HTTP boundary', () => {
         },
       }),
     });
+    const enabledDashboard = await enabled.inject({ method: 'GET', url: '/owner' });
+    expect(enabledDashboard.body).toContain('id="cbe-upgrade-form"');
     const payload = {
       accountHolderName: 'Synthetic Receiver',
       accountReference: '251000003456',

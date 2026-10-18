@@ -223,9 +223,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             complete account number is encrypted in server memory and is never displayed again.
           </p>
           <p class="pilot-warning">
-            TeleBirr receiver changes and later CBE Birr rotations require the financial switches
-            to be off. The first CBE Birr receiver may be saved while TeleBirr runs, but CBE Birr
-            verification must stay off. Stop any pilot for the provider before changing its receiver.
+            TeleBirr receiver changes and CBE Birr account rotations require the financial switches
+            to be off. The first CBE Birr receiver and a one-time same-account protection upgrade
+            may preserve live TeleBirr when their exact server guards allow it. CBE Birr verification
+            stays off. Stop any pilot for the provider before changing its receiver.
           </p>
           <div class="request-list" id="receiver-list"></div>
           <form id="receiver-form" autocomplete="off">
@@ -255,6 +256,27 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </label>
             <button id="receiver-submit-button" type="submit">Save new active receiver</button>
           </form>
+          ${
+            runtime.cbeBirrReceiverV2RotationEnabled
+              ? `
+          <form id="cbe-upgrade-form" autocomplete="off">
+            <h3>Protect the current CBE Birr receiver for receipt lookup</h3>
+            <p class="receipt-label" id="cbe-upgrade-status" role="status" aria-live="polite">
+              Refresh receiving-account history before preparing this upgrade.
+            </p>
+            <label for="cbe-upgrade-phone">Same full CBE Birr receiving phone (251 + nine digits)</label>
+            <input id="cbe-upgrade-phone" name="accountReference" type="password"
+              inputmode="numeric" pattern="251[0-9]{9}" minlength="12" maxlength="12"
+              autocomplete="new-password" required />
+            <label class="confirmation-row" for="cbe-upgrade-confirmation">
+              <input id="cbe-upgrade-confirmation" name="confirmation" type="checkbox" required />
+              I checked the same active CBE Birr receiver and approve a new protected revision.
+              This does not enable CBE Birr deposits.
+            </label>
+            <button id="cbe-upgrade-submit" type="submit" disabled>Upgrade CBE Birr protection</button>
+          </form>`
+              : ''
+          }
           <p class="request-meta" id="receiver-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
         </section>
 
@@ -806,6 +828,11 @@ const receiverRefreshButton = document.querySelector('#receiver-refresh-button')
 const receiverAccountReference = document.querySelector('#receiver-account-reference');
 const receiverAccountReferenceLabel = document.querySelector('#receiver-account-reference-label');
 const receiverConfirmation = document.querySelector('#receiver-confirmation');
+const cbeUpgradeForm = document.querySelector('#cbe-upgrade-form');
+const cbeUpgradePhone = document.querySelector('#cbe-upgrade-phone');
+const cbeUpgradeConfirmation = document.querySelector('#cbe-upgrade-confirmation');
+const cbeUpgradeSubmit = document.querySelector('#cbe-upgrade-submit');
+const cbeUpgradeStatus = document.querySelector('#cbe-upgrade-status');
 const kemerbetAgentProfileList = document.querySelector('#kemerbet-agent-profile-list');
 const kemerbetAgentProfileForm = document.querySelector('#kemerbet-agent-profile-form');
 const kemerbetAgentProfileConfirmation = document.querySelector('#kemerbet-agent-profile-confirmation');
@@ -923,6 +950,7 @@ let supportContactRequest = 0;
 let supportContactLoading = false;
 let supportContactSaving = false;
 let supportContactDirty = false;
+let eligibleCbeUpgradeReceiver;
 let pendingKemerbetReadinessCohortRequestId;
 let pendingKemerbetAgentProfileRequest;
 let currentInvite;
@@ -1248,10 +1276,12 @@ function applyKemerbetQuarantineMutationBoundary() {
   if (!kemerbetRecoveryLaneKnown) {
     for (const form of [
       receiverForm,
+      cbeUpgradeForm,
       kemerbetReadinessCohortForm,
       kemerbetAgentProfileForm,
       pilotPrepareForm,
     ]) {
+      if (!form) continue;
       for (const element of form.elements) element.disabled = true;
     }
     for (const element of document.querySelectorAll('[data-kemerbet-state-mutation]')) {
@@ -1269,10 +1299,12 @@ function applyKemerbetQuarantineMutationBoundary() {
   if (!kemerbetSecurityRecoveryRequired) {
     for (const form of [
       receiverForm,
+      cbeUpgradeForm,
       kemerbetReadinessCohortForm,
       kemerbetAgentProfileForm,
       pilotPrepareForm,
     ]) {
+      if (!form) continue;
       if (form.dataset.ownerBusy === 'true') continue;
       for (const element of form.elements) {
         element.disabled = form === kemerbetAgentProfileForm && !profileControlsReady;
@@ -1285,9 +1317,11 @@ function applyKemerbetQuarantineMutationBoundary() {
     updateKemerbetReadinessCohortAvailability();
     updatePilotPreparationAvailability();
     updateKemerbetAgentProfileStatus();
+    updateCbeUpgradeAvailability();
     return;
   }
-  for (const form of [receiverForm]) {
+  for (const form of [receiverForm, cbeUpgradeForm]) {
+    if (!form) continue;
     for (const element of form.elements) element.disabled = true;
   }
   for (const element of pilotPrepareForm.elements) {
@@ -1633,6 +1667,13 @@ function clearReceivers() {
   receiverList.replaceChildren();
   receiverAccountReference.value = '';
   receiverConfirmation.checked = false;
+  eligibleCbeUpgradeReceiver = undefined;
+  if (cbeUpgradeForm) {
+    cbeUpgradePhone.value = '';
+    cbeUpgradeConfirmation.checked = false;
+    cbeUpgradeStatus.textContent = 'Refresh receiving-account history before preparing this upgrade.';
+    cbeUpgradeSubmit.disabled = true;
+  }
   setReceiverFeedback('');
 }
 
@@ -3131,7 +3172,9 @@ function validReceiver(value) {
       typeof value.activeFrom !== 'string' || !Number.isFinite(Date.parse(value.activeFrom)) ||
       typeof value.protectedReference !== 'boolean' ||
       (value.protectedReference &&
-        !['initial_configuration', 'account_rotation', 'provider_incident_recovery', 'owner_correction'].includes(value.rotationReason)) ||
+        !['initial_configuration', 'account_rotation', 'provider_incident_recovery', 'owner_correction',
+          'protection_upgrade'].includes(value.rotationReason)) ||
+      (value.rotationReason === 'protection_upgrade' && providerCode !== 'cbe_birr') ||
       (!value.protectedReference && value.rotationReason !== undefined) ||
       (value.receiverStatus === 'active' && value.retiredAt !== undefined) ||
       (value.receiverStatus === 'inactive' &&
@@ -3146,6 +3189,30 @@ function validReceiver(value) {
 function setReceiverFeedback(message) {
   receiverFeedback.textContent = message;
   receiverFeedback.hidden = !message;
+}
+
+function updateCbeUpgradeAvailability() {
+  if (!cbeUpgradeForm) return;
+  cbeUpgradeSubmit.disabled = !eligibleCbeUpgradeReceiver || !ordinaryKemerbetMutationAllowed() ||
+    cbeUpgradeForm.dataset.ownerBusy === 'true';
+}
+
+function selectCbeUpgradeReceiver(receivers) {
+  if (!cbeUpgradeForm) return;
+  const active = receivers.filter((receiver) =>
+    receiver.providerCode === 'cbe_birr' && receiver.receiverStatus === 'active');
+  eligibleCbeUpgradeReceiver = active.length === 1 && active[0].protectedReference &&
+    active[0].rotationReason !== 'protection_upgrade' &&
+    !receivers.some((receiver) =>
+      receiver.providerCode === 'cbe_birr' && receiver.rotationReason === 'protection_upgrade')
+    ? active[0] : undefined;
+  cbeUpgradeStatus.textContent = eligibleCbeUpgradeReceiver
+    ? 'Active CBE Birr revision ' + eligibleCbeUpgradeReceiver.revision + ' for ' +
+      eligibleCbeUpgradeReceiver.accountHolderName + ' ending ' +
+      eligibleCbeUpgradeReceiver.accountReferenceMasked.slice(-4) +
+      '. Enter that same full phone. TeleBirr may remain live; CBE Birr stays disabled.'
+    : 'No eligible v1 CBE Birr receiver is available for a one-time protection upgrade.';
+  updateCbeUpgradeAvailability();
 }
 
 function renderReceivers(receivers) {
@@ -3184,11 +3251,17 @@ async function loadReceivers() {
     const receivers = payload.receivers.map(validReceiver);
     if (receivers.some((receiver) => !receiver)) throw new Error('receivers');
     renderReceivers(receivers);
+    selectCbeUpgradeReceiver(receivers);
     const activeCount = receivers.filter((receiver) => receiver.receiverStatus === 'active').length;
     setReceiverFeedback('Receiving-account history refreshed. ' + activeCount +
       (activeCount === 1 ? ' active receiving account.' : ' active receiving accounts.'));
   } catch (error) {
     receiverList.replaceChildren();
+    eligibleCbeUpgradeReceiver = undefined;
+    if (cbeUpgradeForm) {
+      cbeUpgradeStatus.textContent = 'Receiving-account history is unavailable. Refresh before upgrading.';
+      updateCbeUpgradeAvailability();
+    }
     if (!isSignedOutError(error)) {
       const message = 'Receiver-account history is unavailable. Do not save another revision until it can be checked.';
       setReceiverFeedback(message);
@@ -3275,6 +3348,65 @@ async function rotateReceiver() {
     }
   } finally {
     setBusy(receiverForm, false);
+    applyKemerbetQuarantineMutationBoundary();
+  }
+}
+
+async function upgradeCbeBirrReceiverProtection() {
+  if (!cbeUpgradeForm || !requireOrdinaryKemerbetMutation()) return;
+  const receiver = eligibleCbeUpgradeReceiver;
+  const phone = cbeUpgradePhone.value;
+  if (!receiver || !cbeUpgradeConfirmation.checked || !/^251[0-9]{9}$/.test(phone) ||
+      !phone.endsWith(receiver.accountReferenceMasked.slice(-4)) ||
+      !Number.isSafeInteger(receiver.revision + 1) || receiver.revision >= 2147483647) {
+    cbeUpgradeStatus.textContent = 'Enter and confirm the same full phone shown by the active CBE Birr mask.';
+    return;
+  }
+  if (!window.confirm('Create CBE Birr protection revision ' + (receiver.revision + 1) +
+      ' for ' + receiver.accountHolderName + ' ending ' + phone.slice(-4) +
+      '? The previous revision will be retired. CBE Birr deposits remain disabled.')) return;
+  const requestId = crypto.randomUUID();
+  setBusy(cbeUpgradeForm, true);
+  cbeUpgradeStatus.textContent = 'Protecting the same receiver and saving its new revision…';
+  try {
+    const response = await ownerRequest('/v1/owner/cbe-birr-receiver-v2/protection-upgrade', {
+      method: 'POST',
+      headers: receiverMutationHeaders(requestId),
+      body: JSON.stringify({ accountHolderName: receiver.accountHolderName,
+        accountReference: phone,
+        confirmation: 'owner_confirmed_cbe_birr_same_receiver_protection_upgrade',
+        expectedVersion: receiver.revision + 1, requestId }),
+    });
+    cbeUpgradePhone.value = '';
+    cbeUpgradeConfirmation.checked = false;
+    if (response.status !== 201) throw new Error('cbe_upgrade');
+    const payload = await response.json();
+    const saved = payload && payload.receiver;
+    if (!saved || saved.lookupProtected !== true ||
+        saved.receiverRevisionId !== requestId ||
+        saved.revision !== receiver.revision + 1 ||
+        saved.receiverStatus !== 'active' ||
+        saved.rotationReason !== 'protection_upgrade' ||
+        saved.accountReferenceMasked !== receiver.accountReferenceMasked ||
+        typeof saved.activeFrom !== 'string' || !Number.isFinite(Date.parse(saved.activeFrom))) {
+      throw new Error('cbe_upgrade');
+    }
+    await loadReceivers();
+    const message = 'CBE Birr protection revision ' + saved.revision +
+      ' was saved for the same receiver. CBE Birr deposits remain disabled.';
+    cbeUpgradeStatus.textContent = message;
+    setNotice(message);
+  } catch (error) {
+    cbeUpgradePhone.value = '';
+    cbeUpgradeConfirmation.checked = false;
+    if (!isSignedOutError(error)) {
+      await loadReceivers();
+      const message = 'The upgrade could not be confirmed. It may already have been applied. Review refreshed receiving-account history before trying again.';
+      cbeUpgradeStatus.textContent = message;
+      setNotice(message);
+    }
+  } finally {
+    setBusy(cbeUpgradeForm, false);
     applyKemerbetQuarantineMutationBoundary();
   }
 }
@@ -6031,6 +6163,10 @@ updateReceiverAccountReferenceFormat();
 receiverForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await rotateReceiver();
+});
+if (cbeUpgradeForm) cbeUpgradeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await upgradeCbeBirrReceiverProtection();
 });
 kemerbetAgentRefreshButton.addEventListener('click', loadKemerbetAgentProfiles);
 kemerbetAgentProfileForm.addEventListener('submit', async (event) => {

@@ -56,10 +56,18 @@ The private Telegram route now accepts explicit `/cbe_test PLAYER` and
 `TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED`, which requires the staging Player-action target
 and `FINANCIAL_ACTIONS_MODE=dry_run`. The new migration grants only these two RPCs to the
 Player-action group role; it does not grant direct table access. The SQL functions still enforce
-the disabled financial switches independently. This code and migration are in the draft PR, not
-applied to a deployment. The route displays no payment destination, performs no receipt lookup,
-and cannot credit a Player. V2 receiver provisioning, authoritative lookup, and financial
-activation remain separate work.
+the disabled financial switches independently. The route remains default-off; application and
+migration rollout must be checked for each target. The route displays no payment destination,
+performs no receipt lookup, and cannot credit a Player. V2 receiver provisioning, authoritative
+lookup, and financial activation remain separate work.
+
+The routine candidate ledger is a separate inert pointer to one immutable, instruction-bound v2
+proof. Its ungranted enrollment function requires the exact blocked metadata preflight and disabled
+CBE verification switch, then returns only an opaque candidate ID and replay flag. It stores no
+reference, receiver value, amount, or receipt. Enrollment itself does not require TeleBirr's shared
+deposit switches to be disabled, but the existing CBE dry-run proof capture still does. No runtime
+role can call enrollment or read the ledger; there is no verifier lease, result writer, source
+request, claim, or credit. This does not clear the prelease or protected-material blockers.
 
 The only valid-request disposition remains `blocked`, with reason
 `authoritative_lookup_prerequisites_incomplete`. All 16 capability fields are literal `false`:

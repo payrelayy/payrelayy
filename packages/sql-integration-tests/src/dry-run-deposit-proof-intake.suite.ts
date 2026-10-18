@@ -747,6 +747,16 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         ]);
         await expect(
           withSavepoint(client, async () => {
+            await client.query(
+              `update app.customer_identities set status = 'inactive'
+                where id = $1::uuid`,
+              [fixture.actorA.telegramIdentityId],
+            );
+            await client.query(instructionSql, instructionValues);
+          }),
+        ).rejects.toThrow(/customer is inactive/u);
+        await expect(
+          withSavepoint(client, async () => {
             await client.query(instructionSql, [
               instructionEvent,
               fixture.playerId,

@@ -121,6 +121,10 @@ begin
 
   perform app.require_dry_run_deposit_proof_switches_disabled();
 
+  if v_identity_status <> 'active' or v_customer_status <> 'active' then
+    raise exception 'The Telegram CBE Birr instruction customer is inactive.';
+  end if;
+
   select receipt.* into v_receipt
     from app.telegram_cbe_birr_dry_run_instruction_receipts receipt
    where receipt.origin_inbound_event_id = p_origin_inbound_event_id;
@@ -149,8 +153,6 @@ begin
   end if;
 
   if v_processed_at is not null
-    or v_identity_status <> 'active'
-    or v_customer_status <> 'active'
     or exists (
       select 1 from app.inbound_event_consumptions consumption
        where consumption.origin_inbound_event_id = p_origin_inbound_event_id

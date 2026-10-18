@@ -347,6 +347,12 @@ importers:
         specifier: 8.0.1
         version: 8.0.1
 
+  packages/cbe-birr-reference-opening:
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
+
   packages/config:
     dependencies:
       '@fetanagent/domain':

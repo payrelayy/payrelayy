@@ -19,3 +19,11 @@ rotation and recovery process, prelease authorization, proof-to-receiver-revisio
 callback-scoped material access. The candidate must remain unwired until those boundaries and the
 other authoritative lookup prerequisites are reviewed. No real receipt or personal data is stored
 in this package or its tests.
+
+An additional dormant `@fetanagent/cbe-birr-reference-opening` package tests the narrower worker
+opening boundary. It accepts only the CBE Birr/purpose-scoped v2 child key with a matching nonsecret
+key fingerprint, checks the stored mask, and makes the authenticated reference available only to
+a synchronous trusted callback. It cannot accept the API master or derive another provider key.
+No application imports this package. Independent worker key provenance, provisioning, rotation,
+recovery, deployment-profile binding, prelease authorization, and callback use inside a reviewed
+worker are still absent; the inventory blockers and all lookup/financial gates remain unchanged.

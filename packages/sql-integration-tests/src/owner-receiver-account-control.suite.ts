@@ -726,4 +726,170 @@ export function registerOwnerReceiverAccountControlSqlTests(
       }
     });
   });
+
+  describe('Owner CBE Birr provisioning metadata snapshot', () => {
+    const snapshotSql = 'select * from app.inspect_owner_cbe_birr_provisioning_snapshot($1::uuid)';
+
+    it('keeps the metadata function ungranted until the Owner catalog is updated', async () => {
+      const client = getClient();
+      const privileges = await client.query<{
+        readonly hardened: boolean;
+        readonly owner_execute: boolean;
+        readonly public_execute: boolean;
+        readonly runtime_execute: boolean;
+        readonly worker_execute: boolean;
+        readonly runtime_table_select: boolean;
+      }>(`
+        select routine.prosecdef
+                 and routine.proowner = 'postgres'::regrole
+                 and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+                   as hardened,
+               has_function_privilege('fetanagent_owner_control', routine.oid, 'EXECUTE')
+                 as owner_execute,
+               has_function_privilege('fetanagent_owner_control_runtime', routine.oid, 'EXECUTE')
+                 as runtime_execute,
+               has_function_privilege('fetanagent_cbe_birr_shadow_worker', routine.oid, 'EXECUTE')
+                 as worker_execute,
+               has_table_privilege('fetanagent_owner_control_runtime',
+                 'app.cbe_birr_receiver_lookup_revisions', 'SELECT')
+                 as runtime_table_select,
+               exists (
+                 select 1 from aclexplode(coalesce(routine.proacl,
+                   acldefault('f', routine.proowner))) acl
+                  where acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+               ) as public_execute
+          from pg_proc routine
+         where routine.oid =
+           'app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)'::regprocedure
+      `);
+      expect(privileges.rows).toEqual([
+        {
+          hardened: true,
+          owner_execute: false,
+          public_execute: false,
+          runtime_execute: false,
+          worker_execute: false,
+          runtime_table_select: false,
+        },
+      ]);
+    });
+
+    it('reports only the currently active v2 revision while CBE is disabled', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`grant execute on function
+          app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)
+          to fetanagent_owner_control`);
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        const authUserId = owner.rows[0]!.auth_user_id;
+        await expectFailure(
+          client,
+          snapshotSql,
+          [authUserId],
+          /active protected CBE Birr receiver revision is unavailable/u,
+        );
+        await expectFailure(client, snapshotSql, [randomUUID()], /Only the active Owner/u);
+
+        const legacyCiphertext = `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`;
+        const legacyFingerprint = 'a'.repeat(64);
+        const initial = await queryAsOwnerControl<{
+          readonly revision: number;
+        }>(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+          $1::uuid, $2::uuid, 'cbe_birr', 'Synthetic SQL Receiver',
+          $3::text, $4::text, '***6789', 1::smallint, 1::smallint, 1::smallint,
+          'initial_configuration'
+        )`,
+          [authUserId, randomUUID(), legacyCiphertext, legacyFingerprint],
+        );
+        expect(initial).toHaveLength(1);
+        await expectFailure(
+          client,
+          snapshotSql,
+          [authUserId],
+          /active protected CBE Birr receiver revision is unavailable/u,
+        );
+
+        const receiverRevisionId = randomUUID();
+        const upgrade = await queryAsOwnerControl<{
+          readonly receiver_revision_id: string;
+          readonly revision: number;
+        }>(
+          client,
+          `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+          $1::uuid, $2::uuid, $3::uuid, $4::integer, 'Synthetic SQL Receiver',
+          $5::text, $6::text, '***6789', $7::text, $8::text, '***6789',
+          'protection_upgrade'
+        )`,
+          [
+            authUserId,
+            randomUUID(),
+            receiverRevisionId,
+            initial[0]!.revision + 1,
+            legacyCiphertext,
+            legacyFingerprint,
+            `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`,
+            'b'.repeat(64),
+          ],
+        );
+        expect(upgrade).toHaveLength(1);
+
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        const snapshot = await queryAsOwnerControl(client, snapshotSql, [authUserId]);
+        expect(snapshot).toEqual([
+          {
+            receiver_revision_id: receiverRevisionId,
+            receiver_version: initial[0]!.revision + 1,
+            protection_profile_version: 2,
+            encryption_key_version: 2,
+            fingerprint_key_version: 2,
+          },
+        ]);
+        expect(Object.keys(snapshot[0] ?? {}).sort()).toEqual([
+          'encryption_key_version',
+          'fingerprint_key_version',
+          'protection_profile_version',
+          'receiver_revision_id',
+          'receiver_version',
+        ]);
+        await client.query(`update app.feature_switches set mode = 'dry_run'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        await expectFailure(client, snapshotSql, [authUserId], /requires verification disabled/u);
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        expect(await queryAsOwnerControl(client, snapshotSql, [authUserId])).toEqual(snapshot);
+
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key in ('payment_verification', 'deposit_execution')`);
+        await queryAsOwnerControl(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+          $1::uuid, $2::uuid, 'cbe_birr', 'Later Synthetic Receiver',
+          $3::text, $4::text, '***9999', 1::smallint, 1::smallint, 1::smallint,
+          'account_rotation'
+        )`,
+          [
+            authUserId,
+            randomUUID(),
+            `receiver-v1.cbe_birr.${'G'.repeat(16)}.${'H'.repeat(22)}.${'I'.repeat(16)}`,
+            'c'.repeat(64),
+          ],
+        );
+        await expectFailure(
+          client,
+          snapshotSql,
+          [authUserId],
+          /active protected CBE Birr receiver revision is unavailable/u,
+        );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+  });
 }

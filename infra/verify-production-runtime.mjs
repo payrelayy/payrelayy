@@ -588,7 +588,10 @@ assert.match(
   workflow,
   /confirm_routine_deposit_transport:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- enabled/u,
 );
-assert.match(workflow, /"\$REQUESTED_MODE" != 'deploy-inert'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled'/u);
+assert.match(
+  workflow,
+  /"\$REQUESTED_MODE" != 'deploy-inert'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled'/u,
+);
 assert.match(workflow, /Build the exact active production TeleBirr assignment manifest/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy'\s+shell: bash/u);
 assert.match(workflow, /Build the exact no-money production TeleBirr shadow assignment manifest/u);
@@ -654,7 +657,10 @@ assert.doesNotMatch(postgresScramVerifier, /console\.|process\.stdout|process\.s
 assert.match(workflow, /Atomically activate production and switch the public edge/u);
 assert.match(workflow, /Verify live public production services/u);
 const routineTransportGate = workflow.indexOf('Verify requested signed Windows routine transport');
-assert.ok(routineTransportGate > workflow.indexOf('Atomically activate production and switch the public edge'));
+assert.ok(
+  routineTransportGate >
+    workflow.indexOf('Atomically activate production and switch the public edge'),
+);
 assert.ok(routineTransportGate < workflow.indexOf('Attest and finalize the production cutover'));
 assert.match(workflow, /enabled\) expected_status=400/u);
 assert.match(workflow, /disabled\) expected_status=503/u);

@@ -128,6 +128,15 @@ The marker must not coexist with
 release if both modes are selected, if the credential or marker is a link, if metadata is broader,
 if the account/host/TLS URL is not exact, or if the release SHA differs.
 
+The marker is bound to one release. Before a later inert production deployment intended to retain
+the signed Windows routine transport, stop the financial gates, check there is no unresolved
+execution attempt, and replace the marker with that **new** reviewed main SHA using the same
+root-owned mode-0600 contract. Select `confirm_routine_deposit_transport: enabled` for the
+`deploy-inert` workflow. Its no-money public smoke requires the signed Windows routine endpoint
+to reject a malformed unauthenticated request as an active route; a dormant route fails the
+deployment and triggers rollback. Keep the marker at the prior SHA and select `disabled` when
+the new release is intentionally dormant.
+
 Deploy that exact sealed release through the normal production workflow. The bundle always carries
 the reviewed routine overlay, but the helper includes it only for this matching protected marker.
 Its negative public smoke expects the routine endpoint to change from dormant 503 to authenticated

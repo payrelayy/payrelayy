@@ -40,6 +40,14 @@ on:
         description: For a live-authority deploy type the exact TeleBirr activation epoch; otherwise type not-applicable
         required: true
         type: string
+      confirm_routine_deposit_transport:
+        description: Expected signed Windows routine bridge transport after an inert deploy
+        required: true
+        default: disabled
+        type: choice
+        options:
+          - disabled
+          - enabled
 
 permissions:
   contents: read
@@ -77,6 +85,7 @@ jobs:
           CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
           CONFIRMED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
           CONFIRMED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
+          CONFIRMED_ROUTINE_TRANSPORT: ${{ inputs.confirm_routine_deposit_transport }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
@@ -85,6 +94,11 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_PROJECT" != "$STAGING_PROJECT_REF" ]]
           [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
+          [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ||
+            "$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled' ]]
+          if [[ "$REQUESTED_MODE" != 'deploy-inert' ]]; then
+            [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ]]
+          fi
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy:DEPLOY PRODUCTION RUNTIME'|\
@@ -1101,6 +1115,28 @@ jobs:
           done
           echo '::error::The public production HTTPS smoke did not pass within 90 seconds.'
           exit 1
+
+      - name: Verify requested signed Windows routine transport
+        if: inputs.mode == 'deploy-inert'
+        shell: bash
+        env:
+          REQUESTED_ROUTINE_TRANSPORT: ${{ inputs.confirm_routine_deposit_transport }}
+        run: |
+          set -euo pipefail
+          case "$REQUESTED_ROUTINE_TRANSPORT" in
+            disabled) expected_status=503 ;;
+            enabled) expected_status=400 ;;
+            *) exit 1 ;;
+          esac
+          status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+            --header 'Content-Type: application/vnd.fetanagent.companion-device-bridge+json' \
+            --header 'Accept: application/vnd.fetanagent.companion-device-bridge+json' \
+            --data '{}' https://device.fetanagent.com/v3/companion/device/routine-deposits:command)"
+          [[ "$status" == "$expected_status" ]] || {
+            echo '::error::The signed Windows routine route does not match the reviewed transport state.'
+            exit 1
+          }
 
       - name: Attest and finalize the production cutover
         shell: bash

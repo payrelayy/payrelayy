@@ -268,6 +268,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.revoke_telegram_beta_invite(uuid,uuid,text)' },
         {
           signature:
+            'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
+        },
+        {
+          signature:
             'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
         },
         { signature: 'app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)' },

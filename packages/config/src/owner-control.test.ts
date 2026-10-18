@@ -135,7 +135,14 @@ describe('Owner-control configuration', () => {
     });
     expect(loadOwnerControlConfig(unreadEnvironment).runtime).toMatchObject({
       cbeBirrLookupKeyMaterial: { configured: false },
+      cbeBirrReceiverV2RotationEnabled: false,
     });
+    expect(() =>
+      loadOwnerControlConfig({
+        ...enabledEnvironment(),
+        INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true',
+      }),
+    ).toThrow('requires the lookup key profile');
     const enabled = {
       ...enabledEnvironment(),
       INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true',
@@ -145,6 +152,7 @@ describe('Owner-control configuration', () => {
     };
     const configured = loadOwnerControlConfig(enabled);
     expect(configured.runtime).toMatchObject({
+      cbeBirrReceiverV2RotationEnabled: false,
       cbeBirrLookupKeyMaterial: {
         configured: true,
         encryptionSecret: cbeBirrLookupEncryptionMaster,
@@ -154,6 +162,14 @@ describe('Owner-control configuration', () => {
     });
     const redacted = JSON.stringify(redactedOwnerControlConfigForLog(configured));
     expect(redacted).toContain('"cbeBirrLookupKeyMaterialConfigured":true');
+    expect(redacted).toContain('"cbeBirrReceiverV2RotationEnabled":false');
+    const rotationEnabled = loadOwnerControlConfig({
+      ...enabled,
+      INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true',
+    });
+    expect(
+      rotationEnabled.runtime.enabled && rotationEnabled.runtime.cbeBirrReceiverV2RotationEnabled,
+    ).toBe(true);
     for (const secret of [
       cbeBirrLookupEncryptionMaster,
       cbeBirrLookupFingerprintMaster,

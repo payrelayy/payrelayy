@@ -121,15 +121,36 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(`drop function ${signature}`);
         }
         // The three routine-policy configuration RPCs are additive, not execution grants.
-        expect(await executableOwnerFunctionCount(client)).toBe(48);
+        expect(await executableOwnerFunctionCount(client)).toBe(49);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
 
         // Restore the actual checked-in migration's functions and ACLs, not test doubles.
         // This models the formerly healthy process restarting after that additive migration.
         await client.query('rollback to savepoint support_pre_migration_catalog');
         await client.query('release savepoint support_pre_migration_catalog');
-        expect(await executableOwnerFunctionCount(client)).toBe(51);
+        expect(await executableOwnerFunctionCount(client)).toBe(52);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+      });
+    });
+
+    it('keeps the default-off Owner catalog safe before the separate v2 receiver grant', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        await client.query(`
+          revoke execute on function app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text
+          ) from fetanagent_owner_control
+        `);
+        const row = await runActualOwnerPreflight(client);
+        expect(row.cbe_birr_receiver_v2_rotate_allowed).toBe(false);
+        expect(row.exact_app_execute_count).toBe(true);
+        expect(row.all_other_app_functions_denied).toBe(true);
+        expect(
+          Object.entries(row).filter(
+            ([check, value]) => check !== 'cbe_birr_receiver_v2_rotate_allowed' && value !== true,
+          ),
+        ).toEqual([]);
       });
     });
 
@@ -142,7 +163,7 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(
             `revoke execute on function ${signature} from fetanagent_owner_control`,
           );
-          expect(await executableOwnerFunctionCount(client)).toBe(50);
+          expect(await executableOwnerFunctionCount(client)).toBe(51);
           const row = await runActualOwnerPreflight(client);
           expect(row[check]).toBe(false);
           expect(row.exact_app_execute_count).toBe(false);
@@ -161,7 +182,7 @@ export function registerOwnerSupportContactSqlTests(
           revoke all on function app.sql_integration_unexpected_support_probe() from public;
           grant execute on function app.sql_integration_unexpected_support_probe() to fetanagent_owner_control;
         `);
-        expect(await executableOwnerFunctionCount(client)).toBe(52);
+        expect(await executableOwnerFunctionCount(client)).toBe(53);
         const row = await runActualOwnerPreflight(client);
         expect(row.exact_app_execute_count).toBe(false);
         expect(row.all_other_app_functions_denied).toBe(false);

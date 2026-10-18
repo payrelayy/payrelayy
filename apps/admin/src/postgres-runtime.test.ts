@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   OWNER_CONTROL_PREFLIGHT_SQL,
   OwnerControlPostgresRuntimeUnavailableError,
+  ownerControlCatalogReady,
   ownerControlPoolConfig,
 } from './postgres-runtime.js';
 
@@ -26,6 +27,7 @@ const config = {
     fingerprintSecret: undefined,
     masterProfile: undefined,
   },
+  cbeBirrReceiverV2RotationEnabled: false,
   devicePairing: { assignmentSignerKeyId: undefined, configured: false },
   routineEnrollmentReceiptSigner: {
     signerKeyId: undefined,
@@ -104,6 +106,29 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       );
       expect(executeCountSql).toContain(`to_regprocedure('${signature}')`);
     }
+  });
+
+  it('permits the v2 grant to arrive after a default-off deploy but requires it before activation', () => {
+    const safeCatalog = {
+      receiver_list_allowed: true,
+      exact_app_execute_count: true,
+      all_other_app_functions_denied: true,
+      cbe_birr_receiver_v2_rotate_allowed: false,
+    };
+    expect(ownerControlCatalogReady(safeCatalog, false)).toBe(true);
+    expect(ownerControlCatalogReady(safeCatalog, true)).toBe(false);
+    expect(
+      ownerControlCatalogReady({ ...safeCatalog, cbe_birr_receiver_v2_rotate_allowed: true }, true),
+    ).toBe(true);
+    expect(ownerControlCatalogReady({ ...safeCatalog, receiver_list_allowed: false }, false)).toBe(
+      false,
+    );
+    expect(
+      ownerControlCatalogReady(
+        { ...safeCatalog, cbe_birr_receiver_v2_rotate_allowed: null },
+        false,
+      ),
+    ).toBe(false);
   });
 
   it('accepts the display-only readiness function before and after its migration, but no extra grants', () => {
@@ -215,6 +240,9 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_receiver_accounts(uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
       'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      'app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)',
     );
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('app.list_owner_kemerbet_agent_profiles(uuid)');
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(

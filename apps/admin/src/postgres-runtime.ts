@@ -55,7 +55,8 @@ export interface OwnerControlPostgresRuntime {
     PostgresOwnerPrivateLivePilotControl,
     'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
-  readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'>;
+  readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'> &
+    Partial<Pick<PostgresOwnerReceiverAccounts, 'upgradeCbeBirrProtection'>>;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
@@ -212,6 +213,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false) as cbe_birr_receiver_v2_rotate_allowed,
     has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
     has_function_privilege(current_user, 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)', 'execute') as kemerbet_agent_profile_prepare_allowed,
     has_function_privilege(current_user, 'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)', 'execute') as kemerbet_agent_profile_recover_allowed,
@@ -246,6 +248,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
       select count(*) = 35
+        + coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false)::integer
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)') is not null)::integer
         + (to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)') is not null)::integer
@@ -320,6 +323,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.issue_current_private_telebirr_device_pairing(uuid,uuid,text,text)'::regprocedure
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
+          ,coalesce(to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 0::oid)
           ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
           ,'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)'::regprocedure
           ,'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)'::regprocedure
@@ -330,14 +334,31 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     ) as all_other_app_functions_denied
 `;
 
-async function runOwnerControlCatalogPreflight(pool: Pool): Promise<void> {
+export function ownerControlCatalogReady(
+  row: Record<string, unknown> | undefined,
+  cbeBirrReceiverV2RotationEnabled: boolean,
+): boolean {
+  if (!row || typeof row.cbe_birr_receiver_v2_rotate_allowed !== 'boolean') return false;
+  return Object.entries(row).every(
+    ([check, value]) =>
+      (check === 'cbe_birr_receiver_v2_rotate_allowed' &&
+        !cbeBirrReceiverV2RotationEnabled &&
+        value === false) ||
+      value === true,
+  );
+}
+
+async function runOwnerControlCatalogPreflight(
+  pool: Pool,
+  cbeBirrReceiverV2RotationEnabled: boolean,
+): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('begin read only');
     await client.query("set local search_path = 'pg_catalog'");
     const result = await client.query<Record<string, boolean>>(OWNER_CONTROL_PREFLIGHT_SQL);
     const row = result.rows.length === 1 ? result.rows[0] : undefined;
-    if (!row || Object.values(row).some((value) => value !== true)) {
+    if (!ownerControlCatalogReady(row, cbeBirrReceiverV2RotationEnabled)) {
       throw new Error('preflight failed');
     }
     await client.query('rollback');
@@ -363,7 +384,7 @@ export async function createOwnerControlPostgresRuntime(
   });
   let routineReceiptAdapter: PostgresOwnerRoutineTelebirrReceipt | undefined;
   try {
-    await runOwnerControlCatalogPreflight(pool);
+    await runOwnerControlCatalogPreflight(pool, config.cbeBirrReceiverV2RotationEnabled);
     if (config.routineEnrollmentReceiptSigner.configured) {
       routineReceiptAdapter = new PostgresOwnerRoutineTelebirrReceipt(
         { query: async (sql, values) => pool.query(sql, [...values]) },
@@ -438,6 +459,12 @@ export async function createOwnerControlPostgresRuntime(
         encryptionSecret: config.receiverReferenceProtection.encryptionSecret,
         fingerprintSecret: config.receiverReferenceProtection.fingerprintSecret,
       },
+      config.cbeBirrReceiverV2RotationEnabled && config.cbeBirrLookupKeyMaterial.configured
+        ? {
+            encryptionSecret: config.cbeBirrLookupKeyMaterial.encryptionSecret,
+            fingerprintSecret: config.cbeBirrLookupKeyMaterial.fingerprintSecret,
+          }
+        : undefined,
     ),
     telebirrDevicePairing: config.devicePairing.configured
       ? new PostgresOwnerTelebirrDevicePairing(

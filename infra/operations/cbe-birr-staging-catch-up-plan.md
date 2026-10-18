@@ -25,7 +25,11 @@ Player credit, or production state changes in this plan.
    and the four historical gaps. Preserve a recoverable staging backup and verify a restore path.
 2. Recheck the staging ledger, seven switch states, pilot revision, reservations, unresolved
    transfers, and CBE Birr intent/job counts immediately before any write. If any observation
-   differs from the reviewed plan, stop and revise it.
+   differs from the reviewed plan, stop and revise it. Run the aggregate-only
+   [`staging-cbe-catch-up-preflight.sql`](../sql/staging-cbe-catch-up-preflight.sql) against the
+   exact staging project before the pilot stop. Its `matches_reviewed_pre_stop_snapshot` result
+   must be `true`. It is intentionally expected to become `false` after the Owner stop and must
+   not be treated as an apply gate.
 3. Obtain the user's approval for the payment-switch change, then use the Owner-controlled pilot
    stop path for the exact armed revision. Verify it stopped the revision and disabled the five
    deposit/provider switches; verify the two withdrawal switches remain disabled. Do not simulate

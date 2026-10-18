@@ -1,0 +1,163 @@
+name: Staging CBE migration catch-up
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_project_ref:
+        description: Type the exact staging project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_catch_up:
+        description: Type APPLY 185 REVIEWED STAGING MIGRATIONS after approval
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: supabase-staging-bootstrap
+  cancel-in-progress: false
+
+env:
+  STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
+  SUPABASE_CLI_VERSION: 2.113.0
+  BACKUP_RUN_ID: '39131122213'
+  BACKUP_ARTIFACT_NAME: cbe-staging-encrypted-backup-cc368c297456eacba1831549983f2a9d4fcd0f1f
+  BACKUP_CIPHERTEXT_SHA256: 7abbc7c5f432976d9d7ca855a956c26c371a54b0161c3fa613b5aebd44b3a3ad
+
+jobs:
+  validate-target:
+    name: Validate reviewed staging catch-up target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_STAGING_PROJECT_REF: ${{ inputs.confirm_staging_project_ref }}
+      CONFIRMED_MAIN_COMMIT_SHA: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_CATCH_UP: ${{ inputs.confirm_catch_up }}
+    steps:
+      - name: Reject any other branch, project, commit, or action
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRMED_STAGING_PROJECT_REF" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_CATCH_UP" == 'APPLY 185 REVIEWED STAGING MIGRATIONS' ]]
+
+  apply-catch-up:
+    name: Apply exact staging migration catch-up
+    needs: validate-target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    environment: staging
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact checked-out commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Verify the reviewed encrypted backup is still available
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null
+          backup_dir="$(mktemp -d "$RUNNER_TEMP/cbe-catch-up-backup.XXXXXXXX")"
+          trap 'rm -rf -- "$backup_dir"' EXIT
+          gh run download "$BACKUP_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$BACKUP_ARTIFACT_NAME" --dir "$backup_dir"
+          ciphertext="$backup_dir/cbe-staging-backup.cms"
+          [[ -s "$ciphertext" ]]
+          [[ "$(sha256sum "$ciphertext" | cut -d ' ' -f 1)" == "$BACKUP_CIPHERTEXT_SHA256" ]]
+
+      - name: Set up the pinned Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3
+        with:
+          version: 2.113.0
+
+      - name: Set up Node.js for the exact migration guard
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Recheck stopped staging, exact dry run, apply, and verify
+        shell: bash
+        env:
+          SUPABASE_HOME: ${{ runner.temp }}/fetanagent-supabase-home
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$(supabase --version)" == "$SUPABASE_CLI_VERSION" ]]
+          [[ -n "$SUPABASE_ACCESS_TOKEN" && -n "$SUPABASE_DB_PASSWORD" ]]
+          [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          command -v psql >/dev/null
+          command -v node >/dev/null
+
+          ca_file="$(mktemp "$RUNNER_TEMP/cbe-catch-up-ca.XXXXXXXX")"
+          dry_run_file="$(mktemp "$RUNNER_TEMP/cbe-catch-up-plan.XXXXXXXX")"
+          trap 'rm -f -- "$ca_file" "$dry_run_file"' EXIT
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          export PGHOST="$STAGING_POOLER_HOST"
+          export PGPORT=5432 PGDATABASE=postgres
+          export PGUSER="postgres.$STAGING_PROJECT_REF"
+          export PGSSLMODE=verify-full PGSSLROOTCERT="$ca_file"
+          export PGCONNECT_TIMEOUT=5 PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null
+
+          assert_sql_gate() {
+            local file="$1" expected="$2" result
+            result="$(psql -X -qAt -v ON_ERROR_STOP=1 --file="$file")"
+            if [[ -z "$result" || "$result" == *$'\n'* || "${result##*|}" != 't' ]]; then
+              echo "::error::The $expected staging SQL gate did not match."
+              exit 1
+            fi
+          }
+
+          assert_sql_gate infra/sql/staging-cbe-reviewed-catch-up-preflight.sql pre-apply
+
+          if [[ ! -f supabase/config.toml && ! -f supabase/config.json ]]; then
+            supabase init
+          fi
+          supabase link --project-ref "$STAGING_PROJECT_REF"
+          [[ -f supabase/.temp/project-ref ]]
+          linked_ref="$(tr -d '\r\n' < supabase/.temp/project-ref)"
+          [[ "$linked_ref" == "$STAGING_PROJECT_REF" ]]
+          [[ "$linked_ref" != "$PRODUCTION_PROJECT_REF" ]]
+
+          migration_list="$(supabase migration list --linked 2>&1)"
+          printf '%s\n' "$migration_list"
+          supabase db push --linked --dry-run --include-all 2>&1 | tee "$dry_run_file"
+          printf '%s\n' "$migration_list" |
+            node infra/staging-migration-gap-guard.mjs cbe-catch-up "$dry_run_file"
+
+          assert_sql_gate infra/sql/staging-cbe-reviewed-catch-up-preflight.sql pre-apply
+          [[ "$(tr -d '\r\n' < supabase/.temp/project-ref)" == "$STAGING_PROJECT_REF" ]]
+          supabase db push --linked --include-all --yes
+
+          assert_sql_gate infra/sql/staging-cbe-post-catch-up-verification.sql post-apply
+          supabase migration list --linked
+          echo 'The exact staging catch-up is applied; all financial switches remain disabled.'

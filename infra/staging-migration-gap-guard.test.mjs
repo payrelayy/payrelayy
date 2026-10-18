@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   assessStagingMigrationGap,
   requireExactStagingDryRun,
+  requireReviewedCbeStagingCatchUp,
   requireSafeStagingApply,
 } from './staging-migration-gap-guard.mjs';
 
@@ -98,6 +99,32 @@ test('allows a later migration once the catch-up is complete', () => {
   assert.deepEqual(assessment.historicalGaps, []);
   assert.deepEqual(assessment.pending, ['20261006000000']);
   assert.doesNotThrow(() => requireSafeStagingApply(assessment));
+});
+
+test('the separately reviewed CBE catch-up rejects ledger or migration-set drift', () => {
+  const reviewed = {
+    localCount: 272,
+    remoteCount: 87,
+    latestApplied: '20260915190000',
+    pending: [
+      ...Array.from({ length: 184 }, (_, index) => `20261001${String(index).padStart(6, '0')}`),
+      '20261018170000',
+    ],
+    historicalGaps: ['20260912233000', '20260914030000', '20260914123000', '20260914165043'],
+  };
+  assert.doesNotThrow(() => requireReviewedCbeStagingCatchUp(reviewed));
+  for (const drift of [
+    { remoteCount: 88 },
+    { localCount: 273 },
+    { latestApplied: '20260915190001' },
+    { pending: reviewed.pending.slice(1) },
+    { historicalGaps: reviewed.historicalGaps.slice(1) },
+  ]) {
+    assert.throws(
+      () => requireReviewedCbeStagingCatchUp({ ...reviewed, ...drift }),
+      /differs from the reviewed CBE catch-up snapshot/u,
+    );
+  }
 });
 
 test('fails closed on missing rows, remote-only history, or ambiguous output', () => {

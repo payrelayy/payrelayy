@@ -10,6 +10,7 @@ import {
   isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
   reduceTelegramDepositIntentCommand,
+  reduceTelegramCbeBirrDryRunCommand,
   reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofCommand,
@@ -61,6 +62,44 @@ const priorPaymentPrompt = [
 ].join('\n');
 
 describe('private Telegram action reducers', () => {
+  it('accepts explicit private CBE Birr test commands with synthetic references only', () => {
+    expect(
+      reduceTelegramCbeBirrDryRunCommand({
+        ...privateMetadata,
+        command: '/cbe_test PLAYER-DEMO-42',
+      }),
+    ).toMatchObject({
+      kind: 'cbe_birr_dry_run_instruction_command',
+      playerId: 'PLAYER-DEMO-42',
+    });
+    expect(
+      reduceTelegramCbeBirrDryRunCommand({
+        ...privateMetadata,
+        command: '/cbe_test_proof AAAAAAAAAAAAAAAAAAAAAA PLAYER-DEMO-42 SYNTHCBE0001',
+      }),
+    ).toMatchObject({
+      kind: 'cbe_birr_bound_dry_run_proof_command',
+      instructionToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+      playerId: 'PLAYER-DEMO-42',
+      transactionReference: 'SYNTHCBE0001',
+    });
+    for (const command of [
+      '/cbe_test_proof AAAAAAAAAAAAAAAAAAAAAA PLAYER-DEMO-42 REALREF1234',
+      '/cbe_test_proof AAAAAAAAAAAAAAAAAAAAAA PLAYER-DEMO-42 synthcbe0001',
+      '/cbe_test_proof invalid PLAYER-DEMO-42 SYNTHCBE0001',
+      '/cbe_test PLAYER-DEMO-42 extra',
+    ]) {
+      expect(reduceTelegramCbeBirrDryRunCommand({ ...privateMetadata, command })).toBeUndefined();
+    }
+    expect(
+      reduceTelegramCbeBirrDryRunCommand({
+        ...privateMetadata,
+        chat: { id: 123456789, type: 'group' },
+        command: '/cbe_test PLAYER-DEMO-42',
+      }),
+    ).toBeUndefined();
+  });
+
   it('routes saved-Player actions only from the same private chat', () => {
     expect(reduceTelegramSavedTelebirrDestinationAction(privateMetadata)).toMatchObject({
       kind: 'saved_telebirr_destination_command',

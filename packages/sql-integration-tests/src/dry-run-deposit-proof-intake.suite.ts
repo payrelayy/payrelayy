@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 import type { Client, QueryResultRow } from 'pg';
@@ -33,7 +33,12 @@ type CbeBirrProofPreflightRow = {
   readonly proof_request_id: string;
   readonly preflight_version: string;
   readonly eligibility: 'blocked';
-  readonly blocker_code: 'receiver_v1_metadata_only' | 'receiver_revision_unavailable';
+  readonly blocker_code:
+    | 'instruction_binding_unavailable'
+    | 'receiver_revision_unavailable'
+    | 'instruction_time_window_review_required'
+    | 'receiver_revision_retired_at_submission'
+    | 'receiver_v2_instruction_bound_metadata_only';
   readonly lease_allowed: false;
   readonly protected_material_allowed: false;
 };
@@ -563,14 +568,12 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         expect(first).toHaveLength(1);
         expect(first[0]).toMatchObject({
           proof_request_id: cbeProof.deposit_proof_request_id,
-          preflight_version: 'cbe-birr-proof-preflight-v1',
+          preflight_version: 'cbe-birr-proof-preflight-v2',
           eligibility: 'blocked',
           lease_allowed: false,
           protected_material_allowed: false,
         });
-        expect(first[0]!.blocker_code).toMatch(
-          /^(?:receiver_v1_metadata_only|receiver_revision_unavailable)$/u,
-        );
+        expect(first[0]!.blocker_code).toBe('instruction_binding_unavailable');
         expect(Object.keys(first[0]!).sort()).toEqual(
           [
             'proof_request_id',
@@ -657,6 +660,423 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             [cbeProof.deposit_proof_request_id],
           ),
         ).toEqual(before);
+        expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
+      });
+    });
+
+    it('binds a CBE proof to one exact v2 receiver instruction without granting a lease', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        const fixture = await createFixture(client, '131');
+        const owner = await client.query<{ readonly auth_user_id: string }>(
+          `select auth_user_id from app.admin_users
+            where role = 'owner' and status = 'active' limit 1`,
+        );
+        const provider = await client.query<{
+          readonly id: string;
+          readonly next_version: number;
+        }>(`
+          select provider.id,
+                 coalesce(max(receiver.version), 0)::integer + 1 as next_version
+            from app.payment_providers provider
+            left join app.receiver_accounts receiver
+              on receiver.provider_id = provider.id
+           where provider.code = 'cbe_birr'
+           group by provider.id
+        `);
+        expect(owner.rows).toHaveLength(1);
+        expect(provider.rows).toHaveLength(1);
+        const providerId = provider.rows[0]!.id;
+        const receiverRevisionId = randomUUID();
+        const rotationRequestId = randomUUID();
+        const legacyFingerprint = createHash('sha256').update(rotationRequestId).digest('hex');
+        const lookupFingerprint = createHash('sha256').update(receiverRevisionId).digest('hex');
+        const receiver = await client.query<{
+          readonly receiver_revision_id: string;
+          readonly revision: number;
+        }>(
+          `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            $1::uuid, $2::uuid, $3::uuid, $4::integer, 'Synthetic SQL Receiver',
+            $5::text, $6::text, '***0001', $7::text, $8::text, '***0001',
+            'account_rotation'
+          )`,
+          [
+            owner.rows[0]!.auth_user_id,
+            rotationRequestId,
+            receiverRevisionId,
+            provider.rows[0]!.next_version,
+            `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+            legacyFingerprint,
+            `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`,
+            lookupFingerprint,
+          ],
+        );
+        expect(receiver.rows).toMatchObject([{ receiver_revision_id: receiverRevisionId }]);
+
+        const instructionEvent = await createInboundEvent(
+          client,
+          fixture.actorA,
+          9_131_000_000,
+          '0',
+        );
+        const instructionSql = `select instruction_id as id, issued_at, expires_at,
+                                       request_replayed
+                                  from app.issue_telegram_cbe_birr_dry_run_instruction(
+                                    $1::uuid, $2::text, $3::text
+                                  )`;
+        const instructionValues = [instructionEvent, fixture.playerId, payloadHmac('0')];
+        const instruction = await client.query<{
+          readonly id: string;
+          readonly issued_at: Date;
+          readonly expires_at: Date;
+          readonly request_replayed: boolean;
+        }>(instructionSql, instructionValues);
+        expect(instruction.rows).toHaveLength(1);
+        expect(instruction.rows[0]!.request_replayed).toBe(false);
+        expect(
+          instruction.rows[0]!.expires_at.getTime() - instruction.rows[0]!.issued_at.getTime(),
+        ).toBe(3_600_000);
+        expect(Object.keys(instruction.rows[0]!).sort()).toEqual([
+          'expires_at',
+          'id',
+          'issued_at',
+          'request_replayed',
+        ]);
+        expect((await client.query(instructionSql, instructionValues)).rows).toMatchObject([
+          { id: instruction.rows[0]!.id, request_replayed: true },
+        ]);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(
+              `update app.customer_identities set status = 'inactive'
+                where id = $1::uuid`,
+              [fixture.actorA.telegramIdentityId],
+            );
+            await client.query(instructionSql, instructionValues);
+          }),
+        ).rejects.toThrow(/customer is inactive/u);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(instructionSql, [
+              instructionEvent,
+              fixture.playerId,
+              payloadHmac('1'),
+            ]);
+          }),
+        ).rejects.toThrow(/conflicts with its receipt/u);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(instructionSql, [
+              instructionEvent,
+              fixture.alternatePlayerId,
+              payloadHmac('0'),
+            ]);
+          }),
+        ).rejects.toThrow(/conflicts with its receipt/u);
+        expect(
+          await queryAsRole(client, 'fetanagent_player_actions', instructionSql, instructionValues),
+        ).toMatchObject([{ id: instruction.rows[0]!.id, request_replayed: true }]);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_player_actions',
+            'select * from app.telegram_cbe_birr_dry_run_instruction_receipts limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
+        const event = await createInboundEvent(client, fixture.actorA, 9_131_000_001, 'e');
+        const proof = (
+          await captureTelegramProof(client, {
+            eventId: event,
+            fingerprint: 'e'.repeat(64),
+            hmac: payloadHmac('e'),
+            masked: '***A131',
+            playerId: fixture.playerId,
+            providerCode: 'cbe_birr',
+          })
+        )[0]!;
+        const proofId = proof.deposit_proof_request_id;
+        const instructionId = instruction.rows[0]!.id;
+        const preflightSql = 'select * from app.preflight_cbe_birr_proof_request($1::uuid)';
+        const beforeFinancial = await readFinancialLedgerSnapshot(client);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [proofId],
+          ),
+        ).toMatchObject([{ blocker_code: 'instruction_binding_unavailable' }]);
+
+        const insertBindingSql = `insert into app.cbe_birr_instruction_proof_bindings (
+          proof_request_id, instruction_id, submitting_customer_id,
+          player_account_id, payment_provider_id, origin_channel,
+          receiver_revision_id, receiver_version, receiver_rotation_request_id
+        ) values (
+          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'telegram',
+          $6::uuid, $7::integer, $8::uuid
+        )`;
+        const bindingValues = [
+          proofId,
+          instructionId,
+          fixture.actorA.customerId,
+          fixture.playerAccountId,
+          providerId,
+          receiverRevisionId,
+          receiver.rows[0]!.revision,
+          rotationRequestId,
+        ];
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(insertBindingSql, [
+              ...bindingValues.slice(0, 6),
+              receiver.rows[0]!.revision + 1,
+              rotationRequestId,
+            ]);
+          }),
+        ).rejects.toThrow(/foreign key/u);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(insertBindingSql, [
+              ...bindingValues.slice(0, 2),
+              fixture.actorB.customerId,
+              ...bindingValues.slice(3),
+            ]);
+          }),
+        ).rejects.toThrow(/foreign key/u);
+        await client.query(insertBindingSql, bindingValues);
+
+        const bound = await queryAsRole<CbeBirrProofPreflightRow>(
+          client,
+          'fetanagent_cbe_birr_proof_preflight',
+          preflightSql,
+          [proofId],
+        );
+        expect(bound).toEqual([
+          {
+            proof_request_id: proofId,
+            preflight_version: 'cbe-birr-proof-preflight-v2',
+            eligibility: 'blocked',
+            blocker_code: 'receiver_v2_instruction_bound_metadata_only',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
+        expect(JSON.stringify(bound)).not.toContain(receiverRevisionId);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(
+              `update app.cbe_birr_instruction_proof_bindings
+                  set receiver_version = receiver_version + 1
+                where proof_request_id = $1::uuid`,
+              [proofId],
+            );
+          }),
+        ).rejects.toThrow(/immutable/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            'select * from app.cbe_birr_instruction_proof_bindings limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
+
+        const lateEvent = await createInboundEvent(client, fixture.actorA, 9_131_000_002, 'f');
+        const lateProof = (
+          await captureTelegramProof(client, {
+            eventId: lateEvent,
+            fingerprint: 'f'.repeat(64),
+            hmac: payloadHmac('f'),
+            masked: '***A132',
+            playerId: fixture.playerId,
+            providerCode: 'cbe_birr',
+          })
+        )[0]!;
+        const lateProofId = lateProof.deposit_proof_request_id;
+        const lateInstruction = await client.query<{ readonly id: string }>(
+          `with proof as (
+             select submitted_at from app.deposit_proof_requests where id = $7::uuid
+           )
+           insert into app.cbe_birr_payment_instructions (
+             submitting_customer_id, player_account_id, payment_provider_id,
+             provider_code, origin_channel, receiver_revision_id,
+             receiver_version, receiver_rotation_request_id, issued_at, expires_at
+           )
+           select $1::uuid, $2::uuid, $3::uuid, 'cbe_birr', 'telegram',
+                  $4::uuid, $5::integer, $6::uuid,
+                  proof.submitted_at - interval '1 minute',
+                  proof.submitted_at + interval '59 minutes'
+             from proof
+           returning id`,
+          [
+            fixture.actorA.customerId,
+            fixture.playerAccountId,
+            providerId,
+            receiverRevisionId,
+            receiver.rows[0]!.revision,
+            rotationRequestId,
+            lateProofId,
+          ],
+        );
+        await client.query(insertBindingSql, [
+          lateProofId,
+          lateInstruction.rows[0]!.id,
+          ...bindingValues.slice(2),
+        ]);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [lateProofId],
+          ),
+        ).toMatchObject([
+          {
+            blocker_code: 'instruction_time_window_review_required',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
+
+        const nextInstructionSql = `with issued as (select clock_timestamp() as instant)
+          insert into app.cbe_birr_payment_instructions (
+            submitting_customer_id, player_account_id, payment_provider_id,
+            provider_code, origin_channel, receiver_revision_id,
+            receiver_version, receiver_rotation_request_id, issued_at, expires_at
+          )
+          select $2::uuid, original.player_account_id, original.payment_provider_id,
+                 original.provider_code, original.origin_channel,
+                 original.receiver_revision_id, original.receiver_version,
+                 original.receiver_rotation_request_id,
+                 issued.instant, issued.instant + interval '1 hour'
+            from app.cbe_birr_payment_instructions original cross join issued
+           where original.id = $1::uuid
+          returning id`;
+        const atomicInstruction = await client.query<{ readonly id: string }>(nextInstructionSql, [
+          instructionId,
+          fixture.actorA.customerId,
+        ]);
+        const atomicEvent = await createInboundEvent(client, fixture.actorA, 9_131_000_003, '1');
+        const atomicSql = `select * from app.capture_telegram_cbe_birr_bound_dry_run_proof(
+          $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text,
+          $7::smallint, $8::smallint, $9::text
+        )`;
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(atomicSql, [
+              lateInstruction.rows[0]!.id,
+              lateEvent,
+              fixture.playerId,
+              referenceCiphertext('cbe_birr', 'n', 't'),
+              'f'.repeat(64),
+              '***A132',
+              2,
+              2,
+              payloadHmac('f'),
+            ]);
+          }),
+        ).rejects.toThrow(/lineage needs review/u);
+        const atomicValues = [
+          atomicInstruction.rows[0]!.id,
+          atomicEvent,
+          fixture.playerId,
+          referenceCiphertext('cbe_birr', 'n', 't'),
+          '1'.repeat(64),
+          '***A133',
+          2,
+          2,
+          payloadHmac('1'),
+        ];
+        const atomicProof = await client.query<ProofRow>(atomicSql, atomicValues);
+        expect(atomicProof.rows).toMatchObject([
+          { provider_code: 'cbe_birr', proof_status: 'proof_received', request_replayed: false },
+        ]);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [atomicProof.rows[0]!.deposit_proof_request_id],
+          ),
+        ).toMatchObject([
+          {
+            blocker_code: 'receiver_v2_instruction_bound_metadata_only',
+            lease_allowed: false,
+            protected_material_allowed: false,
+          },
+        ]);
+        expect((await client.query<ProofRow>(atomicSql, atomicValues)).rows).toMatchObject([
+          {
+            deposit_proof_request_id: atomicProof.rows[0]!.deposit_proof_request_id,
+            request_replayed: true,
+          },
+        ]);
+
+        const wrongInstruction = await client.query<{ readonly id: string }>(nextInstructionSql, [
+          instructionId,
+          fixture.actorB.customerId,
+        ]);
+        const wrongEvent = await createInboundEvent(client, fixture.actorA, 9_131_000_004, '2');
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(atomicSql, [
+              wrongInstruction.rows[0]!.id,
+              wrongEvent,
+              fixture.playerId,
+              referenceCiphertext('cbe_birr', 'n', 't'),
+              '2'.repeat(64),
+              '***A134',
+              2,
+              2,
+              payloadHmac('2'),
+            ]);
+          }),
+        ).rejects.toThrow(/does not match this proof/u);
+        expect(
+          (
+            await client.query<{ readonly count: number }>(
+              `select count(*)::integer as count from app.deposit_proof_requests
+                where submitting_customer_id = $1::uuid
+                  and candidate_reference_fingerprint = $2::text`,
+              [fixture.actorA.customerId, '2'.repeat(64)],
+            )
+          ).rows[0]!.count,
+        ).toBe(0);
+
+        const unboundEvent = await createInboundEvent(client, fixture.actorA, 9_131_000_005, '3');
+        const unboundProof = await captureTelegramProof(client, {
+          eventId: unboundEvent,
+          fingerprint: '3'.repeat(64),
+          hmac: payloadHmac('3'),
+          masked: '***A135',
+          playerId: fixture.playerId,
+          providerCode: 'cbe_birr',
+        });
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(atomicSql, [
+              atomicInstruction.rows[0]!.id,
+              unboundEvent,
+              fixture.playerId,
+              referenceCiphertext('cbe_birr', 'n', 't'),
+              '3'.repeat(64),
+              '***A135',
+              2,
+              2,
+              payloadHmac('3'),
+            ]);
+          }),
+        ).rejects.toThrow(/earlier unbound/u);
+        expect(
+          await queryAsRole<CbeBirrProofPreflightRow>(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            preflightSql,
+            [unboundProof[0]!.deposit_proof_request_id],
+          ),
+        ).toMatchObject([{ blocker_code: 'instruction_binding_unavailable' }]);
+        expect(
+          await queryAsRole(client, 'fetanagent_player_actions', atomicSql, atomicValues),
+        ).toMatchObject([{ request_replayed: true }]);
         expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
       });
     });

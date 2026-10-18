@@ -108,7 +108,10 @@ describe('dependency and runtime isolation', () => {
       '@fetanagent/cbe-birr-authoritative-pdf-parser': 'workspace:*',
       '@fetanagent/cbe-birr-official-source-policy': 'workspace:*',
     });
-    expect(manifest.devDependencies).toBeUndefined();
+    expect(manifest.devDependencies).toEqual({
+      '@fetanagent/cbe-birr-normalization-candidate': 'workspace:*',
+      '@fetanagent/deposit-reference-protection': 'workspace:*',
+    });
     expect(manifest.optionalDependencies).toBeUndefined();
   });
 
@@ -249,7 +252,7 @@ describe('dependency and runtime isolation', () => {
       /  packages\/cbe-birr-authoritative-receipt-transport:\r?\n(?<body>(?:    .*\r?\n|      .*\r?\n|        .*\r?\n)+?)(?=\r?\n  packages\/)/u,
     );
     expect(importer?.groups?.body).toBe(
-      "    dependencies:\n      '@fetanagent/cbe-birr-authoritative-pdf-parser':\n        specifier: workspace:*\n        version: link:../cbe-birr-authoritative-pdf-parser\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n".replaceAll(
+      "    dependencies:\n      '@fetanagent/cbe-birr-authoritative-pdf-parser':\n        specifier: workspace:*\n        version: link:../cbe-birr-authoritative-pdf-parser\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n    devDependencies:\n      '@fetanagent/cbe-birr-normalization-candidate':\n        specifier: workspace:*\n        version: link:../cbe-birr-normalization-candidate\n      '@fetanagent/deposit-reference-protection':\n        specifier: workspace:*\n        version: link:../deposit-reference-protection\n".replaceAll(
         '\n',
         lock.includes('\r\n') ? '\r\n' : '\n',
       ),

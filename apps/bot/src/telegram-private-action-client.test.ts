@@ -27,6 +27,32 @@ const config = {
 };
 
 describe('Telegram private-action bot client', () => {
+  it('accepts only the non-payable CBE Birr staging instruction preview', async () => {
+    const preview = {
+      version: 1,
+      outcome: 'cbe_birr_dry_run_instruction_preview',
+      instructionToken: 'AAAAAAAAAAAAAAAAAAAAAA',
+      expiresAt: '2026-10-18T01:00:00.000Z',
+      acceptsPayments: false,
+    } as const;
+    await expect(
+      deliverTelegramPrivateAction(action, config, {
+        fetch: async () => ({ status: 200, json: async () => preview }),
+      }),
+    ).resolves.toEqual(preview);
+    for (const invalid of [
+      { ...preview, acceptsPayments: true },
+      { ...preview, receiverAccountReference: '0000000042' },
+      { ...preview, instructionToken: 'invalid' },
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => invalid }),
+        }),
+      ).rejects.toEqual(new TelegramPrivateActionDeliveryError(false));
+    }
+  });
+
   it('accepts only a bounded selected Player in private menu and receiver results', async () => {
     const callbackData = 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w';
     const menu = { version: 1, outcome: 'menu', callbackData, selectedPlayerId: 'PLAYER-DEMO-42' };

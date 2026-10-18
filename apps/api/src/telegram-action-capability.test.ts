@@ -274,6 +274,71 @@ describe('Telegram Player ID capability protection', () => {
     ).toThrow('protected deposit-proof semantics');
   });
 
+  it('binds the dormant CBE Birr proof HMAC to one exact instruction ID', () => {
+    const shared = {
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      providerCode: 'cbe_birr' as const,
+      referenceFingerprint: 'd'.repeat(64),
+      referenceMasked: '***7890',
+      keyVersion: DEPOSIT_PROOF_REFERENCE_KEY_VERSION,
+      profileVersion: DEPOSIT_PROOF_REFERENCE_PROFILE_VERSION,
+      semanticHmacSecret: keys.semanticHmacSecret,
+    };
+    const first = createTelegramActionSemanticHmac({
+      ...shared,
+      consumer: 'capture_telegram_cbe_birr_bound_dry_run_proof',
+      instructionId: '17830f40-ef8f-4fe4-ab6b-57187c93e81e',
+    });
+    expect(first).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'capture_telegram_cbe_birr_bound_dry_run_proof',
+        instructionId: 'b82a68d6-b8f7-4ed3-9981-98631206c10e',
+      }),
+    ).not.toBe(first);
+    expect(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'capture_dry_run_deposit_proof',
+      }),
+    ).not.toBe(first);
+    expect(() =>
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'capture_telegram_cbe_birr_bound_dry_run_proof',
+        instructionId: 'not-an-instruction',
+      }),
+    ).toThrow('instruction ID');
+  });
+
+  it('separates CBE Birr dry-run instruction issuance from other Telegram actions', () => {
+    const shared = {
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      semanticHmacSecret: keys.semanticHmacSecret,
+    };
+    const issued = createTelegramActionSemanticHmac({
+      ...shared,
+      consumer: 'issue_telegram_cbe_birr_dry_run_instruction',
+    });
+    expect(issued).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(issued).not.toBe(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'prepare_telegram_telebirr_destination',
+      }),
+    );
+    expect(issued).not.toBe(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        playerId: 'DIFFERENT-PLAYER',
+        consumer: 'issue_telegram_cbe_birr_dry_run_instruction',
+      }),
+    );
+  });
+
   it('fails closed on malformed internal identifiers or secrets', () => {
     expect(() =>
       derivePlayerRegistrationCapabilityPresentation({

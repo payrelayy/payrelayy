@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./cbe-birr-proof-open": {
+      "types": "./dist/cbe-birr-proof-open.d.ts",
+      "default": "./dist/cbe-birr-proof-open.js"
     }
   },
   "scripts": {

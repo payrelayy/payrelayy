@@ -108,6 +108,13 @@ principal, service charge, VAT, tip, optional disaster fee, and total must recon
 rows, duplicate critical fields, ambiguous wrapped lines, and arithmetic drift stay in advisory
 review. Local PDF samples and actual values are not committed.
 
+A separately consented, read-only local sample produced the existing newer-layout parser's
+advisory review result. It contains additional header and footer text alongside wrapped display
+names and the paired fee rows. A wholly synthetic regression exercises these structural features
+and confirms that financial action remains disabled; the sample PDF and its private values remain
+outside Git. One matching sample does not attest a provider-wide response contract or authorize
+receipt lookup or payment decisions.
+
 The newer PDF layout prints transaction time only to the minute. Parser version 2 marks its
 `occurredAt` value as `occurredAtPrecision: minute`; the older seconds-bearing layout is marked
 `second`. A future financial policy must treat the displayed timestamp as the start of a possible

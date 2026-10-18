@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -87,10 +87,47 @@ export function requireSafeStagingApply(assessment) {
   }
 }
 
+export function requireExactStagingDryRun(dryRunOutput, assessment, migrationFiles) {
+  const output = dryRunOutput.replace(ANSI_COLOR, '');
+  if (!output.includes('DRY RUN: migrations will *not* be pushed to the database.')) {
+    throw new Error('The linked db push output is not a recognized dry run.');
+  }
+
+  const filenamesByVersion = new Map(
+    migrationFiles.map((file) => [MIGRATION_FILE.exec(file)?.[1], file]),
+  );
+  const expected = assessment.pending.map((version) => filenamesByVersion.get(version));
+  if (expected.some((file) => file === undefined)) {
+    throw new Error('The linked ledger has a pending version without a canonical SQL file.');
+  }
+
+  const planned = [];
+  for (const line of output.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('•')) continue;
+    const match = /^•\s+(\d{14}_.+\.sql)$/u.exec(trimmed);
+    if (!match) throw new Error('The linked dry-run migration list has an invalid filename.');
+    planned.push(match[1]);
+  }
+  const headers = output.match(/Would push these migrations:/gu) ?? [];
+  if (
+    (expected.length > 0 && headers.length !== 1) ||
+    (expected.length === 0 && headers.length > 0) ||
+    planned.length !== expected.length ||
+    planned.some((file, index) => file !== expected[index])
+  ) {
+    throw new Error(
+      'The linked dry-run migration order does not match the canonical pending ledger.',
+    );
+  }
+  return planned.length;
+}
+
 async function main() {
   const mode = process.argv[2];
-  if (process.argv.length !== 3 || !['plan', 'apply'].includes(mode)) {
-    throw new Error('Expected exactly one plan or apply mode argument.');
+  const dryRunPath = process.argv[3];
+  if (process.argv.length !== 4 || !['plan', 'apply'].includes(mode)) {
+    throw new Error('Expected a plan or apply mode and one dry-run output file.');
   }
   const migrationsDirectory = resolve(
     dirname(fileURLToPath(import.meta.url)),
@@ -100,10 +137,15 @@ async function main() {
   let listOutput = '';
   for await (const chunk of process.stdin) listOutput += chunk;
   const assessment = assessStagingMigrationGap(listOutput, files);
+  const plannedCount = requireExactStagingDryRun(
+    await readFile(dryRunPath, 'utf8'),
+    assessment,
+    files,
+  );
   console.log(
     `Staging ledger: ${assessment.remoteCount}/${assessment.localCount} canonical migrations applied; ` +
-      `${assessment.pending.length} pending; ${assessment.historicalGaps.length} older than ` +
-      `${assessment.latestApplied}.`,
+      `${assessment.pending.length} pending; ${plannedCount} in the exact dry-run order; ` +
+      `${assessment.historicalGaps.length} older than ${assessment.latestApplied}.`,
   );
   if (mode === 'apply') requireSafeStagingApply(assessment);
   else {

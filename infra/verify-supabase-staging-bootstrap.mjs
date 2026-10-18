@@ -114,6 +114,11 @@ assertInOrder(
   ],
   'Commit verification and dry-run must precede credentials, linking, and conditional apply',
 );
+assert.match(
+  protectedJob,
+  /supabase db push --linked --dry-run --include-all 2>&1 \| tee "\$dry_run_file"/u,
+);
+assert.match(protectedJob, /staging-migration-gap-guard\.mjs "\$REQUESTED_MODE" "\$dry_run_file"/u);
 const applyStep = /- name: Apply canonical migrations to staging([\s\S]*)$/u.exec(
   protectedJob,
 )?.[1];

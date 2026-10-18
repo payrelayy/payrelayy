@@ -327,6 +327,13 @@ importers:
       pdfjs-dist:
         specifier: 6.2.108
         version: 6.2.108
+    devDependencies:
+      '@fetanagent/cbe-birr-normalization-candidate':
+        specifier: workspace:*
+        version: link:../cbe-birr-normalization-candidate
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/cbe-birr-authoritative-receipt-transport:
     dependencies:
@@ -336,6 +343,13 @@ importers:
       '@fetanagent/cbe-birr-official-source-policy':
         specifier: workspace:*
         version: link:../cbe-birr-official-source-policy
+    devDependencies:
+      '@fetanagent/cbe-birr-normalization-candidate':
+        specifier: workspace:*
+        version: link:../cbe-birr-normalization-candidate
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/cbe-birr-fixtures: {}
 
@@ -346,6 +360,28 @@ importers:
       parse5:
         specifier: 8.0.1
         version: 8.0.1
+
+  packages/cbe-birr-reference-opening:
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
+
+  packages/cbe-birr-worker-key-custody:
+    dependencies:
+      '@fetanagent/cbe-birr-reference-opening':
+        specifier: workspace:*
+        version: link:../cbe-birr-reference-opening
+
+  packages/cbe-birr-worker-key-provisioning-check:
+    dependencies:
+      '@fetanagent/cbe-birr-reference-opening':
+        specifier: workspace:*
+        version: link:../cbe-birr-reference-opening
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
 
   packages/config:
     dependencies:

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL,
   PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
+  PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL,
   PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
   playerActionCatalogPreflightPassed,
 } from './player-action-catalog-preflight.js';
@@ -190,7 +192,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(queries).toEqual([PLAYER_ACTION_CATALOG_PREFLIGHT_SQL]);
   });
 
-  it('does not use the transition fallback when candidate routing is on or either catalog is unsafe', async () => {
+  it('requires an active candidate and checks only exact optional grant shapes', async () => {
     const queries: string[] = [];
     const database = {
       async query(query: string) {
@@ -199,12 +201,45 @@ describe('Player-ID action catalog preflight', () => {
       },
     };
     await expect(playerActionCatalogPreflightPassed(database, true, true)).resolves.toBe(false);
-    expect(queries).toEqual([PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL]);
+    expect(queries).toEqual([
+      PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL,
+    ]);
     queries.length = 0;
     await expect(playerActionCatalogPreflightPassed(database, false, true)).resolves.toBe(false);
     expect(queries).toEqual([
       PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
       PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL,
     ]);
+  });
+
+  it('requires both CBE Birr RPC grants only when the staging gate is on', async () => {
+    const queries: string[] = [];
+    await expect(
+      playerActionCatalogPreflightPassed(
+        {
+          async query(query) {
+            queries.push(query);
+            return { rows: [passingRow] };
+          },
+        },
+        false,
+        true,
+        true,
+      ),
+    ).resolves.toBe(true);
+    expect(queries).toEqual([PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL]);
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 32');
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
+    );
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
+      'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
+    );
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
+      "then array['search_path=pg_catalog, pg_temp']::text[]",
+    );
   });
 });

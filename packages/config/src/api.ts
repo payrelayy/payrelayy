@@ -92,6 +92,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly telebirrReceiverReviewEnabled: false;
       readonly routineTelebirrCandidateStagingEnabled: false;
       readonly routineTelebirrCandidateProductionEnabled: false;
+      readonly cbeBirrBoundDryRunStagingEnabled: false;
       readonly tlsMode: undefined;
     }
   | {
@@ -121,6 +122,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly routineTelebirrCandidateStagingEnabled: boolean;
       /** Production-only real-reference, amount-free candidate routing; default off. */
       readonly routineTelebirrCandidateProductionEnabled: boolean;
+      readonly cbeBirrBoundDryRunStagingEnabled: boolean;
       readonly tlsMode: 'verify-full';
     };
 
@@ -513,7 +515,17 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     false,
     'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED',
   );
+  const cbeBirrBoundDryRunStagingEnabled = booleanFromEnv(
+    environment.TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED,
+    false,
+    'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED',
+  );
   if (!enabled) {
+    if (cbeBirrBoundDryRunStagingEnabled) {
+      throw new Error(
+        'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED requires the Player-action runtime.',
+      );
+    }
     if (routineTelebirrCandidateStagingEnabled) {
       throw new Error(
         'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED requires the Player-action runtime.',
@@ -539,6 +551,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       telebirrReceiverReviewEnabled: false,
       routineTelebirrCandidateStagingEnabled: false,
       routineTelebirrCandidateProductionEnabled: false,
+      cbeBirrBoundDryRunStagingEnabled: false,
       tlsMode: undefined,
     };
   }
@@ -568,6 +581,11 @@ function loadApiTelegramPlayerActionRuntimeConfig(
   if (routineTelebirrCandidateProductionEnabled && deploymentTarget !== 'production') {
     throw new Error(
       'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED is restricted to the production Player-action target.',
+    );
+  }
+  if (cbeBirrBoundDryRunStagingEnabled && deploymentTarget !== 'staging') {
+    throw new Error(
+      'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED is restricted to the staging Player-action target.',
     );
   }
 
@@ -717,6 +735,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     telebirrReceiverReviewEnabled,
     routineTelebirrCandidateStagingEnabled,
     routineTelebirrCandidateProductionEnabled,
+    cbeBirrBoundDryRunStagingEnabled,
     tlsMode: 'verify-full',
   };
 }
@@ -831,6 +850,15 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_STAGING_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
     );
   }
+  if (
+    telegramPlayerActionRuntime.enabled &&
+    telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled &&
+    financialActionsMode !== 'dry_run'
+  ) {
+    throw new Error(
+      'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
+    );
+  }
   assertDistinctApiTelegramHmacSecrets(
     telegramIngress,
     telegramActionCapability,
@@ -890,6 +918,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly telebirrReceiverReviewEnabled: boolean;
     readonly routineTelebirrCandidateStagingEnabled: boolean;
     readonly routineTelebirrCandidateProductionEnabled: boolean;
+    readonly cbeBirrBoundDryRunStagingEnabled: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
 } {
@@ -935,6 +964,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
         config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
       routineTelebirrCandidateProductionEnabled:
         config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
+      cbeBirrBoundDryRunStagingEnabled:
+        config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },
   };

@@ -178,27 +178,27 @@ canonical-reference, receiver, or provider-payload values. See
 [cbe-birr-authoritative-shadow.md](cbe-birr-authoritative-shadow.md) and
 [cbe-birr-authoritative-adapter-fixtures.md](cbe-birr-authoritative-adapter-fixtures.md).
 
-Stage 1E is a pure offline official-source policy contract under the package name
+Stage 1E is an offline official-source policy contract under the package name
 `@fetanagent/cbe-birr-official-source-policy`. Contract version 2 defines the exact compiled `GET`
-shape for `https://cbepay1.cbe.com.et:443/aureceipt`, ordered `TID` then `PH` query parameters, and a
-zero-redirect policy. Its disposition is `offline_profile_defined` with reason
-`live_transport_absent`. A parse5 8.0.1 parser is exercised only with an exact plain synthetic
-response data record and clearly synthetic fixtures; no callback or executable transport is
-accepted. There is no HTTP client, live response, credential,
-protected lookup material, lease, database, evidence claim, KemerBet logic, or runtime wiring. All
-financial switches remain off.
+shape for the official receipt route, ordered `TID` then `PH` query parameters, and a zero-redirect
+policy. An isolated sibling package implements a bounded one-fetch HTTPS/PDF transport and
+package-internal advisory parser composition. No application or worker imports that composition;
+it has no proof lease, independently provisioned lookup keys, provider request permission,
+financial claim, or KemerBet operation.
 
 Stage 1F implements the separate pure package
 `@fetanagent/cbe-birr-authoritative-lookup-prerequisite`. Its only valid-request disposition is
-`blocked`, with 13 exact blockers. The former broad source-permission blocker is replaced by
-`official_receipt_live_response_contract_unattested` and `official_receipt_live_transport_absent`.
-The remaining areas cover receiver protection,
-provenance, and fresh immutable provisioning without inference or backfill; a submitted-reference
-key lifecycle independent from the API master; a joint review of the lookup-reference,
-receiver-lookup, and canonical-reference normalization profiles; and a non-mutating prerequisite
-preflight before any lease. The existing lease mutates durable state and returns protected material
-before such a preflight, so a future boundary needs metadata-only preflight and opaque-handle
-payloads.
+`blocked`, with 11 exact blockers. Synthetic cross-package tests establish narrow local
+proof-reference-to-`TID`, v2 receiver-envelope-to-`PH`, and proof-reference-to-synthetic-PDF
+`Order ID` format compatibility. An internal CBE-only proof-open candidate authenticates v2
+ciphertext without the fingerprint master. These code paths remain unwired. The blockers still cover
+live response attestation and runtime transport; receiver protection, provenance, and fresh
+provisioning; an independently provisioned worker decrypt lifecycle; canonical-reference ownership;
+and a non-mutating prerequisite gate before any lease. Private default-off CBE instruction and
+proof-binding tables now record exact v2 receiver-revision lineage for future intake. Their
+read-only preflight remains blocked and has no runtime writer or lease consumer.
+The existing legacy lease mutates durable state and returns protected material, so a future boundary
+needs complete prelease authorization and opaque-handle payloads.
 
 Every Stage 1F capability is false. The package contains no raw lookup material, ciphertext, key or
 protected-material version, algorithm or KMS selection, URL or credential, lease value, runtime or

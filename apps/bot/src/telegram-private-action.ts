@@ -509,6 +509,39 @@ export function reduceTelegramDepositProofCommand(
   return result?.kind === 'action' ? result.action : undefined;
 }
 
+/** Explicit staging simulation; only synthetic references cross the private action boundary. */
+export function reduceTelegramCbeBirrDryRunCommand(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return undefined;
+  const instruction = /^\/cbe_test ([^\s]+)$/u.exec(metadata.command);
+  if (instruction) {
+    const playerId = instruction[1];
+    return playerId && validPlayerIdText(playerId)
+      ? { ...identity, kind: 'cbe_birr_dry_run_instruction_command', playerId }
+      : undefined;
+  }
+  const proof = /^\/cbe_test_proof ([A-Za-z0-9_-]{22}) ([^\s]+) (SYNTHCBE[A-Z0-9]{4,24})$/u.exec(
+    metadata.command,
+  );
+  if (!proof) return undefined;
+  const [, instructionToken, playerId, transactionReference] = proof;
+  return instructionToken &&
+    playerId &&
+    transactionReference &&
+    COMPACT_UUID_PATTERN.test(instructionToken) &&
+    validPlayerIdText(playerId)
+    ? {
+        ...identity,
+        kind: 'cbe_birr_bound_dry_run_proof_command',
+        instructionToken,
+        playerId,
+        transactionReference,
+      }
+    : undefined;
+}
+
 /** Parse an exact compact deposit token and a bounded single-token transaction reference. */
 export function reduceTelegramDepositReferenceCommand(
   metadata: TelegramDepositCommandMetadata,

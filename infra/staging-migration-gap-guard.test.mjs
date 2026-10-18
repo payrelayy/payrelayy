@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   assessStagingMigrationGap,
+  requireExactStagingDryRun,
   requireSafeStagingApply,
 } from './staging-migration-gap-guard.mjs';
 
@@ -32,6 +33,46 @@ test('reports both older and newer gaps, but refuses an ordinary apply with olde
     historicalGaps: ['20260912233000'],
   });
   assert.throws(() => requireSafeStagingApply(assessment), /Ordinary db push would skip them/u);
+});
+
+test('requires the linked dry run to list every pending migration in ledger order', () => {
+  const assessment = assessStagingMigrationGap(linkedList, files);
+  const preview = `DRY RUN: migrations will *not* be pushed to the database.
+Would push these migrations:
+ • 20260912233000_older.sql
+ • 20260916000000_newer.sql
+Finished supabase db push.`;
+  assert.equal(requireExactStagingDryRun(preview, assessment, files), 2);
+  assert.throws(
+    () =>
+      requireExactStagingDryRun(
+        preview.replace(' • 20260912233000_older.sql\n', ''),
+        assessment,
+        files,
+      ),
+    /does not match/u,
+  );
+  assert.throws(
+    () =>
+      requireExactStagingDryRun(
+        preview.replace(
+          ' • 20260912233000_older.sql\n • 20260916000000_newer.sql',
+          ' • 20260916000000_newer.sql\n • 20260912233000_older.sql',
+        ),
+        assessment,
+        files,
+      ),
+    /does not match/u,
+  );
+  assert.throws(
+    () =>
+      requireExactStagingDryRun(
+        preview.replace('DRY RUN: migrations will *not* be pushed to the database.', ''),
+        assessment,
+        files,
+      ),
+    /not a recognized dry run/u,
+  );
 });
 
 test('refuses the unrehearsed catch-up even after the older gap is filled', () => {

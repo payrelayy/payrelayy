@@ -2,6 +2,9 @@ import { Buffer } from 'node:buffer';
 import { once } from 'node:events';
 import { createDeflate } from 'node:zlib';
 
+import { isCanonicalCbeBirrReferenceCandidate } from '@fetanagent/cbe-birr-normalization-candidate';
+import { protectDepositProofReference } from '@fetanagent/deposit-reference-protection';
+import { openCbeBirrDepositProofReference } from '@fetanagent/deposit-reference-protection/cbe-birr-proof-open';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
@@ -51,6 +54,8 @@ interface SyntheticReceiptOptions {
   readonly wrappedDebitName?: string;
   readonly wrappedCreditName?: string;
   readonly wrappedReceiverName?: string;
+  readonly headerMetadata?: readonly string[];
+  readonly footerNotes?: readonly string[];
   readonly tip?: string;
   readonly reference?: string;
   readonly status?: string;
@@ -115,6 +120,7 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
     const rows: SyntheticTextRow[] = [
       row(760, 'Commercial Bank of Ethiopia'),
       row(740, 'VAT Invoice/ Customer Receipt'),
+      ...(options.headerMetadata ?? []).map((text, index) => row(733 - index * 8, text)),
       row(710, 'Transaction Information'),
       row(680, 'Debit Account', `${options.debitAccount ?? '251900000002'} - SYNTHETIC PAYER`),
       ...(options.wrappedDebitName ? [row(668, options.wrappedDebitName)] : []),
@@ -146,6 +152,7 @@ function receiptRows(options: SyntheticReceiptOptions): readonly SyntheticTextRo
       row(270, 'Total Amount in word One Hundred ETB and zero Cents .'),
       row(240, 'Payment Reason', options.paymentReason ?? 'Send Money'),
       row(215, 'Payment Channel', options.paymentChannel ?? 'USSD'),
+      ...(options.footerNotes ?? []).map((text, index) => row(195 - index * 12, text)),
     ];
     if (options.extraText) rows.push(row(190, options.extraText));
     return rows;
@@ -599,6 +606,70 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
   });
 
+  it('matches only the exact canonical v2 proof reference in a synthetic PDF Order ID', async () => {
+    const encryptionSecret = 'a'.repeat(64);
+    const protectedProof = protectDepositProofReference(
+      {
+        provider: 'cbe_birr',
+        reference: 'sYnThEtIc123',
+        secrets: { encryptionSecret, fingerprintSecret: 'b'.repeat(64) },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const openedReference = openCbeBirrDepositProofReference({
+      provider: 'cbe_birr',
+      ciphertext: protectedProof.ciphertext,
+      masked: protectedProof.masked,
+      referenceProfileVersion: 2,
+      encryptionKeyVersion: protectedProof.keyVersion,
+      encryptionSecret,
+    });
+    expect(openedReference).toBe('SYNTHETIC123');
+    expect(isCanonicalCbeBirrReferenceCandidate(openedReference)).toBe(true);
+
+    const parserExpectations = { ...expectations(), canonicalReference: openedReference };
+    const matching = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', reference: openedReference }),
+      parserExpectations,
+    );
+    expect(matching).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      facts: { referenceMatched: true },
+      financialActionAllowed: false,
+    });
+
+    const differentOrderId = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({ layout: 'credit_account_v2', reference: 'OTHERREF1234' }),
+      parserExpectations,
+    );
+    expect(differentOrderId).toMatchObject({
+      disposition: 'would_reject',
+      reasonCode: 'reference_mismatch',
+      facts: { referenceMatched: false },
+      financialActionAllowed: false,
+    });
+
+    for (const noncanonical of [
+      { reference: 'synthetic123' },
+      { reference: openedReference, summaryReference: 'OTHERREF1234' },
+    ]) {
+      const result = await parseCbeBirrAuthoritativePdf(
+        syntheticReceiptPdf({ layout: 'credit_account_v2', ...noncanonical }),
+        parserExpectations,
+      );
+      expect(result).toMatchObject({
+        disposition: 'would_review',
+        reasonCode: 'pdf_value_invalid',
+        financialActionAllowed: false,
+      });
+      expect(Reflect.ownKeys(result)).not.toContain('facts');
+    }
+    for (const result of [matching, differentOrderId]) {
+      expect(JSON.stringify(result)).not.toContain(openedReference);
+    }
+  });
+
   it('parses the compact official layout with wrapped account names and no disaster-fee pair', async () => {
     const result = await parseCbeBirrAuthoritativePdf(
       syntheticReceiptPdf({
@@ -626,6 +697,36 @@ describe('CBE Birr authoritative PDF parser foundation', () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+  });
+
+  it('keeps a metadata-rich, wrapped synthetic receipt advisory without retaining source values', async () => {
+    const result = await parseCbeBirrAuthoritativePdf(
+      syntheticReceiptPdf({
+        layout: 'credit_account_v2',
+        headerMetadata: ['SYNTHETIC ISSUER METADATA', 'SYNTHETIC INVOICE METADATA'],
+        wrappedCreditName: 'SYNTHETIC RECEIVER CONTINUED',
+        wrappedReceiverName: 'SYNTHETIC RECEIVER CONTINUED',
+        footerNotes: ['SYNTHETIC INFORMATIONAL FOOTER A', 'SYNTHETIC INFORMATIONAL FOOTER B'],
+      }),
+      expectations(),
+    );
+    expect(result).toMatchObject({
+      disposition: 'would_review',
+      reasonCode: 'receiver_identity_observed',
+      advisoryOnly: true,
+      financialActionAllowed: false,
+      facts: {
+        documentTopology: 'cbe_birr_vat_customer_receipt_credit_account_v2',
+        receiverIdentityMatch: 'matched',
+        referenceMatched: true,
+        feeArithmetic: 'consistent',
+        occurredAtPrecision: 'minute',
+      },
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(SYNTHETIC_REFERENCE);
+    expect(serialized).not.toContain(SYNTHETIC_RECEIVER_IDENTIFIER);
+    expect(serialized).not.toContain(SYNTHETIC_RECEIVER_NAME);
   });
 
   it.each([
@@ -1297,7 +1398,7 @@ describe('isolated child-process supervisor', () => {
 });
 
 describe('dependency, fixture, and runtime boundary', () => {
-  it('pins only pdfjs-dist 6.2.108 as the parser dependency', () => {
+  it('pins only pdfjs-dist 6.2.108 as the runtime dependency', () => {
     const manifests = import.meta.glob('../package.json', {
       eager: true,
       import: 'default',
@@ -1305,7 +1406,10 @@ describe('dependency, fixture, and runtime boundary', () => {
     }) as Record<string, string>;
     const manifest = JSON.parse(Object.values(manifests)[0]!) as Record<string, unknown>;
     expect(manifest.dependencies).toEqual({ 'pdfjs-dist': '6.2.108' });
-    expect(manifest.devDependencies).toBeUndefined();
+    expect(manifest.devDependencies).toEqual({
+      '@fetanagent/cbe-birr-normalization-candidate': 'workspace:*',
+      '@fetanagent/deposit-reference-protection': 'workspace:*',
+    });
     expect(manifest.optionalDependencies).toBeUndefined();
     expect(CBE_BIRR_AUTHORITATIVE_PDF_PARSER_VERSION).toBe(2);
     expect(CBE_BIRR_AUTHORITATIVE_PDFJS_VERSION).toBe('6.2.108');

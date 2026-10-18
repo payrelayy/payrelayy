@@ -227,6 +227,17 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return { version: 1, outcome: 'player_selection_saved', playerId: value.playerId };
   }
   if (
+    value.outcome === 'cbe_birr_dry_run_instruction_preview' &&
+    keys.length === 5 &&
+    typeof value.instructionToken === 'string' &&
+    /^[A-Za-z0-9_-]{22}$/u.test(value.instructionToken) &&
+    typeof value.expiresAt === 'string' &&
+    !Number.isNaN(Date.parse(value.expiresAt)) &&
+    value.acceptsPayments === false
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'deposit_instructions' &&
     keys.length === 12 &&
     typeof value.depositToken === 'string' &&

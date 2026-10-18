@@ -178,6 +178,18 @@ export type TelegramPrivateActionEnvelope =
       readonly transactionReference: string;
     })
   | (TelegramPrivateActionIdentity & {
+      /** Explicit staging simulation; it never returns payable receiver details. */
+      readonly kind: 'cbe_birr_dry_run_instruction_command';
+      readonly playerId: string;
+    })
+  | (TelegramPrivateActionIdentity & {
+      /** Synthetic staging proof bound to one earlier instruction token. */
+      readonly kind: 'cbe_birr_bound_dry_run_proof_command';
+      readonly instructionToken: string;
+      readonly playerId: string;
+      readonly transactionReference: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'deposit_proof_status_command';
       /** Compact proof UUID presentation; the API separately authorizes the submitting customer. */
       readonly proofToken: string;
@@ -384,6 +396,13 @@ export type TelegramPrivateActionResult =
       readonly providerName: 'CBE Birr' | 'TeleBirr';
       readonly proofStatus: 'proof_received';
       readonly financialMode: 'dry_run';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'cbe_birr_dry_run_instruction_preview';
+      readonly instructionToken: string;
+      readonly expiresAt: string;
+      readonly acceptsPayments: false;
     }
   | {
       readonly version: 1;

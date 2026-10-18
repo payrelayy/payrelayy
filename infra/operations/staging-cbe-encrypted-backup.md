@@ -17,7 +17,8 @@ authorize a migration apply, payment switch, receiver change, payment, or Player
   repository is public, so the ciphertext artifact may be downloaded by others; the local private
   key and authenticated encryption are the confidentiality boundary. Only the `.cms` ciphertext
   is uploaded; plaintext exists only in the temporary job workspace and is removed when the dump
-  step ends. The artifact expires after seven days.
+  step ends. The workflow checks the exact post-stop SQL snapshot before and after the dump and
+  discards the attempt on drift. The artifact expires after seven days.
 - The checked-in certificate is a **public encryption recipient**, not a credential. Its SHA-256
   file digest is pinned in the workflow. The corresponding private key is in a restricted
   `%USERPROFILE%\.codex\backup-keys\cbe-staging-20261018\private-key.pem` directory, outside Git.

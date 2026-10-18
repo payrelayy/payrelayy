@@ -26,6 +26,7 @@ concurrency:
 env:
   STAGING_PROJECT_REF: spzpiyxheappsfyswewl
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  STAGING_POOLER_HOST: aws-1-eu-west-1.pooler.supabase.com
   SUPABASE_CLI_VERSION: 2.113.0
   RECIPIENT_CERT: infra/keys/cbe-staging-20261018-recipient.crt
   RECIPIENT_CERT_SHA256: 93ecd9232f34f1f9313c053b08c27bf348c316b56e214ab88ee4e05a3c87778a
@@ -102,16 +103,38 @@ jobs:
           SUPABASE_HOME: ${{ runner.temp }}/fetanagent-supabase-home
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
         run: |
           set -euo pipefail
           umask 077
           backup_dir="$(mktemp -d "$RUNNER_TEMP/cbe-staging-backup.XXXXXXXX")"
           bundle="$RUNNER_TEMP/cbe-staging-backup.tar.gz"
           encrypted="$RUNNER_TEMP/cbe-staging-backup.cms"
-          trap 'rm -rf -- "$backup_dir"; rm -f -- "$bundle"' EXIT
+          ca_file="$RUNNER_TEMP/cbe-staging-backup-ca.crt"
+          trap 'rm -rf -- "$backup_dir"; rm -f -- "$bundle" "$ca_file"' EXIT
 
           linked_ref="$(tr -d '\r\n' < supabase/.temp/project-ref)"
           [[ "$linked_ref" == "$STAGING_PROJECT_REF" && "$linked_ref" != "$PRODUCTION_PROJECT_REF" ]]
+          [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          command -v psql >/dev/null
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$ca_file"
+          openssl x509 -in "$ca_file" -noout -checkend 0 >/dev/null
+          assert_post_stop() {
+            local result
+            result="$(PGPASSWORD="$SUPABASE_DB_PASSWORD" \
+              PGHOST="$STAGING_POOLER_HOST" PGPORT=5432 PGDATABASE=postgres \
+              PGUSER="postgres.$STAGING_PROJECT_REF" PGSSLMODE=verify-full \
+              PGSSLROOTCERT="$ca_file" PGCONNECT_TIMEOUT=5 \
+              PGSERVICEFILE=/dev/null PGPASSFILE=/dev/null \
+              psql -X -qAt -v ON_ERROR_STOP=1 \
+              --file=infra/sql/staging-cbe-post-stop-preflight.sql)"
+            if [[ -z "$result" || "$result" == *$'\n'* || "${result##*|}" != 't' ]]; then
+              echo '::error::The exact staging post-stop snapshot changed; discard this backup attempt.'
+              exit 1
+            fi
+          }
+          assert_post_stop
+
           supabase db dump --linked -f "$backup_dir/roles.sql" --role-only
           supabase db dump --linked -f "$backup_dir/schema.sql"
           supabase db dump --linked -f "$backup_dir/data.sql" --use-copy --data-only \
@@ -123,6 +146,7 @@ jobs:
           for file in roles.sql schema.sql data.sql history_schema.sql history_data.sql; do
             [[ -s "$backup_dir/$file" ]]
           done
+          assert_post_stop
           printf 'staging_project_ref=%s\ncommit_sha=%s\ncreated_utc=%s\nsupabase_cli=%s\n' \
             "$STAGING_PROJECT_REF" "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             "$SUPABASE_CLI_VERSION" > "$backup_dir/manifest.txt"

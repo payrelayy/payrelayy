@@ -1137,6 +1137,7 @@ describe('disposable SQL migration baseline', () => {
         procedure.prosecdef
           and procedure.proconfig in (
             array['search_path=pg_catalog']::text[],
+            array['search_path=pg_catalog, pg_temp']::text[],
             array['search_path=pg_catalog, app, pg_temp']::text[]
           )
           and procedure.proowner = 'postgres'::regrole as hardened,
@@ -1197,15 +1198,15 @@ describe('disposable SQL migration baseline', () => {
       'app.submit_telegram_player_registration_input(uuid,text,text)',
     ]);
     expect(
-      functions.rows.every(
+      functions.rows.filter(
         (row) =>
-          row.group_allowed &&
-          row.hardened &&
-          !row.public_allowed &&
-          !row.runtime_direct &&
-          row.runtime_effective,
+          !row.group_allowed ||
+          !row.hardened ||
+          row.public_allowed ||
+          row.runtime_direct ||
+          !row.runtime_effective,
       ),
-    ).toBe(true);
+    ).toEqual([]);
 
     const nonceTable = await client.query<{
       readonly policies: number;

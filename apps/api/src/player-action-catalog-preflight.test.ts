@@ -238,5 +238,8 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
     );
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
+      "then array['search_path=pg_catalog, pg_temp']::text[]",
+    );
   });
 });

@@ -196,17 +196,17 @@ function buildPlayerActionCatalogPreflightSql(
               '${ROUTINE_CANDIDATE_FUNCTION}'
             )`
                 : ''
-            }${
-              cbeBirrCandidateEnabled
-                ? CBE_BIRR_CANDIDATE_FUNCTIONS.map(
-                    (signature) => `,
-            pg_catalog.to_regprocedure(
-              '${signature}'
-            )`,
-                  ).join('')
-                : ''
             }
           ) then array['search_path=pg_catalog']::text[]
+          ${
+            cbeBirrCandidateEnabled
+              ? `when routine.oid in (
+            ${CBE_BIRR_CANDIDATE_FUNCTIONS.map(
+              (signature) => `pg_catalog.to_regprocedure('${signature}')`,
+            ).join(',\n            ')}
+          ) then array['search_path=pg_catalog, pg_temp']::text[]`
+              : ''
+          }
           else array['search_path=pg_catalog, app, pg_temp']::text[]
         end
         and owner.rolname = 'postgres'

@@ -24,6 +24,13 @@ import {
   type CbeBirrReferenceOpeningProfile,
   type CbeBirrScopedReferenceOpeningKey,
 } from '@fetanagent/cbe-birr-reference-opening';
+import {
+  CBE_BIRR_RECEIVER_LOOKUP_OPENING_CONTRACT_VERSION,
+  CBE_BIRR_RECEIVER_LOOKUP_OPENING_PURPOSE,
+  type CbeBirrApprovedReceiverLookupRootProfile,
+  type CbeBirrReceiverLookupChildKey,
+  type CbeBirrReceiverLookupOpeningProfile,
+} from '@fetanagent/deposit-reference-protection/cbe-birr-receiver-opening';
 
 export const CBE_BIRR_WORKER_OPENING_KEY_FILE =
   '/run/secrets/cbe_birr_worker_reference_opening_key.v1.json' as const;
@@ -35,6 +42,7 @@ export const CBE_BIRR_WORKER_PRODUCER_ROOT_PROFILE_FILE =
 const MAX_FILE_BYTES = 4096;
 const SHA256_ID = /^sha256:[0-9a-f]{64}$/u;
 const KEY_HEX = /^[0-9a-f]{64}$/u;
+const REVISION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type CbeBirrWorkerDeploymentTarget = 'staging' | 'production';
 
@@ -495,6 +503,284 @@ export function redactedCbeBirrWorkerKeyCustodyForLog(config: CbeBirrWorkerKeyCu
   return Object.freeze({
     enabled: true as const,
     deploymentTarget: config.deploymentTarget,
+    keyId: config.key.keyId,
+    rootProfileVersion: config.approvedRootProfile.version,
+    workerProfileVersion: config.workerProfile.version,
+  });
+}
+
+export const CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE =
+  '/run/secrets/cbe_birr_worker_receiver_lookup_key.v1.json' as const;
+export const CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE =
+  '/etc/fetanagent/cbe-birr-worker-receiver-lookup-profile.v1.json' as const;
+export const CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE =
+  '/etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json' as const;
+
+/** Supplied by an independently approved release, never reconstructed from mounted files. */
+export interface CbeBirrReceiverLookupReleasePins {
+  readonly deploymentTarget: CbeBirrWorkerDeploymentTarget;
+  readonly receiverRevisionId: string;
+  readonly receiverVersion: number;
+  readonly rootProfileSha256: string;
+  readonly workerProfileSha256: string;
+  readonly workerKeyId: string;
+}
+
+export type CbeBirrReceiverLookupKeyCustodyConfig =
+  | { readonly enabled: false }
+  | {
+      readonly enabled: true;
+      readonly deploymentTarget: CbeBirrWorkerDeploymentTarget;
+      readonly key: CbeBirrReceiverLookupChildKey;
+      readonly workerProfile: CbeBirrReceiverLookupOpeningProfile;
+      readonly approvedRootProfile: CbeBirrApprovedReceiverLookupRootProfile;
+    };
+
+function exactReceiverPins(
+  candidate: CbeBirrReceiverLookupReleasePins | undefined,
+): CbeBirrReceiverLookupReleasePins {
+  const pins = exactDataProperties(candidate, [
+    'deploymentTarget',
+    'receiverRevisionId',
+    'receiverVersion',
+    'rootProfileSha256',
+    'workerProfileSha256',
+    'workerKeyId',
+  ]);
+  if (
+    pins === undefined ||
+    (pins.deploymentTarget !== 'staging' && pins.deploymentTarget !== 'production') ||
+    typeof pins.receiverRevisionId !== 'string' ||
+    !REVISION_ID.test(pins.receiverRevisionId) ||
+    typeof pins.receiverVersion !== 'number' ||
+    !Number.isSafeInteger(pins.receiverVersion) ||
+    pins.receiverVersion < 1 ||
+    pins.receiverVersion > 2_147_483_647 ||
+    typeof pins.rootProfileSha256 !== 'string' ||
+    !SHA256_ID.test(pins.rootProfileSha256) ||
+    typeof pins.workerProfileSha256 !== 'string' ||
+    !SHA256_ID.test(pins.workerProfileSha256) ||
+    typeof pins.workerKeyId !== 'string' ||
+    !SHA256_ID.test(pins.workerKeyId)
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({
+    deploymentTarget: pins.deploymentTarget,
+    receiverRevisionId: pins.receiverRevisionId,
+    receiverVersion: pins.receiverVersion,
+    rootProfileSha256: pins.rootProfileSha256,
+    workerProfileSha256: pins.workerProfileSha256,
+    workerKeyId: pins.workerKeyId,
+  });
+}
+
+function exactReceiverRoot(candidate: unknown): CbeBirrApprovedReceiverLookupRootProfile {
+  const root = exactDataProperties(candidate, [
+    'encryptionMasterFingerprint',
+    'fingerprintMasterFingerprint',
+    'purpose',
+    'version',
+  ]);
+  if (
+    root === undefined ||
+    root.version !== 2 ||
+    root.purpose !== 'cbe_birr_receiver_lookup' ||
+    typeof root.encryptionMasterFingerprint !== 'string' ||
+    !SHA256_ID.test(root.encryptionMasterFingerprint) ||
+    typeof root.fingerprintMasterFingerprint !== 'string' ||
+    !SHA256_ID.test(root.fingerprintMasterFingerprint) ||
+    root.encryptionMasterFingerprint === root.fingerprintMasterFingerprint
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({
+    encryptionMasterFingerprint: root.encryptionMasterFingerprint,
+    fingerprintMasterFingerprint: root.fingerprintMasterFingerprint,
+    purpose: 'cbe_birr_receiver_lookup',
+    version: 2,
+  });
+}
+
+function exactReceiverKey(
+  candidate: unknown,
+  pins: CbeBirrReceiverLookupReleasePins,
+): CbeBirrReceiverLookupChildKey {
+  const key = exactDataProperties(candidate, [
+    'contractVersion',
+    'providerCode',
+    'purpose',
+    'receiverRevisionId',
+    'receiverVersion',
+    'keyId',
+    'keyHex',
+  ]);
+  if (
+    key === undefined ||
+    key.contractVersion !== CBE_BIRR_RECEIVER_LOOKUP_OPENING_CONTRACT_VERSION ||
+    key.providerCode !== 'cbe_birr' ||
+    key.purpose !== CBE_BIRR_RECEIVER_LOOKUP_OPENING_PURPOSE ||
+    key.receiverRevisionId !== pins.receiverRevisionId ||
+    key.receiverVersion !== pins.receiverVersion ||
+    key.keyId !== pins.workerKeyId ||
+    typeof key.keyHex !== 'string' ||
+    !KEY_HEX.test(key.keyHex)
+  ) {
+    return unavailable();
+  }
+  const bytes = Buffer.from(key.keyHex, 'hex');
+  const actualId = createHash('sha256').update(bytes).digest();
+  const expectedId = Buffer.from(pins.workerKeyId.slice(7), 'hex');
+  try {
+    if (!timingSafeEqual(actualId, expectedId)) unavailable();
+  } finally {
+    bytes.fill(0);
+    actualId.fill(0);
+    expectedId.fill(0);
+  }
+  return Object.freeze({
+    contractVersion: CBE_BIRR_RECEIVER_LOOKUP_OPENING_CONTRACT_VERSION,
+    providerCode: 'cbe_birr',
+    purpose: CBE_BIRR_RECEIVER_LOOKUP_OPENING_PURPOSE,
+    receiverRevisionId: pins.receiverRevisionId,
+    receiverVersion: pins.receiverVersion,
+    keyId: pins.workerKeyId,
+    keyHex: key.keyHex,
+  });
+}
+
+function exactReceiverProfile(
+  candidate: unknown,
+  root: CbeBirrApprovedReceiverLookupRootProfile,
+  key: CbeBirrReceiverLookupChildKey,
+): CbeBirrReceiverLookupOpeningProfile {
+  const profile = exactDataProperties(candidate, [
+    'version',
+    'providerCode',
+    'purpose',
+    'receiverRevisionId',
+    'receiverVersion',
+    'keyId',
+    'rootEncryptionMasterFingerprint',
+    'rootFingerprintMasterFingerprint',
+  ]);
+  if (
+    profile === undefined ||
+    profile.version !== CBE_BIRR_RECEIVER_LOOKUP_OPENING_CONTRACT_VERSION ||
+    profile.providerCode !== 'cbe_birr' ||
+    profile.purpose !== CBE_BIRR_RECEIVER_LOOKUP_OPENING_PURPOSE ||
+    profile.receiverRevisionId !== key.receiverRevisionId ||
+    profile.receiverVersion !== key.receiverVersion ||
+    profile.keyId !== key.keyId ||
+    profile.rootEncryptionMasterFingerprint !== root.encryptionMasterFingerprint ||
+    profile.rootFingerprintMasterFingerprint !== root.fingerprintMasterFingerprint
+  ) {
+    return unavailable();
+  }
+  return Object.freeze({
+    version: CBE_BIRR_RECEIVER_LOOKUP_OPENING_CONTRACT_VERSION,
+    providerCode: 'cbe_birr',
+    purpose: CBE_BIRR_RECEIVER_LOOKUP_OPENING_PURPOSE,
+    receiverRevisionId: key.receiverRevisionId,
+    receiverVersion: key.receiverVersion,
+    keyId: key.keyId,
+    rootEncryptionMasterFingerprint: root.encryptionMasterFingerprint,
+    rootFingerprintMasterFingerprint: root.fingerprintMasterFingerprint,
+  });
+}
+
+/** Inert receiver-key loader; it has no application import or production mount. */
+export function loadCbeBirrReceiverLookupKeyCustody(
+  environment: NodeJS.ProcessEnv = process.env,
+  approvedPins?: CbeBirrReceiverLookupReleasePins,
+  dependencies: CbeBirrWorkerKeyCustodyDependencies = {},
+): CbeBirrReceiverLookupKeyCustodyConfig {
+  try {
+    const enabled = environment.INTERNAL_CBE_BIRR_RECEIVER_KEY_CUSTODY_CANDIDATE_ENABLED;
+    if (enabled === undefined || enabled === 'false') return Object.freeze({ enabled: false });
+    if (
+      enabled !== 'true' ||
+      environment.NODE_ENV !== 'production' ||
+      environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
+      environment.CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE !==
+        CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE ||
+      environment.CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE !==
+        CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE ||
+      environment.CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE !==
+        CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE
+    ) {
+      return unavailable();
+    }
+    const pins = exactReceiverPins(approvedPins);
+    if (environment.CBE_BIRR_RECEIVER_KEY_DEPLOYMENT_TARGET !== pins.deploymentTarget) {
+      unavailable();
+    }
+    const forbidden = [
+      'CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY',
+      'CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE',
+      'OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER',
+      'OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE',
+      'OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER',
+      'OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE',
+      'OWNER_CBE_BIRR_LOOKUP_PROFILE',
+      'OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE',
+      'OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER',
+      'OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE',
+      'OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER',
+      'OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE',
+      'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET',
+      'DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET_FILE',
+      'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET',
+      'DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET_FILE',
+      'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET',
+      'CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET_FILE',
+      'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET',
+      'CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET_FILE',
+    ] as const;
+    if (forbidden.some((name) => environment[name] !== undefined)) unavailable();
+
+    const approvedRootProfile = exactReceiverRoot(
+      parsedPinnedJson(
+        CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE,
+        'profile',
+        pins.rootProfileSha256,
+        dependencies,
+      ),
+    );
+    const key = exactReceiverKey(
+      parsedPinnedJson(CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE, 'secret', undefined, dependencies),
+      pins,
+    );
+    const workerProfile = exactReceiverProfile(
+      parsedPinnedJson(
+        CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE,
+        'profile',
+        pins.workerProfileSha256,
+        dependencies,
+      ),
+      approvedRootProfile,
+      key,
+    );
+    return Object.freeze({
+      enabled: true,
+      deploymentTarget: pins.deploymentTarget,
+      key,
+      workerProfile,
+      approvedRootProfile,
+    });
+  } catch {
+    return unavailable();
+  }
+}
+
+export function redactedCbeBirrReceiverLookupKeyCustodyForLog(
+  config: CbeBirrReceiverLookupKeyCustodyConfig,
+) {
+  if (!config.enabled) return Object.freeze({ enabled: false as const });
+  return Object.freeze({
+    enabled: true as const,
+    deploymentTarget: config.deploymentTarget,
+    receiverVersion: config.key.receiverVersion,
     keyId: config.key.keyId,
     rootProfileVersion: config.approvedRootProfile.version,
     workerProfileVersion: config.workerProfile.version,

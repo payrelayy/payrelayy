@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createCipheriv, createHash, createHmac } from 'node:crypto';
 import { constants } from 'node:fs';
 
 import {
@@ -6,17 +6,24 @@ import {
   type CbeBirrReferenceOpeningProfile,
   type CbeBirrScopedReferenceOpeningKey,
 } from '@fetanagent/cbe-birr-reference-opening';
+import { withOpenedCbeBirrReceiverLookup } from '@fetanagent/deposit-reference-protection/cbe-birr-receiver-opening';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   CBE_BIRR_WORKER_OPENING_KEY_FILE,
   CBE_BIRR_WORKER_OPENING_PROFILE_FILE,
   CBE_BIRR_WORKER_PRODUCER_ROOT_PROFILE_FILE,
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE,
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE,
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE,
   CbeBirrWorkerKeyCustodyError,
+  loadCbeBirrReceiverLookupKeyCustody,
   loadCbeBirrWorkerKeyCustody,
+  redactedCbeBirrReceiverLookupKeyCustodyForLog,
   redactedCbeBirrWorkerKeyCustodyForLog,
   type CbeBirrApprovedReleasePins,
   type CbeBirrGuardedFileStat,
+  type CbeBirrReceiverLookupReleasePins,
   type CbeBirrWorkerKeyCustodyDependencies,
 } from './index.js';
 
@@ -116,7 +123,10 @@ function guardedDependencies(
   ): CbeBirrGuardedFileStat => ({
     dev: 7,
     ino: path.length,
-    mode: path === CBE_BIRR_WORKER_OPENING_KEY_FILE ? 0o100400 : 0o100444,
+    mode:
+      path === CBE_BIRR_WORKER_OPENING_KEY_FILE || path === CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE
+        ? 0o100400
+        : 0o100444,
     mtimeMs: 1_700_000_000_000,
     nlink: 1,
     size: values[path]!.byteLength,
@@ -389,4 +399,238 @@ describe('dormant CBE Birr worker key custody candidate', () => {
       ).toBe(true);
     },
   );
+});
+
+const receiverEnvironment: NodeJS.ProcessEnv = {
+  NODE_ENV: 'production',
+  FINANCIAL_ACTIONS_MODE: 'dry_run',
+  INTERNAL_CBE_BIRR_RECEIVER_KEY_CUSTODY_CANDIDATE_ENABLED: 'true',
+  CBE_BIRR_RECEIVER_KEY_DEPLOYMENT_TARGET: 'staging',
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE,
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE,
+  CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE,
+};
+
+function syntheticReceiverFixture(): {
+  readonly pins: CbeBirrReceiverLookupReleasePins;
+  readonly values: FileValues;
+  readonly keyHex: string;
+} {
+  const receiverRevisionId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const receiverVersion = 3;
+  const master = Buffer.alloc(32, 0x31);
+  const child = createHmac('sha256', master)
+    .update(
+      `fetanagent:cbe-birr:receiver-lookup:encryption-key:v2\nrevision:${receiverRevisionId}\nversion:${receiverVersion}`,
+      'utf8',
+    )
+    .digest();
+  const root = {
+    encryptionMasterFingerprint: sha256(master),
+    fingerprintMasterFingerprint: sha256(Buffer.alloc(32, 0x52)),
+    purpose: 'cbe_birr_receiver_lookup',
+    version: 2,
+  };
+  const key = {
+    contractVersion: 1,
+    providerCode: 'cbe_birr',
+    purpose: 'receiver-lookup-opening',
+    receiverRevisionId,
+    receiverVersion,
+    keyId: sha256(child),
+    keyHex: child.toString('hex'),
+  };
+  const profile = {
+    version: 1,
+    providerCode: 'cbe_birr',
+    purpose: 'receiver-lookup-opening',
+    receiverRevisionId,
+    receiverVersion,
+    keyId: key.keyId,
+    rootEncryptionMasterFingerprint: root.encryptionMasterFingerprint,
+    rootFingerprintMasterFingerprint: root.fingerprintMasterFingerprint,
+  };
+  const values: FileValues = {
+    [CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE]: jsonBytes(root),
+    [CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE]: jsonBytes(key),
+    [CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE]: jsonBytes(profile),
+  };
+  const pins: CbeBirrReceiverLookupReleasePins = {
+    deploymentTarget: 'staging',
+    receiverRevisionId,
+    receiverVersion,
+    rootProfileSha256: sha256(values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE]!),
+    workerProfileSha256: sha256(values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE]!),
+    workerKeyId: key.keyId,
+  };
+  master.fill(0);
+  child.fill(0);
+  return { pins, values, keyHex: key.keyHex };
+}
+
+describe('dormant CBE Birr receiver-revision key custody candidate', () => {
+  it('is disabled by default without reading files', () => {
+    const fixture = syntheticReceiverFixture();
+    const dependencies = guardedDependencies(fixture.values);
+    const config = loadCbeBirrReceiverLookupKeyCustody({}, undefined, dependencies);
+    expect(config).toEqual({ enabled: false });
+    expect(redactedCbeBirrReceiverLookupKeyCustodyForLog(config)).toEqual({ enabled: false });
+    expect(dependencies.fileSystem.lstat).not.toHaveBeenCalled();
+  });
+
+  it('loads exactly one synthetic receiver revision and redacts the child key', () => {
+    const fixture = syntheticReceiverFixture();
+    const dependencies = guardedDependencies(fixture.values);
+    const config = loadCbeBirrReceiverLookupKeyCustody(
+      receiverEnvironment,
+      fixture.pins,
+      dependencies,
+    );
+    expect(config.enabled).toBe(true);
+    if (!config.enabled) throw new Error('expected synthetic enabled config');
+    expect(config.key.receiverRevisionId).toBe(fixture.pins.receiverRevisionId);
+    expect(config.key.receiverVersion).toBe(fixture.pins.receiverVersion);
+    expect(config.key.keyHex).toBe(fixture.keyHex);
+    expect(dependencies.readPaths).toEqual([
+      CBE_BIRR_WORKER_RECEIVER_LOOKUP_ROOT_PROFILE_FILE,
+      CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE,
+      CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE,
+    ]);
+    expect(dependencies.returnedBuffers.every((bytes) => bytes.every((value) => value === 0))).toBe(
+      true,
+    );
+    expect(dependencies.closeHandles.every((close) => close.mock.calls.length === 1)).toBe(true);
+    const redacted = redactedCbeBirrReceiverLookupKeyCustodyForLog(config);
+    expect(JSON.stringify(redacted)).not.toContain(fixture.keyHex);
+    expect(JSON.stringify(redacted)).not.toContain(fixture.pins.receiverRevisionId);
+  });
+
+  it('opens only the pinned revision through the narrow verifier entry point', () => {
+    const fixture = syntheticReceiverFixture();
+    const config = loadCbeBirrReceiverLookupKeyCustody(
+      receiverEnvironment,
+      fixture.pins,
+      guardedDependencies(fixture.values),
+    );
+    if (!config.enabled) throw new Error('expected synthetic enabled config');
+    const phone = '251900000001';
+    const nonce = Buffer.alloc(12, 0x11);
+    const cipher = createCipheriv('aes-256-gcm', Buffer.from(config.key.keyHex, 'hex'), nonce, {
+      authTagLength: 16,
+    });
+    cipher.setAAD(
+      Buffer.from(
+        `fetanagent:cbe-birr:receiver-lookup:v2\nrevision:${fixture.pins.receiverRevisionId}\nversion:${fixture.pins.receiverVersion}`,
+        'utf8',
+      ),
+    );
+    const encrypted = Buffer.concat([cipher.update(phone, 'utf8'), cipher.final()]);
+    const ciphertext = `cbe-receiver-v2.${nonce.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`;
+    const row = {
+      receiverRevisionId: fixture.pins.receiverRevisionId,
+      receiverVersion: fixture.pins.receiverVersion,
+      ciphertext,
+      masked: '***0001',
+      protectionProfileVersion: 2 as const,
+      encryptionKeyVersion: 2 as const,
+    };
+    expect(
+      withOpenedCbeBirrReceiverLookup(
+        row,
+        config.key,
+        config.workerProfile,
+        config.approvedRootProfile,
+        (opened) => opened === phone,
+      ),
+    ).toBe(true);
+    expect(() =>
+      withOpenedCbeBirrReceiverLookup(
+        { ...row, receiverVersion: row.receiverVersion + 1 },
+        config.key,
+        config.workerProfile,
+        config.approvedRootProfile,
+        () => true,
+      ),
+    ).toThrow('CBE Birr receiver lookup material is unavailable.');
+  });
+
+  it('rejects stale release pins even with self-consistent mounted files', () => {
+    const fixture = syntheticReceiverFixture();
+    for (const pins of [
+      { ...fixture.pins, receiverVersion: 2 },
+      { ...fixture.pins, receiverRevisionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeef' },
+      { ...fixture.pins, workerKeyId: `sha256:${'f'.repeat(64)}` },
+      { ...fixture.pins, rootProfileSha256: `sha256:${'f'.repeat(64)}` },
+      { ...fixture.pins, workerProfileSha256: `sha256:${'f'.repeat(64)}` },
+    ]) {
+      expectUnavailable(() =>
+        loadCbeBirrReceiverLookupKeyCustody(
+          receiverEnvironment,
+          pins,
+          guardedDependencies(fixture.values),
+        ),
+      );
+    }
+  });
+
+  it('rejects a mismatched profile and an altered child key', () => {
+    const fixture = syntheticReceiverFixture();
+    const profile = JSON.parse(
+      fixture.values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE]!.toString('utf8'),
+    ) as Record<string, unknown>;
+    fixture.values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE] = jsonBytes({
+      ...profile,
+      receiverVersion: 4,
+    });
+    const pins = {
+      ...fixture.pins,
+      workerProfileSha256: sha256(fixture.values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_PROFILE_FILE]!),
+    };
+    expectUnavailable(() =>
+      loadCbeBirrReceiverLookupKeyCustody(
+        receiverEnvironment,
+        pins,
+        guardedDependencies(fixture.values),
+      ),
+    );
+
+    const changed = syntheticReceiverFixture();
+    const key = JSON.parse(
+      changed.values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE]!.toString('utf8'),
+    ) as Record<string, unknown>;
+    changed.values[CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE] = jsonBytes({
+      ...key,
+      keyHex: 'a'.repeat(64),
+    });
+    expectUnavailable(() =>
+      loadCbeBirrReceiverLookupKeyCustody(
+        receiverEnvironment,
+        changed.pins,
+        guardedDependencies(changed.values),
+      ),
+    );
+  });
+
+  it('rejects inherited Owner masters, live mode, and unsafe key file before use', () => {
+    const fixture = syntheticReceiverFixture();
+    for (const environment of [
+      { ...receiverEnvironment, OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER: 'a'.repeat(64) },
+      { ...receiverEnvironment, FINANCIAL_ACTIONS_MODE: 'live' },
+    ]) {
+      const dependencies = guardedDependencies(fixture.values);
+      expectUnavailable(() =>
+        loadCbeBirrReceiverLookupKeyCustody(environment, fixture.pins, dependencies),
+      );
+      expect(dependencies.fileSystem.lstat).not.toHaveBeenCalled();
+    }
+    expectUnavailable(() =>
+      loadCbeBirrReceiverLookupKeyCustody(
+        receiverEnvironment,
+        fixture.pins,
+        guardedDependencies(fixture.values, CBE_BIRR_WORKER_RECEIVER_LOOKUP_KEY_FILE, {
+          before: { mode: 0o100440 },
+        }),
+      ),
+    );
+  });
 });

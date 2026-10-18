@@ -12,3 +12,14 @@ identity consistency only: this repository does not yet supply an approved CBE r
 these files into a worker, establish rotation and recovery, authorize an official source, or allow
 lookup, lease, settlement, or Player credit. Do not log the returned configuration; it contains the
 secret child key. Use the redacted projection for diagnostics.
+
+The package also has a separate default-off **receiver-revision lookup** loader. It reads one
+revision-scoped child key, a worker opening profile, and the Owner's nonsecret v2 lookup root
+profile from three fixed paths. An external release pin must name the exact revision UUID/version,
+child-key ID, both profile digests, and deployment target. It reuses the guarded Linux file checks,
+rejects inherited Owner masters, and exposes only redacted metadata for logs. The narrow
+`@fetanagent/deposit-reference-protection/cbe-birr-receiver-opening` subpath exposes the opener,
+not Owner key derivation. Synthetic tests cover successful opening and mismatched revisions.
+No worker imports the loader or mounts a real child key. The checks cannot prove that the child was
+derived from the approved Owner master, that the active SQL revision matches the pin, or that the
+mount source is trustworthy. Those require separately reviewed provisioning and runtime gates.

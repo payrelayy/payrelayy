@@ -214,6 +214,20 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false) as cbe_birr_receiver_v2_rotate_allowed,
+    -- The metadata function may arrive before this app, and its Owner grant may arrive later.
+    -- Either state is safe only while the function stays private and hardened.
+    coalesce((
+      select routine.prosecdef
+        and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and not exists (
+          select 1 from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+           where acl.privilege_type = 'EXECUTE'
+             and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole)
+        )
+        from pg_proc routine
+       where routine.oid = to_regprocedure('app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)')::oid
+    ), true) as cbe_birr_provisioning_snapshot_catalog_safe,
     has_function_privilege(current_user, 'app.list_owner_kemerbet_agent_profiles(uuid)', 'execute') as kemerbet_agent_profile_list_allowed,
     has_function_privilege(current_user, 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)', 'execute') as kemerbet_agent_profile_prepare_allowed,
     has_function_privilege(current_user, 'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)', 'execute') as kemerbet_agent_profile_recover_allowed,
@@ -249,6 +263,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     (
       select count(*) = 35
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user, to_regprocedure('app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)')::oid, 'execute'), false)::integer
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_pending_telebirr_executions(uuid,integer)') is not null)::integer
         + (to_regprocedure('app.approve_owner_telebirr_execution(uuid,uuid,uuid)') is not null)::integer
@@ -324,6 +339,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.list_owner_receiver_accounts(uuid)'::regprocedure
           ,'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)'::regprocedure
           ,coalesce(to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)')::oid, 0::oid)
           ,'app.list_owner_kemerbet_agent_profiles(uuid)'::regprocedure
           ,'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)'::regprocedure
           ,'app.recover_owner_kemerbet_quarantined_agent_profile(uuid,uuid,uuid)'::regprocedure
@@ -338,7 +354,12 @@ export function ownerControlCatalogReady(
   row: Record<string, unknown> | undefined,
   cbeBirrReceiverV2RotationEnabled: boolean,
 ): boolean {
-  if (!row || typeof row.cbe_birr_receiver_v2_rotate_allowed !== 'boolean') return false;
+  if (
+    !row ||
+    typeof row.cbe_birr_receiver_v2_rotate_allowed !== 'boolean' ||
+    typeof row.cbe_birr_provisioning_snapshot_catalog_safe !== 'boolean'
+  )
+    return false;
   return Object.entries(row).every(
     ([check, value]) =>
       (check === 'cbe_birr_receiver_v2_rotate_allowed' &&

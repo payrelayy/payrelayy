@@ -806,6 +806,10 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             [proofId],
           ),
         ).toMatchObject([{ blocker_code: 'instruction_binding_unavailable' }]);
+        const candidateSql = 'select * from app.enqueue_routine_cbe_birr_candidate($1::uuid)';
+        await expect(
+          withSavepoint(client, async () => client.query(candidateSql, [proofId])),
+        ).rejects.toThrow(/candidate lineage is unavailable/u);
 
         const insertBindingSql = `insert into app.cbe_birr_instruction_proof_bindings (
           proof_request_id, instruction_id, submitting_customer_id,
@@ -862,6 +866,74 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
           },
         ]);
         expect(JSON.stringify(bound)).not.toContain(receiverRevisionId);
+        const candidate = await client.query<{
+          readonly candidate_id: string;
+          readonly already_recorded: boolean;
+        }>(candidateSql, [proofId]);
+        expect(candidate.rows).toHaveLength(1);
+        expect(candidate.rows[0]!.already_recorded).toBe(false);
+        expect(Object.keys(candidate.rows[0]!).sort()).toEqual([
+          'already_recorded',
+          'candidate_id',
+        ]);
+        expect((await client.query(candidateSql, [proofId])).rows).toEqual([
+          { candidate_id: candidate.rows[0]!.candidate_id, already_recorded: true },
+        ]);
+        await client.query('savepoint cbe_candidate_live_telebirr');
+        try {
+          await client.query(
+            `update app.feature_switches set mode = 'live'
+              where feature_key in ('payment_verification', 'deposit_execution')`,
+          );
+          expect((await client.query(candidateSql, [proofId])).rows).toEqual([
+            { candidate_id: candidate.rows[0]!.candidate_id, already_recorded: true },
+          ]);
+        } finally {
+          await client.query('rollback to savepoint cbe_candidate_live_telebirr');
+          await client.query('release savepoint cbe_candidate_live_telebirr');
+        }
+        await client.query('savepoint cbe_candidate_verification_off');
+        try {
+          await client.query(
+            `update app.feature_switches set mode = 'dry_run'
+              where feature_key = 'cbe_birr_authoritative_verification'`,
+          );
+          await expect(client.query(candidateSql, [proofId])).rejects.toThrow(
+            /requires CBE verification disabled/u,
+          );
+        } finally {
+          await client.query('rollback to savepoint cbe_candidate_verification_off');
+          await client.query('release savepoint cbe_candidate_verification_off');
+        }
+        const storedCandidate = await client.query<{
+          readonly proof_request_id: string;
+          readonly contract_version: number;
+        }>(
+          `select proof_request_id, contract_version
+             from app.routine_cbe_birr_candidates
+            where id = $1::uuid`,
+          [candidate.rows[0]!.candidate_id],
+        );
+        expect(storedCandidate.rows).toEqual([{ proof_request_id: proofId, contract_version: 1 }]);
+        await expect(
+          withSavepoint(client, async () =>
+            client.query(
+              `update app.routine_cbe_birr_candidates set contract_version = 1
+                where id = $1::uuid`,
+              [candidate.rows[0]!.candidate_id],
+            ),
+          ),
+        ).rejects.toThrow(/candidate lineage is immutable/u);
+        await expect(
+          queryAsRole(client, 'fetanagent_player_actions', candidateSql, [proofId]),
+        ).rejects.toThrow(/permission denied/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_proof_preflight',
+            'select * from app.routine_cbe_birr_candidates limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
         await expect(
           withSavepoint(client, async () => {
             await client.query(
@@ -936,6 +1008,9 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             protected_material_allowed: false,
           },
         ]);
+        await expect(
+          withSavepoint(client, async () => client.query(candidateSql, [lateProofId])),
+        ).rejects.toThrow(/candidate lineage is unavailable/u);
 
         const nextInstructionSql = `with issued as (select clock_timestamp() as instant)
           insert into app.cbe_birr_payment_instructions (

@@ -104,7 +104,10 @@ open.
 
 An offline provisioning check now compares a proposed worker child with the v2 producer-root
 derivation and returns only nonsecret consistency metadata. No real keys are provisioned, and the
-worker still has no trusted file custody or deployment binding. The same blockers remain open.
+worker still has no trusted file custody or deployment binding. A separate dormant guarded-file
+loader now checks synthetic private-file custody against externally supplied profile digests and
+child-key/deployment pins, but no application imports it, no release has approved pins, and no
+worker files are mounted. The same blockers remain open.
 
 The local `receiver_lookup_normalization_unreviewed` blocker is closed only for a synthetic v2
 envelope bound to a supplied receiver-revision UUID and version, then passed as the

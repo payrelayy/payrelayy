@@ -37,3 +37,13 @@ roots match their nonsecret identities, and that the proposed worker profile mat
 root pair. It returns only a nonsecret consistency witness and handles no files or live secrets in
 tests. Actual private-file provisioning, independent custody, rotation, recovery, and deployment
 pinning remain unimplemented; the blockers remain open.
+
+The dormant `@fetanagent/cbe-birr-worker-key-custody` package now has a guarded Linux loader for
+the CBE child key, its worker opening profile, and the nonsecret producer-root profile. It requires
+fixed private paths, a nonroot process, regular single-link files with restricted permissions,
+stable no-follow reads, and separately supplied release pins for both profile-file digests, the
+child-key ID, and deployment target. It refuses inline and producer-master secrets, checks the
+key/profile/root relationship, and exposes only a redacted log projection. Its tests use synthetic
+file data. No application imports the loader, and no approved release pins, actual mounts,
+rotation/recovery procedure, or runtime authority exist. Passing the loader does not clear the
+worker lifecycle or any lookup/financial blocker.

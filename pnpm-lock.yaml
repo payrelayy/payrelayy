@@ -353,6 +353,12 @@ importers:
         specifier: workspace:*
         version: link:../deposit-reference-protection
 
+  packages/cbe-birr-worker-key-custody:
+    dependencies:
+      '@fetanagent/cbe-birr-reference-opening':
+        specifier: workspace:*
+        version: link:../cbe-birr-reference-opening
+
   packages/cbe-birr-worker-key-provisioning-check:
     dependencies:
       '@fetanagent/cbe-birr-reference-opening':

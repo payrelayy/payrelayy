@@ -22,8 +22,11 @@ in this package or its tests.
 
 An additional dormant `@fetanagent/cbe-birr-reference-opening` package tests the narrower worker
 opening boundary. It accepts only the CBE Birr/purpose-scoped v2 child key with a matching nonsecret
-key fingerprint, checks the stored mask, and makes the authenticated reference available only to
-a synchronous trusted callback. It cannot accept the API master or derive another provider key.
-No application imports this package. Independent worker key provenance, provisioning, rotation,
-recovery, deployment-profile binding, prelease authorization, and callback use inside a reviewed
-worker are still absent; the inventory blockers and all lookup/financial gates remain unchanged.
+key fingerprint, requires a worker profile to match an independently supplied producer v2 root
+identity, checks the stored mask, and makes the authenticated reference available only to a
+synchronous trusted callback. The profile fixes the provider, purpose, reserved source label,
+envelope/key versions, child-key ID, and both root fingerprints. It cannot accept the API master or
+derive another provider key. No application imports this package. Independent profile provenance,
+worker key provisioning, rotation, recovery, deployment binding, prelease authorization, and
+callback use inside a reviewed worker are still absent; the inventory blockers and all
+lookup/financial gates remain unchanged.

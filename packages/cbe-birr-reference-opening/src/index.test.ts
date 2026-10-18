@@ -7,11 +7,16 @@ import {
   CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION,
   CBE_BIRR_REFERENCE_OPENING_CONTRACT_VERSION,
   CBE_BIRR_REFERENCE_OPENING_KEY_VERSION,
+  CBE_BIRR_REFERENCE_OPENING_PROFILE_VERSION,
   CBE_BIRR_REFERENCE_OPENING_PROVIDER,
   CBE_BIRR_REFERENCE_OPENING_PURPOSE,
+  CBE_BIRR_REFERENCE_OPENING_ROOT_PROFILE_VERSION,
+  CBE_BIRR_REFERENCE_OPENING_SOURCE_PROFILE,
   CbeBirrReferenceOpeningError,
   withOpenedCbeBirrDepositProofReference,
+  type CbeBirrApprovedProofRootProfile,
   type CbeBirrProtectedReferenceOpeningInput,
+  type CbeBirrReferenceOpeningProfile,
   type CbeBirrScopedReferenceOpeningKey,
 } from './index.js';
 
@@ -35,6 +40,50 @@ function scopedKey(overrides: Partial<CbeBirrScopedReferenceOpeningKey> = {}) {
   };
   child.fill(0);
   return value;
+}
+
+function fingerprint(secret: string): string {
+  return `sha256:${createHash('sha256').update(Buffer.from(secret, 'hex')).digest('hex')}`;
+}
+
+function rootProfile(
+  overrides: Partial<CbeBirrApprovedProofRootProfile> = {},
+): CbeBirrApprovedProofRootProfile {
+  return {
+    encryptionMasterFingerprint: fingerprint(encryptionMaster),
+    fingerprintMasterFingerprint: fingerprint(fingerprintMaster),
+    version: CBE_BIRR_REFERENCE_OPENING_ROOT_PROFILE_VERSION,
+    ...overrides,
+  };
+}
+
+function openingProfile(
+  key: CbeBirrScopedReferenceOpeningKey,
+  root: CbeBirrApprovedProofRootProfile = rootProfile(),
+  overrides: Partial<CbeBirrReferenceOpeningProfile> = {},
+): CbeBirrReferenceOpeningProfile {
+  return {
+    version: CBE_BIRR_REFERENCE_OPENING_PROFILE_VERSION,
+    providerCode: CBE_BIRR_REFERENCE_OPENING_PROVIDER,
+    purpose: CBE_BIRR_REFERENCE_OPENING_PURPOSE,
+    sourceProfile: CBE_BIRR_REFERENCE_OPENING_SOURCE_PROFILE,
+    ciphertextProfileVersion: CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION,
+    encryptionKeyVersion: CBE_BIRR_REFERENCE_OPENING_KEY_VERSION,
+    keyId: key.keyId,
+    rootEncryptionMasterFingerprint: root.encryptionMasterFingerprint,
+    rootFingerprintMasterFingerprint: root.fingerprintMasterFingerprint,
+    ...overrides,
+  };
+}
+
+function open<Result>(
+  input: CbeBirrProtectedReferenceOpeningInput,
+  key: CbeBirrScopedReferenceOpeningKey,
+  useReference: (rawReference: string) => Result,
+  profile: CbeBirrReferenceOpeningProfile = openingProfile(key),
+  approvedRoot: CbeBirrApprovedProofRootProfile = rootProfile(),
+): Result {
+  return withOpenedCbeBirrDepositProofReference(input, key, profile, approvedRoot, useReference);
 }
 
 function protectedInput(reference = 'FTAN12345678'): CbeBirrProtectedReferenceOpeningInput {
@@ -61,7 +110,7 @@ function protectedInput(reference = 'FTAN12345678'): CbeBirrProtectedReferenceOp
 describe('CBE Birr protected-reference opening boundary', () => {
   it('opens only the provider-scoped v2 envelope inside the synchronous callback', () => {
     const callback = vi.fn((reference: string) => Object.freeze({ digest: reference.slice(-4) }));
-    const result = withOpenedCbeBirrDepositProofReference(protectedInput(), scopedKey(), callback);
+    const result = open(protectedInput(), scopedKey(), callback);
 
     expect(result).toEqual({ digest: '5678' });
     expect(callback).toHaveBeenCalledOnce();
@@ -70,19 +119,82 @@ describe('CBE Birr protected-reference opening boundary', () => {
 
   it('opens the canonical uppercase reference produced from mixed-case capture', () => {
     const callback = vi.fn((reference: string) => reference.endsWith('5678'));
-    expect(
-      withOpenedCbeBirrDepositProofReference(protectedInput('ftan12345678'), scopedKey(), callback),
-    ).toBe(true);
+    expect(open(protectedInput('ftan12345678'), scopedKey(), callback)).toBe(true);
     expect(callback).toHaveBeenCalledWith('FTAN12345678');
+  });
+
+  it.each([
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, version: 2 }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, providerCode: 'telebirr' }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, purpose: 'receiver-opening' }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, sourceProfile: 'other' }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({
+      ...profile,
+      ciphertextProfileVersion: 1,
+    }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, encryptionKeyVersion: 1 }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({
+      ...profile,
+      keyId: `sha256:${'c'.repeat(64)}`,
+    }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({
+      ...profile,
+      rootEncryptionMasterFingerprint: `sha256:${'c'.repeat(64)}`,
+    }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({
+      ...profile,
+      rootFingerprintMasterFingerprint: `sha256:${'c'.repeat(64)}`,
+    }),
+    (profile: CbeBirrReferenceOpeningProfile) => ({ ...profile, extra: true }),
+  ])('rejects altered worker profile %# before invoking the callback', (alter) => {
+    const key = scopedKey();
+    const callback = vi.fn(() => ({ ok: true }));
+    expect(() =>
+      open(
+        protectedInput(),
+        key,
+        callback,
+        alter(openingProfile(key)) as CbeBirrReferenceOpeningProfile,
+      ),
+    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('rejects a self-consistent worker profile bound to a different producer root', () => {
+    const key = scopedKey();
+    const differentRoot = rootProfile({
+      encryptionMasterFingerprint: `sha256:${'c'.repeat(64)}`,
+    });
+    const callback = vi.fn(() => ({ ok: true }));
+    expect(() =>
+      open(protectedInput(), key, callback, openingProfile(key, differentRoot), rootProfile()),
+    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed or proxy-approved producer root', () => {
+    const key = scopedKey();
+    const callback = vi.fn(() => ({ ok: true }));
+    const malformedRoot = {
+      ...rootProfile(),
+      version: 1,
+    } as unknown as CbeBirrApprovedProofRootProfile;
+    expect(() => open(protectedInput(), key, callback, openingProfile(key), malformedRoot)).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
+    expect(() =>
+      open(protectedInput(), key, callback, openingProfile(key), new Proxy(rootProfile(), {})),
+    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(callback).not.toHaveBeenCalled();
   });
 
   it('rejects a wrong scoped key or mismatched key fingerprint without exposing material', () => {
     const wrongKey = scopedKey({ keyHex: 'c'.repeat(64) });
-    expect(() =>
-      withOpenedCbeBirrDepositProofReference(protectedInput(), wrongKey, () => ({ ok: true })),
-    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(() => open(protectedInput(), wrongKey, () => ({ ok: true }))).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
     try {
-      withOpenedCbeBirrDepositProofReference(protectedInput(), wrongKey, () => ({ ok: true }));
+      open(protectedInput(), wrongKey, () => ({ ok: true }));
     } catch (error) {
       expect(String(error)).not.toContain(encryptionMaster);
       expect(String(error)).not.toContain(fingerprintMaster);
@@ -108,11 +220,7 @@ describe('CBE Birr protected-reference opening boundary', () => {
   ])('fails closed for altered input %#', (alter) => {
     const callback = vi.fn(() => ({ ok: true }));
     expect(() =>
-      withOpenedCbeBirrDepositProofReference(
-        alter(protectedInput()) as CbeBirrProtectedReferenceOpeningInput,
-        scopedKey(),
-        callback,
-      ),
+      open(alter(protectedInput()) as CbeBirrProtectedReferenceOpeningInput, scopedKey(), callback),
     ).toThrow(CbeBirrReferenceOpeningError);
     expect(callback).not.toHaveBeenCalled();
   });
@@ -124,9 +232,9 @@ describe('CBE Birr protected-reference opening boundary', () => {
       keyId: `sha256:${createHash('sha256').update(otherChild).digest('hex')}`,
     });
     otherChild.fill(0);
-    expect(() =>
-      withOpenedCbeBirrDepositProofReference(protectedInput(), otherKey, () => ({ ok: true })),
-    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(() => open(protectedInput(), otherKey, () => ({ ok: true }))).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
   });
 
   it.each([
@@ -138,11 +246,7 @@ describe('CBE Birr protected-reference opening boundary', () => {
   ])('rejects altered key metadata %# before invoking the callback', (alter) => {
     const callback = vi.fn(() => ({ ok: true }));
     expect(() =>
-      withOpenedCbeBirrDepositProofReference(
-        protectedInput(),
-        alter(scopedKey()) as CbeBirrScopedReferenceOpeningKey,
-        callback,
-      ),
+      open(protectedInput(), alter(scopedKey()) as CbeBirrScopedReferenceOpeningKey, callback),
     ).toThrow(CbeBirrReferenceOpeningError);
     expect(callback).not.toHaveBeenCalled();
   });
@@ -156,27 +260,27 @@ describe('CBE Birr protected-reference opening boundary', () => {
     for (const [key, value] of Object.entries(protectedInput()).slice(1)) {
       Object.defineProperty(accessor, key, { enumerable: true, value });
     }
+    expect(() => open(accessor, scopedKey(), () => ({ ok: true }))).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
     expect(() =>
-      withOpenedCbeBirrDepositProofReference(accessor, scopedKey(), () => ({ ok: true })),
-    ).toThrow(CbeBirrReferenceOpeningError);
-    expect(() =>
-      withOpenedCbeBirrDepositProofReference(
+      open(
         new Proxy(protectedInput(), {}) as CbeBirrProtectedReferenceOpeningInput,
         scopedKey(),
         () => ({ ok: true }),
       ),
     ).toThrow(CbeBirrReferenceOpeningError);
-    expect(() =>
-      withOpenedCbeBirrDepositProofReference(protectedInput(), scopedKey(), async () => true),
-    ).toThrow(CbeBirrReferenceOpeningError);
-    expect(() =>
-      withOpenedCbeBirrDepositProofReference(protectedInput(), scopedKey(), (value) => value),
-    ).toThrow(CbeBirrReferenceOpeningError);
+    expect(() => open(protectedInput(), scopedKey(), async () => true)).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
+    expect(() => open(protectedInput(), scopedKey(), (value) => value)).toThrow(
+      CbeBirrReferenceOpeningError,
+    );
   });
 
   it('does not accept the API master or fingerprint master shape as a scoped runtime key', () => {
     expect(() =>
-      withOpenedCbeBirrDepositProofReference(
+      open(
         protectedInput(),
         {
           encryptionSecret: encryptionMaster,

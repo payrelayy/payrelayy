@@ -6,6 +6,10 @@ export const CBE_BIRR_REFERENCE_OPENING_PROVIDER = 'cbe_birr' as const;
 export const CBE_BIRR_REFERENCE_OPENING_PURPOSE = 'deposit-proof-reference-opening' as const;
 export const CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION = 2 as const;
 export const CBE_BIRR_REFERENCE_OPENING_KEY_VERSION = 2 as const;
+export const CBE_BIRR_REFERENCE_OPENING_PROFILE_VERSION = 1 as const;
+export const CBE_BIRR_REFERENCE_OPENING_ROOT_PROFILE_VERSION = 2 as const;
+export const CBE_BIRR_REFERENCE_OPENING_SOURCE_PROFILE =
+  'cbe_birr_official_receipt_lookup_v1' as const;
 
 const HEX_KEY_PATTERN = /^[0-9a-f]{64}$/u;
 const KEY_ID_PATTERN = /^sha256:[0-9a-f]{64}$/u;
@@ -30,6 +34,26 @@ export interface CbeBirrProtectedReferenceOpeningInput {
   readonly ciphertextProfileVersion: typeof CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION;
   readonly encryptionKeyVersion: typeof CBE_BIRR_REFERENCE_OPENING_KEY_VERSION;
   readonly providerCode: typeof CBE_BIRR_REFERENCE_OPENING_PROVIDER;
+}
+
+/** Nonsecret v2 root identity independently approved for the proof-producing processes. */
+export interface CbeBirrApprovedProofRootProfile {
+  readonly encryptionMasterFingerprint: string;
+  readonly fingerprintMasterFingerprint: string;
+  readonly version: typeof CBE_BIRR_REFERENCE_OPENING_ROOT_PROFILE_VERSION;
+}
+
+/** Nonsecret worker manifest. Its provenance and immutability must be established by deployment. */
+export interface CbeBirrReferenceOpeningProfile {
+  readonly version: typeof CBE_BIRR_REFERENCE_OPENING_PROFILE_VERSION;
+  readonly providerCode: typeof CBE_BIRR_REFERENCE_OPENING_PROVIDER;
+  readonly purpose: typeof CBE_BIRR_REFERENCE_OPENING_PURPOSE;
+  readonly sourceProfile: typeof CBE_BIRR_REFERENCE_OPENING_SOURCE_PROFILE;
+  readonly ciphertextProfileVersion: typeof CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION;
+  readonly encryptionKeyVersion: typeof CBE_BIRR_REFERENCE_OPENING_KEY_VERSION;
+  readonly keyId: string;
+  readonly rootEncryptionMasterFingerprint: string;
+  readonly rootFingerprintMasterFingerprint: string;
 }
 
 export class CbeBirrReferenceOpeningError extends Error {
@@ -105,12 +129,15 @@ function isThenable(value: unknown): boolean {
 
 /**
  * Opens exactly one provider-bound reference for a synchronous trusted callback. The plaintext
- * buffer and all decoded key/envelope material are wiped before this function returns. JavaScript
- * strings cannot be erased; the trusted callback must not retain or expose the raw reference.
+ * buffer and all decoded key/envelope material are wiped before this function returns. The worker
+ * manifest must agree with an independently approved producer root profile before decryption.
+ * JavaScript strings cannot be erased; the trusted callback must not retain the raw reference.
  */
 export function withOpenedCbeBirrDepositProofReference<Result>(
   inputCandidate: CbeBirrProtectedReferenceOpeningInput,
   keyCandidate: CbeBirrScopedReferenceOpeningKey,
+  profileCandidate: CbeBirrReferenceOpeningProfile,
+  approvedRootProfileCandidate: CbeBirrApprovedProofRootProfile,
   useReference: (rawReference: string) => Result,
 ): Result {
   let key: Buffer | undefined;
@@ -136,9 +163,27 @@ export function withOpenedCbeBirrDepositProofReference<Result>(
       'keyId',
       'keyHex',
     ]);
+    const profile = exactDataProperties(profileCandidate, [
+      'version',
+      'providerCode',
+      'purpose',
+      'sourceProfile',
+      'ciphertextProfileVersion',
+      'encryptionKeyVersion',
+      'keyId',
+      'rootEncryptionMasterFingerprint',
+      'rootFingerprintMasterFingerprint',
+    ]);
+    const approvedRootProfile = exactDataProperties(approvedRootProfileCandidate, [
+      'encryptionMasterFingerprint',
+      'fingerprintMasterFingerprint',
+      'version',
+    ]);
     if (
       input === undefined ||
       scopedKey === undefined ||
+      profile === undefined ||
+      approvedRootProfile === undefined ||
       input.providerCode !== CBE_BIRR_REFERENCE_OPENING_PROVIDER ||
       input.ciphertextProfileVersion !== CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION ||
       input.encryptionKeyVersion !== CBE_BIRR_REFERENCE_OPENING_KEY_VERSION ||
@@ -154,6 +199,30 @@ export function withOpenedCbeBirrDepositProofReference<Result>(
       !KEY_ID_PATTERN.test(scopedKey.keyId) ||
       typeof scopedKey.keyHex !== 'string' ||
       !HEX_KEY_PATTERN.test(scopedKey.keyHex) ||
+      profile.version !== CBE_BIRR_REFERENCE_OPENING_PROFILE_VERSION ||
+      profile.providerCode !== CBE_BIRR_REFERENCE_OPENING_PROVIDER ||
+      profile.purpose !== CBE_BIRR_REFERENCE_OPENING_PURPOSE ||
+      profile.sourceProfile !== CBE_BIRR_REFERENCE_OPENING_SOURCE_PROFILE ||
+      profile.ciphertextProfileVersion !== CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION ||
+      profile.encryptionKeyVersion !== CBE_BIRR_REFERENCE_OPENING_KEY_VERSION ||
+      typeof profile.keyId !== 'string' ||
+      !KEY_ID_PATTERN.test(profile.keyId) ||
+      profile.keyId !== scopedKey.keyId ||
+      typeof profile.rootEncryptionMasterFingerprint !== 'string' ||
+      !KEY_ID_PATTERN.test(profile.rootEncryptionMasterFingerprint) ||
+      typeof profile.rootFingerprintMasterFingerprint !== 'string' ||
+      !KEY_ID_PATTERN.test(profile.rootFingerprintMasterFingerprint) ||
+      profile.rootEncryptionMasterFingerprint === profile.rootFingerprintMasterFingerprint ||
+      approvedRootProfile.version !== CBE_BIRR_REFERENCE_OPENING_ROOT_PROFILE_VERSION ||
+      typeof approvedRootProfile.encryptionMasterFingerprint !== 'string' ||
+      !KEY_ID_PATTERN.test(approvedRootProfile.encryptionMasterFingerprint) ||
+      typeof approvedRootProfile.fingerprintMasterFingerprint !== 'string' ||
+      !KEY_ID_PATTERN.test(approvedRootProfile.fingerprintMasterFingerprint) ||
+      approvedRootProfile.encryptionMasterFingerprint ===
+        approvedRootProfile.fingerprintMasterFingerprint ||
+      profile.rootEncryptionMasterFingerprint !== approvedRootProfile.encryptionMasterFingerprint ||
+      profile.rootFingerprintMasterFingerprint !==
+        approvedRootProfile.fingerprintMasterFingerprint ||
       typeof useReference !== 'function' ||
       nodeUtilTypes.isProxy(useReference)
     ) {

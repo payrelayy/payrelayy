@@ -96,10 +96,11 @@ whitespace, and wrong-provider input. This is a local code-shape review only: th
 worker key lifecycle, lease, runtime import, or provider acceptance, and every lookup and financial
 capability remains false. See [cbe-birr-proof-open-candidate.md](cbe-birr-proof-open-candidate.md).
 
-A separate dormant CBE Birr opening package now demonstrates the provider-scoped child-key and
-synchronous callback shape with synthetic proof envelopes. This does not establish an independent
-worker key lifecycle or permit a worker, lease, provider lookup, or financial action; blockers 7,
-8, 10, and 11 remain open.
+A separate dormant CBE Birr opening package now demonstrates the provider-scoped child-key,
+worker-profile-to-producer-root identity check, and synchronous callback shape with synthetic proof
+envelopes. No deployment pins the worker profile or provides independent key custody, and no
+worker, lease, provider lookup, or financial action is permitted; blockers 7, 8, 10, and 11 remain
+open.
 
 The local `receiver_lookup_normalization_unreviewed` blocker is closed only for a synthetic v2
 envelope bound to a supplied receiver-revision UUID and version, then passed as the

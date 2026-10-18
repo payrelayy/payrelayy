@@ -64,10 +64,11 @@ Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker
    receiving only the minimum decryption material and an audited rotation/recovery path.
-2. Review and deploy the default-off Owner API and its grant, then add a guarded Owner dashboard
-   action. Check the saved result without exposing the phone or lookup material; do not treat SQL
-   envelope-shape checks as proof of a valid key or phone. Obtain separate approval before changing
-   the active receiver revision.
+2. Review and deploy the default-off Owner API before applying its Owner-only grant. The route
+   remains absent while the flag is off, and startup tolerates the missing grant only in that
+   state. Add a guarded Owner dashboard action later. Check the saved result without exposing the
+   phone or lookup material; do not treat SQL envelope-shape checks as proof of a valid key or
+   phone. Obtain separate approval before changing the active receiver revision.
 3. Bind each new CBE Birr payment instruction and proof to that exact revision. A lookup must not
    substitute whichever receiver happens to be active later.
 4. Add a narrow, prelease-safe worker access boundary that returns only the needed protected

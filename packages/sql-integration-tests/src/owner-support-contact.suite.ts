@@ -133,6 +133,27 @@ export function registerOwnerSupportContactSqlTests(
       });
     });
 
+    it('keeps the default-off Owner catalog safe before the separate v2 receiver grant', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        await client.query(`
+          revoke execute on function app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text
+          ) from fetanagent_owner_control
+        `);
+        const row = await runActualOwnerPreflight(client);
+        expect(row.cbe_birr_receiver_v2_rotate_allowed).toBe(false);
+        expect(row.exact_app_execute_count).toBe(true);
+        expect(row.all_other_app_functions_denied).toBe(true);
+        expect(
+          Object.entries(row).filter(
+            ([check, value]) => check !== 'cbe_birr_receiver_v2_rotate_allowed' && value !== true,
+          ),
+        ).toEqual([]);
+      });
+    });
+
     it.each(supportRoutines)(
       'rejects a missing support grant for %s at actual startup',
       async (signature, check) => {

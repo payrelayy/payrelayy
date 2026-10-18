@@ -60,7 +60,7 @@ The only valid-request disposition remains `blocked`, with reason
 
 ## Exact remaining blockers
 
-The contract returns these 13 blockers in this fixed order:
+The contract returns these 11 blockers in this fixed order:
 
 1. `official_receipt_live_response_contract_unattested`
 2. `official_receipt_live_transport_absent`
@@ -70,11 +70,26 @@ The contract returns these 13 blockers in this fixed order:
 6. `receiver_lookup_metadata_inference_or_backfill_forbidden`
 7. `submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root`
 8. `submitted_reference_independent_worker_decrypt_lifecycle_absent`
-9. `lookup_reference_normalization_unreviewed`
-10. `receiver_lookup_normalization_unreviewed`
-11. `canonical_reference_normalization_unreviewed`
-12. `prelease_prerequisite_gate_absent`
-13. `lease_boundary_returns_protected_material`
+9. `canonical_reference_normalization_unreviewed`
+10. `prelease_prerequisite_gate_absent`
+11. `lease_boundary_returns_protected_material`
+
+The local `lookup_reference_normalization_unreviewed` blocker is closed for the narrow path from
+provider-aware v2 CBE Birr proof capture to the unwired receipt transport's `TID` input. An offline
+cross-package test verifies 8–32 ASCII alphanumeric acceptance, uppercase canonicalization inside
+v2 protection, opening the v2 envelope with an internal CBE-only candidate, exact `TID`
+preservation, and rejection of lowercase direct lookup input, legacy punctuation, Unicode,
+whitespace, and wrong-provider input. This is a local code-shape review only: the candidate has no
+worker key lifecycle, lease, runtime import, or provider acceptance, and every lookup and financial
+capability remains false. See [cbe-birr-proof-open-candidate.md](cbe-birr-proof-open-candidate.md).
+
+The local `receiver_lookup_normalization_unreviewed` blocker is closed only for a synthetic v2
+envelope bound to a supplied receiver-revision UUID and version, then passed as the
+full `251` plus nine-digit phone to the unwired receipt transport. A synthetic cross-package test
+pins the exact phone and nine-digit `PH` derivation and rejects truncated, changed, or Unicode
+inputs. This does not establish that an Owner created the revision, that its keys were independently
+provisioned, or that a real PDF credits the configured receiver. All provider and financial
+capabilities remain false.
 
 The obsolete broad `source_permission_unproven` blocker has been replaced, not merely removed. The
 offline route and synthetic parser are now explicit, while the exact live response contract and
@@ -121,16 +136,17 @@ The remaining blockers preserve the existing safety design:
    receiver-provenance blocker therefore remains.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
-3. **Normalization ownership.** Submitted capture, synthetic fixture reduction, receiver lookup,
-   and canonical settlement profiles require an exact joint compatibility review. No label implies
-   equivalence.
+3. **Normalization ownership.** Synthetic fixture reduction and canonical settlement profiles
+   still require a broader joint compatibility review. The local v2 proof-to-`TID` and
+   receiver-revision-to-`PH` format checks do not establish provider acceptance, receipt credit
+   identity, or profile equivalence.
 4. **Prelease-safe acquisition.** Metadata preflight must complete before lease mutation or any
    protected-material return. Later work requires an opaque handle and a narrow callback-scoped
    decrypt boundary.
 
 ## Normalization ownership inventory
 
-The metadata-only inventory now distinguishes five existing boundaries. Version 2 of the inventory
+The metadata-only inventory now distinguishes five existing boundaries. Version 4 of the inventory
 records these facts without promoting either protection key version to a normalization version:
 
 | Boundary                              | Current status                                                                                                                                                                                                                                                       |
@@ -143,16 +159,16 @@ records these facts without promoting either protection key version to a normali
 
 Each observed source boundary is independently pinned by a source attestation in tests. Every
 boundary remains `authoritativeOwner: unassigned` and `jointReviewStatus: not_completed`.
-All ten pairwise compatibility relationships remain `not_established`; transformation reuse and
-implicit upgrades remain false. In particular, neither the older v1 reference format nor a
+All ten pairwise compatibility relationships among these five profiles remain `not_established`;
+transformation reuse and implicit upgrades remain false. In particular, neither the older v1 reference format nor a
 9-digit receiver value may be silently converted into the provider-aware v2 reference or the
 full 12-digit receiver input or the resulting nine-digit official lookup selector. This inventory accepts no references, receiver digits,
 ciphertext, or keys, and it authorizes no decrypt, lookup, lease, or credit.
 
 An [offline normalization candidate](cbe-birr-normalization-candidate.md) now specifies and tests
-the narrow reference and lookup-selector formats with synthetic values only. It has no runtime
-consumer and does not assign ownership, establish cross-profile compatibility, or clear any of the
-three normalization blockers above.
+the narrow reference and lookup-selector formats with synthetic values only. Its reference rule is
+now checked against the actual v2 protection and unwired transport validators. The candidate has
+no runtime consumer and does not assign ownership or clear either remaining normalization blocker.
 
 ## Pure boundary
 

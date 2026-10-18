@@ -5,7 +5,7 @@ import { isProxy } from 'node:util/types';
  * repository. It does not normalize a value, declare the profiles equivalent, select an
  * authoritative profile, or authorize runtime use.
  */
-export const CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION = 2 as const;
+export const CBE_BIRR_NORMALIZATION_OWNERSHIP_CONTRACT_VERSION = 4 as const;
 export const CBE_BIRR_SUBMITTED_REFERENCE_CAPTURE_SOURCE_ATTESTATION =
   'sha256:56a14b1b377a2d64de345ae03d390d0a01fa46f91a3af8017ed2137e74671195' as const;
 export const CBE_BIRR_PROVIDER_AWARE_PROOF_CAPTURE_SOURCE_ATTESTATION =
@@ -16,10 +16,40 @@ export const CBE_BIRR_OFFLINE_FIXTURE_NORMALIZER_SOURCE_ATTESTATION =
   'sha256:362779764454f371171796cc7bf37e604732bad78694c10ebe0917afa8d3ea61' as const;
 
 export const CBE_BIRR_NORMALIZATION_OWNERSHIP_REMAINING_BLOCKERS = Object.freeze([
-  'lookup_reference_normalization_unreviewed',
-  'receiver_lookup_normalization_unreviewed',
   'canonical_reference_normalization_unreviewed',
 ] as const);
+
+/**
+ * Scoped source review of the local v2 CBE proof capture and the unwired receipt transport's
+ * TID validator. Synthetic cross-package tests pin their 8–32 ASCII alphanumeric and uppercase
+ * behavior. This does not attest provider acceptance, authorize decryption, or complete the
+ * separate receiver/canonical-reference ownership review.
+ */
+export const CBE_BIRR_LOOKUP_REFERENCE_LOCAL_REVIEW = Object.freeze({
+  reviewVersion: 1 as const,
+  scope: 'provider_aware_proof_v2_to_unwired_receipt_tid' as const,
+  disposition: 'local_format_compatible' as const,
+  providerAcceptanceAttested: false as const,
+  workerDecryptionAllowed: false as const,
+  runtimeWiringAllowed: false as const,
+  financialActionAllowed: false as const,
+});
+
+/**
+ * Scoped source review of a synthetic v2 receiver-revision envelope through the unwired receipt
+ * transport's full-phone validator and PH selector. It does not prove receiver/key provenance,
+ * live PDF credit identity, or authority to fetch a receipt.
+ */
+export const CBE_BIRR_RECEIVER_LOOKUP_LOCAL_REVIEW = Object.freeze({
+  reviewVersion: 1 as const,
+  scope: 'receiver_revision_v2_to_unwired_receipt_ph' as const,
+  disposition: 'local_format_compatible' as const,
+  receiverRevisionProvenanceAttested: false as const,
+  keyProvenanceAttested: false as const,
+  receiptCreditIdentityAttested: false as const,
+  runtimeWiringAllowed: false as const,
+  financialActionAllowed: false as const,
+});
 
 const submittedReferenceTransformations = Object.freeze([
   'reject_input_changed_by_trim',

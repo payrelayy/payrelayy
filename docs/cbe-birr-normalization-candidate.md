@@ -11,9 +11,11 @@ consumer, transport, secret, database access, or financial action.
 | Configured receiver phone                           | Exactly `251` plus nine ASCII digits                                 | No inference from a 9-digit Owner value                                               |
 | Official receipt `PH` selector                      | Last nine digits of that validated full receiver phone               | `PH` is not receiver evidence; the PDF credit account needs an independent comparison |
 
-The candidate deliberately does not update the existing normalization-ownership inventory or
-clear any authoritative-lookup blocker. Its relationship to current submitted-reference protection,
-receiver revision protection, receipt parsing, and settlement still needs an explicit joint review.
+The candidate alone does not update the normalization-ownership inventory or clear an
+authoritative-lookup blocker. Separate offline cross-package reviews establish the local
+provider-aware v2 proof-to-unwired-transport `TID` relationship and the newly protected v2 receiver
+revision-to-`PH` relationship. These reviews do not prove revision or key provenance, that the PDF
+credited the configured receiver, receipt parsing, provider acceptance, or settlement.
 It must not be imported into the bot, API, Companion, or verifier as an authorization decision.
 No live CBE Birr reference, account, receipt, or other personal data is stored here.
 

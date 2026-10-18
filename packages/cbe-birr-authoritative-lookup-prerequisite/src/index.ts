@@ -11,7 +11,7 @@ export * from './receiver-revision-metadata.js';
  * financial claim. It only records the currently reviewed reasons an authoritative lookup cannot
  * begin.
  */
-export const CBE_BIRR_AUTHORITATIVE_LOOKUP_PREREQUISITE_CONTRACT_VERSION = 1 as const;
+export const CBE_BIRR_AUTHORITATIVE_LOOKUP_PREREQUISITE_CONTRACT_VERSION = 3 as const;
 export const CBE_BIRR_LEGACY_LOOKUP_MATERIAL_SHAPE =
   'cbe_birr_shadow_protected_lookup_material_legacy' as const;
 
@@ -24,8 +24,6 @@ export const CBE_BIRR_AUTHORITATIVE_LOOKUP_REMAINING_BLOCKERS = Object.freeze([
   'receiver_lookup_metadata_inference_or_backfill_forbidden',
   'submitted_reference_encryption_and_fingerprint_subkeys_share_api_master_provisioning_root',
   'submitted_reference_independent_worker_decrypt_lifecycle_absent',
-  'lookup_reference_normalization_unreviewed',
-  'receiver_lookup_normalization_unreviewed',
   'canonical_reference_normalization_unreviewed',
   'prelease_prerequisite_gate_absent',
   'lease_boundary_returns_protected_material',

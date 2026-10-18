@@ -62,19 +62,22 @@ with an exact Owner confirmation, expected next version, idempotency UUID, full 
 the existing Owner origin and CSRF headers. The request UUID is also the new immutable revision
 UUID, so a retry uses the same identity. The adapter protects both v1 display and v2 lookup
 material in memory and passes only ciphertext, fingerprints, masks, and metadata to the existing
-atomic SQL function. The Owner response contains no full phone, ciphertext, or fingerprint. No
-dashboard button, deployment, key provision, receiver revision, provider request, payment switch,
-or Player credit is part of this code phase.
+atomic SQL function. The Owner response contains no full phone, ciphertext, or fingerprint. A
+guarded dashboard form is rendered only when the same default-off route flag and key profile are
+enabled. It requires a successful masked receiver-history read, checks the entered phone against the
+active mask, and clears the phone after a request. The SQL function remains the final same-account
+guard. This dashboard change does not deploy the app, provision keys, change a receiver or switch,
+make a provider request, or credit a Player.
 
 Before any runtime use, a separately reviewed change must:
 
 1. Provision fresh, independently managed encryption and fingerprint masters, with the worker
    receiving only the minimum decryption material and an audited rotation/recovery path.
-2. Review and deploy the default-off Owner API before applying its Owner-only grant. The route
-   remains absent while the flag is off, and startup tolerates the missing grant only in that
-   state. Add a guarded Owner dashboard action later. Check the saved result without exposing the
-   phone or lookup material; do not treat SQL envelope-shape checks as proof of a valid key or
-   phone. Obtain separate approval before changing the active receiver revision.
+2. Review and deploy the private key mounts and default-off Owner configuration before enabling
+   the route. The Owner-only grant is present, but the route and form remain absent while the flag
+   is off. Check the saved result without exposing the phone or lookup material; do not treat SQL
+   envelope-shape checks as proof of a valid key or phone. Obtain separate approval before
+   changing the active receiver revision.
 3. Bind each new CBE Birr payment instruction and proof to that exact revision. A lookup must not
    substitute whichever receiver happens to be active later.
 4. Add a narrow, prelease-safe worker access boundary that returns only the needed protected

@@ -254,6 +254,11 @@ function ownerBrowserHarness(
     providerCode: element('#receiver-provider'),
     rotationReason: element('#receiver-rotation-reason'),
   });
+  element('#cbe-upgrade-form').elements = namedElements({
+    accountReference: element('#cbe-upgrade-phone'),
+    confirmation: element('#cbe-upgrade-confirmation'),
+    submit: element('#cbe-upgrade-submit'),
+  });
   const kemerbetAgentProfileReason = element('#kemerbet-agent-profile-reason');
   kemerbetAgentProfileReason.value = 'initial_configuration';
   element('#kemerbet-agent-profile-form').elements = namedElements({
@@ -1600,6 +1605,96 @@ describe('Owner dashboard browser authentication boundary', () => {
     expect(number.pattern).toBe('[0-9]{9,24}');
     expect(number.minLength).toBe(9);
     expect(number.maxLength).toBe(24);
+  });
+
+  it('upgrades only the same active CBE Birr phone and accepts protected history', async () => {
+    const initial = {
+      accountHolderName: 'Synthetic Receiver',
+      accountReferenceMasked: '***3456',
+      activeFrom: '2026-10-18T15:00:00.000Z',
+      protectedReference: true,
+      providerCode: 'cbe_birr',
+      providerDisplayName: 'CBE Birr',
+      receiverRevisionId: '33333333-3333-4333-8333-333333333333',
+      receiverStatus: 'active',
+      revision: 1,
+      rotationReason: 'initial_configuration',
+    };
+    const upgraded = {
+      ...initial,
+      activeFrom: '2026-10-18T16:00:00.000Z',
+      receiverRevisionId: '11111111-1111-4111-8111-111111111111',
+      revision: 2,
+      rotationReason: 'protection_upgrade',
+    };
+    let history: Array<typeof initial & { retiredAt?: string }> = [initial];
+    let requests = 0;
+    let savedRequest: Record<string, unknown> | undefined;
+    let activeTest = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (!activeTest) return undefined;
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: history });
+        if (url === '/v1/owner/cbe-birr-receiver-v2/protection-upgrade') {
+          requests += 1;
+          savedRequest = JSON.parse(String(init.body)) as Record<string, unknown>;
+          history = [
+            { ...initial, receiverStatus: 'inactive', retiredAt: upgraded.activeFrom },
+            upgraded,
+          ];
+          return response(201, {
+            receiver: {
+              accountReferenceMasked: upgraded.accountReferenceMasked,
+              activeFrom: upgraded.activeFrom,
+              lookupProtected: true,
+              receiverRevisionId: upgraded.receiverRevisionId,
+              receiverStatus: upgraded.receiverStatus,
+              revision: upgraded.revision,
+              rotationReason: upgraded.rotationReason,
+            },
+          });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    browser.evaluate("kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true;");
+    activeTest = true;
+    await browser.call('loadReceivers');
+    expect(browser.element('#cbe-upgrade-submit').disabled).toBe(false);
+
+    browser.evaluate('kemerbetSecurityRecoveryRequired = true;');
+    await browser.call('applyKemerbetQuarantineMutationBoundary');
+    expect(browser.element('#cbe-upgrade-submit').disabled).toBe(true);
+    browser.element('#cbe-upgrade-phone').value = '251000003456';
+    browser.element('#cbe-upgrade-confirmation').checked = true;
+    await browser.call('upgradeCbeBirrReceiverProtection');
+    expect(requests).toBe(0);
+    browser.evaluate('kemerbetSecurityRecoveryRequired = false;');
+    await browser.call('applyKemerbetQuarantineMutationBoundary');
+    expect(browser.element('#cbe-upgrade-submit').disabled).toBe(false);
+
+    browser.element('#cbe-upgrade-phone').value = '251000007777';
+    browser.element('#cbe-upgrade-confirmation').checked = true;
+    await browser.call('upgradeCbeBirrReceiverProtection');
+    expect(requests).toBe(0);
+
+    browser.element('#cbe-upgrade-phone').value = '251000003456';
+    await browser.call('upgradeCbeBirrReceiverProtection');
+    expect(requests).toBe(1);
+    expect(savedRequest).toMatchObject({
+      accountHolderName: 'Synthetic Receiver',
+      accountReference: '251000003456',
+      confirmation: 'owner_confirmed_cbe_birr_same_receiver_protection_upgrade',
+      expectedVersion: 2,
+      requestId: upgraded.receiverRevisionId,
+    });
+    expect(browser.element('#cbe-upgrade-phone').value).toBe('');
+    expect(browser.element('#cbe-upgrade-submit').disabled).toBe(true);
+    expect(browser.element('#receiver-list').children).toHaveLength(2);
+    expect(browser.element('#cbe-upgrade-status').textContent).toContain('revision 2 was saved');
+    expect(browser.element('#cbe-upgrade-status').textContent).not.toContain('251000003456');
   });
 
   it.each([201, 503])(

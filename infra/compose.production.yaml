@@ -53,7 +53,7 @@ services:
       OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_FILE: /run/secrets/owner_cbe_birr_lookup_encryption_master
       OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_FILE: /run/secrets/owner_cbe_birr_lookup_fingerprint_master
       OWNER_CBE_BIRR_LOOKUP_PROFILE_FILE: /etc/fetanagent/owner-cbe-birr-receiver-lookup-profile.v2.json
-      INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'false'
+      INTERNAL_OWNER_CBE_BIRR_V2_RECEIVER_ROTATION_ENABLED: 'true'
       OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: ${FETANAGENT_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID:?set the reviewed production assignment signer key ID}
       OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-production-v1
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'

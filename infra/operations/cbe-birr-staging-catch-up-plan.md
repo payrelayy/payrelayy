@@ -58,10 +58,20 @@ migrations, including the four older gaps, passed. The SQL-integration marker by
 After rehearsal, all seven switches remained disabled, all three historical CBE intents and two
 submissions remained, and there were no deposit jobs or execution attempts.
 
-The guarded [`staging-cbe-shadow-verifier-role-lock.sql`](../sql/staging-cbe-shadow-verifier-role-lock.sql)
-and [manual workflow](../../.github/workflows/staging-cbe-shadow-role-lock.yml) prepare the exact
-staging role prerequisite. They require separate approval to merge and run. No role change has
-been applied to staging. A full isolated Supabase restore remains required before migration apply.
+The approved [manual role-lock workflow](../../.github/workflows/staging-cbe-shadow-role-lock.yml)
+ran successfully on merged commit `43b0a4785441fcb992268296e6f31a5a4ebd71ff` (Actions run
+`39134996389`). Independent staging queries confirmed the expired shadow verifier runtime role is
+`NOLOGIN` with zero sessions and the exact post-stop aggregate still matches. A fresh staging
+`plan` on the same commit (Actions run `39135335116`) found 185 pending migrations in the exact
+dry-run order, including the four older gaps. A full isolated Supabase restore remains required
+before migration apply.
+
+The read-only [`reviewed-catch-up preflight`](../sql/staging-cbe-reviewed-catch-up-preflight.sql)
+adds the exact 87-version ledger hash and the locked, idle role to the post-stop checks. It passed
+on staging after the role lock. The separate
+[`post-catch-up verification`](../sql/staging-cbe-post-catch-up-verification.sql) expects the exact
+272-version ledger hash and preserved no-money aggregates; it correctly returns false before
+apply. Neither query performs a migration.
 
 ## Required sequence before a staging catch-up
 

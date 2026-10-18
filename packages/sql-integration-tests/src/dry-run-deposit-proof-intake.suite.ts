@@ -713,27 +713,66 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         );
         expect(receiver.rows).toMatchObject([{ receiver_revision_id: receiverRevisionId }]);
 
-        const instruction = await client.query<{ readonly id: string }>(
-          `with issued as (select clock_timestamp() as instant)
-           insert into app.cbe_birr_payment_instructions (
-             submitting_customer_id, player_account_id, payment_provider_id,
-             provider_code, origin_channel, receiver_revision_id,
-             receiver_version, receiver_rotation_request_id, issued_at, expires_at
-           )
-           select $1::uuid, $2::uuid, $3::uuid, 'cbe_birr', 'telegram',
-                  $4::uuid, $5::integer, $6::uuid,
-                  issued.instant, issued.instant + interval '1 hour'
-             from issued
-           returning id`,
-          [
-            fixture.actorA.customerId,
-            fixture.playerAccountId,
-            providerId,
-            receiverRevisionId,
-            receiver.rows[0]!.revision,
-            rotationRequestId,
-          ],
+        const instructionEvent = await createInboundEvent(
+          client,
+          fixture.actorA,
+          9_131_000_000,
+          '0',
         );
+        const instructionSql = `select instruction_id as id, issued_at, expires_at,
+                                       request_replayed
+                                  from app.issue_telegram_cbe_birr_dry_run_instruction(
+                                    $1::uuid, $2::text, $3::text
+                                  )`;
+        const instructionValues = [instructionEvent, fixture.playerId, payloadHmac('0')];
+        const instruction = await client.query<{
+          readonly id: string;
+          readonly issued_at: Date;
+          readonly expires_at: Date;
+          readonly request_replayed: boolean;
+        }>(instructionSql, instructionValues);
+        expect(instruction.rows).toHaveLength(1);
+        expect(instruction.rows[0]!.request_replayed).toBe(false);
+        expect(
+          instruction.rows[0]!.expires_at.getTime() - instruction.rows[0]!.issued_at.getTime(),
+        ).toBe(3_600_000);
+        expect(Object.keys(instruction.rows[0]!).sort()).toEqual([
+          'expires_at',
+          'id',
+          'issued_at',
+          'request_replayed',
+        ]);
+        expect((await client.query(instructionSql, instructionValues)).rows).toMatchObject([
+          { id: instruction.rows[0]!.id, request_replayed: true },
+        ]);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(instructionSql, [
+              instructionEvent,
+              fixture.playerId,
+              payloadHmac('1'),
+            ]);
+          }),
+        ).rejects.toThrow(/conflicts with its receipt/u);
+        await expect(
+          withSavepoint(client, async () => {
+            await client.query(instructionSql, [
+              instructionEvent,
+              fixture.alternatePlayerId,
+              payloadHmac('0'),
+            ]);
+          }),
+        ).rejects.toThrow(/conflicts with its receipt/u);
+        await expect(
+          queryAsRole(client, 'fetanagent_player_actions', instructionSql, instructionValues),
+        ).rejects.toThrow(/permission denied/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_player_actions',
+            'select * from app.telegram_cbe_birr_dry_run_instruction_receipts limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
         const event = await createInboundEvent(client, fixture.actorA, 9_131_000_001, 'e');
         const proof = (
           await captureTelegramProof(client, {

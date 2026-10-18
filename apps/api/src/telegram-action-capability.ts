@@ -23,6 +23,7 @@ export type TelegramActionSemanticConsumer =
   | 'open_dry_run_deposit_intent'
   | 'capture_dry_run_deposit_reference'
   | 'capture_dry_run_deposit_proof'
+  | 'issue_telegram_cbe_birr_dry_run_instruction'
   | 'capture_telegram_cbe_birr_bound_dry_run_proof'
   | 'capture_telegram_telebirr_shadow_proof'
   | 'capture_telegram_live_telebirr_proof'
@@ -55,6 +56,13 @@ type PlayerIdSubmissionSemanticInput = {
 type TelebirrDestinationSemanticInput = {
   readonly consumer:
     'prepare_telegram_telebirr_destination' | 'prepare_telegram_live_telebirr_destination';
+  readonly originInboundEventId: string;
+  readonly playerId: string;
+  readonly semanticHmacSecret: string;
+};
+
+type CbeBirrInstructionSemanticInput = {
+  readonly consumer: 'issue_telegram_cbe_birr_dry_run_instruction';
   readonly originInboundEventId: string;
   readonly playerId: string;
   readonly semanticHmacSecret: string;
@@ -113,6 +121,7 @@ export type TelegramActionSemanticHmacInput =
   | CapabilityBoundSemanticInput
   | PlayerIdSubmissionSemanticInput
   | TelebirrDestinationSemanticInput
+  | CbeBirrInstructionSemanticInput
   | PlayerIdExpirySemanticInput
   | DepositIntentSemanticInput
   | DepositReferenceSemanticInput
@@ -304,6 +313,15 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
         providerCode: 'telebirr',
         normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
         financialMode: 'live',
+      });
+      break;
+    case 'issue_telegram_cbe_birr_dry_run_instruction':
+      canonicalPayload = JSON.stringify({
+        ...basePayload,
+        platformCode: 'kemerbet',
+        providerCode: 'cbe_birr',
+        normalizedPlayerId: canonicalPlayerIdForSemanticHmac(input.playerId),
+        financialMode: 'dry_run',
       });
       break;
     case 'expire_player_registration_action':

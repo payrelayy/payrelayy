@@ -313,6 +313,32 @@ describe('Telegram Player ID capability protection', () => {
     ).toThrow('instruction ID');
   });
 
+  it('separates CBE Birr dry-run instruction issuance from other Telegram actions', () => {
+    const shared = {
+      originInboundEventId,
+      playerId: 'PLAYER-DEMO-42',
+      semanticHmacSecret: keys.semanticHmacSecret,
+    };
+    const issued = createTelegramActionSemanticHmac({
+      ...shared,
+      consumer: 'issue_telegram_cbe_birr_dry_run_instruction',
+    });
+    expect(issued).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
+    expect(issued).not.toBe(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        consumer: 'prepare_telegram_telebirr_destination',
+      }),
+    );
+    expect(issued).not.toBe(
+      createTelegramActionSemanticHmac({
+        ...shared,
+        playerId: 'DIFFERENT-PLAYER',
+        consumer: 'issue_telegram_cbe_birr_dry_run_instruction',
+      }),
+    );
+  });
+
   it('fails closed on malformed internal identifiers or secrets', () => {
     expect(() =>
       derivePlayerRegistrationCapabilityPresentation({

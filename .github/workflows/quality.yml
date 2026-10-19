@@ -211,6 +211,10 @@ jobs:
       - name: Build and test
         run: pnpm test
 
+      - name: Rehearse synthetic CBE receiver file mounts
+        shell: bash
+        run: bash infra/operations/test-cbe-birr-mounted-custody.sh
+
       - name: Build and check local receipt readers in the bot image
         shell: bash
         run: |

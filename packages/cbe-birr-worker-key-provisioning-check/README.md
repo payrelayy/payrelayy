@@ -51,3 +51,5 @@ Staged files are **not** mounted into a worker. No app or workflow calls this in
 Owner keys or release pins are supplied, and no existing files are replaced. A later deployment
 must separately approve the worker UID and host mount, verify the mounted files with the guarded
 loader, recheck the active revision at use, and define rotation and recovery before CBE can run.
+The disposable Linux bind-mount check and its remaining operational limits are recorded in
+[`docs/cbe-birr-receiver-custody-mount-rehearsal.md`](../../docs/cbe-birr-receiver-custody-mount-rehearsal.md).

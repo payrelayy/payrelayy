@@ -49,23 +49,28 @@ an admitted inbound event, an eligible Player, and a current v2 receiver revisio
 event-to-instruction retry lineage and an exact one-hour window, but returns no payable receiver
 details. The capture candidate can then atomically record a dry-run proof and bind it to
 that instruction. It refuses another customer or Player, rejects a late or retired receiver, and
-cannot attach an older unbound proof on replay. Both candidates require all financial switches
-disabled. Their API adapters bind the event and instruction to separate semantic HMAC consumers.
+cannot attach an older unbound proof on replay. The CBE-only instruction and bound capture now
+require the CBE verification switch disabled while TeleBirr may stay live. The generic unbound
+dry-run capture keeps its all-switches-off gate. Their API adapters bind the event and instruction
+to separate semantic HMAC consumers.
 The private Telegram route now accepts explicit `/cbe_test PLAYER` and
 `/cbe_test_proof TOKEN PLAYER SYNTHCBE0001` staging commands. It is default-off behind
 `TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED`, which requires the staging Player-action target
-and `FINANCIAL_ACTIONS_MODE=dry_run`. The new migration grants only these two RPCs to the
-Player-action group role; it does not grant direct table access. The SQL functions still enforce
-the disabled financial switches independently. The route remains default-off; application and
-migration rollout must be checked for each target. The route displays no payment destination,
-performs no receipt lookup, and cannot credit a Player. V2 receiver provisioning, authoritative
-lookup, and financial activation remain separate work.
+and `FINANCIAL_ACTIONS_MODE=dry_run`. A separate production no-money flag,
+`TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED`, is default-off in the production API
+Compose file and requires the production Player-action target and live API mode. Even when
+explicitly enabled, these commands accept only `SYNTHCBE` references; no payable receiver
+is shown. For this CBE path, the Player-action role has only two narrow RPC grants, not direct table access.
+PostgreSQL independently requires CBE verification disabled. The route performs no receipt
+lookup, verifier job, claim, or Player credit. Deploying or enabling the production flag needs
+a separate review; real CBE intake and financial activation remain separate work.
 
 The routine candidate ledger is a separate inert pointer to one immutable, instruction-bound v2
 proof. Its ungranted enrollment function requires the exact blocked metadata preflight and disabled
 CBE verification switch, then returns only an opaque candidate ID and replay flag. It stores no
 reference, receiver value, amount, or receipt. Enrollment itself does not require TeleBirr's shared
-deposit switches to be disabled, but the existing CBE dry-run proof capture still does. No runtime
+deposit switches to be disabled. The instruction-bound CBE proof capture now requires only CBE
+verification disabled. No runtime
 role can call enrollment or read the ledger; there is no verifier lease, result writer, source
 request, claim, or credit. This does not clear the prelease or protected-material blockers.
 

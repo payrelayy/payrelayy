@@ -226,6 +226,7 @@ services:
       # accepting a proof. No executor or KemerBet final-action capability is mounted here.
       FINANCIAL_ACTIONS_MODE: live
       TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'
+      TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'false'
       API_HOST: 0.0.0.0
       API_PORT: '3000'
       NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate

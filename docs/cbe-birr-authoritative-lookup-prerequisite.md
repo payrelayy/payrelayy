@@ -205,8 +205,9 @@ The remaining blockers preserve the existing safety design:
    protection versions while CBE verification is disabled. It returns no phone or key material.
    Its narrow grant follows the deployed startup catalog allowlist. An internal Owner adapter now
    requires an independently supplied revision UUID/version, checks it against the current SQL
-   snapshot, and returns only those five fields. No route or provisioner calls it yet.
-   Its result is a point-in-time snapshot, so key
+   snapshot, and returns only those five fields. A guarded Owner-only read route accepts an exact
+   Owner-confirmed revision and returns that projection when the existing v2 rotation route flag
+   is enabled; no provisioner calls it yet. Its result is a point-in-time snapshot, so key
    provisioning and later worker use must each recheck the active revision.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.

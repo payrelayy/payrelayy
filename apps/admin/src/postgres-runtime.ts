@@ -54,7 +54,12 @@ export interface OwnerControlPostgresRuntime {
     'arm' | 'current' | 'prepare' | 'status' | 'stop'
   >;
   readonly receivers: Pick<PostgresOwnerReceiverAccounts, 'list' | 'rotate'> &
-    Partial<Pick<PostgresOwnerReceiverAccounts, 'upgradeCbeBirrProtection'>>;
+    Partial<
+      Pick<
+        PostgresOwnerReceiverAccounts,
+        'readCbeBirrProvisioningSnapshot' | 'upgradeCbeBirrProtection'
+      >
+    >;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &

@@ -12,6 +12,13 @@ declare
 begin
   -- Never erase the only redeemed invite while a financial or status path
   -- could still depend on that row.
+  perform 1 from app.feature_switches
+   where feature_key in (
+     'cbe_birr_authoritative_verification', 'deposit_execution',
+     'payment_verification', 'private_live_deposit_pilot',
+     'telebirr_authoritative_verification', 'withdrawal_collection',
+     'withdrawal_validation'
+   ) for update;
   if (select count(*) = 13
              and bool_and(pg_catalog.strpos(p.prosrc, 'telegram_beta_invites') = 0)
         from pg_catalog.pg_proc p

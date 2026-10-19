@@ -49,9 +49,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_REF" != 'refs/heads/main' &&
-                "$GITHUB_REF" != 'refs/heads/codex/telebirr-immediate-outcomes' ]]; then
-            echo '::error::This workflow may run only from main or the reviewed PR 2 staging branch.'
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo '::error::This workflow may run only from the main branch.'
             exit 1
           fi
 

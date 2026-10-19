@@ -337,6 +337,9 @@ importers:
 
   packages/cbe-birr-authoritative-receipt-transport:
     dependencies:
+      '@fetanagent/cbe-birr-authoritative-lookup-prerequisite':
+        specifier: workspace:*
+        version: link:../cbe-birr-authoritative-lookup-prerequisite
       '@fetanagent/cbe-birr-authoritative-pdf-parser':
         specifier: workspace:*
         version: link:../cbe-birr-authoritative-pdf-parser

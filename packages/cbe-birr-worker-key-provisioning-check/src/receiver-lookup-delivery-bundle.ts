@@ -34,6 +34,7 @@ const SNAPSHOT_KEYS = [
   'encryptionKeyVersion',
   'fingerprintKeyVersion',
 ] as const;
+const preparedBundles = new WeakSet<object>();
 
 export interface CbeBirrReceiverDeliveryBundleInput {
   readonly candidate: CbeBirrReceiverProvisioningCandidate;
@@ -220,13 +221,22 @@ export async function prepareCbeBirrReceiverDeliveryBundle(
       ),
     );
     const approvedPins = Object.freeze({ ...candidate.proposedPins });
-    return Object.freeze({
+    const bundle = Object.freeze({
       disposition: 'offline_delivery_bundle_only',
       approvedPins,
       files: Object.freeze(createdFiles) as CbeBirrReceiverDeliveryBundle['files'],
     });
+    preparedBundles.add(bundle);
+    return bundle;
   } catch {
     for (const file of createdFiles) file.bytes.fill(0);
     throw new CbeBirrReceiverDeliveryBundleError();
   }
+}
+
+/** Package-internal provenance check; copying a bundle does not retain install authority. */
+export function wasPreparedCbeBirrReceiverDeliveryBundle(
+  bundle: unknown,
+): bundle is CbeBirrReceiverDeliveryBundle {
+  return typeof bundle === 'object' && bundle !== null && preparedBundles.has(bundle);
 }

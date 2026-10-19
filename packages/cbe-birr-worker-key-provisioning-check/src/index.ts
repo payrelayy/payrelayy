@@ -17,6 +17,17 @@ export {
   type CbeBirrReceiverDeliveryFile,
 } from './receiver-lookup-delivery-bundle.js';
 
+export {
+  CBE_BIRR_RECEIVER_PRIVATE_STAGE_ROOT,
+  CbeBirrReceiverPrivateStageError,
+  stageCbeBirrReceiverDeliveryBundle,
+  type CbeBirrReceiverPrivateStageInput,
+  type CbeBirrReceiverPrivateStageDependencies,
+  type CbeBirrReceiverStageHandle,
+  type CbeBirrReceiverStageStat,
+  type CbeBirrReceiverStageFileSystem,
+} from './receiver-lookup-private-stage.js';
+
 import {
   CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION,
   CBE_BIRR_REFERENCE_OPENING_CONTRACT_VERSION,

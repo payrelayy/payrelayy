@@ -168,6 +168,15 @@ receiver-material protection, worker decryption, normalization ownership, prelea
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of
 those capabilities is implied by an opaque PDF observation.
 
+An internal no-money assessment now combines the protected-receiver one-fetch parser result with
+the immutable instruction's issue, expiry, and submission times. It gives a consistent advisory
+result only for the exact PDF `Credit Account` match, completed Send Money receipt, reconciled
+fees, 25–25,000 ETB principal, active receiver revision, and a whole displayed minute inside the
+instruction and freshness windows. It returns the principal without fees, but fixes source
+attestation, runtime wiring, claiming, and financial action to false. An unavailable, ambiguous,
+out-of-range, retired, or late receipt goes to advisory review. This is not an application route,
+database result, duplicate check, or permission to credit a Player.
+
 The internal one-fetch composition now validates and snapshots a single full `251…` receiver
 phone before the request. Its nine local digits select the official `PH` lookup, while the same
 full configured value is independently compared with the PDF's Credit Account field. Callers

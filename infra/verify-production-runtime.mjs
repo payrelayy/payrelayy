@@ -925,21 +925,69 @@ assert.match(
 );
 const transferBlock = /transfer_files=\(\n([\s\S]*?)\n          \)/u.exec(workflow)?.[1];
 assert.ok(transferBlock, 'the production transfer inventory must exist');
-const transferredBaseFiles = transferBlock
-  .split('\n')
-  .map((line) => line.trim())
-  .filter(Boolean)
-  .reduce((count, line) => {
-    const expansion = /\{([^}]+)\}/u.exec(line)?.[1];
-    return count + (expansion ? expansion.split(',').length : 1);
-  }, 0);
+const operationalTransferBlock =
+  /deploy\|deploy-shadow\|deploy-shadow-intake\)\n\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+;;/u.exec(
+    workflow,
+  )?.[1];
+const inertTransferBlock = /deploy-inert\)\n\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+;;/u.exec(
+  workflow,
+)?.[1];
+assert.ok(operationalTransferBlock, 'the operational transfer inventory must exist');
+assert.ok(inertTransferBlock, 'the inert transfer inventory must exist');
+const transferredNames = (block) =>
+  block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const expansion = /\{([^}]+)\}/u.exec(line)?.[1];
+      return expansion
+        ? expansion.split(',')
+        : [line.replace(/\\$/u, '').trim().replaceAll('"', '').split('/').at(-1)];
+    });
+const baseTransferNames = transferredNames(transferBlock);
+const operationalTransferNames = [
+  ...baseTransferNames,
+  ...transferredNames(operationalTransferBlock),
+];
+const inertTransferNames = [...baseTransferNames, ...transferredNames(inertTransferBlock)];
+assert.equal(new Set(operationalTransferNames).size, operationalTransferNames.length);
+assert.equal(new Set(inertTransferNames).size, inertTransferNames.length);
+const coreRequiredBlock = /local -a required=\(\n([\s\S]*?)\n  \)/u.exec(helper)?.[1];
+assert.ok(coreRequiredBlock, 'the helper required-secret inventory must exist');
+for (const name of coreRequiredBlock.split('\n').map((line) => line.trim())) {
+  assert.ok(baseTransferNames.includes(name), `production transfer omits required file ${name}`);
+}
 const helperBaseCount = Number(
   /local_count="\$\(find[^\n]+\n    expected_count=(\d+)/u.exec(helper)?.[1],
 );
+const helperCountBlock =
+  /local_count="\$\(find[\s\S]*?\[\[ "\$local_count" -eq "\$expected_count"/u.exec(helper)?.[0];
+assert.ok(helperCountBlock, 'the helper bundle count gate must exist');
+const [
+  betaFiles,
+  operationalFiles,
+  routineFiles,
+  paidPollFiles,
+  paidSettlementFiles,
+  companionFiles,
+] = [...helperCountBlock.matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu)].map(
+  (match) => Number(match[1]),
+);
+assert.ok(betaFiles > 0, 'legacy beta rollback accounting must remain explicit');
+assert.match(compose, /^  production-companion-device-bridge:/mu);
+assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'/u);
 assert.equal(
-  helperBaseCount,
-  transferredBaseFiles,
-  'the helper base bundle count must match the files sent by the production workflow',
+  helperBaseCount + operationalFiles + companionFiles,
+  operationalTransferNames.length,
+  'the helper operational bundle count must match the flattened workflow transfer',
+);
+assert.equal(
+  helperBaseCount + routineFiles + paidPollFiles + paidSettlementFiles + companionFiles,
+  inertTransferNames.length,
+  'the helper inert bundle count must match the flattened workflow transfer',
 );
 assert.match(helper, /if grep -Fq '  beta-admission:' "\$incoming\/compose\.production\.yaml"/u);
 assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);

@@ -756,7 +756,7 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=37
+    expected_count=33
     if grep -Fq '  beta-admission:' "$incoming/compose.production.yaml"; then
       expected_count=$((expected_count + 4))
     fi
@@ -830,7 +830,7 @@ case "${1:-}" in
       expected_count=$((expected_count + 5))
     fi
     [[ "$local_count" -eq "$expected_count" && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
-      die 'the incoming production bundle shape is wrong'
+      die "the incoming production bundle shape is wrong (files=$local_count expected=$expected_count)"
     [[ -s "$incoming/fetanagent-production-images.tar" && -s "$incoming/compose.production.yaml" &&
       -s "$incoming/telebirr-assignment-signer-key-id" ]] || die 'the incoming production contract is incomplete'
     install -d -m 0700 "$incoming/secrets"

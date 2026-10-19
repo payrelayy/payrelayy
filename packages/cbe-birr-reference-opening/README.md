@@ -19,6 +19,7 @@ log it, persist it, place it in an error, or retain it for asynchronous work. Ja
 cannot be reliably erased, so this contract relies on a trusted callback and narrow lifetime.
 
 The package has no filesystem, environment, PostgreSQL, Supabase, HTTP, provider, settlement, or
-execution surface. Key derivation, independent worker provisioning and rotation, profile-file
-custody, and any runtime or lease integration remain separate prerequisites. No application imports
-this package and its existence does not authorize authoritative lookup or financial action.
+execution surface. The worker's uninvoked no-money candidate adapter imports this opener and
+accepts separately loaded, revision-pinned custody profiles. No worker entrypoint, deployed service,
+lease, claim, or payment action uses it. Key rotation and operational runtime authorization remain
+separate prerequisites.

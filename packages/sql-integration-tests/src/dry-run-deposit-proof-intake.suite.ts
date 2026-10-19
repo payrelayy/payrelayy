@@ -968,6 +968,68 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
         const candidatePreleaseSql =
           'select * from app.preflight_routine_cbe_birr_candidate($1::uuid)';
         const candidateId = candidate.rows[0]!.candidate_id;
+        const noMoneyReadSql = 'select * from app.read_cbe_birr_no_money_candidate($1::uuid)';
+        const noMoneyRead = await queryAsRole<Record<string, unknown>>(
+          client,
+          'fetanagent_cbe_birr_no_money_reader',
+          noMoneyReadSql,
+          [candidateId],
+        );
+        expect(noMoneyRead).toHaveLength(1);
+        expect(noMoneyRead[0]).toMatchObject({
+          candidate_id: candidateId,
+          proof_request_id: proofId,
+          reference_masked: '***A131',
+          reference_profile_version: 2,
+          reference_encryption_key_version: 2,
+          receiver_revision_id: receiverRevisionId,
+          receiver_version: receiver.rows[0]!.revision,
+          receiver_rotation_request_id: rotationRequestId,
+          receiver_lookup_masked: '***0001',
+          receiver_lookup_profile_version: 2,
+          receiver_lookup_encryption_key_version: 2,
+          receiver_active_at_submission: true,
+        });
+        expect(noMoneyRead[0]!.reference_ciphertext).toBe(
+          referenceCiphertext('cbe_birr', 'n', 't'),
+        );
+        expect(noMoneyRead[0]!.receiver_lookup_ciphertext).toBe(
+          `cbe-receiver-v2.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`,
+        );
+        expect(Object.keys(noMoneyRead[0]!).sort()).toEqual([
+          'candidate_id',
+          'instruction_expires_at',
+          'instruction_issued_at',
+          'proof_request_id',
+          'proof_submitted_at',
+          'receiver_active_at_submission',
+          'receiver_lookup_ciphertext',
+          'receiver_lookup_encryption_key_version',
+          'receiver_lookup_masked',
+          'receiver_lookup_profile_version',
+          'receiver_revision_id',
+          'receiver_rotation_request_id',
+          'receiver_version',
+          'reference_ciphertext',
+          'reference_encryption_key_version',
+          'reference_masked',
+          'reference_profile_version',
+        ]);
+        expect(
+          await queryAsRole(client, 'fetanagent_cbe_birr_no_money_reader', noMoneyReadSql, [
+            '99999999-9999-4999-8999-999999999999',
+          ]),
+        ).toEqual([]);
+        await expect(
+          queryAsRole(client, 'fetanagent_player_actions', noMoneyReadSql, [candidateId]),
+        ).rejects.toThrow(/permission denied/u);
+        await expect(
+          queryAsRole(
+            client,
+            'fetanagent_cbe_birr_no_money_reader',
+            'select * from app.deposit_proof_requests limit 1',
+          ),
+        ).rejects.toThrow(/permission denied|row-level security/u);
         const candidatePrelease = await queryAsRole<CbeBirrCandidatePreleaseRow>(
           client,
           'fetanagent_cbe_birr_candidate_prelease',
@@ -1139,6 +1201,14 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
               [candidateId],
             ),
           ).toEqual(candidatePrelease);
+          expect(
+            await queryAsRole<Record<string, unknown>>(
+              client,
+              'fetanagent_cbe_birr_no_money_reader',
+              noMoneyReadSql,
+              [candidateId],
+            ),
+          ).toEqual(noMoneyRead);
         } finally {
           await client.query('rollback to savepoint cbe_candidate_live_telebirr');
           await client.query('release savepoint cbe_candidate_live_telebirr');
@@ -1169,6 +1239,11 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
           ).rejects.toThrow(/requires CBE verification disabled/u);
           await expect(
             queryAsRole(client, 'fetanagent_cbe_birr_candidate_prelease', candidatePreleaseSql, [
+              candidateId,
+            ]),
+          ).rejects.toThrow(/requires verification disabled/u);
+          await expect(
+            queryAsRole(client, 'fetanagent_cbe_birr_no_money_reader', noMoneyReadSql, [
               candidateId,
             ]),
           ).rejects.toThrow(/requires verification disabled/u);

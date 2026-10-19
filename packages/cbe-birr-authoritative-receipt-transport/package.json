@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./no-money": {
+      "types": "./dist/no-money-runtime.d.ts",
+      "default": "./dist/no-money-runtime.js"
     }
   },
   "scripts": {

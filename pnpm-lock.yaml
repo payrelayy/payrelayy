@@ -262,12 +262,25 @@ importers:
 
   apps/worker:
     dependencies:
+      '@fetanagent/cbe-birr-authoritative-receipt-transport':
+        specifier: workspace:*
+        version: link:../../packages/cbe-birr-authoritative-receipt-transport
+      '@fetanagent/cbe-birr-reference-opening':
+        specifier: workspace:*
+        version: link:../../packages/cbe-birr-reference-opening
+      '@fetanagent/cbe-birr-worker-key-custody':
+        specifier: workspace:*
+        version: link:../../packages/cbe-birr-worker-key-custody
       '@fetanagent/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@fetanagent/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+    devDependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
 
   packages/agent-platform-companion-activation-issuer:
     dependencies:

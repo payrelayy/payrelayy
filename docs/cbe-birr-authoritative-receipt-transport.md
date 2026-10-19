@@ -1,13 +1,13 @@
 # CBE Birr authoritative-receipt transport boundary
 
-`@fetanagent/cbe-birr-authoritative-receipt-transport` is an unwired, package-only transport for
+`@fetanagent/cbe-birr-authoritative-receipt-transport` implements a bounded transport for
 the fixed CBE Birr official-receipt route. It can perform at most one request when called with an
-exact request-scoped control. No application imports it, and no configuration, worker, database,
-queue, deployment, or feature switch makes the request reachable.
+exact request-scoped control. A CBE-only, no-money adapter in `apps/worker` now imports its narrow
+advisory subpath, but no worker entrypoint, deployed service, queue, or feature switch invokes it.
 
 The public transport entry point does not parse receipt fields or produce authoritative evidence.
-The separate package-internal advisory composition described below parses the same fetched bytes,
-but is not exported through the package entry point or imported by an application. Every public
+The separate advisory composition described below parses the same fetched bytes. It is exposed
+only through a narrow no-money subpath used by the uninvoked worker adapter. Every public
 transport result fixes
 `responseContractAttested`, `receiptFieldParsingAllowed`, `authoritativeAdapterAllowed`,
 `evidenceClaimAllowed`, `duplicateClaimAllowed`, `databaseAccessAllowed`, `persistenceAllowed`,
@@ -128,7 +128,7 @@ DNS answers, streams, and errors. The lower-level DNS/HTTPS seam is available on
 module import in package tests; it is not re-exported by the package entry point. No test contacts
 CBE or any other network destination.
 
-No application manifest or source imports the package. Its internal advisory composition now
+The worker manifest and no-money adapter import the package. Its advisory composition
 depends on the scoped CBE receiver opener as well as the isolated PDF parser and pure official-source
 policy. The public transport entry point still exposes no receiver material. The package has no
 dependency on runtime configuration, Supabase, PostgreSQL, filesystem access, settlement, KemerBet,
@@ -161,8 +161,10 @@ capability also remains true for the authoritative lookup runtime: no permitted 
 this package, no protected lookup material can reach it, and no operational source authorization
 or trusted incident stop is wired.
 
-The package-only one-fetch composition is in place, but it confers no live capability. Any later
-runtime composition must resolve source permission and request/rate policy, redacted
+The one-fetch composition and one-candidate worker adapter are in place, but confer no live
+capability. The database read is granted only to a NOLOGIN role, and the worker entrypoint cannot
+invoke the adapter. An operational runtime must still resolve source permission and request/rate
+policy, redacted
 operational telemetry,
 receiver-material protection, worker decryption, normalization ownership, prelease-safe protected
 material access, duplicate reads, evidence and claim handling, settlement, and rollout. None of

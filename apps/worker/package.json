@@ -4,8 +4,14 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/cbe-birr-authoritative-receipt-transport": "workspace:*",
+    "@fetanagent/cbe-birr-reference-opening": "workspace:*",
+    "@fetanagent/cbe-birr-worker-key-custody": "workspace:*",
     "@fetanagent/config": "workspace:*",
     "@fetanagent/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@fetanagent/deposit-reference-protection": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

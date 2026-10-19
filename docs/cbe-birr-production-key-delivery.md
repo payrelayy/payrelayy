@@ -36,3 +36,20 @@ three files, recheck the active receiver revision at use, test the read-only bin
 10001, and define retirement of old material. CBE verification remains disabled until the live
 receipt contract, protected proof opening, prelease gate, global claim, settlement, and recovery
 path are implemented and reviewed.
+
+## Separate submitted-reference child
+
+The `production-cbe-reference-key-plan.yml` and `production-cbe-reference-key-stage.yml` workflows
+prepare a CBE-only child for opening v2 protected proof references. They use the existing deposit
+proof producer masters on a protected runner, verify the approved v2 root profile, and derive only
+the CBE child. The plan prints a digest of nonsecret pins; the stage sends the child and two profiles
+over pinned SSH stdin to a separate digest-pinned host installer. The API masters are never sent to
+the host installer or placed in its process environment. Staging requires CBE verification disabled
+and an exact current deployed release. The host stores the child under a private one-use directory;
+no running container mounts it. TeleBirr remains live.
+
+Installing the reference-key helper and sudoers grant, running its key plan, and staging a real child
+are separate production decisions. A partial directory after an uncertain SSH result requires
+inspection under the host lock before any retry. Later worker deployment must pin the exact key ID
+and profile digests, mount only this child under UID 10001, and define key rotation and retirement.
+The staged key alone cannot lease a proof, contact CBE, claim a payment, or credit a Player.

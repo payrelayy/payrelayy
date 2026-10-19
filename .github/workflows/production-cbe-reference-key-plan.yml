@@ -1,0 +1,77 @@
+name: Plan production CBE reference-opening child
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit SHA
+        required: true
+        type: string
+      confirm_production_project_ref:
+        description: Exact production Supabase project ref
+        required: true
+        type: string
+      confirm_operation:
+        description: Type PLAN CBE REFERENCE KEY - NO WORKER
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require exact main and production target
+        shell: bash
+        env:
+          CONFIRMED_SHA: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_OPERATION" == 'PLAN CBE REFERENCE KEY - NO WORKER' ]]
+
+      - name: Check out exact production source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact main push CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Build locked key check
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          test "$(pnpm --version)" = '11.16.0'
+          pnpm install --frozen-lockfile
+          pnpm --filter '@fetanagent/cbe-birr-worker-key-provisioning-check...' build
+
+      - name: Derive and discard child; print only the pin digest
+        env:
+          DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
+          DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+        run: node infra/operations/plan-production-cbe-reference-key.mjs

@@ -21,7 +21,7 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
 fi
 
 docker run --rm --pull=never --network none --read-only \
-  --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE \
+  --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER \
   --security-opt no-new-privileges --pids-limit 32 --memory 256m \
   --user 0:0 --workdir /workspace \
   --mount "type=bind,src=$repo_root,dst=/workspace,readonly" \

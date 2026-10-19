@@ -340,6 +340,7 @@ services:
       TELEGRAM_BOT_ENABLED: 'true'
       BOT_SUPPORT_CONTACT_URL: https://owner.fetanagent.com/v1/public/support-contact
       TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      BOT_TO_API_INGRESS_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
       INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true'
       BOT_TO_API_ACTION_BASE_URL: http://api:3000/

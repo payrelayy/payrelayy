@@ -1,0 +1,1 @@
+fetanagent-admin ALL=(root) NOPASSWD: sha256:df7e2d79153c2e3b14f514ade534492d137e9f56a71ee0009a80b706a85efde2 /usr/local/sbin/fetanagent-cbe-receiver-key-installer *

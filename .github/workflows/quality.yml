@@ -214,9 +214,23 @@ jobs:
       - name: Check production CBE receiver key planning boundary
         run: node --test infra/operations/plan-production-cbe-receiver-key.test.mjs
 
+      - name: Check guarded production CBE receiver key delivery
+        run: node --test infra/operations/stage-production-cbe-receiver-key.test.mjs
+
       - name: Rehearse synthetic CBE receiver file mounts
         shell: bash
         run: bash infra/operations/test-cbe-birr-mounted-custody.sh
+
+      - name: Check production CBE receiver host installer with synthetic keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n infra/operations/fetanagent-cbe-receiver-key-installer.sh
+          expected="$(sha256sum infra/operations/fetanagent-cbe-receiver-key-installer.sh | cut -d ' ' -f 1)"
+          grep -Fx "fetanagent-admin ALL=(root) NOPASSWD: sha256:$expected /usr/local/sbin/fetanagent-cbe-receiver-key-installer *" \
+            infra/operations/fetanagent-cbe-receiver-key-installer.sudoers
+          sudo visudo -cf infra/operations/fetanagent-cbe-receiver-key-installer.sudoers
+          bash infra/operations/test-production-cbe-receiver-key-installer.sh
 
       - name: Build and check local receipt readers in the bot image
         shell: bash

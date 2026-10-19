@@ -52,6 +52,15 @@ export interface OwnerCbeBirrReceiverV2Revision {
   readonly rotationReason: 'protection_upgrade';
 }
 
+/** Point-in-time, nonsecret identity for a later guarded child-key provisioner. */
+export interface OwnerCbeBirrProvisioningSnapshot {
+  readonly receiverRevisionId: string;
+  readonly receiverVersion: number;
+  readonly protectionProfileVersion: 2;
+  readonly encryptionKeyVersion: 2;
+  readonly fingerprintKeyVersion: 2;
+}
+
 export interface OwnerReceiverDatabase {
   query(
     sql: string,
@@ -147,6 +156,20 @@ const ROTATE_CBE_BIRR_V2_SQL = `
       $7::text, $8::text, $9::text, $10::text, $11::text, 'protection_upgrade'
     )
 `;
+
+const CBE_BIRR_PROVISIONING_SNAPSHOT_SQL = `
+  select receiver_revision_id, receiver_version, protection_profile_version,
+         encryption_key_version, fingerprint_key_version
+    from app.inspect_owner_cbe_birr_provisioning_snapshot($1::uuid)
+`;
+
+const CBE_BIRR_PROVISIONING_SNAPSHOT_COLUMNS = [
+  'encryption_key_version',
+  'fingerprint_key_version',
+  'protection_profile_version',
+  'receiver_revision_id',
+  'receiver_version',
+] as const;
 
 function rowObject(row: unknown): Record<string, unknown> {
   if (typeof row !== 'object' || row === null || Array.isArray(row)) {
@@ -271,6 +294,57 @@ export class PostgresOwnerReceiverAccounts {
       return Object.freeze(receivers.map((receiver) => Object.freeze(receiver)));
     } catch (error) {
       if (error instanceof OwnerReceiverAccountRejectedError) throw error;
+      throw new OwnerReceiverAccountUnavailableError();
+    }
+  }
+
+  async readCbeBirrProvisioningSnapshot(
+    authUserId: string,
+    approvedRevision: Readonly<{ receiverRevisionId: string; receiverVersion: number }>,
+  ): Promise<OwnerCbeBirrProvisioningSnapshot> {
+    const expectedRevisionId = approvedRevision?.receiverRevisionId;
+    const expectedVersion = approvedRevision?.receiverVersion;
+    if (
+      !UUID_PATTERN.test(authUserId) ||
+      typeof approvedRevision !== 'object' ||
+      approvedRevision === null ||
+      typeof expectedRevisionId !== 'string' ||
+      !UUID_V4_PATTERN.test(expectedRevisionId) ||
+      typeof expectedVersion !== 'number' ||
+      !Number.isSafeInteger(expectedVersion) ||
+      expectedVersion < 1 ||
+      expectedVersion > 2_147_483_647
+    ) {
+      throw new OwnerReceiverAccountRejectedError();
+    }
+    try {
+      const result = await this.database.query(CBE_BIRR_PROVISIONING_SNAPSHOT_SQL, [authUserId]);
+      const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
+      if (
+        row === undefined ||
+        Object.keys(row).sort().join(',') !== CBE_BIRR_PROVISIONING_SNAPSHOT_COLUMNS.join(',') ||
+        typeof row.receiver_revision_id !== 'string' ||
+        !UUID_V4_PATTERN.test(row.receiver_revision_id) ||
+        row.receiver_revision_id !== expectedRevisionId ||
+        typeof row.receiver_version !== 'number' ||
+        !Number.isSafeInteger(row.receiver_version) ||
+        row.receiver_version < 1 ||
+        row.receiver_version > 2_147_483_647 ||
+        row.receiver_version !== expectedVersion ||
+        row.protection_profile_version !== 2 ||
+        row.encryption_key_version !== 2 ||
+        row.fingerprint_key_version !== 2
+      ) {
+        throw new OwnerReceiverAccountUnavailableError();
+      }
+      return Object.freeze({
+        receiverRevisionId: row.receiver_revision_id,
+        receiverVersion: row.receiver_version,
+        protectionProfileVersion: 2,
+        encryptionKeyVersion: 2,
+        fingerprintKeyVersion: 2,
+      });
+    } catch {
       throw new OwnerReceiverAccountUnavailableError();
     }
   }

@@ -10,9 +10,7 @@
     }
   },
   "dependencies": {
-    "@fetanagent/cbe-birr-reference-opening": "workspace:*"
-  },
-  "devDependencies": {
+    "@fetanagent/cbe-birr-reference-opening": "workspace:*",
     "@fetanagent/deposit-reference-protection": "workspace:*"
   },
   "scripts": {

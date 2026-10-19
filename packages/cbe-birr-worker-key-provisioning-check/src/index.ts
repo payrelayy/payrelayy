@@ -1,6 +1,14 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { types as nodeUtilTypes } from 'node:util';
 
+export {
+  CbeBirrReceiverProvisioningCandidateError,
+  prepareCbeBirrReceiverProvisioningCandidate,
+  type CbeBirrReceiverProvisioningCandidate,
+  type CbeBirrReceiverProvisioningCandidateInput,
+  type CbeBirrReceiverProvisioningSnapshot,
+} from './receiver-lookup-candidate.js';
+
 import {
   CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION,
   CBE_BIRR_REFERENCE_OPENING_CONTRACT_VERSION,

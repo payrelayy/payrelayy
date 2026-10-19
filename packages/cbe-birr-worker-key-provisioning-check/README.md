@@ -8,8 +8,8 @@ internally consistent but unrelated CBE key fails.
 
 Run this check only in a trusted offline provisioning process. The process must obtain the producer
 profile from an independently approved source and keep the producer masters out of the worker.
-The package does not generate, write, deliver, or rotate any secret or profile file. It has no
-filesystem, environment, database, HTTP, provider, lease, settlement, or payment access. No
+That proof-opening check does not generate, write, deliver, or rotate any secret or profile file.
+The package has no filesystem, environment, database, HTTP, provider, lease, settlement, or payment access. No
 application imports it. A passing synthetic or future private check does not establish file
 custody, deployment pinning, official-source permission, or authoritative lookup readiness.
 
@@ -20,6 +20,12 @@ with the proposed worker key and opening profile. It returns only a frozen nonse
 witness. The dedicated offline `cbe-birr-receiver-provisioning` subpath exposes child derivation;
 the separate verifier subpath exposes only opening. Synthetic tests reject a self-consistent child
 and manifest for the wrong revision and confirm compatibility with an Owner-produced envelope.
-This check does not obtain the active SQL revision or read private files, so the trusted
-provisioner must supply that identity from a separately reviewed source. No real child key is
-generated, delivered, mounted, or activated here.
+The offline receiver candidate composes these existing pieces for a trusted provisioner. It
+requires an independently approved revision, root profile, and Owner master pair, plus an injected
+trusted Owner snapshot reader. It checks the same active v2 revision before and after deriving a
+revision-scoped child, runs the cryptographic consistency check, and returns canonical nonsecret
+root/worker profile bytes and proposed release pins. Its secret `workerKey` is nonenumerable so
+serializing the candidate to JSON omits it; callers must still treat the entire object as secret.
+The candidate does not contact the Owner route itself, write or mount files, approve release pins,
+or activate worker custody. A future delivery step and worker use must independently recheck the
+active revision. Only synthetic keys are used in this repository's tests.

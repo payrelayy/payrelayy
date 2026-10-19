@@ -208,3 +208,8 @@ export {
   type RoutineTelebirrEnrollmentReceiptBody,
   type SignedRoutineTelebirrEnrollmentReceipt,
 } from './routine-enrollment-receipt.js';
+export {
+  routinePaidCheckReportSignatureBytes,
+  verifyRoutinePaidCheckReport,
+  type VerifiedRoutinePaidCheckReport,
+} from './routine-paid-check-report.js';

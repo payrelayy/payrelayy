@@ -218,8 +218,24 @@ internal class RoutinePaidPhonePreparation(
         try { workStore.discardExpiredAssignment(clock.nowMillis()) } catch (_: Exception) {
           return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
         }
+        return RoutinePaidPhonePreparationResult.Review(collected.reasonCode)
       }
-      return RoutinePaidPhonePreparationResult.Review(collected.reasonCode)
+      val checkedAt = try {
+        DateTimeFormatterBuilder().appendInstant(3).toFormatter().format(
+          Instant.ofEpochMilli(clock.nowMillis()))
+      } catch (_: Exception) {
+        return RoutinePaidPhonePreparationResult.Review("clock_unavailable")
+      }
+      val report = try {
+        RoutinePaidCheckReport.encodeUpload(assignmentBytes,
+          assessment.authenticatedAssignment, collected.reasonCode, checkedAt, deviceIdentity)
+      } catch (_: Exception) {
+        return RoutinePaidPhonePreparationResult.Review("check_report_invalid")
+      }
+      try { workStore.stageUpload(assignmentBytes, report) } catch (_: Exception) {
+        return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
+      }
+      return uploadPending(report)
     }
     val observation = (collected as RoutineTelebirrObservationCollection.WouldForward).observation
     val upload = try {
@@ -241,6 +257,13 @@ internal class RoutinePaidPhonePreparation(
   }
 
   private fun uploadPending(bytes: ByteArray): RoutinePaidPhonePreparationResult {
+    val checkReason = try {
+      val frame = StrictJson.parse(bytes).requireObject(setOf(
+        "publicKeySpki", "signedAssignment", "signedCheck"))
+      val signed = frame.value("signedCheck").requireObject(setOf("body", "signature"))
+      signed.value("body").requireObject(setOf("version", "candidateId", "challengeId",
+        "challengeDigest", "reasonCode", "checkedAt")).string("reasonCode")
+    } catch (_: Exception) { null }
     val response = try {
       exchange.post(RoutinePaidBridgeProtocol.UPLOAD_PATH,
         RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE, bytes)
@@ -274,6 +297,12 @@ internal class RoutinePaidPhonePreparation(
       return RoutinePaidPhonePreparationResult.Review("upload_rejected")
     }
     val accepted = try {
+      if (checkReason != null) {
+        val frame = StrictJson.parse(response.body).requireObject(setOf(
+          "outcome", "advisoryOnly", "financialActionAllowed"))
+        frame.string("outcome") == "signed_paid_check_recorded" &&
+          frame.boolean("advisoryOnly") && !frame.boolean("financialActionAllowed")
+      } else {
       val frame = StrictJson.parse(response.body).requireObject(setOf(
         "outcome", "advisoryOnly", "paymentVerificationRequested",
         "pairedPhoneEvidenceVerified", "sourceAuthenticationPerformed",
@@ -283,12 +312,14 @@ internal class RoutinePaidPhonePreparation(
         frame.boolean("pairedPhoneEvidenceVerified") &&
         !frame.boolean("sourceAuthenticationPerformed") &&
         !frame.boolean("financialActionAllowed")
+      }
     } catch (_: Exception) { false }
     if (!accepted) return RoutinePaidPhonePreparationResult.Review("invalid_upload_response")
     try { workStore.acknowledge(bytes) } catch (_: Exception) {
       return RoutinePaidPhonePreparationResult.Review("local_work_unavailable")
     }
-    return RoutinePaidPhonePreparationResult.SubmittedForReview
+    return if (checkReason == null) RoutinePaidPhonePreparationResult.SubmittedForReview
+      else RoutinePaidPhonePreparationResult.Review(checkReason)
   }
 
   private fun isNoAssignment(body: ByteArray): Boolean = try {

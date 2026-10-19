@@ -57,6 +57,7 @@ function fakeBroker() {
     classifyTerminal: vi.fn(async () => true),
     stageObservation: vi.fn(async () => 'recorded' as const),
     recordTerminalRejection: vi.fn(async () => 'recorded' as const),
+    recordCheckReason: vi.fn(async () => 'recorded' as const),
   };
 }
 

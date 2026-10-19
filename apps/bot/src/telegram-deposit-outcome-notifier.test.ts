@@ -141,10 +141,9 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'already_used',
       amountMinor: null,
     });
-    expect(duplicate).toContain('Reference already used');
-    expect(duplicate).toContain('This Telegram account');
-    expect(duplicate).toContain('No new Player credit was made');
-    expect(duplicate).toContain('1A2B');
+    expect(duplicate).toBe(
+      'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.',
+    );
     expect(duplicate).not.toContain('30.00');
     expect(duplicate).not.toContain('fake');
   });
@@ -155,10 +154,9 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'wrong_receiver',
       amountMinor: null,
     });
-    expect(wrongReceiver).toContain('Deposit rejected — wrong receiver');
-    expect(wrongReceiver).toContain('different receiver');
-    expect(wrongReceiver).toContain('No Player credit was made');
-    expect(wrongReceiver).toContain('1A2B');
+    expect(wrongReceiver).toBe(
+      'Deposit not credited. Reason: wrong receiver. Contact support if this is unexpected.',
+    );
     expect(wrongReceiver).not.toContain('30.00');
   });
 
@@ -168,12 +166,23 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'invalid_reference',
       amountMinor: null,
     });
-    expect(invalid).toContain('Invalid TeleBirr reference');
-    expect(invalid).toContain('official receipt page did not recognize');
-    expect(invalid).toContain('No Player credit was made');
-    expect(invalid).toContain('1A2B');
+    expect(invalid).toBe(
+      'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
+    );
     expect(invalid).not.toContain('30.00');
     expect(invalid).not.toContain('fake');
+  });
+
+  it('has customer-safe copy ready for a future unrelated-receipt decision', () => {
+    const unrelated = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'unrelated_receipt',
+      amountMinor: null,
+    });
+    expect(unrelated).toBe(
+      'Deposit not credited. Reason: unrelated receipt. Contact support if this is unexpected.',
+    );
+    expect(unrelated).not.toContain('1A2B');
   });
 
   it('holds a rotated-instruction submission for review without implying rejection', () => {

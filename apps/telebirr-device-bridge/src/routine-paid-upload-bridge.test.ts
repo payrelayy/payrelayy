@@ -13,6 +13,7 @@ import {
   digestRoutineTelebirrObservationBody,
   digestRoutineTelebirrObservationFacts,
   digestRoutineTelebirrReceiverName,
+  routinePaidCheckReportSignatureBytes,
 } from '@fetanagent/telebirr-verification-foundation';
 
 import {
@@ -205,7 +206,7 @@ function fixture() {
       },
     };
   };
-  return { context, frame, rawReference, withFacts };
+  return { context, frame, rawReference, withFacts, devicePrivateKey: device.privateKey };
 }
 
 function http(path: string, contentType: string, body: unknown) {
@@ -222,6 +223,97 @@ function decoded(bytes: Uint8Array): Record<string, unknown> {
 }
 
 describe('paid TeleBirr phone observation upload boundary', () => {
+  it('records a signed review code without staging evidence or deciding a payment', async () => {
+    const { context, frame, devicePrivateKey } = fixture();
+    const body = {
+      version: 1 as const,
+      candidateId: context.trustedLookup.candidateId,
+      challengeId: context.trustedLookup.challengeId,
+      challengeDigest: context.trustedLookup.challengeDigest,
+      reasonCode: 'unknown_layout_provider_identity',
+      checkedAt: '2026-10-05T18:03:00.000Z',
+    };
+    const signedCheck = {
+      body,
+      signature: sign('sha256', routinePaidCheckReportSignatureBytes(body), {
+        key: devicePrivateKey,
+        dsaEncoding: 'ieee-p1363',
+      }).toString('base64url'),
+    };
+    const stageObservation = vi.fn(async () => 'recorded' as const);
+    const recordTerminalRejection = vi.fn(async () => 'recorded' as const);
+    const recordCheckReason = vi.fn(async () => 'recorded' as const);
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
+      loadObservation: async () => context,
+      stageObservation,
+      recordTerminalRejection,
+      recordCheckReason,
+    });
+    const request = http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, {
+      publicKeySpki: frame.publicKeySpki,
+      signedAssignment: frame.signedAssignment,
+      signedCheck,
+    });
+    const result = decoded((await handler(request)).body);
+    expect(result).toMatchObject({
+      outcome: 'signed_paid_check_recorded',
+      financialActionAllowed: false,
+    });
+    expect(recordCheckReason).toHaveBeenCalledWith(
+      expect.objectContaining({
+        challengeId: body.challengeId,
+        reasonCode: body.reasonCode,
+      }),
+    );
+    expect(stageObservation).not.toHaveBeenCalled();
+    expect(recordTerminalRejection).not.toHaveBeenCalled();
+    const forged = decoded(
+      (
+        await handler(
+          http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, {
+            publicKeySpki: frame.publicKeySpki,
+            signedAssignment: frame.signedAssignment,
+            signedCheck: { ...signedCheck, body: { ...body, reasonCode: 'network_unavailable' } },
+          }),
+        )
+      ).body,
+    );
+    expect(forged).toEqual({ code: 'paid_check_review' });
+    expect(recordCheckReason).toHaveBeenCalledTimes(1);
+  });
+
+  it('records an authenticated signed receipt policy review without a financial action', async () => {
+    const { context, withFacts } = fixture();
+    const stageObservation = vi.fn(async () => 'recorded' as const);
+    const recordTerminalRejection = vi.fn(async () => 'recorded' as const);
+    const recordCheckReason = vi.fn(async () => 'recorded' as const);
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
+      loadObservation: async () => context,
+      stageObservation,
+      recordTerminalRejection,
+      recordCheckReason,
+    });
+    const result = await handler(
+      http(
+        ROUTINE_PAID_UPLOAD_PATH,
+        ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+        withFacts({ providerFinalStatus: 'pending' }),
+      ),
+    );
+    expect(result.statusCode).toBe(403);
+    expect(recordCheckReason).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reasonCode: 'receipt_policy_review',
+        candidateId: context.trustedLookup.candidateId,
+      }),
+    );
+    expect(stageObservation).not.toHaveBeenCalled();
+    expect(recordTerminalRejection).not.toHaveBeenCalled();
+  });
   it.each(['other', 'unknown'])(
     'stages a signed completed receipt with channel %s when all other checks pass',
     async (paymentChannel) => {

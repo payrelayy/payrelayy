@@ -35,6 +35,8 @@ export type RoutineTelebirrPaidPhoneAssessment =
       reasonCode: string;
       financialActionAllowed: false;
       evidence: null;
+      /** All assignment, enrollment, and phone signatures matched before policy review. */
+      authenticatedPhoneCheck: boolean;
       /** Only an authenticated, immutable receipt mismatch can retire this sealed upload. */
       terminalReview?: true;
       terminalReasonCode?:
@@ -82,12 +84,14 @@ function review(
     | 'old_receipt'
     | 'explicit_invalid_reference'
     | null = null,
+  authenticatedPhoneCheck = false,
 ): RoutineTelebirrPaidPhoneAssessment {
   return Object.freeze({
     disposition: 'review',
     reasonCode,
     financialActionAllowed: false,
     evidence: null,
+    authenticatedPhoneCheck,
     ...(terminalReasonCode ? { terminalReview: true as const, terminalReasonCode } : {}),
   });
 }
@@ -205,13 +209,19 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
           ownDataValue(candidate, 'trustedLookup'),
           ownDataValue(candidate, 'signedObservation'),
         );
-      return review(checked.reasonCode, terminalReasonCode || null);
+      return review(
+        checked.reasonCode,
+        terminalReasonCode || null,
+        checked.serverSignatureVerified &&
+          checked.deviceSignatureVerified &&
+          checked.providedSnapshotMatched,
+      );
     }
     // Version 1 remains usable for no-money review, never for a paid decision.
     // Version 2 signs the fixed official TLS-origin assertion in the same fact
     // transcript as the receipt and is accepted only with the enrolled key.
     if (!checked.phoneOfficialOriginAttested) {
-      return review('official_origin_attestation_missing');
+      return review('official_origin_attestation_missing', null, true);
     }
 
     const lookup = ownDataValue(candidate, 'trustedLookup');
@@ -236,7 +246,7 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     // No-money observation review permits a seven-day candidate. A paid claim
     // must still be within the receipt's one-hour funding window at decision time.
     if (Date.parse(assessedAt) >= Date.parse(occurredAt) + 3_600_000) {
-      return review('payment_expired');
+      return review('payment_expired', null, true);
     }
 
     return Object.freeze({

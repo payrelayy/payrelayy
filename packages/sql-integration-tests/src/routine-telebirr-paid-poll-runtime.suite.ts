@@ -95,7 +95,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       expect(sources.rows[0]?.nested).toContain("challenge.issuance_mode = 'paid'");
     });
 
-    it('starts without a login or password and inherits only six paid functions', async () => {
+    it('starts without a login or password and inherits only seven paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         name: string;
@@ -157,6 +157,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         'issue_routine_telebirr_paid_poll_assignment',
         'load_routine_telebirr_paid_observation_material',
         'load_routine_telebirr_paid_poll_enrollment',
+        'record_routine_telebirr_paid_check_reason',
         'record_routine_telebirr_paid_terminal_result',
         'stage_routine_telebirr_paid_signed_observation',
       ]);
@@ -207,7 +208,13 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           'EXECUTE') as public_wrong_receiver,
         pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
           'app.record_routine_telebirr_paid_terminal_result(uuid,jsonb)',
-          'EXECUTE') as no_money_wrong_receiver`);
+          'EXECUTE') as no_money_wrong_receiver,
+        pg_catalog.has_function_privilege('public',
+          'app.record_routine_telebirr_paid_check_reason(uuid,uuid,text,timestamptz,text)',
+          'EXECUTE') as public_check_reason,
+        pg_catalog.has_function_privilege('fetanagent_routine_telebirr_no_money_runtime',
+          'app.record_routine_telebirr_paid_check_reason(uuid,uuid,text,timestamptz,text)',
+          'EXECUTE') as no_money_check_reason`);
       expect(access.rows).toEqual([
         {
           public_enrollment: false,
@@ -222,6 +229,8 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           no_money_paid_stage: false,
           public_wrong_receiver: false,
           no_money_wrong_receiver: false,
+          public_check_reason: false,
+          no_money_check_reason: false,
         },
       ]);
       const guards = await client.query<{ name: string; guard_count: number }>(
@@ -242,10 +251,11 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             'classify_routine_telebirr_paid_upload_terminal',
             'stage_routine_telebirr_paid_signed_observation',
             'record_routine_telebirr_paid_terminal_result',
+            'record_routine_telebirr_paid_check_reason',
           ],
         ],
       );
-      expect(guards.rows).toHaveLength(8);
+      expect(guards.rows).toHaveLength(9);
       expect(guards.rows.every((row) => row.guard_count === 1)).toBe(true);
     });
 
@@ -274,6 +284,18 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
             [randomUUID(), `sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`],
           );
           expect(terminal.rows).toEqual([{ terminal: false }]);
+          const unknownCheck = await client.query<{ status: string }>(
+            `select app.record_routine_telebirr_paid_check_reason(
+              $1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::text) as status`,
+            [
+              randomUUID(),
+              randomUUID(),
+              'network_unavailable',
+              new Date().toISOString(),
+              `sha256:${'c'.repeat(64)}`,
+            ],
+          );
+          expect(unknownCheck.rows).toEqual([{ status: 'conflict' }]);
           const preflight = await client.query<Record<string, boolean>>(
             ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL,
             [],
@@ -315,6 +337,38 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
           'app.routine_telebirr_paid_observation_staging'::pg_catalog.regclass
           and tgname = 'routine_paid_staging_no_update'`);
       expect(trigger.rows).toEqual([{ enabled: 'O' }]);
+    });
+
+    it('keeps redacted check reasons and customer classifications in a private append-only audit', async () => {
+      const client = getClient();
+      const access = await client.query<Record<string, boolean>>(`select
+        (select relrowsecurity and relforcerowsecurity from pg_catalog.pg_class
+         where oid = 'app.routine_telebirr_paid_check_audit'::pg_catalog.regclass)
+           as forced_rls,
+        pg_catalog.has_table_privilege('${runtime}',
+          'app.routine_telebirr_paid_check_audit', 'SELECT,INSERT,UPDATE,DELETE')
+           as runtime_base_access,
+        pg_catalog.has_table_privilege('service_role',
+          'app.routine_telebirr_paid_check_audit', 'SELECT,INSERT,UPDATE,DELETE')
+           as service_base_access`);
+      expect(access.rows).toEqual([
+        {
+          forced_rls: true,
+          runtime_base_access: false,
+          service_base_access: false,
+        },
+      ]);
+      const triggers = await client.query<{ tgname: string }>(`select tgname
+        from pg_catalog.pg_trigger where tgname in (
+          'routine_paid_check_audit_staged', 'routine_paid_check_audit_terminal',
+          'routine_paid_check_audit_customer_outcome', 'routine_paid_check_audit_immutable')
+        order by tgname`);
+      expect(triggers.rows.map((row) => row.tgname)).toEqual([
+        'routine_paid_check_audit_customer_outcome',
+        'routine_paid_check_audit_immutable',
+        'routine_paid_check_audit_staged',
+        'routine_paid_check_audit_terminal',
+      ]);
     });
   });
 }

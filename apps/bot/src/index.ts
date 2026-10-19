@@ -307,7 +307,7 @@ bot.on('message', async (context) => {
       } catch {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply(
-          'I could not read this receipt. Please try again or type the transaction number. Nothing was submitted.',
+          'We could not read your receipt right now. Please try again or type the transaction number. Nothing was submitted.',
         );
         return;
       }
@@ -318,7 +318,9 @@ bot.on('message', async (context) => {
             ? 'Receipt reading is busy. Please try again shortly or type the transaction number.'
             : extracted.kind === 'too_large'
               ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
-              : 'I could not read this receipt. Please send a clearer image/PDF or type the transaction number. Nothing was submitted.',
+              : extracted.kind === 'unreadable'
+                ? TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT
+                : 'We could not read your receipt right now. Please try again or type the transaction number. Nothing was submitted.',
         );
         return;
       }

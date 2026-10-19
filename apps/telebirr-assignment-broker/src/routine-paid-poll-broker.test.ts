@@ -113,6 +113,7 @@ function fixture() {
     classifyTerminal: vi.fn(async () => false),
     stageObservation: vi.fn(async () => 'recorded'),
     recordTerminalRejection: vi.fn(async () => 'recorded'),
+    recordCheckReason: vi.fn(async () => 'recorded'),
   };
   const signer = {
     assignmentSignerId: ids.signer,

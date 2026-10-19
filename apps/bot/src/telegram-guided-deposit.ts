@@ -74,8 +74,8 @@ export const TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT = [
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT = [
-  "I couldn't find one TeleBirr reference. Nothing was submitted.",
-  'Send a reference, SMS, receipt link, screenshot or PDF.',
+  'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
+  'No payment was submitted. Send one clear TeleBirr reference or receipt.',
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT = [

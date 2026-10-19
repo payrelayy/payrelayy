@@ -255,6 +255,21 @@ export function createRoutinePaidUploadLocalAdapter(
         throw new Error();
       return value.kind;
     },
+    async recordCheckReason(input: {
+      readonly challengeId: string;
+      readonly candidateId: string;
+      readonly reasonCode: string;
+      readonly checkedAt: string;
+      readonly reportDigest: string;
+    }) {
+      const value = await wire('record_check_reason', input);
+      if (
+        !exact(value, ['kind']) ||
+        (value.kind !== 'recorded' && value.kind !== 'exact_replay' && value.kind !== 'conflict')
+      )
+        throw new Error();
+      return value.kind;
+    },
   });
 }
 

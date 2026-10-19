@@ -105,9 +105,20 @@ begin
                                  'customer.telegram_beta_invite_redeemed'))
     or has_function_privilege('fetanagent_owner_control',
          'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'EXECUTE')
+    or has_function_privilege('fetanagent_owner_control_runtime',
+         'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'EXECUTE')
+    or has_function_privilege('fetanagent_owner_control_runtime',
+         'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'EXECUTE')
     or has_function_privilege('fetanagent_beta_admission',
          'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'EXECUTE')
-    or has_schema_privilege('fetanagent_beta_admission', 'app', 'USAGE') then
+    or has_function_privilege('fetanagent_beta_admission_runtime',
+         'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'EXECUTE')
+    or has_function_privilege('fetanagent_beta_admission_runtime',
+         'app.reserve_telegram_beta_invite_admission_nonce(text,timestamptz)', 'EXECUTE')
+    or has_function_privilege('fetanagent_player_actions_runtime',
+         'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'EXECUTE')
+    or has_schema_privilege('fetanagent_beta_admission', 'app', 'USAGE')
+    or has_schema_privilege('fetanagent_beta_admission_runtime', 'app', 'USAGE') then
     raise exception 'Telegram beta invite retirement was incomplete.';
   end if;
 end;

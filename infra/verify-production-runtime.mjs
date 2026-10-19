@@ -923,7 +923,24 @@ assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=33/u);
+const transferBlock = /transfer_files=\(\n([\s\S]*?)\n          \)/u.exec(workflow)?.[1];
+assert.ok(transferBlock, 'the production transfer inventory must exist');
+const transferredBaseFiles = transferBlock
+  .split('\n')
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .reduce((count, line) => {
+    const expansion = /\{([^}]+)\}/u.exec(line)?.[1];
+    return count + (expansion ? expansion.split(',').length : 1);
+  }, 0);
+const helperBaseCount = Number(
+  /local_count="\$\(find[^\n]+\n    expected_count=(\d+)/u.exec(helper)?.[1],
+);
+assert.equal(
+  helperBaseCount,
+  transferredBaseFiles,
+  'the helper base bundle count must match the files sent by the production workflow',
+);
 assert.match(helper, /if grep -Fq '  beta-admission:' "\$incoming\/compose\.production\.yaml"/u);
 assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);

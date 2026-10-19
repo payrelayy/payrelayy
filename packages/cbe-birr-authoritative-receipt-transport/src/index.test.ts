@@ -116,7 +116,7 @@ describe('dependency and runtime isolation', () => {
     expect(manifest.optionalDependencies).toBeUndefined();
   });
 
-  it('keeps both packages absent from all application and unrelated workspace sources', () => {
+  it('allows only the uninvoked worker advisory adapter to import receipt transport', () => {
     const dormantPackages = [
       '@fetanagent/cbe-birr-authoritative-receipt-transport',
       '@fetanagent/cbe-birr-authoritative-pdf-parser',
@@ -129,6 +129,7 @@ describe('dependency and runtime isolation', () => {
       [
         '../../../package.json',
         '../../../{apps,packages}/*/package.json',
+        '!../../../apps/worker/package.json',
         '!../../../packages/cbe-birr-authoritative-receipt-transport/package.json',
         '!../../../packages/cbe-birr-authoritative-pdf-parser/package.json',
       ],
@@ -142,6 +143,14 @@ describe('dependency and runtime isolation', () => {
     for (const source of Object.values(manifests)) {
       for (const packageName of dormantPackages) expect(source).not.toContain(packageName);
     }
+    const workerManifest = import.meta.glob('../../../apps/worker/package.json', {
+      eager: true,
+      import: 'default',
+      query: '?raw',
+    }) as Record<string, string>;
+    expect(Object.keys(workerManifest)).toHaveLength(1);
+    expect(Object.values(workerManifest)[0]).toContain(dormantPackages[0]);
+    expect(Object.values(workerManifest)[0]).not.toContain(dormantPackages[1]);
 
     const workspaceSources = import.meta.glob(
       [
@@ -152,6 +161,8 @@ describe('dependency and runtime isolation', () => {
         '!../../../.git/**',
         '!../../../packages/cbe-birr-authoritative-receipt-transport/**',
         '!../../../packages/cbe-birr-authoritative-pdf-parser/**',
+        '!../../../apps/worker/src/cbe-birr-no-money-candidate.ts',
+        '!../../../apps/worker/src/cbe-birr-no-money-candidate.test.ts',
       ],
       {
         eager: true,
@@ -168,6 +179,17 @@ describe('dependency and runtime isolation', () => {
       expect(source).not.toContain('retrieveCbeBirrAuthoritativeReceipt');
       expect(source).not.toContain('parseCbeBirrAuthoritativePdf');
     }
+    const workerAdapter = import.meta.glob(
+      '../../../apps/worker/src/cbe-birr-no-money-candidate.ts',
+      { eager: true, import: 'default', query: '?raw' },
+    ) as Record<string, string>;
+    expect(Object.keys(workerAdapter)).toHaveLength(1);
+    const adapterSource = Object.values(workerAdapter)[0]!;
+    expect(adapterSource).toContain(
+      "from '@fetanagent/cbe-birr-authoritative-receipt-transport/no-money'",
+    );
+    expect(adapterSource).not.toContain('parseCbeBirrAuthoritativePdf');
+    expect(adapterSource).not.toContain('retrieveCbeBirrAuthoritativeReceipt');
 
     const ownManifests = import.meta.glob(
       ['../package.json', '../../cbe-birr-authoritative-pdf-parser/package.json'],

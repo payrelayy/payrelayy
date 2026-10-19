@@ -10,13 +10,23 @@ helper='/usr/local/sbin/fetanagent-cbe-reference-key-installer'
 source_helper='infra/operations/fetanagent-cbe-reference-key-installer.sh'
 release_sha='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 stage='/var/lib/fetanagent/cbe-birr-reference-key-custody-v1'
-[[ ! -e "$helper" && ! -e /srv/fetanagent/production/current && ! -e "$stage" ]] || exit 1
+release="/srv/fetanagent/production/releases/$release_sha"
+current='/srv/fetanagent/production/current'
+[[ ! -e "$helper" && ! -e "$stage" ]] || exit 1
 
-sudo install -d -o root -g root -m 0700 /var/lib/fetanagent /var/lib/fetanagent/production
-sudo install -d -o root -g root -m 0755 "/srv/fetanagent/production/releases/$release_sha"
-printf '%s\n' "$release_sha" | sudo tee "/srv/fetanagent/production/releases/$release_sha/.release-sha" >/dev/null
-sudo ln -s "/srv/fetanagent/production/releases/$release_sha" /srv/fetanagent/production/current
-sudo install -o root -g root -m 0600 /dev/null /var/lib/fetanagent/production/helper.lock
+if [[ -e "$current" || -L "$current" ]]; then
+  # Quality also runs the receiver-key host test in this ephemeral runner.
+  [[ -L "$current" && "$(realpath "$current")" == "$release" &&
+     "$(<"$release/.release-sha")" == "$release_sha" &&
+     "$(sudo stat -c '%u:%g:%a' /var/lib/fetanagent/production)" == '0:0:700' &&
+     "$(sudo stat -c '%u:%g:%a' /var/lib/fetanagent/production/helper.lock)" == '0:0:600' ]] || exit 1
+else
+  sudo install -d -o root -g root -m 0700 /var/lib/fetanagent /var/lib/fetanagent/production
+  sudo install -d -o root -g root -m 0755 "$release"
+  printf '%s\n' "$release_sha" | sudo tee "$release/.release-sha" >/dev/null
+  sudo ln -s "$release" "$current"
+  sudo install -o root -g root -m 0600 /dev/null /var/lib/fetanagent/production/helper.lock
+fi
 sudo install -o root -g root -m 0700 "$source_helper" "$helper"
 helper_sha="$(sha256sum "$source_helper" | cut -d ' ' -f 1)"
 sudo "$helper" verify "$helper_sha" >/dev/null

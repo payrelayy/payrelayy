@@ -1,0 +1,71 @@
+name: Retire staging Telegram beta invite history
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_project_ref:
+        description: Type the exact staging Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type PURGE STAGING TELEGRAM BETA INVITE HISTORY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-staging-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    name: Guarded staging invite-history retirement
+    runs-on: ubuntu-24.04
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - name: Require exact staging target and main commit
+        env:
+          CONFIRMED_PROJECT: ${{ inputs.confirm_staging_project_ref }}
+          CONFIRMED_MAIN_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_MAIN_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'spzpiyxheappsfyswewl' ]]
+          [[ "$CONFIRMED_PROJECT" != 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_OPERATION" == 'PURGE STAGING TELEGRAM BETA INVITE HISTORY' ]]
+
+      - name: Check out reviewed retirement script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require exact checked-out commit
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+
+      - name: Delete only retired invite records under the SQL financial stop
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-1-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGUSER: postgres.spzpiyxheappsfyswewl
+          PGDATABASE: postgres
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          [[ -n "$SUPABASE_DB_PASSWORD" ]]
+          command -v psql >/dev/null
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          timeout 90s psql -X --set ON_ERROR_STOP=1 --quiet \
+            --file=infra/sql/retire-telegram-beta-invite-history.sql
+          printf '%s\n' 'Staging Telegram beta invite history retirement completed.'

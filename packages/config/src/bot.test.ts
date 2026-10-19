@@ -261,6 +261,44 @@ describe('Telegram beta admission bot configuration', () => {
 });
 
 describe('Telegram admission and action transport composition', () => {
+  it('starts the production action channel without beta admission or legacy API ingress secrets', () => {
+    const environment = new Proxy(
+      {
+        NODE_ENV: 'production',
+        TELEGRAM_BOT_ENABLED: 'true',
+        TELEGRAM_BOT_TOKEN: '12345678:synthetic-test-token',
+        TELEGRAM_BETA_ADMISSION_ENABLED: 'false',
+        BOT_TO_API_INGRESS_ENABLED: 'false',
+        INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+        INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true',
+        BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+        BOT_TO_API_ACTION_HMAC_SECRET: 'a'.repeat(64),
+      },
+      {
+        get(target, property, receiver) {
+          if (
+            property === 'BOT_TO_API_INGRESS_BASE_URL' ||
+            property === 'BOT_TO_API_INGRESS_HMAC_SECRET'
+          ) {
+            throw new Error(`disabled legacy ingress must not read ${String(property)}`);
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    ) as NodeJS.ProcessEnv;
+
+    const config = loadBotConfig(environment);
+    expect(config.telegram.enabled).toBe(true);
+    expect(config.telegramBetaAdmission.enabled).toBe(false);
+    expect(config.apiIngress).toEqual({
+      enabled: false,
+      baseUrl: undefined,
+      transportHmacSecret: undefined,
+    });
+    expect(config.telegramActionChannel.enabled).toBe(true);
+    expect(config.playerValidationIntakeEnabled).toBe(true);
+  });
+
   it.each([
     { betaAdmissionEnabled: false, actionChannelEnabled: false },
     { betaAdmissionEnabled: true, actionChannelEnabled: false },

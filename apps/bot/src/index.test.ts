@@ -142,6 +142,7 @@ function botConfig(
   betaAdmissionEnabled: boolean,
   actionChannelEnabled: boolean,
   playerValidationIntakeEnabled = false,
+  legacyIngressEnabled = !betaAdmissionEnabled,
 ) {
   return {
     nodeEnv: 'test',
@@ -149,13 +150,13 @@ function botConfig(
     telegram: { enabled: true, token: '123456:test-token' },
     supportContactUrl: undefined as string | undefined,
     playerValidationIntakeEnabled,
-    apiIngress: betaAdmissionEnabled
-      ? { enabled: false, baseUrl: undefined, transportHmacSecret: undefined }
-      : {
+    apiIngress: legacyIngressEnabled
+      ? {
           enabled: true,
           baseUrl: 'http://api:3000/',
           transportHmacSecret: 'a'.repeat(64),
-        },
+        }
+      : { enabled: false, baseUrl: undefined, transportHmacSecret: undefined },
     telegramBetaAdmission: betaAdmissionEnabled
       ? {
           enabled: true,
@@ -177,11 +178,13 @@ async function loadComposition(
   betaAdmissionEnabled: boolean,
   actionChannelEnabled: boolean,
   playerValidationIntakeEnabled = false,
+  legacyIngressEnabled = !betaAdmissionEnabled,
 ) {
   runtime.config = botConfig(
     betaAdmissionEnabled,
     actionChannelEnabled,
     playerValidationIntakeEnabled,
+    legacyIngressEnabled,
   );
   await import('./index.js');
   expect(runtime.messageHandler).toBeTypeOf('function');
@@ -508,6 +511,27 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     ]);
     expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('runs the invite-free production action channel without legacy ingress', async () => {
+    await loadComposition(false, true, true, false);
+
+    await runtime.messageHandler!(messageContext('/start'));
+    await runtime.messageHandler!(messageContext('ordinary private message'));
+
+    expect(runtime.admissionCalls).toHaveLength(0);
+    expect(runtime.actionDeliveries).toEqual([
+      {
+        version: 1,
+        kind: 'root_menu',
+        updateId: '123456',
+        telegramUserId: '123456789',
+        privateChatId: '123456789',
+        preferredLocale: 'en',
+      },
+    ]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(runtime.startOptions!.allowed_updates).toEqual(['message', 'callback_query']);
   });
 
   it('renders Deposit as the first root-menu action', async () => {

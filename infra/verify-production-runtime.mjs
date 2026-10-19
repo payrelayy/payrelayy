@@ -318,6 +318,8 @@ assert.equal(
 );
 assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'false'/u);
 assert.doesNotMatch(bot, /BOT_TO_BETA_ADMISSION_BASE_URL|BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE/u);
+assert.match(bot, /BOT_TO_API_INGRESS_ENABLED: 'false'/u);
+assert.doesNotMatch(bot, /BOT_TO_API_INGRESS_BASE_URL|BOT_TO_API_INGRESS_HMAC_SECRET/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true'/u);
 assert.equal(

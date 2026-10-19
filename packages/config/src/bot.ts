@@ -385,23 +385,29 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       runtime.nodeEnv,
     ),
   };
-  const apiIngress: BotApiIngressConfig = telegramBetaAdmission.enabled
-    ? {
-        enabled: false,
-        baseUrl: undefined,
-        transportHmacSecret: undefined,
-      }
-    : {
-        enabled: true,
-        baseUrl: requiredInternalApiBaseUrl(
-          environment.BOT_TO_API_INGRESS_BASE_URL,
-          runtime.nodeEnv,
-        ),
-        transportHmacSecret: requiredHexHmacSecret(
-          environment.BOT_TO_API_INGRESS_HMAC_SECRET,
-          'BOT_TO_API_INGRESS_HMAC_SECRET',
-        ),
-      };
+  const legacyApiIngressEnabled = booleanFromEnv(
+    environment.BOT_TO_API_INGRESS_ENABLED,
+    true,
+    'BOT_TO_API_INGRESS_ENABLED',
+  );
+  const apiIngress: BotApiIngressConfig =
+    telegramBetaAdmission.enabled || !legacyApiIngressEnabled
+      ? {
+          enabled: false,
+          baseUrl: undefined,
+          transportHmacSecret: undefined,
+        }
+      : {
+          enabled: true,
+          baseUrl: requiredInternalApiBaseUrl(
+            environment.BOT_TO_API_INGRESS_BASE_URL,
+            runtime.nodeEnv,
+          ),
+          transportHmacSecret: requiredHexHmacSecret(
+            environment.BOT_TO_API_INGRESS_HMAC_SECRET,
+            'BOT_TO_API_INGRESS_HMAC_SECRET',
+          ),
+        };
   assertDistinctBotTelegramTransportHmacSecrets(apiIngress, telegramActionChannel);
 
   return {

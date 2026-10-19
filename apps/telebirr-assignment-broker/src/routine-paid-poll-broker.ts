@@ -19,7 +19,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
 const UTC = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u;
 
-/** The paid role has six exact SQL entry points and no table grants. */
+/** The paid role has seven exact SQL entry points and no table grants. */
 export interface RoutinePaidPollBrokerDatabase {
   loadEnrollment(enrollmentId: string): Promise<unknown | undefined>;
   issuePollAssignment(input: {
@@ -46,6 +46,13 @@ export interface RoutinePaidPollBrokerDatabase {
   recordTerminalRejection(input: {
     readonly challengeId: string;
     readonly signedObservation: unknown;
+  }): Promise<unknown>;
+  recordCheckReason(input: {
+    readonly challengeId: string;
+    readonly candidateId: string;
+    readonly reasonCode: string;
+    readonly checkedAt: string;
+    readonly reportDigest: string;
   }): Promise<unknown>;
 }
 
@@ -77,7 +84,8 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
     !openingKey ||
     !signer ||
     typeof now !== 'function' ||
-    typeof database.recordTerminalRejection !== 'function'
+    typeof database.recordTerminalRejection !== 'function' ||
+    typeof database.recordCheckReason !== 'function'
   ) {
     throw new RoutinePaidPollBrokerUnavailableError();
   }
@@ -247,6 +255,30 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
         )
           throw new Error();
         const result = await database.recordTerminalRejection(input);
+        if (result !== 'recorded' && result !== 'exact_replay' && result !== 'conflict')
+          throw new Error();
+        return result;
+      } catch {
+        throw new RoutinePaidPollBrokerUnavailableError();
+      }
+    },
+    async recordCheckReason(input: {
+      readonly challengeId: string;
+      readonly candidateId: string;
+      readonly reasonCode: string;
+      readonly checkedAt: string;
+      readonly reportDigest: string;
+    }) {
+      try {
+        if (
+          !UUID_V4.test(input.challengeId) ||
+          !UUID_V4.test(input.candidateId) ||
+          !/^[a-z][a-z0-9_]{0,63}$/u.test(input.reasonCode) ||
+          !utc(input.checkedAt) ||
+          !DIGEST.test(input.reportDigest)
+        )
+          throw new Error();
+        const result = await database.recordCheckReason(input);
         if (result !== 'recorded' && result !== 'exact_replay' && result !== 'conflict')
           throw new Error();
         return result;

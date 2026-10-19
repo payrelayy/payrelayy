@@ -236,12 +236,15 @@ internal class EncryptedRoutinePaidWorkStore(
 
   private fun requireUpload(assignment: ByteArray, upload: ByteArray) {
     require(upload.size in 1..MAX_UPLOAD_BYTES)
-    val frame = StrictJson.parse(upload).requireObject(
-      setOf("publicKeySpki", "signedAssignment", "signedObservation"))
+    val value = StrictJson.parse(upload) as? JsonValue.Object ?: error("Invalid paid upload")
+    val signedField = if (value.fields.containsKey("signedCheck")) "signedCheck"
+      else "signedObservation"
+    val frame = value.requireObject(
+      setOf("publicKeySpki", "signedAssignment", signedField))
     require(frame.string("publicKeySpki").isNotEmpty())
     require(StrictJson.encode(frame.value("signedAssignment")) ==
       assignment.toString(StandardCharsets.UTF_8))
-    require(frame.value("signedObservation") is JsonValue.Object)
+    require(frame.value(signedField) is JsonValue.Object)
   }
 
   private fun restrictOwnerAccess(file: File, executable: Boolean) {

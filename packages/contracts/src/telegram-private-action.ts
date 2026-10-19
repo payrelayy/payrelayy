@@ -269,6 +269,7 @@ export type TelegramPrivateActionResult =
         | 'rejected'
         | 'wrong_receiver'
         | 'invalid_reference'
+        | 'unrelated_receipt'
         | 'manual_review'
         | 'not_credited'
         | 'not_verified'

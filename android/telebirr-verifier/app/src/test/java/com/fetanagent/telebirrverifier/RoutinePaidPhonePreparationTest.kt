@@ -223,9 +223,22 @@ class RoutinePaidPhonePreparationTest {
     val issuedAfterPollStart = assignment(issuedAt = "2026-10-05T18:03:01.000Z")
     var clockReads = 0
     var receiptCalls = 0
-    val fixed = exchange { path, contentType, _ ->
-      assertEquals(RoutinePaidBridgeProtocol.POLL_PATH, path)
-      DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse(issuedAfterPollStart))
+    val fixed = exchange { path, contentType, bytes ->
+      if (path == RoutinePaidBridgeProtocol.POLL_PATH)
+        DeviceBridgeRawResponse(200, contentType, paidAssignmentResponse(issuedAfterPollStart))
+      else {
+        val frame = StrictJson.parse(bytes).requireObject(setOf(
+          "publicKeySpki", "signedAssignment", "signedCheck"))
+        val report = frame.value("signedCheck").requireObject(setOf("body", "signature"))
+        val reportBody = report.value("body").requireObject(setOf("version", "candidateId",
+          "challengeId", "challengeDigest", "reasonCode", "checkedAt"))
+        assertEquals("transport_unavailable", reportBody.string("reasonCode"))
+        assertEquals(issuedAfterPollStart.body.candidateId, reportBody.string("candidateId"))
+        assertEquals(86, report.string("signature").length)
+        DeviceBridgeRawResponse(202, contentType,
+          """{"outcome":"signed_paid_check_recorded","advisoryOnly":true,"financialActionAllowed":false}"""
+            .toByteArray(StandardCharsets.UTF_8))
+      }
     }
     val preparation = RoutinePaidPhonePreparation(fixed,
       RoutineTelebirrObservationCollector(ProviderTransport {
@@ -237,7 +250,7 @@ class RoutinePaidPhonePreparationTest {
       run(preparation))
     assertEquals(1, receiptCalls)
     assertTrue(clockReads >= 2)
-    assertTrue(workStore.load() is RoutinePaidPendingWork.Assignment)
+    assertNull(workStore.load())
   }
 
   @Test fun `signed paid assignment persists before lookup and observation stays sealed`() {
@@ -303,7 +316,7 @@ class RoutinePaidPhonePreparationTest {
     assertNull(workStore.load())
   }
 
-  @Test fun `offline receipt retains assignment and restart does not consume another poll`() {
+  @Test fun `offline receipt seals its reason and restart retries upload without another poll`() {
     var calls = 0
     val fixed = exchange { path, contentType, _ ->
       calls++
@@ -312,13 +325,13 @@ class RoutinePaidPhonePreparationTest {
       else DeviceBridgeRawResponse(503, contentType,
         """{"code":"temporarily_unavailable"}""".toByteArray(StandardCharsets.UTF_8))
     }
-    assertEquals(RoutinePaidPhonePreparationResult.Review("transport_unavailable"),
+    assertEquals(RoutinePaidPhonePreparationResult.Retry,
       run(preparation(fixed, ProviderTransport { error("offline") })))
-    assertTrue(workStore.load() is RoutinePaidPendingWork.Assignment)
+    assertTrue(workStore.load() is RoutinePaidPendingWork.Upload)
     val restarted = EncryptedRoutinePaidWorkStore(workDirectory, workCipher)
     assertEquals(RoutinePaidPhonePreparationResult.Retry,
       run(preparation(fixed, ProviderTransport { observedReceipt() }, restarted)))
-    assertEquals(2, calls)
+    assertEquals(3, calls)
   }
 
   @Test fun `sealed paid observation retries and clears only after an exact no-credit acknowledgement`() {

@@ -96,11 +96,14 @@ export interface TelegramProofMediaDependencies {
 
 export type TelegramProofMediaResult =
   | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'unreadable' }
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'too_large' }
   | { readonly kind: 'busy' };
 
 let activeMediaJobs = 0;
+
+class UnreadableTelegramProof extends Error {}
 
 function withinImageBounds(width: number, height: number): boolean {
   return width > 0 && height > 0 && width * height <= MAX_IMAGE_PIXELS;
@@ -198,7 +201,7 @@ function boundedExtractedText(text: string): string {
     normalized.length === 0 ||
     Buffer.byteLength(normalized, 'utf8') > TELEBIRR_CANDIDATE_EXTRACTION_MAX_INPUT_BYTES
   ) {
-    throw new Error('Receipt text is empty or too large.');
+    throw new UnreadableTelegramProof('Receipt text is empty or too large.');
   }
   return normalized;
 }
@@ -222,7 +225,8 @@ export async function recognizeTelegramProofMedia(
   bytes: Buffer,
   kind: TelegramProofMedia['kind'],
 ): Promise<string> {
-  if (!hasMediaSignature(bytes, kind)) throw new Error('Unsupported receipt content.');
+  if (!hasMediaSignature(bytes, kind))
+    throw new UnreadableTelegramProof('Unsupported receipt content.');
   const directory = await mkdtemp(join(tmpdir(), 'fetanagent-proof-'));
   try {
     const isPng = bytes
@@ -242,7 +246,7 @@ export async function recognizeTelegramProofMedia(
     const info = await runExtractor('pdfinfo', [source], 5_000);
     const pageCount = /^Pages:\s+(\d+)\s*$/mu.exec(info)?.[1];
     if (!pageCount || Number(pageCount) < 1 || Number(pageCount) > MAX_PDF_PAGES) {
-      throw new Error('PDF page count is unsupported.');
+      throw new UnreadableTelegramProof('PDF page count is unsupported.');
     }
     const embeddedText = (
       await runExtractor('pdftotext', ['-layout', '-f', '1', '-l', pageCount, source, '-'], 8_000)
@@ -289,11 +293,11 @@ export async function extractTelegramProofMediaText(
   try {
     const bytes = await downloadTelegramFile(media, dependencies);
     if (bytes === 'too_large') return { kind: 'too_large' };
-    if (!hasMediaSignature(bytes, media.kind)) return { kind: 'unavailable' };
+    if (!hasMediaSignature(bytes, media.kind)) return { kind: 'unreadable' };
     const text = await (dependencies.recognize ?? recognizeTelegramProofMedia)(bytes, media.kind);
     return { kind: 'text', text: boundedExtractedText(text) };
-  } catch {
-    return { kind: 'unavailable' };
+  } catch (error) {
+    return { kind: error instanceof UnreadableTelegramProof ? 'unreadable' : 'unavailable' };
   } finally {
     activeMediaJobs -= 1;
   }

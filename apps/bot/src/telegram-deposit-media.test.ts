@@ -5,6 +5,7 @@ import {
   extractTelegramProofMediaText,
   selectTelegramProofMedia,
 } from './telegram-deposit-media.js';
+import { TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT } from './telegram-guided-deposit.js';
 
 // Only the header is needed: recognition is injected, so no image is decoded in unit tests.
 const image = Buffer.from([
@@ -14,6 +15,12 @@ const image = Buffer.from([
 const pdf = Buffer.from('%PDF-1.7\nsynthetic test');
 
 describe('Telegram receipt media intake', () => {
+  it('explains unreadable input without implying a payment was checked', () => {
+    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).toContain(
+      'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
+    );
+    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).toContain('No payment was submitted');
+  });
   it('selects only a bounded photo or JPG/PNG/PDF document', () => {
     expect(
       selectTelegramProofMedia({
@@ -162,7 +169,7 @@ describe('Telegram receipt media intake', () => {
         getFile: async () => ({ file_path: 'photos/file.jpg' }),
         fetch: async () => new Response('not an image'),
       }),
-    ).toEqual({ kind: 'unavailable' });
+    ).toEqual({ kind: 'unreadable' });
     expect(recognize).not.toHaveBeenCalled();
   });
 
@@ -181,7 +188,7 @@ describe('Telegram receipt media intake', () => {
           recognize,
         },
       ),
-    ).toEqual({ kind: 'unavailable' });
+    ).toEqual({ kind: 'unreadable' });
     expect(recognize).not.toHaveBeenCalled();
   });
 

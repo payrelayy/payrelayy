@@ -17,6 +17,7 @@ const ALLOWED_FUNCTIONS = [
   'app.classify_routine_telebirr_paid_upload_terminal(uuid,text,text)',
   'app.stage_routine_telebirr_paid_signed_observation(uuid,text,text,text,text,jsonb)',
   'app.record_routine_telebirr_paid_terminal_result(uuid,jsonb)',
+  'app.record_routine_telebirr_paid_check_reason(uuid,uuid,text,timestamptz,text)',
 ] as const;
 const GUARDED_FUNCTIONS = [
   ...ALLOWED_FUNCTIONS,
@@ -187,7 +188,7 @@ export const ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL = `
         )
     ) as no_non_system_base_object_access,
     (
-      select count(*) = 6
+      select count(*) = 7
       from pg_catalog.pg_proc routine
       join pg_catalog.pg_namespace namespace on namespace.oid = routine.pronamespace
       where namespace.nspname not in ('pg_catalog', 'information_schema')
@@ -205,7 +206,7 @@ export const ROUTINE_PAID_POLL_CATALOG_PREFLIGHT_SQL = `
         and routine.oid not in (${ALLOWED_OIDS})
     ) as exact_reachable_function_surface_allowed,
     (
-      select count(*) = 8 and pg_catalog.bool_and(
+      select count(*) = 9 and pg_catalog.bool_and(
         routine.prosecdef and routine.prokind = 'f'
         and routine.proconfig = array['search_path=pg_catalog']::text[]
         and owner.rolname = 'postgres'

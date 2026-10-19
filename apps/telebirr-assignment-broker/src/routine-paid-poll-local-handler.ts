@@ -112,7 +112,8 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
     typeof broker.loadObservation !== 'function' ||
     typeof broker.classifyTerminal !== 'function' ||
     typeof broker.stageObservation !== 'function' ||
-    typeof broker.recordTerminalRejection !== 'function'
+    typeof broker.recordTerminalRejection !== 'function' ||
+    typeof broker.recordCheckReason !== 'function'
   )
     throw new Error();
   return async (
@@ -280,6 +281,35 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
         const recorded = await broker.recordTerminalRejection({
           challengeId: input.challengeId,
           signedObservation: input.signedObservation,
+        });
+        return response(200, { kind: recorded });
+      }
+      if (value.operation === 'record_check_reason') {
+        if (
+          !exact(input, [
+            'challengeId',
+            'candidateId',
+            'reasonCode',
+            'checkedAt',
+            'reportDigest',
+          ]) ||
+          typeof input.challengeId !== 'string' ||
+          !UUID_V4.test(input.challengeId) ||
+          typeof input.candidateId !== 'string' ||
+          !UUID_V4.test(input.candidateId) ||
+          typeof input.reasonCode !== 'string' ||
+          !/^[a-z][a-z0-9_]{0,63}$/u.test(input.reasonCode) ||
+          !utc(input.checkedAt) ||
+          typeof input.reportDigest !== 'string' ||
+          !DIGEST.test(input.reportDigest)
+        )
+          return response(400, { code: 'invalid_request' });
+        const recorded = await broker.recordCheckReason({
+          challengeId: input.challengeId,
+          candidateId: input.candidateId,
+          reasonCode: input.reasonCode,
+          checkedAt: input.checkedAt,
+          reportDigest: input.reportDigest,
         });
         return response(200, { kind: recorded });
       }

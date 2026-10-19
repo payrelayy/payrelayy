@@ -53,25 +53,16 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     ].join('\n');
   }
   if (delivery.outcomeCode === 'already_used') {
-    return [
-      '⚠️ Reference already used',
-      `This Telegram account already submitted the TeleBirr reference ending ${delivery.referenceMasked.slice(-4)} for a completed deposit.`,
-      'No new Player credit was made. Do not pay again; contact support if this is unexpected.',
-    ].join('\n');
+    return 'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.';
   }
   if (delivery.outcomeCode === 'wrong_receiver') {
-    return [
-      '❌ Deposit rejected — wrong receiver',
-      `The TeleBirr receipt ending ${delivery.referenceMasked.slice(-4)} names a different receiver. No Player credit was made.`,
-      'If money left your wallet, do not pay again. Contact support with the reference.',
-    ].join('\n');
+    return 'Deposit not credited. Reason: wrong receiver. Contact support if this is unexpected.';
   }
   if (delivery.outcomeCode === 'invalid_reference') {
-    return [
-      '❌ Invalid TeleBirr reference',
-      `The official receipt page did not recognize the reference ending ${delivery.referenceMasked.slice(-4)}. No Player credit was made.`,
-      'Check the reference. If money left your wallet, do not pay again—contact support.',
-    ].join('\n');
+    return 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.';
+  }
+  if (delivery.outcomeCode === 'unrelated_receipt') {
+    return 'Deposit not credited. Reason: unrelated receipt. Contact support if this is unexpected.';
   }
   if (delivery.outcomeCode === 'manual_review') {
     return [

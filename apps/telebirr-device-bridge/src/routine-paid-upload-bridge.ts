@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import { isProxy } from 'node:util/types';
 
 import {
+  assessRoutineTelebirrNoMoneyAssignment,
   assessRoutineTelebirrPaidPhoneEvidence,
+  verifyRoutinePaidCheckReport,
   type RoutineTelebirrPaidPhoneEvidence,
 } from '@fetanagent/telebirr-verification-foundation';
 
@@ -56,6 +58,14 @@ export interface RoutinePaidUploadBridgeDependencies {
   recordTerminalRejection(input: {
     readonly challengeId: string;
     readonly signedObservation: unknown;
+  }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
+  /** Diagnostic only; this grants no receipt, claim, or execution authority. */
+  recordCheckReason?(input: {
+    readonly challengeId: string;
+    readonly candidateId: string;
+    readonly reasonCode: string;
+    readonly checkedAt: string;
+    readonly reportDigest: string;
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
 }
 
@@ -159,12 +169,16 @@ export function createRoutinePaidUploadBridgeHandler(
     try {
       if (!validRequest(request)) return error(400, 'invalid_request');
       const value = parseCanonicalJson(request.body);
-      if (!exact(value, ['publicKeySpki', 'signedAssignment', 'signedObservation']))
+      const checkReport = exact(value, ['publicKeySpki', 'signedAssignment', 'signedCheck']);
+      if (!checkReport && !exact(value, ['publicKeySpki', 'signedAssignment', 'signedObservation']))
         return error(400, 'invalid_request');
       const deviceSpkiDer = publicKeyHint(own(value, 'publicKeySpki'));
       const signedAssignment = own(value, 'signedAssignment');
-      const signedObservation = own(value, 'signedObservation');
-      const body = record(signedObservation) && own(signedObservation, 'body');
+      const signedObservation = checkReport ? undefined : own(value, 'signedObservation');
+      const signedCheck = checkReport ? own(value, 'signedCheck') : undefined;
+      const body = checkReport
+        ? record(signedCheck) && own(signedCheck, 'body')
+        : record(signedObservation) && own(signedObservation, 'body');
       const challengeId = record(body) && own(body, 'challengeId');
       const observationChallengeDigest = record(body) && own(body, 'challengeDigest');
       const assignmentBody = record(signedAssignment) && own(signedAssignment, 'body');
@@ -173,7 +187,7 @@ export function createRoutinePaidUploadBridgeHandler(
       if (
         !deviceSpkiDer ||
         !record(signedAssignment) ||
-        !record(signedObservation) ||
+        !record(checkReport ? signedCheck : signedObservation) ||
         typeof challengeId !== 'string' ||
         !UUID_V4.test(challengeId) ||
         assignmentChallengeId !== challengeId ||
@@ -190,6 +204,47 @@ export function createRoutinePaidUploadBridgeHandler(
       if (terminal) return error(410, 'paid_observation_terminal_expired');
       const context = await dependencies.loadObservation(challengeId);
       if (!context) return error(401, 'observation_unavailable');
+      if (checkReport) {
+        const lookup = context.trustedLookup;
+        if (!record(lookup)) return error(403, 'paid_check_review');
+        const verified = verifyRoutinePaidCheckReport(
+          signedCheck,
+          {
+            candidateId: own(lookup, 'candidateId'),
+            challengeId: own(lookup, 'challengeId'),
+            challengeDigest: own(lookup, 'challengeDigest'),
+            issuedAt: own(lookup, 'issuedAt'),
+            expiresAt: own(lookup, 'expiresAt'),
+          },
+          dependencies.now(),
+          deviceSpkiDer,
+        );
+        if (!verified || !dependencies.recordCheckReason) return error(403, 'paid_check_review');
+        const assignment = assessRoutineTelebirrNoMoneyAssignment(
+          {
+            assessedAt: verified.checkedAt,
+            trustedLookup: context.trustedLookup,
+            trustedRawReference: context.trustedRawReference,
+            trustedSigner: context.trustedSigner,
+            deviceEnrollment: context.deviceEnrollment,
+            signedAssignment,
+          },
+          context.trustedSignerSpkiDer,
+          deviceSpkiDer,
+        );
+        if (assignment.disposition !== 'would_forward_signed_lookup')
+          return error(403, 'paid_check_review');
+        const recorded = await dependencies.recordCheckReason(verified);
+        if (recorded === 'retry') return error(503, 'temporarily_unavailable');
+        if (recorded === 'conflict') return error(409, 'check_conflict');
+        if (recorded !== 'recorded' && recorded !== 'exact_replay')
+          return error(503, 'temporarily_unavailable');
+        return response(202, {
+          outcome: 'signed_paid_check_recorded',
+          advisoryOnly: true,
+          financialActionAllowed: false,
+        });
+      }
       const assessment = assessRoutineTelebirrPaidPhoneEvidence(
         {
           assessedAt: dependencies.now(),
@@ -217,13 +272,43 @@ export function createRoutinePaidUploadBridgeHandler(
           if (recorded === 'conflict') return error(409, 'observation_conflict');
           if (recorded !== 'recorded' && recorded !== 'exact_replay')
             return error(503, 'temporarily_unavailable');
+        } else if (assessment.authenticatedPhoneCheck && dependencies.recordCheckReason) {
+          const observedAt = record(body) && own(body, 'observedAt');
+          const signature = record(signedObservation) && own(signedObservation, 'signature');
+          const observationDigest =
+            record(signedObservation) && own(signedObservation, 'bodyDigest');
+          const candidateId = record(body) && own(body, 'candidateId');
+          if (
+            typeof observedAt !== 'string' ||
+            typeof signature !== 'string' ||
+            !SIGNATURE.test(signature) ||
+            typeof observationDigest !== 'string' ||
+            !DIGEST.test(observationDigest) ||
+            typeof candidateId !== 'string' ||
+            !UUID_V4.test(candidateId)
+          )
+            return error(403, 'paid_observation_review');
+          const recorded = await dependencies.recordCheckReason({
+            challengeId,
+            candidateId,
+            reasonCode: assessment.terminalReasonCode ?? assessment.reasonCode,
+            checkedAt: observedAt,
+            reportDigest: `sha256:${createHash('sha256')
+              .update(observationDigest)
+              .update(Buffer.from(signature, 'base64url'))
+              .digest('hex')}`,
+          });
+          if (recorded === 'retry') return error(503, 'temporarily_unavailable');
+          if (recorded === 'conflict') return error(409, 'observation_conflict');
+          if (recorded !== 'recorded' && recorded !== 'exact_replay')
+            return error(503, 'temporarily_unavailable');
         }
         return assessment.terminalReview
           ? error(410, 'paid_observation_terminal_review')
           : error(403, 'paid_observation_review');
       }
       const assignmentBodyDigest = own(signedAssignment, 'bodyDigest');
-      const signature = own(signedObservation, 'signature');
+      const signature = record(signedObservation) ? own(signedObservation, 'signature') : undefined;
       if (
         typeof assignmentBodyDigest !== 'string' ||
         !DIGEST.test(assignmentBodyDigest) ||

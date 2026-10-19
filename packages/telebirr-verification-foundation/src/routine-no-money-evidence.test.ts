@@ -325,6 +325,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     ).toEqual({
       disposition: 'review',
       reasonCode: 'official_origin_attestation_missing',
+      authenticatedPhoneCheck: true,
       financialActionAllowed: false,
       evidence: null,
     });
@@ -359,6 +360,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     ).toEqual({
       disposition: 'review',
       reasonCode: 'no_money_challenge',
+      authenticatedPhoneCheck: false,
       financialActionAllowed: false,
       evidence: null,
     });

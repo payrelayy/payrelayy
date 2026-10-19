@@ -16,6 +16,8 @@ const STAGE =
   'select app.stage_routine_telebirr_paid_signed_observation($1::uuid,$2::text,$3::text,$4::text,$5::text,$6::jsonb) as status';
 const REJECT_TERMINAL =
   'select app.record_routine_telebirr_paid_terminal_result($1::uuid,$2::jsonb) as status';
+const RECORD_CHECK_REASON =
+  'select app.record_routine_telebirr_paid_check_reason($1::uuid,$2::uuid,$3::text,$4::timestamptz,$5::text) as status';
 
 export class RoutinePaidPollSqlUnavailableError extends Error {
   constructor() {
@@ -103,6 +105,30 @@ export function createRoutinePaidPollPostgresDatabase(
       const row = await oneRow(client, REJECT_TERMINAL, [
         input.challengeId,
         JSON.stringify(input.signedObservation),
+      ]);
+      if (
+        typeof row !== 'object' ||
+        row === null ||
+        Array.isArray(row) ||
+        isProxy(row) ||
+        Object.getPrototypeOf(row) !== Object.prototype ||
+        Reflect.ownKeys(row).length !== 1
+      )
+        throw new RoutinePaidPollSqlUnavailableError();
+      const status = Object.getOwnPropertyDescriptor(row, 'status');
+      if (!status?.enumerable || !Object.hasOwn(status, 'value'))
+        throw new RoutinePaidPollSqlUnavailableError();
+      return status.value;
+    },
+    async recordCheckReason(
+      input: Parameters<RoutinePaidPollBrokerDatabase['recordCheckReason']>[0],
+    ) {
+      const row = await oneRow(client, RECORD_CHECK_REASON, [
+        input.challengeId,
+        input.candidateId,
+        input.reasonCode,
+        input.checkedAt,
+        input.reportDigest,
       ]);
       if (
         typeof row !== 'object' ||

@@ -2348,6 +2348,167 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
+  it('keeps the CBE provisioning snapshot route gated and returns only matched metadata to Owner', async () => {
+    const url = '/v1/owner/cbe-birr-receiver-v2/provisioning-snapshot';
+    const payload = {
+      confirmation: 'owner_confirmed_cbe_birr_provisioning_snapshot',
+      receiverRevisionId: pilotRequestId,
+      receiverVersion: 3,
+      requestId: pilotRevisionId,
+    };
+    const disabled = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime(),
+    });
+    expect(
+      (
+        await disabled.inject({
+          method: 'POST',
+          url,
+          headers: receiverMutationHeaders(pilotRevisionId),
+          payload,
+        })
+      ).statusCode,
+    ).toBe(404);
+    await disabled.close();
+
+    const snapshot = Object.freeze({
+      receiverRevisionId: pilotRequestId,
+      receiverVersion: 3,
+      protectionProfileVersion: 2 as const,
+      encryptionKeyVersion: 2 as const,
+      fingerprintKeyVersion: 2 as const,
+      receiverPhone: 'synthetic-field-that-must-not-escape',
+    });
+    let observed: unknown;
+    const enabled = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receivers: {
+          list: async () => [],
+          rotate: async () => {
+            throw new Error('rotation must not run');
+          },
+          readCbeBirrProvisioningSnapshot: async (actor, approvedRevision) => {
+            expect(actor).toBe(authUserId);
+            observed = approvedRevision;
+            return snapshot;
+          },
+        },
+      }),
+    });
+    const result = await enabled.inject({
+      method: 'POST',
+      url,
+      headers: receiverMutationHeaders(pilotRevisionId),
+      payload,
+    });
+    expect(result.statusCode).toBe(200);
+    expect(observed).toEqual({ receiverRevisionId: pilotRequestId, receiverVersion: 3 });
+    expect(result.json()).toEqual({
+      snapshot: {
+        receiverRevisionId: pilotRequestId,
+        receiverVersion: 3,
+        protectionProfileVersion: 2,
+        encryptionKeyVersion: 2,
+        fingerprintKeyVersion: 2,
+      },
+    });
+    expect(result.body).not.toMatch(/phone|account|keyHex|ciphertext/iu);
+    await enabled.close();
+  });
+
+  it('rejects malformed CBE provisioning snapshot requests before Owner authentication', async () => {
+    let authenticationCalls = 0;
+    const url = '/v1/owner/cbe-birr-receiver-v2/provisioning-snapshot';
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: (async () => {
+        authenticationCalls += 1;
+        throw new Error('authentication must not run');
+      }) as typeof fetch,
+      runtime: runtime(),
+    });
+    const payload = {
+      confirmation: 'owner_confirmed_cbe_birr_provisioning_snapshot',
+      receiverRevisionId: pilotRequestId,
+      receiverVersion: 3,
+      requestId: pilotRevisionId,
+    };
+    for (const candidate of [
+      {
+        payload: { ...payload, receiverRevisionId: 'not-a-uuid' },
+        headers: receiverMutationHeaders(pilotRevisionId),
+      },
+      {
+        payload: { ...payload, receiverVersion: 0 },
+        headers: receiverMutationHeaders(pilotRevisionId),
+      },
+      {
+        payload: { ...payload, receiverVersion: 3.5 },
+        headers: receiverMutationHeaders(pilotRevisionId),
+      },
+      { payload: { ...payload, extra: true }, headers: receiverMutationHeaders(pilotRevisionId) },
+      {
+        payload: { ...payload, confirmation: 'unconfirmed' },
+        headers: receiverMutationHeaders(pilotRevisionId),
+      },
+      {
+        payload,
+        headers: { ...receiverMutationHeaders(pilotRevisionId), origin: 'https://evil.example' },
+      },
+    ]) {
+      const response = await app.inject({ method: 'POST', url, ...candidate });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(authenticationCalls).toBe(0);
+    await app.close();
+  });
+
+  it('fails closed for unauthenticated or unavailable CBE provisioning snapshots', async () => {
+    const url = '/v1/owner/cbe-birr-receiver-v2/provisioning-snapshot';
+    const payload = {
+      confirmation: 'owner_confirmed_cbe_birr_provisioning_snapshot',
+      receiverRevisionId: pilotRequestId,
+      receiverVersion: 3,
+      requestId: pilotRevisionId,
+    };
+    const app = buildOwnerControlApp(config(false, false, 'staging', false, true), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receivers: {
+          list: async () => [],
+          rotate: async () => {
+            throw new Error('rotation must not run');
+          },
+          readCbeBirrProvisioningSnapshot: async () => {
+            throw new Error('synthetic-private-database-detail');
+          },
+        },
+      }),
+    });
+    const unauthenticated = await app.inject({
+      method: 'POST',
+      url,
+      headers: {
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-fetanagent-owner-csrf': 'owner-receiver-rotation-v1',
+        'x-idempotency-key': pilotRevisionId,
+      },
+      payload,
+    });
+    expect(unauthenticated.statusCode).toBe(403);
+    const unavailable = await app.inject({
+      method: 'POST',
+      url,
+      headers: receiverMutationHeaders(pilotRevisionId),
+      payload,
+    });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.body).not.toContain('synthetic-private-database-detail');
+    await app.close();
+  });
+
   it('lists and prepares only a credential-free KemerBet agent profile', async () => {
     let observed: unknown;
     const profile = {

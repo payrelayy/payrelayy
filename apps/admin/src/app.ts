@@ -1273,6 +1273,56 @@ export function buildOwnerControlApp(
   });
 
   if (runtimeConfig.cbeBirrReceiverV2RotationEnabled) {
+    app.post('/v1/owner/cbe-birr-receiver-v2/provisioning-snapshot', async (request, reply) => {
+      try {
+        const body = exactObject(request.body, [
+          'confirmation',
+          'receiverRevisionId',
+          'receiverVersion',
+          'requestId',
+        ]);
+        if (
+          body?.confirmation !== 'owner_confirmed_cbe_birr_provisioning_snapshot' ||
+          typeof body.receiverRevisionId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.receiverRevisionId) ||
+          typeof body.receiverVersion !== 'number' ||
+          !Number.isSafeInteger(body.receiverVersion) ||
+          body.receiverVersion < 1 ||
+          body.receiverVersion > 2_147_483_647 ||
+          !validReceiverMutationHeaders(request.raw.rawHeaders, body.requestId)
+        ) {
+          return reply.code(400).send({ error: 'invalid_request' });
+        }
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const receivers = dependencies.runtime.receivers;
+        if (!receivers.readCbeBirrProvisioningSnapshot) {
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        }
+        const snapshot = await receivers.readCbeBirrProvisioningSnapshot(authUserId, {
+          receiverRevisionId: body.receiverRevisionId,
+          receiverVersion: body.receiverVersion,
+        });
+        return reply.code(200).send({
+          snapshot: {
+            receiverRevisionId: snapshot.receiverRevisionId,
+            receiverVersion: snapshot.receiverVersion,
+            protectionProfileVersion: snapshot.protectionProfileVersion,
+            encryptionKeyVersion: snapshot.encryptionKeyVersion,
+            fingerprintKeyVersion: snapshot.fingerprintKeyVersion,
+          },
+        });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerReceiverAccountRejectedError
+        ) {
+          return reply.code(403).send({ error: 'forbidden' });
+        }
+        request.log.warn('Owner CBE Birr provisioning snapshot is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    });
+
     app.post('/v1/owner/cbe-birr-receiver-v2/protection-upgrade', async (request, reply) => {
       try {
         const body = exactObject(request.body, [

@@ -9,8 +9,8 @@ internally consistent but unrelated CBE key fails.
 Run this check only in a trusted offline provisioning process. The process must obtain the producer
 profile from an independently approved source and keep the producer masters out of the worker.
 That proof-opening check does not generate, write, deliver, or rotate any secret or profile file.
-The package has no filesystem, environment, database, HTTP, provider, lease, settlement, or payment access. No
-application imports it. A passing synthetic or future private check does not establish file
+That offline check has no filesystem, environment, database, HTTP, provider, lease, settlement,
+or payment access. No application imports this package. A passing synthetic or future private check does not establish file
 custody, deployment pinning, official-source permission, or authoritative lookup readiness.
 
 The package also checks a proposed **receiver-revision lookup** child key against the Owner's
@@ -36,3 +36,18 @@ profile digests and child-key ID, and shapes the three files expected by the gua
 The key bytes are nonenumerable and must be erased after use. This step does not write or mount a
 file, approve pins, read a live key, start a worker, contact CBE, or change a financial switch. A
 future installer must recheck the revision at delivery, and a future worker must recheck it at use.
+
+The private staging step is an unwired, one-use Linux installer for that bundle. It requires an
+independently approved worker UID, an empty root-owned `0700` directory at its fixed host path,
+matching release pins, and an active Owner revision before and after the write. It validates the
+bundle with the guarded loader, creates each file exclusively with no-follow flags, writes and
+syncs the two public profiles before the `0400` worker-owned child key, and reopens every file to
+compare its exact bytes. On failure it removes only files it created when their inode still matches;
+any residue blocks the next attempt. Bundle buffers are zeroed after an attempt. JavaScript secret
+strings in the earlier candidate cannot be reliably erased, so the trusted provisioning process
+must be short-lived and must never log or serialize them.
+
+Staged files are **not** mounted into a worker. No app or workflow calls this installer, no real
+Owner keys or release pins are supplied, and no existing files are replaced. A later deployment
+must separately approve the worker UID and host mount, verify the mounted files with the guarded
+loader, recheck the active revision at use, and define rotation and recovery before CBE can run.

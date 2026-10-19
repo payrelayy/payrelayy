@@ -214,6 +214,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.get_owner_telebirr_shadow_verification_status(uuid)' },
         { signature: 'app.get_private_live_deposit_pilot_status(uuid,uuid)' },
         { signature: 'app.get_public_support_contact()' },
+        { signature: 'app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)' },
         {
           signature: 'app.issue_agent_platform_companion_exact_five_lookup(uuid,uuid,text)',
         },

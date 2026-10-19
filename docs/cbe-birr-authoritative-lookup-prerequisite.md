@@ -201,10 +201,10 @@ The remaining blockers preserve the existing safety design:
    identity. The guarded receiver-key loader can reject stale release pins. Neither check
    retrieves the active revision, provisions a real key, or connects a verifier; the blocker
    remains open.
-   An ungranted Owner metadata function can identify the active v2 revision UUID/version and
+   An Owner-only metadata function can identify the active v2 revision UUID/version and
    protection versions while CBE verification is disabled. It returns no phone or key material.
-   The function remains inaccessible to the Owner runtime until its startup catalog allowlist is
-   deployed and a separate grant is reviewed. Its result is a point-in-time snapshot, so key
+   Its narrow grant follows the deployed startup catalog allowlist; no Owner route calls it yet.
+   Its result is a point-in-time snapshot, so key
    provisioning and later worker use must each recheck the active revision.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.

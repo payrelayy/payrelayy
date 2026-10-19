@@ -1016,6 +1016,118 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             `update app.feature_switches set mode = 'live'
               where feature_key in ('payment_verification', 'deposit_execution')`,
           );
+          const liveInstructionEvent = await createInboundEvent(
+            client,
+            fixture.actorA,
+            9_131_000_009,
+            '9',
+          );
+          const liveInstruction = await queryAsRole<{
+            readonly id: string;
+            readonly request_replayed: boolean;
+          }>(client, 'fetanagent_player_actions', instructionSql, [
+            liveInstructionEvent,
+            fixture.playerId,
+            payloadHmac('9'),
+          ]);
+          expect(liveInstruction).toMatchObject([{ request_replayed: false }]);
+          const liveProofEvent = await createInboundEvent(
+            client,
+            fixture.actorA,
+            9_131_000_010,
+            '8',
+          );
+          const liveProofSql = `select * from app.capture_telegram_cbe_birr_bound_dry_run_proof(
+            $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text,
+            $7::smallint, $8::smallint, $9::text
+          )`;
+          const liveProof = await queryAsRole<ProofRow>(
+            client,
+            'fetanagent_player_actions',
+            liveProofSql,
+            [
+              liveInstruction[0]!.id,
+              liveProofEvent,
+              fixture.playerId,
+              referenceCiphertext('cbe_birr', 'n', 't'),
+              '8'.repeat(64),
+              '***A138',
+              2,
+              2,
+              payloadHmac('8'),
+            ],
+          );
+          expect(liveProof).toMatchObject([
+            { provider_code: 'cbe_birr', proof_status: 'proof_received', request_replayed: false },
+          ]);
+          expect(
+            await queryAsRole<CbeBirrProofPreflightRow>(
+              client,
+              'fetanagent_cbe_birr_proof_preflight',
+              preflightSql,
+              [liveProof[0]!.deposit_proof_request_id],
+            ),
+          ).toMatchObject([
+            {
+              blocker_code: 'receiver_v2_instruction_bound_metadata_only',
+              lease_allowed: false,
+              protected_material_allowed: false,
+            },
+          ]);
+          expect(await readFinancialLedgerSnapshot(client)).toEqual(beforeFinancial);
+          const telebirrDryRunEvent = await createInboundEvent(
+            client,
+            fixture.actorA,
+            9_131_000_011,
+            '7',
+          );
+          await expect(
+            captureTelegramProof(client, {
+              eventId: telebirrDryRunEvent,
+              fingerprint: '7'.repeat(64),
+              hmac: payloadHmac('7'),
+              masked: '***A137',
+              playerId: fixture.playerId,
+              providerCode: 'telebirr',
+            }),
+          ).rejects.toThrow(/every financial switch disabled/u);
+          const unboundCbeEvent = await createInboundEvent(
+            client,
+            fixture.actorA,
+            9_131_000_013,
+            '5',
+          );
+          await expect(
+            captureTelegramProof(client, {
+              eventId: unboundCbeEvent,
+              fingerprint: '5'.repeat(64),
+              hmac: payloadHmac('5'),
+              masked: '***A135',
+              playerId: fixture.playerId,
+              providerCode: 'cbe_birr',
+            }),
+          ).rejects.toThrow(/every financial switch disabled/u);
+          await expect(
+            queryAsRole(
+              client,
+              'fetanagent_player_actions',
+              `select * from app.capture_telegram_cbe_birr_no_money_proof(
+                $1::uuid, $2::text, $3::text, $4::text, $5::text,
+                $6::text, $7::smallint, $8::smallint, $9::text
+              )`,
+              [
+                unboundCbeEvent,
+                fixture.playerId,
+                'cbe_birr',
+                referenceCiphertext('cbe_birr', 'n', 't'),
+                '5'.repeat(64),
+                '***A135',
+                2,
+                2,
+                payloadHmac('5'),
+              ],
+            ),
+          ).rejects.toThrow(/permission denied/u);
           expect((await client.query(candidateSql, [proofId])).rows).toEqual([
             { candidate_id: candidate.rows[0]!.candidate_id, already_recorded: true },
           ]);
@@ -1037,6 +1149,21 @@ export function registerDryRunDepositProofIntakeSqlTests(getClient: () => Client
             `update app.feature_switches set mode = 'dry_run'
               where feature_key = 'cbe_birr_authoritative_verification'`,
           );
+          const blockedInstructionEvent = await createInboundEvent(
+            client,
+            fixture.actorA,
+            9_131_000_012,
+            '6',
+          );
+          await expect(
+            withSavepoint(client, async () =>
+              client.query(instructionSql, [
+                blockedInstructionEvent,
+                fixture.playerId,
+                payloadHmac('6'),
+              ]),
+            ),
+          ).rejects.toThrow(/requires verification disabled/u);
           await expect(
             withSavepoint(client, async () => client.query(candidateSql, [proofId])),
           ).rejects.toThrow(/requires CBE verification disabled/u);

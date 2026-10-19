@@ -80,7 +80,7 @@ jobs:
         env:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: aws-0-eu-west-1.pooler.supabase.com
-          PGPORT: '5432'
+          PGPORT: '6543'
           PGUSER: postgres.xzztugbgtulptnbpoelr
           PGDATABASE: postgres
           PGSSLMODE: require

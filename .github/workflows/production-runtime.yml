@@ -64,7 +64,6 @@ env:
   # GitHub-hosted runners are IPv4-only. Short-lived administrative SQL uses the
   # shared transaction pooler; deployed long-lived runtimes remain on session mode 5432.
   PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
-  BETA_RUNTIME_ROLE: fetanagent_beta_admission_runtime
   CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
   PLAYER_ACTION_RUNTIME_ROLE: fetanagent_player_actions_runtime
@@ -226,7 +225,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_SHA:0:12}"
-          for target in admin customer-web api beta-admission bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge companion-device-bridge gateway; do
+          for target in admin customer-web api bot telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge companion-device-bridge gateway; do
             case "$target" in
               admin) image='owner-control' ;;
               *) image="$target" ;;
@@ -247,7 +246,6 @@ jobs:
             "fetanagent-owner-control:$tag" \
             "fetanagent-customer-web:$tag" \
             "fetanagent-api:$tag" \
-            "fetanagent-beta-admission:$tag" \
             "fetanagent-bot:$tag" \
             "fetanagent-telebirr-assignment-broker:$tag" \
             "fetanagent-telebirr-device-state-broker:$tag" \
@@ -349,10 +347,7 @@ jobs:
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
-          BETA_ADMISSION_PAYLOAD_HMAC_SECRET: ${{ secrets.BETA_ADMISSION_PAYLOAD_HMAC_SECRET }}
-          BETA_ADMISSION_RUNTIME_PASSWORD: ${{ secrets.BETA_ADMISSION_RUNTIME_PASSWORD }}
           BOT_TO_API_ACTION_HMAC_SECRET: ${{ secrets.BOT_TO_API_ACTION_HMAC_SECRET }}
-          BOT_TO_BETA_ADMISSION_HMAC_SECRET: ${{ secrets.BOT_TO_BETA_ADMISSION_HMAC_SECRET }}
           CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET }}
           CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET: ${{ secrets.CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET }}
           CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON: ${{ vars.CBE_DEPOSIT_REFERENCE_KEY_PROFILE_V1_JSON }}
@@ -443,10 +438,7 @@ jobs:
             "$API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET"
             "$API_TELEGRAM_CAPABILITY_HMAC_SECRET"
             "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET"
-            "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET"
-            "$BETA_ADMISSION_RUNTIME_PASSWORD"
             "$BOT_TO_API_ACTION_HMAC_SECRET"
-            "$BOT_TO_BETA_ADMISSION_HMAC_SECRET"
             "$CBE_DEPOSIT_REFERENCE_ENCRYPTION_SECRET"
             "$CBE_DEPOSIT_REFERENCE_FINGERPRINT_SECRET"
             "$COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD"
@@ -550,8 +542,6 @@ jobs:
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$CUSTOMER_WEB_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/customer-web-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$BETA_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$BETA_ADMISSION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/beta-database-url"
-          printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
             "$PLAYER_ACTION_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/player-action-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
             "$ASSIGNMENT_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-assignment-database-url"
@@ -559,9 +549,6 @@ jobs:
             "fetanagent_telebirr_device_state_runtime.$PRODUCTION_PROJECT_REF" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
           printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
-          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/beta-transport-hmac"
-          printf '%s\n' "$BETA_ADMISSION_PAYLOAD_HMAC_SECRET" >"$secret_dir/beta-payload-hmac"
-          printf '%s\n' "$BOT_TO_BETA_ADMISSION_HMAC_SECRET" >"$secret_dir/bot-transport-hmac"
           printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/api-action-transport-hmac"
           printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/bot-action-transport-hmac"
           printf '%s\n' "$API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET" >"$secret_dir/api-action-payload-hmac"
@@ -1063,7 +1050,7 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
-            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,beta-database-url,beta-payload-hmac,beta-transport-hmac,bot-action-transport-hmac,bot-token,bot-transport-hmac,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-device-state-database-url}
           )
           case "$REQUESTED_MODE" in
             deploy|deploy-shadow|deploy-shadow-intake)

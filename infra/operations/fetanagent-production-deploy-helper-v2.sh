@@ -357,9 +357,12 @@ disable_staging_bot_token() {
 
 verify_images() {
   local sha="$1" tag="$2" release="${3:-}" image
-  local -a images=(owner-control customer-web api beta-admission bot gateway)
+  local -a images=(owner-control customer-web api bot gateway)
   require_sha "$sha"
   require_tag "$tag"
+  if [[ -n "$release" ]] && grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
+    images+=(beta-admission)
+  fi
   if [[ -n "$release" ]] && grep -Fq '  telebirr-assignment-broker:' "$release/compose.production.yaml"; then
     images+=(telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge)
   fi
@@ -379,12 +382,8 @@ verify_release_files() {
     api-action-payload-hmac
     api-action-semantic-hmac
     api-action-transport-hmac
-    beta-database-url
-    beta-payload-hmac
-    beta-transport-hmac
     bot-action-transport-hmac
     bot-token
-    bot-transport-hmac
     cbe-deposit-reference-encryption-key
     cbe-deposit-reference-fingerprint-key
     cbe-deposit-reference-key-profile.v1.json
@@ -403,6 +402,9 @@ verify_release_files() {
     telebirr-bridge-server-signer.pkcs8.der
     telebirr-device-state-database-url
   )
+  if grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
+    required+=(beta-database-url beta-payload-hmac beta-transport-hmac bot-transport-hmac)
+  fi
   if grep -Fq "INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true'" \
     "$release/compose.production.yaml"; then
     required+=(
@@ -754,7 +756,10 @@ case "${1:-}" in
       exit 0
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
-    expected_count=37
+    expected_count=33
+    if grep -Fq '  beta-admission:' "$incoming/compose.production.yaml"; then
+      expected_count=$((expected_count + 4))
+    fi
     if [[ "$deployment_mode" == 'operational' || "$deployment_mode" == 'shadow-review' ]]; then
       expected_count=$((expected_count + 4))
       for name in \
@@ -899,8 +904,11 @@ case "${1:-}" in
     printf '%s\n' "$previous" >"$previous_file"
     trap 'rollback_transition "$sha" "$release"' ERR
     compose_release "$release" config --quiet
-    start_release_services_with_session_handoff_retry "$release" \
-      owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker
+    core_services=(owner-control customer-web api telebirr-assignment-broker telebirr-device-state-broker)
+    if grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
+      core_services+=(beta-admission)
+    fi
+    start_release_services_with_session_handoff_retry "$release" "${core_services[@]}"
     if [[ "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] &&
       grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
         "$release/compose.production.inert-maintenance.yaml"; then
@@ -939,9 +947,12 @@ case "${1:-}" in
       die 'the requested release is not current'
     tag="$(<"$release/.image-tag")"
     verify_images "$sha" "$tag" "$release"
-    services=(owner-control customer-web api beta-admission gateway)
+    services=(owner-control customer-web api gateway)
     if grep -Fq '  telebirr-assignment-broker:' "$release/compose.production.yaml"; then
-      services=(owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge gateway)
+      services=(owner-control customer-web api telebirr-assignment-broker telebirr-device-state-broker telebirr-device-bridge gateway)
+    fi
+    if grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
+      services+=(beta-admission)
     fi
     if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
       services+=(production-companion-device-bridge)
@@ -983,6 +994,11 @@ case "${1:-}" in
     for service in owner-control customer-web api beta-admission; do
       stop_if_running "$(container_for "$STAGING_PROJECT" "$service")"
     done
+    id="$(container_for "$PROJECT_NAME" beta-admission)"
+    if [[ -n "$id" ]] && ! grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
+      stop_if_running "$id"
+      docker container rm -- "$id" >/dev/null
+    fi
     stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
     disable_staging_bot_token
     for service in telebirr-device-bridge telebirr-device-state-broker telebirr-assignment-broker; do

@@ -22,7 +22,7 @@ bot. This scope decision does not change any running service or financial activa
 copy is English-only. The [phase map](docs/real-money-go-live-phases.md) governs the Telegram-first
 delivery sequence.
 
-The repository currently implements an English-only, invite-only Telegram staging slice, a unified
+The repository implements an English-only Telegram bot with public action onboarding, a unified
 default-off customer deposit intake/status boundary for web and Telegram, a disabled authoritative
 CBE foundation, and a disabled-by-default customer web authentication/workspace foundation. The
 customer source includes a responsive PWA shell, generic account creation and
@@ -153,8 +153,9 @@ The current foundation is deliberately safe:
   instructions, accept only server-protected references, and expose customer-safe status. Live
   capture can enqueue one private authoritative verification job only when all three switches are
   locked live; no API or web path can create the required eligibility decision or provider evidence;
-- the historical generic private Telegram inbox procedure is retired. The staging beta boundary is
-  English-only and invite-only: only a one-time authorized team invitation may create an identity.
+- the historical generic private Telegram inbox procedure is retired. Telegram action onboarding
+  creates a customer identity without an invitation; Player validation and financial eligibility
+  remain separate gates. The former beta invite route and Owner controls are retired;
 - the staging bot can now show an admitted-user menu and record a non-claiming KemerBet Player-ID
   request as `pending` through a dedicated database role and durable action nonce store.
 - pending or merely found Player IDs are not usable for deposits; the legacy audited ownership

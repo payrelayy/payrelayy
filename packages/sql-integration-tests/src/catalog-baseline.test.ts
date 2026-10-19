@@ -472,6 +472,123 @@ registerOwnerReceiverAccountControlSqlTests(
 );
 
 describe('disposable SQL migration baseline', () => {
+  it('removes invite eligibility from every Telegram financial function', async () => {
+    const routines = await client.query<{
+      readonly signature: string;
+      readonly still_requires_invite: boolean;
+    }>(`
+      select p.oid::regprocedure::text as signature,
+             position('telegram_beta_invites' in p.prosrc) > 0 as still_requires_invite
+        from pg_proc p
+       where p.oid in (
+         'app.capture_telegram_dry_run_deposit_proof(uuid,text,text,text,text,text,smallint,smallint,text)'::regprocedure,
+         'app.capture_telegram_live_deposit_reference(uuid,uuid,text,text,text,smallint,text)'::regprocedure,
+         'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)'::regprocedure,
+         'app.capture_telegram_routine_telebirr_no_money_core(uuid,text,text,text,text,text,smallint,smallint,text)'::regprocedure,
+         'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)'::regprocedure,
+         'app.enforce_telegram_dry_run_proof_receipt_binding()'::regprocedure,
+         'app.enforce_telegram_live_deposit_receipt_binding()'::regprocedure,
+         'app.enforce_telegram_live_telebirr_proof_receipt_insert()'::regprocedure,
+         'app.get_telegram_customer_deposit(uuid,uuid)'::regprocedure,
+         'app.get_telegram_customer_live_telebirr_proof(uuid,uuid)'::regprocedure,
+         'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)'::regprocedure,
+         'app.open_telegram_live_deposit_intent(uuid,text,bigint,text)'::regprocedure,
+         'app.prepare_telegram_telebirr_destination(uuid,text,text)'::regprocedure
+       )
+    `);
+    expect(routines.rows).toHaveLength(13);
+    expect(routines.rows.filter((routine) => routine.still_requires_invite)).toEqual([]);
+  });
+
+  it('retires invite history under a stopped financial gate without deleting customer lineage', async () => {
+    const source = await readFile(
+      '/workspace/infra/sql/retire-telegram-beta-invite-history.sql',
+      'utf8',
+    );
+    const retirement = source.replace(/^begin;\s*$/m, '').replace(/^commit;\s*$/m, '');
+    expect(retirement).not.toBe(source);
+
+    await client.query('begin');
+    try {
+      await client.query(
+        `insert into app.telegram_beta_invites (token_digest, expires_at, issued_by_admin_id)
+         values ('sha256-v1:' || repeat('1', 64), clock_timestamp() + interval '1 hour', $1::uuid)`,
+        [ownerAdminId],
+      );
+      await client.query(
+        `insert into app.telegram_beta_invite_admission_nonce_reservations (nonce_digest, expires_at)
+         values (repeat('2', 64), clock_timestamp() + interval '1 minute')`,
+      );
+      await client.query(
+        `insert into app.audit_events (actor_kind, action, resource_type, metadata)
+         values ('system', 'telegram.beta_invite_issued', 'telegram_beta_invite', '{}'::jsonb)`,
+      );
+      const before = await client.query<{
+        readonly customers: number;
+        readonly audit_events: number;
+      }>(
+        `select (select count(*)::integer from app.customers) as customers,
+                (select count(*)::integer from app.audit_events) as audit_events`,
+      );
+
+      await client.query(retirement);
+      const after = await client.query<{
+        readonly customers: number;
+        readonly audit_events: number;
+        readonly invites: number;
+        readonly nonces: number;
+        readonly audit_trigger_restored: boolean;
+        readonly issue_denied: boolean;
+        readonly redeem_denied: boolean;
+      }>(`
+        select (select count(*)::integer from app.customers) as customers,
+               (select count(*)::integer from app.audit_events) as audit_events,
+               (select count(*)::integer from app.telegram_beta_invites) as invites,
+               (select count(*)::integer from app.telegram_beta_invite_admission_nonce_reservations) as nonces,
+               exists (select 1 from pg_trigger where tgrelid = 'app.audit_events'::regclass
+                         and tgname = 'audit_events_immutable') as audit_trigger_restored,
+               not has_function_privilege('fetanagent_owner_control',
+                 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'EXECUTE') as issue_denied,
+               not has_function_privilege('fetanagent_beta_admission',
+                 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'EXECUTE') as redeem_denied
+      `);
+      expect(after.rows[0]).toMatchObject({
+        customers: before.rows[0]!.customers,
+        audit_events: before.rows[0]!.audit_events - 1,
+        invites: 0,
+        nonces: 0,
+        audit_trigger_restored: true,
+        issue_denied: true,
+        redeem_denied: true,
+      });
+
+      const runtimeSource = await readFile('/workspace/apps/admin/src/postgres-runtime.ts', 'utf8');
+      const preflightMatch = runtimeSource.match(
+        /export const OWNER_CONTROL_PREFLIGHT_SQL = `([^`]+)`;/u,
+      );
+      expect(preflightMatch).not.toBeNull();
+      await client.query('set session authorization fetanagent_owner_control_runtime');
+      try {
+        const readiness = await client.query<Record<string, boolean>>(preflightMatch![1]!);
+        expect(readiness.rows).toHaveLength(1);
+        // The disposable runtime login is intentionally disabled in this baseline;
+        // the invite cleanup must preserve every other Owner catalog guarantee.
+        expect(readiness.rows[0]!.runtime_role_is_narrow).toBe(false);
+        expect(
+          Object.entries(readiness.rows[0]!).filter(
+            ([check, value]) =>
+              !['cbe_birr_receiver_v2_rotate_allowed', 'runtime_role_is_narrow'].includes(check) &&
+              value !== true,
+          ),
+        ).toEqual([]);
+      } finally {
+        await client.query('reset session authorization');
+      }
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
   it('applies every checked-in migration in lexical filename order', async () => {
     const expectedMigrationNames = await listMigrationsLexically(environment.migrationsDirectory);
     const appliedRows = await client.query<{ readonly filename: string }>(`

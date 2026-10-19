@@ -330,70 +330,6 @@ services:
       start_period: 20s
       retries: 4
 
-  beta-admission:
-    <<: *runtime-defaults
-    image: fetanagent-beta-admission:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
-    environment:
-      NODE_ENV: production
-      LOG_LEVEL: info
-      FINANCIAL_ACTIONS_MODE: dry_run
-      BETA_ADMISSION_HOST: 0.0.0.0
-      BETA_ADMISSION_PORT: '3001'
-      BETA_ADMISSION_DEPLOYMENT_TARGET: production
-      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
-      INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'
-      BETA_ADMISSION_DATABASE_URL_FILE: /run/secrets/beta_admission_database_url
-      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/beta_admission_bot_transport_hmac
-      BETA_ADMISSION_PAYLOAD_HMAC_SECRET_FILE: /run/secrets/beta_admission_payload_hmac
-      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
-      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
-      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
-      TELEGRAM_BOT_ENABLED: 'false'
-      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
-      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
-      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
-      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
-      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
-      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
-      KEMERBET_EXECUTOR_ENABLED: 'false'
-      KEMERBET_FINAL_ACTION_ENABLED: 'false'
-    secrets:
-      - source: beta_admission_database_url
-        target: beta_admission_database_url
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
-      - source: beta_admission_bot_transport_hmac
-        target: beta_admission_bot_transport_hmac
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
-      - source: beta_admission_payload_hmac
-        target: beta_admission_payload_hmac
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
-    configs:
-      - source: supabase_ca_certificate
-        target: /run/configs/supabase_ca_certificate
-        uid: '10001'
-        gid: '10001'
-        mode: 0444
-    networks:
-      - private_application
-    healthcheck:
-      test:
-        [
-          CMD,
-          node,
-          -e,
-          "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 15s
-      timeout: 3s
-      start_period: 20s
-      retries: 4
-
   bot:
     <<: *runtime-defaults
     image: fetanagent-bot:${FETANAGENT_IMAGE_TAG:?set the exact commit-derived image tag}
@@ -403,13 +339,11 @@ services:
       FINANCIAL_ACTIONS_MODE: dry_run
       TELEGRAM_BOT_ENABLED: 'true'
       BOT_SUPPORT_CONTACT_URL: https://owner.fetanagent.com/v1/public/support-contact
-      TELEGRAM_BETA_ADMISSION_ENABLED: 'true'
-      BOT_TO_BETA_ADMISSION_BASE_URL: http://beta-admission:3001/
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
       INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'
       INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true'
       BOT_TO_API_ACTION_BASE_URL: http://api:3000/
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
-      BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE: /run/secrets/bot_beta_admission_transport_hmac
       BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/bot_player_action_transport_hmac
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
@@ -426,11 +360,6 @@ services:
         uid: '10001'
         gid: '10001'
         mode: 0400
-      - source: bot_beta_admission_transport_hmac
-        target: bot_beta_admission_transport_hmac
-        uid: '10001'
-        gid: '10001'
-        mode: 0400
       - source: bot_player_action_transport_hmac
         target: bot_player_action_transport_hmac
         uid: '10001'
@@ -440,9 +369,6 @@ services:
       - private_application
     depends_on:
       api:
-        condition: service_healthy
-        restart: true
-      beta-admission:
         condition: service_healthy
         restart: true
     # Observe only successful existing long polls; the probe makes no Telegram requests.
@@ -809,12 +735,6 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/customer-web-database-url
   customer_web_rate_limit_hmac:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/customer-web-rate-limit-hmac
-  beta_admission_database_url:
-    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-database-url
-  beta_admission_bot_transport_hmac:
-    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-transport-hmac
-  beta_admission_payload_hmac:
-    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/beta-payload-hmac
   player_action_database_url:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/player-action-database-url
   api_player_action_transport_hmac:
@@ -839,8 +759,6 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/owner-cbe-birr-lookup-fingerprint-master
   telegram_bot_token:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-token
-  bot_beta_admission_transport_hmac:
-    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-transport-hmac
   bot_player_action_transport_hmac:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-action-transport-hmac
   telebirr_assignment_broker_database_url:

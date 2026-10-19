@@ -1,6 +1,5 @@
 import {
   OWNER_CONTROL_DATABASE_TARGETS,
-  OWNER_CONTROL_TELEGRAM_BOT_USERNAME,
   type OwnerControlRuntimeConfig,
 } from '@fetanagent/config/owner-control';
 
@@ -69,35 +68,15 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         </form>
       </section>
 
-      <section class="panel" id="invite-panel" aria-labelledby="invite-title" hidden>
+      <section class="panel" id="owner-panel" aria-labelledby="owner-title" hidden>
         <div class="panel-heading">
           <div>
             <p class="status-ok">Authenticated ${deploymentLabelLower} Owner</p>
-            <h2 id="invite-title">Telegram beta invite</h2>
+            <h2 id="owner-title">Owner controls</h2>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
         <p class="request-meta" id="owner-session-status"></p>
-        <form id="invite-form">
-          <label for="expiry">Invite lifetime</label>
-          <select id="expiry" name="expiry">
-            <option value="3600">1 hour</option>
-            <option value="86400">24 hours</option>
-            <option value="604800">7 days</option>
-          </select>
-          <button type="submit">Create one-time invite</button>
-        </form>
-
-        <div class="receipt" id="invite-receipt" hidden>
-          <p class="receipt-label">This link is shown once. Send it only to the intended tester.</p>
-          <output id="invite-url"></output>
-          <div class="actions">
-            <button id="copy-button" type="button">Copy invite</button>
-            <a id="open-link" target="_blank" rel="noopener noreferrer">Open Telegram</a>
-            <button class="danger" id="revoke-button" type="button">Revoke invite</button>
-          </div>
-        </div>
-
         <section class="review-section" aria-labelledby="support-contact-title">
           <div class="panel-heading">
             <h2 id="support-contact-title">Customer support</h2>
@@ -791,9 +770,8 @@ footer { margin-top: 30px; font-size: 0.85rem; }
 `;
 
 export const OWNER_DASHBOARD_JAVASCRIPT = `const loginPanel = document.querySelector('#login-panel');
-const invitePanel = document.querySelector('#invite-panel');
+const ownerPanel = document.querySelector('#owner-panel');
 const loginForm = document.querySelector('#login-form');
-const inviteForm = document.querySelector('#invite-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
@@ -808,11 +786,6 @@ const supportContactPreview = document.querySelector('#support-contact-preview')
 const supportContactLink = document.querySelector('#support-contact-link');
 const supportContactFeedback = document.querySelector('#support-contact-feedback');
 const notice = document.querySelector('#notice');
-const receipt = document.querySelector('#invite-receipt');
-const inviteOutput = document.querySelector('#invite-url');
-const copyButton = document.querySelector('#copy-button');
-const openLink = document.querySelector('#open-link');
-const revokeButton = document.querySelector('#revoke-button');
 const refreshRequestsButton = document.querySelector('#refresh-requests-button');
 const playerRequestList = document.querySelector('#player-request-list');
 const playerAssociationList = document.querySelector('#player-association-list');
@@ -953,7 +926,6 @@ let supportContactDirty = false;
 let eligibleCbeUpgradeReceiver;
 let pendingKemerbetReadinessCohortRequestId;
 let pendingKemerbetAgentProfileRequest;
-let currentInvite;
 let currentPilot;
 let currentPilotLoaded = false;
 let pendingTelebirrDevicePairingRequestId;
@@ -1633,13 +1605,6 @@ async function saveSupportContact() {
       renderSupportContactPreview();
     }
   }
-}
-
-function clearInvite() {
-  currentInvite = undefined;
-  inviteOutput.textContent = '';
-  openLink.removeAttribute('href');
-  receipt.hidden = true;
 }
 
 function clearPlayerRequests() {
@@ -2844,7 +2809,6 @@ function signOut(message = 'Signed out.') {
   kemerbetSecurityRecoverySessionAllowed = false;
   ownerSessionStatus.textContent = '';
   passwordInput.value = '';
-  clearInvite();
   clearPlayerRequests();
   clearAssociationCandidates();
   clearPlayerEligibility();
@@ -2876,23 +2840,9 @@ function signOut(message = 'Signed out.') {
   clearExecutionApprovals();
   clearDepositIntake();
   clearReceiverChangeReviews();
-  invitePanel.hidden = true;
+  ownerPanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
-}
-
-function validInvite(value) {
-  if (!value || typeof value !== 'object') return undefined;
-  const inviteId = typeof value.inviteId === 'string' ? value.inviteId : undefined;
-  const inviteUrl = typeof value.inviteUrl === 'string' ? value.inviteUrl : undefined;
-  const expiresAt = typeof value.expiresAt === 'string' ? value.expiresAt : undefined;
-  if (!inviteId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(inviteId) || !inviteUrl || !expiresAt) return undefined;
-  let url;
-  try { url = new URL(inviteUrl); } catch { return undefined; }
-  const start = url.searchParams.get('start');
-  if (url.protocol !== 'https:' || url.hostname !== 't.me' || url.pathname !== '/${OWNER_CONTROL_TELEGRAM_BOT_USERNAME}' ||
-      url.searchParams.size !== 1 || !start || !/^[A-Za-z0-9_-]{43}$/.test(start) || url.hash) return undefined;
-  return { inviteId, inviteUrl: url.toString(), expiresAt };
 }
 
 function isSignedOutError(error) {
@@ -5938,7 +5888,7 @@ async function loadOwnerPlayerQueues() {
 
 async function loadOwnerDashboardAfterAuthentication(successNotice) {
   loginPanel.hidden = true;
-  invitePanel.hidden = false;
+  ownerPanel.hidden = false;
   updateRoutinePhonePairingAvailability();
   updateRoutineReceiptAvailability();
   setNotice(successNotice);
@@ -6049,62 +5999,6 @@ async function restoreOwnerSession() {
   }
   await loadOwnerDashboardAfterAuthentication('Owner session restored after reload.');
 }
-
-inviteForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  setBusy(inviteForm, true);
-  clearInvite();
-  setNotice('Creating one-time invite…');
-  try {
-    const response = await ownerRequest('/v1/owner/telegram-beta-invites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expiresInSeconds: Number(inviteForm.elements.expiry.value) }),
-    });
-    if (!response.ok) throw new Error('issue');
-    const invite = validInvite(await response.json());
-    if (!invite) throw new Error('receipt');
-    currentInvite = invite;
-    inviteOutput.textContent = invite.inviteUrl;
-    openLink.href = invite.inviteUrl;
-    receipt.hidden = false;
-    setNotice('Invite created. It will not be recoverable after this page is closed.');
-  } catch (error) {
-    if (!isSignedOutError(error)) setNotice('Invite creation failed. No reusable link was stored here.');
-  } finally {
-    setBusy(inviteForm, false);
-  }
-});
-
-copyButton.addEventListener('click', async () => {
-  if (!currentInvite) return;
-  try {
-    await navigator.clipboard.writeText(currentInvite.inviteUrl);
-    setNotice('Invite copied.');
-  } catch {
-    setNotice('Copy was unavailable. Select the displayed link manually.');
-  }
-});
-
-revokeButton.addEventListener('click', async () => {
-  if (!currentInvite) return;
-  revokeButton.disabled = true;
-  setNotice('Revoking invite…');
-  try {
-    const response = await ownerRequest('/v1/owner/telegram-beta-invites/' + encodeURIComponent(currentInvite.inviteId) + '/revoke', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ reasonCode: 'owner_cancelled' }),
-    });
-    if (response.status !== 204) throw new Error('revoke');
-    clearInvite();
-    setNotice('Invite revoked.');
-  } catch (error) {
-    if (!isSignedOutError(error)) setNotice('Invite revocation failed. Stop and verify before sharing it.');
-  } finally {
-    revokeButton.disabled = false;
-  }
-});
 
 logoutButton.addEventListener('click', async () => {
   if (currentKemerbetSession?.active) await stopKemerbetSession({ confirm: false });

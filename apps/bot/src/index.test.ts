@@ -436,7 +436,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     {
       betaAdmissionEnabled: true,
       actionChannelEnabled: false,
-      expectedAdmissionCalls: 1,
+      expectedAdmissionCalls: 0,
       expectedActionDeliveries: 0,
       expectedIngressDeliveries: 0,
     },
@@ -450,7 +450,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     {
       betaAdmissionEnabled: true,
       actionChannelEnabled: true,
-      expectedAdmissionCalls: 1,
+      expectedAdmissionCalls: 0,
       expectedActionDeliveries: 1,
       expectedIngressDeliveries: 0,
     },
@@ -478,7 +478,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     },
   );
 
-  it('lets admission short-circuit only an update it handled', async () => {
+  it('does not let the retired admission handler short-circuit an action', async () => {
     runtime.admissionOutcome = 'admitted';
     await loadComposition(true, true);
 
@@ -486,17 +486,17 @@ describe('Telegram admission, private action, and ingress composition', () => {
       messageContext('/deposit cbe_birr PLAYER-DEMO-42 SYNTHETICCBE7890'),
     );
 
-    expect(runtime.admissionCalls).toHaveLength(1);
-    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(runtime.admissionCalls).toHaveLength(0);
+    expect(runtime.actionDeliveries).toHaveLength(1);
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
-  it('routes a public /start through the action channel when beta admission ignores it', async () => {
+  it('routes a public /start through the action channel without admission', async () => {
     await loadComposition(true, true);
 
     await runtime.messageHandler!(messageContext('/start'));
 
-    expect(runtime.admissionCalls).toHaveLength(1);
+    expect(runtime.admissionCalls).toHaveLength(0);
     expect(runtime.actionDeliveries).toEqual([
       {
         version: 1,
@@ -575,13 +575,13 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
-  it('preserves beta invite-token admission as a handled short-circuit', async () => {
+  it('does not redeem an old invite token', async () => {
     runtime.admissionOutcome = 'admitted';
     await loadComposition(true, true);
 
     await runtime.messageHandler!(messageContext(`/start ${'A'.repeat(43)}`));
 
-    expect(runtime.admissionCalls).toHaveLength(1);
+    expect(runtime.admissionCalls).toHaveLength(0);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });

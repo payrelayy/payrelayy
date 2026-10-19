@@ -31,7 +31,6 @@ import {
   type OwnerCompanionLookupIssueReceipt,
   type OwnerCompanionLookupStatus,
 } from './owner-companion-exact-five-lookup.js';
-import { OwnerInviteRejectedError } from './owner-invites.js';
 import {
   OwnerPrivateLivePilotRejectedError,
   OwnerPrivateLivePilotUnavailableError,
@@ -398,14 +397,6 @@ function runtime(
             : 'financial_eligibility_revoked',
       }),
       list: async () => [],
-    },
-    invites: {
-      issue: async () => ({
-        expiresAt: '2026-08-11T12:00:00.000Z',
-        inviteId,
-        inviteUrl: 'https://t.me/fetanagentbot?start=raw-token-returned-once',
-      }),
-      revoke: async () => undefined,
     },
     kemerbetAgentProfiles: {
       list: async () => [],
@@ -1137,7 +1128,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Approve deposit eligibility');
     expect(response.body).toContain('Revoke deposit eligibility');
     expect(response.body).not.toContain('innerHTML');
-    expect(response.body).toContain("url.pathname !== '/fetanagentbot'");
+    expect(response.body).not.toContain('/v1/owner/telegram-beta-invites');
     expect(response.body).not.toContain('/FetanAgentBot');
     expect(() => new Function(OWNER_DASHBOARD_JAVASCRIPT)).not.toThrow();
     await app.close();
@@ -1219,87 +1210,25 @@ describe('Owner-control HTTP boundary', () => {
     await app.close();
   });
 
-  it('rejects an expiry without the database clock and transport margin', async () => {
+  it('does not expose the retired beta-invite routes or Owner form', async () => {
     const app = buildOwnerControlApp(config(), {
-      fetch: async () => {
-        throw new Error('authentication must not run');
-      },
       runtime: runtime(),
     });
-    const response = await app.inject({
+    const issue = await app.inject({
       method: 'POST',
       url: '/v1/owner/telegram-beta-invites',
-      payload: { expiresInSeconds: 300 },
-    });
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'invalid_request' });
-    await app.close();
-  });
-
-  it('verifies the bearer token and returns a no-store one-time invite receipt', async () => {
-    const app = buildOwnerControlApp(config(), {
-      fetch: verifiedAuthFetch(),
-      now: () => new Date('2026-08-10T12:00:00.000Z'),
-      runtime: runtime(),
-    });
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/owner/telegram-beta-invites',
-      headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
       payload: { expiresInSeconds: 86_400 },
     });
-    expect(response.statusCode).toBe(201);
-    expect(response.headers['cache-control']).toBe('no-store, max-age=0');
-    expect(response.json()).toMatchObject({ inviteId });
-    await app.close();
-  });
-
-  it('returns generic forbidden when the verified user is not an active Owner', async () => {
-    const app = buildOwnerControlApp(config(), {
-      fetch: verifiedAuthFetch(),
-      runtime: runtime({
-        invites: {
-          issue: async () => {
-            throw new OwnerInviteRejectedError();
-          },
-          revoke: async () => undefined,
-        },
-      }),
-    });
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/owner/telegram-beta-invites',
-      headers: { authorization: `Bearer ${bearer}` },
-      payload: { expiresInSeconds: 3_600 },
-    });
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({ error: 'forbidden' });
-    await app.close();
-  });
-
-  it('revokes by opaque invite id and allowlisted reason', async () => {
-    let revoked: readonly string[] = [];
-    const app = buildOwnerControlApp(config(), {
-      fetch: verifiedAuthFetch(),
-      runtime: runtime({
-        invites: {
-          issue: async () => {
-            throw new Error('not called');
-          },
-          revoke: async (actor, id, reason) => {
-            revoked = [actor, id, reason];
-          },
-        },
-      }),
-    });
-    const response = await app.inject({
+    const revoke = await app.inject({
       method: 'POST',
       url: `/v1/owner/telegram-beta-invites/${inviteId}/revoke`,
-      headers: { authorization: `Bearer ${bearer}` },
       payload: { reasonCode: 'owner_cancelled' },
     });
-    expect(response.statusCode).toBe(204);
-    expect(revoked).toEqual([authUserId, inviteId, 'owner_cancelled']);
+    const page = await app.inject({ method: 'GET', url: '/owner' });
+    expect(issue.statusCode).toBe(404);
+    expect(revoke.statusCode).toBe(404);
+    expect(page.body).not.toContain('Telegram beta invite');
+    expect(page.body).not.toContain('invite-form');
     await app.close();
   });
 

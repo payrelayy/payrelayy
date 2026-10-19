@@ -147,7 +147,6 @@ assert.deepEqual(serviceNames, [
   'owner-control',
   'customer-web',
   'api',
-  'beta-admission',
   'bot',
   'telebirr-assignment-broker',
   'telebirr-device-state-broker',
@@ -157,7 +156,7 @@ assert.deepEqual(serviceNames, [
 ]);
 
 const applicationServices = serviceNames
-  .slice(0, 5)
+  .slice(0, 4)
   .map((name) => [name, childBlock(services, name)]);
 const gateway = childBlock(services, 'gateway');
 for (const [name, service] of applicationServices) {
@@ -305,10 +304,6 @@ assert.equal(
   'the live proof-intake review override must be disabled only in the production API service',
 );
 
-const beta = childBlock(services, 'beta-admission');
-assert.match(beta, /BETA_ADMISSION_DEPLOYMENT_TARGET: production/u);
-assert.match(beta, /INTERNAL_TELEGRAM_BETA_ADMISSION_RUNTIME_ENABLED: 'true'/u);
-
 const bot = childBlock(services, 'bot');
 assert.match(bot, /TELEGRAM_BOT_ENABLED: 'true'/u);
 assert.match(
@@ -321,7 +316,8 @@ assert.equal(
   1,
   'the public support-contact URL must occur only in the bot service',
 );
-assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'true'/u);
+assert.match(bot, /TELEGRAM_BETA_ADMISSION_ENABLED: 'false'/u);
+assert.doesNotMatch(bot, /BOT_TO_BETA_ADMISSION_BASE_URL|BOT_TO_BETA_ADMISSION_HMAC_SECRET_FILE/u);
 assert.match(bot, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(bot, /INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED: 'true'/u);
 assert.equal(
@@ -457,8 +453,8 @@ assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
 assert.match(compose, /^name: fetanagent-production$/mu);
 assert.doesNotMatch(compose, /fetanagent-staging|2026-09-0|shutdown|expires|systemd|timer/iu);
 assert.doesNotMatch(compose, /deposit-executor|trusted-telebirr-verifier|target: executor/iu);
-assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 9);
-assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 9);
+assert.equal(count(compose, /KEMERBET_EXECUTOR_ENABLED: 'false'/gu), 8);
+assert.equal(count(compose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/gu), 8);
 assert.equal(count(compose, /restart: unless-stopped/gu), 1);
 
 const networks = topLevelSection(compose, 'networks');
@@ -482,8 +478,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 7);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 7);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 35);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 35);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 31);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 31);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -725,7 +721,6 @@ assert.doesNotMatch(
 for (const roleVariable of [
   'OWNER_RUNTIME_ROLE',
   'CUSTOMER_WEB_RUNTIME_ROLE',
-  'BETA_RUNTIME_ROLE',
   'PLAYER_ACTION_RUNTIME_ROLE',
 ]) {
   assert.match(
@@ -922,17 +917,18 @@ assert.match(helper, /for attempt in 1 2 3; do/u);
 assert.match(helper, /sleep "\$\(\(attempt \* 5\)\)"/u);
 assert.match(
   helper,
-  /start_release_services_with_session_handoff_retry "\$release" \\\s*owner-control customer-web api beta-admission telebirr-assignment-broker telebirr-device-state-broker/u,
+  /start_release_services_with_session_handoff_retry "\$release" "\$\{core_services\[@\]\}"/u,
 );
 assert.match(
   helper,
   /start_release_services_with_session_handoff_retry "\$release" production-companion-device-bridge/u,
 );
-assert.match(helper, /expected_count=37/u);
+assert.match(helper, /expected_count=33/u);
+assert.match(helper, /if grep -Fq '  beta-admission:' "\$incoming\/compose\.production\.yaml"/u);
 assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 4\)\)/u);
-assert.equal((helper.match(/expected_count=\$\(\(expected_count \+ 4\)\)/gu) ?? []).length, 2);
+assert.equal((helper.match(/expected_count=\$\(\(expected_count \+ 4\)\)/gu) ?? []).length, 3);
 assert.match(
   helper,
   /elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'"[\s\S]*?routine-no-money-database-url[\s\S]*?routine-no-money-lookup-signer\.pkcs8\.der[\s\S]*?routine-no-money-lookup-signer\.v1\.json[\s\S]*?telebirr-reference-opening-key\.v1\.json/u,

@@ -92,7 +92,13 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     const executeCountSql = OWNER_CONTROL_PREFLIGHT_SQL.split(
       'as exact_app_execute_count',
     )[0]!.split('as recorder_denied,')[1]!;
-    expect(executeCountSql).toMatch(/select count\(\*\) = 35\s*\+/u);
+    expect(executeCountSql).toMatch(/select count\(\*\) = 33\s*\+/u);
+    expect(executeCountSql).toContain(
+      "has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')::integer",
+    );
+    expect(executeCountSql).toContain(
+      "has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')::integer",
+    );
     for (const signature of [
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',
@@ -133,6 +139,30 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(
       ownerControlCatalogReady(
         { ...safeCatalog, cbe_birr_receiver_v2_rotate_allowed: null },
+        false,
+      ),
+    ).toBe(false);
+  });
+
+  it('allows the brief invite grant transition only while both Owner grants agree', () => {
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as invite_control_grants_consistent');
+    expect(
+      ownerControlCatalogReady(
+        {
+          cbe_birr_receiver_v2_rotate_allowed: false,
+          cbe_birr_provisioning_snapshot_catalog_safe: true,
+          invite_control_grants_consistent: true,
+        },
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      ownerControlCatalogReady(
+        {
+          cbe_birr_receiver_v2_rotate_allowed: false,
+          cbe_birr_provisioning_snapshot_catalog_safe: true,
+          invite_control_grants_consistent: false,
+        },
         false,
       ),
     ).toBe(false);

@@ -5,6 +5,13 @@ import {
   redactedCbeBirrAuthoritativePdfParserResultForLog,
   type CbeBirrAuthoritativePdfParserResult,
 } from '@fetanagent/cbe-birr-authoritative-pdf-parser';
+import {
+  withOpenedCbeBirrReceiverLookup,
+  type CbeBirrApprovedReceiverLookupRootProfile,
+  type CbeBirrReceiverLookupChildKey,
+  type CbeBirrReceiverLookupOpeningProfile,
+  type OpenCbeBirrReceiverLookupInput,
+} from '@fetanagent/deposit-reference-protection/cbe-birr-receiver-opening';
 
 import { cbeBirrNodeHttpsTransport } from './node-https-transport.js';
 import {
@@ -13,7 +20,11 @@ import {
   type CbeBirrAuthoritativeReceiptFailedResult,
   type CbeBirrAuthoritativeReceiptOpaquePdfResult,
 } from './runner.js';
-import { parseLookupInput, type CbeBirrAuthoritativeReceiptInternalTransport } from './shared.js';
+import {
+  parseLookupInput,
+  parseTransportControl,
+  type CbeBirrAuthoritativeReceiptInternalTransport,
+} from './shared.js';
 
 /**
  * Package-internal advisory seam. Neither this module nor its raw-byte fetch is exported from
@@ -45,6 +56,16 @@ export type CbeBirrOneFetchAdvisoryResult =
       readonly disposition: 'parsed_advisory';
       readonly transportResult: CbeBirrAuthoritativeReceiptOpaquePdfResult;
       readonly parserResult: CbeBirrAuthoritativePdfParserResult;
+    };
+
+export type CbeBirrReceiverBoundAdvisoryResult =
+  | CbeBirrOneFetchAdvisoryResult
+  | {
+      readonly providerCode: 'cbe_birr';
+      readonly advisoryOnly: true;
+      readonly runtimeWiringAllowed: false;
+      readonly financialActionAllowed: false;
+      readonly disposition: 'receiver_unavailable';
     };
 
 type AdvisoryPdfParser = typeof parseCbeBirrAuthoritativePdf;
@@ -135,4 +156,71 @@ export function retrieveAndParseCbeBirrReceiptAdvisoryOnly(
     cbeBirrNodeHttpsTransport,
     parseCbeBirrAuthoritativePdf,
   );
+}
+
+/**
+ * Joins one authenticated receiver revision to the existing one-fetch advisory path. The
+ * synchronous opener returns only a private thunk; the phone stays inside that thunk until the
+ * bounded asynchronous request and PDF comparison finish. Neither the phone nor the thunk is
+ * returned to the caller. This is not a lease, claim, or payment decision.
+ */
+export async function retrieveAndParseCbeBirrReceiptForProtectedReceiverAdvisoryOnly(
+  referenceCandidate: unknown,
+  protectedReceiver: OpenCbeBirrReceiverLookupInput,
+  childKey: CbeBirrReceiverLookupChildKey,
+  openingProfile: CbeBirrReceiverLookupOpeningProfile,
+  approvedRootProfile: CbeBirrApprovedReceiverLookupRootProfile,
+  controlCandidate: unknown,
+  transport: CbeBirrAuthoritativeReceiptInternalTransport,
+  parser: AdvisoryPdfParser,
+): Promise<CbeBirrReceiverBoundAdvisoryResult> {
+  if (typeof referenceCandidate !== 'string' || !/^[A-Z0-9]{8,32}$/u.test(referenceCandidate)) {
+    return Object.freeze({
+      ...base,
+      disposition: 'transport_failed_closed' as const,
+      transportResult: failedResult('invalid_request'),
+    });
+  }
+  const control = parseTransportControl(controlCandidate);
+  if (!control) {
+    return Object.freeze({
+      ...base,
+      disposition: 'transport_failed_closed' as const,
+      transportResult: failedResult('invalid_control'),
+    });
+  }
+  if (control.incidentStop === 'open' || control.providerRequest === 'disabled') {
+    return Object.freeze({
+      ...base,
+      disposition: 'transport_failed_closed' as const,
+      transportResult: failedResult(
+        control.incidentStop === 'open' ? 'incident_stop_open' : 'provider_request_disabled',
+      ),
+    });
+  }
+
+  try {
+    const runOneFetch = withOpenedCbeBirrReceiverLookup(
+      protectedReceiver,
+      childKey,
+      openingProfile,
+      approvedRootProfile,
+      (receiverPhone) => () =>
+        retrieveAndParseCbeBirrReceiptWithTransportAndParser(
+          {
+            contractVersion: 1,
+            providerCode: 'cbe_birr',
+            sourceProfile: 'cbe_birr_official_receipt_lookup_v1',
+            requestedReference: referenceCandidate,
+            receiverLookupPhone: receiverPhone,
+          },
+          control,
+          transport,
+          parser,
+        ),
+    );
+    return await runOneFetch();
+  } catch {
+    return Object.freeze({ ...base, disposition: 'receiver_unavailable' as const });
+  }
 }

@@ -15,10 +15,10 @@
   },
   "dependencies": {
     "@fetanagent/cbe-birr-authoritative-pdf-parser": "workspace:*",
-    "@fetanagent/cbe-birr-official-source-policy": "workspace:*"
+    "@fetanagent/cbe-birr-official-source-policy": "workspace:*",
+    "@fetanagent/deposit-reference-protection": "workspace:*"
   },
   "devDependencies": {
-    "@fetanagent/cbe-birr-normalization-candidate": "workspace:*",
-    "@fetanagent/deposit-reference-protection": "workspace:*"
+    "@fetanagent/cbe-birr-normalization-candidate": "workspace:*"
   }
 }

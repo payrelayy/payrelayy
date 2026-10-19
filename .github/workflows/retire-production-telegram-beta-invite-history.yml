@@ -31,6 +31,7 @@ jobs:
   retire:
     name: Guarded production invite-history retirement
     runs-on: ubuntu-24.04
+    environment: production
     timeout-minutes: 10
     steps:
       - name: Require exact production target and release

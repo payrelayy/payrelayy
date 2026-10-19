@@ -208,7 +208,12 @@ The remaining blockers preserve the existing safety design:
    snapshot, and returns only those five fields. A guarded Owner-only read route accepts an exact
    Owner-confirmed revision and returns that projection when the existing v2 rotation route flag
    is enabled; no provisioner calls it yet. Its result is a point-in-time snapshot, so key
-   provisioning and later worker use must each recheck the active revision.
+   provisioning and later worker use must each recheck the active revision. A new offline
+   provisioning candidate accepts that trusted snapshot through an injected reader, checks the
+   exact v2 revision twice around child derivation, and proposes profile digests and release pins.
+   It performs no live call, key delivery, release approval, mount, or worker activation. The
+   receiver-provenance blocker remains open until those steps and authoritative receiver-credit
+   evidence are established.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are
    separated, but independently provisioned worker decryption and rotation are not established.
 3. **Normalization ownership.** Synthetic fixture reduction and canonical settlement profiles

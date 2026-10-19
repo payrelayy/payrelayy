@@ -203,7 +203,9 @@ The remaining blockers preserve the existing safety design:
    remains open.
    An Owner-only metadata function can identify the active v2 revision UUID/version and
    protection versions while CBE verification is disabled. It returns no phone or key material.
-   Its narrow grant follows the deployed startup catalog allowlist; no Owner route calls it yet.
+   Its narrow grant follows the deployed startup catalog allowlist. An internal Owner adapter now
+   requires an independently supplied revision UUID/version, checks it against the current SQL
+   snapshot, and returns only those five fields. No route or provisioner calls it yet.
    Its result is a point-in-time snapshot, so key
    provisioning and later worker use must each recheck the active revision.
 2. **Independent submitted-reference key lifecycle.** Encryption and fingerprint domains are

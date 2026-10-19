@@ -1,0 +1,95 @@
+name: Retire production Telegram beta invite history
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_deployed_release_sha:
+        description: Type the exact deployed invite-free production release SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type PURGE PRODUCTION TELEGRAM BETA INVITE HISTORY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    name: Guarded production invite-history retirement
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - name: Require exact production target and release
+        env:
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_MAIN_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_RELEASE: ${{ inputs.confirm_deployed_release_sha }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_MAIN_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_PROJECT" != 'spzpiyxheappsfyswewl' ]]
+          [[ "$CONFIRMED_RELEASE" == 'b734cd12c235c05b48d64ce308fb0fa1e0d595c4' ]]
+          [[ "$CONFIRMED_OPERATION" == 'PURGE PRODUCTION TELEGRAM BETA INVITE HISTORY' ]]
+
+      - name: Check out reviewed retirement script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Require the exact healthy invite-free release on the protected host
+        env:
+          CONFIRMED_RELEASE: ${{ inputs.confirm_deployed_release_sha }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
+          protected="$RUNNER_TEMP/invite-retirement-host"
+          install -d -m 0700 "$protected"
+          umask 077
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          ssh -F /dev/null -i "$protected/deploy-key" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$protected/known-hosts" \
+            "fetanagent-admin@$PRODUCTION_VM_HOST" \
+            "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify 3e67fd9ad36da1f8d183bca183650bf30f54ec27086a38e157a47d901cf26a97 && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '$CONFIRMED_RELEASE'"
+
+      - name: Delete only retired invite records under the SQL financial stop
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-0-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGUSER: postgres.xzztugbgtulptnbpoelr
+          PGDATABASE: postgres
+          PGSSLMODE: require
+        run: |
+          set -euo pipefail
+          [[ -n "$SUPABASE_DB_PASSWORD" ]]
+          command -v psql >/dev/null
+          export PGPASSWORD="$SUPABASE_DB_PASSWORD"
+          timeout 90s psql -X --set ON_ERROR_STOP=1 --quiet \
+            --file=infra/sql/retire-telegram-beta-invite-history.sql
+          printf '%s\n' 'Production Telegram beta invite history retirement completed.'

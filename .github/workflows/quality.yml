@@ -211,6 +211,9 @@ jobs:
       - name: Build and test
         run: pnpm test
 
+      - name: Check production CBE receiver key planning boundary
+        run: node --test infra/operations/plan-production-cbe-receiver-key.test.mjs
+
       - name: Rehearse synthetic CBE receiver file mounts
         shell: bash
         run: bash infra/operations/test-cbe-birr-mounted-custody.sh

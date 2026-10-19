@@ -1,0 +1,116 @@
+name: Production CBE receiver key plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit SHA
+        required: true
+        type: string
+      confirm_production_project_ref:
+        description: Exact production Supabase project ref
+        required: true
+        type: string
+      confirm_receiver_revision_id:
+        description: Independently reviewed active CBE receiver revision UUID
+        required: true
+        type: string
+      confirm_receiver_version:
+        description: Independently reviewed active CBE receiver version
+        required: true
+        type: string
+      confirm_operation:
+        description: Type PLAN CBE RECEIVER KEY - NO FILES
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-cbe-key-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Derive only a nonsecret production pin plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require exact main and production target
+        shell: bash
+        env:
+          CONFIRMED_SHA: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+          CONFIRMED_REVISION: ${{ inputs.confirm_receiver_revision_id }}
+          CONFIRMED_VERSION: ${{ inputs.confirm_receiver_version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_OPERATION" == 'PLAN CBE RECEIVER KEY - NO FILES' ]]
+          [[ "$CONFIRMED_REVISION" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$CONFIRMED_VERSION" =~ ^[1-9][0-9]{0,9}$ ]]
+
+      - name: Check out exact production source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact main push CI before production secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Install and build locked provisioning package
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          test "$(pnpm --version)" = '11.16.0'
+          pnpm install --frozen-lockfile
+          pnpm --filter '@fetanagent/cbe-birr-worker-key-provisioning-check...' build
+
+      - name: Prepare production database CA
+        id: ca
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+        run: |
+          set -euo pipefail
+          umask 077
+          install -d -m 0700 "$RUNNER_TEMP/cbe-receiver-key-plan"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$RUNNER_TEMP/cbe-receiver-key-plan/supabase-ca.crt"
+          openssl x509 -in "$RUNNER_TEMP/cbe-receiver-key-plan/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          echo "path=$RUNNER_TEMP/cbe-receiver-key-plan/supabase-ca.crt" >> "$GITHUB_OUTPUT"
+
+      - name: Recheck active revision and derive nonsecret pin digest
+        shell: bash
+        env:
+          CBE_APPROVED_RECEIVER_REVISION_ID: ${{ inputs.confirm_receiver_revision_id }}
+          CBE_APPROVED_RECEIVER_VERSION: ${{ inputs.confirm_receiver_version }}
+          OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET: ${{ secrets.OWNER_CBE_BIRR_LOOKUP_ENCRYPTION_MASTER_SECRET }}
+          OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET: ${{ secrets.OWNER_CBE_BIRR_LOOKUP_FINGERPRINT_MASTER_SECRET }}
+          OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON: ${{ vars.OWNER_CBE_BIRR_LOOKUP_PROFILE_V2_JSON }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-0-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGDATABASE: postgres
+          PGUSER: postgres.xzztugbgtulptnbpoelr
+          PGSSLROOTCERT: ${{ steps.ca.outputs.path }}
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_cbe_receiver_key_plan
+        run: |
+          set -euo pipefail
+          node infra/operations/plan-production-cbe-receiver-key.mjs

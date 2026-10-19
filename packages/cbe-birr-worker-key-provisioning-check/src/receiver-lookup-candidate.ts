@@ -22,6 +22,7 @@ const SNAPSHOT_KEYS = [
   'encryptionKeyVersion',
   'fingerprintKeyVersion',
 ] as const;
+const preparedCandidates = new WeakSet<object>();
 
 /** The Owner adapter supplies this point-in-time metadata without receiver or key material. */
 export interface CbeBirrReceiverProvisioningSnapshot {
@@ -258,8 +259,17 @@ export async function prepareCbeBirrReceiverProvisioningCandidate(
       witness,
     };
     Object.defineProperty(output, 'workerKey', { enumerable: false });
-    return Object.freeze(output);
+    const candidate = Object.freeze(output);
+    preparedCandidates.add(candidate);
+    return candidate;
   } catch {
     throw new CbeBirrReceiverProvisioningCandidateError();
   }
+}
+
+/** Package-internal provenance check for the subsequent guarded delivery bundle. */
+export function wasPreparedCbeBirrReceiverCandidate(
+  candidate: unknown,
+): candidate is CbeBirrReceiverProvisioningCandidate {
+  return typeof candidate === 'object' && candidate !== null && preparedCandidates.has(candidate);
 }

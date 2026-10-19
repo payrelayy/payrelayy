@@ -381,6 +381,9 @@ importers:
       '@fetanagent/cbe-birr-reference-opening':
         specifier: workspace:*
         version: link:../cbe-birr-reference-opening
+      '@fetanagent/cbe-birr-worker-key-custody':
+        specifier: workspace:*
+        version: link:../cbe-birr-worker-key-custody
       '@fetanagent/deposit-reference-protection':
         specifier: workspace:*
         version: link:../deposit-reference-protection

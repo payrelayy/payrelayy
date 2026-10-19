@@ -206,13 +206,13 @@ export function assessRoutineTelebirrObservedReceiptFacts(
     ) {
       return result('would_review', 'amount_out_of_range');
     }
+    // The provider's channel is recorded as metadata; it does not decide payment eligibility.
     if (
       observation.currencyCode !== 'ETB' ||
       observation.evidenceSource !== 'provider_receipt_lookup' ||
       observation.sourceProfile !== TELEBIRR_OFFICIAL_RECEIPT_SOURCE_PROFILE ||
       observation.paymentMode !== 'telebirr' ||
-      observation.paymentReason !== 'send_money_to_registered_customer' ||
-      observation.paymentChannel !== 'api_app'
+      observation.paymentReason !== 'send_money_to_registered_customer'
     ) {
       return result('would_review', 'receipt_semantics_incomplete');
     }

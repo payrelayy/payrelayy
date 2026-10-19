@@ -51,6 +51,24 @@ function fixture() {
 }
 
 describe('advisory routine TeleBirr receipt-facts assessment', () => {
+  it.each(['api_app', 'other', 'unknown'])(
+    'does not use payment channel %s to decide whether receipt facts match',
+    (paymentChannel) => {
+      const input = fixture();
+      input.observation.paymentChannel = paymentChannel;
+      expect(assessRoutineTelebirrObservedReceiptFacts(input)).toMatchObject({
+        disposition: 'would_match_observed_facts',
+        reasonCode: 'observed_facts_match',
+        financialActionAllowed: false,
+      });
+      input.observation.receiverMatch = 'mismatched';
+      expect(assessRoutineTelebirrObservedReceiptFacts(input)).toMatchObject({
+        disposition: 'would_review',
+        reasonCode: 'receiver_mismatch',
+      });
+    },
+  );
+
   it.each([ROUTINE_TELEBIRR_MINIMUM_AMOUNT_MINOR, ROUTINE_TELEBIRR_MAXIMUM_AMOUNT_MINOR])(
     'matches the inclusive policy boundary at %i minor units without granting authority',
     (amountMinor) => {

@@ -93,6 +93,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly routineTelebirrCandidateStagingEnabled: false;
       readonly routineTelebirrCandidateProductionEnabled: false;
       readonly cbeBirrBoundDryRunStagingEnabled: false;
+      readonly cbeBirrBoundNoMoneyProductionEnabled: false;
       readonly tlsMode: undefined;
     }
   | {
@@ -123,6 +124,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       /** Production-only real-reference, amount-free candidate routing; default off. */
       readonly routineTelebirrCandidateProductionEnabled: boolean;
       readonly cbeBirrBoundDryRunStagingEnabled: boolean;
+      readonly cbeBirrBoundNoMoneyProductionEnabled: boolean;
       readonly tlsMode: 'verify-full';
     };
 
@@ -520,10 +522,20 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     false,
     'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED',
   );
+  const cbeBirrBoundNoMoneyProductionEnabled = booleanFromEnv(
+    environment.TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED,
+    false,
+    'TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED',
+  );
   if (!enabled) {
     if (cbeBirrBoundDryRunStagingEnabled) {
       throw new Error(
         'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED requires the Player-action runtime.',
+      );
+    }
+    if (cbeBirrBoundNoMoneyProductionEnabled) {
+      throw new Error(
+        'TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED requires the Player-action runtime.',
       );
     }
     if (routineTelebirrCandidateStagingEnabled) {
@@ -552,6 +564,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       routineTelebirrCandidateStagingEnabled: false,
       routineTelebirrCandidateProductionEnabled: false,
       cbeBirrBoundDryRunStagingEnabled: false,
+      cbeBirrBoundNoMoneyProductionEnabled: false,
       tlsMode: undefined,
     };
   }
@@ -586,6 +599,12 @@ function loadApiTelegramPlayerActionRuntimeConfig(
   if (cbeBirrBoundDryRunStagingEnabled && deploymentTarget !== 'staging') {
     throw new Error(
       'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED is restricted to the staging Player-action target.',
+    );
+  }
+
+  if (cbeBirrBoundNoMoneyProductionEnabled && deploymentTarget !== 'production') {
+    throw new Error(
+      'TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED is restricted to the production Player-action target.',
     );
   }
 
@@ -736,6 +755,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     routineTelebirrCandidateStagingEnabled,
     routineTelebirrCandidateProductionEnabled,
     cbeBirrBoundDryRunStagingEnabled,
+    cbeBirrBoundNoMoneyProductionEnabled,
     tlsMode: 'verify-full',
   };
 }
@@ -859,6 +879,15 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv = process.env): Api
       'TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED requires FINANCIAL_ACTIONS_MODE=dry_run.',
     );
   }
+  if (
+    telegramPlayerActionRuntime.enabled &&
+    telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled &&
+    financialActionsMode !== 'live'
+  ) {
+    throw new Error(
+      'TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED requires FINANCIAL_ACTIONS_MODE=live.',
+    );
+  }
   assertDistinctApiTelegramHmacSecrets(
     telegramIngress,
     telegramActionCapability,
@@ -919,6 +948,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly routineTelebirrCandidateStagingEnabled: boolean;
     readonly routineTelebirrCandidateProductionEnabled: boolean;
     readonly cbeBirrBoundDryRunStagingEnabled: boolean;
+    readonly cbeBirrBoundNoMoneyProductionEnabled: boolean;
     readonly tlsMode: 'verify-full' | undefined;
   };
 } {
@@ -966,6 +996,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
         config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
       cbeBirrBoundDryRunStagingEnabled:
         config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled,
+      cbeBirrBoundNoMoneyProductionEnabled:
+        config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled,
       tlsMode: config.telegramPlayerActionRuntime.tlsMode,
     },
   };

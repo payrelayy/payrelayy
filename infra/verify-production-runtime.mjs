@@ -298,6 +298,12 @@ assert.match(api, /INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true'/u);
 assert.match(api, /INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true'/u);
 assert.match(api, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/u);
+assert.match(api, /TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'false'/u);
+assert.equal(
+  count(compose, /TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'false'/gu),
+  1,
+  'the production CBE no-money test route must stay disabled',
+);
 assert.equal(
   count(compose, /TELEGRAM_TELEBIRR_RECEIVER_REVIEW_ENABLED: 'false'/gu),
   1,

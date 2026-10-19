@@ -1197,6 +1197,17 @@ async function handleDepositProof(
   };
 }
 
+function cbeBirrNoMoneyRouteEnabled(config: EnabledPlayerActionConfig): boolean {
+  return (
+    (config.telegramPlayerActionRuntime.deploymentTarget === 'staging' &&
+      config.financialActionsMode === 'dry_run' &&
+      config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled) ||
+    (config.telegramPlayerActionRuntime.deploymentTarget === 'production' &&
+      config.financialActionsMode === 'live' &&
+      config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled)
+  );
+}
+
 async function handleCbeBirrDryRunInstruction(
   database: TelegramPlayerActionDatabase,
   originInboundEventId: string,
@@ -1206,11 +1217,7 @@ async function handleCbeBirrDryRunInstruction(
   >,
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
-  if (
-    !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
-    config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
-    config.financialActionsMode !== 'dry_run'
-  ) {
+  if (!cbeBirrNoMoneyRouteEnabled(config)) {
     return { version: 1, outcome: 'deposit_unavailable' };
   }
   const preview = await issueTelegramCbeBirrDryRunInstruction(
@@ -1238,9 +1245,7 @@ async function handleCbeBirrBoundDryRunProof(
   config: EnabledPlayerActionConfig,
 ): Promise<TelegramPrivateActionResult> {
   if (
-    !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
-    config.telegramPlayerActionRuntime.deploymentTarget !== 'staging' ||
-    config.financialActionsMode !== 'dry_run' ||
+    !cbeBirrNoMoneyRouteEnabled(config) ||
     !/^SYNTHCBE[A-Z0-9]{4,24}$/u.test(action.transactionReference)
   ) {
     return { version: 1, outcome: 'deposit_unavailable' };
@@ -1468,7 +1473,9 @@ export function createPostgresTelegramPlayerActionRuntime(
         if (
           (action.kind === 'cbe_birr_dry_run_instruction_command' ||
             action.kind === 'cbe_birr_bound_dry_run_proof_command') &&
-          !config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled
+          (!cbeBirrNoMoneyRouteEnabled(config) ||
+            (action.kind === 'cbe_birr_bound_dry_run_proof_command' &&
+              !/^SYNTHCBE[A-Z0-9]{4,24}$/u.test(action.transactionReference)))
         ) {
           return { version: 1, outcome: 'deposit_unavailable' };
         }
@@ -1523,7 +1530,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
           // Permit only the exact candidate grant during the gate-off handoff.
           true,
-          config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled,
+          config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
+            config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled,
         );
       } catch {
         return false;

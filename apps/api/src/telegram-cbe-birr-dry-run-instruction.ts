@@ -7,7 +7,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
-/** Candidate only: no application route imports this module and the SQL function is ungranted. */
+/** Bound no-money route; PostgreSQL independently requires CBE verification disabled. */
 export const ISSUE_TELEGRAM_CBE_BIRR_DRY_RUN_INSTRUCTION_SQL = `
   select instruction_id, issued_at, expires_at, request_replayed
   from app.issue_telegram_cbe_birr_dry_run_instruction(
@@ -44,7 +44,16 @@ async function issueInternal(
   config: ApiConfig,
 ): Promise<TelegramCbeBirrDryRunInstructionPreview> {
   if (
-    config.financialActionsMode !== 'dry_run' ||
+    !(
+      (config.financialActionsMode === 'dry_run' &&
+        config.telegramPlayerActionRuntime.enabled &&
+        config.telegramPlayerActionRuntime.deploymentTarget === 'staging' &&
+        config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled) ||
+      (config.financialActionsMode === 'live' &&
+        config.telegramPlayerActionRuntime.enabled &&
+        config.telegramPlayerActionRuntime.deploymentTarget === 'production' &&
+        config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled)
+    ) ||
     !config.telegramActionCapability.enabled ||
     !config.telegramPlayerActionRuntime.enabled
   ) {

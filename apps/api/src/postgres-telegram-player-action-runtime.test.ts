@@ -79,7 +79,7 @@ const rootAction: TelegramPrivateActionEnvelope = {
   preferredLocale: 'en',
 };
 
-describe('staging CBE Birr instruction-bound dry run', () => {
+describe('CBE Birr instruction-bound no-money intake', () => {
   const instructionId = '17830f40-ef8f-4fe4-ab6b-57187c93e81e';
   const reference = 'SYNTHCBE0001';
   const instruction: TelegramPrivateActionEnvelope = {
@@ -93,6 +93,21 @@ describe('staging CBE Birr instruction-bound dry run', () => {
     instructionToken: encodeTelegramCapabilityId(instructionId),
     playerId: 'PLAYER-DEMO-42',
     transactionReference: reference,
+  };
+
+  const productionNoMoneyConfig = {
+    ...actionConfig,
+    financialActionsMode: 'live' as const,
+    telegramPlayerActionRuntime: {
+      ...enabledActionRuntime,
+      deploymentTarget: 'production' as const,
+      projectReference: 'xzztugbgtulptnbpoelr' as const,
+      connection: {
+        ...enabledActionRuntime.connection,
+        host: 'db.xzztugbgtulptnbpoelr.supabase.co',
+      },
+      cbeBirrBoundNoMoneyProductionEnabled: true,
+    },
   };
 
   it.each([instruction, proof])('rejects %s while the staging gate is off', async (action) => {
@@ -113,78 +128,105 @@ describe('staging CBE Birr instruction-bound dry run', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('issues an opaque instruction and records only a bound synthetic proof when enabled', async () => {
-    const calls: Array<{ query: string; values: readonly unknown[] }> = [];
+  it.each(['staging', 'production'] as const)(
+    'issues an opaque instruction and records only a bound synthetic proof in %s',
+    async (target) => {
+      const calls: Array<{ query: string; values: readonly unknown[] }> = [];
+      const database: TelegramPlayerActionDatabase = {
+        async query(query, values) {
+          calls.push({ query, values });
+          if (query.includes('record_public_telegram_action_inbound_event')) {
+            return {
+              rows: [
+                {
+                  inbound_event_id: inboundEventId,
+                  received_at: new Date('2026-10-18T00:00:00.000Z'),
+                  inbound_event_already_recorded: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('issue_telegram_cbe_birr_dry_run_instruction')) {
+            return {
+              rows: [
+                {
+                  instruction_id: instructionId,
+                  issued_at: new Date('2026-10-18T00:00:00.000Z'),
+                  expires_at: new Date('2026-10-18T01:00:00.000Z'),
+                  request_replayed: false,
+                },
+              ],
+            };
+          }
+          if (query.includes('capture_telegram_cbe_birr_bound_dry_run_proof')) {
+            return {
+              rows: [
+                {
+                  deposit_proof_request_id: depositProofRequestId,
+                  provider_code: 'cbe_birr',
+                  proof_status: 'proof_received',
+                  submitted_at: new Date('2026-10-18T00:01:00.000Z'),
+                  request_replayed: false,
+                },
+              ],
+            };
+          }
+          throw new Error('unexpected statement');
+        },
+        async end() {},
+      };
+      const stagingConfig = {
+        ...actionConfig,
+        telegramPlayerActionRuntime: {
+          ...enabledActionRuntime,
+          cbeBirrBoundDryRunStagingEnabled: true,
+        },
+      };
+      const runtime = createPostgresTelegramPlayerActionRuntime(
+        target === 'staging' ? stagingConfig : productionNoMoneyConfig,
+        database,
+      );
+      await expect(
+        runtime.handle(instruction, Buffer.from(JSON.stringify(instruction))),
+      ).resolves.toEqual({
+        version: 1,
+        outcome: 'cbe_birr_dry_run_instruction_preview',
+        instructionToken: encodeTelegramCapabilityId(instructionId),
+        expiresAt: '2026-10-18T01:00:00.000Z',
+        acceptsPayments: false,
+      });
+      await expect(
+        runtime.handle(proof, Buffer.from(JSON.stringify(proof))),
+      ).resolves.toMatchObject({
+        version: 1,
+        outcome: 'deposit_proof_received',
+        providerCode: 'cbe_birr',
+        financialMode: 'dry_run',
+      });
+      expect(
+        calls.map(({ query }) => query).filter((query) => query.includes('cbe_birr')),
+      ).toHaveLength(2);
+      expect(JSON.stringify(calls)).not.toContain(reference);
+    },
+  );
+
+  it('rejects a real reference before recording an inbound event in production no-money mode', async () => {
+    const calls: string[] = [];
     const database: TelegramPlayerActionDatabase = {
-      async query(query, values) {
-        calls.push({ query, values });
-        if (query.includes('record_public_telegram_action_inbound_event')) {
-          return {
-            rows: [
-              {
-                inbound_event_id: inboundEventId,
-                received_at: new Date('2026-10-18T00:00:00.000Z'),
-                inbound_event_already_recorded: false,
-              },
-            ],
-          };
-        }
-        if (query.includes('issue_telegram_cbe_birr_dry_run_instruction')) {
-          return {
-            rows: [
-              {
-                instruction_id: instructionId,
-                issued_at: new Date('2026-10-18T00:00:00.000Z'),
-                expires_at: new Date('2026-10-18T01:00:00.000Z'),
-                request_replayed: false,
-              },
-            ],
-          };
-        }
-        if (query.includes('capture_telegram_cbe_birr_bound_dry_run_proof')) {
-          return {
-            rows: [
-              {
-                deposit_proof_request_id: depositProofRequestId,
-                provider_code: 'cbe_birr',
-                proof_status: 'proof_received',
-                submitted_at: new Date('2026-10-18T00:01:00.000Z'),
-                request_replayed: false,
-              },
-            ],
-          };
-        }
+      async query(query) {
+        calls.push(query);
         throw new Error('unexpected statement');
       },
       async end() {},
     };
-    const stagingConfig = {
-      ...actionConfig,
-      telegramPlayerActionRuntime: {
-        ...enabledActionRuntime,
-        cbeBirrBoundDryRunStagingEnabled: true,
-      },
-    };
-    const runtime = createPostgresTelegramPlayerActionRuntime(stagingConfig, database);
+    const action = { ...proof, transactionReference: 'REALREF1234' };
     await expect(
-      runtime.handle(instruction, Buffer.from(JSON.stringify(instruction))),
-    ).resolves.toEqual({
-      version: 1,
-      outcome: 'cbe_birr_dry_run_instruction_preview',
-      instructionToken: encodeTelegramCapabilityId(instructionId),
-      expiresAt: '2026-10-18T01:00:00.000Z',
-      acceptsPayments: false,
-    });
-    await expect(runtime.handle(proof, Buffer.from(JSON.stringify(proof)))).resolves.toMatchObject({
-      version: 1,
-      outcome: 'deposit_proof_received',
-      providerCode: 'cbe_birr',
-      financialMode: 'dry_run',
-    });
-    expect(
-      calls.map(({ query }) => query).filter((query) => query.includes('cbe_birr')),
-    ).toHaveLength(2);
-    expect(JSON.stringify(calls)).not.toContain(reference);
+      createPostgresTelegramPlayerActionRuntime(productionNoMoneyConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action)),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'deposit_unavailable' });
+    expect(calls).toHaveLength(0);
   });
 });
 

@@ -23,6 +23,7 @@ const config = loadApiConfig({
   INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'true',
   INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'true',
   PLAYER_ACTION_DEPLOYMENT_TARGET: 'staging',
+  TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED: 'true',
   BOT_TO_API_ACTION_HMAC_SECRET: 'a'.repeat(64),
   API_TELEGRAM_CAPABILITY_HMAC_SECRET: 'b'.repeat(64),
   API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: 'c'.repeat(64),
@@ -53,7 +54,7 @@ const config = loadApiConfig({
     'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
 });
 
-describe('dormant Telegram CBE Birr dry-run instruction issuer', () => {
+describe('Telegram CBE Birr no-money instruction issuer', () => {
   it('creates a distinct semantic HMAC and returns only an opaque one-hour preview', async () => {
     const calls: Array<{ readonly query: string; readonly values: readonly unknown[] }> = [];
     const database: TelegramCbeBirrInstructionDatabase = {

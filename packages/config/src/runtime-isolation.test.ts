@@ -305,6 +305,38 @@ describe('runtime configuration isolation', () => {
     ).toThrow('restricted to the staging Player-action target');
   });
 
+  it('keeps production CBE no-money intake default-off and rejects wrong runtime shapes', () => {
+    const productionTargetEnvironment = {
+      ...playerActionEnvironment,
+      PLAYER_ACTION_DEPLOYMENT_TARGET: 'production',
+      PLAYER_ACTION_DATABASE_URL:
+        'postgres://fetanagent_player_actions_runtime:password@db.xzztugbgtulptnbpoelr.supabase.co:5432/postgres?sslmode=verify-full',
+    };
+    expect(loadApiConfig(productionTargetEnvironment).telegramPlayerActionRuntime).toMatchObject({
+      deploymentTarget: 'production',
+      cbeBirrBoundNoMoneyProductionEnabled: false,
+    });
+    expect(() =>
+      loadApiConfig({
+        ...productionTargetEnvironment,
+        TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'true',
+      }),
+    ).toThrow('requires FINANCIAL_ACTIONS_MODE=live');
+    expect(() =>
+      loadApiConfig({
+        ...playerActionEnvironment,
+        TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'true',
+        PLAYER_ACTION_DATABASE_URL:
+          'postgres://fetanagent_player_actions_runtime:password@db.spzpiyxheappsfyswewl.supabase.co:5432/postgres?sslmode=verify-full',
+      }),
+    ).toThrow('restricted to the production Player-action target');
+    expect(() =>
+      loadApiConfig({
+        NODE_ENV: 'test',
+        TELEGRAM_CBE_BIRR_BOUND_NO_MONEY_PRODUCTION_ENABLED: 'true',
+      }),
+    ).toThrow('requires the Player-action runtime');
+  });
   it('rejects target drift, a generic role, and shared Player-ID action HMACs', () => {
     expect(() =>
       loadApiConfig({

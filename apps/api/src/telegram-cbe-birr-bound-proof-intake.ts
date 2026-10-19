@@ -13,7 +13,7 @@ import {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
-/** Candidate only: no application route imports this module and the SQL function is ungranted. */
+/** Bound no-money route; PostgreSQL independently requires CBE verification disabled. */
 export const CAPTURE_TELEGRAM_CBE_BIRR_BOUND_PROOF_SQL = `
   select deposit_proof_request_id, provider_code, proof_status,
          submitted_at, request_replayed
@@ -50,7 +50,16 @@ async function captureInternal(
   config: ApiConfig,
 ): Promise<TelegramPrivateActionResult> {
   if (
-    config.financialActionsMode !== 'dry_run' ||
+    !(
+      (config.financialActionsMode === 'dry_run' &&
+        config.telegramPlayerActionRuntime.enabled &&
+        config.telegramPlayerActionRuntime.deploymentTarget === 'staging' &&
+        config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled) ||
+      (config.financialActionsMode === 'live' &&
+        config.telegramPlayerActionRuntime.enabled &&
+        config.telegramPlayerActionRuntime.deploymentTarget === 'production' &&
+        config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled)
+    ) ||
     !config.telegramActionCapability.enabled ||
     !config.telegramPlayerActionRuntime.enabled ||
     action.kind !== 'deposit_proof_command' ||

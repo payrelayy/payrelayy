@@ -925,14 +925,16 @@ assert.match(
 );
 const transferBlock = /transfer_files=\(\n([\s\S]*?)\n          \)/u.exec(workflow)?.[1];
 assert.ok(transferBlock, 'the production transfer inventory must exist');
-const transferredBaseFiles = transferBlock
-  .split('\n')
-  .map((line) => line.trim())
-  .filter(Boolean)
-  .reduce((count, line) => {
-    const expansion = /\{([^}]+)\}/u.exec(line)?.[1];
-    return count + (expansion ? expansion.split(',').length : 1);
-  }, 0);
+const countTransferFiles = (block) =>
+  block
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reduce((count, line) => {
+      const expansion = /\{([^}]+)\}/u.exec(line)?.[1];
+      return count + (expansion ? expansion.split(',').length : 1);
+    }, 0);
+const transferredBaseFiles = countTransferFiles(transferBlock);
 const helperBaseCount = Number(
   /local_count="\$\(find[^\n]+\n    expected_count=(\d+)/u.exec(helper)?.[1],
 );
@@ -950,7 +952,25 @@ assert.match(
   helper,
   /elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'"[\s\S]*?routine-no-money-database-url[\s\S]*?routine-no-money-lookup-signer\.pkcs8\.der[\s\S]*?routine-no-money-lookup-signer\.v1\.json[\s\S]*?telebirr-reference-opening-key\.v1\.json/u,
 );
-assert.match(helper, /expected_count=\$\(\(expected_count \+ 5\)\)/u);
+const inertTransferBlock =
+  /  deploy-inert\)\n\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+;;/u.exec(workflow)?.[1];
+assert.ok(inertTransferBlock, 'the inert transfer inventory must exist');
+const inertHelperStart = helper.indexOf('elif grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED:');
+const inertHelperEnd = helper.indexOf('[[ "$local_count" -eq "$expected_count"', inertHelperStart);
+assert.ok(inertHelperStart >= 0 && inertHelperEnd > inertHelperStart);
+const inertHelperIncrements = [
+  ...helper
+    .slice(inertHelperStart, inertHelperEnd)
+    .matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu),
+].map((match) => Number(match[1]));
+assert.deepEqual(inertHelperIncrements, [4, 1, 1]);
+assert.equal(
+  helperBaseCount + inertHelperIncrements.reduce((sum, increment) => sum + increment, 0),
+  transferredBaseFiles + countTransferFiles(inertTransferBlock),
+  'the helper inert bundle count must include each transferred file exactly once',
+);
+assert.match(transferBlock, /companion-device-database-url/u);
+assert.match(transferBlock, /companion-bridge-runtime-manifest\.v3\.json/u);
 assert.match(helper, /expected_count=\$\(\(expected_count \+ 1\)\)/u);
 assert.match(helper, /routine-paid-poll-database-url/u);
 assert.match(helper, /routine-paid-settlement-database-url/u);

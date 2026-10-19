@@ -826,9 +826,8 @@ case "${1:-}" in
           die "the inert production bundle unexpectedly contains $name"
       done
     fi
-    if grep -Fq '  production-companion-device-bridge:' "$incoming/compose.production.yaml"; then
-      expected_count=$((expected_count + 5))
-    fi
+    # The bridge overlay and its four protected files are in transfer_files' base
+    # inventory. Counting them again rejects the exact inert release bundle.
     [[ "$local_count" -eq "$expected_count" && -z "$(find -P "$incoming" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
       die 'the incoming production bundle shape is wrong'
     [[ -s "$incoming/fetanagent-production-images.tar" && -s "$incoming/compose.production.yaml" &&

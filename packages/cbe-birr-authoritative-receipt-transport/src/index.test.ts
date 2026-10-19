@@ -97,7 +97,7 @@ describe('public CBE Birr authoritative receipt transport policy', () => {
 });
 
 describe('dependency and runtime isolation', () => {
-  it('depends only on the isolated PDF parser and pure official-source policy', () => {
+  it('keeps receiver opening confined to the internal advisory composition', () => {
     const manifests = import.meta.glob('../package.json', {
       eager: true,
       import: 'default',
@@ -107,10 +107,10 @@ describe('dependency and runtime isolation', () => {
     expect(manifest.dependencies).toEqual({
       '@fetanagent/cbe-birr-authoritative-pdf-parser': 'workspace:*',
       '@fetanagent/cbe-birr-official-source-policy': 'workspace:*',
+      '@fetanagent/deposit-reference-protection': 'workspace:*',
     });
     expect(manifest.devDependencies).toEqual({
       '@fetanagent/cbe-birr-normalization-candidate': 'workspace:*',
-      '@fetanagent/deposit-reference-protection': 'workspace:*',
     });
     expect(manifest.optionalDependencies).toBeUndefined();
   });
@@ -252,7 +252,7 @@ describe('dependency and runtime isolation', () => {
       /  packages\/cbe-birr-authoritative-receipt-transport:\r?\n(?<body>(?:    .*\r?\n|      .*\r?\n|        .*\r?\n)+?)(?=\r?\n  packages\/)/u,
     );
     expect(importer?.groups?.body).toBe(
-      "    dependencies:\n      '@fetanagent/cbe-birr-authoritative-pdf-parser':\n        specifier: workspace:*\n        version: link:../cbe-birr-authoritative-pdf-parser\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n    devDependencies:\n      '@fetanagent/cbe-birr-normalization-candidate':\n        specifier: workspace:*\n        version: link:../cbe-birr-normalization-candidate\n      '@fetanagent/deposit-reference-protection':\n        specifier: workspace:*\n        version: link:../deposit-reference-protection\n".replaceAll(
+      "    dependencies:\n      '@fetanagent/cbe-birr-authoritative-pdf-parser':\n        specifier: workspace:*\n        version: link:../cbe-birr-authoritative-pdf-parser\n      '@fetanagent/cbe-birr-official-source-policy':\n        specifier: workspace:*\n        version: link:../cbe-birr-official-source-policy\n      '@fetanagent/deposit-reference-protection':\n        specifier: workspace:*\n        version: link:../deposit-reference-protection\n    devDependencies:\n      '@fetanagent/cbe-birr-normalization-candidate':\n        specifier: workspace:*\n        version: link:../cbe-birr-normalization-candidate\n".replaceAll(
         '\n',
         lock.includes('\r\n') ? '\r\n' : '\n',
       ),

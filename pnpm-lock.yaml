@@ -343,13 +343,13 @@ importers:
       '@fetanagent/cbe-birr-official-source-policy':
         specifier: workspace:*
         version: link:../cbe-birr-official-source-policy
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../deposit-reference-protection
     devDependencies:
       '@fetanagent/cbe-birr-normalization-candidate':
         specifier: workspace:*
         version: link:../cbe-birr-normalization-candidate
-      '@fetanagent/deposit-reference-protection':
-        specifier: workspace:*
-        version: link:../deposit-reference-protection
 
   packages/cbe-birr-fixtures: {}
 

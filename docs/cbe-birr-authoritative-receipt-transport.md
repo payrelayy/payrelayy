@@ -128,11 +128,14 @@ DNS answers, streams, and errors. The lower-level DNS/HTTPS seam is available on
 module import in package tests; it is not re-exported by the package entry point. No test contacts
 CBE or any other network destination.
 
-No application manifest or source imports the package. The package depends only on the isolated
-PDF parser and pure official-source policy; it has no dependency on shared financial contracts,
-domain logic, runtime configuration, Supabase, PostgreSQL, filesystem access, settlement,
-KemerBet, Telegram, customer web, or deployment code. The parser has no dependency back on the
-transport. The composition returns only advisory parser facts and the opaque transport descriptor;
+No application manifest or source imports the package. Its internal advisory composition now
+depends on the scoped CBE receiver opener as well as the isolated PDF parser and pure official-source
+policy. The public transport entry point still exposes no receiver material. The package has no
+dependency on runtime configuration, Supabase, PostgreSQL, filesystem access, settlement, KemerBet,
+Telegram, customer web, or deployment code. The parser has no dependency back on the transport.
+The new internal receiver-bound path opens one protected receiver revision and keeps its full phone
+inside a private asynchronous thunk for the one request and independent PDF `Credit Account`
+comparison. The composition returns only advisory parser facts and the opaque transport descriptor;
 raw bytes, request URL, reference, and receiver account do not appear in the result. Tests assert
 one request, no parse on incident stop or malformed response, and no leakage on parser failure.
 

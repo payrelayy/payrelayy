@@ -1,7 +1,6 @@
 import type { OwnerControlRuntimeConfig } from '@fetanagent/config/owner-control';
 import { Pool, type PoolConfig } from 'pg';
 
-import { PostgresOwnerInviteControl } from './owner-invites.js';
 import { PostgresOwnerKemerbetAgentProfiles } from './owner-kemerbet-agent-profile.js';
 import { PostgresOwnerKemerbetReadinessCohortClaims } from './owner-kemerbet-readiness-cohort.js';
 import { PostgresOwnerPlayerDepositEligibility } from './owner-player-deposit-eligibility.js';
@@ -40,7 +39,6 @@ export interface OwnerControlPostgresRuntime {
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
   readonly deposits: Pick<PostgresOwnerDryRunDepositIntake, 'list'>;
   readonly eligibility: Pick<PostgresOwnerPlayerDepositEligibility, 'decide' | 'list'>;
-  readonly invites: Pick<PostgresOwnerInviteControl, 'issue' | 'revoke'>;
   readonly kemerbetAgentProfiles: Pick<PostgresOwnerKemerbetAgentProfiles, 'list' | 'prepare'> &
     Partial<Pick<PostgresOwnerKemerbetAgentProfiles, 'recover'>>;
   readonly kemerbetReadinessCohorts: Pick<
@@ -155,8 +153,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       where granted_role.rolname = 'fetanagent_owner_control'
         and member_role.rolname not in ('fetanagent_owner_control_runtime', 'postgres')
     ) as owner_group_members_are_private,
-    has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute') as issue_allowed,
-    has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute') as revoke_allowed,
+    (has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')
+      = has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')) as invite_control_grants_consistent,
     has_function_privilege(current_user, 'app.list_owner_player_registration_requests(uuid,integer)', 'execute') as player_request_list_allowed,
     has_function_privilege(current_user, 'app.review_owner_player_registration_request(uuid,uuid,text,text)', 'execute') as player_request_review_allowed,
     has_function_privilege(current_user, 'app.list_owner_player_registration_association_candidates(uuid,integer)', 'execute') as player_association_list_allowed,
@@ -261,7 +259,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 35
+      select count(*) = 33
+        + has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')::integer
+        + has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')::integer
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false)::integer
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.inspect_owner_cbe_birr_provisioning_snapshot(uuid)')::oid, 'execute'), false)::integer
         + (to_regprocedure('app.get_owner_companion_execution_readiness(uuid)') is not null)::integer
@@ -457,9 +457,6 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     eligibility: new PostgresOwnerPlayerDepositEligibility({
-      query: async (sql, values) => pool.query(sql, [...values]),
-    }),
-    invites: new PostgresOwnerInviteControl({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     kemerbetAgentProfiles: new PostgresOwnerKemerbetAgentProfiles({

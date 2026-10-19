@@ -3,7 +3,6 @@ import type { TelegramPrivateActionEnvelope } from '@fetanagent/contracts';
 import { message } from '@fetanagent/i18n';
 import { Bot, InlineKeyboard } from 'grammy';
 
-import { handleTelegramBetaInviteMessage } from './telegram-beta-invite-admission.js';
 import {
   extractTelegramProofMediaText,
   selectTelegramProofMedia,
@@ -78,7 +77,6 @@ const bot = new Bot(config.telegram.token);
 const telegramToken = config.telegram.token;
 const pollingReadiness = createTelegramPollingReadiness();
 bot.api.config.use(pollingReadiness.transformer);
-const betaAdmission = config.telegramBetaAdmission;
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const quickMenu = renderTelegramQuickMenu();
@@ -200,39 +198,6 @@ bot.on('message', async (context) => {
     { reply: (text) => context.reply(text), botUsername: context.me.username },
   );
   if (supportOutcome === 'handled') return;
-
-  if (betaAdmission.enabled) {
-    const outcome = await handleTelegramBetaInviteMessage(
-      {
-        updateId: context.update.update_id,
-        chat: context.chat
-          ? {
-              id: context.chat.id,
-              type: context.chat.type,
-            }
-          : undefined,
-        from: context.from
-          ? {
-              id: context.from.id,
-              isBot: context.from.is_bot,
-            }
-          : undefined,
-        text: 'text' in context.message ? context.message.text : undefined,
-      },
-      betaAdmission,
-      {
-        reply: (text) => context.reply(text),
-      },
-    );
-
-    if (outcome === 'unavailable') {
-      console.warn(
-        { invitePresented: true },
-        'Telegram beta admission was unavailable; no customer action was started.',
-      );
-    }
-    if (outcome !== 'ignored') return;
-  }
 
   if (playerActions.enabled) {
     const metadata = {
@@ -615,7 +580,6 @@ bot.catch((error) => {
   console.error(
     {
       updateId: error.ctx.update.update_id,
-      betaAdmissionEnabled: betaAdmission.enabled,
       playerActionsEnabled: playerActions.enabled,
     },
     'Telegram bot update handling failed; processing or reply delivery may be incomplete.',
@@ -651,12 +615,13 @@ await runTelegramPolling(
       console.info(
         {
           username: botInfo.username,
-          betaAdmissionEnabled: config.telegramBetaAdmission.enabled,
           playerActionsEnabled: config.telegramActionChannel.enabled,
         },
-        betaAdmission.enabled || playerActions.enabled
+        config.telegramBetaAdmission.enabled
           ? 'Telegram bot started with configured private admission and action handlers.'
-          : 'Telegram bot started in Stage 0 mode.',
+          : playerActions.enabled
+            ? 'Telegram bot started with private action handlers.'
+            : 'Telegram bot started in Stage 0 mode.',
       );
     },
   },

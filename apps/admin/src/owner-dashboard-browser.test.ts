@@ -241,7 +241,7 @@ function ownerBrowserHarness(
   const email = element('#email');
   const password = element('#password');
   element('#login-form').elements = namedElements({ email, password });
-  element('#invite-form').elements = namedElements({ expiry: new FakeElement() });
+
   element('#support-contact-form').elements = namedElements({
     telegramUsername: element('#support-contact-username'),
     confirmation: element('#support-contact-confirmation'),
@@ -1290,7 +1290,7 @@ describe('Owner customer support contact', () => {
       await browser.signIn();
       release?.(response(status, contact('help_team', 1)));
       await save;
-      expect(browser.element('#invite-panel').hidden).toBe(false);
+      expect(browser.element('#owner-panel').hidden).toBe(false);
       expect(browser.element('#support-contact-saved').textContent).toContain('not configured');
       expect(browser.element('#support-contact-feedback').textContent).toBe(
         'Saved support contact loaded.',
@@ -1304,7 +1304,7 @@ describe('Owner customer support contact', () => {
     });
     await browser.signIn();
     expect(browser.evaluate('accessToken')).toBeUndefined();
-    expect(browser.element('#invite-panel').hidden).toBe(true);
+    expect(browser.element('#owner-panel').hidden).toBe(true);
     expect(browser.element('#support-contact-saved').textContent).toBe(
       'Sign in to load the saved contact.',
     );
@@ -2781,7 +2781,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     await browser.signIn();
 
     expect(browser.element('#login-panel').hidden).toBe(true);
-    expect(browser.element('#invite-panel').hidden).toBe(false);
+    expect(browser.element('#owner-panel').hidden).toBe(false);
     expect(browser.element('#notice').textContent).toBe(
       'Owner authentication succeeded, but dashboard data is temporarily unavailable. ' +
         'Your session remains active; select Refresh to retry.',
@@ -2798,7 +2798,7 @@ describe('Owner dashboard browser authentication boundary', () => {
       await browser.signIn();
 
       expect(browser.element('#login-panel').hidden).toBe(false);
-      expect(browser.element('#invite-panel').hidden).toBe(true);
+      expect(browser.element('#owner-panel').hidden).toBe(true);
       expect(browser.element('#notice').textContent).toBe(
         'Your session is unavailable or is not an active Owner.',
       );
@@ -2823,7 +2823,7 @@ describe('Owner dashboard browser authentication boundary', () => {
 
     expect(result.status).toBe(409);
     expect(browser.element('#login-panel').hidden).toBe(true);
-    expect(browser.element('#invite-panel').hidden).toBe(false);
+    expect(browser.element('#owner-panel').hidden).toBe(false);
     expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
   });
 
@@ -2846,7 +2846,7 @@ describe('Owner dashboard browser authentication boundary', () => {
     await expect(refresh).rejects.toThrow('owner_transport_timeout');
     expect(refreshSignal?.aborted).toBe(true);
     expect(browser.element('#login-panel').hidden).toBe(true);
-    expect(browser.element('#invite-panel').hidden).toBe(false);
+    expect(browser.element('#owner-panel').hidden).toBe(false);
     expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
   });
 
@@ -2861,7 +2861,7 @@ describe('Owner dashboard browser authentication boundary', () => {
 
     await expect(browser.call('refreshOwnerSession')).rejects.toThrow('owner_transport_network');
     expect(browser.element('#login-panel').hidden).toBe(true);
-    expect(browser.element('#invite-panel').hidden).toBe(false);
+    expect(browser.element('#owner-panel').hidden).toBe(false);
     expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).not.toBeNull();
   });
 
@@ -2909,7 +2909,7 @@ describe('Owner dashboard browser authentication boundary', () => {
 
     await expect(browser.call('refreshOwnerSession')).rejects.toThrow('signed_out');
     expect(browser.element('#login-panel').hidden).toBe(false);
-    expect(browser.element('#invite-panel').hidden).toBe(true);
+    expect(browser.element('#owner-panel').hidden).toBe(true);
     expect(browser.sessionStorage.getItem('fetanagent.owner.session.v1')).toBeNull();
   });
 });

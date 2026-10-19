@@ -39,11 +39,6 @@ import {
   verifyOwnerBearerToken,
 } from './owner-auth.js';
 import {
-  OwnerInviteRejectedError,
-  OwnerInviteUnavailableError,
-  type BetaInviteRevocationReason,
-} from './owner-invites.js';
-import {
   OwnerKemerbetAgentProfileRejectedError,
   OwnerKemerbetAgentProfileUnavailableError,
   type OwnerKemerbetAgentProfileReason,
@@ -145,11 +140,6 @@ function exactObject(value: unknown, keys: readonly string[]): Record<string, un
     : undefined;
 }
 
-const REVOCATION_REASONS = new Set<BetaInviteRevocationReason>([
-  'owner_cancelled',
-  'security_rotation',
-  'staging_reset',
-]);
 const PLAYER_REGISTRATION_DECISIONS = new Set<OwnerPlayerRegistrationDecision>([
   'exists',
   'not_found',
@@ -725,77 +715,6 @@ export function buildOwnerControlApp(
       ? { securityRecoverySessionAllowed: true, session }
       : { session };
   }
-
-  app.post('/v1/owner/telegram-beta-invites', async (request, reply) => {
-    try {
-      const body = exactObject(request.body, ['expiresInSeconds']);
-      const expiresInSeconds = body?.expiresInSeconds;
-      if (
-        !Number.isSafeInteger(expiresInSeconds) ||
-        // Keep a one-minute transport margin above the database's five-minute minimum.
-        (expiresInSeconds as number) < 360 ||
-        (expiresInSeconds as number) > 604_800
-      ) {
-        return reply.code(400).send({ error: 'invalid_request' });
-      }
-      const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const now = dependencies.now?.() ?? new Date();
-      const invite = await dependencies.runtime.invites.issue(
-        authUserId,
-        new Date(now.getTime() + (expiresInSeconds as number) * 1_000),
-        config.botUsername,
-      );
-      return reply.code(201).send(invite);
-    } catch (error) {
-      if (
-        error instanceof OwnerAuthenticationRejectedError ||
-        error instanceof OwnerInviteRejectedError
-      ) {
-        return reply.code(403).send({ error: 'forbidden' });
-      }
-      if (
-        error instanceof OwnerAuthenticationUnavailableError ||
-        error instanceof OwnerInviteUnavailableError
-      ) {
-        request.log.warn('Owner beta-invite issuance is unavailable.');
-        return reply.code(503).send({ error: 'owner_control_unavailable' });
-      }
-      request.log.warn('Owner beta-invite issuance is unavailable.');
-      return reply.code(503).send({ error: 'owner_control_unavailable' });
-    }
-  });
-
-  app.post<{ Params: { inviteId: string } }>(
-    '/v1/owner/telegram-beta-invites/:inviteId/revoke',
-    async (request, reply) => {
-      try {
-        const body = exactObject(request.body, ['reasonCode']);
-        const reasonCode = body?.reasonCode;
-        if (
-          typeof reasonCode !== 'string' ||
-          !REVOCATION_REASONS.has(reasonCode as BetaInviteRevocationReason)
-        ) {
-          return reply.code(400).send({ error: 'invalid_request' });
-        }
-        const authUserId = await ownerSubject(request.raw.rawHeaders);
-        await dependencies.runtime.invites.revoke(
-          authUserId,
-          request.params.inviteId,
-          reasonCode as BetaInviteRevocationReason,
-        );
-        return reply.code(204).send();
-      } catch (error) {
-        if (
-          error instanceof OwnerAuthenticationRejectedError ||
-          error instanceof OwnerInviteRejectedError
-        ) {
-          return reply.code(403).send({ error: 'forbidden' });
-        }
-        request.log.warn('Owner beta-invite revocation is unavailable.');
-        return reply.code(503).send({ error: 'owner_control_unavailable' });
-      }
-    },
-  );
 
   app.get<{ Querystring: { limit?: string } }>(
     '/v1/owner/dry-run-deposit-intake',

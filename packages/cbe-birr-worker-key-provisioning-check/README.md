@@ -29,3 +29,10 @@ serializing the candidate to JSON omits it; callers must still treat the entire 
 The candidate does not contact the Owner route itself, write or mount files, approve release pins,
 or activate worker custody. A future delivery step and worker use must independently recheck the
 active revision. Only synthetic keys are used in this repository's tests.
+
+The offline delivery-bundle step accepts only a candidate created in the same process and an
+independently approved exact pin set. It rechecks the active Owner revision, verifies the proposed
+profile digests and child-key ID, and shapes the three files expected by the guarded worker loader.
+The key bytes are nonenumerable and must be erased after use. This step does not write or mount a
+file, approve pins, read a live key, start a worker, contact CBE, or change a financial switch. A
+future installer must recheck the revision at delivery, and a future worker must recheck it at use.

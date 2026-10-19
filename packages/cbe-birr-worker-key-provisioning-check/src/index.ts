@@ -9,6 +9,14 @@ export {
   type CbeBirrReceiverProvisioningSnapshot,
 } from './receiver-lookup-candidate.js';
 
+export {
+  CbeBirrReceiverDeliveryBundleError,
+  prepareCbeBirrReceiverDeliveryBundle,
+  type CbeBirrReceiverDeliveryBundle,
+  type CbeBirrReceiverDeliveryBundleInput,
+  type CbeBirrReceiverDeliveryFile,
+} from './receiver-lookup-delivery-bundle.js';
+
 import {
   CBE_BIRR_REFERENCE_OPENING_CIPHERTEXT_PROFILE_VERSION,
   CBE_BIRR_REFERENCE_OPENING_CONTRACT_VERSION,

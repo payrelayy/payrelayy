@@ -131,6 +131,7 @@ async function queryAsRole<T extends QueryResultRow>(
   client: Client,
   role:
     | 'fetanagent_cbe_birr_candidate_prelease'
+    | 'fetanagent_cbe_birr_no_money_reader'
     | 'fetanagent_cbe_birr_proof_preflight'
     | 'fetanagent_cbe_birr_shadow_worker'
     | 'fetanagent_customer_web'

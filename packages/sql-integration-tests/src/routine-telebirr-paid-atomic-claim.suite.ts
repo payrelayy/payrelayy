@@ -834,7 +834,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
             where candidate_id = $1::uuid`,
           [otherCustomerCandidateId],
         );
-        expect(otherDelivery.rows).toEqual([]);
+        expect(otherDelivery.rows).toEqual([{ outcome_code: 'already_used' }]);
       } finally {
         await client.query('rollback');
       }

@@ -64,6 +64,9 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'unrelated_receipt') {
     return 'Deposit not credited. Reason: unrelated receipt. Contact support if this is unexpected.';
   }
+  if (delivery.outcomeCode === 'held_review') {
+    return 'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.';
+  }
   if (delivery.outcomeCode === 'manual_review') {
     return [
       '⚠️ Deposit needs review',

@@ -1000,6 +1000,7 @@ describe('Owner-control HTTP boundary', () => {
     );
     expect(response.body).toContain('/v1/owner/dry-run-deposit-intake?limit=25');
     expect(response.body).toContain('/v1/owner/routine-telebirr-receiver-change-reviews?limit=25');
+    expect(response.body).toContain('/v1/owner/routine-telebirr-fast-alerts');
     expect(response.body).toContain('/v1/owner/dry-run-fixture-assessments?limit=50');
     expect(response.body).toContain('/v1/owner/player-deposit-eligibility?limit=50');
     expect(response.body).toContain('/v1/owner/private-live-deposit-pilots/current');
@@ -1411,6 +1412,31 @@ describe('Owner-control HTTP boundary', () => {
         })
       ).statusCode,
     ).toBe(400);
+    await app.close();
+  });
+
+  it('shows an Owner-only count of held TeleBirr checks without payment identifiers', async () => {
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrFastAlerts: {
+          status: async (actor) => {
+            expect(actor).toBe(authUserId);
+            return { heldCount: 2, receiptLayoutChanged: true };
+          },
+        },
+      }),
+    });
+    const url = '/v1/owner/routine-telebirr-fast-alerts';
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
+    const response = await app.inject({
+      method: 'GET',
+      url,
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ heldCount: 2, receiptLayoutChanged: true });
+    expect(response.body).not.toMatch(/reference|player|phone|receiptText/iu);
     await app.close();
   });
 

@@ -11,6 +11,15 @@ class LivePrivatePilotReceiptParserTest {
   private val parser = LivePrivatePilotReceiptParser()
 
   @Test
+  fun `reports explicit non-ETB currency without receipt contents`() {
+    val html = currentOfficialCardLivePilotHtml().replace("25.00 ETB", "25.00 USD")
+    val facts = parser.parse(livePilotProviderFound(html), assignment).facts
+      as LivePilotReviewRequiredFacts
+    assertEquals("currency_mismatch", facts.reviewReason)
+    assertFalse(facts.toString().contains(PILOT_REFERENCE))
+  }
+
+  @Test
   fun `compares exact normalized credited-party full name on device`() {
     val parsed = parser.parse(livePilotProviderFound(), assignment)
     val facts = parsed.facts as LivePilotFoundFacts

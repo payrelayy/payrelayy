@@ -393,7 +393,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     expect(JSON.stringify(result)).not.toContain(input.signedObservation.signature);
   });
 
-  it('allows a bounded upload retry but reviews tampered, late, and non-completed evidence', () => {
+  it('allows a bounded upload retry but reports signed non-completed evidence', () => {
     const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
       fixture(true);
     const paid = { ...input, trustedIssuanceMode: 'paid' };
@@ -428,14 +428,51 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         signerSpki,
         deviceSpki,
       ),
-    ).toMatchObject({ disposition: 'review', reasonCode: 'receipt_policy_review', evidence: null });
+    ).toMatchObject({
+      disposition: 'review',
+      reasonCode: 'receipt_policy_review',
+      terminalReasonCode: 'provider_status_not_completed',
+      evidence: null,
+    });
     expect(
       assessRoutineTelebirrPaidPhoneEvidence(
         { ...paid, signedObservation: reversed },
         signerSpki,
         deviceSpki,
       ),
-    ).not.toHaveProperty('terminalReview');
+    ).toHaveProperty('terminalReview', true);
+    const unknownStatus = signedObservation(
+      observationBody({ ...facts, providerFinalStatus: 'unknown' }),
+      deviceKey.privateKey,
+    );
+    const uncertain = assessRoutineTelebirrPaidPhoneEvidence(
+      { ...paid, signedObservation: unknownStatus },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(uncertain).toMatchObject({ disposition: 'review', evidence: null });
+    expect(uncertain).not.toHaveProperty('terminalReview');
+  });
+
+  it('reports a signed out-of-range amount without staging a payment', () => {
+    const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
+      fixture(true);
+    const observation = signedObservation(
+      observationBody({ ...facts, amountMinor: 2_500_100 }),
+      deviceKey.privateKey,
+    );
+    expect(
+      assessRoutineTelebirrPaidPhoneEvidence(
+        { ...input, trustedIssuanceMode: 'paid', signedObservation: observation },
+        signerSpki,
+        deviceSpki,
+      ),
+    ).toMatchObject({
+      disposition: 'review',
+      terminalReasonCode: 'amount_out_of_range',
+      financialActionAllowed: false,
+      evidence: null,
+    });
   });
 
   it('retires only a signed official receipt with an immutable wrong receiver or old date', () => {

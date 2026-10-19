@@ -222,6 +222,32 @@ function decoded(bytes: Uint8Array): Record<string, unknown> {
 }
 
 describe('paid TeleBirr phone observation upload boundary', () => {
+  it.each(['other', 'unknown'])(
+    'stages a signed completed receipt with channel %s when all other checks pass',
+    async (paymentChannel) => {
+      const { context, withFacts } = fixture();
+      const stageObservation = vi
+        .fn<RoutinePaidUploadBridgeDependencies['stageObservation']>()
+        .mockResolvedValue('recorded');
+      const handler = createRoutinePaidUploadBridgeHandler({
+        now: () => '2026-10-05T18:04:00.000Z',
+        classifyTerminal: async () => false,
+        loadObservation: async () => context,
+        stageObservation,
+        recordTerminalRejection: async () => 'recorded',
+      });
+      const response = await handler(
+        http(
+          ROUTINE_PAID_UPLOAD_PATH,
+          ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+          withFacts({ paymentChannel }),
+        ),
+      );
+      expect(response.statusCode).toBe(202);
+      expect(stageObservation).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('stages only independently verified paid phone evidence and acknowledges exact replay', async () => {
     const { context, frame, rawReference } = fixture();
     const stageObservation = vi

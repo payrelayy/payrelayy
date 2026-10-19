@@ -30,6 +30,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         config: string[];
         origin_guard: boolean;
         session_guard: boolean;
+        channel_guard_absent: boolean;
       }>(
         `select owner.rolname as owner, routine.prosecdef as security_definer,
                  routine.proconfig as config,
@@ -37,7 +38,9 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
                    as origin_guard,
                  pg_catalog.strpos(routine.prosrc,
                    'not app.routine_telebirr_paid_settlement_session_allowed()') > 0
-                   as session_guard
+                   as session_guard,
+                 pg_catalog.strpos(routine.prosrc, 'paymentChannel') = 0
+                   as channel_guard_absent
             from pg_catalog.pg_proc routine
             join pg_catalog.pg_roles owner on owner.oid = routine.proowner
            where routine.oid = $1::pg_catalog.regprocedure`,
@@ -50,6 +53,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           config: ['search_path=pg_catalog'],
           origin_guard: true,
           session_guard: true,
+          channel_guard_absent: true,
         },
       ]);
       for (const role of [
@@ -315,7 +319,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
               currencyCode: 'ETB',
               evidenceSource: 'provider_receipt_lookup',
               occurredAt: data.occurred_at.toISOString(),
-              paymentChannel: 'api_app',
+              paymentChannel: 'other',
               paymentMode: 'telebirr',
               paymentReason: 'send_money_to_registered_customer',
               providerFinalStatus: 'completed',

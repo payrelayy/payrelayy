@@ -5090,6 +5090,16 @@ async function loadTelebirrFastAlerts() {
   }
 }
 
+function scheduleTelebirrFastAlertRefresh() {
+  window.setTimeout(() => {
+    if (accessToken && document.visibilityState !== 'hidden') {
+      void loadTelebirrFastAlerts();
+    }
+    scheduleTelebirrFastAlertRefresh();
+  }, 30000);
+}
+scheduleTelebirrFastAlertRefresh();
+
 const dryRunFixtureChoices = [
   ['valid-completed', 'Completed fixture'],
   ['wrong-receiver', 'Wrong receiver fixture'],

@@ -232,6 +232,20 @@ jobs:
           sudo visudo -cf infra/operations/fetanagent-cbe-receiver-key-installer.sudoers
           bash infra/operations/test-production-cbe-receiver-key-installer.sh
 
+      - name: Check production CBE reference child derivation and delivery
+        run: node --test infra/operations/cbe-reference-worker-delivery.test.mjs infra/operations/stage-production-cbe-reference-key.test.mjs
+
+      - name: Check production CBE reference host installer with synthetic keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n infra/operations/fetanagent-cbe-reference-key-installer.sh
+          expected="$(sha256sum infra/operations/fetanagent-cbe-reference-key-installer.sh | cut -d ' ' -f 1)"
+          grep -Fx "fetanagent-admin ALL=(root) NOPASSWD: sha256:$expected /usr/local/sbin/fetanagent-cbe-reference-key-installer *" \
+            infra/operations/fetanagent-cbe-reference-key-installer.sudoers
+          sudo visudo -cf infra/operations/fetanagent-cbe-reference-key-installer.sudoers
+          bash infra/operations/test-production-cbe-reference-key-installer.sh
+
       - name: Build and check local receipt readers in the bot image
         shell: bash
         run: |

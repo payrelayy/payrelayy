@@ -1,0 +1,1 @@
+fetanagent-admin ALL=(root) NOPASSWD: sha256:a915f0b5a321457c3769625f313ea5e04fc9059f7ffc9468baf0ea7d0811c502 /usr/local/sbin/fetanagent-cbe-reference-key-installer *

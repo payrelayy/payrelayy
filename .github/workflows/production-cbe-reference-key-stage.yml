@@ -1,0 +1,134 @@
+name: Stage production CBE reference key without worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit SHA
+        required: true
+        type: string
+      confirm_production_project_ref:
+        description: Exact production Supabase project ref
+        required: true
+        type: string
+      confirm_droplet_id:
+        description: Exact production DigitalOcean droplet ID
+        required: true
+        type: string
+      confirm_expected_deployed_release_sha:
+        description: Exact currently deployed production release SHA
+        required: true
+        type: string
+      confirm_pin_plan_digest:
+        description: Exact digest from the protected key plan
+        required: true
+        type: string
+      confirm_operation:
+        description: Type STAGE CBE REFERENCE KEY - NO WORKER
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require exact main and production target
+        shell: bash
+        env:
+          CONFIRMED_SHA: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+          CONFIRMED_DROPLET: ${{ inputs.confirm_droplet_id }}
+          CONFIRMED_RELEASE: ${{ inputs.confirm_expected_deployed_release_sha }}
+          CONFIRMED_DIGEST: ${{ inputs.confirm_pin_plan_digest }}
+          CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_SHA" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == 'xzztugbgtulptnbpoelr' ]]
+          [[ "$CONFIRMED_DROPLET" == '593344964' ]]
+          [[ "$CONFIRMED_RELEASE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CONFIRMED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$CONFIRMED_OPERATION" == 'STAGE CBE REFERENCE KEY - NO WORKER' ]]
+
+      - name: Check out exact production source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require exact main push CI before production secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Build locked key check
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          test "$(pnpm --version)" = '11.16.0'
+          pnpm install --frozen-lockfile
+          pnpm --filter '@fetanagent/cbe-birr-worker-key-provisioning-check...' build
+
+      - name: Prepare private database and SSH connection files
+        id: protected
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          folder="$RUNNER_TEMP/cbe-reference-key-stage"
+          install -d -m 0700 "$folder"
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$folder/supabase-ca.crt"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" > "$folder/known-hosts"
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" > "$folder/deploy-key"
+          openssl x509 -in "$folder/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          ssh-keygen -y -f "$folder/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$folder/known-hosts" >/dev/null
+          echo "ca=$folder/supabase-ca.crt" >> "$GITHUB_OUTPUT"
+          echo "key=$folder/deploy-key" >> "$GITHUB_OUTPUT"
+          echo "known_hosts=$folder/known-hosts" >> "$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-cbe-reference-key-installer.sh | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Recheck stopped CBE and stage only the approved child
+        shell: bash
+        env:
+          CBE_APPROVED_PIN_PLAN_DIGEST: ${{ inputs.confirm_pin_plan_digest }}
+          CBE_EXPECTED_DEPLOYED_RELEASE_SHA: ${{ inputs.confirm_expected_deployed_release_sha }}
+          CBE_REFERENCE_HOST_HELPER_SHA256: ${{ steps.protected.outputs.helper_sha }}
+          DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON: ${{ vars.DEPOSIT_PROOF_REFERENCE_PROFILE_V2_JSON }}
+          DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_SECRET }}
+          DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET: ${{ secrets.DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_SECRET }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: aws-0-eu-west-1.pooler.supabase.com
+          PGPORT: '6543'
+          PGDATABASE: postgres
+          PGUSER: postgres.xzztugbgtulptnbpoelr
+          PGSSLROOTCERT: ${{ steps.protected.outputs.ca }}
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_SSH_KEY_FILE: ${{ steps.protected.outputs.key }}
+          PRODUCTION_VM_KNOWN_HOSTS_FILE: ${{ steps.protected.outputs.known_hosts }}
+        run: |
+          set -euo pipefail
+          node infra/operations/stage-production-cbe-reference-key.mjs

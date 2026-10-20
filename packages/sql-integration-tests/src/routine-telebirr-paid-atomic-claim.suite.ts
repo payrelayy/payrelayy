@@ -22,6 +22,60 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
   getOwnerAuthUserId: () => string,
 ): void {
   describe('isolated atomic routine TeleBirr paid claim boundary', () => {
+    it('keeps the Transactions projection Owner-only and read-only', async () => {
+      const client = getClient();
+      const signature =
+        'app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)';
+      const catalog = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        config: string[];
+      }>(
+        `select owner.rolname as owner, routine.prosecdef as security_definer,
+          routine.proconfig as config
+          from pg_catalog.pg_proc routine
+          join pg_catalog.pg_roles owner on owner.oid=routine.proowner
+          where routine.oid=$1::pg_catalog.regprocedure`,
+        [signature],
+      );
+      expect(catalog.rows).toEqual([
+        { owner: 'postgres', security_definer: true, config: ['search_path=pg_catalog'] },
+      ]);
+      for (const role of [
+        'public',
+        'anon',
+        'authenticated',
+        'service_role',
+        'fetanagent_player_actions_runtime',
+      ]) {
+        const grant = await client.query<{ permitted: boolean }>(
+          `select pg_catalog.has_function_privilege($1::text,$2::text,'EXECUTE') as permitted`,
+          [role, signature],
+        );
+        expect(grant.rows).toEqual([{ permitted: false }]);
+      }
+      const ownerGrant = await client.query<{ permitted: boolean }>(
+        `select pg_catalog.has_function_privilege(
+          'fetanagent_owner_control_runtime',$1::text,'EXECUTE') as permitted`,
+        [signature],
+      );
+      expect(ownerGrant.rows).toEqual([{ permitted: true }]);
+      await client.query('set session authorization fetanagent_owner_control_runtime');
+      try {
+        const result = await client.query<{ snapshot: { rows: unknown[]; waitingCount: number } }>(
+          `select app.list_owner_routine_telebirr_transactions(
+            $1::uuid,'all',null,null,null,25,0) as snapshot`,
+          [getOwnerAuthUserId()],
+        );
+        expect(result.rows[0]!.snapshot).toMatchObject({
+          rows: expect.any(Array),
+          waitingCount: expect.any(Number),
+        });
+      } finally {
+        await client.query('reset session authorization');
+      }
+    });
+
     it('grants only an unprovisioned exact-login runtime the guarded claim capability', async () => {
       const client = getClient();
       const catalog = await client.query<{
@@ -1029,6 +1083,41 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
             [getOwnerAuthUserId()],
           );
           expect(list.rows).toContainEqual({ candidate_id: paidId });
+          const transactions = await client.query<{
+            snapshot: {
+              rows: Array<{
+                candidateId: string;
+                statusDetail: string;
+                referenceMasked: string;
+                playerMasked: string;
+                canDecide: boolean;
+              }>;
+              waitingCount: number;
+            };
+          }>(
+            `select app.list_owner_routine_telebirr_transactions(
+              $1::uuid,'pending',null,null,null,25,0) as snapshot`,
+            [getOwnerAuthUserId()],
+          );
+          expect(transactions.rows[0]!.snapshot.rows).toContainEqual(
+            expect.objectContaining({
+              candidateId: paidId,
+              statusDetail: 'waiting_approval',
+              referenceMasked: expect.stringMatching(/^\*{3}[A-Z0-9]{4}$/u),
+              playerMasked: expect.stringMatching(/^\*{3}.{1,4}$/u),
+              canDecide: true,
+            }),
+          );
+          expect(transactions.rows[0]!.snapshot.waitingCount).toBeGreaterThanOrEqual(1);
+          const suffix = transactions.rows[0]!.snapshot.rows.find(
+            (row) => row.candidateId === paidId,
+          )!.referenceMasked.slice(-4);
+          const searched = await client.query<{ snapshot: { total: number } }>(
+            `select app.list_owner_routine_telebirr_transactions(
+              $1::uuid,'pending',null,null,$2::text,25,0) as snapshot`,
+            [getOwnerAuthUserId(), suffix],
+          );
+          expect(searched.rows[0]!.snapshot.total).toBeGreaterThanOrEqual(1);
           await client.query('savepoint old_reject_preview');
           const rejected = await client.query<{ decision: { decision: string } }>(
             `select app.decide_owner_routine_telebirr_old_payment(
@@ -1153,6 +1242,37 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           eligible: '1',
           audit_actor: getOwnerAdminId(),
         });
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const reviewed = await client.query<{
+            snapshot: {
+              rows: Array<{
+                candidateId: string;
+                statusGroup: string;
+                statusDetail: string;
+                decidedBy: string;
+                decidedAt: string;
+                canDecide: boolean;
+              }>;
+            };
+          }>(
+            `select app.list_owner_routine_telebirr_transactions(
+              $1::uuid,'all',null,null,null,50,0) as snapshot`,
+            [getOwnerAuthUserId()],
+          );
+          expect(reviewed.rows[0]!.snapshot.rows).toContainEqual(
+            expect.objectContaining({
+              candidateId: paidId,
+              statusGroup: 'pending',
+              statusDetail: 'checking',
+              decidedBy: expect.any(String),
+              decidedAt: expect.any(String),
+              canDecide: false,
+            }),
+          );
+        } finally {
+          await client.query('reset session authorization');
+        }
       } finally {
         await client.query('rollback');
       }

@@ -7,6 +7,7 @@ import {
   OwnerOldPaymentConflictError,
   OwnerOldPaymentRejectedError,
 } from './owner-telebirr-old-payments.js';
+import { OwnerTransactionsRejectedError } from './owner-telebirr-transactions.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
@@ -2408,6 +2409,65 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get<{
+    Querystring: {
+      status?: string;
+      from?: string;
+      to?: string;
+      last4?: string;
+      limit?: string;
+      offset?: string;
+    };
+  }>('/v1/owner/transactions', async (request, reply) => {
+    try {
+      if (
+        Object.keys(request.query).some(
+          (key) => !['status', 'from', 'to', 'last4', 'limit', 'offset'].includes(key),
+        )
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      const filters = {
+        status: request.query.status ?? 'all',
+        from: request.query.from,
+        to: request.query.to,
+        last4: request.query.last4,
+        limit: request.query.limit === undefined ? 25 : Number(request.query.limit),
+        offset: request.query.offset === undefined ? 0 : Number(request.query.offset),
+      };
+      if (
+        !['all', 'pending', 'credited', 'rejected'].includes(filters.status) ||
+        !Number.isSafeInteger(filters.limit) ||
+        filters.limit < 1 ||
+        filters.limit > 50 ||
+        !Number.isSafeInteger(filters.offset) ||
+        filters.offset < 0 ||
+        (filters.last4 !== undefined && !/^[A-Z0-9]{4}$/u.test(filters.last4)) ||
+        (filters.from !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(filters.from)) ||
+        (filters.to !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(filters.to))
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.telebirrTransactions)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const page = await dependencies.runtime.telebirrTransactions.list(authUserId, {
+        status: filters.status as 'all' | 'pending' | 'credited' | 'rejected',
+        ...(filters.from === undefined ? {} : { from: filters.from }),
+        ...(filters.to === undefined ? {} : { to: filters.to }),
+        ...(filters.last4 === undefined ? {} : { last4: filters.last4 }),
+        limit: filters.limit,
+        offset: filters.offset,
+      });
+      return reply.code(200).send(page);
+    } catch (error) {
+      if (error instanceof OwnerTransactionsRejectedError)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      request.log.warn('Owner transactions are unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post<{ Params: { candidateId: string } }>(
     '/v1/owner/telebirr-old-payments/:candidateId/decision',

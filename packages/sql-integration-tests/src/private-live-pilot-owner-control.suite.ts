@@ -247,6 +247,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         },
         {
           signature:
+            'app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)',
+        },
+        {
+          signature:
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',
         },
         { signature: 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)' },

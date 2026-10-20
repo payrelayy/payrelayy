@@ -843,6 +843,74 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('serves filtered masked Transactions only to an authenticated Owner', async () => {
+    const calls: unknown[] = [];
+    const page = {
+      rows: [
+        {
+          candidateId: '66666666-6666-4666-8666-666666666666',
+          submittedAt: '2026-10-20T10:00:00.000Z',
+          paymentAt: '2026-10-20T08:59:00.000Z',
+          amountMinor: '2500',
+          referenceMasked: '***AB12',
+          playerMasked: '***5678',
+          statusGroup: 'pending' as const,
+          statusDetail: 'waiting_approval' as const,
+          reason: 'Payment older than 1 hour',
+          decidedBy: null,
+          decidedAt: null,
+          canDecide: true,
+        },
+      ],
+      total: 1,
+      pending: 1,
+      credited: 0,
+      rejected: 0,
+      waitingCount: 2,
+    };
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrTransactions: {
+          list: async (actor, filters) => {
+            calls.push([actor, filters]);
+            return page;
+          },
+        },
+      }),
+    });
+    try {
+      const url = '/v1/owner/transactions?status=pending&from=2026-10-20&last4=AB12';
+      expect((await app.inject(url)).statusCode).toBe(403);
+      expect(
+        (
+          await app.inject({
+            url: '/v1/owner/transactions?last4=ABCDE',
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const listed = await app.inject({ url, headers: { authorization: `Bearer ${bearer}` } });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json()).toEqual(page);
+      expect(listed.body).not.toContain('12345678');
+      expect(calls).toEqual([
+        [
+          authUserId,
+          {
+            status: 'pending',
+            from: '2026-10-20',
+            last4: 'AB12',
+            limit: 25,
+            offset: 0,
+          },
+        ],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

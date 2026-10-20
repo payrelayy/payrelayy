@@ -2079,6 +2079,10 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         await persistentPolicyFixture(client, auth.rows[0]!.auth_user_id);
         await rejected(client, CAPTURE, captureArguments(eventId, 'UNKNOWN-PLAYER-ID'));
         await rejected(client, CAPTURE, captureArguments(eventId, revokedPlayerId));
+        // Disposable database only: TeleBirr presentation must remain available
+        // when CBE's separate verifier switch is later activated.
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
         const presentationEventId = await fixtureInboundEvent(client, actor.identityId);
         const presentationHmac = semanticHmac();
         const present = `select * from app.prepare_telegram_live_telebirr_destination(
@@ -2143,6 +2147,8 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         const replay = await client.query<CaptureRow>(CAPTURE, [...args]);
         expect(replay.rows).toEqual([{ ...first.rows[0], request_replayed: true }]);
         await client.query('reset role');
+        await client.query(`update app.feature_switches set mode = 'disabled'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
 
         const stored = await client.query<{
           intake_mode: string;

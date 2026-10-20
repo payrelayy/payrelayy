@@ -492,6 +492,35 @@ describe('private Telegram action transport contract', () => {
     }
   });
 
+  it('accepts only an exact provider-coded saved SMS proof', async () => {
+    const identity = {
+      version: 1 as const,
+      updateId: '123456',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en' as const,
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...identity,
+      kind: 'saved_receiver_sms_proof_command',
+      providerCode: 'cbe_birr',
+      transactionReference: 'SYNTHCBE1234',
+    };
+    const valid = signedRequest(action);
+    await expect(
+      verifyTelegramPrivateActionRequest(valid.request, valid.rawBody, verificationOptions()),
+    ).resolves.toEqual(action);
+    for (const invalid of [
+      { ...action, providerCode: 'unknown' },
+      { ...action, amountMinor: 2500 },
+    ]) {
+      const request = signedRequest(invalid as TelegramPrivateActionEnvelope);
+      await expect(
+        verifyTelegramPrivateActionRequest(request.request, request.rawBody, verificationOptions()),
+      ).resolves.toBeUndefined();
+    }
+  });
+
   it('accepts only strict deposit, protected-reference, and status commands', async () => {
     const depositAction: TelegramPrivateActionEnvelope = {
       version: 1,

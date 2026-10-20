@@ -231,6 +231,29 @@ export function presentTelegramPlayerIdFlowResult(
       // The outcome notifier sends one definitive message, or a delayed checking notice
       // if the phone/provider remains unavailable.
       return { kind: 'deferred' };
+    case 'receiver_sms_candidate_received':
+      if (result.matchStatus === 'already_used') {
+        return {
+          kind: 'message',
+          text: 'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.',
+        };
+      }
+      if (result.matchStatus === 'older_review') {
+        return {
+          kind: 'message',
+          text: 'Payment found but it is older than 1 hour. Waiting for approval.',
+        };
+      }
+      if (result.matchStatus === 'held_review') {
+        return {
+          kind: 'message',
+          text: 'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.',
+        };
+      }
+      return {
+        kind: 'message',
+        text: `${result.providerName} reference received. Checking against the receiving phone SMS. Please do not pay again.`,
+      };
     case 'telebirr_routine_candidate_already_used':
       return {
         kind: 'menu',

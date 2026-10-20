@@ -32,6 +32,8 @@ async function runPlayerActionDatabasePreflight(): Promise<void> {
         true,
         config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
           config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled,
+        config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled,
+        true,
       ))
     ) {
       throw new Error('The Player-ID action catalog contract did not pass.');

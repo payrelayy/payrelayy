@@ -73,7 +73,8 @@ declare
   v_now timestamptz;
   v_switch_count integer;
 begin
-  if session_user <> 'postgres' or p_candidate_id is null then
+  if session_user not in ('postgres', 'fetanagent_receiver_sms_settlement_runtime')
+    or p_candidate_id is null then
     raise exception using errcode = '42501',
       message = 'Receiver SMS settlement is unavailable.';
   end if;

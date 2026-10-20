@@ -21,6 +21,8 @@ import {
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
   reduceTelegramSavedTelebirrDestinationAction,
+  reduceTelegramSavedCbeSmsMediaSubmission,
+  reduceTelegramSavedCbeSmsProofSubmission,
   reduceTelegramSavedTelebirrProofSubmission,
 } from './telegram-private-action.js';
 import {
@@ -135,6 +137,54 @@ describe('private Telegram action reducers', () => {
         command: 'CBE Birr receipt Transaction ID: TESTCBE123456',
       }),
     ).toBeUndefined();
+  });
+
+  it('nominates CBE SMS text, link, screenshot or PDF as a reference only', () => {
+    const expected = {
+      kind: 'action',
+      action: {
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: 'SYNTHCBE1234',
+      },
+    };
+    for (const command of [
+      '/cbe synthcbe1234',
+      'CBE Birr received. Txn ID: SYNTHCBE1234',
+      'https://cbepay1.cbe.com.et/aureceipt?TID=SYNTHCBE1234&PH=000000000000',
+    ]) {
+      expect(
+        reduceTelegramSavedCbeSmsProofSubmission({ ...privateMetadata, command }),
+      ).toMatchObject(expected);
+    }
+    expect(
+      reduceTelegramSavedCbeSmsMediaSubmission({
+        ...privateMetadata,
+        caption: undefined,
+        extractedText: 'CBE Birr transaction ID: SYNTHCBE1234',
+        sourceKind: 'ocr_text',
+      }),
+    ).toMatchObject(expected);
+    expect(
+      reduceTelegramSavedCbeSmsMediaSubmission({
+        ...privateMetadata,
+        caption: undefined,
+        extractedText: 'CBE Birr transaction ID: SYNTHCBE1234',
+        sourceKind: 'pdf_text',
+      }),
+    ).toMatchObject(expected);
+    expect(
+      reduceTelegramSavedCbeSmsProofSubmission({
+        ...privateMetadata,
+        command: '/deposit cbe_birr PLAYER-DEMO-42 CBE Birr Txn ID: SYNTHCBE1234',
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramSavedCbeSmsProofSubmission({
+        ...privateMetadata,
+        command: 'CBE Birr Txn ID: SYNTHCBE1234 Txn ID: OTHERREF12',
+      }),
+    ).toEqual({ kind: 'selection_required' });
   });
   it('reduces only exact root-menu commands to an English-only envelope', () => {
     expect(reduceTelegramRootMenuAction({ ...privateMetadata, command: '/start' })).toEqual({

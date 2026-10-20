@@ -287,13 +287,65 @@ export function reduceTelegramGuidedDepositDestinationSubmission(
   };
 }
 
-/** Direct receipt intake is enabled only for TeleBirr. Clear CBE Birr material must not be
- * silently interpreted as TeleBirr while that provider remains non-live. */
+/** Classify CBE material before the legacy TeleBirr reducer can interpret its reference. */
 export function isCbeBirrReceiptText(text: unknown): boolean {
   return (
     typeof text === 'string' &&
     /(?:cbepay1\.cbe\.com\.et|\bCBE\s?Birr\b|\bCredit Account\b)/iu.test(text)
   );
+}
+
+/** CBE proof identifies only a reference; the receiving phone SMS supplies amount and time. */
+export function reduceTelegramSavedCbeSmsProofSubmission(
+  metadata: TelegramDepositCommandMetadata,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  const command = metadata.command;
+  if (!identity || typeof command !== 'string') return undefined;
+  const explicit = /^\/cbe\s+([\s\S]+)$/u.exec(command);
+  if (command.startsWith('/') && !explicit) return undefined;
+  const inputText = explicit?.[1] ?? (isCbeBirrReceiptText(command) ? command : undefined);
+  if (inputText === undefined) return undefined;
+  const proof = reduceTelegramDepositProofInput('cbe_birr', inputText);
+  if (proof.kind !== 'candidate') return proof;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'saved_receiver_sms_proof_command',
+      providerCode: 'cbe_birr',
+      transactionReference: proof.transactionReference,
+    },
+  };
+}
+
+export function reduceTelegramSavedCbeSmsMediaSubmission(
+  metadata: Omit<TelegramGuidedDepositMediaMetadata, 'replyToMessage'>,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (
+    !identity ||
+    (!isCbeBirrReceiptText(metadata.extractedText) && !isCbeBirrReceiptText(metadata.caption))
+  )
+    return undefined;
+  if (metadata.caption !== undefined && typeof metadata.caption !== 'string') {
+    return { kind: 'invalid_input' };
+  }
+  const input = reduceTelegramDepositProofInput(
+    'cbe_birr',
+    `${metadata.caption ?? ''}\n${metadata.extractedText}`,
+    metadata.sourceKind,
+  );
+  if (input.kind !== 'candidate') return input;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'saved_receiver_sms_proof_command',
+      providerCode: 'cbe_birr',
+      transactionReference: input.transactionReference,
+    },
+  };
 }
 
 export function reduceTelegramSavedTelebirrProofSubmission(
@@ -384,7 +436,12 @@ export type TelegramDepositProofSubmission =
       readonly kind: 'action';
       readonly action: Extract<
         TelegramPrivateActionEnvelope,
-        { kind: 'deposit_proof_command' | 'saved_telebirr_proof_command' }
+        {
+          kind:
+            | 'deposit_proof_command'
+            | 'saved_telebirr_proof_command'
+            | 'saved_receiver_sms_proof_command';
+        }
       >;
     }
   | { readonly kind: 'selection_required' }

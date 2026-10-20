@@ -140,6 +140,12 @@ export type TelegramPrivateActionEnvelope =
       readonly transactionReference: string;
     })
   | (TelegramPrivateActionIdentity & {
+      /** A saved Player ID with an explicit SMS payment provider. */
+      readonly kind: 'saved_receiver_sms_proof_command';
+      readonly providerCode: DepositProofProviderCode;
+      readonly transactionReference: string;
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'player_registration_callback';
       /** Opaque, compact capability presentation; never log this raw value. */
       readonly callbackData: string;
@@ -443,6 +449,14 @@ export type TelegramPrivateActionResult =
       readonly providerName: 'TeleBirr';
       readonly proofStatus: 'pending_verification';
       readonly verificationMode: 'phone_receipt_pending';
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'receiver_sms_candidate_received';
+      readonly providerCode: DepositProofProviderCode;
+      readonly providerName: 'CBE Birr' | 'TeleBirr';
+      readonly matchStatus:
+        'pending_sms' | 'ready' | 'older_review' | 'held_review' | 'already_used';
     }
   | {
       readonly version: 1;

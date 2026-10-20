@@ -92,6 +92,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly telebirrReceiverReviewEnabled: false;
       readonly routineTelebirrCandidateStagingEnabled: false;
       readonly routineTelebirrCandidateProductionEnabled: false;
+      readonly receiverSmsCandidateProductionEnabled: false;
       readonly cbeBirrBoundDryRunStagingEnabled: false;
       readonly cbeBirrBoundNoMoneyProductionEnabled: false;
       readonly tlsMode: undefined;
@@ -123,6 +124,7 @@ export type ApiTelegramPlayerActionRuntimeConfig =
       readonly routineTelebirrCandidateStagingEnabled: boolean;
       /** Production-only real-reference, amount-free candidate routing; default off. */
       readonly routineTelebirrCandidateProductionEnabled: boolean;
+      readonly receiverSmsCandidateProductionEnabled: boolean;
       readonly cbeBirrBoundDryRunStagingEnabled: boolean;
       readonly cbeBirrBoundNoMoneyProductionEnabled: boolean;
       readonly tlsMode: 'verify-full';
@@ -517,6 +519,11 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     false,
     'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED',
   );
+  const receiverSmsCandidateProductionEnabled = booleanFromEnv(
+    environment.TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED,
+    false,
+    'TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED',
+  );
   const cbeBirrBoundDryRunStagingEnabled = booleanFromEnv(
     environment.TELEGRAM_CBE_BIRR_BOUND_DRY_RUN_STAGING_ENABLED,
     false,
@@ -548,6 +555,11 @@ function loadApiTelegramPlayerActionRuntimeConfig(
         'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED requires the Player-action runtime.',
       );
     }
+    if (receiverSmsCandidateProductionEnabled) {
+      throw new Error(
+        'TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED requires the Player-action runtime.',
+      );
+    }
     return {
       enabled: false,
       deploymentTarget: undefined,
@@ -563,6 +575,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
       telebirrReceiverReviewEnabled: false,
       routineTelebirrCandidateStagingEnabled: false,
       routineTelebirrCandidateProductionEnabled: false,
+      receiverSmsCandidateProductionEnabled: false,
       cbeBirrBoundDryRunStagingEnabled: false,
       cbeBirrBoundNoMoneyProductionEnabled: false,
       tlsMode: undefined,
@@ -595,6 +608,14 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     throw new Error(
       'TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED is restricted to the production Player-action target.',
     );
+  }
+  if (receiverSmsCandidateProductionEnabled && deploymentTarget !== 'production') {
+    throw new Error(
+      'TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED is restricted to production.',
+    );
+  }
+  if (receiverSmsCandidateProductionEnabled && routineTelebirrCandidateProductionEnabled) {
+    throw new Error('The SMS and receipt candidate routes cannot run together.');
   }
   if (cbeBirrBoundDryRunStagingEnabled && deploymentTarget !== 'staging') {
     throw new Error(
@@ -754,6 +775,7 @@ function loadApiTelegramPlayerActionRuntimeConfig(
     telebirrReceiverReviewEnabled,
     routineTelebirrCandidateStagingEnabled,
     routineTelebirrCandidateProductionEnabled,
+    receiverSmsCandidateProductionEnabled,
     cbeBirrBoundDryRunStagingEnabled,
     cbeBirrBoundNoMoneyProductionEnabled,
     tlsMode: 'verify-full',
@@ -947,6 +969,7 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
     readonly telebirrReceiverReviewEnabled: boolean;
     readonly routineTelebirrCandidateStagingEnabled: boolean;
     readonly routineTelebirrCandidateProductionEnabled: boolean;
+    readonly receiverSmsCandidateProductionEnabled: boolean;
     readonly cbeBirrBoundDryRunStagingEnabled: boolean;
     readonly cbeBirrBoundNoMoneyProductionEnabled: boolean;
     readonly tlsMode: 'verify-full' | undefined;
@@ -994,6 +1017,8 @@ export function redactedApiConfigForLog(config: ApiConfig): Omit<
         config.telegramPlayerActionRuntime.routineTelebirrCandidateStagingEnabled,
       routineTelebirrCandidateProductionEnabled:
         config.telegramPlayerActionRuntime.routineTelebirrCandidateProductionEnabled,
+      receiverSmsCandidateProductionEnabled:
+        config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled,
       cbeBirrBoundDryRunStagingEnabled:
         config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled,
       cbeBirrBoundNoMoneyProductionEnabled:

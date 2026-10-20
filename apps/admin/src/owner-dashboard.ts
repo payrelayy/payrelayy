@@ -29,7 +29,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
   const lede =
     runtime.deploymentTarget === 'production'
       ? 'Operate the authenticated FetanAgent production control plane.'
-      : 'Issue one-time Telegram beta invitations from this SSH-only workspace.';
+      : 'Review transactions in the authenticated FetanAgent staging control plane.';
   const footer =
     runtime.deploymentTarget === 'production'
       ? 'Production control. Financial actions remain governed by explicit audited switches.'
@@ -77,6 +77,46 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
         <p class="request-meta" id="owner-session-status"></p>
+        <section class="review-section transactions-section" aria-labelledby="transactions-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">TeleBirr deposits</p>
+              <h2 id="transactions-title">Transactions <span class="waiting-badge" id="transactions-badge" hidden></span></h2>
+            </div>
+            <button class="secondary" id="transactions-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">See what happened to each submission. Approving a verified old payment starts the normal credit checks; it does not mean the Player has been credited yet.</p>
+          <form id="transactions-filters" class="transactions-filters" autocomplete="off">
+            <div>
+              <label for="transactions-status-filter">Status</label>
+              <select id="transactions-status-filter">
+                <option value="all">All transactions</option>
+                <option value="pending">Pending</option>
+                <option value="credited">Approved and credited</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div>
+              <label for="transactions-from">Submitted from</label>
+              <input id="transactions-from" type="date" />
+            </div>
+            <div>
+              <label for="transactions-to">Submitted through</label>
+              <input id="transactions-to" type="date" />
+            </div>
+            <div>
+              <label for="transactions-last4">Reference last 4</label>
+              <input id="transactions-last4" type="text" maxlength="4" pattern="[A-Za-z0-9]{4}" placeholder="AB12" spellcheck="false" autocapitalize="characters" />
+            </div>
+            <div class="transactions-filter-actions">
+              <button type="submit">Apply filters</button>
+              <button class="secondary" id="transactions-clear" type="button">Clear</button>
+            </div>
+          </form>
+          <p class="request-meta" id="transactions-summary" role="status" aria-live="polite">Sign in to load transactions.</p>
+          <div class="request-list" id="transactions-list"></div>
+          <button class="secondary transactions-more" id="transactions-more" type="button" hidden>Show older transactions</button>
+        </section>
         <section class="review-section" aria-labelledby="telebirr-fast-alert-title">
           <h2 id="telebirr-fast-alert-title">TeleBirr payment reviews</h2>
           <p class="request-meta" id="telebirr-fast-alert-status" role="status">
@@ -742,6 +782,22 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .request-list { display: grid; gap: 14px; margin-top: 16px; }
 .request-card { border: 1px solid #30303a; border-radius: 12px; background: #141419; padding: 16px; }
 .request-card h3 { margin: 0 0 6px; font-size: 1rem; overflow-wrap: anywhere; }
+.waiting-badge { display: inline-block; margin-left: 8px; border-radius: 99px; background: #fcd34d; color: #211b0e; padding: 3px 9px; font-size: .72rem; vertical-align: middle; letter-spacing: 0; }
+.transactions-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.transactions-filters > div { display: grid; gap: 6px; }
+.transactions-filter-actions { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
+.transactions-filter-actions button { margin-top: 0; }
+.transactions-summary { margin-top: 16px; }
+.transaction-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.transaction-heading h3 { margin: 0; }
+.transaction-status { border-radius: 99px; padding: 4px 10px; font-size: .76rem; font-weight: 800; background: #27272a; color: #fafafa; }
+.transaction-status.pending { color: #fde68a; background: #3b2a12; }
+.transaction-status.credited { color: #86efac; background: #123323; }
+.transaction-status.rejected { color: #fecaca; background: #3f171b; }
+.transaction-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 12px; margin: 12px 0 0; font-size: .86rem; }
+.transaction-facts dt { color: #a1a1aa; }
+.transaction-facts dd { margin: 0; overflow-wrap: anywhere; }
+.transactions-more { margin-top: 16px; width: 100%; }
 .request-meta { margin: 0; color: #a1a1aa; font-size: 0.82rem; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
@@ -772,7 +828,7 @@ output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #c
 .notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
 footer { margin-top: 30px; font-size: 0.85rem; }
 [hidden] { display: none !important; }
-@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions, .companion-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
+@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
 `;
 
 export const OWNER_DASHBOARD_JAVASCRIPT = `const loginPanel = document.querySelector('#login-panel');
@@ -782,6 +838,20 @@ const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
+const transactionsFilters = document.querySelector('#transactions-filters');
+const transactionsStatusFilter = document.querySelector('#transactions-status-filter');
+const transactionsFrom = document.querySelector('#transactions-from');
+const transactionsTo = document.querySelector('#transactions-to');
+const transactionsLast4 = document.querySelector('#transactions-last4');
+const transactionsClear = document.querySelector('#transactions-clear');
+const transactionsRefresh = document.querySelector('#transactions-refresh');
+const transactionsBadge = document.querySelector('#transactions-badge');
+const transactionsSummary = document.querySelector('#transactions-summary');
+const transactionsList = document.querySelector('#transactions-list');
+const transactionsMore = document.querySelector('#transactions-more');
+let transactionsLoadGeneration = 0;
+let transactionsOffset = 0;
+let transactionsBusy = false;
 const supportContactForm = document.querySelector('#support-contact-form');
 const supportContactUsername = document.querySelector('#support-contact-username');
 const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
@@ -2847,6 +2917,12 @@ function signOut(message = 'Signed out.') {
   clearExecutionApprovals();
   clearDepositIntake();
   clearReceiverChangeReviews();
+  transactionsLoadGeneration += 1;
+  transactionsOffset = 0;
+  transactionsList.replaceChildren();
+  transactionsBadge.hidden = true;
+  transactionsBadge.textContent = '';
+  transactionsSummary.textContent = 'Sign in to load transactions.';
   ownerPanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -5090,6 +5166,211 @@ async function loadTelebirrFastAlerts() {
   }
 }
 
+function transactionDate(value) {
+  return value ? new Date(value).toLocaleString('en-ET', {
+    timeZone: 'Africa/Nairobi', dateStyle: 'medium', timeStyle: 'short',
+  }) : 'Not verified';
+}
+
+function validTransaction(value) {
+  if (!value || typeof value !== 'object' ||
+      typeof value.candidateId !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.candidateId) ||
+      typeof value.submittedAt !== 'string' || !Number.isFinite(Date.parse(value.submittedAt)) ||
+      (value.paymentAt !== null &&
+        (typeof value.paymentAt !== 'string' || !Number.isFinite(Date.parse(value.paymentAt)))) ||
+      (value.amountMinor !== null &&
+        (typeof value.amountMinor !== 'string' || !/^[1-9][0-9]*$/.test(value.amountMinor))) ||
+      typeof value.referenceMasked !== 'string' || !/^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) ||
+      typeof value.playerMasked !== 'string' || !/^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked) ||
+      !['pending', 'credited', 'rejected'].includes(value.statusGroup) ||
+      !['waiting_approval', 'held_review', 'checking', 'credited', 'rejected'].includes(value.statusDetail) ||
+      (value.reason !== null && typeof value.reason !== 'string') ||
+      (value.decidedBy !== null && typeof value.decidedBy !== 'string') ||
+      (value.decidedAt !== null &&
+        (typeof value.decidedAt !== 'string' || !Number.isFinite(Date.parse(value.decidedAt)))) ||
+      typeof value.canDecide !== 'boolean' ||
+      (value.canDecide && (value.statusDetail !== 'waiting_approval' || value.statusGroup !== 'pending'))) {
+    return false;
+  }
+  return true;
+}
+
+function transactionFact(list, label, value) {
+  const name = document.createElement('dt');
+  name.textContent = label;
+  const detail = document.createElement('dd');
+  detail.textContent = value;
+  list.append(name, detail);
+}
+
+function renderTransaction(value) {
+  const card = document.createElement('article');
+  card.className = 'request-card';
+  const heading = document.createElement('div');
+  heading.className = 'transaction-heading';
+  const title = document.createElement('h3');
+  title.textContent = 'Reference ' + value.referenceMasked;
+  const status = document.createElement('span');
+  status.className = 'transaction-status ' + value.statusGroup;
+  status.textContent = ({
+    waiting_approval: 'Waiting for your approval',
+    held_review: 'Held for review',
+    checking: 'Checking',
+    credited: 'Approved and credited',
+    rejected: 'Rejected',
+  })[value.statusDetail];
+  heading.append(title, status);
+  card.append(heading);
+  const facts = document.createElement('dl');
+  facts.className = 'transaction-facts';
+  transactionFact(facts, 'Submitted', transactionDate(value.submittedAt));
+  transactionFact(facts, 'Payment time', transactionDate(value.paymentAt));
+  transactionFact(facts, 'Amount', value.amountMinor === null
+    ? 'Not verified' : (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
+  transactionFact(facts, 'Player', value.playerMasked);
+  if (value.reason) transactionFact(facts, 'Reason', value.reason);
+  if (value.decidedBy && value.decidedAt) {
+    transactionFact(facts, 'Decision', value.decidedBy + ' · ' + transactionDate(value.decidedAt));
+  }
+  card.append(facts);
+  if (value.canDecide) {
+    const actions = document.createElement('div');
+    actions.className = 'review-actions';
+    for (const decision of ['approve', 'reject']) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = decision === 'reject' ? 'danger' : '';
+      button.textContent = decision === 'approve' ? 'Approve payment' : 'Reject payment';
+      button.addEventListener('click', () => void decideTransaction(value, decision));
+      actions.append(button);
+    }
+    card.append(actions);
+  } else if (value.statusDetail === 'held_review') {
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'A verified signed receipt is required before approval. Contact support to review this payment.';
+    card.append(note);
+  }
+  return card;
+}
+
+async function decideTransaction(value, decision) {
+  if (!accessToken || transactionsBusy || !value.canDecide) return;
+  const action = decision === 'approve' ? 'approve' : 'reject';
+  const prompt = action === 'approve'
+    ? 'Approve the verified old payment ' + value.referenceMasked + ' for ' + value.playerMasked +
+      '? All credit checks will run again. Approval does not mean credit has completed.'
+    : 'Reject the verified old payment ' + value.referenceMasked + ' for ' + value.playerMasked +
+      '? The customer will be told it was not credited.';
+  if (!window.confirm(prompt)) return;
+  const requestId = crypto.randomUUID();
+  const generation = ownerAuthGeneration;
+  transactionsBusy = true;
+  transactionsSummary.textContent = 'Recording your decision…';
+  try {
+    const response = await ownerRequest(
+      '/v1/owner/telebirr-old-payments/' + encodeURIComponent(value.candidateId) + '/decision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json',
+          'x-fetanagent-owner-csrf': 'owner-telebirr-old-payment-v1',
+          'x-idempotency-key': requestId },
+        body: JSON.stringify({ decision: action, requestId, confirmed: true }),
+      });
+    if (response.status !== 200) throw new Error('decision_status');
+    if (generation !== ownerAuthGeneration || !accessToken) return;
+    const payload = await response.json();
+    if (!payload || !payload.decision ||
+        payload.decision.decision !== (action === 'approve' ? 'approved' : 'rejected'))
+      throw new Error('decision_response');
+    setNotice(action === 'approve'
+      ? 'Owner approval recorded. The normal credit path is running; check the transaction again for the final result.'
+      : 'Owner rejection recorded. The customer will receive the result.');
+  } catch (error) {
+    if (generation === ownerAuthGeneration && accessToken && !isSignedOutError(error)) {
+      setNotice('The decision could not be confirmed. It may already be recorded. Check the refreshed transaction before acting again.');
+    }
+  } finally {
+    transactionsBusy = false;
+    if (generation === ownerAuthGeneration && accessToken) await loadTransactions(true);
+  }
+}
+
+async function loadTransactions(reset) {
+  if (!accessToken) return;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++transactionsLoadGeneration;
+  const status = transactionsStatusFilter.value;
+  const from = transactionsFrom.value;
+  const to = transactionsTo.value;
+  const last4 = transactionsLast4.value.trim().toUpperCase();
+  if (last4 && !/^[A-Z0-9]{4}$/.test(last4)) {
+    transactionsSummary.textContent = 'Enter exactly four letters or digits for the reference search.';
+    return;
+  }
+  if (from && to && from > to) {
+    transactionsSummary.textContent = 'The first date must be on or before the last date.';
+    return;
+  }
+  const offset = reset ? 0 : transactionsOffset;
+  transactionsRefresh.disabled = true;
+  transactionsMore.disabled = true;
+  transactionsSummary.textContent = 'Loading transactions…';
+  const query = '?status=' + encodeURIComponent(status) +
+    '&limit=25&offset=' + offset +
+    (from ? '&from=' + encodeURIComponent(from) : '') +
+    (to ? '&to=' + encodeURIComponent(to) : '') +
+    (last4 ? '&last4=' + encodeURIComponent(last4) : '');
+  try {
+    const response = await ownerRequest('/v1/owner/transactions' + query, {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('transactions');
+    const page = await response.json();
+    if (!page || !Array.isArray(page.rows) || page.rows.length > 25 ||
+        !page.rows.every(validTransaction) ||
+        ![page.total, page.pending, page.credited, page.rejected, page.waitingCount]
+          .every((count) => Number.isSafeInteger(count) && count >= 0))
+      throw new Error('transactions');
+    if (generation !== ownerAuthGeneration || loadGeneration !== transactionsLoadGeneration ||
+        !accessToken) return;
+    if (reset) transactionsList.replaceChildren();
+    for (const value of page.rows) transactionsList.append(renderTransaction(value));
+    transactionsOffset = offset + page.rows.length;
+    transactionsBadge.hidden = page.waitingCount === 0;
+    transactionsBadge.textContent = page.waitingCount + ' waiting';
+    transactionsSummary.textContent = page.pending + ' pending · ' + page.credited +
+      ' approved and credited · ' + page.rejected + ' rejected. ' +
+      (page.total === 0 ? 'No matching transactions.' :
+        'Showing ' + transactionsOffset + ' of ' + page.total + ' matching transactions.');
+    transactionsMore.hidden = transactionsOffset >= page.total;
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === transactionsLoadGeneration &&
+        accessToken && !isSignedOutError(error)) {
+      transactionsSummary.textContent = 'Transactions are temporarily unavailable. Refresh to try again.';
+    }
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === transactionsLoadGeneration) {
+      transactionsRefresh.disabled = false;
+      transactionsMore.disabled = false;
+    }
+  }
+}
+
+transactionsFilters.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void loadTransactions(true);
+});
+transactionsClear.addEventListener('click', () => {
+  transactionsStatusFilter.value = 'all';
+  transactionsFrom.value = '';
+  transactionsTo.value = '';
+  transactionsLast4.value = '';
+  void loadTransactions(true);
+});
+transactionsRefresh.addEventListener('click', () => void loadTransactions(true));
+transactionsMore.addEventListener('click', () => void loadTransactions(false));
+
 function scheduleTelebirrFastAlertRefresh() {
   window.setTimeout(() => {
     if (accessToken && document.visibilityState !== 'hidden') {
@@ -5916,6 +6197,7 @@ async function loadOwnerPlayerQueues() {
       loadDepositIntake(),
       loadReceiverChangeReviews(),
       loadTelebirrFastAlerts(),
+      loadTransactions(true),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),

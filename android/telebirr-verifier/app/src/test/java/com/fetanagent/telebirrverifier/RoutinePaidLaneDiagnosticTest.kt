@@ -29,7 +29,7 @@ class RoutinePaidLaneDiagnosticTest {
     assertEquals("lane=0 outbox=empty result=review_other", diagnostic)
     assertFalse(diagnostic.contains("private"))
     assertThrows(IllegalArgumentException::class.java) {
-      RoutinePaidLaneDiagnostic.render(4, RoutinePaidLaneDiagnostic.Outbox.EMPTY,
+      RoutinePaidLaneDiagnostic.render(6, RoutinePaidLaneDiagnostic.Outbox.EMPTY,
         RoutinePaidPhonePreparationResult.NoAssignment)
     }
   }

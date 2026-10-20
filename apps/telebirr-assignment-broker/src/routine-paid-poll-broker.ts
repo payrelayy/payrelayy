@@ -43,6 +43,9 @@ export interface RoutinePaidPollBrokerDatabase {
     readonly replayIdentity: string;
     readonly signedObservation: unknown;
   }): Promise<unknown>;
+  stageOldObservation?(
+    input: Parameters<RoutinePaidPollBrokerDatabase['stageObservation']>[0],
+  ): Promise<unknown>;
   recordTerminalRejection(input: {
     readonly challengeId: string;
     readonly signedObservation: unknown;
@@ -88,6 +91,49 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
     typeof database.recordCheckReason !== 'function'
   ) {
     throw new RoutinePaidPollBrokerUnavailableError();
+  }
+  async function stage(
+    input: {
+      readonly evidence: RoutineTelebirrPaidPhoneEvidence;
+      readonly assignmentBodyDigest: string;
+      readonly observationSignatureDigest: string;
+      readonly signedObservation: unknown;
+    },
+    oldForOwnerApproval: boolean,
+  ) {
+    try {
+      const { evidence } = input;
+      if (
+        !evidence ||
+        evidence.providerCode !== 'telebirr' ||
+        !UUID_V4.test(evidence.challengeId) ||
+        !UUID_V4.test(evidence.candidateId) ||
+        !DIGEST.test(evidence.observationBodyDigest) ||
+        !DIGEST.test(evidence.replayIdentity) ||
+        !DIGEST.test(input.assignmentBodyDigest) ||
+        !DIGEST.test(input.observationSignatureDigest) ||
+        typeof input.signedObservation !== 'object' ||
+        input.signedObservation === null ||
+        JSON.stringify(input.signedObservation).length > 16384
+      )
+        throw new Error();
+      const parameters = {
+        challengeId: evidence.challengeId,
+        assignmentBodyDigest: input.assignmentBodyDigest,
+        observationBodyDigest: evidence.observationBodyDigest,
+        observationSignatureDigest: input.observationSignatureDigest,
+        replayIdentity: evidence.replayIdentity,
+        signedObservation: input.signedObservation,
+      };
+      const result = oldForOwnerApproval
+        ? await database.stageOldObservation?.(parameters)
+        : await database.stageObservation(parameters);
+      if (result !== 'recorded' && result !== 'exact_replay' && result !== 'conflict')
+        throw new Error();
+      return result;
+    } catch {
+      throw new RoutinePaidPollBrokerUnavailableError();
+    }
   }
   return Object.freeze({
     now,
@@ -211,36 +257,15 @@ export function createRoutinePaidPollBroker(dependencies: RoutinePaidPollBrokerD
       readonly observationSignatureDigest: string;
       readonly signedObservation: unknown;
     }) {
-      try {
-        const { evidence } = input;
-        if (
-          !evidence ||
-          evidence.providerCode !== 'telebirr' ||
-          !UUID_V4.test(evidence.challengeId) ||
-          !UUID_V4.test(evidence.candidateId) ||
-          !DIGEST.test(evidence.observationBodyDigest) ||
-          !DIGEST.test(evidence.replayIdentity) ||
-          !DIGEST.test(input.assignmentBodyDigest) ||
-          !DIGEST.test(input.observationSignatureDigest) ||
-          typeof input.signedObservation !== 'object' ||
-          input.signedObservation === null ||
-          JSON.stringify(input.signedObservation).length > 16384
-        )
-          throw new Error();
-        const result = await database.stageObservation({
-          challengeId: evidence.challengeId,
-          assignmentBodyDigest: input.assignmentBodyDigest,
-          observationBodyDigest: evidence.observationBodyDigest,
-          observationSignatureDigest: input.observationSignatureDigest,
-          replayIdentity: evidence.replayIdentity,
-          signedObservation: input.signedObservation,
-        });
-        if (result !== 'recorded' && result !== 'exact_replay' && result !== 'conflict')
-          throw new Error();
-        return result;
-      } catch {
-        throw new RoutinePaidPollBrokerUnavailableError();
-      }
+      return stage(input, false);
+    },
+    async stageOldObservation(input: {
+      readonly evidence: RoutineTelebirrPaidPhoneEvidence;
+      readonly assignmentBodyDigest: string;
+      readonly observationSignatureDigest: string;
+      readonly signedObservation: unknown;
+    }) {
+      return stage(input, true);
     },
     async recordTerminalRejection(input: {
       readonly challengeId: string;

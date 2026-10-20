@@ -67,6 +67,12 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'held_review') {
     return 'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.';
   }
+  if (delivery.outcomeCode === 'older_pending') {
+    return 'Payment found but it is older than 1 hour. Waiting for approval.';
+  }
+  if (delivery.outcomeCode === 'old_rejected') {
+    return 'Deposit not credited. Reason: payment older than 1 hour. Contact support if this is unexpected.';
+  }
   if (delivery.outcomeCode === 'manual_review') {
     return [
       '⚠️ Deposit needs review',

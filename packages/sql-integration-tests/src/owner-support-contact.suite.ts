@@ -121,14 +121,14 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(`drop function ${signature}`);
         }
         // The three routine-policy configuration RPCs are additive, not execution grants.
-        expect(await executableOwnerFunctionCount(client)).toBe(51);
+        expect(await executableOwnerFunctionCount(client)).toBe(54);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
 
         // Restore the actual checked-in migration's functions and ACLs, not test doubles.
         // This models the formerly healthy process restarting after that additive migration.
         await client.query('rollback to savepoint support_pre_migration_catalog');
         await client.query('release savepoint support_pre_migration_catalog');
-        expect(await executableOwnerFunctionCount(client)).toBe(54);
+        expect(await executableOwnerFunctionCount(client)).toBe(57);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
       });
     });
@@ -202,7 +202,7 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(
             `revoke execute on function ${signature} from fetanagent_owner_control`,
           );
-          expect(await executableOwnerFunctionCount(client)).toBe(53);
+          expect(await executableOwnerFunctionCount(client)).toBe(56);
           const row = await runActualOwnerPreflight(client);
           expect(row[check]).toBe(false);
           expect(row.exact_app_execute_count).toBe(false);
@@ -221,7 +221,7 @@ export function registerOwnerSupportContactSqlTests(
           revoke all on function app.sql_integration_unexpected_support_probe() from public;
           grant execute on function app.sql_integration_unexpected_support_probe() to fetanagent_owner_control;
         `);
-        expect(await executableOwnerFunctionCount(client)).toBe(55);
+        expect(await executableOwnerFunctionCount(client)).toBe(58);
         const row = await runActualOwnerPreflight(client);
         expect(row.exact_app_execute_count).toBe(false);
         expect(row.all_other_app_functions_denied).toBe(false);

@@ -95,7 +95,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
       expect(sources.rows[0]?.nested).toContain("challenge.issuance_mode = 'paid'");
     });
 
-    it('starts without a login or password and inherits only seven paid functions', async () => {
+    it('starts without a login or password and inherits only eight paid functions', async () => {
       const client = getClient();
       const roles = await client.query<{
         name: string;
@@ -159,6 +159,7 @@ export function registerRoutineTelebirrPaidPollRuntimeSqlTests(getClient: () => 
         'load_routine_telebirr_paid_poll_enrollment',
         'record_routine_telebirr_paid_check_reason',
         'record_routine_telebirr_paid_terminal_result',
+        'stage_routine_telebirr_old_signed_observation',
         'stage_routine_telebirr_paid_signed_observation',
       ]);
       const baseAccess = await client.query<{ accessible: string }>(

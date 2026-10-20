@@ -226,7 +226,10 @@ export async function fixtureEligiblePlayer(
   return playerId;
 }
 
-export async function fixtureTelebirrReceiver(client: Client): Promise<{
+export async function fixtureTelebirrReceiver(
+  client: Client,
+  activeFrom?: string,
+): Promise<{
   readonly id: string;
   readonly version: number;
 }> {
@@ -241,16 +244,17 @@ export async function fixtureTelebirrReceiver(client: Client): Promise<{
        provider_id, version, account_holder_name, account_reference_ciphertext,
        account_reference_masked, account_reference_fingerprint,
        protection_profile_version, encryption_key_version, fingerprint_key_version,
-       rotation_request_id, rotation_reason
+       rotation_request_id, rotation_reason, active_from
      ) select provider.id, 1, 'FetanAgent Fixture',
               $1::text, '***7001', $2::text, 1, 1, 1,
-              $3::uuid, 'initial_configuration'
+              $3::uuid, 'initial_configuration', coalesce($4::timestamptz, now())
          from app.payment_providers provider where provider.code = 'telebirr'
      returning id, version`,
     [
       `receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
       digest(),
       randomUUID(),
+      activeFrom ?? null,
     ],
   );
   return inserted.rows[0]!;

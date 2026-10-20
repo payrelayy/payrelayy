@@ -766,6 +766,83 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('allows only a confirmed Owner decision for a masked older-payment inbox', async () => {
+    const candidateId = '66666666-6666-4666-8666-666666666666';
+    const requestId = '77777777-7777-4777-8777-777777777777';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        telebirrOldPayments: {
+          list: async (actor, limit) => {
+            calls.push(['list', actor, limit]);
+            return [
+              {
+                candidateId,
+                submittedAt: '2026-10-20T10:00:00.000Z',
+                paymentAt: '2026-10-20T08:59:00.000Z',
+                amountMinor: '2500',
+                referenceMasked: '***AB12',
+                playerMasked: '***5678',
+              },
+            ];
+          },
+          decide: async (actor, candidate, action) => {
+            calls.push(['decide', actor, candidate, action]);
+            return { decision: 'rejected' as const, decidedAt: '2026-10-20T10:01:00.000Z' };
+          },
+        },
+      }),
+    });
+    try {
+      const listUrl = '/v1/owner/telebirr-old-payments';
+      const decisionUrl = `${listUrl}/${candidateId}/decision`;
+      expect((await app.inject(listUrl)).statusCode).toBe(403);
+      const listed = await app.inject({
+        url: listUrl,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().pending).toHaveLength(1);
+      expect(listed.body).not.toContain('12345678');
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: decisionUrl,
+            payload: { decision: 'reject', requestId, confirmed: false },
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const decided = await app.inject({
+        method: 'POST',
+        url: decisionUrl,
+        payload: { decision: 'reject', requestId, confirmed: true },
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:3002',
+          'x-fetanagent-owner-csrf': 'owner-telebirr-old-payment-v1',
+          'x-idempotency-key': requestId,
+        },
+      });
+      expect(decided.statusCode).toBe(200);
+      expect(decided.json()).toEqual({
+        decision: {
+          decision: 'rejected',
+          decidedAt: '2026-10-20T10:01:00.000Z',
+        },
+      });
+      expect(calls).toEqual([
+        ['list', authUserId, 25],
+        ['decide', authUserId, candidateId, 'reject'],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

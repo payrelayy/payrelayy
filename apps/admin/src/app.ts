@@ -3,6 +3,10 @@ import { performance } from 'node:perf_hooks';
 
 import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
 import { OwnerTelebirrFastAlertsUnavailableError } from './owner-telebirr-fast-alerts.js';
+import {
+  OwnerOldPaymentConflictError,
+  OwnerOldPaymentRejectedError,
+} from './owner-telebirr-old-payments.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
@@ -175,6 +179,7 @@ const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1'
 const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
 const OWNER_EXECUTION_APPROVAL_CSRF_HEADER_VALUE = 'owner-telebirr-execution-approval-v1';
+const OWNER_OLD_PAYMENT_CSRF_HEADER_VALUE = 'owner-telebirr-old-payment-v1';
 const OWNER_KEMERBET_AGENT_PROFILE_REASONS = new Set<OwnerKemerbetAgentProfileReason>([
   'agent_rotation',
   'initial_configuration',
@@ -2373,6 +2378,77 @@ export function buildOwnerControlApp(
           return reply.code(403).send({ error: 'forbidden' });
         }
         request.log.warn('Owner TeleBirr execution approval list is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/v1/owner/telebirr-old-payments',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => key !== 'limit'))
+          return reply.code(400).send({ error: 'invalid_request' });
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+          return reply.code(400).send({ error: 'invalid_request' });
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.telebirrOldPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const pending = await dependencies.runtime.telebirrOldPayments.list(authUserId, limit);
+        return reply.code(200).send({ pending });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerOldPaymentRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        request.log.warn('Owner old-payment inbox is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { candidateId: string } }>(
+    '/v1/owner/telebirr-old-payments/:candidateId/decision',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['decision', 'requestId', 'confirmed']);
+        if (
+          !body ||
+          !UUID_V4_PATTERN.test(request.params.candidateId) ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          (body.decision !== 'approve' && body.decision !== 'reject') ||
+          body.confirmed !== true ||
+          Object.keys(request.query as object).length !== 0 ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            OWNER_OLD_PAYMENT_CSRF_HEADER_VALUE ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.telebirrOldPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const decision = await dependencies.runtime.telebirrOldPayments.decide(
+          authUserId,
+          request.params.candidateId,
+          body.decision,
+        );
+        return reply.code(200).send({ decision });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerOldPaymentRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerOldPaymentConflictError)
+          return reply.code(409).send({ error: 'payment_not_ready' });
+        request.log.warn('Owner old-payment decision is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
     },

@@ -244,6 +244,17 @@ export function createRoutinePaidUploadLocalAdapter(
         throw new Error();
       return value.kind;
     },
+    async stageOldObservation(
+      input: Parameters<RoutinePaidUploadBridgeDependencies['stageObservation']>[0],
+    ) {
+      const value = await wire('stage_old_observation', input);
+      if (
+        !exact(value, ['kind']) ||
+        (value.kind !== 'recorded' && value.kind !== 'exact_replay' && value.kind !== 'conflict')
+      )
+        throw new Error();
+      return value.kind;
+    },
     async recordTerminalRejection(
       input: Parameters<RoutinePaidUploadBridgeDependencies['recordTerminalRejection']>[0],
     ) {

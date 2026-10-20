@@ -379,6 +379,37 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     expect(JSON.stringify(decoded(responses[0]!))).not.toContain(rawReference);
   });
 
+  it('sends a signed older receipt only to the Owner pending inbox', async () => {
+    const { context, withFacts, rawReference } = fixture();
+    const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
+    const stageOldObservation = vi
+      .fn<NonNullable<RoutinePaidUploadBridgeDependencies['stageOldObservation']>>()
+      .mockResolvedValue('recorded');
+    const handler = createRoutinePaidUploadBridgeHandler({
+      now: () => '2026-10-05T18:04:00.000Z',
+      classifyTerminal: async () => false,
+      loadObservation: async () => context,
+      stageObservation,
+      stageOldObservation,
+      recordTerminalRejection: async () => 'recorded',
+    });
+    const response = await handler(
+      http(
+        ROUTINE_PAID_UPLOAD_PATH,
+        ROUTINE_PAID_UPLOAD_CONTENT_TYPE,
+        withFacts({ occurredAt: '2026-10-05T16:59:00.000Z' }),
+      ),
+    );
+    expect(response.statusCode).toBe(202);
+    expect(decoded(response.body)).toMatchObject({
+      outcome: 'signed_old_payment_pending_owner_approval',
+      financialActionAllowed: false,
+    });
+    expect(stageOldObservation).toHaveBeenCalledTimes(1);
+    expect(stageObservation).not.toHaveBeenCalled();
+    expect(JSON.stringify(stageOldObservation.mock.calls)).not.toContain(rawReference);
+  });
+
   it('rejects no-money mode, forged signatures and stale uploads without staging', async () => {
     const { context, frame } = fixture();
     const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
@@ -442,7 +473,6 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     });
     for (const changed of [
       withFacts({ receiverMatch: 'mismatched', creditedPartyNameDigest: sha('f') }),
-      withFacts({ occurredAt: '2026-10-05T16:59:00.000Z' }),
     ]) {
       const response = await handler(
         http(ROUTINE_PAID_UPLOAD_PATH, ROUTINE_PAID_UPLOAD_CONTENT_TYPE, changed),

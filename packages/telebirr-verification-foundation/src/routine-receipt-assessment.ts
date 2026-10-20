@@ -133,6 +133,7 @@ function utcMs(value: unknown): number | null {
  */
 export function assessRoutineTelebirrObservedReceiptFacts(
   candidateInput: unknown,
+  allowOldForOwnerReview = false,
 ): RoutineTelebirrReceiptAssessment {
   try {
     const input = exactDataRecord(candidateInput, INPUT_KEYS);
@@ -216,7 +217,10 @@ export function assessRoutineTelebirrObservedReceiptFacts(
     ) {
       return result('would_review', 'receipt_semantics_incomplete');
     }
-    if (occurredAt < submittedAt - ONE_HOUR_MS || occurredAt > submittedAt + FIVE_MINUTES_MS) {
+    if (
+      (occurredAt < submittedAt - ONE_HOUR_MS && !allowOldForOwnerReview) ||
+      occurredAt > submittedAt + FIVE_MINUTES_MS
+    ) {
       return result('would_review', 'payment_time_mismatch');
     }
     if (retrievedAt !== observedAt || observedAt < occurredAt || observedAt > assessedAt) {

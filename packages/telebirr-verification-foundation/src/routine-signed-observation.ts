@@ -378,6 +378,7 @@ function parsePublicKey(candidate: unknown): { key: KeyObject; der: Buffer } | u
 export function verifyRoutineTelebirrSignedObservation(
   inputCandidate: unknown,
   enrolledDeviceSpkiDerCandidate: unknown,
+  allowOldForOwnerReview = false,
 ): RoutineTelebirrSignedObservationResult {
   try {
     const input = record(inputCandidate, inputKeys);
@@ -533,27 +534,30 @@ export function verifyRoutineTelebirrSignedObservation(
       ]),
     );
     const facts = body.facts as Facts;
-    const assessment = assessRoutineTelebirrObservedReceiptFacts({
-      assessedAt: input.assessedAt,
-      candidate: {
-        providerCode: 'telebirr',
-        referenceFingerprint: lookup.referenceFingerprint,
-        referenceKeyVersion: lookup.referenceKeyVersion,
-        referenceProfileVersion: lookup.referenceProfileVersion,
-        submittedAt: lookup.submittedAt,
+    const assessment = assessRoutineTelebirrObservedReceiptFacts(
+      {
+        assessedAt: input.assessedAt,
+        candidate: {
+          providerCode: 'telebirr',
+          referenceFingerprint: lookup.referenceFingerprint,
+          referenceKeyVersion: lookup.referenceKeyVersion,
+          referenceProfileVersion: lookup.referenceProfileVersion,
+          submittedAt: lookup.submittedAt,
+        },
+        expectedReceiverNameDigest: lookup.expectedReceiverNameDigest,
+        expectedReceiverProfileDigest: lookup.receiverProfileDigest,
+        expectedReceiverRevisionId: lookup.receiverRevisionId,
+        observation: {
+          ...Object.fromEntries(factsKeys.map((key) => [key, facts[key]])),
+          providerCode: 'telebirr',
+          receiverProfileDigest: body.receiverProfileDigest,
+          receiverRevisionId: body.receiverRevisionId,
+          referenceFingerprint: body.referenceFingerprint,
+          observedAt: body.observedAt,
+        },
       },
-      expectedReceiverNameDigest: lookup.expectedReceiverNameDigest,
-      expectedReceiverProfileDigest: lookup.receiverProfileDigest,
-      expectedReceiverRevisionId: lookup.receiverRevisionId,
-      observation: {
-        ...Object.fromEntries(factsKeys.map((key) => [key, facts[key]])),
-        providerCode: 'telebirr',
-        receiverProfileDigest: body.receiverProfileDigest,
-        receiverRevisionId: body.receiverRevisionId,
-        referenceFingerprint: body.referenceFingerprint,
-        observedAt: body.observedAt,
-      },
-    });
+      allowOldForOwnerReview,
+    );
     if (assessment.disposition !== 'would_match_observed_facts') {
       return result(
         'would_review',

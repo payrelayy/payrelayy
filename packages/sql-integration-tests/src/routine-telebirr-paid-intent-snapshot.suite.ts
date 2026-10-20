@@ -37,7 +37,9 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
                  routine.prosecdef as security_definer,
                  routine.proconfig as config,
                  strpos(routine.prosrc,
-                   'if not app.routine_telebirr_paid_settlement_session_allowed() then') > 0
+                   'if not app.routine_telebirr_paid_settlement_session_allowed()') > 0
+                   and strpos(routine.prosrc,
+                     'app.owner_approved_old_payment_for_intent(new.id)') > 0
                    as exact_session_guard,
                  strpos(routine.prosrc, 'if session_user <> ''postgres'' then') > 0
                    as retired_postgres_only_guard,

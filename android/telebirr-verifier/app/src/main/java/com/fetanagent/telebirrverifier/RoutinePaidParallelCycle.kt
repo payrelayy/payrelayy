@@ -31,5 +31,5 @@ internal class RoutinePaidParallelCycle(
 
   override fun close() { executor.shutdownNow() }
 
-  companion object { const val MAX_LANES = 4 }
+  companion object { const val MAX_LANES = 6 }
 }

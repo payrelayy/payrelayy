@@ -10,17 +10,20 @@ import org.junit.Test
 
 class RoutinePaidParallelCycleTest {
   @Test
-  fun `four paid receipts can be inspected concurrently without a fifth lane`() {
-    val arrived = CountDownLatch(4)
-    RoutinePaidParallelCycle(4).use { cycle ->
-      val results = cycle.runOnce(4) { lane ->
+  fun `six paid receipts can be inspected concurrently without a seventh lane`() {
+    val arrived = CountDownLatch(6)
+    RoutinePaidParallelCycle(6).use { cycle ->
+      val results = cycle.runOnce(6) { lane ->
         arrived.countDown()
         assertTrue(arrived.await(2, TimeUnit.SECONDS))
         if (lane == 2) RoutinePaidPhonePreparationResult.Retry
         else RoutinePaidPhonePreparationResult.SubmittedForReview
       }
-      assertEquals(4, results.size)
+      assertEquals(6, results.size)
       assertEquals(RoutinePaidPhonePreparationResult.Retry, results[2])
+      assertThrows(IllegalArgumentException::class.java) {
+        cycle.runOnce(7) { RoutinePaidPhonePreparationResult.NoAssignment }
+      }
     }
   }
 

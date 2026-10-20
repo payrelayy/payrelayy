@@ -48,7 +48,7 @@ internal object RoutinePaidRuntimeComposition {
       )
     }
     val parallelCycle = RoutinePaidParallelCycle(phones.size)
-    val paidRetryPacer = RoutinePaidRetryPacer(SystemClock::elapsedRealtime)
+    val paidRetryPacer = RoutinePaidRetryPacer(phones.size, SystemClock::elapsedRealtime)
     val rejectedLanePacer = RoutinePaidRejectedLanePacer(phones.size, SystemClock::elapsedRealtime)
     val lastLaneDiagnostics = arrayOfNulls<String>(phones.size)
     // Inspect every outbox on restart; after an empty pass, use one idle poll until work arrives.
@@ -59,34 +59,35 @@ internal object RoutinePaidRuntimeComposition {
           enrollmentStore.loadEnrolled(receiptSigner, identity, currentUtc())
         }.getOrNull() ?: return@VerifierRuntimeCycle LivePilotRuntimeStatus(
           LivePilotRuntimeState.ENROLLMENT_REQUIRED, "routine_enrollment_unavailable")
-        val results = if (paidRetryPacer.shouldAttempt()) {
-          val attemptedLanes = BooleanArray(phones.size)
-          parallelCycle.runOnce(if (burst || rejectedLanePacer.hasCoolingLanes()) phones.size else 1) { lane ->
-            if (!rejectedLanePacer.shouldAttempt(lane)) {
-              RoutinePaidPhonePreparationResult.NoAssignment
-            } else {
-              attemptedLanes[lane] = true
-              phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
-            }
-          }.also { attempted ->
-            attempted.forEachIndexed { lane, result ->
-              if (!attemptedLanes[lane]) return@forEachIndexed
-              val outbox = runCatching { RoutinePaidLaneDiagnostic.outbox(workStores[lane].load()) }
-                .getOrDefault(RoutinePaidLaneDiagnostic.Outbox.UNAVAILABLE)
-              val diagnostic = RoutinePaidLaneDiagnostic.render(lane, outbox, result)
-              if (lastLaneDiagnostics[lane] != diagnostic) {
-                // All three fields are fixed categories; no reference, receipt, or sealed work.
-                Log.i("FetanAgentPaidLane", diagnostic)
-                lastLaneDiagnostics[lane] = diagnostic
-              }
-              rejectedLanePacer.record(lane, result)
-            }
-            paidRetryPacer.record(attempted)
-            burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment } ||
-              rejectedLanePacer.hasCoolingLanes()
+        val attemptedLanes = BooleanArray(phones.size)
+        val results = parallelCycle.runOnce(if (burst || rejectedLanePacer.hasCoolingLanes() ||
+          paidRetryPacer.hasCoolingLanes()) phones.size else 1) { lane ->
+          if (!rejectedLanePacer.shouldAttempt(lane) || !paidRetryPacer.shouldAttempt(lane)) {
+            RoutinePaidPhonePreparationResult.NoAssignment
+          } else {
+            attemptedLanes[lane] = true
+            phones[lane].run(receipt, receiptSigner, lookup.first, lookup.second, identity)
           }
-        } else emptyList()
-        val paidStatus = RoutinePaidCycleStatus.fromResults(results, paidRetryPacer.waitingForRetry)
+        }.also { attempted ->
+          attempted.forEachIndexed { lane, result ->
+            if (!attemptedLanes[lane]) return@forEachIndexed
+            val outbox = runCatching { RoutinePaidLaneDiagnostic.outbox(workStores[lane].load()) }
+              .getOrDefault(RoutinePaidLaneDiagnostic.Outbox.UNAVAILABLE)
+            val diagnostic = RoutinePaidLaneDiagnostic.render(lane, outbox, result)
+            if (lastLaneDiagnostics[lane] != diagnostic) {
+              // All three fields are fixed categories; no reference, receipt, or sealed work.
+              Log.i("FetanAgentPaidLane", diagnostic)
+              lastLaneDiagnostics[lane] = diagnostic
+            }
+            rejectedLanePacer.record(lane, result)
+            paidRetryPacer.record(lane, result)
+          }
+          burst = attempted.any { it != RoutinePaidPhonePreparationResult.NoAssignment } ||
+            rejectedLanePacer.hasCoolingLanes() || paidRetryPacer.hasCoolingLanes()
+        }
+        val observedResults = results.filterIndexed { lane, _ -> attemptedLanes[lane] }
+        val paidStatus = RoutinePaidCycleStatus.fromResults(observedResults,
+          paidRetryPacer.hasCoolingLanes())
         val noMoneyStatus = noMoneySession.cycle.runOnce()
         // Both codes are locally validated, fixed operational categories. Never log an
         // assignment, reference, receipt, address, signature, or response body.
@@ -119,6 +120,9 @@ internal object RoutinePaidCycleStatus {
         LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
       results.any { it == RoutinePaidPhonePreparationResult.SubmittedForReview } ->
         LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_observation_staged")
+      results.any { it == RoutinePaidPhonePreparationResult.Retry } &&
+        results.any { it == RoutinePaidPhonePreparationResult.NoAssignment } ->
+        LivePilotRuntimeStatus(LivePilotRuntimeState.READY, "paid_partial_lane_recovery")
       results.any { it == RoutinePaidPhonePreparationResult.Retry } ->
         LivePilotRuntimeStatus(LivePilotRuntimeState.ATTENTION, "paid_observation_retry")
       reviews.any { it.reasonCode == "network_unavailable" } ->
@@ -165,23 +169,31 @@ internal object RoutineDualModeStatus {
 }
 
 /** Monotonic, bounded paid retry pacing independent of the no-money polling cadence. */
-internal class RoutinePaidRetryPacer(private val nowMillis: () -> Long) {
-  private var consecutiveRetries = 0
-  private var nextAttemptAtMillis = 0L
+internal class RoutinePaidRetryPacer(
+  lanes: Int,
+  private val nowMillis: () -> Long,
+) {
+  private val consecutiveRetries = IntArray(lanes)
+  private val nextAttemptAtMillis = LongArray(lanes)
 
-  val waitingForRetry: Boolean get() = consecutiveRetries > 0
+  init { require(lanes in 1..RoutinePaidParallelCycle.MAX_LANES) }
 
-  fun shouldAttempt(): Boolean = !waitingForRetry || nowMillis() >= nextAttemptAtMillis
+  fun shouldAttempt(lane: Int): Boolean = nowMillis() >= nextAttemptAtMillis[lane]
 
-  fun record(results: List<RoutinePaidPhonePreparationResult>) {
-    require(results.isNotEmpty())
-    if (results.any { it == RoutinePaidPhonePreparationResult.Retry }) {
-      consecutiveRetries = (consecutiveRetries + 1).coerceAtMost(RETRY_DELAYS_MILLIS.size)
-      val delay = RETRY_DELAYS_MILLIS[consecutiveRetries - 1]
-      nextAttemptAtMillis = nowMillis().coerceAtMost(Long.MAX_VALUE - delay) + delay
+  fun hasCoolingLanes(): Boolean {
+    val now = nowMillis()
+    return nextAttemptAtMillis.any { it > now }
+  }
+
+  fun record(lane: Int, result: RoutinePaidPhonePreparationResult) {
+    if (result == RoutinePaidPhonePreparationResult.Retry) {
+      consecutiveRetries[lane] = (consecutiveRetries[lane] + 1)
+        .coerceAtMost(RETRY_DELAYS_MILLIS.size)
+      val delay = RETRY_DELAYS_MILLIS[consecutiveRetries[lane] - 1]
+      nextAttemptAtMillis[lane] = nowMillis().coerceAtMost(Long.MAX_VALUE - delay) + delay
     } else {
-      consecutiveRetries = 0
-      nextAttemptAtMillis = 0L
+      consecutiveRetries[lane] = 0
+      nextAttemptAtMillis[lane] = 0L
     }
   }
 

@@ -2914,6 +2914,39 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
           new Date(Date.now() + 30_000),
           paidTrust.signerId,
         ]);
+        const completedChallenge = await client.query<{
+          challenge_digest: string;
+          device_public_key_spki_sha256: string;
+        }>(
+          `select challenge_digest, device_public_key_spki_sha256
+             from ${LOOKUP_TABLE} where challenge_id = $1::uuid`,
+          [issued.rows[0]!.challenge_id],
+        );
+        const binding = completedChallenge.rows[0]!;
+        const classify = async (challengeDigest: string, deviceKey: string) =>
+          client.query<{ terminal: boolean }>(
+            `select app.classify_routine_telebirr_paid_upload_terminal(
+              $1::uuid,$2::text,$3::text) as terminal`,
+            [issued.rows[0]!.challenge_id, challengeDigest, deviceKey],
+          );
+        expect(
+          (await classify(binding.challenge_digest, binding.device_public_key_spki_sha256)).rows,
+        ).toEqual([{ terminal: false }]);
+        await client.query(
+          `insert into app.routine_telebirr_fast_results
+            (candidate_id, outcome_code, reason_code)
+           values ($1::uuid, 'held_review', 'network_unavailable')`,
+          [paidId],
+        );
+        expect(
+          (await classify(binding.challenge_digest, binding.device_public_key_spki_sha256)).rows,
+        ).toEqual([{ terminal: true }]);
+        expect(
+          (await classify(`sha256:${digest()}`, binding.device_public_key_spki_sha256)).rows,
+        ).toEqual([{ terminal: false }]);
+        expect((await classify(binding.challenge_digest, `sha256:${digest()}`)).rows).toEqual([
+          { terminal: false },
+        ]);
       });
     });
 

@@ -98,6 +98,50 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
       }
     });
 
+    it('keeps the guarded TeleBirr stop available with CBE independently live', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        // Disposable database only: model the later independent CBE activation.
+        await client.query('alter table app.feature_switches disable trigger user');
+        await client.query(`update app.feature_switches set mode = 'live'
+          where feature_key = 'cbe_birr_authoritative_verification'`);
+        await client.query('alter table app.feature_switches enable trigger user');
+        const stopped = await client.query<{ changed: boolean }>(
+          `select app.stop_routine_telebirr_financial_gates(
+             $1::uuid, 'operator_requested') as changed`,
+          [randomUUID()],
+        );
+        expect(stopped.rows).toEqual([{ changed: false }]);
+        const switches = await client.query<{ cbe_mode: string; shared_live_count: string }>(
+          `select max(mode::text) filter (
+                    where feature_key = 'cbe_birr_authoritative_verification') as cbe_mode,
+                  count(*) filter (where feature_key in (
+                    'payment_verification', 'deposit_execution') and mode = 'live')::text
+                    as shared_live_count
+             from app.feature_switches`,
+        );
+        expect(switches.rows).toEqual([{ cbe_mode: 'live', shared_live_count: '0' }]);
+
+        await client.query('savepoint activation');
+        let activationError: unknown;
+        try {
+          await client.query(
+            'select app.activate_routine_telebirr_financial_gates($1::uuid,$2::uuid)',
+            [getOwnerAuthUserId(), randomUUID()],
+          );
+        } catch (error) {
+          activationError = error;
+        }
+        expect(String(activationError)).toContain(
+          'The Owner-approved routine execution lane is not current and exact.',
+        );
+        await client.query('rollback to savepoint activation');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('installs the postgres-only worker probe without turning deposits on', async () => {
       const client = getClient();
       const catalog = await client.query<{

@@ -1,0 +1,139 @@
+name: fetanagent-staging-owner-preview
+
+# A private, Owner-only preview. The beta, bot, API, and money workers are absent.
+services:
+  owner-control:
+    profiles: [owner-preview]
+    platform: linux/amd64
+    image: fetanagent-owner-control:${FETANAGENT_IMAGE_TAG:?set a commit-derived image tag}
+    pull_policy: never
+    init: true
+    user: '10001:10001'
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      FINANCIAL_ACTIONS_MODE: dry_run
+      OWNER_CONTROL_HOST: 0.0.0.0
+      OWNER_CONTROL_PORT: '3002'
+      OWNER_CONTROL_DEPLOYMENT_TARGET: staging
+      OWNER_CONTROL_SUPABASE_URL: https://spzpiyxheappsfyswewl.supabase.co
+      NODE_EXTRA_CA_CERTS: /run/configs/supabase_ca_certificate
+      INTERNAL_OWNER_CONTROL_RUNTIME_ENABLED: 'true'
+      OWNER_CONTROL_DATABASE_URL_FILE: /run/secrets/owner_control_database_url
+      OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE: /run/secrets/owner_control_supabase_publishable_key
+      OWNER_RECEIVER_REFERENCE_ENCRYPTION_MASTER_FILE: /run/secrets/owner_receiver_reference_encryption_master
+      OWNER_RECEIVER_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/owner_receiver_reference_fingerprint_master
+      OWNER_RECEIVER_REFERENCE_PROFILE_FILE: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+      OWNER_COMPANION_SERVER_SIGNER_KEY_ID: companion-server-staging-v1
+      OWNER_TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID: telebirr-assignment-staging-v1
+      INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
+      INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
+      INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
+      TELEGRAM_BOT_ENABLED: 'false'
+      TELEGRAM_BETA_ADMISSION_ENABLED: 'false'
+      INTERNAL_TELEGRAM_INGRESS_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PRIVATE_INGRESS_RUNTIME_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'false'
+      INTERNAL_TELEGRAM_ACTION_CAPABILITY_CONTRACT_ENABLED: 'false'
+      INTERNAL_TELEGRAM_PLAYER_ACTION_RUNTIME_ENABLED: 'false'
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    ports:
+      - 127.0.0.1:3002:3002
+    volumes:
+      - type: volume
+        source: kemerbet_session_control
+        target: /run/fetanagent-kemerbet-session-control
+      - type: bind
+        source: /var/lib/fetanagent/kemerbet-readiness-cohort-receipts
+        target: /run/fetanagent-kemerbet-readiness-cohort-receipts
+        read_only: true
+        bind:
+          create_host_path: false
+    secrets:
+      - source: owner_control_database_url
+        target: owner_control_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: owner_control_supabase_publishable_key
+        target: owner_control_supabase_publishable_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_encryption_master
+        target: owner_receiver_reference_encryption_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: owner_receiver_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs:
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+      - source: deposit_proof_reference_profile
+        target: /etc/fetanagent/deposit-proof-reference-profile.v2.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks:
+      - owner_control_service
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3002/readyz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      start_period: 15s
+      retries: 3
+
+networks:
+  owner_control_service:
+    driver: bridge
+    enable_ipv6: true
+    internal: false
+    attachable: false
+
+volumes:
+  kemerbet_session_control:
+
+secrets:
+  owner_control_database_url:
+    file: ${FETANAGENT_STAGING_OWNER_CONTROL_DATABASE_URL_FILE:?set the sealed staging Owner URL file}
+  owner_control_supabase_publishable_key:
+    file: ${FETANAGENT_STAGING_OWNER_CONTROL_SUPABASE_PUBLISHABLE_KEY_FILE:?set the sealed staging publishable key file}
+  deposit_proof_reference_encryption_master:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_ENCRYPTION_MASTER_FILE:?set the sealed staging reference encryption file}
+  deposit_proof_reference_fingerprint_master:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_FINGERPRINT_MASTER_FILE:?set the sealed staging reference fingerprint file}
+
+configs:
+  supabase_ca_certificate:
+    file: ${FETANAGENT_STAGING_SUPABASE_CA_CERTIFICATE_FILE:?set the staging CA file}
+  deposit_proof_reference_profile:
+    file: ${FETANAGENT_STAGING_DEPOSIT_PROOF_REFERENCE_PROFILE_FILE:?set the sealed staging reference profile file}

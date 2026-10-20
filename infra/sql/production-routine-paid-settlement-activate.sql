@@ -57,6 +57,11 @@ select count(*) = 2 and pg_catalog.bool_and(
         routine.proowner,
         'fetanagent_routine_telebirr_paid_settlement'::pg_catalog.regrole
       )
+      and not (
+        routine.oid =
+          'app.finalize_routine_telebirr_paid_observation(uuid)'::pg_catalog.regprocedure
+        and privilege.grantee = 'fetanagent_owner_control'::pg_catalog.regrole
+      )
   )
 ) as exact_settlement_functions
 from pg_catalog.pg_proc routine

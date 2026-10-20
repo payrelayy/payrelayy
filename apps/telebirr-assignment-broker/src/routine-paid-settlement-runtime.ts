@@ -147,6 +147,12 @@ export const ROUTINE_PAID_SETTLEMENT_CATALOG_PREFLIGHT_SQL = `
          and privilege.grantee not in (
            routine.proowner,
            (select oid from pg_catalog.pg_roles where rolname = '${GROUP_ROLE}'))
+         and not (
+           routine.oid = pg_catalog.to_regprocedure('${FINALIZE}')
+           and privilege.grantee = (
+             select oid from pg_catalog.pg_roles
+             where rolname = 'fetanagent_owner_control')
+         )
     ) as function_grants_private,
     not pg_catalog.has_function_privilege(current_user,
       'app.routine_telebirr_paid_settlement_session_allowed()'::pg_catalog.regprocedure,

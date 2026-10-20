@@ -22,6 +22,35 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
   getOwnerAuthUserId: () => string,
 ): void {
   describe('isolated atomic routine TeleBirr paid claim boundary', () => {
+    it('limits the Owner settlement grant to old-payment finalization', async () => {
+      const grants = await getClient().query<{ is_finalize: boolean; grantee: string }>(
+        `select routine.oid = $1::pg_catalog.regprocedure as is_finalize,
+                pg_catalog.pg_get_userbyid(privilege.grantee) as grantee
+           from pg_catalog.pg_proc routine
+           cross join lateral pg_catalog.aclexplode(coalesce(
+             routine.proacl, pg_catalog.acldefault('f', routine.proowner)
+           )) privilege
+          where routine.oid in (
+            $1::pg_catalog.regprocedure, $2::pg_catalog.regprocedure
+          ) and privilege.privilege_type = 'EXECUTE'
+          order by is_finalize desc, grantee`,
+        [procedure, scanProcedure],
+      );
+      expect(grants.rows).toEqual([
+        { is_finalize: true, grantee: 'fetanagent_owner_control' },
+        {
+          is_finalize: true,
+          grantee: 'fetanagent_routine_telebirr_paid_settlement',
+        },
+        { is_finalize: true, grantee: 'postgres' },
+        {
+          is_finalize: false,
+          grantee: 'fetanagent_routine_telebirr_paid_settlement',
+        },
+        { is_finalize: false, grantee: 'postgres' },
+      ]);
+    });
+
     it('keeps the Transactions projection Owner-only and read-only', async () => {
       const client = getClient();
       const signature =

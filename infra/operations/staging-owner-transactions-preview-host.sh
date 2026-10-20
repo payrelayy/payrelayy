@@ -22,6 +22,44 @@ readonly MODE="$1"
 [[ "$(curl --fail --silent --show-error --noproxy '*' --max-time 3 \
   http://169.254.169.254/metadata/v1/id)" == "$EXPECTED_DROPLET_ID" ]] ||
   die 'the staging droplet identity changed'
+command -v ss >/dev/null || die 'the socket inspection command is unavailable'
+
+# Stopping must remain possible if a preview input or sealed file is damaged.
+if [[ "$MODE" == 'status' || "$MODE" == 'stop' ]]; then
+  preview_list="$(docker ps -a \
+    --filter "label=com.docker.compose.project=$PROJECT" --format '{{.ID}}')" ||
+    die 'the Docker preview inventory is unavailable'
+  preview_ids=()
+  while IFS= read -r preview_id; do
+    [[ -z "$preview_id" ]] || preview_ids+=("$preview_id")
+  done <<<"$preview_list"
+  [[ "${#preview_ids[@]}" -le 1 ]] ||
+    die 'the Owner preview project has an unexpected container count'
+  if [[ "${#preview_ids[@]}" -eq 1 ]]; then
+    [[ "$(docker inspect "${preview_ids[0]}" \
+      --format '{{ index .Config.Labels "com.docker.compose.service" }}')" == 'owner-control' ]] ||
+      die 'the Owner preview project has an unexpected service'
+  fi
+  if [[ "$MODE" == 'status' ]]; then
+    if [[ "${#preview_ids[@]}" -eq 0 ]]; then
+      printf '%s\n' 'STAGING_OWNER_PREVIEW_ABSENT'
+    else
+      docker inspect "${preview_ids[0]}" \
+        --format '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}'
+    fi
+  else
+    if [[ "${#preview_ids[@]}" -eq 1 ]]; then
+      if [[ "$(docker inspect "${preview_ids[0]}" --format '{{.State.Running}}')" == 'true' ]]; then
+        docker stop --time 15 "${preview_ids[0]}" >/dev/null
+      fi
+      docker rm "${preview_ids[0]}" >/dev/null
+    fi
+    [[ -z "$(ss -H -ltn '( sport = :3002 )')" ]] ||
+      die 'the staging Owner loopback port is still occupied'
+    printf '%s\n' 'STAGING_OWNER_PREVIEW_STOPPED'
+  fi
+  exit 0
+fi
 
 [[ -d "$PREVIEW_ROOT" && ! -L "$PREVIEW_ROOT" ]] ||
   die 'the reviewed preview directory is absent or symbolic'
@@ -105,14 +143,5 @@ case "$MODE" in
       die 'the Owner-only preview failed health checks and was stopped'
     fi
     printf '%s\n' 'STAGING_OWNER_PREVIEW_RUNNING'
-    ;;
-  status)
-    "${compose[@]}" ps owner-control
-    ;;
-  stop)
-    "${compose[@]}" down
-    [[ -z "$(ss -H -ltn '( sport = :3002 )')" ]] ||
-      die 'the staging Owner loopback port is still occupied'
-    printf '%s\n' 'STAGING_OWNER_PREVIEW_STOPPED'
     ;;
 esac

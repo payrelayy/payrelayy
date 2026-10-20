@@ -11,7 +11,7 @@ run `39400466948`. Its OCI revision must equal
 `946fd5ca4b4a29c099f63453d1cb859f1bdafda27738cfe533f8fa34d39f7bdb`.
 The reviewed Compose SHA-256 is
 `725aaca97529419cfc6343c6826ebc10b1cf98515bf8ab61ea746c2f0d82f267`; the host
-helper SHA-256 is `ff51eb86d55ce2f9ade5d4054697c0242d610845a537b4269f4361b56de3dc6d`.
+helper SHA-256 is `cdde03cc8ffb1b492762aff780999deec314a1d73296e4b39dd65701d647d3f4`.
 
 ## Gate and start
 
@@ -44,8 +44,8 @@ helper SHA-256 is `ff51eb86d55ce2f9ade5d4054697c0242d610845a537b4269f4361b56de3d
 
 ## Stop
 
-Run the host helper's `stop` mode to stop only the `fetanagent-staging-owner-preview` Compose
-project, then run the same workflow in `disable` mode. Verify port 3002 is closed, the staging
+Run the host helper's `stop` mode to stop only the `fetanagent-staging-owner-preview` Owner
+container, then run the same workflow in `disable` mode. Verify port 3002 is closed, the staging
 Owner role is `NOLOGIN` with a null
 password, the seven staging switches remain disabled, and the production runtime is unchanged.
 The role's two-hour `VALID UNTIL` is a fallback if the explicit stop is delayed; it is not a

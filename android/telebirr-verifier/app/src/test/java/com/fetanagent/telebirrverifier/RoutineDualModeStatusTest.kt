@@ -34,20 +34,38 @@ class RoutineDualModeStatusTest {
 
   @Test fun `paid retries keep their own bounded clock while no-money polling continues`() {
     var now = 1_000L
-    val pacer = RoutinePaidRetryPacer { now }
-    assertEquals(true, pacer.shouldAttempt())
+    val pacer = RoutinePaidRetryPacer(6) { now }
+    assertEquals(true, pacer.shouldAttempt(0))
     val delays = listOf(5_000L, 10_000L, 20_000L, 30_000L, 60_000L, 60_000L)
     for (delay in delays) {
-      pacer.record(listOf(RoutinePaidPhonePreparationResult.Retry))
-      assertEquals(true, pacer.waitingForRetry)
+      pacer.record(0, RoutinePaidPhonePreparationResult.Retry)
+      assertEquals(true, pacer.hasCoolingLanes())
+      // A sealed upload on lane zero never delays a free lane's next poll.
+      assertEquals(true, pacer.shouldAttempt(1))
       now += delay - 1L
-      assertEquals(false, pacer.shouldAttempt())
+      assertEquals(false, pacer.shouldAttempt(0))
       now += 1L
-      assertEquals(true, pacer.shouldAttempt())
+      assertEquals(true, pacer.shouldAttempt(0))
     }
-    pacer.record(listOf(RoutinePaidPhonePreparationResult.NoAssignment))
-    assertEquals(false, pacer.waitingForRetry)
-    assertEquals(true, pacer.shouldAttempt())
+    pacer.record(0, RoutinePaidPhonePreparationResult.NoAssignment)
+    assertEquals(false, pacer.hasCoolingLanes())
+    assertEquals(true, pacer.shouldAttempt(0))
+  }
+
+  @Test fun `each paid lane keeps its own retry clock`() {
+    var now = 1_000L
+    val pacer = RoutinePaidRetryPacer(6) { now }
+    pacer.record(0, RoutinePaidPhonePreparationResult.Retry)
+    now += 2_000L
+    pacer.record(1, RoutinePaidPhonePreparationResult.Retry)
+    now += 3_000L
+    assertEquals(true, pacer.shouldAttempt(0))
+    assertEquals(false, pacer.shouldAttempt(1))
+    assertEquals(true, pacer.shouldAttempt(2))
+    pacer.record(0, RoutinePaidPhonePreparationResult.Retry)
+    pacer.record(1, RoutinePaidPhonePreparationResult.NoAssignment)
+    assertEquals(true, pacer.shouldAttempt(1))
+    assertEquals(false, pacer.shouldAttempt(0))
   }
 
   @Test fun `paid receipt network and review retries keep distinct fast statuses`() {
@@ -95,6 +113,10 @@ class RoutineDualModeStatusTest {
     assertEquals(status, RoutineDualModeStatus.select(ready("no_assignment"), status))
     assertEquals(attention("server_rejected"), RoutinePaidCycleStatus.fromResults(listOf(
       RoutinePaidPhonePreparationResult.Review("server_rejected")), false))
+    assertEquals(ready("paid_partial_lane_recovery"), RoutinePaidCycleStatus.fromResults(listOf(
+      RoutinePaidPhonePreparationResult.Retry,
+      RoutinePaidPhonePreparationResult.NoAssignment,
+    ), true))
   }
 
   @Test fun `an unattested transient page stays review only and retries promptly`() {

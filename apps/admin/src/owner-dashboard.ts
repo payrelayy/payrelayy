@@ -77,6 +77,12 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
         <p class="request-meta" id="owner-session-status"></p>
+        <section class="review-section" aria-labelledby="telebirr-fast-alert-title">
+          <h2 id="telebirr-fast-alert-title">TeleBirr payment reviews</h2>
+          <p class="request-meta" id="telebirr-fast-alert-status" role="status">
+            Loading payment review alerts…
+          </p>
+        </section>
         <section class="review-section" aria-labelledby="support-contact-title">
           <div class="panel-heading">
             <h2 id="support-contact-title">Customer support</h2>
@@ -775,6 +781,7 @@ const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
+const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
 const supportContactForm = document.querySelector('#support-contact-form');
 const supportContactUsername = document.querySelector('#support-contact-username');
 const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
@@ -5058,6 +5065,41 @@ async function loadReceiverChangeReviews(beforeCaseId) {
   }
 }
 
+async function loadTelebirrFastAlerts() {
+  const generation = ownerAuthGeneration;
+  try {
+    const response = await ownerRequest('/v1/owner/routine-telebirr-fast-alerts', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('telebirr_fast_alerts');
+    const summary = await response.json();
+    if (!summary || !Number.isSafeInteger(summary.heldCount) || summary.heldCount < 0 ||
+      typeof summary.receiptLayoutChanged !== 'boolean') {
+      throw new Error('telebirr_fast_alerts');
+    }
+    if (generation !== ownerAuthGeneration || !accessToken) return;
+    telebirrFastAlertStatus.textContent = summary.receiptLayoutChanged
+      ? summary.heldCount + ' payment(s) held for review. TeleBirr receipt layout may have changed; check before rejecting any receipt.'
+      : summary.heldCount > 0
+        ? summary.heldCount + ' payment(s) held for review. No automatic credit will run for these submissions.'
+        : 'No TeleBirr payments held for review.';
+  } catch (error) {
+    if (generation === ownerAuthGeneration && accessToken && !isSignedOutError(error)) {
+      telebirrFastAlertStatus.textContent = 'Payment review alerts are temporarily unavailable.';
+    }
+  }
+}
+
+function scheduleTelebirrFastAlertRefresh() {
+  window.setTimeout(() => {
+    if (accessToken && document.visibilityState !== 'hidden') {
+      void loadTelebirrFastAlerts();
+    }
+    scheduleTelebirrFastAlertRefresh();
+  }, 30000);
+}
+scheduleTelebirrFastAlertRefresh();
+
 const dryRunFixtureChoices = [
   ['valid-completed', 'Completed fixture'],
   ['wrong-receiver', 'Wrong receiver fixture'],
@@ -5873,6 +5915,7 @@ async function loadOwnerPlayerQueues() {
       loadReceivers(),
       loadDepositIntake(),
       loadReceiverChangeReviews(),
+      loadTelebirrFastAlerts(),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),

@@ -284,7 +284,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     expect(recordCheckReason).toHaveBeenCalledTimes(1);
   });
 
-  it('records an authenticated signed receipt policy review without a financial action', async () => {
+  it('records an authenticated incomplete payment status without a financial action', async () => {
     const { context, withFacts } = fixture();
     const stageObservation = vi.fn(async () => 'recorded' as const);
     const recordTerminalRejection = vi.fn(async () => 'recorded' as const);
@@ -304,10 +304,10 @@ describe('paid TeleBirr phone observation upload boundary', () => {
         withFacts({ providerFinalStatus: 'pending' }),
       ),
     );
-    expect(result.statusCode).toBe(403);
+    expect(result.statusCode).toBe(410);
     expect(recordCheckReason).toHaveBeenCalledWith(
       expect.objectContaining({
-        reasonCode: 'receipt_policy_review',
+        reasonCode: 'provider_status_not_completed',
         candidateId: context.trustedLookup.candidateId,
       }),
     );
@@ -425,18 +425,20 @@ describe('paid TeleBirr phone observation upload boundary', () => {
     expect(stageObservation).not.toHaveBeenCalled();
   });
 
-  it('retires only authenticated immutable receipt mismatches, not pending or forged evidence', async () => {
+  it('retires only authenticated receipt mismatches and incomplete status, not forged evidence', async () => {
     const { context, frame, withFacts } = fixture();
     const stageObservation = vi.fn<RoutinePaidUploadBridgeDependencies['stageObservation']>();
     const recordTerminalRejection = vi.fn<
       RoutinePaidUploadBridgeDependencies['recordTerminalRejection']
     >(async () => 'recorded' as const);
+    const recordCheckReason = vi.fn(async () => 'recorded' as const);
     const handler = createRoutinePaidUploadBridgeHandler({
       now: () => '2026-10-05T18:04:00.000Z',
       classifyTerminal: async () => false,
       loadObservation: async () => context,
       stageObservation,
       recordTerminalRejection,
+      recordCheckReason,
     });
     for (const changed of [
       withFacts({ receiverMatch: 'mismatched', creditedPartyNameDigest: sha('f') }),
@@ -462,7 +464,10 @@ describe('paid TeleBirr phone observation upload boundary', () => {
         withFacts({ providerFinalStatus: 'pending' }),
       ),
     );
-    expect(pending.statusCode).toBe(403);
+    expect(pending.statusCode).toBe(410);
+    expect(recordCheckReason).toHaveBeenCalledWith(
+      expect.objectContaining({ reasonCode: 'provider_status_not_completed' }),
+    );
     expect(stageObservation).not.toHaveBeenCalled();
     expect(recordTerminalRejection).toHaveBeenCalledTimes(1);
     expect(recordTerminalRejection.mock.calls[0]?.[0]).toMatchObject({

@@ -185,6 +185,19 @@ describe('Telegram deposit outcome notifier', () => {
     expect(unrelated).not.toContain('1A2B');
   });
 
+  it('holds an uncertain phone check without calling the payment invalid', () => {
+    const held = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'held_review',
+      amountMinor: null,
+    });
+    expect(held).toBe(
+      'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.',
+    );
+    expect(held).not.toContain('1A2B');
+    expect(held).not.toContain('invalid');
+  });
+
   it('holds a rotated-instruction submission for review without implying rejection', () => {
     const held = presentTelegramDepositOutcome({
       ...delivery,

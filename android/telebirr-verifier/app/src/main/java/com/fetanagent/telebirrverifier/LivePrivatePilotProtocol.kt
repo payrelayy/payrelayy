@@ -292,6 +292,7 @@ data class LivePilotReviewRequiredFacts(
           "unknown_layout_payment_reason",
           "unknown_layout_payment_channel",
           "invalid_layout",
+          "currency_mismatch",
           "parser_uncertain",
           "device_error",
         ),

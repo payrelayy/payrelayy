@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
 import type { OwnerControlConfig } from '@fetanagent/config/owner-control';
+import { OwnerTelebirrFastAlertsUnavailableError } from './owner-telebirr-fast-alerts.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
@@ -744,6 +745,22 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get('/v1/owner/routine-telebirr-fast-alerts', async (request, reply) => {
+    try {
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.telebirrFastAlerts)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const summary = await dependencies.runtime.telebirrFastAlerts.status(authUserId);
+      return reply.code(200).send(summary);
+    } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      if (error instanceof OwnerTelebirrFastAlertsUnavailableError)
+        request.log.warn('Owner TeleBirr alert summary is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.get<{ Querystring: { limit?: string; beforeCaseId?: string } }>(
     '/v1/owner/routine-telebirr-receiver-change-reviews',

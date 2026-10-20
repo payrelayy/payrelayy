@@ -267,6 +267,52 @@ export function captureArguments(eventId: string, playerId: string): readonly st
   ];
 }
 
+async function fixtureFastPaidCandidate(
+  client: Client,
+  ownerAdminId: string,
+  ageSeconds: number,
+): Promise<string> {
+  const actor = await fixtureTelegramActor(client, ownerAdminId);
+  const playerId = await fixtureEligiblePlayer(client);
+  await fixtureTelebirrReceiver(client);
+  const sourceId = (
+    await client.query<CaptureRow>(CAPTURE, [
+      ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+    ])
+  ).rows[0]!.proof_request_id;
+  const paidEventId = await fixtureInboundEvent(client, actor.identityId);
+  const submittedAt = (
+    await client.query<{ processed_at: Date }>(
+      `update app.inbound_events
+          set processed_at = date_trunc('milliseconds', clock_timestamp())
+            - ($2::integer * interval '1 second')
+        where id = $1::uuid returning processed_at`,
+      [paidEventId, ageSeconds],
+    )
+  ).rows[0]!.processed_at;
+  return (
+    await client.query<{ id: string }>(
+      `insert into ${TABLE} (
+         submitting_customer_id, origin_identity_id, origin_channel,
+         origin_request_key, semantic_input_hmac, platform_id,
+         player_account_id, player_deposit_eligibility_decision_id,
+         payment_provider_id, provider_code, candidate_reference_ciphertext,
+         candidate_reference_fingerprint, candidate_reference_masked,
+         reference_encryption_key_version, reference_profile_version,
+         receiver_account_id, receiver_account_version, submitted_at, intake_mode
+       ) select submitting_customer_id, origin_identity_id, origin_channel,
+           $2::uuid, semantic_input_hmac, platform_id,
+           player_account_id, player_deposit_eligibility_decision_id,
+           payment_provider_id, provider_code, candidate_reference_ciphertext,
+           candidate_reference_fingerprint, candidate_reference_masked,
+           reference_encryption_key_version, reference_profile_version,
+           receiver_account_id, receiver_account_version, $3::timestamptz, 'paid'
+         from ${TABLE} where id = $1::uuid returning id`,
+      [sourceId, paidEventId, submittedAt],
+    )
+  ).rows[0]!.id;
+}
+
 export async function fixtureRoutineLookupTrust(
   client: Client,
   candidateId: string,
@@ -2309,6 +2355,160 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
         expect(deliveries.rows).toEqual([
           { notification_stage: 'final', outcome_code: 'not_verified' },
         ]);
+      });
+    });
+
+    it('resolves only signed post-cutover check reasons and holds uncertain checks by five minutes', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await client.query(`update app.routine_telebirr_fast_result_cutover
+          set enabled_at = clock_timestamp() - interval '1 day' where singleton`);
+        await client.query(`update app.routine_telebirr_paid_check_audit_cutover
+          set enabled_at = clock_timestamp() - interval '1 day' where singleton`);
+        await client.query(`update app.telegram_deposit_outcome_cutover
+          set enabled_at = clock_timestamp() - interval '1 day',
+              waiting_enabled_at = clock_timestamp() - interval '1 day',
+              checking_enabled_at = clock_timestamp() - interval '1 day'
+          where singleton`);
+        for (const [reason, expected] of [
+          ['explicit_invalid_reference', 'invalid_reference'],
+          ['provider_status_not_completed', 'invalid_reference'],
+          ['currency_mismatch', 'invalid_reference'],
+          ['amount_out_of_range', 'invalid_reference'],
+          ['receiver_mismatch', 'wrong_receiver'],
+          ['reference_mismatch', 'unrelated_receipt'],
+        ] as const) {
+          const candidateId = await fixtureFastPaidCandidate(client, getOwnerAdminId(), 30);
+          await client.query(
+            `insert into app.routine_telebirr_paid_check_audit
+              (candidate_id, challenge_id, source, reason_code,
+               classification_code, evidence_digest, checked_at)
+             values ($1::uuid,$2::uuid,'check_review',$3::text,'review',$4::text,
+                     clock_timestamp())`,
+            [candidateId, randomUUID(), reason, `sha256:${digest()}`],
+          );
+          await client.query('select app.resolve_routine_telebirr_fast_results()');
+          const result = await client.query<{ outcome_code: string; reason_code: string }>(
+            `select outcome_code, reason_code from app.routine_telebirr_fast_results
+              where candidate_id = $1::uuid`,
+            [candidateId],
+          );
+          expect(result.rows).toEqual([{ outcome_code: expected, reason_code: reason }]);
+          const delivery = await client.query<{ outcome_code: string }>(
+            `select outcome_code from app.telegram_deposit_outcome_deliveries
+              where candidate_id = $1::uuid and notification_stage = 'final'`,
+            [candidateId],
+          );
+          expect(delivery.rows).toEqual([{ outcome_code: expected }]);
+        }
+        const transient = await fixtureFastPaidCandidate(client, getOwnerAdminId(), 6 * 60);
+        await client.query(
+          `insert into app.routine_telebirr_paid_check_audit
+            (candidate_id, challenge_id, source, reason_code,
+             classification_code, evidence_digest, checked_at)
+           values ($1::uuid,$2::uuid,'check_review','network_unavailable',
+                   'review',$3::text,clock_timestamp())`,
+          [transient, randomUUID(), `sha256:${digest()}`],
+        );
+        const noPhone = await fixtureFastPaidCandidate(client, getOwnerAdminId(), 71 * 60);
+        await client.query('select * from app.claim_telegram_deposit_outcome_notification()');
+        const held = await client.query<{ candidate_id: string; reason_code: string }>(
+          `select candidate_id, reason_code from app.routine_telebirr_fast_results
+            where candidate_id in ($1::uuid,$2::uuid) order by candidate_id`,
+          [transient, noPhone],
+        );
+        expect(held.rows).toEqual(
+          expect.arrayContaining([
+            { candidate_id: transient, reason_code: 'network_unavailable' },
+            { candidate_id: noPhone, reason_code: 'no_phone_result' },
+          ]),
+        );
+        const legacyFinal = await client.query<{ outcome_code: string }>(
+          `select outcome_code from app.telegram_deposit_outcome_deliveries
+            where candidate_id = $1::uuid and notification_stage = 'final'`,
+          [noPhone],
+        );
+        expect(legacyFinal.rows).toEqual([{ outcome_code: 'held_review' }]);
+        const alerts = await client.query<{ count: string }>(
+          `select count(*)::text as count from app.routine_telebirr_fast_owner_alerts
+            where alert_code = 'held_review'`,
+        );
+        expect(alerts.rows).toEqual([{ count: '2' }]);
+      });
+    });
+
+    it('requires a second attested not-found challenge after a minute', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await client.query(`update app.routine_telebirr_fast_result_cutover
+          set enabled_at = clock_timestamp() - interval '1 day' where singleton`);
+        const candidateId = await fixtureFastPaidCandidate(client, getOwnerAdminId(), 2 * 60);
+        for (const secondsAgo of [70, 5]) {
+          await client.query(
+            `insert into app.routine_telebirr_paid_check_audit
+              (candidate_id, challenge_id, source, reason_code,
+               classification_code, evidence_digest, checked_at)
+             values ($1::uuid,$2::uuid,'check_review','official_not_found',
+                     'review',$3::text,clock_timestamp() - ($4::integer * interval '1 second'))`,
+            [candidateId, randomUUID(), `sha256:${digest()}`, secondsAgo],
+          );
+          await client.query('select app.resolve_routine_telebirr_fast_results()');
+          const result = await client.query<{ outcome_code: string }>(
+            `select outcome_code from app.routine_telebirr_fast_results
+              where candidate_id = $1::uuid`,
+            [candidateId],
+          );
+          expect(result.rows).toEqual(
+            secondsAgo === 70 ? [] : [{ outcome_code: 'invalid_reference' }],
+          );
+        }
+      });
+    });
+
+    it('trips the unrelated-receipt circuit after three different customers', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        await client.query(`update app.routine_telebirr_fast_result_cutover
+          set enabled_at = clock_timestamp() - interval '1 day' where singleton`);
+        for (let index = 0; index < 4; index += 1) {
+          const candidateId = await fixtureFastPaidCandidate(client, getOwnerAdminId(), 30);
+          await client.query(
+            `insert into app.routine_telebirr_paid_check_audit
+              (candidate_id, challenge_id, source, reason_code,
+               classification_code, evidence_digest, checked_at)
+             values ($1::uuid,$2::uuid,'check_review','invalid_layout',
+                     'review',$3::text,clock_timestamp())`,
+            [candidateId, randomUUID(), `sha256:${digest()}`],
+          );
+          await client.query('select app.resolve_routine_telebirr_fast_results()');
+          const result = await client.query<{ outcome_code: string }>(
+            `select outcome_code from app.routine_telebirr_fast_results
+              where candidate_id = $1::uuid`,
+            [candidateId],
+          );
+          expect(result.rows).toEqual([
+            {
+              outcome_code: index < 2 ? 'unrelated_receipt' : 'held_review',
+            },
+          ]);
+          if (index === 0) {
+            for (let repeat = 0; repeat < 2; repeat += 1) {
+              await client.query(
+                `insert into app.routine_telebirr_paid_check_audit
+                  (candidate_id, challenge_id, source, reason_code,
+                   classification_code, evidence_digest, checked_at)
+                 values ($1::uuid,$2::uuid,'check_review','invalid_layout',
+                         'review',$3::text,clock_timestamp())`,
+                [candidateId, randomUUID(), `sha256:${digest()}`],
+              );
+            }
+          }
+        }
+        const alert = await client.query<{ alert_code: string }>(
+          `select alert_code from app.routine_telebirr_fast_owner_alerts
+            where alert_code = 'receipt_layout_changed'`,
+        );
+        expect(alert.rows).toEqual([{ alert_code: 'receipt_layout_changed' }]);
       });
     });
 

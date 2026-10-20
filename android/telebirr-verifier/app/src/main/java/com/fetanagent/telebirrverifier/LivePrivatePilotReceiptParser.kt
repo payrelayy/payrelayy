@@ -163,6 +163,10 @@ class LivePrivatePilotReceiptParser {
     val creditedPartyNameDigest =
       receiverNameDigest(normalizedReceiver)
         ?: return review(document.sourceDocumentDigest, "parser_uncertain", document.retrievedAt)
+    if (otherCurrencyPattern.matches(amount.trim()) &&
+      !amount.trim().endsWith("ETB", ignoreCase = true)) {
+      return review(document.sourceDocumentDigest, "currency_mismatch", document.retrievedAt)
+    }
     val amountMinor = parseMinorUnits(amount)
       ?: return review(document.sourceDocumentDigest, "invalid_layout", document.retrievedAt)
     val occurredAt = parseOccurredAt(paymentDate)
@@ -508,6 +512,8 @@ class LivePrivatePilotReceiptParser {
     private val whitespace = Regex("[\\s\\p{Zs}\\u2007\\u202F]+")
     private val amountPattern =
       Regex("^([0-9]{1,13})(?:\\.([0-9]{1,2}))?\\s*(?:Birr|ETB)$", RegexOption.IGNORE_CASE)
+    private val otherCurrencyPattern =
+      Regex("^[0-9]{1,13}(?:\\.[0-9]{1,2})?\\s+[A-Z]{3}$", RegexOption.IGNORE_CASE)
     private val receiptReferencePattern = Regex("^[A-Z0-9]{8,64}$")
     private val invoiceColumnLabels = listOf("invoice no", "payment date", "settled amount")
     private val invoiceLabelAliases =

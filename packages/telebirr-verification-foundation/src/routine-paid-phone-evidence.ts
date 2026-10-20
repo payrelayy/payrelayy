@@ -40,7 +40,12 @@ export type RoutineTelebirrPaidPhoneAssessment =
       /** Only an authenticated, immutable receipt mismatch can retire this sealed upload. */
       terminalReview?: true;
       terminalReasonCode?:
-        'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | 'explicit_invalid_reference';
+        | 'receiver_mismatch'
+        | 'reference_mismatch'
+        | 'old_receipt'
+        | 'explicit_invalid_reference'
+        | 'provider_status_not_completed'
+        | 'amount_out_of_range';
     }>
   | Readonly<{
       disposition: 'paid_phone_observation_matches_policy';
@@ -83,6 +88,8 @@ function review(
     | 'reference_mismatch'
     | 'old_receipt'
     | 'explicit_invalid_reference'
+    | 'provider_status_not_completed'
+    | 'amount_out_of_range'
     | null = null,
   authenticatedPhoneCheck = false,
 ): RoutineTelebirrPaidPhoneAssessment {
@@ -100,7 +107,13 @@ function immutableReceiptMismatch(
   lookupCandidate: unknown,
   observationCandidate: unknown,
 ):
-  'receiver_mismatch' | 'reference_mismatch' | 'old_receipt' | 'explicit_invalid_reference' | null {
+  | 'receiver_mismatch'
+  | 'reference_mismatch'
+  | 'old_receipt'
+  | 'explicit_invalid_reference'
+  | 'provider_status_not_completed'
+  | 'amount_out_of_range'
+  | null {
   if (!isPlainNonProxyRecord(lookupCandidate) || !isPlainNonProxyRecord(observationCandidate))
     return null;
   const body = ownDataValue(observationCandidate, 'body');
@@ -133,6 +146,13 @@ function immutableReceiptMismatch(
     ownDataValue(facts, 'referenceMatch') === 'unknown'
   )
     return 'explicit_invalid_reference';
+  if (
+    ownDataValue(facts, 'sourceProfile') !== 'telebirr_official_receipt_v1' ||
+    ownDataValue(facts, 'evidenceSource') !== 'provider_receipt_lookup' ||
+    ownDataValue(facts, 'providerIdentity') !== 'matched' ||
+    ownDataValue(facts, 'canonicalReferencePresent') !== true
+  )
+    return null;
   if (ownDataValue(facts, 'referenceMatch') === 'mismatched') return 'reference_mismatch';
   if (
     ownDataValue(facts, 'referenceMatch') === 'matched' &&
@@ -141,6 +161,15 @@ function immutableReceiptMismatch(
       ownDataValue(lookupCandidate, 'expectedReceiverNameDigest')
   )
     return 'receiver_mismatch';
+  if (ownDataValue(facts, 'referenceMatch') !== 'matched') return null;
+  const providerStatus = ownDataValue(facts, 'providerFinalStatus');
+  if (providerStatus === 'pending' || providerStatus === 'failed' || providerStatus === 'reversed')
+    return 'provider_status_not_completed';
+  if (ownDataValue(facts, 'currencyCode') !== 'ETB') return null;
+  const amountMinor = ownDataValue(facts, 'amountMinor');
+  if (typeof amountMinor === 'number' && Number.isSafeInteger(amountMinor)) {
+    if (amountMinor < 2500 || amountMinor > 2_500_000) return 'amount_out_of_range';
+  }
   if (
     utc(submittedAt) &&
     utc(occurredAt) &&

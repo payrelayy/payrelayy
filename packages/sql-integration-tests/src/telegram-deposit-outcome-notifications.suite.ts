@@ -4,6 +4,35 @@ import { describe, expect, it } from 'vitest';
 
 export function registerTelegramDepositOutcomeNotificationsSqlTests(getClient: () => Client): void {
   describe('Telegram deposit outcome notifications', () => {
+    it('keeps fast results private and grants only the Owner a redacted alert summary', async () => {
+      const client = getClient();
+      const rows = await client.query<Record<string, boolean>>(`select
+        (select relrowsecurity and relforcerowsecurity from pg_class
+          where oid = 'app.routine_telebirr_fast_results'::regclass) as result_rls,
+        (select relrowsecurity and relforcerowsecurity from pg_class
+          where oid = 'app.routine_telebirr_fast_owner_alerts'::regclass) as alert_rls,
+        has_table_privilege('fetanagent_player_actions_runtime',
+          'app.routine_telebirr_fast_results', 'SELECT,INSERT,UPDATE,DELETE') as bot_table_access,
+        has_table_privilege('fetanagent_owner_control_runtime',
+          'app.routine_telebirr_fast_owner_alerts', 'SELECT') as owner_table_access,
+        has_function_privilege('fetanagent_owner_control_runtime',
+          'app.get_owner_routine_telebirr_fast_alert_summary(uuid)', 'EXECUTE') as owner_summary,
+        has_function_privilege('anon',
+          'app.get_owner_routine_telebirr_fast_alert_summary(uuid)', 'EXECUTE') as anon_summary,
+        has_function_privilege('fetanagent_player_actions_runtime',
+          'app.resolve_routine_telebirr_fast_results()', 'EXECUTE') as bot_resolver`);
+      expect(rows.rows).toEqual([
+        {
+          result_rls: true,
+          alert_rls: true,
+          bot_table_access: false,
+          owner_table_access: false,
+          owner_summary: true,
+          anon_summary: false,
+          bot_resolver: false,
+        },
+      ]);
+    });
     it('keeps temporary notice IDs private with no customer or direct runtime table access', async () => {
       const client = getClient();
       const catalog = await client.query<{

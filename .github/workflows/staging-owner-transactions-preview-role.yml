@@ -1,0 +1,100 @@
+name: Staging Owner Transactions preview role
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Check, enable for two hours, or disable the staging Owner preview login
+        required: true
+        type: choice
+        options: [plan, enable, disable]
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit containing this workflow
+        required: true
+        type: string
+      confirm_staging_project_ref:
+        description: Exact staging Supabase project ref
+        required: true
+        type: string
+      confirm_owner_image_sha:
+        description: Exact Owner app release to preview
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-staging-owner-transactions-preview
+  cancel-in-progress: false
+
+jobs:
+  staging-owner-role:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    env:
+      STAGING_PROJECT_REF: spzpiyxheappsfyswewl
+      OWNER_IMAGE_SHA: cefa719dbd8fcec534f9ccb248d18b1be101524e
+      SEALED_OWNER_URL_SHA256: 5e91eefdddf5e35c029f8d22a7d3f38ff77952314038ada1727f0a5a792cc046
+      PGHOST: aws-1-eu-west-1.pooler.supabase.com
+      PGPORT: '5432'
+      PGDATABASE: postgres
+      PGUSER: postgres.spzpiyxheappsfyswewl
+      PGSSLMODE: verify-full
+      PGSERVICEFILE: /dev/null
+      PGPASSFILE: /dev/null
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate exact staging request
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRM_MAIN_SHA: ${{ inputs.confirm_main_commit_sha }}
+          CONFIRM_STAGING_REF: ${{ inputs.confirm_staging_project_ref }}
+          CONFIRM_OWNER_SHA: ${{ inputs.confirm_owner_image_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "$CONFIRM_MAIN_SHA" ]]
+          [[ "$REQUESTED_MODE" =~ ^(plan|enable|disable)$ ]]
+          [[ "$CONFIRM_STAGING_REF" == "$STAGING_PROJECT_REF" ]]
+          [[ "$CONFIRM_OWNER_SHA" == "$OWNER_IMAGE_SHA" ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Check or change only the short-lived staging Owner login
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          export PGSSLROOTCERT="$RUNNER_TEMP/staging-supabase-ca.pem"
+          umask 077
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" > "$PGSSLROOTCERT"
+          openssl x509 -in "$PGSSLROOTCERT" -noout -checkend 0 >/dev/null
+          if [[ "$REQUESTED_MODE" != 'disable' ]]; then
+            [[ "$OWNER_CONTROL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            sealed_url_sha="$(printf 'postgresql://%s:%s@db.%s.supabase.co:5432/postgres?sslmode=verify-full\n' \
+              'fetanagent_owner_control_runtime' "$OWNER_CONTROL_RUNTIME_PASSWORD" "$STAGING_PROJECT_REF" \
+              | sha256sum | cut -d ' ' -f 1)"
+            [[ "$sealed_url_sha" == "$SEALED_OWNER_URL_SHA256" ]]
+          fi
+          case "$REQUESTED_MODE" in
+            plan)
+              psql -X -q -f infra/sql/staging-owner-preview-plan.sql
+              ;;
+            enable)
+              psql -X -q -f infra/sql/staging-owner-preview-plan.sql
+              psql -X -q -f infra/sql/staging-owner-preview-enable.sql
+              test "$(psql -XAtqc "select count(*) from pg_catalog.pg_roles where rolname = 'fetanagent_owner_control_runtime' and rolcanlogin and rolvaliduntil > pg_catalog.clock_timestamp() and rolvaliduntil <= pg_catalog.clock_timestamp() + interval '2 hours'")" = '1'
+              ;;
+            disable)
+              psql -X -q -f infra/sql/staging-owner-preview-disable.sql
+              test "$(psql -XAtqc "select count(*) from pg_catalog.pg_roles where rolname = 'fetanagent_owner_control_runtime' and not rolcanlogin")" = '1'
+              ;;
+          esac

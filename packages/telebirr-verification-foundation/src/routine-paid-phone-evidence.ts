@@ -52,6 +52,12 @@ export type RoutineTelebirrPaidPhoneAssessment =
       reasonCode: 'signed_paid_phone_receipt_matches_policy';
       financialActionAllowed: false;
       evidence: RoutineTelebirrPaidPhoneEvidence;
+    }>
+  | Readonly<{
+      disposition: 'paid_phone_observation_requires_owner_approval';
+      reasonCode: 'old_receipt';
+      financialActionAllowed: false;
+      evidence: RoutineTelebirrPaidPhoneEvidence;
     }>;
 
 const INPUT_KEYS = [
@@ -220,6 +226,7 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
       },
       trustedSignerSpkiDer,
       enrolledDeviceSpkiDer,
+      true,
     );
     if (
       checked.disposition !== 'would_forward_signed_evidence' ||
@@ -272,33 +279,48 @@ export function assessRoutineTelebirrPaidPhoneEvidence(
     ) {
       return review('invalid_request');
     }
-    // No-money observation review permits a seven-day candidate. A paid claim
-    // must still be within the receipt's one-hour funding window at decision time.
-    if (Date.parse(assessedAt) >= Date.parse(occurredAt) + 3_600_000) {
+    const submittedAt = ownDataValue(lookup, 'submittedAt');
+    if (!utc(submittedAt)) return review('invalid_request');
+    const olderThanHourAtSubmission = Date.parse(occurredAt) < Date.parse(submittedAt) - 3_600_000;
+    // A receipt that was fresh at submission but expired before upload is an
+    // inconclusive check. Only an already-old, otherwise valid signed receipt
+    // enters the separate Owner-approval inbox.
+    if (
+      !olderThanHourAtSubmission &&
+      Date.parse(assessedAt) >= Date.parse(occurredAt) + 3_600_000
+    ) {
       return review('payment_expired', null, true);
     }
 
+    const evidence = Object.freeze({
+      providerCode: 'telebirr',
+      candidateId: ownDataValue(body, 'candidateId') as string,
+      challengeId: ownDataValue(body, 'challengeId') as string,
+      referenceFingerprint: ownDataValue(body, 'referenceFingerprint') as string,
+      receiverRevisionId: ownDataValue(body, 'receiverRevisionId') as string,
+      receiverVersion: ownDataValue(body, 'receiverVersion') as number,
+      submittedAt: ownDataValue(lookup, 'submittedAt') as string,
+      observedAt: ownDataValue(body, 'observedAt') as string,
+      occurredAt,
+      retrievedAt: ownDataValue(facts, 'retrievedAt') as string,
+      amountMinor: ownDataValue(facts, 'amountMinor') as number,
+      currencyCode: 'ETB',
+      sourceDocumentDigest,
+      observationBodyDigest,
+      replayIdentity: checked.replayIdentity,
+    });
+    if (olderThanHourAtSubmission)
+      return Object.freeze({
+        disposition: 'paid_phone_observation_requires_owner_approval',
+        reasonCode: 'old_receipt',
+        financialActionAllowed: false,
+        evidence,
+      });
     return Object.freeze({
       disposition: 'paid_phone_observation_matches_policy',
       reasonCode: 'signed_paid_phone_receipt_matches_policy',
       financialActionAllowed: false,
-      evidence: Object.freeze({
-        providerCode: 'telebirr',
-        candidateId: ownDataValue(body, 'candidateId') as string,
-        challengeId: ownDataValue(body, 'challengeId') as string,
-        referenceFingerprint: ownDataValue(body, 'referenceFingerprint') as string,
-        receiverRevisionId: ownDataValue(body, 'receiverRevisionId') as string,
-        receiverVersion: ownDataValue(body, 'receiverVersion') as number,
-        submittedAt: ownDataValue(lookup, 'submittedAt') as string,
-        observedAt: ownDataValue(body, 'observedAt') as string,
-        occurredAt,
-        retrievedAt: ownDataValue(facts, 'retrievedAt') as string,
-        amountMinor: ownDataValue(facts, 'amountMinor') as number,
-        currencyCode: 'ETB',
-        sourceDocumentDigest,
-        observationBodyDigest,
-        replayIdentity: checked.replayIdentity,
-      }),
+      evidence,
     });
   } catch {
     return review('invalid_request');

@@ -198,11 +198,13 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.decide_owner_player_deposit_eligibility(uuid,uuid,text,text)',
         },
+        { signature: 'app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)' },
         { signature: 'app.enqueue_cbe_birr_shadow_verification(uuid,uuid,uuid)' },
         {
           signature:
             'app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone)',
         },
+        { signature: 'app.finalize_routine_telebirr_paid_observation(uuid)' },
         { signature: 'app.get_agent_platform_companion_exact_five_lookup_status(uuid)' },
         { signature: 'app.get_current_private_live_deposit_pilot_status(uuid)' },
         { signature: 'app.get_owner_companion_connection_status(uuid)' },
@@ -239,6 +241,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         { signature: 'app.list_owner_player_registration_requests(uuid,integer)' },
         { signature: 'app.list_owner_receiver_accounts(uuid)' },
         { signature: 'app.list_owner_routine_telebirr_active_phone_enrollments(uuid)' },
+        { signature: 'app.list_owner_routine_telebirr_old_payments(uuid,integer)' },
         {
           signature: 'app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)',
         },

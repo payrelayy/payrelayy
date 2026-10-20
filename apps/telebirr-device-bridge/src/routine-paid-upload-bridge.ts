@@ -54,6 +54,13 @@ export interface RoutinePaidUploadBridgeDependencies {
     readonly observationSignatureDigest: string;
     readonly signedObservation: unknown;
   }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
+  /** Preserve a valid signed receipt that predates submission by over an hour. */
+  stageOldObservation?(input: {
+    readonly evidence: RoutineTelebirrPaidPhoneEvidence;
+    readonly assignmentBodyDigest: string;
+    readonly observationSignatureDigest: string;
+    readonly signedObservation: unknown;
+  }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
   /** Persist only a signed, official-origin terminal rejection before retiring the upload. */
   recordTerminalRejection(input: {
     readonly challengeId: string;
@@ -259,7 +266,10 @@ export function createRoutinePaidUploadBridgeHandler(
         context.trustedSignerSpkiDer,
         deviceSpkiDer,
       );
-      if (assessment.disposition !== 'paid_phone_observation_matches_policy') {
+      if (
+        assessment.disposition !== 'paid_phone_observation_matches_policy' &&
+        assessment.disposition !== 'paid_phone_observation_requires_owner_approval'
+      ) {
         if (
           assessment.terminalReasonCode === 'receiver_mismatch' ||
           assessment.terminalReasonCode === 'explicit_invalid_reference'
@@ -319,7 +329,12 @@ export function createRoutinePaidUploadBridgeHandler(
       const observationSignatureDigest = `sha256:${createHash('sha256')
         .update(Buffer.from(signature, 'base64url'))
         .digest('hex')}`;
-      const staged = await dependencies.stageObservation({
+      const stage =
+        assessment.disposition === 'paid_phone_observation_requires_owner_approval'
+          ? dependencies.stageOldObservation
+          : dependencies.stageObservation;
+      if (!stage) return error(503, 'temporarily_unavailable');
+      const staged = await stage({
         evidence: assessment.evidence,
         assignmentBodyDigest,
         observationSignatureDigest,
@@ -330,7 +345,10 @@ export function createRoutinePaidUploadBridgeHandler(
       if (staged !== 'recorded' && staged !== 'exact_replay')
         return error(503, 'temporarily_unavailable');
       return response(202, {
-        outcome: 'signed_paid_observation_staged',
+        outcome:
+          assessment.disposition === 'paid_phone_observation_requires_owner_approval'
+            ? 'signed_old_payment_pending_owner_approval'
+            : 'signed_paid_observation_staged',
         advisoryOnly: true,
         paymentVerificationRequested: true,
         pairedPhoneEvidenceVerified: true,

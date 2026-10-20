@@ -475,7 +475,7 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
     });
   });
 
-  it('retires only a signed official receipt with an immutable wrong receiver or old date', () => {
+  it('retires only a signed official receipt with an immutable wrong receiver', () => {
     const { input, signerSpki, deviceSpki, facts, observationBody, signedObservation, deviceKey } =
       fixture(true);
     const paid = { ...input, trustedIssuanceMode: 'paid' };
@@ -485,7 +485,6 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
         receiverMatch: 'mismatched',
         creditedPartyNameDigest: `sha256:${'f'.repeat(64)}`,
       },
-      { ...facts, occurredAt: '2026-10-05T16:59:00.000Z' },
     ]) {
       const observation = signedObservation(observationBody(changedFacts), deviceKey.privateKey);
       expect(
@@ -614,6 +613,49 @@ describe('routine TeleBirr paid-phone evidence adapter', () => {
       reasonCode: 'payment_expired',
       financialActionAllowed: false,
       evidence: null,
+    });
+  });
+
+  it('keeps a correctly signed receipt already older than one hour at submission for Owner review', () => {
+    const {
+      input,
+      signerSpki,
+      deviceSpki,
+      assignmentBody,
+      signedAssignment,
+      facts,
+      observationBody,
+      signedObservation,
+      deviceKey,
+    } = fixture(true);
+    const submittedAt = '2026-10-05T18:58:00.000Z';
+    const issuedAt = '2026-10-05T18:59:00.000Z';
+    const expiresAt = '2026-10-05T19:04:00.000Z';
+    const receiptFacts = {
+      ...facts,
+      occurredAt: '2026-10-05T17:50:00.000Z',
+      retrievedAt: '2026-10-05T18:59:30.000Z',
+    };
+    const result = assessRoutineTelebirrPaidPhoneEvidence(
+      {
+        ...input,
+        assessedAt: '2026-10-05T19:00:00.000Z',
+        trustedIssuanceMode: 'paid',
+        trustedLookup: { ...input.trustedLookup, submittedAt, issuedAt, expiresAt },
+        signedAssignment: signedAssignment({ ...assignmentBody, submittedAt, issuedAt, expiresAt }),
+        signedObservation: signedObservation(
+          { ...observationBody(receiptFacts), observedAt: receiptFacts.retrievedAt },
+          deviceKey.privateKey,
+        ),
+      },
+      signerSpki,
+      deviceSpki,
+    );
+    expect(result).toMatchObject({
+      disposition: 'paid_phone_observation_requires_owner_approval',
+      reasonCode: 'old_receipt',
+      financialActionAllowed: false,
+      evidence: { occurredAt: receiptFacts.occurredAt, submittedAt },
     });
   });
 

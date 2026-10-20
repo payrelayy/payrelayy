@@ -251,6 +251,7 @@ export function assessRoutineTelebirrNoMoneyEvidence(
   inputCandidate: unknown,
   trustedSignerSpkiDer: unknown,
   enrolledDeviceSpkiDer: unknown,
+  allowOldForOwnerReview = false,
 ): RoutineNoMoneyEvidenceAssessment {
   try {
     const input = record(inputCandidate, INPUT_KEYS);
@@ -282,6 +283,7 @@ export function assessRoutineTelebirrNoMoneyEvidence(
         signedObservation: input.signedObservation,
       },
       enrolledDeviceSpkiDer,
+      allowOldForOwnerReview,
     );
     if (observationCheck.disposition !== 'would_forward_signed_observation') {
       return result(

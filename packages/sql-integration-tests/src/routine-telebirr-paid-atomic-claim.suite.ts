@@ -83,6 +83,8 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         [procedure],
       );
       expect(appGrants.rows).toEqual([
+        { role_name: 'fetanagent_owner_control' },
+        { role_name: 'fetanagent_owner_control_runtime' },
         { role_name: 'fetanagent_routine_telebirr_paid_settlement' },
         { role_name: 'fetanagent_routine_telebirr_paid_settlement_runtime' },
       ]);
@@ -835,6 +837,322 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [otherCustomerCandidateId],
         );
         expect(otherDelivery.rows).toEqual([{ outcome_code: 'already_used' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('keeps an old signed receipt pending, then requires Owner approval and all live claim gates', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`update app.feature_switches set mode = 'disabled', settings = '{}'::jsonb
+          where feature_key in ('deposit_execution','payment_verification',
+            'private_live_deposit_pilot','telebirr_authoritative_verification')`);
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        const historicalReceiver = await fixtureTelebirrReceiver(client);
+        // The disposable catalog seeds the active receiver at startup. Move
+        // only this rollback-scoped fixture's start time so it could have
+        // received a payment 61 minutes before submission.
+        await client.query(
+          'alter table app.receiver_accounts disable trigger receiver_accounts_immutable_revision',
+        );
+        await client.query(
+          `update app.receiver_accounts
+          set active_from=clock_timestamp()-interval '2 hours'
+          where id=$1::uuid`,
+          [historicalReceiver.id],
+        );
+        await client.query(
+          'alter table app.receiver_accounts enable trigger receiver_accounts_immutable_revision',
+        );
+        const noMoneyEvent = await fixtureInboundEvent(client, actor.identityId);
+        const sourceId = (
+          await client.query<{ proof_request_id: string }>(CAPTURE, [
+            ...captureArguments(noMoneyEvent, playerId),
+          ])
+        ).rows[0]!.proof_request_id;
+        await persistentPolicyFixture(client, getOwnerAuthUserId());
+        const paidEvent = await fixtureInboundEvent(client, actor.identityId);
+        const submittedAt = (
+          await client.query<{ submitted_at: Date }>(
+            `update app.inbound_events set processed_at = date_trunc('milliseconds',clock_timestamp())
+             where id = $1::uuid returning processed_at as submitted_at`,
+            [paidEvent],
+          )
+        ).rows[0]!.submitted_at;
+        const paidId = (
+          await client.query<{ id: string }>(
+            `insert into app.routine_telebirr_untrusted_proof_requests (
+             submitting_customer_id,origin_identity_id,origin_channel,origin_request_key,
+             semantic_input_hmac,platform_id,player_account_id,
+             player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+             candidate_reference_ciphertext,candidate_reference_fingerprint,
+             candidate_reference_masked,reference_encryption_key_version,
+             reference_profile_version,receiver_account_id,receiver_account_version,
+             submitted_at,intake_mode)
+           select submitting_customer_id,origin_identity_id,origin_channel,$2::uuid,
+             semantic_input_hmac,platform_id,player_account_id,
+             player_deposit_eligibility_decision_id,payment_provider_id,provider_code,
+             candidate_reference_ciphertext,candidate_reference_fingerprint,
+             candidate_reference_masked,reference_encryption_key_version,
+             reference_profile_version,receiver_account_id,receiver_account_version,
+             $3::timestamptz,'paid'
+           from app.routine_telebirr_untrusted_proof_requests where id=$1::uuid
+           returning id`,
+            [sourceId, paidEvent, submittedAt],
+          )
+        ).rows[0]!.id;
+        const trust = await fixtureRoutineLookupTrust(client, paidId);
+        await client.query(`update app.feature_switches set mode='live'
+          where feature_key in ('payment_verification','deposit_execution')`);
+        const challenge = (
+          await client.query<{ challenge_id: string; challenge_digest: string }>(
+            `select challenge_id,challenge_digest
+             from app.issue_routine_telebirr_paid_lookup_challenge($1::uuid,$2::uuid,$3::uuid)`,
+            [paidId, trust.enrollmentId, trust.signerId],
+          )
+        ).rows[0]!;
+        const exact = (
+          await client.query<{
+            payment_provider_id: string;
+            reference_fingerprint: string;
+            receiver_account_id: string;
+            receiver_account_version: number;
+            observed_at: Date;
+          }>(
+            `select candidate.payment_provider_id,
+             candidate.candidate_reference_fingerprint as reference_fingerprint,
+             receiver.id as receiver_account_id,receiver.version as receiver_account_version,
+             date_trunc('milliseconds',clock_timestamp()) as observed_at
+             from app.routine_telebirr_untrusted_proof_requests candidate
+             join app.receiver_accounts receiver on receiver.id=candidate.receiver_account_id
+             where candidate.id=$1::uuid`,
+            [paidId],
+          )
+        ).rows[0]!;
+        const digest = (seed: string) =>
+          `sha256:${createHash('sha256').update(seed).digest('hex')}`;
+        const occurredAt = new Date(submittedAt.getTime() - 61 * 60_000);
+        const bodyDigest = digest(randomUUID());
+        const documentDigest = digest(randomUUID());
+        const signed = {
+          contractVersion: 2,
+          providerCode: 'telebirr',
+          protocolMode: 'routine_signed_observation_v2',
+          transcriptVersion: 'telebirr-routine-observation-transcript-v2',
+          bodyDigest,
+          signature: 'A'.repeat(86),
+          body: {
+            contractVersion: 2,
+            protocolMode: 'routine_signed_observation_v2',
+            candidateId: paidId,
+            challengeId: challenge.challenge_id,
+            challengeDigest: challenge.challenge_digest,
+            referenceFingerprint: exact.reference_fingerprint,
+            receiverRevisionId: exact.receiver_account_id,
+            receiverVersion: exact.receiver_account_version,
+            receiverProfileDigest: trust.receiverProfileDigest,
+            expectedReceiverNameDigest: trust.expectedReceiverNameDigest,
+            deviceId: trust.deviceId,
+            keyId: trust.deviceKeyId,
+            sourceDocumentDigest: documentDigest,
+            observedAt: exact.observed_at.toISOString(),
+            facts: {
+              amountMinor: 2500,
+              canonicalReferencePresent: true,
+              creditedPartyNameDigest: trust.expectedReceiverNameDigest,
+              currencyCode: 'ETB',
+              evidenceSource: 'provider_receipt_lookup',
+              occurredAt: occurredAt.toISOString(),
+              paymentChannel: 'other',
+              paymentMode: 'telebirr',
+              paymentReason: 'send_money_to_registered_customer',
+              providerFinalStatus: 'completed',
+              providerIdentity: 'matched',
+              receiverMatch: 'matched',
+              referenceMatch: 'matched',
+              retrievedAt: exact.observed_at.toISOString(),
+              sourceProfile: 'telebirr_official_receipt_v1',
+              sourceOriginAttestation: 'official_tls_origin',
+            },
+          },
+        };
+        // The bridge test verifies a real signature. This privileged database
+        // fixture inserts only the exact body shape that the bridge would stage.
+        await client.query(
+          `insert into app.routine_telebirr_old_payment_observations
+          (challenge_id,candidate_id,payment_provider_id,reference_fingerprint,
+           source_document_digest,assignment_body_digest,observation_body_digest,
+           observation_signature_digest,replay_identity,signed_observation,
+           observed_at,occurred_at,amount_minor)
+          values ($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::text,$7::text,
+           $8::text,$9::text,$10::jsonb,$11::timestamptz,$12::timestamptz,2500)`,
+          [
+            challenge.challenge_id,
+            paidId,
+            exact.payment_provider_id,
+            exact.reference_fingerprint,
+            documentDigest,
+            digest(randomUUID()),
+            bodyDigest,
+            digest(randomUUID()),
+            digest(randomUUID()),
+            JSON.stringify(signed),
+            exact.observed_at,
+            occurredAt,
+          ],
+        );
+        const pending = await client.query<{ code: string; intents: string; jobs: string }>(
+          `select (select outcome_code from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$1::uuid and notification_stage='old_pending') as code,
+            (select count(*)::text from app.deposit_intents
+              where routine_telebirr_paid_opening_challenge_id=$2::uuid) as intents,
+            (select count(*)::text from app.deposit_jobs job
+              join app.routine_telebirr_paid_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.challenge_id=$2::uuid) as jobs`,
+          [paidId, challenge.challenge_id],
+        );
+        expect(pending.rows).toEqual([{ code: 'older_pending', intents: '0', jobs: '0' }]);
+        const receiverWindow = await client.query<{ receiver_valid_at_payment: boolean }>(
+          `select active_from <= $2::timestamptz as receiver_valid_at_payment
+             from app.receiver_accounts where id=$1::uuid`,
+          [exact.receiver_account_id, occurredAt],
+        );
+        expect(receiverWindow.rows).toEqual([{ receiver_valid_at_payment: true }]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const list = await client.query<{ candidate_id: string }>(
+            `select candidate_id from app.list_owner_routine_telebirr_old_payments($1::uuid,25)`,
+            [getOwnerAuthUserId()],
+          );
+          expect(list.rows).toContainEqual({ candidate_id: paidId });
+          await client.query('savepoint old_reject_preview');
+          const rejected = await client.query<{ decision: { decision: string } }>(
+            `select app.decide_owner_routine_telebirr_old_payment(
+              $1::uuid,$2::uuid,'reject') as decision`,
+            [getOwnerAuthUserId(), paidId],
+          );
+          expect(rejected.rows[0]!.decision.decision).toBe('rejected');
+          await client.query('rollback to savepoint old_reject_preview');
+          await client.query('release savepoint old_reject_preview');
+        } finally {
+          await client.query('reset session authorization');
+        }
+        await client.query(`update app.feature_switches set mode='disabled'
+          where feature_key in ('payment_verification','deposit_execution')`);
+        await client.query('savepoint old_stopped_approval');
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          await expect(
+            client.query(
+              `select app.decide_owner_routine_telebirr_old_payment(
+              $1::uuid,$2::uuid,'approve')`,
+              [getOwnerAuthUserId(), paidId],
+            ),
+          ).rejects.toThrow(/settlement is stopped/iu);
+        } finally {
+          await client.query('rollback to savepoint old_stopped_approval');
+          await client.query('release savepoint old_stopped_approval');
+          await client.query('reset session authorization');
+        }
+        const stopped = await client.query<{ decisions: string; jobs: string }>(
+          `select (select count(*)::text from app.routine_telebirr_old_payment_decisions
+              where candidate_id=$1::uuid) as decisions,
+            (select count(*)::text from app.deposit_jobs job
+              join app.routine_telebirr_paid_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as jobs`,
+          [paidId],
+        );
+        expect(stopped.rows).toEqual([{ decisions: '0', jobs: '0' }]);
+        await client.query(`update app.feature_switches set mode='live'
+          where feature_key in ('payment_verification','deposit_execution')`);
+        await client.query('savepoint old_receiver_retired');
+        await client.query(
+          `update app.receiver_accounts
+          set status='inactive', retired_at=clock_timestamp()
+          where id=$1::uuid`,
+          [historicalReceiver.id],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          await expect(
+            client.query(
+              `select app.decide_owner_routine_telebirr_old_payment(
+              $1::uuid,$2::uuid,'approve')`,
+              [getOwnerAuthUserId(), paidId],
+            ),
+          ).rejects.toThrow();
+        } finally {
+          await client.query('rollback to savepoint old_receiver_retired');
+          await client.query('release savepoint old_receiver_retired');
+        }
+        await client.query('savepoint old_player_ineligible');
+        await client.query(
+          `update app.customer_platform_players set status='inactive'
+          where id=(select player_account_id
+            from app.routine_telebirr_untrusted_proof_requests where id=$1::uuid)`,
+          [paidId],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          await expect(
+            client.query(
+              `select app.decide_owner_routine_telebirr_old_payment(
+              $1::uuid,$2::uuid,'approve')`,
+              [getOwnerAuthUserId(), paidId],
+            ),
+          ).rejects.toThrow();
+        } finally {
+          await client.query('rollback to savepoint old_player_ineligible');
+          await client.query('release savepoint old_player_ineligible');
+        }
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        let approved: { decision: string; depositIntentId: string; executionJobId: string };
+        try {
+          approved = (
+            await client.query<{ decision: typeof approved }>(
+              `select app.decide_owner_routine_telebirr_old_payment(
+              $1::uuid,$2::uuid,'approve') as decision`,
+              [getOwnerAuthUserId(), paidId],
+            )
+          ).rows[0]!.decision;
+          await client.query('reset session authorization');
+        } catch (error) {
+          await client.query('rollback');
+          throw error;
+        }
+        expect(approved.decision).toBe('approved');
+        const lineage = await client.query<{
+          decisions: string;
+          claims: string;
+          jobs: string;
+          eligible: string;
+          audit_actor: string;
+        }>(
+          `select (select count(*)::text from app.routine_telebirr_old_payment_decisions
+              where candidate_id=$1::uuid and decision='approved'
+                and actor_admin_id=$4::uuid) as decisions,
+            (select count(*)::text from app.deposit_payment_claims
+              where deposit_intent_id=$2::uuid) as claims,
+            (select count(*)::text from app.deposit_jobs where id=$3::uuid
+              and status='queued') as jobs,
+            (select count(*)::text from app.assess_routine_telebirr_execution_job($3::uuid))
+              as eligible,
+            (select actor_admin_id::text from app.routine_telebirr_old_payment_decisions
+              where candidate_id=$1::uuid) as audit_actor`,
+          [paidId, approved.depositIntentId, approved.executionJobId, getOwnerAdminId()],
+        );
+        expect(lineage.rows[0]).toMatchObject({
+          decisions: '1',
+          claims: '1',
+          jobs: '1',
+          eligible: '1',
+          audit_actor: getOwnerAdminId(),
+        });
       } finally {
         await client.query('rollback');
       }

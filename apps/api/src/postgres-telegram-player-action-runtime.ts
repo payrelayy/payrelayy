@@ -291,6 +291,8 @@ async function handleDepositOutcomeClaim(
       'invalid_reference',
       'unrelated_receipt',
       'held_review',
+      'older_pending',
+      'old_rejected',
       'manual_review',
       'not_credited',
       'not_verified',
@@ -321,6 +323,8 @@ async function handleDepositOutcomeClaim(
       | 'invalid_reference'
       | 'unrelated_receipt'
       | 'held_review'
+      | 'older_pending'
+      | 'old_rejected'
       | 'manual_review'
       | 'not_credited'
       | 'not_verified'

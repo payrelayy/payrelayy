@@ -16,6 +16,7 @@ import { PostgresOwnerTelebirrExecutionApprovals } from './owner-telebirr-execut
 import { PostgresOwnerRoutineTelebirrProcessing } from './owner-routine-telebirr-processing.js';
 import { PostgresOwnerRoutineTelebirrReceiverReviews } from './owner-routine-telebirr-receiver-reviews.js';
 import { PostgresOwnerTelebirrFastAlerts } from './owner-telebirr-fast-alerts.js';
+import { PostgresOwnerTelebirrOldPayments } from './owner-telebirr-old-payments.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
 import { PostgresOwnerTelebirrDevicePairing } from './owner-telebirr-device-pairing.js';
@@ -36,6 +37,8 @@ export interface OwnerControlPostgresRuntime {
   readonly receiverChangeReviews?:
     Pick<PostgresOwnerRoutineTelebirrReceiverReviews, 'list'> | undefined;
   readonly telebirrFastAlerts?: Pick<PostgresOwnerTelebirrFastAlerts, 'status'> | undefined;
+  readonly telebirrOldPayments?:
+    Pick<PostgresOwnerTelebirrOldPayments, 'list' | 'decide'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
   readonly companionLookup?: Pick<PostgresOwnerCompanionLookup, 'issue' | 'status'> | undefined;
@@ -197,6 +200,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)')::oid, 'execute'), true) as routine_processing_stop_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)')::oid, 'execute'), true) as receiver_change_reviews_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 'execute'), true) as telebirr_fast_alert_read_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 'execute'), true) as telebirr_old_payment_list_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 'execute'), true) as telebirr_old_payment_decide_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_support_contact(uuid)')::oid, 'execute'), true) as support_contact_read_allowed,
@@ -280,6 +285,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)') is not null)::integer
+        + (to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)') is not null)::integer
+        + (to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)') is not null)::integer
+        + coalesce(has_function_privilege(current_user, to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 'execute'), false)::integer
         + (to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)') is not null)::integer
@@ -335,6 +343,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.stop_owner_routine_telebirr_processing(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 0::oid)
@@ -455,6 +466,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     telebirrFastAlerts: new PostgresOwnerTelebirrFastAlerts({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    telebirrOldPayments: new PostgresOwnerTelebirrOldPayments({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     supportContact: new PostgresOwnerSupportContact({

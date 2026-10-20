@@ -198,6 +198,25 @@ describe('Telegram deposit outcome notifier', () => {
     expect(held).not.toContain('invalid');
   });
 
+  it('reports a verified older payment as pending until the Owner decides', () => {
+    const pending = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'older_pending',
+      amountMinor: null,
+    });
+    expect(pending).toBe('Payment found but it is older than 1 hour. Waiting for approval.');
+    expect(pending).not.toContain('1A2B');
+    expect(pending).not.toContain('credited');
+    const rejected = presentTelegramDepositOutcome({
+      ...delivery,
+      outcomeCode: 'old_rejected',
+      amountMinor: null,
+    });
+    expect(rejected).toBe(
+      'Deposit not credited. Reason: payment older than 1 hour. Contact support if this is unexpected.',
+    );
+  });
+
   it('holds a rotated-instruction submission for review without implying rejection', () => {
     const held = presentTelegramDepositOutcome({
       ...delivery,

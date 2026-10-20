@@ -205,7 +205,7 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
         });
         return response(200, { kind: 'terminal_status', terminal });
       }
-      if (value.operation === 'stage_observation') {
+      if (value.operation === 'stage_observation' || value.operation === 'stage_old_observation') {
         if (
           !exact(input, [
             'evidence',
@@ -251,7 +251,12 @@ export function createRoutinePaidPollLocalHandler(broker: Broker) {
           ])
         )
           return response(400, { code: 'invalid_request' });
-        const staged = await broker.stageObservation({
+        const stage =
+          value.operation === 'stage_old_observation'
+            ? broker.stageOldObservation
+            : broker.stageObservation;
+        if (!stage) return response(503, { code: 'temporarily_unavailable' });
+        const staged = await stage({
           evidence: input.evidence as unknown as RoutineTelebirrPaidPhoneEvidence,
           assignmentBodyDigest: input.assignmentBodyDigest,
           observationSignatureDigest: input.observationSignatureDigest,

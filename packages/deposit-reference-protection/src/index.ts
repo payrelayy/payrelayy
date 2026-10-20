@@ -319,6 +319,44 @@ export function protectDepositProofReference(
   }
 }
 
+/** Computes the existing v2 blind index without making or opening ciphertext. */
+export function fingerprintDepositProofReference(input: {
+  readonly provider: DepositProofReferenceProvider;
+  readonly reference: string;
+  readonly fingerprintSecret: string;
+}): string {
+  let fingerprintMaster: Buffer | undefined;
+  let fingerprintKey: Buffer | undefined;
+  try {
+    const properties = exactDataProperties(input, ['provider', 'reference', 'fingerprintSecret']);
+    if (
+      !properties ||
+      !exactProvider(properties.provider) ||
+      !validDepositProofReference(properties.reference) ||
+      !validSecret(properties.fingerprintSecret)
+    )
+      throw new Error();
+    const provider = properties.provider;
+    const normalizedReference = properties.reference.toUpperCase();
+    fingerprintMaster = Buffer.from(properties.fingerprintSecret, 'hex');
+    fingerprintKey = createHmac('sha256', fingerprintMaster)
+      .update(`fetanagent:deposit-proof-reference:fingerprint-key:v2\nprovider:${provider}`, 'utf8')
+      .digest();
+    return createHmac('sha256', fingerprintKey)
+      .update(
+        `fetanagent:deposit-proof-reference:fingerprint-input:v2\nprovider:${provider}\n`,
+        'utf8',
+      )
+      .update(normalizedReference, 'utf8')
+      .digest('hex');
+  } catch {
+    throw new DepositReferenceProtectionError();
+  } finally {
+    fingerprintMaster?.fill(0);
+    fingerprintKey?.fill(0);
+  }
+}
+
 /**
  * Protects an Owner-configured receiver wallet/account number before it crosses the PostgreSQL
  * boundary. This contract is deliberately separate from customer proof references: provider

@@ -4,8 +4,8 @@ import type { Client } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 const recordSql = `select app.record_receiver_sms_payment_event(
-  $1::text,$2::text,$3::bigint,$4::timestamptz,$5::timestamptz,
-  $6::timestamptz,$7::text,$8::text,$9::text,$10::text,$11::text,$12::integer) as outcome`;
+  $1::text,$2::text,$3::text,$4::bigint,$5::timestamptz,$6::timestamptz,
+  $7::timestamptz,$8::text,$9::text,$10::text,$11::text,$12::text,$13::integer) as outcome`;
 
 export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client): void {
   describe('receiver SMS payment ledger', () => {
@@ -44,10 +44,15 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
             'app.finalize_routine_telebirr_paid_observation(uuid)', 'EXECUTE') as can_credit
         from pg_catalog.pg_authid role
         where role.rolname = 'fetanagent_receiver_sms_ingest_runtime'`);
-      expect(runtime.rows).toEqual([{
-        login: false, password_absent: true, inherited: true,
-        can_read: false, can_credit: false,
-      }]);
+      expect(runtime.rows).toEqual([
+        {
+          login: false,
+          password_absent: true,
+          inherited: true,
+          can_read: false,
+          can_credit: false,
+        },
+      ]);
       const tables = await client.query<{
         name: string;
         rls: boolean;
@@ -71,7 +76,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
         can_credit: boolean;
       }>(`select
           pg_catalog.has_function_privilege('fetanagent_receiver_sms_ingest',
-            'app.record_receiver_sms_payment_event(text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
+            'app.record_receiver_sms_payment_event(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
             'EXECUTE') as can_record,
           pg_catalog.has_function_privilege('fetanagent_receiver_sms_ingest',
             'app.load_receiver_sms_device_enrollment(text)', 'EXECUTE') as can_load,
@@ -101,6 +106,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
           client.query(recordSql, [
             'telebirr',
             digest(randomUUID()),
+            'f'.repeat(64),
             2500,
             now,
             now,
@@ -168,6 +174,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
         const values = [
           'telebirr',
           reference,
+          'f'.repeat(64),
           12_500,
           now,
           now,
@@ -182,14 +189,15 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
         const first = await client.query<{ outcome: string }>(recordSql, [...values]);
         expect(first.rows).toEqual([{ outcome: 'recorded' }]);
         const replay = await client.query<{ outcome: string }>(recordSql, [
-          ...values.slice(0, 7),
+          ...values.slice(0, 8),
           digest(randomUUID()),
-          ...values.slice(8),
+          ...values.slice(9),
         ]);
         expect(replay.rows).toEqual([{ outcome: 'exact_replay' }]);
         const conflict = await client.query<{ outcome: string }>(recordSql, [
           'telebirr',
           reference,
+          'f'.repeat(64),
           12_600,
           now,
           now,

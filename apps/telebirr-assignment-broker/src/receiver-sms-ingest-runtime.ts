@@ -16,10 +16,11 @@ const GROUP = 'fetanagent_receiver_sms_ingest';
 const RUNTIME = 'fetanagent_receiver_sms_ingest_runtime';
 const target = ROUTINE_PAID_POLL_DATABASE_TARGETS.production;
 const DATABASE_URL_FILE = '/run/secrets/receiver_sms_ingest_database_url';
+const FINGERPRINT_MASTER_FILE = '/run/secrets/receiver_sms_reference_fingerprint_master';
 const CA_FILE = '/run/configs/supabase_ca_certificate';
 const FUNCTIONS = [
   'app.load_receiver_sms_device_enrollment(text)',
-  'app.record_receiver_sms_payment_event(text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
+  'app.record_receiver_sms_payment_event(text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer)',
 ] as const;
 const oids = FUNCTIONS.map((value) => `pg_catalog.to_regprocedure('${value}')`).join(',');
 
@@ -96,6 +97,11 @@ export interface ReceiverSmsIngestConnection {
   readonly ca: string;
 }
 
+export interface ReceiverSmsIngestConfig {
+  readonly connection: ReceiverSmsIngestConnection;
+  readonly fingerprintSecret: string;
+}
+
 function connectionFromUrl(raw: string, ca: string): ReceiverSmsIngestConnection {
   const url = new URL(raw);
   const user = decodeURIComponent(url.username);
@@ -124,7 +130,7 @@ function connectionFromUrl(raw: string, ca: string): ReceiverSmsIngestConnection
 export function loadReceiverSmsIngestConfig(
   environment: NodeJS.ProcessEnv,
   dependencies: TelebirrAssignmentBrokerConfigDependencies = {},
-): ReceiverSmsIngestConnection | undefined {
+): ReceiverSmsIngestConfig | undefined {
   const flag = environment.INTERNAL_RECEIVER_SMS_BROKER_ENABLED;
   if (flag === undefined || flag === 'false') return undefined;
   if (
@@ -134,12 +140,22 @@ export function loadReceiverSmsIngestConfig(
     environment.TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET !== 'production' ||
     environment.TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED !== 'true' ||
     environment.RECEIVER_SMS_DATABASE_URL_FILE !== DATABASE_URL_FILE ||
+    environment.RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER_FILE !== FINGERPRINT_MASTER_FILE ||
     environment.RECEIVER_SMS_DATABASE_URL !== undefined ||
+    environment.RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER !== undefined ||
     environment.NODE_EXTRA_CA_CERTS !== undefined
   )
     throw new Error();
   const ca = guardedCa(readGuardedText(CA_FILE, dependencies, 'public_config'));
-  return connectionFromUrl(readGuardedText(DATABASE_URL_FILE, dependencies, 'secret').trim(), ca);
+  const fingerprintSecret = readGuardedText(FINGERPRINT_MASTER_FILE, dependencies, 'secret').trim();
+  if (!/^[0-9a-f]{64}$/u.test(fingerprintSecret)) throw new Error();
+  return Object.freeze({
+    connection: connectionFromUrl(
+      readGuardedText(DATABASE_URL_FILE, dependencies, 'secret').trim(),
+      ca,
+    ),
+    fingerprintSecret,
+  });
 }
 
 export interface ReceiverSmsIngestPostgresClient extends ReceiverSmsIngestSqlClient {

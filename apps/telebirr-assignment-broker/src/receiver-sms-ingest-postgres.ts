@@ -6,8 +6,8 @@ export interface ReceiverSmsIngestSqlClient {
 
 const LOAD = 'select * from app.load_receiver_sms_device_enrollment($1::text)';
 const RECORD = `select app.record_receiver_sms_payment_event(
-  $1::text,$2::text,$3::bigint,$4::timestamptz,$5::timestamptz,$6::timestamptz,
-  $7::text,$8::text,$9::text,$10::text,$11::text,$12::integer) as status`;
+  $1::text,$2::text,$3::text,$4::bigint,$5::timestamptz,$6::timestamptz,$7::timestamptz,
+  $8::text,$9::text,$10::text,$11::text,$12::text,$13::integer) as status`;
 
 function row(value: unknown): Record<string, unknown> | undefined {
   return value !== null &&
@@ -64,6 +64,7 @@ export function createReceiverSmsIngestPostgresDatabase(
       const result = await client.query(RECORD, [
         payment.providerCode,
         input.referenceDigest,
+        input.referenceFingerprint,
         payment.amountMinor,
         payment.occurredAt,
         event.receivedAt,

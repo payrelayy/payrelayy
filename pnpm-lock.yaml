@@ -187,6 +187,9 @@ importers:
 
   apps/telebirr-assignment-broker:
     dependencies:
+      '@fetanagent/deposit-reference-protection':
+        specifier: workspace:*
+        version: link:../../packages/deposit-reference-protection
       '@fetanagent/telebirr-reference-opening':
         specifier: workspace:*
         version: link:../../packages/telebirr-reference-opening
@@ -197,9 +200,6 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
     devDependencies:
-      '@fetanagent/deposit-reference-protection':
-        specifier: workspace:*
-        version: link:../../packages/deposit-reference-protection
       '@types/pg':
         specifier: 8.21.0
         version: 8.21.0

@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@fetanagent/deposit-reference-protection": "workspace:*",
     "@fetanagent/telebirr-reference-opening": "workspace:*",
     "@fetanagent/telebirr-verification-foundation": "workspace:*",
     "pg": "8.22.0"
   },
   "devDependencies": {
-    "@fetanagent/deposit-reference-protection": "workspace:*",
     "@types/pg": "8.21.0"
   },
   "scripts": {

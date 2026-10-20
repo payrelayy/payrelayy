@@ -19,6 +19,7 @@ create table app.receiver_sms_payment_events (
   receiver_account_id uuid not null,
   receiver_account_version integer not null check (receiver_account_version > 0),
   reference_digest text not null check (reference_digest ~ '^sha256:[0-9a-f]{64}$'),
+  reference_fingerprint text not null check (reference_fingerprint ~ '^[0-9a-f]{64}$'),
   amount_minor bigint not null check (amount_minor between 1 and 9999999999),
   occurred_at timestamptz not null,
   received_at timestamptz not null,
@@ -40,6 +41,7 @@ create table app.receiver_sms_payment_events (
   foreign key (receiver_account_id, payment_provider_id, receiver_account_version)
     references app.receiver_accounts (id, provider_id, version) on delete restrict,
   unique (provider_code, reference_digest),
+  unique (provider_code, reference_fingerprint),
   check (occurred_at <= received_at + interval '5 minutes'
     and occurred_at >= received_at - interval '30 days'),
   check (received_at <= observed_at + interval '5 minutes'
@@ -78,7 +80,8 @@ revoke all on app.receiver_sms_payment_events, app.receiver_sms_payment_conflict
   from public, anon, authenticated, service_role;
 
 create function app.record_receiver_sms_payment_event(
-  p_provider_code text, p_reference_digest text, p_amount_minor bigint,
+  p_provider_code text, p_reference_digest text, p_reference_fingerprint text,
+  p_amount_minor bigint,
   p_occurred_at timestamptz, p_received_at timestamptz, p_observed_at timestamptz,
   p_source_message_digest text, p_event_body_digest text,
   p_device_id text, p_device_key_id text, p_device_public_key_spki_sha256 text,
@@ -98,6 +101,7 @@ begin
   if session_user not in ('postgres', 'fetanagent_receiver_sms_ingest_runtime')
     or p_provider_code is null or p_provider_code not in ('telebirr', 'cbe_birr')
     or p_reference_digest is null or p_reference_digest !~ '^sha256:[0-9a-f]{64}$'
+    or p_reference_fingerprint is null or p_reference_fingerprint !~ '^[0-9a-f]{64}$'
     or p_amount_minor is null or p_amount_minor not between 1 and 9999999999
     or p_occurred_at is null or p_received_at is null or p_observed_at is null
     or p_source_message_digest is null
@@ -165,6 +169,7 @@ begin
   if v_existing.id is not null then
     if v_existing.provider_code = p_provider_code
       and v_existing.reference_digest = p_reference_digest
+      and v_existing.reference_fingerprint = p_reference_fingerprint
       and v_existing.amount_minor = p_amount_minor
       and v_existing.occurred_at = p_occurred_at
       and v_existing.source_message_digest = p_source_message_digest
@@ -180,12 +185,14 @@ begin
   end if;
   insert into app.receiver_sms_payment_events (
     provider_code, payment_provider_id, receiver_account_id,
-    receiver_account_version, reference_digest, amount_minor, occurred_at, received_at,
+    receiver_account_version, reference_digest, reference_fingerprint,
+    amount_minor, occurred_at, received_at,
     observed_at, source_message_digest, event_body_digest, source_subscription_id,
     device_enrollment_id, device_id, device_key_id, device_public_key_spki_sha256
   ) values (
     p_provider_code, v_provider.id, v_receiver.id, v_receiver.version,
-    p_reference_digest, p_amount_minor, p_occurred_at, p_received_at,
+    p_reference_digest, p_reference_fingerprint,
+    p_amount_minor, p_occurred_at, p_received_at,
     p_observed_at, p_source_message_digest, p_event_body_digest, p_source_subscription_id,
     v_enrollment.id, p_device_id, p_device_key_id, p_device_public_key_spki_sha256
   );
@@ -194,16 +201,16 @@ end;
 $$;
 
 alter function app.record_receiver_sms_payment_event(
-  text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
+  text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
 ) owner to postgres;
 revoke all on function app.record_receiver_sms_payment_event(
-  text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
+  text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
 ) from public, anon, authenticated, service_role,
   fetanagent_api, fetanagent_api_runtime, fetanagent_player_actions,
   fetanagent_player_actions_runtime, fetanagent_worker;
 grant usage on schema app to fetanagent_receiver_sms_ingest;
 grant execute on function app.record_receiver_sms_payment_event(
-  text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
+  text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
 ) to fetanagent_receiver_sms_ingest;
 
 create function app.load_receiver_sms_device_enrollment(p_device_id text)
@@ -236,7 +243,7 @@ grant execute on function app.load_receiver_sms_device_enrollment(text)
 comment on table app.receiver_sms_payment_events is
   'Signed paired-phone receiver SMS payment facts only. No raw SMS or reference, claim, job, or credit.';
 comment on function app.record_receiver_sms_payment_event(
-  text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
+  text,text,text,bigint,timestamptz,timestamptz,timestamptz,text,text,text,text,text,integer
 ) is 'Ingests a signed phone payment fact after bridge verification. Cannot match a customer or credit.';
 comment on function app.load_receiver_sms_device_enrollment(text) is
   'Returns one nonsecret currently non-revoked paired-phone identity for SMS signature verification.';

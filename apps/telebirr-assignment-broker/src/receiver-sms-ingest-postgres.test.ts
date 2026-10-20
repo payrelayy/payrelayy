@@ -26,6 +26,7 @@ describe('receiver SMS narrow SQL adapter', () => {
           occurredAt: '2026-10-20T14:47:00.000Z',
         },
         referenceDigest: `sha256:${'c'.repeat(64)}`,
+        referenceFingerprint: 'e'.repeat(64),
         devicePublicKeySpkiSha256: `sha256:${'d'.repeat(64)}`,
       }),
     ).toBe('recorded');
@@ -33,5 +34,6 @@ describe('receiver SMS narrow SQL adapter', () => {
     expect(query.mock.calls[0]?.[0]).toContain('app.record_receiver_sms_payment_event');
     expect(query.mock.calls[0]?.[1]).not.toContain('SYNTHETIC1234');
     expect(query.mock.calls[0]?.[1]?.[1]).toBe(`sha256:${'c'.repeat(64)}`);
+    expect(query.mock.calls[0]?.[1]?.[2]).toBe('e'.repeat(64));
   });
 });

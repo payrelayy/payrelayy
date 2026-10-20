@@ -6,12 +6,14 @@ import {
   canonicalReceiverSmsEventSignatureBytes,
   digestReceiverSmsEventBody,
 } from '@fetanagent/telebirr-verification-foundation';
+import { fingerprintDepositProofReference } from '@fetanagent/deposit-reference-protection';
 
 import { createReceiverSmsIngestBroker } from './receiver-sms-ingest-broker.js';
 import type { ReceiverSmsIngestDatabase } from './receiver-sms-ingest-broker.js';
 
 const sha256 = (value: string | Buffer) =>
   `sha256:${createHash('sha256').update(value).digest('hex')}`;
+const fingerprintSecret = 'f'.repeat(64);
 
 function fixture(providerCode: 'telebirr' | 'cbe_birr' = 'telebirr') {
   const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -66,6 +68,7 @@ describe('private receiver SMS ingestion', () => {
           recordPayment,
         },
         () => '2026-10-20T14:47:03.000Z',
+        fingerprintSecret,
       );
       expect(await broker.verifyAndRecord(f)).toBe('recorded');
       expect(recordPayment).toHaveBeenCalledOnce();
@@ -73,6 +76,13 @@ describe('private receiver SMS ingestion', () => {
       expect(recorded?.payment.amountMinor).toBe(12_345);
       expect(recorded?.payment.providerCode).toBe(providerCode);
       expect(recorded?.referenceDigest).toBe(sha256('SYNTHETIC1234'));
+      expect(recorded?.referenceFingerprint).toBe(
+        fingerprintDepositProofReference({
+          provider: providerCode,
+          reference: 'SYNTHETIC1234',
+          fingerprintSecret,
+        }),
+      );
     },
   );
 
@@ -88,6 +98,7 @@ describe('private receiver SMS ingestion', () => {
         recordPayment,
       },
       () => '2026-10-20T14:47:03.000Z',
+      fingerprintSecret,
     );
     expect(
       await broker.verifyAndRecord({
@@ -102,6 +113,7 @@ describe('private receiver SMS ingestion', () => {
         recordPayment,
       },
       () => '2026-10-20T14:47:03.000Z',
+      fingerprintSecret,
     );
     expect(await missing.verifyAndRecord(f)).toBe('review');
     expect(recordPayment).not.toHaveBeenCalled();

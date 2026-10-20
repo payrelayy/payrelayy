@@ -8,6 +8,7 @@ import {
   fixtureInboundEvent,
   fixtureTelegramActor,
 } from './routine-telebirr-untrusted-proof.suite.js';
+import { persistentPolicyFixture } from './routine-telebirr-processing-policy.suite.js';
 
 const recordSql = `select app.record_receiver_sms_payment_event(
   $1::text,$2::text,$3::text,$4::bigint,$5::timestamptz,$6::timestamptz,
@@ -129,7 +130,10 @@ async function fixturePaymentEvent(
   return event.rows[0]!.id;
 }
 
-export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client): void {
+export function registerReceiverSmsPaymentLedgerSqlTests(
+  getClient: () => Client,
+  getOwner: () => string,
+): void {
   describe('receiver SMS payment ledger', () => {
     it('keeps the paired-phone inbox private and unable to issue credit', async () => {
       const client = getClient();
@@ -406,6 +410,76 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
           `select candidate_id, disposition from app.receiver_sms_payment_matches`,
         );
         expect(matches.rows).toEqual([{ candidate_id: candidate, disposition: 'older_review' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('turns one matched SMS into one fenced claim and job, then replays without a second credit', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [candidate],
+        );
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const first = await client.query<{
+          deposit_intent_id: string;
+          payment_claim_id: string;
+          execution_job_id: string;
+          already_finalized: boolean;
+        }>(`select * from app.finalize_receiver_sms_match($1::uuid)`, [candidate]);
+        expect(first.rows).toHaveLength(1);
+        expect(first.rows[0]?.already_finalized).toBe(false);
+        const replay = await client.query(`select * from app.finalize_receiver_sms_match($1::uuid)`, [
+          candidate,
+        ]);
+        expect(replay.rows).toEqual([
+          { ...first.rows[0], already_finalized: true },
+        ]);
+        const lineage = await client.query<{
+          provider: string;
+          amount_minor: string;
+          intent_status: string;
+          job_status: string;
+          admissible: string;
+        }>(
+          `select provider.code as provider, evidence.amount_minor::text,
+              intent.status as intent_status, job.status as job_status,
+              (select count(*)::text from app.assess_routine_telebirr_execution_job(job.id))
+                as admissible
+            from app.receiver_sms_settlement_lineages lineage
+            join app.deposit_intents intent on intent.id = lineage.deposit_intent_id
+            join app.deposit_jobs job on job.id = lineage.execution_job_id
+            join app.provider_payment_evidence evidence
+              on evidence.id = lineage.provider_payment_evidence_id
+            join app.payment_providers provider on provider.id = evidence.payment_provider_id
+            where lineage.candidate_id = $1::uuid`,
+          [candidate],
+        );
+        expect(lineage.rows).toEqual([{
+          provider: 'telebirr',
+          amount_minor: '12500',
+          intent_status: 'execution_pending',
+          job_status: 'queued',
+          admissible: '1',
+        }]);
       } finally {
         await client.query('rollback');
       }

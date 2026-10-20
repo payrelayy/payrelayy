@@ -6795,6 +6795,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(depositInsertTriggers.rows.map((row) => row.trigger_name)).toEqual([
       'deposit_intents_enforce_player_deposit_eligibility',
+      'deposit_intents_populate_receiver_sms_snapshot',
       'deposit_intents_populate_routine_paid_snapshot',
       'deposit_intents_populate_snapshot',
     ]);
@@ -6983,7 +6984,8 @@ describe('disposable SQL migration baseline', () => {
     expect(nonTriggerEligibilityReaders.rows).toEqual([
       { signature: 'app.agent_platform_companion_current_exact_five_players()' },
       { signature: 'app.arm_private_live_deposit_pilot_by_admin_id(uuid,uuid)' },
-      { signature: 'app.assess_routine_telebirr_execution_job(uuid)' },
+      { signature: 'app.assess_receiver_sms_execution_job(uuid)' },
+      { signature: 'app.assess_routine_telebirr_execution_job_legacy(uuid)' },
       {
         signature:
           'app.capture_telegram_live_telebirr_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
@@ -8852,7 +8854,19 @@ describe('disposable SQL migration baseline', () => {
         deposit_executor_runtime: false,
         public_execute: false,
         settlement_runtime: false,
+        signature: 'app.assess_receiver_sms_execution_job(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
         signature: 'app.assess_routine_telebirr_execution_job(uuid)',
+      },
+      {
+        deposit_executor_runtime: false,
+        public_execute: false,
+        settlement_runtime: false,
+        signature: 'app.assess_routine_telebirr_execution_job_legacy(uuid)',
       },
       {
         deposit_executor_runtime: true,
@@ -10051,7 +10065,7 @@ registerRoutineTelebirrRotatedInstructionReviewSqlTests(
 );
 registerRoutineTelebirrNoMoneyRuntimeSqlTests(() => client);
 registerRoutineTelebirrPaidPollRuntimeSqlTests(() => client);
-registerReceiverSmsPaymentLedgerSqlTests(() => client);
+registerReceiverSmsPaymentLedgerSqlTests(() => client, () => ownerAuthUserId);
 registerRoutineTelebirrPaidAtomicClaimSqlTests(
   () => client,
   () => ownerAdminId,

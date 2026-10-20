@@ -18,6 +18,12 @@ import { createRoutinePaidPollPostgresRuntime } from './routine-paid-poll-runtim
 import { createRoutinePaidPollBroker } from './routine-paid-poll-broker.js';
 import { createRoutinePaidPollLocalHandler } from './routine-paid-poll-local-handler.js';
 import {
+  loadReceiverSmsIngestConfig,
+  createReceiverSmsIngestPostgresRuntime,
+} from './receiver-sms-ingest-runtime.js';
+import { createReceiverSmsIngestBroker } from './receiver-sms-ingest-broker.js';
+import { createReceiverSmsIngestLocalHandler } from './receiver-sms-ingest-local-handler.js';
+import {
   createTelebirrAssignmentBrokerLocalUnixServer,
   type RoutineLocalHandler,
 } from './local-telebirr-assignment-broker-server.js';
@@ -104,7 +110,8 @@ export async function runTelebirrAssignmentBrokerMain(
   const config = loadTelebirrAssignmentBrokerConfig(environment, configDependencies);
   const routine = loadRoutineNoMoneyConfig(environment, configDependencies);
   const paid = loadRoutinePaidPollConfig(environment, configDependencies);
-  if (routine === undefined && paid === undefined) {
+  const receiverSms = loadReceiverSmsIngestConfig(environment, configDependencies);
+  if (routine === undefined && paid === undefined && receiverSms === undefined) {
     return startTelebirrAssignmentBrokerApplication(config, applicationDependencies);
   }
   if (
@@ -143,10 +150,23 @@ export async function runTelebirrAssignmentBrokerMain(
         }),
       );
     }
+    let receiverSmsHandler: RoutineLocalHandler | undefined;
+    if (receiverSms !== undefined) {
+      const runtime = await createReceiverSmsIngestPostgresRuntime(receiverSms);
+      runtimes.push(runtime);
+      receiverSmsHandler = createReceiverSmsIngestLocalHandler(
+        createReceiverSmsIngestBroker(runtime.database, now),
+      );
+    }
     const application = await startTelebirrAssignmentBrokerApplication(config, {
       ...applicationDependencies,
       createLocalServer: (poll) =>
-        createTelebirrAssignmentBrokerLocalUnixServer(poll, routineHandler, paidHandler),
+        createTelebirrAssignmentBrokerLocalUnixServer(
+          poll,
+          routineHandler,
+          paidHandler,
+          receiverSmsHandler,
+        ),
     });
     let closePromise: Promise<void> | undefined;
     return Object.freeze({

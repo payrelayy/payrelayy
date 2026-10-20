@@ -82,4 +82,27 @@ class ReceiverSmsPhoneUploadTest {
       assertTrue(root.listFiles().orEmpty().any { it.name.endsWith(".review.sealed") })
     } finally { root.deleteRecursively() }
   }
+
+  @Test fun `a terminal malformed event is sealed for review and unblocks the queue`() {
+    val root = Files.createTempDirectory("receiver-sms-reject-test").toFile()
+    try {
+      val outbox = ReceiverSmsEncryptedOutbox(root, cipher)
+      val sms = "You have received ETB 100.00 from Synthetic Sender " +
+        "on 20/10/2026 17:47:00. Your transaction number is SYNTHETIC003. " +
+        "Thank you for using telebirr"
+      outbox.stage(ReceiverSmsSignedObservation.Message(1,
+        Instant.parse("2026-10-20T14:47:05Z").toEpochMilli(), sms))
+      val exchange = DeviceBridgeExchange { _, contentType, _ ->
+        DeviceBridgeRawResponse(403, contentType,
+          "{\"code\":\"sms_event_review\"}".toByteArray(StandardCharsets.UTF_8))
+      }
+      val result = ReceiverSmsPhoneUpload(outbox, exchange) {
+        Instant.parse("2026-10-20T14:48:00Z")
+      }.run("receiver_device_001", JvmP256Identity())
+      assertTrue(result is ReceiverSmsUploadResult.Review &&
+        result.reasonCode == "sms_server_review")
+      assertEquals(0, outbox.pendingCount())
+      assertTrue(root.listFiles().orEmpty().any { it.name.endsWith(".review.sealed") })
+    } finally { root.deleteRecursively() }
+  }
 }

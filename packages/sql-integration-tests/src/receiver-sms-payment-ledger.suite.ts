@@ -28,6 +28,26 @@ export function registerReceiverSmsPaymentLedgerSqlTests(getClient: () => Client
           password_absent: true,
         },
       ]);
+      const runtime = await client.query<{
+        login: boolean;
+        password_absent: boolean;
+        inherited: boolean;
+        can_read: boolean;
+        can_credit: boolean;
+      }>(`select role.rolcanlogin as login,
+          role.rolpassword is null as password_absent,
+          pg_catalog.pg_has_role(role.rolname,
+            'fetanagent_receiver_sms_ingest', 'USAGE') as inherited,
+          pg_catalog.has_table_privilege(role.rolname,
+            'app.receiver_sms_payment_events', 'SELECT,INSERT,UPDATE,DELETE') as can_read,
+          pg_catalog.has_function_privilege(role.rolname,
+            'app.finalize_routine_telebirr_paid_observation(uuid)', 'EXECUTE') as can_credit
+        from pg_catalog.pg_authid role
+        where role.rolname = 'fetanagent_receiver_sms_ingest_runtime'`);
+      expect(runtime.rows).toEqual([{
+        login: false, password_absent: true, inherited: true,
+        can_read: false, can_credit: false,
+      }]);
       const tables = await client.query<{
         name: string;
         rls: boolean;

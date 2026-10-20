@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isProxy } from 'node:util/types';
 
 import {
@@ -30,7 +31,10 @@ export interface ReceiverSmsUploadDependencies {
   recordPayment(input: {
     readonly event: ReceiverSmsVerifiedEvent;
     readonly payment: ReceiverSmsVerifiedPayment;
-  }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'retry'>;
+    readonly devicePublicKeySpkiSha256: string;
+    readonly publicKeySpki: string;
+    readonly signedEvent: unknown;
+  }): Promise<'recorded' | 'exact_replay' | 'conflict' | 'review' | 'retry'>;
 }
 
 function own(value: unknown, key: string): unknown {
@@ -160,9 +164,16 @@ export function createReceiverSmsUploadBridgeHandler(dependencies: ReceiverSmsUp
       );
       if (verified.disposition !== 'verified_phone_sms' || !payment || !verified.event)
         return error(403, 'sms_event_review');
-      const stored = await dependencies.recordPayment({ event: verified.event, payment });
+      const devicePublicKeySpkiSha256 = `sha256:${createHash('sha256').update(key).digest('hex')}`;
+      const stored = await dependencies.recordPayment({
+        event: verified.event,
+        payment,
+        devicePublicKeySpkiSha256,
+        publicKeySpki: Buffer.from(key).toString('base64url'),
+        signedEvent,
+      });
       if (stored === 'retry') return error(503, 'temporarily_unavailable');
-      if (stored === 'conflict') return error(409, 'sms_conflict');
+      if (stored === 'conflict' || stored === 'review') return error(409, 'sms_conflict');
       if (stored !== 'recorded' && stored !== 'exact_replay')
         return error(503, 'temporarily_unavailable');
       return response(202, {

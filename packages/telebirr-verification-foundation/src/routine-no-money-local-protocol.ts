@@ -9,3 +9,9 @@ export const ROUTINE_PAID_POLL_LOCAL_PATH = '/v1/telebirr/routine/paid/broker:ex
 export const ROUTINE_PAID_POLL_LOCAL_CONTENT_TYPE =
   'application/vnd.fetanagent.telebirr-routine-paid-broker.v1+json' as const;
 export const ROUTINE_PAID_POLL_LOCAL_MAX_BYTES = 32_768 as const;
+
+/** Private receiver-SMS fact ingestion; the public bridge never opens a database credential. */
+export const RECEIVER_SMS_LOCAL_PATH = '/v1/receiver-sms/broker:execute' as const;
+export const RECEIVER_SMS_LOCAL_CONTENT_TYPE =
+  'application/vnd.fetanagent.receiver-sms-broker.v1+json' as const;
+export const RECEIVER_SMS_LOCAL_MAX_BYTES = 16_384 as const;

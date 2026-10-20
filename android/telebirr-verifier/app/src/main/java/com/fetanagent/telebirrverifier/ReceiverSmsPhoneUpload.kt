@@ -112,6 +112,15 @@ internal class ReceiverSmsPhoneUpload(
         ReceiverSmsUploadResult.Review("sms_payment_conflict")
       } catch (_: Exception) { ReceiverSmsUploadResult.Review("sms_queue_unavailable") }
     }
+    if (response.contentType == ReceiverSmsBridgeProtocol.CONTENT_TYPE &&
+      response.statusCode in listOf(HttpURLConnection.HTTP_BAD_REQUEST,
+        HttpURLConnection.HTTP_FORBIDDEN)) {
+      // One malformed/rejected event must not block every later receiver SMS.
+      return try {
+        outbox.archiveForReview(pending.key)
+        ReceiverSmsUploadResult.Review("sms_server_review")
+      } catch (_: Exception) { ReceiverSmsUploadResult.Review("sms_queue_unavailable") }
+    }
     if (response.contentType != ReceiverSmsBridgeProtocol.CONTENT_TYPE ||
       response.statusCode != HttpURLConnection.HTTP_ACCEPTED)
       return if (response.statusCode in 400..499)

@@ -88,16 +88,18 @@ class MainActivity : Activity() {
     grantResults: IntArray,
   ) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-    if (requestCode != NOTIFICATION_PERMISSION_REQUEST) return
+    if (requestCode != NOTIFICATION_PERMISSION_REQUEST &&
+      requestCode != SMS_PERMISSION_REQUEST) return
     if (grantResults.singleOrNull() == PackageManager.PERMISSION_GRANTED) {
-      startVerifier()
+      requestStart()
     } else {
       runCatching { stateStore.setOperatorEnabled(false) }
       runCatching {
         stateStore.recordStatus(
           LivePilotRuntimeStatus(
             LivePilotRuntimeState.ATTENTION,
-            "notification_permission_required",
+            if (requestCode == SMS_PERMISSION_REQUEST) "sms_permission_required"
+              else "notification_permission_required",
           ),
         )
       }
@@ -581,6 +583,11 @@ class MainActivity : Activity() {
       )
       return
     }
+    if (BuildConfig.RECEIVER_SMS_ENABLED &&
+      checkSelfPermission(Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
+      requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), SMS_PERMISSION_REQUEST)
+      return
+    }
     startVerifier()
   }
 
@@ -675,6 +682,7 @@ class MainActivity : Activity() {
 
   companion object {
     private const val NOTIFICATION_PERMISSION_REQUEST = 7_001
+    private const val SMS_PERMISSION_REQUEST = 7_002
   }
 }
 

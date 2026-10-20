@@ -35,7 +35,8 @@ internal fun isAllowedDeviceBridgeContentType(contentType: String): Boolean =
   contentType == DeviceBridgeProtocol.CONTENT_TYPE ||
     contentType == RoutineNoMoneyBridgeProtocol.CONTENT_TYPE ||
     contentType == RoutinePaidBridgeProtocol.CONTENT_TYPE ||
-    contentType == RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE
+    contentType == RoutinePaidBridgeProtocol.UPLOAD_CONTENT_TYPE ||
+    contentType == ReceiverSmsBridgeProtocol.CONTENT_TYPE
 
 /**
  * Immutable HTTPS transport for the FetanAgent device bridge. The hostname and four paths are

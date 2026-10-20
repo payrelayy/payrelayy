@@ -207,6 +207,21 @@ val routinePaidPhoneEnabled = run {
   requested == "true"
 }
 
+val receiverSmsEnabled = run {
+  val requested = providers.gradleProperty("fetanagentReceiverSmsEnabled").orNull ?: "false"
+  require(requested == "true" || requested == "false") {
+    "fetanagentReceiverSmsEnabled must be true or false."
+  }
+  if (requested == "true") {
+    require(requestedRuntimeMode == "evidence_only" &&
+      requestedDeploymentTarget == "production" && routineReceiptTrust != null &&
+      !routinePaidPhoneEnabled) {
+      "Receiver SMS requires the signed production evidence build and existing pairing trust."
+    }
+  }
+  requested == "true"
+}
+
 val operationalSigning =
   if (operationalTrust == null) {
     null
@@ -317,6 +332,7 @@ val verifierVersionName =
   when (requestedRuntimeMode) {
     "pairing_only" -> "0.5.15-secure-pairing"
     "evidence_only" -> when {
+      receiverSmsEnabled -> "0.5.32-receiver-sms"
       routinePaidPhoneEnabled -> "0.5.31-routine-paid-lane-recovery"
       routineLookupTrust != null -> "0.5.17-routine-no-money"
       else -> "0.5.15-evidence-only"
@@ -332,7 +348,7 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = if (routinePaidPhoneEnabled) 36 else if (routineLookupTrust != null) 22 else 20
+    versionCode = if (receiverSmsEnabled) 37 else if (routinePaidPhoneEnabled) 36 else if (routineLookupTrust != null) 22 else 20
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")
@@ -351,6 +367,7 @@ android {
     buildConfigField("String", "ROUTINE_RECEIPT_SIGNER_VALID_UNTIL", quotedBuildConfig(""))
     buildConfigField("boolean", "ROUTINE_NO_MONEY_ENABLED", "false")
     buildConfigField("boolean", "ROUTINE_PAID_ENABLED", "false")
+    buildConfigField("boolean", "RECEIVER_SMS_ENABLED", "false")
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_KEY_ID", quotedBuildConfig(""))
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI", quotedBuildConfig(""))
     buildConfigField("String", "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256", quotedBuildConfig(""))
@@ -433,6 +450,9 @@ android {
         }
         if (routinePaidPhoneEnabled) {
           buildConfigField("boolean", "ROUTINE_PAID_ENABLED", "true")
+        }
+        if (receiverSmsEnabled) {
+          buildConfigField("boolean", "RECEIVER_SMS_ENABLED", "true")
         }
       }
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

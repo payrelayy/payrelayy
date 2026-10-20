@@ -8,50 +8,30 @@ import java.time.Instant
 import java.time.format.DateTimeFormatterBuilder
 import java.util.Base64
 
-/** A separate protocol from the existing official-receipt observation. */
+/** Signs an incoming SMS before a customer submits any reference. No receipt lookup occurs. */
 internal object ReceiverSmsSignedObservation {
-  const val PROTOCOL_MODE = "direct_receiver_sms_v1"
-  const val SOURCE_PROFILE = "direct_receiver_sms_v1"
-  private const val BODY_DOMAIN = "fetanagent:receiver-sms-observation-body:v1"
-  private const val SIGNATURE_DOMAIN = "fetanagent:receiver-sms-observation-signature:v1"
+  const val PROTOCOL_MODE = "direct_receiver_sms_event_v1"
+  private const val BODY_DOMAIN = "fetanagent:receiver-sms-event-body:v1"
+  private const val SIGNATURE_DOMAIN = "fetanagent:receiver-sms-event-signature:v1"
 
-  internal class Binding(
-    val providerCode: String,
-    val candidateId: String,
-    val rawReference: String,
-    val referenceFingerprint: String,
-    val receiverRevisionId: String,
-    val receiverVersion: Int,
-    val receiverProfileDigest: String,
-    val expectedReceiverNameDigest: String,
-    val deviceId: String,
-    val keyId: String,
-    val challengeId: String,
-    val challengeDigest: String,
-    val sourceSubscriptionId: Int,
+  internal class Message(
+    val subscriptionId: Int,
+    val receivedAtMillis: Long,
+    val body: String,
   ) {
-    override fun toString(): String = "ReceiverSmsSignedObservation.Binding(<redacted>)"
+    override fun toString(): String = "ReceiverSmsSignedObservation.Message(<redacted>)"
   }
 
   internal class Body(
     val contractVersion: Int,
     val protocolMode: String,
-    val sourceProfile: String,
-    val providerCode: String,
-    val candidateId: String,
-    val referenceFingerprint: String,
-    val receiverRevisionId: String,
-    val receiverVersion: Int,
-    val receiverProfileDigest: String,
-    val expectedReceiverNameDigest: String,
     val deviceId: String,
     val keyId: String,
-    val challengeId: String,
-    val challengeDigest: String,
     val sourceSubscriptionId: Int,
     val sourceMessageDigest: String,
+    val providerCode: String,
+    val transactionReference: String,
     val amountMinor: Long,
-    val currencyCode: String,
     val occurredAt: String,
     val receivedAt: String,
     val observedAt: String,
@@ -70,44 +50,39 @@ internal object ReceiverSmsSignedObservation {
   }
 
   fun create(
-    binding: Binding,
-    match: ReceiverPaymentSmsParser.Result.Match,
+    deviceId: String,
+    message: Message,
     identity: P256Identity,
     observedAt: Instant,
   ): Envelope {
-    require(binding.providerCode in setOf("telebirr", "cbe_birr"))
-    require(binding.providerCode == when (match.provider) {
-      ReceiverPaymentSmsParser.Provider.TELEBIRR -> "telebirr"
-      ReceiverPaymentSmsParser.Provider.CBE_BIRR -> "cbe_birr"
-    })
-    require(binding.rawReference == match.reference &&
-      binding.sourceSubscriptionId == match.subscriptionId)
-    require(identity.publicMaterial().keyId == binding.keyId && identity.keyId == binding.keyId)
-    require(match.amountMinor in 1..9_007_199_254_740_991L)
-    require(match.occurredAt <= match.receivedAt.plusSeconds(5 * 60) &&
-      match.receivedAt <= observedAt.plusSeconds(5 * 60))
+    val keyId = identity.publicMaterial().keyId
+    require(identity.keyId == keyId)
+    require(deviceId.matches(Regex("^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$")))
+    require(message.subscriptionId >= -1)
+    require(message.body.toByteArray(StandardCharsets.UTF_8).size in 40..2_048)
+    val receivedAt = Instant.ofEpochMilli(message.receivedAtMillis)
+    require(receivedAt <= observedAt.plusSeconds(5 * 60))
+    require(receivedAt >= observedAt.minusSeconds(30L * 24 * 60 * 60))
+    val payment = (ReceiverSmsPaymentFields.extract(message.body, message.receivedAtMillis)
+      as? ReceiverSmsPaymentFields.Result.Found)?.payment
+      ?: throw IllegalArgumentException("Receiver SMS payment fields require review")
     val utc = DateTimeFormatterBuilder().appendInstant(3).toFormatter()
-    val body = Body(1, PROTOCOL_MODE, SOURCE_PROFILE, binding.providerCode,
-      binding.candidateId, binding.referenceFingerprint, binding.receiverRevisionId,
-      binding.receiverVersion, binding.receiverProfileDigest,
-      binding.expectedReceiverNameDigest, binding.deviceId, binding.keyId,
-      binding.challengeId, binding.challengeDigest, binding.sourceSubscriptionId,
-      match.messageDigest, match.amountMinor, "ETB", utc.format(match.occurredAt),
-      utc.format(match.receivedAt), utc.format(observedAt))
-    val digest = digest(bodyBytes(body))
-    val signature = identity.signP1363(signatureBytes(digest))
+    val body = Body(1, PROTOCOL_MODE, deviceId, keyId, message.subscriptionId,
+      digest(message.body.toByteArray(StandardCharsets.UTF_8)),
+      payment.providerCode, payment.reference, payment.amountMinor, payment.occurredAt,
+      utc.format(receivedAt), utc.format(observedAt))
+    val bodyDigest = digest(bodyBytes(body))
+    val signature = identity.signP1363(signatureBytes(bodyDigest))
     require(signature.size == 64)
-    return Envelope(1, PROTOCOL_MODE, digest, body,
+    return Envelope(1, PROTOCOL_MODE, bodyDigest, body,
       Base64.getUrlEncoder().withoutPadding().encodeToString(signature))
   }
 
   fun bodyBytes(body: Body): ByteArray = jsonArray(BODY_DOMAIN, listOf(
-    body.contractVersion, body.protocolMode, body.sourceProfile, body.providerCode,
-    body.candidateId, body.referenceFingerprint, body.receiverRevisionId,
-    body.receiverVersion, body.receiverProfileDigest, body.expectedReceiverNameDigest,
-    body.deviceId, body.keyId, body.challengeId, body.challengeDigest,
-    body.sourceSubscriptionId, body.sourceMessageDigest, body.amountMinor,
-    body.currencyCode, body.occurredAt, body.receivedAt, body.observedAt,
+    body.contractVersion, body.protocolMode, body.deviceId, body.keyId,
+    body.sourceSubscriptionId, body.sourceMessageDigest, body.providerCode,
+    body.transactionReference, body.amountMinor, body.occurredAt, body.receivedAt,
+    body.observedAt,
   ))
 
   fun signatureBytes(bodyDigest: String): ByteArray =
@@ -127,7 +102,7 @@ internal object ReceiverSmsSignedObservation {
         is String -> writer.value(value)
         is Int -> writer.value(value)
         is Long -> writer.value(value)
-        else -> error("Unsupported SMS observation transcript value")
+        else -> error("Unsupported SMS event transcript value")
       }
       writer.endArray()
     }

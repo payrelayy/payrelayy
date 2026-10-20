@@ -55,6 +55,7 @@ import { registerTrustedTelebirrActivationEpochSqlTests } from './trusted-telebi
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
+import { registerReceiverSmsPaymentLedgerSqlTests } from './receiver-sms-payment-ledger.suite.js';
 
 type RoleRow = {
   readonly rolbypassrls: boolean;
@@ -10050,6 +10051,7 @@ registerRoutineTelebirrRotatedInstructionReviewSqlTests(
 );
 registerRoutineTelebirrNoMoneyRuntimeSqlTests(() => client);
 registerRoutineTelebirrPaidPollRuntimeSqlTests(() => client);
+registerReceiverSmsPaymentLedgerSqlTests(() => client);
 registerRoutineTelebirrPaidAtomicClaimSqlTests(
   () => client,
   () => ownerAdminId,

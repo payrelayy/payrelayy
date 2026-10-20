@@ -109,7 +109,7 @@ class VerifierRunLoopPolicy(
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
     private val ROUTINE_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 30_000L)
     private val RECEIPT_REVIEW_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L)
-    private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled")
+    private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled", "sms_inbox_idle")
     private val UPLOAD_DELAYS_MILLIS =
       longArrayOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 120_000L, 300_000L)
     private val ATTENTION_DELAYS_MILLIS =

@@ -158,13 +158,13 @@ export {
 } from './routine-paid-phone-evidence.js';
 export {
   RECEIVER_SMS_PROTOCOL_MODE,
-  RECEIVER_SMS_SOURCE_PROFILE,
-  canonicalReceiverSmsObservationBodyBytes,
-  canonicalReceiverSmsObservationSignatureBytes,
-  digestReceiverSmsObservationBody,
-  verifyReceiverSmsObservation,
-  type ReceiverSmsObservationAssessment,
-  type ReceiverSmsVerifiedEvidence,
+  canonicalReceiverSmsEventBodyBytes,
+  canonicalReceiverSmsEventSignatureBytes,
+  digestReceiverSmsEventBody,
+  verifyReceiverSmsEvent,
+  type ReceiverSmsEventAssessment,
+  type ReceiverSmsVerifiedEvent,
+  type ReceiverSmsVerifiedPayment,
 } from './receiver-sms-observation.js';
 export {
   ROUTINE_NO_MONEY_POLL_MODE,

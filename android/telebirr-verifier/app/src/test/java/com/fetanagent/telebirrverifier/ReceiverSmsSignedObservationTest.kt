@@ -1,5 +1,6 @@
 package com.fetanagent.telebirrverifier
 
+import java.security.MessageDigest
 import java.security.Signature
 import java.time.Instant
 import java.util.Base64
@@ -11,68 +12,53 @@ import org.junit.Test
 
 class ReceiverSmsSignedObservationTest {
   private val identity = JvmP256Identity()
-  private val binding = ReceiverSmsSignedObservation.Binding(
-    providerCode = "cbe_birr",
-    candidateId = "a681cdd0-4d74-47c1-a420-07a14521550b",
-    rawReference = "SYNTHCBE001",
-    referenceFingerprint = "a".repeat(64),
-    receiverRevisionId = "43119b2b-6644-4ce4-adc3-38ab89031704",
-    receiverVersion = 3,
-    receiverProfileDigest = "sha256:" + "b".repeat(64),
-    expectedReceiverNameDigest = "sha256:" + "c".repeat(64),
-    deviceId = "receiver_device_001",
-    keyId = identity.keyId,
-    challengeId = "a2f47ba0-2a89-4f68-ac66-289603f34922",
-    challengeDigest = "sha256:" + "d".repeat(64),
-    sourceSubscriptionId = 5,
-  )
-  private val source = ReceiverPaymentSmsParser.Source(
-    ReceiverPaymentSmsParser.Provider.CBE_BIRR, 5, "Test Receiver", "251900000001")
-  private val text = "Dear Test Receiver, you received 100.00Br. from " +
-    "251900000002 - Synthetic Payer on 20/10/26 17:46,Txn ID " +
-    "SYNTHCBE001.Your CBE Birr account balance is 1,000.00Br. Thank you! " +
-    "For invoice https://cbepay1.cbe.com.et/aureceipt?TID=SYNTHCBE001&PH=251900000001"
+  private val sms = "You have received ETB 100.00 from Synthetic Sender " +
+    "on 20/10/2026 17:47:00. Your transaction number is SYNTHETIC001. " +
+    "Thank you for using telebirr"
 
-  @Test fun `paired identity signs only the normalized SMS facts`() {
-    val parsed = ReceiverPaymentSmsParser().parse(
-      ReceiverPaymentSmsParser.Message(5,
-        Instant.parse("2026-10-20T14:47:00Z").toEpochMilli(), text),
-      source, binding.rawReference) as ReceiverPaymentSmsParser.Result.Match
-    val signed = ReceiverSmsSignedObservation.create(binding, parsed, identity,
-      Instant.parse("2026-10-20T14:48:00Z"))
-    assertEquals("cbe_birr", signed.body.providerCode)
-    assertEquals(10_000L, signed.body.amountMinor)
-    assertEquals("2026-10-20T14:46:00.000Z", signed.body.occurredAt)
-    assertFalse(signed.body.toString().contains(binding.rawReference))
-    assertFalse(signed.toString().contains("Synthetic Payer"))
-    val signature = Base64.getUrlDecoder().decode(signed.signature)
+  @Test fun `phone signs an incoming SMS without customer assignment`() {
+    val message = ReceiverSmsSignedObservation.Message(5,
+      Instant.parse("2026-10-20T14:47:00Z").toEpochMilli(), sms)
+    val envelope = ReceiverSmsSignedObservation.create("receiver_device_001", message,
+      identity, Instant.parse("2026-10-20T14:48:00Z"))
+    assertEquals("telebirr", envelope.body.providerCode)
+    assertEquals("SYNTHETIC001", envelope.body.transactionReference)
+    assertEquals(10_000L, envelope.body.amountMinor)
+    assertEquals("2026-10-20T14:47:00.000Z", envelope.body.occurredAt)
+    assertFalse(envelope.body.toString().contains("SYNTHETIC001"))
+    assertFalse(envelope.toString().contains("ETB 100.00"))
     val verifier = Signature.getInstance("SHA256withECDSA")
     verifier.initVerify(identity.keyPair.public)
-    verifier.update(ReceiverSmsSignedObservation.signatureBytes(signed.bodyDigest))
-    assertTrue(verifier.verify(EcdsaP1363.p1363ToDer(signature)))
+    verifier.update(ReceiverSmsSignedObservation.signatureBytes(envelope.bodyDigest))
+    assertTrue(verifier.verify(EcdsaP1363.p1363ToDer(
+      Base64.getUrlDecoder().decode(envelope.signature))))
   }
 
-  @Test fun `another reference or subscription cannot be signed for the challenge`() {
-    val parsed = ReceiverPaymentSmsParser().parse(
-      ReceiverPaymentSmsParser.Message(5,
-        Instant.parse("2026-10-20T14:47:00Z").toEpochMilli(), text),
-      source, binding.rawReference) as ReceiverPaymentSmsParser.Result.Match
+  @Test fun `clock and oversized messages fail closed`() {
+    val now = Instant.parse("2026-10-20T14:48:00Z")
     assertThrows(IllegalArgumentException::class.java) {
-      ReceiverSmsSignedObservation.create(ReceiverSmsSignedObservation.Binding(
-        binding.providerCode, binding.candidateId, "SYNTHCBE002",
-        binding.referenceFingerprint, binding.receiverRevisionId, binding.receiverVersion,
-        binding.receiverProfileDigest, binding.expectedReceiverNameDigest,
-        binding.deviceId, binding.keyId, binding.challengeId, binding.challengeDigest,
-        binding.sourceSubscriptionId), parsed, identity,
-        Instant.parse("2026-10-20T14:48:00Z"))
+      ReceiverSmsSignedObservation.create("receiver_device_001",
+        ReceiverSmsSignedObservation.Message(5, now.plusSeconds(600).toEpochMilli(), sms),
+        identity, now)
     }
     assertThrows(IllegalArgumentException::class.java) {
-      ReceiverSmsSignedObservation.create(ReceiverSmsSignedObservation.Binding(
-        binding.providerCode, binding.candidateId, binding.rawReference,
-        binding.referenceFingerprint, binding.receiverRevisionId, binding.receiverVersion,
-        binding.receiverProfileDigest, binding.expectedReceiverNameDigest,
-        binding.deviceId, binding.keyId, binding.challengeId, binding.challengeDigest,
-        1), parsed, identity, Instant.parse("2026-10-20T14:48:00Z"))
+      ReceiverSmsSignedObservation.create("receiver_device_001",
+        ReceiverSmsSignedObservation.Message(5, now.toEpochMilli(), "X".repeat(2_049)),
+        identity, now)
     }
+  }
+
+  @Test fun `SMS event transcript matches server digest`() {
+    val body = ReceiverSmsSignedObservation.Body(
+      1, ReceiverSmsSignedObservation.PROTOCOL_MODE,
+      "receiver_device_001", "receiver_key_001", 5,
+      "sha256:" + "e".repeat(64),
+      "telebirr", "SYNTHETIC001", 10_000L, "2026-10-20T14:47:00.000Z",
+      "2026-10-20T14:47:00.000Z", "2026-10-20T14:48:00.000Z",
+    )
+    val digest = MessageDigest.getInstance("SHA-256")
+      .digest(ReceiverSmsSignedObservation.bodyBytes(body))
+      .joinToString("") { "%02x".format(it) }
+    assertEquals("56ba3d983fe669636fbfb379fbc2322c4584385b8ad51ae7653210786007d207", digest)
   }
 }

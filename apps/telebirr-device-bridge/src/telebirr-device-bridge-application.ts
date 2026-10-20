@@ -53,12 +53,15 @@ export interface TelebirrDeviceBridgeApplicationDependencies {
   readonly createPaidPollHandler?: () => TelebirrDeviceBridgeHandler;
   /** Dormant until the paid broker can stage authenticated phone observations. */
   readonly createPaidUploadHandler?: () => TelebirrDeviceBridgeHandler;
+  /** Dormant until a private receiver SMS ledger is provisioned. */
+  readonly createReceiverSmsHandler?: () => TelebirrDeviceBridgeHandler;
   readonly createHttpServer?: (
     handler: TelebirrDeviceBridgeHandler,
     options: Pick<EnabledConfig, 'host' | 'port'>,
     routineHandler?: TelebirrDeviceBridgeHandler,
     paidPollHandler?: TelebirrDeviceBridgeHandler,
     paidUploadHandler?: TelebirrDeviceBridgeHandler,
+    receiverSmsHandler?: TelebirrDeviceBridgeHandler,
   ) => TelebirrDeviceBridgeHttpServerRuntime;
   readonly effectiveUserId?: number;
   readonly fileSystem?: TelebirrDeviceBridgeLocalFileSystem;
@@ -195,12 +198,16 @@ export async function startTelebirrDeviceBridgeApplication(
       typeof paidUploadHandler !== 'function'
     )
       throw new Error();
+    const receiverSmsHandler = dependencies.createReceiverSmsHandler?.();
+    if (dependencies.createReceiverSmsHandler !== undefined &&
+      typeof receiverSmsHandler !== 'function') throw new Error();
     server = createHttpServer(
       handler,
       { host: config.host, port: config.port },
       routineHandler,
       paidPollHandler,
       paidUploadHandler,
+      receiverSmsHandler,
     );
     await server.listen();
     if (!server.ready()) throw new Error();

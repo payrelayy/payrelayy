@@ -27,8 +27,8 @@ async function fixtureCandidate(
   const actor = await fixtureTelegramActor(client, randomUUID(), false);
   const playerId = await fixtureEligiblePlayer(client, actor.customerId);
   const inboundId = await fixtureInboundEvent(client, actor.identityId);
-  const player = await client.query<{ id: string; platform_id: string }>(
-    `select id, platform_id from app.customer_platform_players where player_id = $1::text`,
+  const player = await client.query<{ id: string; platform_id: string; customer_id: string }>(
+    `select id, platform_id, customer_id from app.customer_platform_players where player_id = $1::text`,
     [playerId],
   );
   const eligibility = await client.query<{ id: string }>(
@@ -43,18 +43,20 @@ async function fixtureCandidate(
   const inserted = await client.query<{ id: string }>(
     `insert into app.receiver_sms_deposit_candidates (
       origin_inbound_event_id, origin_identity_id, submitting_customer_id,
-      platform_id, player_account_id, player_deposit_eligibility_decision_id,
+      beneficiary_customer_id, platform_id, player_account_id,
+      player_deposit_eligibility_decision_id,
       payment_provider_id, provider_code, reference_ciphertext,
       reference_fingerprint, reference_masked, reference_key_version,
       reference_profile_version, semantic_input_hmac, submitted_at
     ) values (
-      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,
-      $7::uuid,$8::text,$9::text,$10::text,'***ABCD',2,2,$11::text,$12::timestamptz
+      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,
+      $8::uuid,$9::text,$10::text,$11::text,'***ABCD',2,2,$12::text,$13::timestamptz
     ) returning id`,
     [
       inboundId,
       actor.identityId,
       actor.customerId,
+      player.rows[0]!.customer_id,
       player.rows[0]!.platform_id,
       player.rows[0]!.id,
       eligibility.rows[0]!.id,
@@ -643,6 +645,88 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         ).toEqual([{ outcome: 'empty' }]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('binds a cross-customer submission to the selected eligible Player for one ordinary job', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const submitter = await fixtureTelegramActor(client, randomUUID(), false);
+        const selectedPlayerId = await fixtureEligiblePlayer(client);
+        const selectedPlayer = await client.query<{ customer_id: string }>(
+          `select customer_id from app.customer_platform_players where player_id = $1::text`,
+          [selectedPlayerId],
+        );
+        expect(selectedPlayer.rows[0]!.customer_id).not.toBe(submitter.customerId);
+        const inboundId = await fixtureInboundEvent(client, submitter.identityId);
+        const fingerprint = hexDigest();
+        const captured = await client.query<{ candidate_id: string; proof_status: string }>(
+          `select candidate_id, proof_status
+            from app.capture_telegram_receiver_sms_candidate(
+              $1::uuid,$2::text,'telebirr',$3::text,$4::text,
+              '***ABCD',2::smallint,2::smallint,$5::text)`,
+          [
+            inboundId,
+            selectedPlayerId,
+            `v2.telebirr.${'a'.repeat(16)}.${'b'.repeat(22)}.${'c'.repeat(11)}`,
+            fingerprint,
+            `hmac-sha256-v1:${hexDigest()}`,
+          ],
+        );
+        expect(captured.rows).toHaveLength(1);
+        const candidateId = captured.rows[0]!.candidate_id;
+        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const queued = await client.query<{ outcome: string }>(
+          `select app.settle_next_receiver_sms_match() as outcome`,
+        );
+        expect(queued.rows).toEqual([{ outcome: 'queued' }]);
+        const binding = await client.query<{
+          submitting_customer_id: string;
+          beneficiary_customer_id: string;
+          intent_customer_id: string;
+          admissible: string;
+        }>(
+          `select candidate.submitting_customer_id,
+              candidate.beneficiary_customer_id,
+              intent.customer_id as intent_customer_id,
+              (select count(*)::text
+                 from app.assess_routine_telebirr_execution_job(lineage.execution_job_id))
+                as admissible
+            from app.receiver_sms_deposit_candidates candidate
+            join app.receiver_sms_settlement_lineages lineage
+              on lineage.candidate_id = candidate.id
+            join app.deposit_intents intent on intent.id = lineage.deposit_intent_id
+            where candidate.id = $1::uuid`,
+          [candidateId],
+        );
+        expect(binding.rows).toEqual([
+          {
+            submitting_customer_id: submitter.customerId,
+            beneficiary_customer_id: selectedPlayer.rows[0]!.customer_id,
+            intent_customer_id: selectedPlayer.rows[0]!.customer_id,
+            admissible: '1',
+          },
+        ]);
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'empty' }]);
+      } finally {
         await client.query('rollback');
       }
     });

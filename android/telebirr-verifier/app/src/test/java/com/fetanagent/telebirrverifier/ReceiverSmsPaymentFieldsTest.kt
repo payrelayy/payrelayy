@@ -42,4 +42,30 @@ class ReceiverSmsPaymentFieldsTest {
       " reference or amount available in this message", time)
       is ReceiverSmsPaymentFields.Result.Review)
   }
+
+  @Test fun `sent and payout messages never produce payment fields`() {
+    val time = Instant.parse("2026-10-20T14:47:00Z").toEpochMilli()
+    val messages = listOf(
+      "Dear Receiver, You have sent ETB 250.00 to Synthetic Payee " +
+        "on 20/10/2026 17:46:00. Your transaction number is SYNTHOUT001. telebirr",
+      "Dear Receiver, you sent 250.00Br. to Synthetic Payee " +
+        "on 20/10/26 17:46,Txn ID SYNTHOUT002. Your CBE Birr account balance is 10,000.00Br.",
+      "Dear Receiver, You have received ETB 250.00 from Synthetic Payer " +
+        "on 20/10/2026 17:46:00. Your transaction number is SYNTHOUT003. " +
+        "This is a payout. telebirr",
+      "Dear Receiver, you received 250.00Br. from Synthetic Payer " +
+        "on 20/10/26 17:46,Txn ID SYNTHOUT004. CBE Birr payout completed.",
+      "Dear Receiver, you received 250.00Br. from Synthetic Payer " +
+        "on 20/10/26 17:46,Txn ID SYNTHOUT006. CBE Birr paid out.",
+      "Dear Receiver, You have sent ETB 250.00 to Synthetic Payee. " +
+        "You have received ETB 250.00 from Synthetic Payer " +
+        "on 20/10/2026 17:46:00. Your transaction number is SYNTHOUT005. telebirr",
+    )
+    for (sms in messages) {
+      val result = ReceiverSmsPaymentFields.extract(sms, time)
+      assertTrue(result is ReceiverSmsPaymentFields.Result.Review)
+      assertEquals("sms_not_incoming_payment",
+        (result as ReceiverSmsPaymentFields.Result.Review).reasonCode)
+    }
+  }
 }

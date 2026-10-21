@@ -28,6 +28,22 @@ internal object ReceiverPaymentSmsInbox {
   internal fun matchesSender(sender: String?, body: String): Boolean =
     sender != null && sender == expectedSender(body)
 
+  internal fun classifyIncoming(
+    sender: String?, body: String, subscriptionId: Int, receivedAtMillis: Long,
+  ): Read {
+    if (!matchesSender(sender, body)) return Read.Irrelevant
+    val expectedProviderCode = if (sender == "127") "telebirr" else "cbe_birr"
+    return when (val result = ReceiverSmsPaymentFields.extract(body, receivedAtMillis)) {
+      is ReceiverSmsPaymentFields.Result.Found ->
+        if (result.payment.providerCode == expectedProviderCode)
+          Read.Relevant(ReceiverSmsSignedObservation.Message(subscriptionId, receivedAtMillis, body))
+        else Read.Irrelevant
+      is ReceiverSmsPaymentFields.Result.Review ->
+        if (result.reasonCode == "sms_not_incoming_payment") Read.Irrelevant
+        else Read.Review(result.reasonCode)
+    }
+  }
+
   fun read(intent: Intent, nowMillis: Long = System.currentTimeMillis()): Read {
     if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return Read.Irrelevant
     val segments = try { Telephony.Sms.Intents.getMessagesFromIntent(intent).toList() }
@@ -56,6 +72,6 @@ internal object ReceiverPaymentSmsInbox {
       return Read.Review("sms_subscription_uncertain")
     // SmsMessage.timestampMillis is the carrier timestamp, not proof of when this
     // device received the broadcast. Bind the receipt to the local inbox time.
-    return Read.Relevant(ReceiverSmsSignedObservation.Message(subscriptionId, nowMillis, body))
+    return classifyIncoming(sender, body, subscriptionId, nowMillis)
   }
 }

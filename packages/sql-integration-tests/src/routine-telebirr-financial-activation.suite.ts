@@ -7,6 +7,80 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
   getOwnerAuthUserId: () => string,
 ): void {
   describe('dormant routine TeleBirr financial activation boundary', () => {
+    it('installs private SMS cutover actions without enabling money or matching', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        name: string;
+        owner: string;
+        security_definer: boolean;
+        public_execute: boolean;
+        authenticated_execute: boolean;
+      }>(`select routine.proname as name, owner.rolname as owner,
+                 routine.prosecdef as security_definer,
+                 pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                   as public_execute,
+                 pg_catalog.has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+                   as authenticated_execute
+            from pg_catalog.pg_proc routine
+            join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+           where routine.oid in (
+             'app.activate_receiver_sms_financial_gates(uuid,uuid)'::pg_catalog.regprocedure,
+             'app.stop_receiver_sms_financial_gates(uuid,text)'::pg_catalog.regprocedure)
+           order by routine.proname`);
+      expect(catalog.rows).toEqual([
+        {
+          name: 'activate_receiver_sms_financial_gates',
+          owner: 'postgres',
+          security_definer: false,
+          public_execute: false,
+          authenticated_execute: false,
+        },
+        {
+          name: 'stop_receiver_sms_financial_gates',
+          owner: 'postgres',
+          security_definer: false,
+          public_execute: false,
+          authenticated_execute: false,
+        },
+      ]);
+      const state = await client.query<{ live: string; enabled: boolean; cutover: boolean }>(
+        `select (select count(*)::text from app.feature_switches
+                  where mode = 'live') as live,
+                enabled, cutover_at is not null as cutover
+           from app.receiver_sms_route_control where singleton`,
+      );
+      expect(state.rows).toEqual([{ live: '0', enabled: false, cutover: false }]);
+    });
+
+    it('fails closed when SMS activation prerequisites are absent', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query('savepoint rejected_sms_activation');
+        await expect(
+          client.query('select app.activate_receiver_sms_financial_gates($1::uuid,$2::uuid)', [
+            getOwnerAuthUserId(),
+            randomUUID(),
+          ]),
+        ).rejects.toThrow();
+        await client.query('rollback to savepoint rejected_sms_activation');
+        const state = await client.query<{ live: string; enabled: boolean }>(
+          `select (select count(*)::text from app.feature_switches
+                    where mode = 'live') as live, enabled
+             from app.receiver_sms_route_control where singleton`,
+        );
+        expect(state.rows).toEqual([{ live: '0', enabled: false }]);
+        const stopped = await client.query<{ changed: boolean }>(
+          `select app.stop_receiver_sms_financial_gates(
+             $1::uuid, 'operator_requested') as changed`,
+          [randomUUID()],
+        );
+        expect(stopped.rows).toEqual([{ changed: false }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('installs only postgres-owned private operator actions and keeps money off', async () => {
       const client = getClient();
       const catalog = await client.query<{

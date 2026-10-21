@@ -189,8 +189,8 @@ assert.match(androidEvidenceWorkflow, /\[\[ "\$PHONE_MODE" == 'receiver_sms' \]\
 assert.match(androidEvidenceWorkflow, /fetanagentReceiverSmsEnabled=true/);
 assert.match(androidEvidenceWorkflow, /ROUTINE_PAID_ENABLED = false/);
 assert.match(androidEvidenceWorkflow, /RECEIVER_SMS_ENABLED = true/);
-assert.match(androidEvidenceWorkflow, /VERSION_NAME = "0\.5\.35-receiver-sms-incoming-only"/);
-assert.match(androidEvidenceWorkflow, /VERSION_CODE = 40/);
+assert.match(androidEvidenceWorkflow, /VERSION_NAME = "0\.5\.36-receiver-sms"/);
+assert.match(androidEvidenceWorkflow, /VERSION_CODE = 41/);
 assert.match(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=evidence_only/);
 assert.doesNotMatch(androidEvidenceWorkflow, /fetanagentVerifierRuntimeMode=pairing_only/);
 assert.match(androidEvidenceWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/);
@@ -198,7 +198,7 @@ assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD
 assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
 assert.match(androidEvidenceWorkflow, /VERIFIER_RUNTIME_MODE = \"evidence_only\"/);
 assert.doesNotMatch(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.15-evidence-only\"/);
-assert.match(androidEvidenceWorkflow, /FetanAgent-Receiver-SMS-Verifier-0\.5\.35-production\.apk/);
+assert.match(androidEvidenceWorkflow, /FetanAgent-Receiver-SMS-Verifier-0\.5\.36-production\.apk/);
 assert.match(androidEvidenceWorkflow, /apksigner verify --verbose --print-certs/);
 assert.match(androidEvidenceWorkflow, /Verified using v1 scheme \(JAR signing\): false/);
 assert.match(androidEvidenceWorkflow, /Verified using v2 scheme .*: true/);
@@ -217,11 +217,11 @@ assert.match(
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /"pairing_only" -> "0\.5\.15-secure-pairing"/);
 assert.match(androidBuild, /routinePaidPhoneEnabled -> "0\.5\.31-routine-paid-lane-recovery"/);
-assert.match(androidBuild, /receiverSmsEnabled -> "0\.5\.35-receiver-sms-incoming-only"/);
+assert.match(androidBuild, /receiverSmsEnabled -> "0\.5\.36-receiver-sms"/);
 assert.match(androidBuild, /routineLookupTrust != null -> "0\.5\.17-routine-no-money"/);
 assert.match(
   androidBuild,
-  /versionCode = if \(receiverSmsEnabled\) 40 else if \(routinePaidPhoneEnabled\) 36 else if \(routineLookupTrust != null\) 22 else 20/,
+  /versionCode = if \(receiverSmsEnabled\) 41 else if \(routinePaidPhoneEnabled\) 36 else if \(routineLookupTrust != null\) 22 else 20/,
 );
 assert.match(androidBuild, /buildConfigField\("boolean", "ROUTINE_PAID_ENABLED", "false"\)/);
 assert.match(androidBuild, /fetanagentVerifierDeploymentTarget"\)\.orNull \?: "inert"/);

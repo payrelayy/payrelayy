@@ -218,8 +218,8 @@ jobs:
           grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
           grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
           grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
-          grep -Fq 'VERSION_NAME = "0.5.35-receiver-sms-incoming-only"' "$build_config"
-          grep -Fq 'VERSION_CODE = 40' "$build_config"
+          grep -Fq 'VERSION_NAME = "0.5.36-receiver-sms"' "$build_config"
+          grep -Fq 'VERSION_CODE = 41' "$build_config"
           grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
           grep -Fq 'RECEIVER_SMS_ENABLED = true' "$build_config"
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
@@ -240,7 +240,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-evidence-artifact"
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
-          artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.35-production.apk'
+          artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.36-production.apk'
           install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
           (
             cd "$artifact_dir"

@@ -146,7 +146,7 @@ class MainActivity : Activity() {
       setPadding(48, 96, 48, 48)
       addView(
         TextView(context).apply {
-          setText(R.string.app_name)
+          setText(if (BuildConfig.RECEIVER_SMS_ENABLED) R.string.receiver_sms_app_name else R.string.app_name)
           textSize = 24f
           setTypeface(typeface, Typeface.BOLD)
         },
@@ -165,18 +165,25 @@ class MainActivity : Activity() {
           gravity = Gravity.CENTER
         },
       )
-      addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
-      addView(versionView("Target", BuildConfig.VERIFIER_DEPLOYMENT_TARGET))
-      addView(versionView("Pilot", LivePrivatePilotProtocol.OBSERVATION_TRANSCRIPT_VERSION))
-      addView(versionView("Bridge", DeviceBridgeProtocol.REQUEST_TRANSCRIPT_VERSION))
-      addView(versionView("Provider", LivePrivatePilotProtocol.SOURCE_PROFILE))
-      addView(versionView("Parser", RelayProtocol.PARSER_VERSION))
-      addView(versionView("Normalizer", RelayProtocol.NORMALIZER_VERSION))
+      addView(versionView("App", BuildConfig.VERSION_NAME))
+      if (!BuildConfig.RECEIVER_SMS_ENABLED) {
+        addView(versionView("Relay", RelayProtocol.TRANSCRIPT_VERSION))
+        addView(versionView("Target", BuildConfig.VERIFIER_DEPLOYMENT_TARGET))
+        addView(versionView("Pilot", LivePrivatePilotProtocol.OBSERVATION_TRANSCRIPT_VERSION))
+        addView(versionView("Bridge", DeviceBridgeProtocol.REQUEST_TRANSCRIPT_VERSION))
+        addView(versionView("Provider", LivePrivatePilotProtocol.SOURCE_PROFILE))
+        addView(versionView("Parser", RelayProtocol.PARSER_VERSION))
+        addView(versionView("Normalizer", RelayProtocol.NORMALIZER_VERSION))
+      }
       addView(
         TextView(context).apply {
           text =
             if (!BuildConfig.VERIFIER_ENABLED) {
               getString(R.string.inert_artifact_notice)
+            } else if (BuildConfig.RECEIVER_SMS_ENABLED && snapshot.operatorEnabled) {
+              getString(R.string.receiver_sms_running)
+            } else if (BuildConfig.RECEIVER_SMS_ENABLED) {
+              getString(R.string.receiver_sms_stopped)
             } else if (snapshot.operatorEnabled) {
               getString(R.string.automatic_operation_enabled)
             } else {
@@ -187,30 +194,33 @@ class MainActivity : Activity() {
           gravity = Gravity.CENTER
         },
       )
-      addView(
-        TextView(context).apply {
+      if (BuildConfig.RECEIVER_SMS_ENABLED) {
+        addView(TextView(context).apply {
+          setText(R.string.receiver_sms_scope)
+          textSize = 14f
+          setPadding(0, 24, 0, 0)
+          gravity = Gravity.CENTER
+        })
+      } else {
+        addView(TextView(context).apply {
           setText(R.string.no_calendar_shutdown)
           textSize = 14f
           setPadding(0, 20, 0, 0)
           gravity = Gravity.CENTER
-        },
-      )
-      addView(
-        TextView(context).apply {
+        })
+        addView(TextView(context).apply {
           setText(R.string.signed_route_only)
           textSize = 14f
           setPadding(0, 36, 0, 0)
           gravity = Gravity.CENTER
-        },
-      )
-      addView(
-        TextView(context).apply {
+        })
+        addView(TextView(context).apply {
           setText(R.string.no_financial_authority)
           textSize = 14f
           setPadding(0, 24, 0, 0)
           gravity = Gravity.CENTER
-        },
-      )
+        })
+      }
       if (BuildConfig.VERIFIER_ENABLED && !enrolled &&
         !RoutineNoMoneyRuntimeComposition.enabled() &&
         !RoutinePaidRuntimeComposition.enabled()) {
@@ -223,12 +233,14 @@ class MainActivity : Activity() {
 
   private fun LinearLayout.addRoutinePairingControls() {
     addView(TextView(context).apply {
-      setText(R.string.routine_pairing_heading)
+      setText(if (BuildConfig.RECEIVER_SMS_ENABLED) R.string.receiver_sms_pairing_heading
+        else R.string.routine_pairing_heading)
       textSize = 20f
       setPadding(0, 48, 0, 16)
     })
     addView(TextView(context).apply {
-      setText(R.string.routine_pairing_instructions)
+      setText(if (BuildConfig.RECEIVER_SMS_ENABLED) R.string.receiver_sms_pairing_instructions
+        else R.string.routine_pairing_instructions)
       textSize = 14f
     })
     if (routineReceiptTrust() != null) addRoutineReceiptControls()
@@ -312,14 +324,17 @@ class MainActivity : Activity() {
 
   private fun LinearLayout.addRoutineReceiptControls() {
     addView(TextView(context).apply {
-      setText(R.string.routine_receipt_heading)
+      setText(if (BuildConfig.RECEIVER_SMS_ENABLED) R.string.receiver_sms_receipt_heading
+        else R.string.routine_receipt_heading)
       textSize = 18f
       setPadding(0, 36, 0, 12)
     })
     val validUntil = routineReceiptValidUntil
     if (validUntil != null) {
       addView(TextView(context).apply {
-        text = getString(R.string.routine_receipt_stored_until, validUntil)
+        text = getString(if (BuildConfig.RECEIVER_SMS_ENABLED)
+          R.string.receiver_sms_receipt_stored_until else R.string.routine_receipt_stored_until,
+          validUntil)
         textSize = 14f
       })
       return
@@ -539,7 +554,8 @@ class MainActivity : Activity() {
   private fun LinearLayout.addOperationalControls(operatorEnabled: Boolean) {
     addView(
       Button(context).apply {
-        setText(R.string.start_automatic_verification)
+        setText(if (BuildConfig.RECEIVER_SMS_ENABLED) R.string.receiver_sms_start
+          else R.string.start_automatic_verification)
         isEnabled = !operatorEnabled
         setPadding(24, 20, 24, 20)
         setOnClickListener { requestStart() }

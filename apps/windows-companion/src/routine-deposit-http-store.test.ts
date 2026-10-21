@@ -215,6 +215,31 @@ describe('routine deposit HTTP store', () => {
     expect(selected.createSignedHttpRequest.mock.calls[0]?.[1]).toMatch(/^sha256:[0-9a-f]{64}$/u);
   });
 
+  it('recovers a committed lease whose first HTTP response was lost', async () => {
+    const selected = fixture(false, true);
+    selected.fetchImplementation.mockRejectedValueOnce(
+      new Error('private-payment-reference-and-token'),
+    );
+
+    await expect(selected.store.leaseNext()).resolves.toMatchObject({
+      phase: 'execute',
+      jobId: fullLease.jobId,
+    });
+    expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
+    expect(selected.fetchImplementation.mock.calls[0]?.[1]?.body).toBe(
+      selected.fetchImplementation.mock.calls[1]?.[1]?.body,
+    );
+    expect(selected.diagnostics).toEqual([
+      { operation: 'lease', stage: 'transport_failed' },
+      { operation: 'lease', stage: 'same_signed_request_retry' },
+      { operation: 'lease', stage: 'signed_response_verified' },
+    ]);
+    expect(JSON.stringify(selected.diagnostics)).not.toContain(
+      'private-payment-reference-and-token',
+    );
+  });
+
   it('fails closed without retrying when the execution signature is invalid', async () => {
     const selected = fixture(true);
 
@@ -223,6 +248,9 @@ describe('routine deposit HTTP store', () => {
     );
     expect(selected.fetchImplementation).toHaveBeenCalledOnce();
     expect(selected.operations).toEqual(['lease']);
+    expect(selected.diagnostics).toEqual([
+      { operation: 'lease', stage: 'response_signature_invalid' },
+    ]);
   });
 
   it('reports a redacted fence transport failure without retrying or exposing the error', async () => {

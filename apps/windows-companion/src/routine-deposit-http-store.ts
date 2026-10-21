@@ -182,8 +182,8 @@ function base(
 
 /**
  * Authenticated network implementation of the routine worker port. It never retries a fence or
- * provider action. After the provider action, one bounded replay of the identical signed broker
- * request can recover an acknowledgement lost after the broker committed its one-use ledger row.
+ * provider action. One bounded replay of an identical signed lease or post-action broker request
+ * can recover a response lost after the broker committed its one-use ledger row.
  */
 export function createRoutineDepositHttpStore(
   options: RoutineDepositHttpStoreOptions,
@@ -214,7 +214,9 @@ export function createRoutineDepositHttpStore(
     stage: RoutineDepositHttpStoreDiagnostic['stage'],
     httpStatus?: number,
   ): void {
-    if (operation === 'lease' || operation === 'pause') return;
+    // Idle leases emit no diagnostic. Report only failures and an actual signed retry so a
+    // committed lease lost in transit is distinguishable from an empty queue.
+    if (operation === 'pause') return;
     try {
       options.reportDiagnostic?.(
         Object.freeze({
@@ -258,6 +260,7 @@ export function createRoutineDepositHttpStore(
       return unavailable();
     }
     const replayable =
+      value.operation === 'lease' ||
       value.operation === 'record_dispatch' ||
       value.operation === 'reconcile' ||
       value.operation === 'confirm_history' ||

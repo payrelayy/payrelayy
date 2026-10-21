@@ -108,7 +108,10 @@ async function deliverPlayerAction(
     keyboard?: InlineKeyboard,
     forceReplyPlaceholder?: string,
   ) => Promise<unknown>,
-  temporaryAttempt?: { readonly handle: TelegramTemporaryMessageHandle | undefined },
+  temporaryAttempt?: {
+    readonly handle: TelegramTemporaryMessageHandle | undefined;
+    readonly mediaReferenceMask?: string | undefined;
+  },
 ): Promise<void> {
   if (!playerActions.enabled) return;
   const temporary =
@@ -150,7 +153,14 @@ async function deliverPlayerAction(
     }
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     if (presentation.kind === 'message') {
-      await reply(presentation.text);
+      const mediaReferenceMask = temporaryAttempt?.mediaReferenceMask;
+      await reply(
+        result.outcome === 'receiver_sms_candidate_received' &&
+          result.matchStatus === 'pending_sms' &&
+          mediaReferenceMask
+          ? `${presentation.text}\nI read a reference ending ${mediaReferenceMask.slice(-4)} from your image. If that ending does not match your payment confirmation, send the exact transaction number as text here. Do not pay again.`
+          : presentation.text,
+      );
       return;
     }
     if (presentation.kind === 'force_reply') {
@@ -368,11 +378,19 @@ bot.on('message', async (context) => {
           ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
           : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
       if (mediaSubmission?.kind === 'action') {
+        const reference =
+          'transactionReference' in mediaSubmission.action
+            ? mediaSubmission.action.transactionReference
+            : undefined;
+        const mediaReferenceMask =
+          typeof reference === 'string' && /^[A-Z0-9]{8,32}$/u.test(reference)
+            ? `***${reference.slice(-4)}`
+            : undefined;
         await deliverPlayerAction(
           mediaSubmission.action,
           (replyText, keyboard) =>
             context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
-          { handle: temporary },
+          { handle: temporary, mediaReferenceMask },
         );
       } else {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);

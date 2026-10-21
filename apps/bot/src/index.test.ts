@@ -143,6 +143,7 @@ function botConfig(
   actionChannelEnabled: boolean,
   playerValidationIntakeEnabled = false,
   legacyIngressEnabled = !betaAdmissionEnabled,
+  receiverSmsCandidateEnabled = false,
 ) {
   return {
     nodeEnv: 'test',
@@ -150,6 +151,7 @@ function botConfig(
     telegram: { enabled: true, token: '123456:test-token' },
     supportContactUrl: undefined as string | undefined,
     playerValidationIntakeEnabled,
+    receiverSmsCandidateEnabled,
     apiIngress: legacyIngressEnabled
       ? {
           enabled: true,
@@ -179,12 +181,14 @@ async function loadComposition(
   actionChannelEnabled: boolean,
   playerValidationIntakeEnabled = false,
   legacyIngressEnabled = !betaAdmissionEnabled,
+  receiverSmsCandidateEnabled = false,
 ) {
   runtime.config = botConfig(
     betaAdmissionEnabled,
     actionChannelEnabled,
     playerValidationIntakeEnabled,
     legacyIngressEnabled,
+    receiverSmsCandidateEnabled,
   );
   await import('./index.js');
   expect(runtime.messageHandler).toBeTypeOf('function');
@@ -224,6 +228,27 @@ afterEach(() => {
 });
 
 describe('Telegram admission, private action, and ingress composition', () => {
+  it('shows only the OCR reference ending so a customer can correct a misread image', async () => {
+    await loadComposition(false, true, false, false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'telebirr',
+      providerName: 'TeleBirr',
+      matchStatus: 'pending_sms',
+    };
+    const context = messageContext('');
+    await runtime.messageHandler!({
+      ...context,
+      message: { photo: [{ file_id: 'photo-id', file_size: 100 }] },
+    });
+    expect(context.replies).toHaveLength(1);
+    expect(context.replies[0]).toContain('ending 0001');
+    expect(context.replies[0]).toContain('send the exact transaction number as text');
+    expect(context.replies[0]).not.toContain('SYNTB00000001');
+    expect(runtime.actionDeliveries).toHaveLength(1);
+  });
+
   it.each(['photo', 'document'] as const)(
     'routes a replied %s receipt through the existing protected proof action',
     async (kind) => {

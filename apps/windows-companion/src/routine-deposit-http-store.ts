@@ -51,7 +51,8 @@ export interface RoutineDepositHttpStoreOptions {
 }
 
 export interface RoutineDepositHttpStoreDiagnostic {
-  readonly operation: 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete';
+  readonly operation:
+    'lease' | 'fence' | 'record_dispatch' | 'reconcile' | 'confirm_history' | 'complete';
   readonly stage:
     | 'request_aborted'
     | 'request_build_failed'

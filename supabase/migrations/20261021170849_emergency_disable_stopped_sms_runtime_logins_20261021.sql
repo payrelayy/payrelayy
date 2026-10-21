@@ -1,0 +1,11 @@
+-- Records an already-applied, production-only emergency operation in canonical
+-- migration history. The original one-shot SQL disabled idle runtime logins
+-- while the production app was stopped on 2026-10-21. It is retained in the
+-- production migration ledger (source SHA-256:
+-- 6792739cd4eb7236b9ba2efe6d1b2323738416f51dd4b1492ee91cb88e70389e).
+--
+-- Replaying that operational stop against a new database would disable the
+-- current app roles. New installations use the normal role migrations and
+-- guarded deploy procedure instead. Production already has this version, so
+-- the Supabase release skips this marker and applies later canonical files.
+select 1;

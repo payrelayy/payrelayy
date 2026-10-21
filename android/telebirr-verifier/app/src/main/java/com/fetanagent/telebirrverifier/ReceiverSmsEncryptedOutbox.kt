@@ -19,6 +19,8 @@ internal class ReceiverSmsEncryptedOutbox(
   private val cipher: LivePilotQueueCipher,
   private val maximumPending: Int = 512,
 ) {
+  internal class InitializationFailure(val code: String) : IllegalStateException(code)
+
   internal class Pending(
     val key: String,
     val message: ReceiverSmsSignedObservation.Message,
@@ -30,19 +32,25 @@ internal class ReceiverSmsEncryptedOutbox(
 
   init {
     require(maximumPending in 1..1_024)
-    if (!directory.exists()) check(directory.mkdirs())
-    require(directory.isDirectory && !Files.isSymbolicLink(directory.toPath()))
-    require(directory.canonicalFile == directory)
+    if (!directory.exists() && !directory.mkdirs())
+      throw InitializationFailure("sms_queue_create_failed")
+    if (!directory.isDirectory || Files.isSymbolicLink(directory.toPath()))
+      throw InitializationFailure("sms_queue_path_invalid")
+    // Android may expose noBackupFilesDir through a canonicalized parent path.
+    // Keep the queue inside that private directory without requiring both path spellings to match.
+    val parent = directory.parentFile ?: throw InitializationFailure("sms_queue_path_invalid")
+    if (directory.canonicalFile.parentFile != parent.canonicalFile)
+      throw InitializationFailure("sms_queue_path_invalid")
     directory.listFiles()?.filter { TEMP.matches(it.name) }?.forEach {
       require(it.isFile && !Files.isSymbolicLink(it.toPath()))
       check(it.delete())
-    } ?: error("Receiver SMS queue is unavailable")
+    } ?: throw InitializationFailure("sms_queue_list_failed")
     directory.listFiles()?.filter { RECORD_PENDING.matches(it.name) }?.forEach { pending ->
       val key = pending.name.removeSuffix(".sealed")
       if (acknowledgedFile(key).exists() || reviewFile(key).exists()) {
         check(pending.delete())
       }
-    } ?: error("Receiver SMS queue is unavailable")
+    } ?: throw InitializationFailure("sms_queue_list_failed")
     pruneOldAcknowledgements()
     inspectFiles()
   }

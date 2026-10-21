@@ -58,4 +58,28 @@ class ReceiverSmsEncryptedOutboxTest {
       assertEquals(1, outbox.pendingCount())
     } finally { root.deleteRecursively() }
   }
+
+  @Test fun `private queue accepts a canonicalized parent path`() {
+    val parent = directory()
+    try {
+      val alias = File(parent, "alias")
+      assertTrue(alias.mkdir())
+      val root = File(alias, "../receiver-sms-outbox-v1")
+      val outbox = ReceiverSmsEncryptedOutbox(root, cipher)
+      assertEquals(0, outbox.pendingCount())
+      assertEquals(root.canonicalFile, File(parent, "receiver-sms-outbox-v1"))
+    } finally { parent.deleteRecursively() }
+  }
+
+  @Test fun `queue setup reports a fixed code without a filesystem path`() {
+    val parent = directory()
+    try {
+      val regularFile = File(parent, "not-a-directory")
+      assertTrue(regularFile.createNewFile())
+      val failure = runCatching { ReceiverSmsEncryptedOutbox(regularFile, cipher) }.exceptionOrNull()
+      assertTrue(failure is ReceiverSmsEncryptedOutbox.InitializationFailure)
+      assertEquals("sms_queue_path_invalid", (failure as ReceiverSmsEncryptedOutbox.InitializationFailure).code)
+      assertEquals("sms_queue_path_invalid", ReceiverSmsRuntimeComposition.queueInitializationCode(failure))
+    } finally { parent.deleteRecursively() }
+  }
 }

@@ -499,7 +499,10 @@ describe('routine production serial deposit worker', () => {
   it('retries a failed pre-lease request without closing or touching the provider', async () => {
     const { worker, store, session } = fixture();
     store.leaseNext.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce(null);
-    expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
+    expect(await worker.runOnce()).toEqual({
+      status: 'temporarily_unavailable',
+      readOnlyFindSafe: true,
+    });
     expect(await worker.runOnce()).toEqual({ status: 'idle' });
     expect(store.leaseNext).toHaveBeenCalledTimes(2);
     expect(store.pause).not.toHaveBeenCalled();

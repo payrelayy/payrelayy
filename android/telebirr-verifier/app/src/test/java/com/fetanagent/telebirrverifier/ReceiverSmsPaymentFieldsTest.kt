@@ -6,6 +6,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReceiverSmsPaymentFieldsTest {
+  @Test fun `TeleBirr multiline greeting without comma is an incoming payment`() {
+    val sms = "Dear Receiver\nYou have received ETB 125.00 from Synthetic Sender " +
+      "on 21/10/2026 23:44:59. Your transaction number is SYNTHETB002.\n" +
+      "Your current E-Money Account balance is ETB 1,000.00. Thank you for using telebirr"
+    val result = ReceiverSmsPaymentFields.extract(sms,
+      Instant.parse("2026-10-21T20:45:20Z").toEpochMilli())
+    assertTrue(result is ReceiverSmsPaymentFields.Result.Found)
+    val payment = (result as ReceiverSmsPaymentFields.Result.Found).payment
+    assertEquals("SYNTHETB002", payment.reference)
+    assertEquals(12_500L, payment.amountMinor)
+  }
+
   @Test fun `TeleBirr payment fields come from received amount rather than balance`() {
     val sms = "Dear Receiver, You have received ETB 1,250.00 from Synthetic Sender " +
       "on 20/10/2026 14:37:18. Your transaction number is SYNTHETB001. " +

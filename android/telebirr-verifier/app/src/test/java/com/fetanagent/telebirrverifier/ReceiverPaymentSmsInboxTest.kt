@@ -33,6 +33,11 @@ class ReceiverPaymentSmsInboxTest {
       "on 20/10/26 17:46,Txn ID SYNTHIN002. CBE Birr account balance is 10,000.00Br."
     assertTrue(ReceiverPaymentSmsInbox.classifyIncoming("127", telebirr, -1, time)
       is ReceiverPaymentSmsInbox.Read.Relevant)
+    val multilineTelebirr = "Dear Receiver\nYou have received ETB 250.00 from Synthetic Payer " +
+      "on 20/10/2026 17:46:00. Your transaction number is SYNTHIN003.\n" +
+      "Thank you for using telebirr"
+    assertTrue(ReceiverPaymentSmsInbox.classifyIncoming("127", multilineTelebirr, -1, time)
+      is ReceiverPaymentSmsInbox.Read.Relevant)
     assertTrue(ReceiverPaymentSmsInbox.classifyIncoming("CBEBirr", cbe, -1, time)
       is ReceiverPaymentSmsInbox.Read.Relevant)
     assertTrue(ReceiverPaymentSmsInbox.classifyIncoming("127",

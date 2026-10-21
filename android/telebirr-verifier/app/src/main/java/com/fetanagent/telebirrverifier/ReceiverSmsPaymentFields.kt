@@ -40,7 +40,7 @@ internal object ReceiverSmsPaymentFields {
   // Bind the amount, payer, time, and reference to one incoming confirmation.
   // Finding those fields in separate parts of an outgoing SMS is not sufficient.
   private val telebirrIncoming = Regex(
-    """\A\s*(?:Dear\s+[^,\r\n]{1,100},\s*)?You have received ETB\s+""" +
+    """\A\s*(?:Dear[ \t]+[^,\r\n]{1,100}(?:,\s*|\r?\n\s*))?You have received ETB\s+""" +
       """(?:[0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,8})\.[0-9]{2}\s+from\s+""" +
       """[\s\S]{1,180}?\s+on\s+[0-9]{2}/[0-9]{2}/[0-9]{4}\s+""" +
       """[0-9]{2}:[0-9]{2}:[0-9]{2}\.\s+Your transaction number is\s+""" +

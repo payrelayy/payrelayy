@@ -100,6 +100,7 @@ describe('Owner-control bounded PostgreSQL pool', () => {
       "has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')::integer",
     );
     for (const signature of [
+      'app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)',
       'app.get_owner_support_contact(uuid)',
       'app.set_owner_support_contact(uuid,text,integer)',
       'app.get_public_support_contact()',

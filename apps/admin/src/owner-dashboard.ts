@@ -578,7 +578,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <p class="request-meta" id="routine-phone-enrollment-status" role="status"></p>
             <div class="pairing-receipt" aria-labelledby="routine-receipt-title">
               <h4 id="routine-receipt-title">Existing phone: signed no-money receipt</h4>
-              <p class="receipt-label">Retrieve a receipt for the phone already enrolled above. This does not
+              <p class="receipt-label">Load active phones and select the exact enrollment for this receipt. This does not
                 create a challenge, pair another phone, poll TeleBirr, or enable deposits.
                 The receipt is available only after a separate signer is provisioned.</p>
               <label class="confirmation-row" for="routine-receipt-confirmation">
@@ -591,8 +591,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
                 <output class="pairing-package" id="routine-receipt-package"></output>
                 <button id="routine-receipt-copy" type="button">Copy receipt to phone</button>
               </div>
-              <p class="receipt-label">If receipt signing is unavailable, load the current Owner-linked
-                phones directly. Select the exact enrollment before revoking it; loading does not
+              <p class="receipt-label">Load the current Owner-linked phones directly.
+                Select the exact enrollment before retrieving a receipt or revoking it; loading does not
                 contact TeleBirr or enable deposits.</p>
               <button id="routine-phones-load" type="button" disabled>Load active routine phones</button>
               <p class="request-meta" id="routine-phones-status" role="status"></p>
@@ -1897,7 +1897,7 @@ function clearRoutineReceipt() {
   routineReceiptPackage.textContent = '';
   routineReceiptPackageWrap.hidden = true;
   routineReceiptStatus.textContent = '';
-  routineReceiptButton.disabled = !accessToken || !routineReceiptConfirmation.checked;
+  routineReceiptButton.disabled = true;
   routineRevokeConfirmation.checked = false;
   routineRevokeButton.disabled = true;
   routineRevokeStatus.textContent = '';
@@ -1917,11 +1917,11 @@ function updateRoutineReceiptAvailability() {
   if (routineEnrollmentReceipt && Date.parse(routineEnrollmentReceipt.validUntil) <= Date.now()) {
     clearRoutineReceipt();
   }
-  routineReceiptButton.disabled = !accessToken || routineReceiptBusy || routineRevokeBusy ||
-    !routineReceiptConfirmation.checked;
-  routinePhonesLoadButton.disabled = !accessToken || routinePhonesBusy || routineRevokeBusy;
   const selectedPhone = routineActivePhones.find((phone) =>
     phone.enrollmentId === routinePhonesSelect.value);
+  routineReceiptButton.disabled = !accessToken || routineReceiptBusy || routinePhonesBusy ||
+    routineRevokeBusy || !selectedPhone || !routineReceiptConfirmation.checked;
+  routinePhonesLoadButton.disabled = !accessToken || routinePhonesBusy || routineRevokeBusy;
   routineRevokeButton.disabled = !accessToken || routineReceiptBusy || routinePhonesBusy ||
     routineRevokeBusy || !(selectedPhone || routineEnrollmentReceipt) ||
     !routineRevokeConfirmation.checked;
@@ -1978,11 +1978,11 @@ async function loadRoutinePhones() {
       return option;
     });
     routinePhonesSelect.replaceChildren(...options);
-    routinePhonesSelect.value = inventory.phones[0]?.enrollmentId || '';
+    routinePhonesSelect.value = '';
     routinePhonesSelectLabel.hidden = inventory.phones.length === 0;
     routinePhonesStatus.textContent = inventory.phones.length === 0
       ? 'No active Owner-linked routine phone enrollment was found.'
-      : inventory.phones.length + ' active routine phone enrollment(s) found. Select the exact one before revocation.';
+      : inventory.phones.length + ' active routine phone enrollment(s) found. Select the exact one before retrieving a receipt or revoking it.';
   } catch (error) {
     if (accessToken && ownerAuthGeneration === generation && !isSignedOutError(error)) {
       routinePhonesStatus.textContent = 'Active phone inventory is unavailable. No phone was changed.';
@@ -2024,9 +2024,11 @@ function validRoutineSignedReceipt(value) {
 }
 
 async function retrieveRoutineReceipt() {
+  const selectedPhone = routineActivePhones.find((phone) =>
+    phone.enrollmentId === routinePhonesSelect.value);
   if (!accessToken || routineReceiptBusy || routineRevokeBusy ||
-      !routineReceiptConfirmation.checked) return;
-  if (!window.confirm('Retrieve the signed receipt for your existing no-money phone enrollment? This does not enable TeleBirr polling or deposits.')) return;
+      !selectedPhone || !routineReceiptConfirmation.checked) return;
+  if (!window.confirm('Retrieve the signed receipt for the selected no-money phone enrollment? This does not enable TeleBirr polling or deposits.')) return;
   const generation = ownerAuthGeneration;
   const requestId = crypto.randomUUID();
   routineReceiptBusy = true;
@@ -2038,6 +2040,7 @@ async function retrieveRoutineReceipt() {
         'x-fetanagent-owner-csrf': 'owner-routine-telebirr-pairing-v1', 'x-idempotency-key': requestId },
       body: JSON.stringify({
         confirmation: 'owner_confirmed_existing_routine_enrollment_receipt_only_no_money',
+        enrollmentId: selectedPhone.enrollmentId,
         requestId,
       }),
     });
@@ -2050,7 +2053,8 @@ async function retrieveRoutineReceipt() {
     }
     const receipt = validRoutineSignedReceipt(await response.json());
     if (!accessToken || ownerAuthGeneration !== generation) return;
-    if (!receipt || Date.parse(receipt.validUntil) <= Date.now()) {
+    if (!receipt || receipt.enrollmentId !== selectedPhone.enrollmentId ||
+        Date.parse(receipt.validUntil) <= Date.now()) {
       routineReceiptStatus.textContent = 'The receipt response was invalid or expired. Do not use it.';
       return;
     }

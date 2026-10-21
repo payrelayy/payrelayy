@@ -5444,7 +5444,7 @@ describe('Owner-control HTTP boundary', () => {
   });
 
   it('retrieves only the existing Owner-linked signed routine receipt when a separate signer is configured', async () => {
-    const calls: string[] = [];
+    const calls: Array<readonly string[]> = [];
     const receipt = {
       assignmentPollingAllowed: false as const,
       financialActionAllowed: false as const,
@@ -5458,6 +5458,7 @@ describe('Owner-control HTTP boundary', () => {
     });
     const payload = {
       confirmation: 'owner_confirmed_existing_routine_enrollment_receipt_only_no_money',
+      enrollmentId: '225181c2-0747-4bb5-94e4-18fafcf67ed3',
       requestId: pilotRequestId,
     };
     const disabled = await unconfigured.inject({
@@ -5473,8 +5474,8 @@ describe('Owner-control HTTP boundary', () => {
       fetch: verifiedAuthFetch(),
       runtime: runtime({
         routineTelebirrReceipt: {
-          issue: async (actor) => {
-            calls.push(actor);
+          issue: async (actor, target) => {
+            calls.push([actor, target]);
             return receipt;
           },
         },
@@ -5487,6 +5488,13 @@ describe('Owner-control HTTP boundary', () => {
       payload: { ...payload, deviceId: 'browser-chosen-device' },
     });
     expect(bad.statusCode).toBe(400);
+    const missingTarget = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/routine-telebirr-enrollment-receipt',
+      headers: routineTelebirrPairingMutationHeaders(),
+      payload: { confirmation: payload.confirmation, requestId: payload.requestId },
+    });
+    expect(missingTarget.statusCode).toBe(400);
     const noAuthHeaders = routineTelebirrPairingMutationHeaders();
     delete (noAuthHeaders as { authorization?: string }).authorization;
     const noAuth = await app.inject({
@@ -5505,7 +5513,7 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toEqual(receipt);
-    expect(calls).toEqual([authUserId]);
+    expect(calls).toEqual([[authUserId, payload.enrollmentId]]);
     await app.close();
   });
 

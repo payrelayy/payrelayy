@@ -242,6 +242,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 'execute'), true) as routine_telebirr_pairing_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 'execute'), true) as routine_telebirr_pairing_enroll_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)')::oid, 'execute'), true) as routine_telebirr_receipt_material_allowed,
+    coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)')::oid, 'execute'), true) as routine_telebirr_receipt_material_exact_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)')::oid, 'execute'), true) as routine_telebirr_enrollment_revoke_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)')::oid, 'execute'), true) as routine_telebirr_phone_inventory_allowed,
     coalesce(not has_function_privilege(current_user, to_regprocedure('app.consume_routine_telebirr_device_pairing_challenge(uuid,text)')::oid, 'execute'), true) as routine_telebirr_pairing_consume_denied,
@@ -323,6 +324,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)') is not null)::integer
         + (to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)') is not null)::integer
+        + (to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_support_contact(uuid)') is not null)::integer
@@ -384,6 +386,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)')::oid, 0::oid)
            ,coalesce(to_regprocedure('app.revoke_owner_routine_telebirr_device_enrollment(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_active_phone_enrollments(uuid)')::oid, 0::oid)
           -- Never allow NULL into NOT IN: that would neutralize this deny check.

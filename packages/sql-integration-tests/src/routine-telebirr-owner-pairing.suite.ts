@@ -14,6 +14,8 @@ const ENROLL = `select * from app.enroll_owner_routine_telebirr_device_pairing_p
 const TABLE = 'app.routine_telebirr_device_pairing_challenges';
 const RECEIPT_MATERIAL =
   'select * from app.get_owner_routine_telebirr_enrollment_receipt_material($1::uuid,$2::text,$3::text)';
+const EXACT_RECEIPT_MATERIAL =
+  'select * from app.get_owner_routine_telebirr_enrollment_receipt_material_exact($1::uuid,$2::uuid,$3::text,$4::text)';
 const REVOKE_ENROLLMENT =
   'select * from app.revoke_owner_routine_telebirr_device_enrollment($1::uuid,$2::uuid)';
 const LIST_ACTIVE_PHONES =
@@ -268,12 +270,21 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           has_function_privilege('fetanagent_owner_control_runtime',
             'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
             'execute') as owner_receipt_allowed,
+          has_function_privilege('fetanagent_owner_control_runtime',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)',
+            'execute') as owner_exact_receipt_allowed,
           not has_function_privilege('service_role',
             'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
             'execute') as service_receipt_denied,
+          not has_function_privilege('service_role',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)',
+            'execute') as service_exact_receipt_denied,
           not has_function_privilege('authenticated',
             'app.get_owner_routine_telebirr_enrollment_receipt_material(uuid,text,text)',
-            'execute') as authenticated_receipt_denied
+            'execute') as authenticated_receipt_denied,
+          not has_function_privilege('authenticated',
+            'app.get_owner_routine_telebirr_enrollment_receipt_material_exact(uuid,uuid,text,text)',
+            'execute') as authenticated_exact_receipt_denied
           from pg_class signer, pg_class revocation
           where signer.oid = 'app.routine_telebirr_enrollment_receipt_signers'::regclass
             and revocation.oid =
@@ -288,8 +299,11 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           runtime_signer_table_denied: true,
           service_signer_table_denied: true,
           owner_receipt_allowed: true,
+          owner_exact_receipt_allowed: true,
           service_receipt_denied: true,
+          service_exact_receipt_denied: true,
           authenticated_receipt_denied: true,
+          authenticated_exact_receipt_denied: true,
         },
       ]);
     });
@@ -298,6 +312,8 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
       const client = getClient();
       await rollback(client, async () => {
         await fixtureReceiver(client);
+        let firstEnrollmentId = '';
+        let secondEnrollmentId = '';
         await client.query('set session authorization fetanagent_owner_control_runtime');
         try {
           const issued = (await client.query(ISSUE, [getOwnerAuthUserId(), randomUUID()])).rows[0]!;
@@ -340,6 +356,7 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           expect(first.rows).toHaveLength(1);
           expect(first.rows[0]!.replayed).toBe(false);
           expect(first.rows[0]!.enrollment_id).toMatch(/^[0-9a-f-]{36}$/u);
+          firstEnrollmentId = first.rows[0]!.enrollment_id as string;
           expect(
             (first.rows[0]!.valid_until as Date).getTime() -
               (first.rows[0]!.valid_from as Date).getTime(),
@@ -360,6 +377,27 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
           expect(
             (await client.query(READ_PROOF_CHALLENGE, [getOwnerAuthUserId(), pairingId])).rows,
           ).toEqual(trusted.rows);
+          const secondChallenge = (await client.query(ISSUE, [getOwnerAuthUserId(), randomUUID()]))
+            .rows[0]!;
+          const secondIssued = secondChallenge.issued_at as Date;
+          const second = await client.query(ENROLL, [
+            getOwnerAuthUserId(),
+            secondChallenge.pairing_id,
+            secondChallenge.pairing_nonce_digest,
+            secondChallenge.receiver_revision_id,
+            secondChallenge.receiver_version,
+            secondChallenge.receiver_profile_digest,
+            secondChallenge.expected_receiver_name_digest,
+            `sha256:${'a'.repeat(64)}`,
+            'routine-device-0002',
+            'routine-key-0002',
+            `sha256:${'b'.repeat(64)}`,
+            secondIssued,
+            new Date(secondIssued.getTime() + 300_000),
+          ]);
+          expect(second.rows).toHaveLength(1);
+          secondEnrollmentId = second.rows[0]!.enrollment_id as string;
+          expect(secondEnrollmentId).not.toBe(firstEnrollmentId);
         } finally {
           await client.query('reset session authorization');
         }
@@ -389,8 +427,14 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
             signerKeyId,
             `sha256:${'0'.repeat(64)}`,
           ]);
-          const material = await client.query(RECEIPT_MATERIAL, [
+          await rejected(client, RECEIPT_MATERIAL, [
             getOwnerAuthUserId(),
+            signerKeyId,
+            signerDigest,
+          ]);
+          const material = await client.query(EXACT_RECEIPT_MATERIAL, [
+            getOwnerAuthUserId(),
+            firstEnrollmentId,
             signerKeyId,
             signerDigest,
           ]);
@@ -406,6 +450,30 @@ export function registerRoutineTelebirrOwnerPairingSqlTests(
             receiver_profile_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
             expected_receiver_name_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
           });
+          const secondMaterial = await client.query(EXACT_RECEIPT_MATERIAL, [
+            getOwnerAuthUserId(),
+            secondEnrollmentId,
+            signerKeyId,
+            signerDigest,
+          ]);
+          expect(secondMaterial.rows).toHaveLength(1);
+          expect(secondMaterial.rows[0]).toMatchObject({
+            enrollment_id: secondEnrollmentId,
+            device_id: 'routine-device-0002',
+            device_key_id: 'routine-key-0002',
+          });
+          await rejected(client, EXACT_RECEIPT_MATERIAL, [
+            getOwnerAuthUserId(),
+            randomUUID(),
+            signerKeyId,
+            signerDigest,
+          ]);
+          await rejected(client, EXACT_RECEIPT_MATERIAL, [
+            randomUUID(),
+            firstEnrollmentId,
+            signerKeyId,
+            signerDigest,
+          ]);
         } finally {
           await client.query('reset session authorization');
         }

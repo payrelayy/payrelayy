@@ -157,6 +157,16 @@ export {
   type RoutineTelebirrPaidPhoneEvidence,
 } from './routine-paid-phone-evidence.js';
 export {
+  RECEIVER_SMS_PROTOCOL_MODE,
+  canonicalReceiverSmsEventBodyBytes,
+  canonicalReceiverSmsEventSignatureBytes,
+  digestReceiverSmsEventBody,
+  verifyReceiverSmsEvent,
+  type ReceiverSmsEventAssessment,
+  type ReceiverSmsVerifiedEvent,
+  type ReceiverSmsVerifiedPayment,
+} from './receiver-sms-observation.js';
+export {
   ROUTINE_NO_MONEY_POLL_MODE,
   ROUTINE_NO_MONEY_POLL_TRANSCRIPT,
   canonicalRoutineNoMoneyPollBodyBytes,

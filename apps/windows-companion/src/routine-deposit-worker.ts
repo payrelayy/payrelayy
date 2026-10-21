@@ -20,7 +20,7 @@ export interface RoutineDepositPolicy {
   readonly mode: 'routine_production';
   readonly status: 'active';
   readonly version: 1;
-  readonly provider: 'telebirr';
+  readonly provider: 'telebirr' | 'receiver_sms';
   readonly platformCode: 'kemerbet';
   readonly currencyCode: 'ETB';
   readonly minimumAmountMinor: 2500;
@@ -30,7 +30,7 @@ export interface RoutineDepositPolicy {
   readonly dailyQuotaMinor: null;
   readonly successfulDepositQuota: null;
   readonly maxConcurrentDeposits: 1;
-  readonly amountSource: 'official_receipt_settled_amount';
+  readonly amountSource: 'official_receipt_settled_amount' | 'receiver_sms_amount';
 }
 
 export interface RoutineDepositBinding {
@@ -133,7 +133,7 @@ export function isRoutineDepositPolicy(candidate: unknown): candidate is Routine
     policy.mode === 'routine_production' &&
     policy.status === 'active' &&
     policy.version === 1 &&
-    policy.provider === 'telebirr' &&
+    (policy.provider === 'telebirr' || policy.provider === 'receiver_sms') &&
     policy.platformCode === 'kemerbet' &&
     policy.currencyCode === 'ETB' &&
     policy.minimumAmountMinor === 2500 &&
@@ -143,7 +143,9 @@ export function isRoutineDepositPolicy(candidate: unknown): candidate is Routine
     policy.dailyQuotaMinor === null &&
     policy.successfulDepositQuota === null &&
     policy.maxConcurrentDeposits === 1 &&
-    policy.amountSource === 'official_receipt_settled_amount'
+    ((policy.provider === 'telebirr' &&
+      policy.amountSource === 'official_receipt_settled_amount') ||
+      (policy.provider === 'receiver_sms' && policy.amountSource === 'receiver_sms_amount'))
   );
 }
 

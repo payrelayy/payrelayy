@@ -20,7 +20,8 @@ internal object RoutineNoMoneyRuntimeComposition {
   }
 
   fun receiptSigner(): RoutineEnrollmentTrustedSigner? = runCatching {
-    if (!BuildConfig.VERIFIER_ENABLED || !BuildConfig.ROUTINE_NO_MONEY_ENABLED ||
+    if (!BuildConfig.VERIFIER_ENABLED ||
+      (!BuildConfig.ROUTINE_NO_MONEY_ENABLED && !BuildConfig.RECEIVER_SMS_ENABLED) ||
       BuildConfig.VERIFIER_RUNTIME_MODE != "evidence_only" ||
       BuildConfig.VERIFIER_DEPLOYMENT_TARGET != "production" ||
       BuildConfig.ROUTINE_RECEIPT_SIGNER_KEY_ID !=

@@ -50,11 +50,10 @@ export interface RoutineDepositProtocolBinding {
   readonly currencyCode: 'ETB';
 }
 
-export interface RoutineDepositProtocolPolicy {
+interface RoutineDepositProtocolPolicyBase {
   readonly mode: 'routine_production';
   readonly status: 'active';
   readonly version: 1;
-  readonly provider: 'telebirr';
   readonly platformCode: 'kemerbet';
   readonly currencyCode: 'ETB';
   readonly minimumAmountMinor: 2500;
@@ -64,8 +63,19 @@ export interface RoutineDepositProtocolPolicy {
   readonly dailyQuotaMinor: null;
   readonly successfulDepositQuota: null;
   readonly maxConcurrentDeposits: 1;
-  readonly amountSource: 'official_receipt_settled_amount';
 }
+
+export type RoutineDepositProtocolPolicy = RoutineDepositProtocolPolicyBase &
+  (
+    | {
+        readonly provider: 'telebirr';
+        readonly amountSource: 'official_receipt_settled_amount';
+      }
+    | {
+        readonly provider: 'receiver_sms';
+        readonly amountSource: 'receiver_sms_amount';
+      }
+  );
 
 export interface RoutineDepositProtocolLease extends RoutineDepositProtocolBinding {
   readonly policy: RoutineDepositProtocolPolicy;
@@ -310,7 +320,11 @@ function decodePolicy(candidate: unknown): RoutineDepositProtocolPolicy | undefi
     candidate.mode !== 'routine_production' ||
     candidate.status !== 'active' ||
     candidate.version !== 1 ||
-    candidate.provider !== 'telebirr' ||
+    !(
+      (candidate.provider === 'telebirr' &&
+        candidate.amountSource === 'official_receipt_settled_amount') ||
+      (candidate.provider === 'receiver_sms' && candidate.amountSource === 'receiver_sms_amount')
+    ) ||
     candidate.platformCode !== 'kemerbet' ||
     candidate.currencyCode !== 'ETB' ||
     candidate.minimumAmountMinor !== MINIMUM_AMOUNT_MINOR ||
@@ -319,8 +333,7 @@ function decodePolicy(candidate: unknown): RoutineDepositProtocolPolicy | undefi
     candidate.playerOwnershipRequired !== false ||
     candidate.dailyQuotaMinor !== null ||
     candidate.successfulDepositQuota !== null ||
-    candidate.maxConcurrentDeposits !== 1 ||
-    candidate.amountSource !== 'official_receipt_settled_amount'
+    candidate.maxConcurrentDeposits !== 1
   ) {
     return undefined;
   }

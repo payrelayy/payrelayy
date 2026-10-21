@@ -739,7 +739,8 @@ describe('read-only repository prerequisite regressions', () => {
     const legacyBoundarySource = protectionSource.slice(legacyBoundaryStart, proofBoundaryStart);
     const providerAwareBoundarySource = protectionSource.slice(providerAwareBoundaryStart);
     expect(legacyBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
-    expect(providerAwareBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(1);
+    // Capture and the new SMS blind-index helper each normalize once at this boundary.
+    expect(providerAwareBoundarySource.match(/reference\.toUpperCase\(\)/gu)).toHaveLength(2);
     expect(apiSource).toContain(
       "  protectCbeBirrDepositReference,\n  protectDepositProofReference,\n  unprotectReceiverAccountReference,\n} from '@fetanagent/deposit-reference-protection';",
     );

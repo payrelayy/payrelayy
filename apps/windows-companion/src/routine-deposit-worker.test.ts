@@ -139,6 +139,15 @@ function fixture(lease = makeLease()) {
 describe('routine production serial deposit worker', () => {
   it('accepts persistent routine policy, not fixed pilot or quotas', () => {
     expect(isRoutineDepositPolicy(policy)).toBe(true);
+    expect(
+      isRoutineDepositPolicy({
+        ...policy,
+        provider: 'receiver_sms',
+        amountSource: 'receiver_sms_amount',
+      }),
+    ).toBe(true);
+    expect(isRoutineDepositPolicy({ ...policy, provider: 'receiver_sms' })).toBe(false);
+    expect(isRoutineDepositPolicy({ ...policy, amountSource: 'receiver_sms_amount' })).toBe(false);
     for (const altered of [
       { mode: 'private_pilot' },
       { maximumAmountMinor: 2500 },

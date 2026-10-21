@@ -52,6 +52,7 @@ async function save(client: Client, owner: string, selectedAccount: string, key 
 export async function persistentPolicyFixture(
   client: Client,
   owner: string,
+  authorizedAt?: string,
 ): Promise<{ authorityId: string; accountId: string }> {
   const accountId = await account(client);
   // This disposable fixture models an authorization committed before the current transaction.
@@ -60,11 +61,12 @@ export async function persistentPolicyFixture(
     `
     insert into app.routine_telebirr_processing_authorizations (
       platform_agent_account_id, deposit_policy_version_id, authorized_by_admin_id, authorized_at
-    ) select $1::uuid, policy.id, owner_user.id, transaction_timestamp() - interval '1 second'
+    ) select $1::uuid, policy.id, owner_user.id,
+        coalesce($3::timestamptz, transaction_timestamp() - interval '1 second')
       from app.deposit_policy_versions policy, app.admin_users owner_user
       where policy.status = 'active' and owner_user.auth_user_id = $2::uuid returning id
   `,
-    [accountId, owner],
+    [accountId, owner, authorizedAt ?? null],
   );
   const authorityId = authority.rows[0]!.id;
   await client.query(

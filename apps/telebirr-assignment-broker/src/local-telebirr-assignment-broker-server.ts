@@ -15,6 +15,7 @@ import {
   TELEBIRR_ASSIGNMENT_BROKER_LOCAL_SOCKET,
   ROUTINE_NO_MONEY_LOCAL_PATH,
   ROUTINE_PAID_POLL_LOCAL_PATH,
+  RECEIVER_SMS_LOCAL_PATH,
   decodeTelebirrAssignmentBrokerLocalPollRequestBytes,
   encodeTelebirrAssignmentBrokerLocalPollResponse,
 } from '@fetanagent/telebirr-verification-foundation';
@@ -134,6 +135,7 @@ export function createTelebirrAssignmentBrokerLocalHandler(
   poll: TelebirrAssignmentBrokerPoll,
   routineHandler?: RoutineLocalHandler,
   paidPollHandler?: RoutineLocalHandler,
+  receiverSmsHandler?: RoutineLocalHandler,
 ): (
   request: TelebirrAssignmentBrokerLocalHttpRequest,
 ) => Promise<TelebirrAssignmentBrokerLocalHttpResponse> {
@@ -149,6 +151,11 @@ export function createTelebirrAssignmentBrokerLocalHandler(
         return paidPollHandler === undefined
           ? errorResponse(400, 'invalid_request')
           : await paidPollHandler(request);
+      }
+      if (request.path === RECEIVER_SMS_LOCAL_PATH) {
+        return receiverSmsHandler === undefined
+          ? errorResponse(400, 'invalid_request')
+          : await receiverSmsHandler(request);
       }
       if (!hasValidHttpEnvelope(request)) return errorResponse(400, 'invalid_request');
       const decoded = decodeTelebirrAssignmentBrokerLocalPollRequestBytes(request.body);
@@ -307,12 +314,18 @@ export function createTelebirrAssignmentBrokerLocalUnixServer(
   poll: TelebirrAssignmentBrokerPoll,
   routineHandler?: RoutineLocalHandler,
   paidPollHandler?: RoutineLocalHandler,
+  receiverSmsHandler?: RoutineLocalHandler,
 ): {
   readonly server: Server;
   readonly listen: () => Promise<void>;
   readonly close: () => Promise<void>;
 } {
-  const handler = createTelebirrAssignmentBrokerLocalHandler(poll, routineHandler, paidPollHandler);
+  const handler = createTelebirrAssignmentBrokerLocalHandler(
+    poll,
+    routineHandler,
+    paidPollHandler,
+    receiverSmsHandler,
+  );
   const server = createServer({ maxHeaderSize: 8_192 }, (request, target) => {
     void (async () => {
       try {

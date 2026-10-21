@@ -64,6 +64,7 @@ export interface BotConfig extends RuntimeConfig {
   readonly telegramBetaAdmission: BotTelegramBetaAdmissionConfig;
   readonly telegramActionChannel: BotTelegramActionChannelConfig;
   readonly playerValidationIntakeEnabled: boolean;
+  readonly receiverSmsCandidateEnabled: boolean;
   readonly supportContactUrl: string | undefined;
 }
 
@@ -354,6 +355,16 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     false,
     'INTERNAL_TELEGRAM_PLAYER_VALIDATION_INTAKE_ENABLED',
   );
+  const receiverSmsCandidateEnabled = booleanFromEnv(
+    environment.BOT_RECEIVER_SMS_CANDIDATE_ENABLED,
+    false,
+    'BOT_RECEIVER_SMS_CANDIDATE_ENABLED',
+  );
+  if (receiverSmsCandidateEnabled && (!enabled || !telegramActionChannel.enabled)) {
+    throw new Error(
+      'The receiver SMS candidate route requires the private Telegram action channel.',
+    );
+  }
   if (playerValidationIntakeEnabled && (!enabled || !telegramActionChannel.enabled)) {
     throw new Error('Player validation intake requires the private Telegram action channel.');
   }
@@ -373,6 +384,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       telegramBetaAdmission,
       telegramActionChannel,
       playerValidationIntakeEnabled,
+      receiverSmsCandidateEnabled,
       supportContactUrl,
     };
   }
@@ -417,6 +429,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     telegramBetaAdmission,
     telegramActionChannel,
     playerValidationIntakeEnabled,
+    receiverSmsCandidateEnabled,
     supportContactUrl,
   };
 }
@@ -441,6 +454,7 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
     readonly secretsConfigured: boolean;
   };
   readonly playerValidationIntakeEnabled: boolean;
+  readonly receiverSmsCandidateEnabled: boolean;
 } {
   return {
     nodeEnv: config.nodeEnv,
@@ -463,5 +477,6 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
       secretsConfigured: config.telegramActionChannel.enabled,
     },
     playerValidationIntakeEnabled: config.playerValidationIntakeEnabled,
+    receiverSmsCandidateEnabled: config.receiverSmsCandidateEnabled,
   };
 }

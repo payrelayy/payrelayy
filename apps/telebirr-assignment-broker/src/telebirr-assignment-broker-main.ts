@@ -18,6 +18,16 @@ import { createRoutinePaidPollPostgresRuntime } from './routine-paid-poll-runtim
 import { createRoutinePaidPollBroker } from './routine-paid-poll-broker.js';
 import { createRoutinePaidPollLocalHandler } from './routine-paid-poll-local-handler.js';
 import {
+  loadReceiverSmsIngestConfig,
+  createReceiverSmsIngestPostgresRuntime,
+} from './receiver-sms-ingest-runtime.js';
+import { createReceiverSmsIngestBroker } from './receiver-sms-ingest-broker.js';
+import { createReceiverSmsIngestLocalHandler } from './receiver-sms-ingest-local-handler.js';
+import {
+  createReceiverSmsSettlementRuntime,
+  loadReceiverSmsSettlementConfig,
+} from './receiver-sms-settlement-runtime.js';
+import {
   createTelebirrAssignmentBrokerLocalUnixServer,
   type RoutineLocalHandler,
 } from './local-telebirr-assignment-broker-server.js';
@@ -104,7 +114,17 @@ export async function runTelebirrAssignmentBrokerMain(
   const config = loadTelebirrAssignmentBrokerConfig(environment, configDependencies);
   const routine = loadRoutineNoMoneyConfig(environment, configDependencies);
   const paid = loadRoutinePaidPollConfig(environment, configDependencies);
-  if (routine === undefined && paid === undefined) {
+  const receiverSms = loadReceiverSmsIngestConfig(environment, configDependencies);
+  const smsSettlement = loadReceiverSmsSettlementConfig(environment, configDependencies);
+  if (smsSettlement !== undefined && (receiverSms === undefined || paid !== undefined)) {
+    throw new Error('The receiver SMS settlement lane is unavailable.');
+  }
+  if (
+    routine === undefined &&
+    paid === undefined &&
+    receiverSms === undefined &&
+    smsSettlement === undefined
+  ) {
     return startTelebirrAssignmentBrokerApplication(config, applicationDependencies);
   }
   if (
@@ -115,6 +135,7 @@ export async function runTelebirrAssignmentBrokerMain(
     throw new Error('The private routine TeleBirr broker is unavailable.');
   }
   const runtimes: Array<{ ready(): Promise<boolean>; close(): Promise<void> }> = [];
+  let settlementTimer: NodeJS.Timeout | undefined;
   try {
     const now = () => new Date().toISOString();
     let routineHandler: RoutineLocalHandler | undefined;
@@ -143,10 +164,39 @@ export async function runTelebirrAssignmentBrokerMain(
         }),
       );
     }
+    let receiverSmsHandler: RoutineLocalHandler | undefined;
+    if (receiverSms !== undefined) {
+      const runtime = await createReceiverSmsIngestPostgresRuntime(receiverSms.connection);
+      runtimes.push(runtime);
+      receiverSmsHandler = createReceiverSmsIngestLocalHandler(
+        createReceiverSmsIngestBroker(runtime.database, now, receiverSms.fingerprintSecret),
+      );
+    }
+    let settlementInFlight = false;
+    if (smsSettlement !== undefined) {
+      const runtime = await createReceiverSmsSettlementRuntime(smsSettlement);
+      runtimes.push(runtime);
+      settlementTimer = setInterval(() => {
+        if (settlementInFlight) return;
+        settlementInFlight = true;
+        void runtime
+          .poll()
+          .catch(() => undefined)
+          .finally(() => {
+            settlementInFlight = false;
+          });
+      }, 1_000);
+      settlementTimer.unref();
+    }
     const application = await startTelebirrAssignmentBrokerApplication(config, {
       ...applicationDependencies,
       createLocalServer: (poll) =>
-        createTelebirrAssignmentBrokerLocalUnixServer(poll, routineHandler, paidHandler),
+        createTelebirrAssignmentBrokerLocalUnixServer(
+          poll,
+          routineHandler,
+          paidHandler,
+          receiverSmsHandler,
+        ),
     });
     let closePromise: Promise<void> | undefined;
     return Object.freeze({
@@ -155,6 +205,7 @@ export async function runTelebirrAssignmentBrokerMain(
         (await Promise.all(runtimes.map((runtime) => runtime.ready()))).every(Boolean),
       close: () => {
         closePromise ??= (async () => {
+          if (settlementTimer !== undefined) clearInterval(settlementTimer);
           const closed = await Promise.allSettled([
             application.close(),
             ...runtimes.map((runtime) => runtime.close()),
@@ -165,6 +216,7 @@ export async function runTelebirrAssignmentBrokerMain(
       },
     });
   } catch {
+    if (settlementTimer !== undefined) clearInterval(settlementTimer);
     await Promise.allSettled(runtimes.map((runtime) => runtime.close()));
     throw new Error('The private routine TeleBirr broker is unavailable.');
   }

@@ -27,6 +27,7 @@ import { playerActionCatalogPreflightPassed } from './player-action-catalog-pref
 import { captureTelegramCbeBirrBoundProof } from './telegram-cbe-birr-bound-proof-intake.js';
 import { issueTelegramCbeBirrDryRunInstruction } from './telegram-cbe-birr-dry-run-instruction.js';
 import { captureTelegramRoutineTelebirrCandidate } from './telegram-routine-telebirr-candidate-intake.js';
+import { captureTelegramReceiverSmsCandidate } from './telegram-receiver-sms-candidate-intake.js';
 import { captureTelegramLiveTelebirrProof } from './telegram-telebirr-live-proof-intake.js';
 import { captureTelegramTelebirrShadowProof } from './telegram-telebirr-shadow-proof-intake.js';
 import type { TelegramPrivateActionNonceStore } from './telegram-private-action.js';
@@ -776,6 +777,32 @@ async function handleSavedTelebirrProof(
   );
 }
 
+async function handleSavedReceiverSmsProof(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'saved_receiver_sms_proof_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (!config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled) {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  if (selectedPlayerId === null) return { version: 1, outcome: 'player_selection_missing' };
+  return handleDepositProof(
+    database,
+    originInboundEventId,
+    {
+      ...action,
+      kind: 'deposit_proof_command',
+      playerId: selectedPlayerId,
+    },
+    config,
+  );
+}
+
 async function handleCallback(
   database: TelegramPlayerActionDatabase,
   originInboundEventId: string,
@@ -1111,6 +1138,9 @@ async function handleDepositProof(
 ): Promise<TelegramPrivateActionResult> {
   if (config.telegramPlayerActionRuntime.telebirrReceiverReviewEnabled) {
     return { version: 1, outcome: 'deposit_unavailable' };
+  }
+  if (config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled) {
+    return captureTelegramReceiverSmsCandidate(database, originInboundEventId, action, config);
   }
 
   if (action.providerCode === 'telebirr') {
@@ -1504,6 +1534,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleSavedTelebirrDestination(pool, inboundEventId, action, config);
           case 'saved_telebirr_proof_command':
             return await handleSavedTelebirrProof(pool, inboundEventId, action, config);
+          case 'saved_receiver_sms_proof_command':
+            return await handleSavedReceiverSmsProof(pool, inboundEventId, action, config);
           case 'player_registration_callback':
             return await handleCallback(pool, inboundEventId, action, config);
           case 'player_id_text':
@@ -1540,6 +1572,8 @@ export function createPostgresTelegramPlayerActionRuntime(
           true,
           config.telegramPlayerActionRuntime.cbeBirrBoundDryRunStagingEnabled ||
             config.telegramPlayerActionRuntime.cbeBirrBoundNoMoneyProductionEnabled,
+          config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled,
+          true,
         );
       } catch {
         return false;

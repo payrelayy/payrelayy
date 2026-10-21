@@ -22,6 +22,7 @@ export type TelegramPlayerIdFlowPresentation =
 export interface TelegramPlayerIdFlowContext {
   readonly selectedPlayerId?: string;
   readonly playerValidationEnabled?: boolean;
+  readonly receiverSmsCandidateEnabled?: boolean;
 }
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
@@ -231,6 +232,25 @@ export function presentTelegramPlayerIdFlowResult(
       // The outcome notifier sends one definitive message, or a delayed checking notice
       // if the phone/provider remains unavailable.
       return { kind: 'deferred' };
+    case 'receiver_sms_candidate_received':
+      if (result.matchStatus === 'already_used') {
+        return {
+          kind: 'message',
+          text: 'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.',
+        };
+      }
+      if (result.matchStatus === 'older_review') {
+        // The database has already queued the durable Owner-review notice.
+        return { kind: 'deferred' };
+      }
+      if (result.matchStatus === 'held_review') {
+        // The notifier owns the one customer-visible held result and its retries.
+        return { kind: 'deferred' };
+      }
+      return {
+        kind: 'message',
+        text: `${result.providerName} reference received. Checking against the receiving phone SMS. Please do not pay again.`,
+      };
     case 'telebirr_routine_candidate_already_used':
       return {
         kind: 'menu',
@@ -291,7 +311,10 @@ export function presentTelegramPlayerIdFlowResult(
         text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${result.depositStatus.label}.`,
       };
     case 'deposit_input_invalid':
-      return { kind: 'message', text: telegramDepositHelpText() };
+      return {
+        kind: 'message',
+        text: telegramDepositHelpText(context.receiverSmsCandidateEnabled),
+      };
     case 'deposit_status_unavailable':
       return {
         kind: 'message',
@@ -308,7 +331,16 @@ export function presentTelegramPlayerIdFlowResult(
   }
 }
 
-export function telegramDepositHelpText(): string {
+export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): string {
+  if (receiverSmsCandidateEnabled) {
+    return [
+      '💰 Deposits',
+      'Save a Player ID once in /menu, then tap Deposit for the current receiver.',
+      'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+      'A bare reference is treated as TeleBirr. For CBE Birr, send /cbe followed by the reference, or send the CBE Birr SMS or receipt.',
+      'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',
+    ].join('\n');
+  }
   return [
     '💰 TeleBirr deposit',
     'Save a Player ID once in /menu, then tap Deposit for the current receiver.',

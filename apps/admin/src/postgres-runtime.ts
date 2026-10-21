@@ -17,6 +17,7 @@ import { PostgresOwnerRoutineTelebirrProcessing } from './owner-routine-telebirr
 import { PostgresOwnerRoutineTelebirrReceiverReviews } from './owner-routine-telebirr-receiver-reviews.js';
 import { PostgresOwnerTelebirrFastAlerts } from './owner-telebirr-fast-alerts.js';
 import { PostgresOwnerTelebirrOldPayments } from './owner-telebirr-old-payments.js';
+import { PostgresOwnerReceiverSmsOldPayments } from './owner-receiver-sms-old-payments.js';
 import { PostgresOwnerTelebirrTransactions } from './owner-telebirr-transactions.js';
 import { PostgresOwnerSupportContact } from './owner-support-contact.js';
 import { PostgresOwnerCompanionLookup } from './owner-companion-exact-five-lookup.js';
@@ -40,6 +41,8 @@ export interface OwnerControlPostgresRuntime {
   readonly telebirrFastAlerts?: Pick<PostgresOwnerTelebirrFastAlerts, 'status'> | undefined;
   readonly telebirrOldPayments?:
     Pick<PostgresOwnerTelebirrOldPayments, 'list' | 'decide'> | undefined;
+  readonly receiverSmsOldPayments?:
+    Pick<PostgresOwnerReceiverSmsOldPayments, 'list' | 'decide'> | undefined;
   readonly telebirrTransactions?: Pick<PostgresOwnerTelebirrTransactions, 'list'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
@@ -204,6 +207,24 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 'execute'), true) as telebirr_fast_alert_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 'execute'), true) as telebirr_old_payment_list_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 'execute'), true) as telebirr_old_payment_decide_allowed,
+    coalesce((
+      select routine.prosecdef and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and not exists (select 1 from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+          where acl.privilege_type = 'EXECUTE'
+            and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole))
+      from pg_proc routine
+      where routine.oid = to_regprocedure('app.list_owner_receiver_sms_old_payments(uuid,integer)')::oid
+    ), true) as receiver_sms_old_payment_list_catalog_safe,
+    coalesce((
+      select routine.prosecdef and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and not exists (select 1 from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+          where acl.privilege_type = 'EXECUTE'
+            and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole))
+      from pg_proc routine
+      where routine.oid = to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid
+    ), true) as receiver_sms_old_payment_decide_catalog_safe,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 'execute'), true) as telebirr_transactions_list_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
@@ -290,6 +311,12 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)') is not null)::integer
         + (to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)') is not null)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.list_owner_receiver_sms_old_payments(uuid,integer)')::oid,
+            'execute'), false)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid,
+            'execute'), false)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 'execute'), false)::integer
         + (to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
@@ -349,6 +376,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_receiver_sms_old_payments(uuid,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
@@ -474,6 +503,9 @@ export async function createOwnerControlPostgresRuntime(
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     telebirrOldPayments: new PostgresOwnerTelebirrOldPayments({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
+    receiverSmsOldPayments: new PostgresOwnerReceiverSmsOldPayments({
       query: async (sql, values) => pool.query(sql, [...values]),
     }),
     telebirrTransactions: new PostgresOwnerTelebirrTransactions({

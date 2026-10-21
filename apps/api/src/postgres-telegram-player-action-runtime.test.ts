@@ -1810,11 +1810,13 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     await expect(
       createPostgresTelegramPlayerActionRuntime(productionCandidateConfig, database).ready(),
     ).resolves.toBe(false);
-    expect(queries).toHaveLength(2);
+    expect(queries).toHaveLength(4);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
     expect(queries[0]).toContain('select count(*) = 31');
     expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
     expect(queries[1]).toContain('select count(*) = 33');
+    expect(queries[2]).toContain('app.capture_telegram_receiver_sms_candidate');
+    expect(queries[3]).toContain('app.capture_telegram_receiver_sms_candidate');
   });
 
   it('keeps an inactive candidate route ready across only the exact grant handoff', async () => {
@@ -1905,11 +1907,13 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     await expect(
       createPostgresTelegramPlayerActionRuntime(stagingCandidateConfig, database).ready(),
     ).resolves.toBe(false);
-    expect(queries).toHaveLength(2);
+    expect(queries).toHaveLength(4);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
     expect(queries[0]).toContain('select count(*) = 31');
     expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
     expect(queries[1]).toContain('select count(*) = 33');
+    expect(queries[2]).toContain('app.capture_telegram_receiver_sms_candidate');
+    expect(queries[3]).toContain('app.capture_telegram_receiver_sms_candidate');
   });
 
   it('disables payment-proof submission while receiver review is enabled', async () => {

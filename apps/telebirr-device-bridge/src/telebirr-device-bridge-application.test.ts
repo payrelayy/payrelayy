@@ -213,6 +213,7 @@ describe('TeleBirr device bridge application', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     );
     expect(fixture.captured.bridge?.serverSigner).toBe(enabledConfig.serverSigner);
     expect(fixture.captured.bridge?.claimReplay).toBeDefined();

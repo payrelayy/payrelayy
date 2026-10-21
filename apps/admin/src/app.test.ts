@@ -911,6 +911,81 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('requires Owner identity and confirmation for an older SMS payment decision', async () => {
+    const candidateId = '22222222-2222-4222-8222-222222222222';
+    const requestId = '77777777-7777-4777-8777-777777777777';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        receiverSmsOldPayments: {
+          list: async (actor, limit) => {
+            calls.push(['list', actor, limit]);
+            return [
+              {
+                candidateId,
+                providerCode: 'cbe_birr' as const,
+                submittedAt: '2026-10-20T10:00:00.000Z',
+                paymentAt: '2026-10-20T08:59:00.000Z',
+                amountMinor: '2500',
+                referenceMasked: '***AB12',
+                playerMasked: '***5678',
+                reviewKind: 'older_approval' as const,
+                reasonCode: 'old_payment' as const,
+              },
+            ];
+          },
+          decide: async (actor, candidate, action) => {
+            calls.push(['decide', actor, candidate, action]);
+            return { decision: 'rejected' as const, decidedAt: '2026-10-20T10:01:00.000Z' };
+          },
+        },
+      }),
+    });
+    try {
+      const listUrl = '/v1/owner/receiver-sms-old-payments';
+      const decisionUrl = `${listUrl}/${candidateId}/decision`;
+      expect((await app.inject(listUrl)).statusCode).toBe(403);
+      const listed = await app.inject({
+        url: listUrl,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json().pending).toHaveLength(1);
+      expect(listed.body).not.toContain('FULL_REFERENCE');
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: decisionUrl,
+            payload: { decision: 'reject', requestId, confirmed: false },
+            headers: { authorization: `Bearer ${bearer}` },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const decided = await app.inject({
+        method: 'POST',
+        url: decisionUrl,
+        payload: { decision: 'reject', requestId, confirmed: true },
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:3002',
+          'x-fetanagent-owner-csrf': 'owner-receiver-sms-old-payment-v1',
+          'x-idempotency-key': requestId,
+        },
+      });
+      expect(decided.statusCode).toBe(200);
+      expect(decided.json().decision.decision).toBe('rejected');
+      expect(calls).toEqual([
+        ['list', authUserId, 25],
+        ['decide', authUserId, candidateId, 'reject'],
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];

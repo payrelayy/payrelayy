@@ -101,5 +101,8 @@ object VerifierPlatformPrerequisites {
         PackageManager.PERMISSION_GRANTED
 
   fun canStart(context: Context, snapshot: VerifierOperationalSnapshot): Boolean =
-    BuildConfig.VERIFIER_ENABLED && snapshot.operatorEnabled && notificationsAllowed(context)
+    BuildConfig.VERIFIER_ENABLED && snapshot.operatorEnabled && notificationsAllowed(context) &&
+      (!BuildConfig.RECEIVER_SMS_ENABLED ||
+        context.checkSelfPermission(Manifest.permission.RECEIVE_SMS) ==
+        PackageManager.PERMISSION_GRANTED)
 }

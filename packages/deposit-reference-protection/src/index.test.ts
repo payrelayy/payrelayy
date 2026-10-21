@@ -11,6 +11,7 @@ import {
   RECEIVER_ACCOUNT_REFERENCE_PROFILE_VERSION,
   protectCbeBirrDepositReference,
   protectDepositProofReference,
+  fingerprintDepositProofReference,
   protectReceiverAccountReference,
   unprotectReceiverAccountReference,
   type DepositProofReferenceProvider,
@@ -160,6 +161,22 @@ function decryptProviderCiphertextForTest(
 }
 
 describe('provider-aware deposit proof-reference protection', () => {
+  it('matches the existing blind index for both SMS providers without ciphertext', () => {
+    for (const provider of ['telebirr', 'cbe_birr'] as const) {
+      const expected = protectDepositProofReference({
+        provider,
+        reference: 'SYNTHREF4821',
+        secrets,
+      });
+      expect(
+        fingerprintDepositProofReference({
+          provider,
+          reference: 'synthref4821',
+          fingerprintSecret: secrets.fingerprintSecret,
+        }),
+      ).toBe(expected.fingerprint);
+    }
+  });
   it('separates providers across metadata, keys, authenticated data, and fingerprints', () => {
     const reference = 'SYNTHREF4821';
     const nonce = () => Buffer.alloc(12, 7);

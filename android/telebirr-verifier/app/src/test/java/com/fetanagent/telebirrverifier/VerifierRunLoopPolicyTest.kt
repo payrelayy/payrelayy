@@ -27,6 +27,16 @@ class VerifierRunLoopPolicyTest {
   }
 
   @Test
+  fun `receiver SMS inbox is checked every few seconds while online`() {
+    val status = status(LivePilotRuntimeState.READY, "sms_inbox_idle")
+    val fastest = VerifierRunLoopPolicy { 0.0 }
+    val slowest = VerifierRunLoopPolicy { 1.0 }
+    assertEquals(listOf(3_000L, 3_000L, 3_000L),
+      (0..2).map { fastest.decide(status, it.toLong()).delayMillis })
+    assertEquals(3_600L, slowest.decide(status, 0L).delayMillis)
+  }
+
+  @Test
   fun `paid idle poll remains responsive without changing no-money backoff`() {
     val policy = VerifierRunLoopPolicy { 0.0 }
     val status = status(LivePilotRuntimeState.READY, "no_paid_assignment")

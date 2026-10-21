@@ -28,6 +28,9 @@ class VerifierRuntimeSession(
  */
 object VerifierRuntimeComposition {
   fun create(context: Context): VerifierRuntimeSession {
+    if (BuildConfig.RECEIVER_SMS_ENABLED) {
+      return ReceiverSmsRuntimeComposition.create(context)
+    }
     if (RoutinePaidRuntimeComposition.enabled()) {
       return RoutinePaidRuntimeComposition.create(context)
     }
@@ -76,6 +79,7 @@ object VerifierRuntimeComposition {
 
   fun isEnrolled(context: Context): Boolean {
     if (!BuildConfig.VERIFIER_ENABLED) return false
+    if (BuildConfig.RECEIVER_SMS_ENABLED) return ReceiverSmsRuntimeComposition.isEnrolled(context)
     if (RoutinePaidRuntimeComposition.enabled()) {
       return RoutinePaidRuntimeComposition.isEnrolled(context)
     }

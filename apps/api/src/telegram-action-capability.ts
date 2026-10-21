@@ -28,6 +28,7 @@ export type TelegramActionSemanticConsumer =
   | 'capture_telegram_telebirr_shadow_proof'
   | 'capture_telegram_live_telebirr_proof'
   | 'capture_telegram_routine_telebirr_untrusted_proof'
+  | 'capture_telegram_receiver_sms_candidate'
   | 'prepare_telegram_telebirr_destination'
   | 'prepare_telegram_live_telebirr_destination'
   | 'open_live_deposit_intent'
@@ -97,7 +98,8 @@ type DepositProofSemanticInput = {
     | 'capture_dry_run_deposit_proof'
     | 'capture_telegram_telebirr_shadow_proof'
     | 'capture_telegram_live_telebirr_proof'
-    | 'capture_telegram_routine_telebirr_untrusted_proof';
+    | 'capture_telegram_routine_telebirr_untrusted_proof'
+    | 'capture_telegram_receiver_sms_candidate';
   readonly originInboundEventId: string;
   readonly playerId: string;
   readonly providerCode: DepositProofProviderCode;
@@ -368,6 +370,7 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
     case 'capture_telegram_telebirr_shadow_proof':
     case 'capture_telegram_live_telebirr_proof':
     case 'capture_telegram_routine_telebirr_untrusted_proof':
+    case 'capture_telegram_receiver_sms_candidate':
       if (
         (input.providerCode !== 'cbe_birr' && input.providerCode !== 'telebirr') ||
         ((input.consumer === 'capture_telegram_telebirr_shadow_proof' ||
@@ -404,7 +407,9 @@ export function createTelegramActionSemanticHmac(input: TelegramActionSemanticHm
               ? 'live'
               : input.consumer === 'capture_telegram_routine_telebirr_untrusted_proof'
                 ? 'routine_candidate_no_money'
-                : 'dry_run',
+                : input.consumer === 'capture_telegram_receiver_sms_candidate'
+                  ? 'receiver_sms_candidate'
+                  : 'dry_run',
       });
       break;
     default:

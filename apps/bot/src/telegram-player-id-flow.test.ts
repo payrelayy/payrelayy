@@ -357,6 +357,21 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(/AB12CD34EF|uuid|token|amount/iu);
   });
 
+  it.each(['older_review', 'held_review'] as const)(
+    'defers the %s SMS response to the durable outcome notifier',
+    (matchStatus) => {
+      expect(
+        presentTelegramPlayerIdFlowResult({
+          version: 1,
+          outcome: 'receiver_sms_candidate_received',
+          providerCode: 'telebirr',
+          providerName: 'TeleBirr',
+          matchStatus,
+        }),
+      ).toEqual({ kind: 'deferred' });
+    },
+  );
+
   it('immediately explains a same-customer completed duplicate without exposing the reference', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,
@@ -447,6 +462,13 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(telegramDepositHelpText()).not.toContain('first line');
     expect(telegramDepositHelpText()).not.toContain('second line');
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');
+  });
+
+  it('explains both SMS payment methods only when the SMS route is selected', () => {
+    const help = telegramDepositHelpText(true);
+    expect(help).toContain('receiving phone SMS supplies the amount');
+    expect(help).toContain('/cbe followed by the reference');
+    expect(help).not.toContain('CBE Birr is not live yet');
   });
 
   it('asks the customer to choose one reference without exposing the candidate list', () => {

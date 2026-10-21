@@ -346,6 +346,17 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     return value as unknown as TelegramPrivateActionResult;
   }
   if (
+    value.outcome === 'receiver_sms_candidate_received' &&
+    keys.length === 5 &&
+    ((value.providerCode === 'cbe_birr' && value.providerName === 'CBE Birr') ||
+      (value.providerCode === 'telebirr' && value.providerName === 'TeleBirr')) &&
+    ['pending_sms', 'ready', 'older_review', 'held_review', 'already_used'].includes(
+      value.matchStatus as string,
+    )
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
     value.outcome === 'telebirr_routine_candidate_already_used' &&
     keys.length === 6 &&
     value.providerCode === 'telebirr' &&

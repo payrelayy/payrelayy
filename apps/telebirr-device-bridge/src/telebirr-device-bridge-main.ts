@@ -15,6 +15,8 @@ import { createRoutinePaidPollBridgeHandler } from './routine-paid-poll-bridge.j
 import { createRoutinePaidPollUnixDependencies } from './local-routine-paid-poll-broker-client.js';
 import { createRoutinePaidUploadBridgeHandler } from './routine-paid-upload-bridge.js';
 import { createRoutinePaidUploadUnixDependencies } from './local-routine-paid-poll-broker-client.js';
+import { createReceiverSmsUploadBridgeHandler } from './receiver-sms-upload-bridge.js';
+import { createReceiverSmsUnixDependencies } from './local-receiver-sms-broker-client.js';
 
 export async function runTelebirrDeviceBridgeMain(
   environment: NodeJS.ProcessEnv = process.env,
@@ -25,6 +27,7 @@ export async function runTelebirrDeviceBridgeMain(
   const routineMode = environment.INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED;
   const paidMode = environment.INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED;
   const paidUploadMode = environment.INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED;
+  const receiverSmsMode = environment.INTERNAL_RECEIVER_SMS_BRIDGE_ENABLED;
   if (routineMode !== undefined && routineMode !== 'false' && routineMode !== 'true') {
     throw new Error('The routine no-money bridge mode is unavailable.');
   }
@@ -34,10 +37,18 @@ export async function runTelebirrDeviceBridgeMain(
   if (paidUploadMode !== undefined && paidUploadMode !== 'false' && paidUploadMode !== 'true') {
     throw new Error('The routine paid upload bridge mode is unavailable.');
   }
+  if (receiverSmsMode !== undefined && receiverSmsMode !== 'false' && receiverSmsMode !== 'true') {
+    throw new Error('The receiver SMS bridge mode is unavailable.');
+  }
   if (paidUploadMode === 'true' && paidMode !== 'true') {
     throw new Error('The routine paid upload needs the private paid broker.');
   }
-  if (routineMode !== 'true' && paidMode !== 'true' && paidUploadMode !== 'true') {
+  if (
+    routineMode !== 'true' &&
+    paidMode !== 'true' &&
+    paidUploadMode !== 'true' &&
+    receiverSmsMode !== 'true'
+  ) {
     return startTelebirrDeviceBridgeApplication(config, applicationDependencies);
   }
   if (
@@ -46,7 +57,8 @@ export async function runTelebirrDeviceBridgeMain(
     environment.FINANCIAL_ACTIONS_MODE !== 'dry_run' ||
     (routineMode === 'true' && applicationDependencies.createRoutineHandler !== undefined) ||
     (paidMode === 'true' && applicationDependencies.createPaidPollHandler !== undefined) ||
-    (paidUploadMode === 'true' && applicationDependencies.createPaidUploadHandler !== undefined)
+    (paidUploadMode === 'true' && applicationDependencies.createPaidUploadHandler !== undefined) ||
+    (receiverSmsMode === 'true' && applicationDependencies.createReceiverSmsHandler !== undefined)
   ) {
     throw new Error('The routine TeleBirr bridge mode is unavailable.');
   }
@@ -68,6 +80,12 @@ export async function runTelebirrDeviceBridgeMain(
       ? {
           createPaidUploadHandler: () =>
             createRoutinePaidUploadBridgeHandler(createRoutinePaidUploadUnixDependencies()),
+        }
+      : {}),
+    ...(receiverSmsMode === 'true'
+      ? {
+          createReceiverSmsHandler: () =>
+            createReceiverSmsUploadBridgeHandler(createReceiverSmsUnixDependencies()),
         }
       : {}),
   });

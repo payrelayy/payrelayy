@@ -36,6 +36,8 @@ const ALLOWED_FUNCTIONS = [
 
 const ROUTINE_CANDIDATE_FUNCTION =
   'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)';
+const RECEIVER_SMS_CANDIDATE_FUNCTION =
+  'app.capture_telegram_receiver_sms_candidate(uuid,text,text,text,text,text,smallint,smallint,text)';
 const CBE_BIRR_CANDIDATE_FUNCTIONS = [
   'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
   'app.capture_telegram_cbe_birr_bound_dry_run_proof(uuid,uuid,text,text,text,text,smallint,smallint,text)',
@@ -44,11 +46,13 @@ const CBE_BIRR_CANDIDATE_FUNCTIONS = [
 function buildPlayerActionCatalogPreflightSql(
   routineCandidateEnabled: boolean,
   cbeBirrCandidateEnabled = false,
+  receiverSmsCandidateEnabled = false,
 ): string {
   const allowedFunctions = [
     ...ALLOWED_FUNCTIONS,
     ...(routineCandidateEnabled ? [ROUTINE_CANDIDATE_FUNCTION] : []),
     ...(cbeBirrCandidateEnabled ? CBE_BIRR_CANDIDATE_FUNCTIONS : []),
+    ...(receiverSmsCandidateEnabled ? [RECEIVER_SMS_CANDIDATE_FUNCTION] : []),
   ];
   const allowedFunctionSql = allowedFunctions
     .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
@@ -199,11 +203,14 @@ function buildPlayerActionCatalogPreflightSql(
             }
           ) then array['search_path=pg_catalog']::text[]
           ${
-            cbeBirrCandidateEnabled
+            cbeBirrCandidateEnabled || receiverSmsCandidateEnabled
               ? `when routine.oid in (
-            ${CBE_BIRR_CANDIDATE_FUNCTIONS.map(
-              (signature) => `pg_catalog.to_regprocedure('${signature}')`,
-            ).join(',\n            ')}
+            ${[
+              ...(cbeBirrCandidateEnabled ? CBE_BIRR_CANDIDATE_FUNCTIONS : []),
+              ...(receiverSmsCandidateEnabled ? [RECEIVER_SMS_CANDIDATE_FUNCTION] : []),
+            ]
+              .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
+              .join(',\n            ')}
           ) then array['search_path=pg_catalog, pg_temp']::text[]`
               : ''
           }
@@ -265,6 +272,8 @@ export const PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL = buildPlayerActionCat
 );
 export const PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL =
   buildPlayerActionCatalogPreflightSql(true, true);
+export const PLAYER_ACTION_RECEIVER_SMS_CATALOG_PREFLIGHT_SQL =
+  buildPlayerActionCatalogPreflightSql(false, false, true);
 
 export interface PlayerActionCatalogDatabase {
   query(query: string, values: readonly unknown[]): Promise<{ readonly rows: readonly unknown[] }>;
@@ -281,13 +290,20 @@ export async function playerActionCatalogPreflightPassed(
   routineCandidateEnabled = false,
   allowInactiveCandidateGrant = false,
   cbeBirrCandidateEnabled = false,
+  receiverSmsCandidateEnabled = false,
+  allowInactiveReceiverSmsGrant = false,
 ): Promise<boolean> {
-  const variants = [
-    { routine: false, cbe: false, sql: PLAYER_ACTION_CATALOG_PREFLIGHT_SQL },
-    { routine: true, cbe: false, sql: PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL },
-    { routine: false, cbe: true, sql: PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL },
-    { routine: true, cbe: true, sql: PLAYER_ACTION_ALL_CANDIDATES_CATALOG_PREFLIGHT_SQL },
-  ];
+  const variants = [false, true].flatMap((sms) => [
+    {
+      routine: false,
+      cbe: false,
+      sms,
+      sql: buildPlayerActionCatalogPreflightSql(false, false, sms),
+    },
+    { routine: true, cbe: false, sms, sql: buildPlayerActionCatalogPreflightSql(true, false, sms) },
+    { routine: false, cbe: true, sms, sql: buildPlayerActionCatalogPreflightSql(false, true, sms) },
+    { routine: true, cbe: true, sms, sql: buildPlayerActionCatalogPreflightSql(true, true, sms) },
+  ]);
   for (const variant of variants) {
     if (
       variant.routine !== routineCandidateEnabled &&
@@ -297,6 +313,11 @@ export async function playerActionCatalogPreflightPassed(
     if (
       variant.cbe !== cbeBirrCandidateEnabled &&
       (cbeBirrCandidateEnabled || !allowInactiveCandidateGrant)
+    )
+      continue;
+    if (
+      variant.sms !== receiverSmsCandidateEnabled &&
+      (receiverSmsCandidateEnabled || !allowInactiveReceiverSmsGrant)
     )
       continue;
     const result = await database.query(variant.sql, []);

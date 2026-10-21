@@ -103,6 +103,11 @@ const ROOT_MENU_KEYS = new Set([
   'preferredLocale',
 ]);
 const SAVED_PROOF_KEYS = new Set([...ROOT_MENU_KEYS, 'transactionReference']);
+const SAVED_RECEIVER_SMS_PROOF_KEYS = new Set([
+  ...ROOT_MENU_KEYS,
+  'providerCode',
+  'transactionReference',
+]);
 const CALLBACK_KEYS = new Set([...ROOT_MENU_KEYS, 'callbackData']);
 const PLAYER_ID_TEXT_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
 const TELEBIRR_DESTINATION_KEYS = new Set([...ROOT_MENU_KEYS, 'playerId']);
@@ -464,6 +469,20 @@ export function parseTelegramPrivateActionEnvelope(
         ? {
             ...identity,
             kind: 'saved_telebirr_proof_command',
+            transactionReference: parsed.transactionReference,
+          }
+        : undefined;
+    }
+    case 'saved_receiver_sms_proof_command': {
+      if (!hasOnlyKeys(parsed, SAVED_RECEIVER_SMS_PROOF_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity &&
+        (parsed.providerCode === 'cbe_birr' || parsed.providerCode === 'telebirr') &&
+        validDepositProofReference(parsed.transactionReference)
+        ? {
+            ...identity,
+            kind: 'saved_receiver_sms_proof_command',
+            providerCode: parsed.providerCode,
             transactionReference: parsed.transactionReference,
           }
         : undefined;

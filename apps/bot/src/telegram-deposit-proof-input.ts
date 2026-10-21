@@ -20,7 +20,7 @@ export type TelegramDepositProofInput =
 const DIRECT_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 const FORBIDDEN_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const CBE_BIRR_REFERENCE_LABEL_PATTERN =
-  /\b(?:Txn\s+ID|Order\s+ID|Receipt\s+Number)\s*[:#]?\s*([A-Za-z0-9]{1,64})/giu;
+  /\b(?:Txn\s+ID|Transaction\s+ID|Order\s+ID|Receipt\s+Number)\s*[:#]?\s*([A-Za-z0-9]{1,64})/giu;
 const LINK_PATTERN = /https?:\/\/[^\s<>"']+/giu;
 
 /** Bound the whole command before splitting, trimming, or scanning customer-controlled text. */

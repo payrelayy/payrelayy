@@ -4,7 +4,7 @@ import android.content.Intent
 import android.provider.Telephony
 import java.nio.charset.StandardCharsets
 
-/** Reads only incoming payment-like SMS broadcasts. No sender label is consulted. */
+/** Only direct payment SMS from the two configured sender labels enter the queue. */
 internal object ReceiverPaymentSmsInbox {
   sealed interface Read {
     data object Irrelevant : Read
@@ -12,22 +12,35 @@ internal object ReceiverPaymentSmsInbox {
     class Relevant(val message: ReceiverSmsSignedObservation.Message) : Read
   }
 
-  fun isPaymentLike(body: String): Boolean {
+  private fun expectedSender(body: String): String? {
     val text = body.lowercase()
-    return (text.contains("telebirr") && text.contains("received") &&
-      text.contains("transaction")) ||
-      (text.contains("cbe birr") && text.contains("received") &&
-        text.contains("txn"))
+    val telebirr = text.contains("telebirr") && text.contains("received") &&
+      text.contains("transaction")
+    val cbe = text.contains("cbe birr") && text.contains("received") &&
+      text.contains("txn")
+    return when {
+      telebirr && !cbe -> "127"
+      cbe && !telebirr -> "CBEBirr"
+      else -> null
+    }
   }
+
+  internal fun matchesSender(sender: String?, body: String): Boolean =
+    sender != null && sender == expectedSender(body)
 
   fun read(intent: Intent, nowMillis: Long = System.currentTimeMillis()): Read {
     if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return Read.Irrelevant
     val segments = try { Telephony.Sms.Intents.getMessagesFromIntent(intent).toList() }
       catch (_: Exception) { return Read.Review("sms_broadcast_unavailable") }
     if (segments.isEmpty() || segments.size > 12) return Read.Review("sms_broadcast_uncertain")
+    val sender = segments.first().originatingAddress
+    if (sender != "127" && sender != "CBEBirr") return Read.Irrelevant
+    if (segments.any { it.originatingAddress != sender ||
+        (it.displayOriginatingAddress != null && it.displayOriginatingAddress != sender) })
+      return Read.Irrelevant
     val body = try { segments.joinToString("") { it.messageBody ?: "" } }
       catch (_: Exception) { return Read.Review("sms_broadcast_uncertain") }
-    if (!isPaymentLike(body)) return Read.Irrelevant
+    if (!matchesSender(sender, body)) return Read.Irrelevant
     if (body.toByteArray(StandardCharsets.UTF_8).size !in 40..2_048 ||
       body.any { it == '\u0000' || it.code in 0x0001..0x0008 ||
         it.code in 0x000e..0x001f || it.code in 0x007f..0x009f })

@@ -230,7 +230,9 @@ internal class ReceiverSmsEncryptedOutbox(
 
     fun forApplication(context: Context): ReceiverSmsEncryptedOutbox =
       ReceiverSmsEncryptedOutbox(
-        File(context.noBackupFilesDir, "receiver-sms-outbox-v1"),
+        // V1 entries have no sender provenance. Leave them sealed for review; never upload
+        // them through a release that requires an exact provider sender.
+        File(context.noBackupFilesDir, "receiver-sms-outbox-v2"),
         AndroidKeystoreLivePilotQueueCipher("fetanagent_receiver_sms_outbox_aes_v1"),
       )
   }

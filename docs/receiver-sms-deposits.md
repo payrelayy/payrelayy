@@ -3,10 +3,15 @@
 This is a default-off replacement for receipt and provider-page checks. It is not active in production.
 
 When the verifier foreground service is online, it receives direct payment SMS for both receiver
-accounts. It identifies TeleBirr or CBE Birr from the message body and extracts only the transaction
+accounts. Before queuing a message, the phone requires the exact SMS sender `127` for TeleBirr or
+`CBEBirr` for CBE Birr, with the same sender on every multipart segment. Personal-number SMS are
+ignored even if their text looks like a payment. It identifies the provider from the message body
+and extracts only the transaction
 reference, received amount, and payment time. The phone queues the message in encrypted app storage,
 signs a structured event with its existing paired key, and retries upload until acknowledged. The
 server checks the signature and pairing, stores protected payment fields, and never stores raw SMS.
+The sender-gated release uses a new encrypted queue. Any pending entries from an older release lack
+sender provenance; they remain sealed on the phone and are not uploaded by the new release.
 While the verifier is running, it checks the encrypted phone queue about every three seconds when
 idle; a recorded event is followed by the next queued event after about one second. If the phone is
 offline or a payment SMS cannot be read, there is no automatic credit from that SMS.
@@ -38,11 +43,11 @@ remain off during that deployment. A failed first deployment restores the previo
 and logins. The digest-pinned host deploy helper must be installed separately before using the
 changed deployment workflow.
 
-The signed Android `0.5.32-receiver-sms` APK is not yet installed on the receiver phone. The
-connected receiver phone has no FetanAgent package, so installation needs a new pairing; an
-in-place update cannot preserve an absent app key. Pair and verify the phone before approving a
-separate SMS route cutover and any financial activation. No receiving-phone SMS collected before
-the cutover timestamp can be matched for automatic credit.
+Install the current signed receiver SMS APK on the paired receiver phone. Verify the release signer
+matches the installed app before an in-place upgrade, then verify the existing pairing, SMS
+permission, and reader status. A different phone needs a separate pairing. Approve the SMS route
+cutover and any financial activation separately. No receiving-phone SMS collected before the
+cutover timestamp can be matched for automatic credit.
 
 The cutover must first verify no unresolved Transfer, back up the current release and paired-phone
 state, and take an exact production snapshot of switches, roles, claims, jobs, and receiver revision.

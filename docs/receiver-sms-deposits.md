@@ -7,6 +7,9 @@ accounts. It identifies TeleBirr or CBE Birr from the message body and extracts 
 reference, received amount, and payment time. The phone queues the message in encrypted app storage,
 signs a structured event with its existing paired key, and retries upload until acknowledged. The
 server checks the signature and pairing, stores protected payment fields, and never stores raw SMS.
+While the verifier is running, it checks the encrypted phone queue about every three seconds when
+idle; a recorded event is followed by the next queued event after about one second. If the phone is
+offline or a payment SMS cannot be read, there is no automatic credit from that SMS.
 
 A customer can nominate one reference by sending text, an SMS, a receipt link, a screenshot, or a
 PDF. The bot extracts only the reference; customer-supplied amount and payment time are ignored.

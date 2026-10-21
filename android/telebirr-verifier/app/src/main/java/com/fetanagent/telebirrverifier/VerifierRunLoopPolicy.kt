@@ -70,7 +70,8 @@ class VerifierRunLoopPolicy(
       LivePilotRuntimeState.ENROLLMENT_REQUIRED,
       -> null
       LivePilotRuntimeState.READY ->
-        if (status.code == "no_paid_assignment" || status.code == "paid_partial_lane_recovery")
+        if (status.code == "sms_inbox_idle") SMS_IDLE_DELAY_MILLIS
+        else if (status.code == "no_paid_assignment" || status.code == "paid_partial_lane_recovery")
           PAID_IDLE_DELAY_MILLIS
         else if (status.code == "routine_no_money_idle_paid_retry")
           delay(ROUTINE_IDLE_DELAYS_MILLIS, repeat)
@@ -106,10 +107,11 @@ class VerifierRunLoopPolicy(
     const val HEARTBEAT_INTERVAL_MILLIS = 5 * 60 * 1_000L
     private const val MAXIMUM_JITTER_FRACTION = 0.20
     private const val PAID_IDLE_DELAY_MILLIS = 10_000L
+    private const val SMS_IDLE_DELAY_MILLIS = 3_000L
     private val READY_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 60_000L)
     private val ROUTINE_IDLE_DELAYS_MILLIS = longArrayOf(10_000L, 20_000L, 30_000L, 30_000L)
     private val RECEIPT_REVIEW_DELAYS_MILLIS = longArrayOf(5_000L, 10_000L, 20_000L, 30_000L)
-    private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled", "sms_inbox_idle")
+    private val READY_IDLE_CODES = setOf("no_assignment", "transport_enrolled")
     private val UPLOAD_DELAYS_MILLIS =
       longArrayOf(5_000L, 10_000L, 20_000L, 40_000L, 60_000L, 120_000L, 300_000L)
     private val ATTENTION_DELAYS_MILLIS =

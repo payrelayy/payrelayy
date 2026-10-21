@@ -299,7 +299,9 @@ bot.on('message', async (context) => {
         await context.reply(
           selection.kind === 'too_large'
             ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
-            : 'Please send a JPG/PNG screenshot or PDF, or type the TeleBirr transaction number.',
+            : config.receiverSmsCandidateEnabled
+              ? 'Please send a JPG/PNG screenshot or PDF, or type the payment transaction number.'
+              : 'Please send a JPG/PNG screenshot or PDF, or type the TeleBirr transaction number.',
         );
         return;
       }

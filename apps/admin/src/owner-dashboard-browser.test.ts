@@ -548,6 +548,48 @@ describe('Owner Transactions page', () => {
   });
 });
 
+describe('Owner older receiver SMS payments', () => {
+  const pending = {
+    candidateId: '22222222-2222-4222-8222-222222222222',
+    providerCode: 'cbe_birr',
+    submittedAt: '2026-10-20T10:00:00Z',
+    paymentAt: '2026-10-20T08:59:00Z',
+    amountMinor: '2500',
+    referenceMasked: '***AB12',
+    playerMasked: '***5678',
+  };
+
+  it('shows a masked CBE payment and requires confirmation before rejection', async () => {
+    let decided = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/receiver-sms-old-payments?'))
+          return response(200, { pending: decided ? [] : [pending] });
+        if (url.endsWith('/receiver-sms-old-payments/' + pending.candidateId + '/decision')) {
+          const body = JSON.parse(String(init.body)) as { decision: string; confirmed: boolean };
+          expect(body).toMatchObject({ decision: 'reject', confirmed: true });
+          decided = true;
+          return response(200, {
+            decision: { decision: 'rejected', decidedAt: '2026-10-20T10:05:00Z' },
+          });
+        }
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    const list = browser.element('#receiver-sms-old-list');
+    expect(list.children).toHaveLength(1);
+    expect(browser.element('#receiver-sms-old-badge').textContent).toBe('1 waiting');
+    expect(JSON.stringify(list)).toContain('CBE Birr');
+    expect(JSON.stringify(list)).not.toContain('FULL_REFERENCE');
+    await browser.call('decideReceiverSmsOldPayment', pending, 'reject');
+    expect(decided).toBe(true);
+    expect(browser.element('#receiver-sms-old-badge').hidden).toBe(true);
+    expect(list.children).toHaveLength(0);
+  });
+});
+
 describe('persistent routine TeleBirr policy controls', () => {
   const unconfigured = {
     configurationState: 'not_configured',

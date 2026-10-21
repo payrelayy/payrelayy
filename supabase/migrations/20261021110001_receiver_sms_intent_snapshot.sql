@@ -8,9 +8,6 @@ set local statement_timeout = '30s';
 alter default privileges for role postgres in schema app
   revoke execute on functions from public;
 
-alter table app.receiver_sms_payment_matches
-  add constraint receiver_sms_matches_pair_key unique (candidate_id, payment_event_id);
-
 create table app.receiver_sms_intent_openings (
   id uuid primary key default pg_catalog.gen_random_uuid(),
   candidate_id uuid not null unique,
@@ -30,6 +27,34 @@ alter table app.receiver_sms_intent_openings enable row level security;
 alter table app.receiver_sms_intent_openings force row level security;
 alter table app.receiver_sms_intent_openings owner to postgres;
 revoke all on app.receiver_sms_intent_openings
+  from public, anon, authenticated, service_role;
+
+create function app.receiver_sms_owner_approved_for_candidate(p_candidate_id uuid)
+returns boolean language sql stable security definer
+set search_path = ''
+as $$
+  select exists (select 1 from app.receiver_sms_owner_decisions decision
+    join app.receiver_sms_payment_matches matched
+      on matched.candidate_id = decision.candidate_id
+      and matched.payment_event_id = decision.payment_event_id
+    where decision.candidate_id = p_candidate_id
+      and decision.decision = 'approved'
+      and matched.disposition = 'older_review')
+$$;
+alter function app.receiver_sms_owner_approved_for_candidate(uuid) owner to postgres;
+revoke all on function app.receiver_sms_owner_approved_for_candidate(uuid)
+  from public, anon, authenticated, service_role;
+
+create function app.receiver_sms_owner_approved_for_intent(p_deposit_intent_id uuid)
+returns boolean language sql stable security definer
+set search_path = ''
+as $$
+  select exists (select 1 from app.receiver_sms_intent_openings opening
+    where opening.deposit_intent_id = p_deposit_intent_id
+      and app.receiver_sms_owner_approved_for_candidate(opening.candidate_id))
+$$;
+alter function app.receiver_sms_owner_approved_for_intent(uuid) owner to postgres;
+revoke all on function app.receiver_sms_owner_approved_for_intent(uuid)
   from public, anon, authenticated, service_role;
 
 alter table app.deposit_intents
@@ -67,7 +92,8 @@ declare
   v_now timestamptz := pg_catalog.clock_timestamp();
   v_switch_count integer;
 begin
-  if session_user not in ('postgres', 'fetanagent_receiver_sms_settlement_runtime') then
+  if session_user not in ('postgres', 'fetanagent_receiver_sms_settlement_runtime',
+    'fetanagent_owner_control_runtime') then
     raise exception using errcode = '42501',
       message = 'The receiver SMS deposit snapshot is unavailable.';
   end if;
@@ -102,7 +128,8 @@ begin
         and feature.feature_key = 'cbe_birr_authoritative_verification'
         and feature.mode = 'live');
   if v_opening.id is null or v_match.candidate_id is null
-    or v_match.disposition <> 'ready'
+    or (v_match.disposition <> 'ready' and not
+      app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
     or v_candidate.id is null or v_event.id is null
     or v_control.enabled is distinct from true
     or v_candidate.submitted_at < v_control.cutover_at
@@ -114,10 +141,12 @@ begin
     or v_candidate.reference_profile_version <> 2
     or exists (select 1 from app.receiver_sms_payment_conflicts conflict
       where conflict.existing_event_id = v_event.id)
-    or v_event.occurred_at < v_candidate.submitted_at - interval '1 hour'
+    or (v_event.occurred_at < v_candidate.submitted_at - interval '1 hour'
+      and not app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
     or v_event.occurred_at > v_candidate.submitted_at + interval '5 minutes'
     or v_event.occurred_at > v_now + interval '5 minutes'
-    or v_now >= v_event.occurred_at + interval '1 hour'
+    or (v_now >= v_event.occurred_at + interval '1 hour'
+      and not app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
     or v_opening.opened_at < v_candidate.submitted_at
     or v_opening.opened_at > v_now + interval '5 seconds'
     or v_player.id is null or v_player.customer_id <> v_candidate.submitting_customer_id

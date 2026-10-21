@@ -75,6 +75,8 @@ create table app.receiver_sms_payment_matches (
     check (disposition in ('ready', 'older_review', 'held_review')),
   matched_at timestamptz not null default pg_catalog.clock_timestamp()
 );
+alter table app.receiver_sms_payment_matches
+  add constraint receiver_sms_matches_pair_key unique (candidate_id, payment_event_id);
 create trigger receiver_sms_payment_matches_immutable
 before update or delete on app.receiver_sms_payment_matches
 for each row execute function app.reject_provider_payment_evidence_mutation();
@@ -82,6 +84,29 @@ alter table app.receiver_sms_payment_matches enable row level security;
 alter table app.receiver_sms_payment_matches force row level security;
 alter table app.receiver_sms_payment_matches owner to postgres;
 revoke all on app.receiver_sms_payment_matches
+  from public, anon, authenticated, service_role;
+
+-- A verified but old SMS never enters automatic settlement. An Owner decision
+-- is immutable and bound to the exact candidate and phone event.
+create table app.receiver_sms_owner_decisions (
+  candidate_id uuid primary key
+    references app.receiver_sms_deposit_candidates (id) on delete restrict,
+  payment_event_id uuid not null
+    references app.receiver_sms_payment_events (id) on delete restrict,
+  decision text not null check (decision in ('approved', 'rejected')),
+  actor_admin_id uuid not null references app.admin_users (id) on delete restrict,
+  decided_at timestamptz not null default pg_catalog.clock_timestamp(),
+  foreign key (candidate_id, payment_event_id)
+    references app.receiver_sms_payment_matches (candidate_id, payment_event_id)
+    on delete restrict
+);
+create trigger receiver_sms_owner_decisions_immutable
+before update or delete on app.receiver_sms_owner_decisions
+for each row execute function app.reject_provider_payment_evidence_mutation();
+alter table app.receiver_sms_owner_decisions enable row level security;
+alter table app.receiver_sms_owner_decisions force row level security;
+alter table app.receiver_sms_owner_decisions owner to postgres;
+revoke all on app.receiver_sms_owner_decisions
   from public, anon, authenticated, service_role;
 
 create function app.match_receiver_sms_payment(

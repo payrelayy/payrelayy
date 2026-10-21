@@ -73,7 +73,8 @@ declare
   v_now timestamptz;
   v_switch_count integer;
 begin
-  if session_user not in ('postgres', 'fetanagent_receiver_sms_settlement_runtime')
+  if session_user not in ('postgres', 'fetanagent_receiver_sms_settlement_runtime',
+    'fetanagent_owner_control_runtime')
     or p_candidate_id is null then
     raise exception using errcode = '42501',
       message = 'Receiver SMS settlement is unavailable.';
@@ -153,18 +154,23 @@ begin
     for share of authority, owner_user, agent, platform, policy;
   v_now := pg_catalog.clock_timestamp();
   if v_control.enabled is distinct from true or v_match.candidate_id is null
-    or v_match.disposition <> 'ready' or v_event.id is null
+    or (v_match.disposition <> 'ready' and not
+      app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
+    or v_event.id is null
     or v_event.provider_code <> v_candidate.provider_code
     or v_event.payment_provider_id <> v_candidate.payment_provider_id
     or v_event.reference_fingerprint <> v_candidate.reference_fingerprint
     or v_event.received_at < v_control.cutover_at
     or v_event.recorded_at < v_control.cutover_at
     or v_candidate.submitted_at < v_control.cutover_at
-    or v_event.occurred_at < v_candidate.submitted_at - interval '1 hour'
+    or (v_event.occurred_at < v_candidate.submitted_at - interval '1 hour'
+      and not app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
     or v_event.occurred_at > v_candidate.submitted_at + interval '5 minutes'
     or v_event.occurred_at > v_now
-    or v_now >= v_event.occurred_at + interval '1 hour'
-    or v_now > v_candidate.submitted_at + interval '5 minutes'
+    or (v_now >= v_event.occurred_at + interval '1 hour'
+      and not app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
+    or (v_now > v_candidate.submitted_at + interval '5 minutes'
+      and not app.receiver_sms_owner_approved_for_candidate(v_candidate.id))
     or v_event.amount_minor not between 2500 and 2500000
     or exists (select 1 from app.receiver_sms_payment_conflicts conflict
       where conflict.existing_event_id = v_event.id)

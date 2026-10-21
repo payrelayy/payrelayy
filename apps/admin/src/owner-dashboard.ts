@@ -117,6 +117,15 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <div class="request-list" id="transactions-list"></div>
           <button class="secondary transactions-more" id="transactions-more" type="button" hidden>Show older transactions</button>
         </section>
+        <section class="review-section" aria-labelledby="receiver-sms-old-title">
+          <div class="panel-heading">
+            <h2 id="receiver-sms-old-title">Older SMS payments <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
+            <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">TeleBirr and CBE Birr payments found in the receiving phone's SMS that are over one hour old need your decision. Approval starts the normal credit checks; it does not mean credit is complete.</p>
+          <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load older SMS payments.</p>
+          <div class="request-list" id="receiver-sms-old-list"></div>
+        </section>
         <section class="review-section" aria-labelledby="telebirr-fast-alert-title">
           <h2 id="telebirr-fast-alert-title">TeleBirr payment reviews</h2>
           <p class="request-meta" id="telebirr-fast-alert-status" role="status">
@@ -849,9 +858,15 @@ const transactionsBadge = document.querySelector('#transactions-badge');
 const transactionsSummary = document.querySelector('#transactions-summary');
 const transactionsList = document.querySelector('#transactions-list');
 const transactionsMore = document.querySelector('#transactions-more');
+const receiverSmsOldBadge = document.querySelector('#receiver-sms-old-badge');
+const receiverSmsOldStatus = document.querySelector('#receiver-sms-old-status');
+const receiverSmsOldList = document.querySelector('#receiver-sms-old-list');
+const receiverSmsOldRefresh = document.querySelector('#receiver-sms-old-refresh');
 let transactionsLoadGeneration = 0;
 let transactionsOffset = 0;
 let transactionsBusy = false;
+let receiverSmsOldLoadGeneration = 0;
+let receiverSmsOldBusy = false;
 const supportContactForm = document.querySelector('#support-contact-form');
 const supportContactUsername = document.querySelector('#support-contact-username');
 const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
@@ -2923,6 +2938,11 @@ function signOut(message = 'Signed out.') {
   transactionsBadge.hidden = true;
   transactionsBadge.textContent = '';
   transactionsSummary.textContent = 'Sign in to load transactions.';
+  receiverSmsOldLoadGeneration += 1;
+  receiverSmsOldList.replaceChildren();
+  receiverSmsOldBadge.hidden = true;
+  receiverSmsOldBadge.textContent = '';
+  receiverSmsOldStatus.textContent = 'Sign in to load older SMS payments.';
   ownerPanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -5357,6 +5377,123 @@ async function loadTransactions(reset) {
   }
 }
 
+function validReceiverSmsOldPayment(value) {
+  return value && typeof value === 'object' &&
+    typeof value.candidateId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.candidateId) &&
+    ['telebirr', 'cbe_birr'].includes(value.providerCode) &&
+    typeof value.submittedAt === 'string' && Number.isFinite(Date.parse(value.submittedAt)) &&
+    typeof value.paymentAt === 'string' && Number.isFinite(Date.parse(value.paymentAt)) &&
+    typeof value.amountMinor === 'string' && /^[1-9][0-9]*$/.test(value.amountMinor) &&
+    typeof value.referenceMasked === 'string' && /^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) &&
+    typeof value.playerMasked === 'string' && /^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked);
+}
+
+function renderReceiverSmsOldPayment(value) {
+  const card = document.createElement('article');
+  card.className = 'request-card';
+  const title = document.createElement('h3');
+  title.textContent = (value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
+    ' · reference ' + value.referenceMasked;
+  card.append(title);
+  const facts = document.createElement('dl');
+  facts.className = 'transaction-facts';
+  transactionFact(facts, 'Submitted', transactionDate(value.submittedAt));
+  transactionFact(facts, 'Payment time', transactionDate(value.paymentAt));
+  transactionFact(facts, 'Amount', (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
+  transactionFact(facts, 'Player', value.playerMasked);
+  card.append(facts);
+  const actions = document.createElement('div');
+  actions.className = 'review-actions';
+  for (const decision of ['approve', 'reject']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = decision === 'reject' ? 'danger' : '';
+    button.textContent = decision === 'approve' ? 'Approve payment' : 'Reject payment';
+    button.addEventListener('click', () => void decideReceiverSmsOldPayment(value, decision));
+    actions.append(button);
+  }
+  card.append(actions);
+  return card;
+}
+
+async function decideReceiverSmsOldPayment(value, action) {
+  if (!accessToken || receiverSmsOldBusy || !validReceiverSmsOldPayment(value) ||
+      !['approve', 'reject'].includes(action)) return;
+  const provider = value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
+  const prompt = action === 'approve'
+    ? 'Approve the older ' + provider + ' payment ' + value.referenceMasked +
+      ' for ' + value.playerMasked + '? All credit checks will run again.'
+    : 'Reject the older ' + provider + ' payment ' + value.referenceMasked +
+      ' for ' + value.playerMasked + '?';
+  if (!window.confirm(prompt)) return;
+  const generation = ownerAuthGeneration;
+  const requestId = crypto.randomUUID();
+  receiverSmsOldBusy = true;
+  receiverSmsOldStatus.textContent = 'Recording your decision…';
+  try {
+    const response = await ownerRequest(
+      '/v1/owner/receiver-sms-old-payments/' + encodeURIComponent(value.candidateId) +
+      '/decision', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json',
+          'x-fetanagent-owner-csrf': 'owner-receiver-sms-old-payment-v1',
+          'x-idempotency-key': requestId },
+        body: JSON.stringify({ decision: action, requestId, confirmed: true }),
+      });
+    if (response.status !== 200) throw new Error('decision_status');
+    if (generation !== ownerAuthGeneration || !accessToken) return;
+    const payload = await response.json();
+    if (!payload || !payload.decision ||
+        payload.decision.decision !== (action === 'approve' ? 'approved' : 'rejected'))
+      throw new Error('decision_response');
+    setNotice(action === 'approve'
+      ? 'Approval recorded. The normal credit path is running; check for the final result.'
+      : 'Rejection recorded. No Player credit was started.');
+  } catch (error) {
+    if (generation === ownerAuthGeneration && accessToken && !isSignedOutError(error))
+      setNotice('The decision could not be confirmed. Refresh before acting again.');
+  } finally {
+    receiverSmsOldBusy = false;
+    if (generation === ownerAuthGeneration && accessToken) await loadReceiverSmsOldPayments();
+  }
+}
+
+async function loadReceiverSmsOldPayments() {
+  if (!accessToken) return;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++receiverSmsOldLoadGeneration;
+  receiverSmsOldRefresh.disabled = true;
+  receiverSmsOldStatus.textContent = 'Loading older SMS payments…';
+  try {
+    const response = await ownerRequest('/v1/owner/receiver-sms-old-payments?limit=25', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('sms_old_payments');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.pending) || payload.pending.length > 25 ||
+        !payload.pending.every(validReceiverSmsOldPayment)) throw new Error('sms_old_payments');
+    if (generation !== ownerAuthGeneration || loadGeneration !== receiverSmsOldLoadGeneration ||
+        !accessToken) return;
+    receiverSmsOldList.replaceChildren();
+    for (const value of payload.pending) receiverSmsOldList.append(renderReceiverSmsOldPayment(value));
+    receiverSmsOldBadge.hidden = payload.pending.length === 0;
+    receiverSmsOldBadge.textContent = payload.pending.length + ' waiting';
+    receiverSmsOldStatus.textContent = payload.pending.length === 0
+      ? 'No older SMS payments need approval.'
+      : payload.pending.length + ' payment(s) waiting for your decision.';
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration &&
+        accessToken && !isSignedOutError(error))
+      receiverSmsOldStatus.textContent = 'Older SMS payments are unavailable. Refresh to try again.';
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration)
+      receiverSmsOldRefresh.disabled = false;
+  }
+}
+
+receiverSmsOldRefresh.addEventListener('click', () => void loadReceiverSmsOldPayments());
+
 transactionsFilters.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadTransactions(true);
@@ -6198,6 +6335,7 @@ async function loadOwnerPlayerQueues() {
       loadReceiverChangeReviews(),
       loadTelebirrFastAlerts(),
       loadTransactions(true),
+      loadReceiverSmsOldPayments(),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),

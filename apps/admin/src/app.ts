@@ -2411,6 +2411,31 @@ export function buildOwnerControlApp(
   );
 
   app.get<{
+    Querystring: { limit?: string };
+  }>('/v1/owner/receiver-sms-old-payments', async (request, reply) => {
+    try {
+      if (Object.keys(request.query).some((key) => key !== 'limit'))
+        return reply.code(400).send({ error: 'invalid_request' });
+      const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.receiverSmsOldPayments)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const pending = await dependencies.runtime.receiverSmsOldPayments.list(authUserId, limit);
+      return reply.code(200).send({ pending });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerOldPaymentRejectedError
+      )
+        return reply.code(403).send({ error: 'forbidden' });
+      request.log.warn('Owner SMS old-payment inbox is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
+  app.get<{
     Querystring: {
       status?: string;
       from?: string;
@@ -2468,6 +2493,51 @@ export function buildOwnerControlApp(
       return reply.code(503).send({ error: 'owner_control_unavailable' });
     }
   });
+
+  app.post<{ Params: { candidateId: string } }>(
+    '/v1/owner/receiver-sms-old-payments/:candidateId/decision',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['decision', 'requestId', 'confirmed']);
+        if (
+          !body ||
+          !UUID_V4_PATTERN.test(request.params.candidateId) ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          (body.decision !== 'approve' && body.decision !== 'reject') ||
+          body.confirmed !== true ||
+          Object.keys(request.query as object).length !== 0 ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            'owner-receiver-sms-old-payment-v1' ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.receiverSmsOldPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const decision = await dependencies.runtime.receiverSmsOldPayments.decide(
+          authUserId,
+          request.params.candidateId,
+          body.decision,
+        );
+        return reply.code(200).send({ decision });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerOldPaymentRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerOldPaymentConflictError)
+          return reply.code(409).send({ error: 'payment_not_ready' });
+        request.log.warn('Owner SMS old-payment decision is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
 
   app.post<{ Params: { candidateId: string } }>(
     '/v1/owner/telebirr-old-payments/:candidateId/decision',

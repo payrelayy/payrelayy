@@ -10065,7 +10065,10 @@ registerRoutineTelebirrRotatedInstructionReviewSqlTests(
 );
 registerRoutineTelebirrNoMoneyRuntimeSqlTests(() => client);
 registerRoutineTelebirrPaidPollRuntimeSqlTests(() => client);
-registerReceiverSmsPaymentLedgerSqlTests(() => client, () => ownerAuthUserId);
+registerReceiverSmsPaymentLedgerSqlTests(
+  () => client,
+  () => ownerAuthUserId,
+);
 registerRoutineTelebirrPaidAtomicClaimSqlTests(
   () => client,
   () => ownerAdminId,

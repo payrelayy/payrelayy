@@ -16,17 +16,23 @@ match a received phone event, the first eligible submission can enter the existi
 and fenced KemerBet deposit job. The credited amount comes from the signed receiving-phone SMS.
 
 The database holds a match for review if its facts conflict, its amount is outside current limits,
-or it arrives after the five-minute automatic window. A payment older than one hour is classified
-for Owner approval. No old payment may bypass the automatic age guard. A match cannot itself run a
-Transfer; the existing Companion execution and reconciliation boundaries still apply.
+or it arrives after the five-minute automatic window. A missing phone SMS after five minutes is
+held for review, never called invalid. A payment older than one hour waits in the Owner page's
+"Older SMS payments" inbox. An active Owner can approve or reject the exact matched event.
+Approval reruns the current one-use, amount, Player, receiver, switch, and execution checks before
+one job can be queued. The existing Companion execution and reconciliation boundaries still apply.
+Masked customer messages are queued for an old payment, a review hold, an Owner rejection, and a
+terminal credit result. They use the existing Telegram notification lease and retry path.
 
 ## Before production cutover
 
-The current branch still needs the Owner decision path for old SMS payments, final customer
-notifications and Owner alerts, production runtime credential and
-Compose wiring, exact catalog grants, and a signed phone APK rollout. Keep the SMS route off until
-those are reviewed and deployed together. The legacy receipt route and live financial switches
-are unchanged by this code.
+The current branch still needs Owner alerts, production runtime credential and Compose wiring,
+exact catalog grant activation, and a signed phone APK rollout. The Owner list and decision SQL
+have no runtime grant at migration time so the currently deployed exact-catalog Owner service
+remains healthy. Grant access only after the new Owner app is deployed and checked. Keep the SMS
+route off until the phone, bot, bridge, broker, Owner app, database roles, and customer messaging
+are reviewed and deployed together. The legacy receipt route and live financial switches are
+unchanged by this code.
 
 The cutover must first verify no unresolved Transfer, back up the current release and paired-phone
 state, and take an exact production snapshot of switches, roles, claims, jobs, and receiver revision.

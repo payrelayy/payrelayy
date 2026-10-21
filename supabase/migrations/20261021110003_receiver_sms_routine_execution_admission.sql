@@ -45,7 +45,9 @@ as $$
   join app.receiver_sms_payment_matches matched
     on matched.candidate_id = lineage.candidate_id
     and matched.payment_event_id = lineage.payment_event_id
-    and matched.disposition = 'ready'
+    and (matched.disposition = 'ready' or
+      (matched.disposition = 'older_review' and
+        app.receiver_sms_owner_approved_for_candidate(matched.candidate_id)))
   join app.receiver_sms_deposit_candidates candidate on candidate.id = lineage.candidate_id
   join app.receiver_sms_payment_events sms on sms.id = lineage.payment_event_id
     and sms.provider_code = candidate.provider_code
@@ -125,9 +127,11 @@ as $$
     and sms.received_at >= control.cutover_at
     and sms.recorded_at >= control.cutover_at
     and candidate.submitted_at >= control.cutover_at
-    and sms.occurred_at between candidate.submitted_at - interval '1 hour'
-      and candidate.submitted_at + interval '5 minutes'
-    and pg_catalog.statement_timestamp() < sms.occurred_at + interval '1 hour'
+    and sms.occurred_at <= candidate.submitted_at + interval '5 minutes'
+    and (sms.occurred_at >= candidate.submitted_at - interval '1 hour'
+      or app.receiver_sms_owner_approved_for_candidate(candidate.id))
+    and (pg_catalog.statement_timestamp() < sms.occurred_at + interval '1 hour'
+      or app.receiver_sms_owner_approved_for_candidate(candidate.id))
     and sms.amount_minor between authority.minimum_amount_minor
       and authority.maximum_amount_minor
     and authority.authorized_at <= sms.occurred_at

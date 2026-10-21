@@ -199,8 +199,11 @@ export async function startTelebirrDeviceBridgeApplication(
     )
       throw new Error();
     const receiverSmsHandler = dependencies.createReceiverSmsHandler?.();
-    if (dependencies.createReceiverSmsHandler !== undefined &&
-      typeof receiverSmsHandler !== 'function') throw new Error();
+    if (
+      dependencies.createReceiverSmsHandler !== undefined &&
+      typeof receiverSmsHandler !== 'function'
+    )
+      throw new Error();
     server = createHttpServer(
       handler,
       { host: config.host, port: config.port },

@@ -38,6 +38,7 @@ const [
   assignmentBrokerPostgres,
   referenceOpeningDeriver,
   postgresScramVerifier,
+  directSqlTunnel,
   packageJson,
   quality,
 ] = await Promise.all([
@@ -72,6 +73,7 @@ const [
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
   read('infra/operations/derive-telebirr-reference-opening-key.mjs'),
   read('infra/operations/verify-postgres-scram-secret.mjs'),
+  read('infra/operations/psql-over-production-direct-tunnel.sh'),
   read('package.json'),
   read('.github/workflows/quality.yml'),
 ]);
@@ -751,11 +753,32 @@ assert.match(workflow, /cleanup-incoming/u);
 assert.match(workflow, /production-nonfinancial-runtimes-disable\.sql/u);
 assert.doesNotMatch(workflow, /^  schedule:|2026-09-0|systemctl|service[_-]?role/imu);
 assert.doesNotMatch(workflow, /echo[^\r\n]*(?:PASSWORD|TOKEN|PRIVATE_KEY)/u);
-assert.doesNotMatch(
-  deployJob,
-  /\$PRODUCTION_DATABASE_DIRECT_HOST/u,
-  'deployed runtime DSNs must not use the unreachable direct IPv6 endpoint',
+assert.match(workflow, /confirm_database_route:[\s\S]*?default: pooler[\s\S]*?- direct/u);
+assert.match(workflow, /direct\) \[\[ "\$REQUESTED_MODE" == 'deploy-inert' \]\]/u);
+assert.match(workflow, /runtime_database_host="\$PRODUCTION_DATABASE_DIRECT_HOST"/u);
+assert.match(workflow, /runtime_role_suffix=''/u);
+assert.match(workflow, /runtime_database_host="\$PRODUCTION_DATABASE_POOLER_HOST"/u);
+assert.match(workflow, /steps\.protected\.outputs\.sms_mode.*'true'/u);
+assert.match(workflow, /psql-over-production-direct-tunnel\.sh/u);
+assert.match(workflow, /printf '%s\\n' "\$SECRET_DIR" >>"\$GITHUB_PATH"/u);
+assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
+assert.match(workflow, /Direct database recovery is allowed only for stopped production/u);
+assert.ok(
+  workflow.indexOf('Verify the stopped direct database route before any production SQL') <
+    workflow.indexOf('Prove the complete inert production money boundary'),
 );
+assert.ok(
+  workflow.indexOf('[[ "$host_state" == \'absent\' ]]') <
+    workflow.indexOf('Activate exact SMS grants and short-lived runtime logins'),
+);
+assert.match(
+  directSqlTunnel,
+  /PGHOST="\$direct_host" PGHOSTADDR=127\.0\.0\.1 PGPORT=55432 PGUSER=postgres/u,
+);
+assert.match(directSqlTunnel, /StrictHostKeyChecking=yes/u);
+assert.match(directSqlTunnel, /UserKnownHostsFile="\$FETANAGENT_DIRECT_DB_KNOWN_HOSTS"/u);
+assert.match(directSqlTunnel, /\[\[ "\$\{PGSSLMODE:-\}" == 'verify-full'/u);
+assert.doesNotMatch(directSqlTunnel, /echo[^\n]*(?:PGPASSWORD|DATABASE_URL)/u);
 assert.doesNotMatch(
   deployJob,
   /postgresql:\/\/[^\r\n]*\$PRODUCTION_DATABASE_ADMIN_POOLER_PORT/u,
@@ -769,7 +792,7 @@ for (const roleVariable of [
   assert.match(
     workflow,
     new RegExp(
-      `"\\$${roleVariable}\\.\\$PRODUCTION_PROJECT_REF"[\\s\\S]*?"\\$PRODUCTION_DATABASE_POOLER_HOST" >"\\$secret_dir/`,
+      `"\\$${roleVariable}\\$runtime_role_suffix"[\\s\\S]*?"\\$runtime_database_host" >"\\$secret_dir/`,
       'u',
     ),
   );
@@ -800,15 +823,15 @@ for (const protectedName of [
 }
 assert.match(
   workflow,
-  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"\$ASSIGNMENT_RUNTIME_ROLE\.\$PRODUCTION_PROJECT_REF"[\s\S]*?"\$PRODUCTION_DATABASE_POOLER_HOST"/u,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"\$ASSIGNMENT_RUNTIME_ROLE\$runtime_role_suffix"[\s\S]*?"\$runtime_database_host"/u,
 );
 assert.match(
   workflow,
-  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"[\s\S]*?"\$PRODUCTION_DATABASE_POOLER_HOST"/u,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full' \\\s*"fetanagent_telebirr_device_state_runtime\$runtime_role_suffix"[\s\S]*?"\$runtime_database_host"/u,
 );
 assert.doesNotMatch(
   workflow,
-  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*"fetanagent_telebirr_device_state_runtime\.\$PRODUCTION_PROJECT_REF"/u,
+  /printf 'postgresql:\/\/%s:%s@%s:5432\/postgres\?sslmode=verify-full\\n' \\\s*"fetanagent_telebirr_device_state_runtime\$runtime_role_suffix"/u,
 );
 assert.match(workflow, /secrets\.TELEBIRR_ASSIGNMENT_SIGNER_PKCS8_BASE64/u);
 assert.doesNotMatch(workflow, /secrets\.TELEBIRR_REFERENCE_OPENING_KEY_V2_BASE64/u);

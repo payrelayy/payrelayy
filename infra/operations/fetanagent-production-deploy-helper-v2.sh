@@ -448,6 +448,20 @@ verify_release_files() {
           "$release/compose.production.inert-maintenance.yaml" ||
           die 'the routine paid upload bridge is not mounted'
       fi
+    elif grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+      grep -Fq "INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the SMS settlement loop is not mounted'
+      grep -Fq "INTERNAL_RECEIVER_SMS_BRIDGE_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the SMS phone bridge is not mounted'
+      grep -Fq -- '- telebirr_assignment_database_egress' \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the SMS broker has no database egress'
+      ! grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml" ||
+        die 'the receipt poll cannot share the SMS broker'
     else
       grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
         die 'the inert-maintenance production overlay is malformed'
@@ -483,6 +497,10 @@ verify_release_files() {
         die 'the isolated paid settlement service is absent'
       required+=(routine-paid-settlement-database-url)
     fi
+  elif [[ "$deployment_mode" == 'inert-maintenance' ]] &&
+    grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
+    required+=(receiver-sms-ingest-database-url receiver-sms-settlement-database-url)
   fi
   if grep -Fq '  production-companion-device-bridge:' "$release/compose.production.yaml"; then
     required+=(companion-device-database-url companion-bridge-server-signer.pkcs8.der companion-bridge-runtime-manifest.v2.json companion-bridge-runtime-manifest.v3.json)
@@ -569,6 +587,23 @@ negative_telebirr_public_smoke() {
       --data '{}' "$TELEBIRR_PUBLIC_ORIGIN$route")"
     [[ "$status" == '400' ]] || die 'a production device route did not reach the rejecting bridge'
   done
+}
+
+negative_receiver_sms_public_smoke() {
+  local release="$1" status
+  if ! grep -Fq "INTERNAL_RECEIVER_SMS_BRIDGE_ENABLED: 'true'" \
+    "$release/compose.production.inert-maintenance.yaml"; then return; fi
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.receiver-sms-event.v1+json' \
+    --header 'X-FetanAgent-Deployment-Target: production' \
+    --data '{}' "$TELEBIRR_PUBLIC_ORIGIN/v1/receiver-sms/events:upload")"
+  [[ "$status" == '400' ]] || die 'the SMS upload route did not reach the rejecting bridge'
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.receiver-sms-event.v1+json' \
+    --data '{}' "$TELEBIRR_PUBLIC_ORIGIN/v1/receiver-sms/events:upload")"
+  [[ "$status" == '404' ]] || die 'an SMS upload without a production target reached the bridge'
 }
 
 negative_companion_public_smoke() {
@@ -815,6 +850,19 @@ case "${1:-}" in
         [[ ! -e "$incoming/$name" && ! -L "$incoming/$name" ]] ||
           die "the inert production bundle unexpectedly contains $name"
       done
+    elif grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+      "$incoming/compose.production.inert-maintenance.yaml"; then
+      expected_count=$((expected_count + 2))
+      for name in receiver-sms-ingest-database-url receiver-sms-settlement-database-url; do
+        [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
+          die "the SMS production bundle is missing $name"
+      done
+      for name in routine-no-money-database-url routine-paid-poll-database-url \
+        routine-paid-settlement-database-url routine-no-money-lookup-signer.pkcs8.der \
+        routine-no-money-lookup-signer.v1.json telebirr-reference-opening-key.v1.json; do
+        [[ ! -e "$incoming/$name" && ! -L "$incoming/$name" ]] ||
+          die "the SMS bundle unexpectedly contains $name"
+      done
     else
       for name in \
         telebirr-assignment-database-url \
@@ -933,6 +981,7 @@ case "${1:-}" in
       die 'the public Owner page is not production-bound'
     fi
     negative_telebirr_public_smoke
+    negative_receiver_sms_public_smoke "$release"
     negative_companion_public_smoke "$release"
     ln -sfn -- "$release" "$CURRENT_LINK.next"
     mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"
@@ -982,6 +1031,7 @@ case "${1:-}" in
       printf '%s\n' 'Legacy release: Telegram polling health is unverified; only process and revision were checked.' >&2
     fi
     negative_telebirr_public_smoke
+    negative_receiver_sms_public_smoke "$release"
     negative_companion_public_smoke "$release"
     ;;
 

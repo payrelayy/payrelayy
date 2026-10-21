@@ -22,6 +22,7 @@ export type TelegramPlayerIdFlowPresentation =
 export interface TelegramPlayerIdFlowContext {
   readonly selectedPlayerId?: string;
   readonly playerValidationEnabled?: boolean;
+  readonly receiverSmsCandidateEnabled?: boolean;
 }
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
@@ -310,7 +311,10 @@ export function presentTelegramPlayerIdFlowResult(
         text: `Deposit ${formatMinorEtb(result.amountMinor)} ETB — ${result.depositStatus.label}.`,
       };
     case 'deposit_input_invalid':
-      return { kind: 'message', text: telegramDepositHelpText() };
+      return {
+        kind: 'message',
+        text: telegramDepositHelpText(context.receiverSmsCandidateEnabled),
+      };
     case 'deposit_status_unavailable':
       return {
         kind: 'message',
@@ -327,7 +331,16 @@ export function presentTelegramPlayerIdFlowResult(
   }
 }
 
-export function telegramDepositHelpText(): string {
+export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): string {
+  if (receiverSmsCandidateEnabled) {
+    return [
+      '💰 Deposits',
+      'Save a Player ID once in /menu, then tap Deposit for the current receiver.',
+      'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+      'A bare reference is treated as TeleBirr. For CBE Birr, send /cbe followed by the reference, or send the CBE Birr SMS or receipt.',
+      'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',
+    ].join('\n');
+  }
   return [
     '💰 TeleBirr deposit',
     'Save a Player ID once in /menu, then tap Deposit for the current receiver.',

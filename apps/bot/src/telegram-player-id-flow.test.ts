@@ -464,6 +464,13 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');
   });
 
+  it('explains both SMS payment methods only when the SMS route is selected', () => {
+    const help = telegramDepositHelpText(true);
+    expect(help).toContain('receiving phone SMS supplies the amount');
+    expect(help).toContain('/cbe followed by the reference');
+    expect(help).not.toContain('CBE Birr is not live yet');
+  });
+
   it('asks the customer to choose one reference without exposing the candidate list', () => {
     expect(telegramDepositReferenceSelectionText()).toContain('Nothing was submitted.');
     expect(telegramDepositReferenceSelectionText()).toContain('Send one reference only.');

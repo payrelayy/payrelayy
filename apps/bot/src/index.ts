@@ -133,8 +133,12 @@ async function deliverPlayerAction(
         ? {
             selectedPlayerId: action.playerId,
             playerValidationEnabled: config.playerValidationIntakeEnabled,
+            receiverSmsCandidateEnabled: config.receiverSmsCandidateEnabled,
           }
-        : { playerValidationEnabled: config.playerValidationIntakeEnabled },
+        : {
+            playerValidationEnabled: config.playerValidationIntakeEnabled,
+            receiverSmsCandidateEnabled: config.receiverSmsCandidateEnabled,
+          },
     );
     if (presentation.kind === 'deferred') {
       // SMS review results are delivered through the durable outcome queue.
@@ -226,7 +230,9 @@ bot.on('message', async (context) => {
     const replyToMessage =
       'reply_to_message' in context.message ? context.message.reply_to_message : undefined;
     if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
-      await context.reply(`${telegramDepositHelpText()}\n${TELEGRAM_SUPPORT_HELP_TEXT}`);
+      await context.reply(
+        `${telegramDepositHelpText(config.receiverSmsCandidateEnabled)}\n${TELEGRAM_SUPPORT_HELP_TEXT}`,
+      );
       return;
     }
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });
@@ -446,7 +452,7 @@ bot.on('message', async (context) => {
         await context.reply(
           proofSubmission.kind === 'selection_required'
             ? telegramDepositReferenceSelectionText()
-            : telegramDepositHelpText(),
+            : telegramDepositHelpText(config.receiverSmsCandidateEnabled),
         );
       }
       return;

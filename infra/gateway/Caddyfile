@@ -137,6 +137,26 @@ device.fetanagent.com {
 	}
 	# END exact TeleBirr device routing contract
 
+	# Only the paired production receiver phone may upload signed SMS payment facts.
+	# The bridge verifies the signature and stores the fact; this path cannot credit.
+	@production_receiver_sms_upload {
+		method POST
+		path /v1/receiver-sms/events:upload
+		expression `{http.request.header.Content-Type} == "application/vnd.fetanagent.receiver-sms-event.v1+json" && {http.request.header.X-FetanAgent-Deployment-Target} == "production"`
+	}
+
+	handle @production_receiver_sms_upload {
+		request_body {
+			max_size 8KiB
+		}
+		reverse_proxy telebirr-device-bridge:8084 {
+			transport http {
+				dial_timeout 3s
+				response_header_timeout 15s
+			}
+		}
+	}
+
 	# BEGIN exact routine no-money routing contract
 	# The routine phone rehearsal is production-only and review-only. An absent,
 	# staging, repeated, or unexpected target never reaches the bridge.

@@ -372,6 +372,8 @@ jobs:
           ROUTINE_NO_MONEY_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_NO_MONEY_RUNTIME_PASSWORD }}
           ROUTINE_PAID_POLL_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_POLL_RUNTIME_PASSWORD }}
           ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD }}
+          RECEIVER_SMS_INGEST_RUNTIME_PASSWORD: ${{ secrets.RECEIVER_SMS_INGEST_RUNTIME_PASSWORD }}
+          RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD }}
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
@@ -427,6 +429,13 @@ jobs:
               exit 1
               ;;
           esac
+          sms_mode=false
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]] &&
+            grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+              infra/compose.production.inert-maintenance.yaml; then
+            sms_mode=true
+          fi
+          echo "sms_mode=$sms_mode" >>"$GITHUB_OUTPUT"
           printf '%s\n' "$runtime_deployment_mode" >"$RUNNER_TEMP/release/runtime-deployment-mode"
           install -m 0600 -- "$shadow_overlay_source" \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml"
@@ -455,7 +464,7 @@ jobs:
           )
           for value in "${values[@]}"; do [[ "$value" =~ ^[0-9a-f]{64}$ ]]; done
           [[ "$(printf '%s\n' "${values[@]}" | sort -u | wc -l)" -eq "${#values[@]}" ]]
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
             [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
             [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
             [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
@@ -465,6 +474,13 @@ jobs:
             [[ ! " ${values[*]} " == *" $ROUTINE_NO_MONEY_RUNTIME_PASSWORD "* ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_PAID_POLL_RUNTIME_PASSWORD "* ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD "* ]]
+          fi
+          if [[ "$sms_mode" == true ]]; then
+            [[ "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" != "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" ]]
+            [[ ! " ${values[*]} " == *" $RECEIVER_SMS_INGEST_RUNTIME_PASSWORD "* ]]
+            [[ ! " ${values[*]} " == *" $RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD "* ]]
           fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
@@ -569,7 +585,7 @@ jobs:
               "$secret_dir/telebirr-reference-opening-key.v1.json"
           )"
           [[ "$telebirr_reference_opening_key_id" =~ ^sha256:[0-9a-f]{64}$ ]]
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
             SECRET_DIR="$secret_dir" node --input-type=module <<'NODE'
           import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
           import { writeFileSync } from 'node:fs';
@@ -624,6 +640,16 @@ jobs:
               "fetanagent_routine_telebirr_paid_settlement_runtime.$PRODUCTION_PROJECT_REF" \
               "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
               >"$secret_dir/routine-paid-settlement-database-url"
+          fi
+          if [[ "$sms_mode" == true ]]; then
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "fetanagent_receiver_sms_ingest_runtime.$PRODUCTION_PROJECT_REF" \
+              "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              >"$secret_dir/receiver-sms-ingest-database-url"
+            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
+              "fetanagent_receiver_sms_settlement_runtime.$PRODUCTION_PROJECT_REF" \
+              "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              >"$secret_dir/receiver-sms-settlement-database-url"
           fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
@@ -699,7 +725,7 @@ jobs:
           psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
 
       - name: Record existing routine review login states for exact rollback
-        if: inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
         id: routine_previous_logins
         shell: bash
         env:
@@ -731,7 +757,7 @@ jobs:
             "$no_money" "$paid_poll" "$paid_settlement" >>"$GITHUB_OUTPUT"
 
       - name: Activate the separate no-money phone review login
-        if: inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
         id: routine_review_activation
         shell: bash
         env:
@@ -763,7 +789,7 @@ jobs:
             --file=infra/sql/production-routine-no-money-activate.sql >/dev/null
 
       - name: Activate the separate review-only paid observation login
-        if: inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
         id: routine_paid_activation
         shell: bash
         env:
@@ -789,7 +815,7 @@ jobs:
             --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
 
       - name: Activate the isolated paid settlement login with deposits disabled
-        if: inputs.mode == 'deploy-inert'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
         id: routine_paid_settlement_activation
         shell: bash
         env:
@@ -813,6 +839,66 @@ jobs:
             -v runtime_password="$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-settlement-activate.sql >/dev/null
+
+      - name: Record the exact previous SMS grants and login state
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true'
+        id: sms_previous
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          state="$(psql -X -q -A -t -v ON_ERROR_STOP=1 -c "
+            select
+              (select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_receiver_sms_ingest_runtime')::text || ',' ||
+              (select rolcanlogin from pg_catalog.pg_roles where rolname = 'fetanagent_receiver_sms_settlement_runtime')::text || ',' ||
+              pg_catalog.has_function_privilege('fetanagent_player_actions_runtime',
+                'app.capture_telegram_receiver_sms_candidate(uuid,text,text,text,text,text,smallint,smallint,text)', 'EXECUTE')::text || ',' ||
+              pg_catalog.has_function_privilege('fetanagent_owner_control_runtime',
+                'app.list_owner_receiver_sms_old_payments(uuid,integer)', 'EXECUTE')::text || ',' ||
+              pg_catalog.has_function_privilege('fetanagent_owner_control_runtime',
+                'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)', 'EXECUTE')::text")"
+          case "$state" in
+            false,false,false,false,false) echo 'state=disabled' >>"$GITHUB_OUTPUT" ;;
+            true,true,true,true,true) echo 'state=enabled' >>"$GITHUB_OUTPUT" ;;
+            *) echo '::error::The SMS grants and logins are in a mixed state.'; exit 1 ;;
+          esac
+
+      - name: Activate exact SMS grants and short-lived runtime logins
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true'
+        id: sms_activation
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          RECEIVER_SMS_INGEST_RUNTIME_PASSWORD: ${{ secrets.RECEIVER_SMS_INGEST_RUNTIME_PASSWORD }}
+          RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD: ${{ secrets.RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          valid_until="$(date -u -d '+29 days' '+%Y-%m-%dT%H:%M:%SZ')"
+          psql -X \
+            -v ingest_password="$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" \
+            -v settlement_password="$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" \
+            -v valid_until="$valid_until" \
+            --file=infra/sql/production-receiver-sms-runtimes-activate.sql >/dev/null
 
       - name: Build the exact active production TeleBirr assignment manifest
         if: inputs.mode == 'deploy'
@@ -1062,14 +1148,21 @@ jobs:
               )
               ;;
             deploy-inert)
-              transfer_files+=(
-                "$SECRET_DIR"/routine-no-money-database-url
-                "$SECRET_DIR"/routine-paid-poll-database-url
-                "$SECRET_DIR"/routine-paid-settlement-database-url
-                "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
-                "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
-                "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
-              )
+              if [[ '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
+                transfer_files+=(
+                  "$SECRET_DIR"/receiver-sms-ingest-database-url
+                  "$SECRET_DIR"/receiver-sms-settlement-database-url
+                )
+              else
+                transfer_files+=(
+                  "$SECRET_DIR"/routine-no-money-database-url
+                  "$SECRET_DIR"/routine-paid-poll-database-url
+                  "$SECRET_DIR"/routine-paid-settlement-database-url
+                  "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
+                  "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
+                  "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
+                )
+              fi
               ;;
             *)
               echo '::error::The release transfer mode is not a deployment mode.'
@@ -1152,7 +1245,9 @@ jobs:
           helper='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
+            echo 'Production web, Telegram, and receiving-phone SMS transport are deployed. The SMS database route and all seven financial switches remain disabled; no SMS claim, job, or Player credit can start.' >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             echo 'Production web, Telegram, and paired-phone receipt observation transport are live. The separate paid-review login may stage signed observations but cannot create payment claims, jobs, or Player credits. All seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-shadow' ]]; then
             echo 'Production web and Telegram are live in receiver-review-only mode. The exact pilot-bound destination may be reviewed, proof submission is unavailable, every financial/provider switch remains disabled, and no trusted TeleBirr activation epoch exists.' >>"$GITHUB_STEP_SUMMARY"
@@ -1257,6 +1352,22 @@ jobs:
           PGPASSFILE: /dev/null
         run: psql -X --file=infra/sql/production-routine-paid-settlement-disable.sql >/dev/null
 
+      - name: Restore disabled SMS grants and logins after failed first deployment
+        if: always() && (failure() || cancelled()) && steps.sms_activation.outputs.attempted == 'true' && steps.sms_previous.outputs.state == 'disabled'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: psql -X --file=infra/sql/production-receiver-sms-runtimes-disable.sql >/dev/null
+
   operate:
     name: Inspect or stop production runtime
     if: inputs.mode == 'status' || inputs.mode == 'stop'
@@ -1293,7 +1404,7 @@ jobs:
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           echo "protected=$protected" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
-          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-deploy-helper.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+          echo "helper_sha=$(sha256sum infra/operations/fetanagent-production-deploy-helper-v2.sh | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
 
       - name: Inspect exact live production release
         if: inputs.mode == 'status'
@@ -1304,7 +1415,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile='${{ steps.connection.outputs.protected }}/known-hosts' \
             'fetanagent-admin@${{ steps.connection.outputs.vm_host }}' \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper status '$GITHUB_SHA'"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '$GITHUB_SHA'"
 
       - name: Stop production and disable all application logins
         if: inputs.mode == 'stop'
@@ -1325,8 +1436,9 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile='${{ steps.connection.outputs.protected }}/known-hosts' \
             'fetanagent-admin@${{ steps.connection.outputs.vm_host }}' \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper stop"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.connection.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 stop"
           psql -X --file=infra/sql/production-nonfinancial-runtimes-disable.sql
           psql -X --file=infra/sql/production-routine-no-money-disable.sql
           psql -X --file=infra/sql/production-routine-paid-poll-disable.sql
           psql -X --file=infra/sql/production-routine-paid-settlement-disable.sql
+          psql -X --file=infra/sql/production-receiver-sms-runtimes-stop.sql

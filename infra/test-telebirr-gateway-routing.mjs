@@ -19,6 +19,7 @@ const mediaType = 'application/vnd.fetanagent.telebirr-device-bridge+json';
 const routineMediaType = 'application/vnd.fetanagent.telebirr-routine-no-money.v1+json';
 const paidPollMediaType = 'application/vnd.fetanagent.telebirr-routine-paid-poll.v1+json';
 const paidUploadMediaType = 'application/vnd.fetanagent.telebirr-routine-paid-observation.v1+json';
+const receiverSmsMediaType = 'application/vnd.fetanagent.receiver-sms-event.v1+json';
 const companionMediaType = 'application/vnd.fetanagent.companion-device-bridge+json';
 const targetHeader = 'X-FetanAgent-Deployment-Target';
 const routePath = '/v1/telebirr/device/heartbeat';
@@ -26,6 +27,7 @@ const routinePollPath = '/v1/telebirr/routine/assignments:poll';
 const routineUploadPath = '/v1/telebirr/routine/observations:upload';
 const paidPollPath = '/v1/telebirr/routine/paid/assignments:poll';
 const paidUploadPath = '/v1/telebirr/routine/paid/observations:upload';
+const receiverSmsPath = '/v1/receiver-sms/events:upload';
 const companionFindPollPath = '/v1/companion/device/player-validations:poll';
 const companionFindSubmitPath = '/v1/companion/device/player-validations:submit';
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,6 +41,7 @@ const paidBeginMarker = '# BEGIN exact routine paid-poll routing contract';
 const paidEndMarker = '# END exact routine paid-poll routing contract';
 const paidUploadBeginMarker = '# BEGIN exact routine paid-observation routing contract';
 const paidUploadEndMarker = '# END exact routine paid-observation routing contract';
+const receiverSmsBeginMarker = '\t@production_receiver_sms_upload {';
 const begin = source.indexOf(beginMarker);
 const companionBegin = source.indexOf(companionBeginMarker);
 const end = source.indexOf(endMarker);
@@ -48,10 +51,13 @@ const paidBegin = source.indexOf(paidBeginMarker);
 const paidEnd = source.indexOf(paidEndMarker);
 const paidUploadBegin = source.indexOf(paidUploadBeginMarker);
 const paidUploadEnd = source.indexOf(paidUploadEndMarker);
+const receiverSmsBegin = source.indexOf(receiverSmsBeginMarker);
 assert.ok(begin >= 0 && end > begin, 'the exact TeleBirr routing block is absent');
 assert.ok(companionBegin >= 0 && companionBegin < begin, 'the Companion routing block is absent');
 assert.equal(source.indexOf(companionBeginMarker, companionBegin + 1), -1);
 assert.ok(routineBegin > end && routineEnd > routineBegin, 'the routine routing block is absent');
+assert.ok(receiverSmsBegin > end && receiverSmsBegin < routineBegin, 'the SMS route is absent');
+assert.equal(source.indexOf(receiverSmsBeginMarker, receiverSmsBegin + 1), -1);
 assert.ok(paidBegin > routineEnd && paidEnd > paidBegin, 'the paid poll routing block is absent');
 assert.ok(
   paidUploadBegin > paidEnd && paidUploadEnd > paidUploadBegin,
@@ -106,6 +112,12 @@ try {
     `127.0.0.1:${production.port}`,
   );
   let routineRoutingBlock = source.slice(routineBegin, routineEnd + routineEndMarker.length);
+  let receiverSmsRoutingBlock = source.slice(receiverSmsBegin, routineBegin);
+  assert.equal(occurrences(receiverSmsRoutingBlock, 'telebirr-device-bridge:8084'), 1);
+  receiverSmsRoutingBlock = receiverSmsRoutingBlock.replace(
+    'telebirr-device-bridge:8084',
+    `127.0.0.1:${production.port}`,
+  );
   assert.equal(occurrences(routineRoutingBlock, 'telebirr-device-bridge:8084'), 1);
   routineRoutingBlock = routineRoutingBlock.replace(
     'telebirr-device-bridge:8084',
@@ -136,6 +148,7 @@ try {
 http://127.0.0.1:${gatewayPort} {
 ${companionRoutingBlock}
 ${routingBlock}
+${receiverSmsRoutingBlock}
 ${routineRoutingBlock}
 ${paidRoutingBlock}
 ${paidUploadRoutingBlock}
@@ -309,8 +322,27 @@ ${paidUploadRoutingBlock}
     [1, 6],
     'a rejected paid upload reached an upstream',
   );
+  await expectRoute(gatewayPort, ['production'], 202, [], receiverSmsPath, receiverSmsMediaType);
+  assert.deepEqual([staging.hits, production.hits], [1, 7]);
+  for (const rejectedTarget of [[], ['staging'], ['PRODUCTION'], ['production', 'production']]) {
+    await expectRoute(gatewayPort, rejectedTarget, 404, [], receiverSmsPath, receiverSmsMediaType);
+  }
+  await expectRoute(gatewayPort, ['production'], 404, [], receiverSmsPath, paidUploadMediaType);
+  await expectRoute(
+    gatewayPort,
+    ['production'],
+    404,
+    ['Content-Type', 'application/json'],
+    receiverSmsPath,
+    receiverSmsMediaType,
+  );
+  assert.deepEqual(
+    [staging.hits, production.hits],
+    [1, 7],
+    'a rejected SMS upload reached an upstream',
+  );
   console.log(
-    'Caddy routing verified: signed Companion Find and exact TeleBirr device, no-money, paid poll, and paid upload routes; invalid targets and duplicate headers fail closed.',
+    'Caddy routing verified: signed Companion Find and exact TeleBirr device, routine, and receiver SMS routes; invalid targets and duplicate headers fail closed.',
   );
 } catch (error) {
   if (caddyOutput) {

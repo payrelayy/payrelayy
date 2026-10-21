@@ -28,15 +28,21 @@ one job can be queued. The existing Companion execution and reconciliation bound
 Masked customer messages are queued for an old payment, a review hold, an Owner rejection, and a
 terminal credit result. They use the existing Telegram notification lease and retry path.
 
-## Before production cutover
+## Production cutover order
 
-The current branch still needs production runtime credential and Compose wiring,
-exact catalog grant activation, and a signed phone APK rollout. The Owner list and decision SQL
-have no runtime grant at migration time so the currently deployed exact-catalog Owner service
-remains healthy. Grant access only after the new Owner app is deployed and checked. Keep the SMS
-route off until the phone, bot, bridge, broker, Owner app, database roles, and customer messaging
-are reviewed and deployed together. The legacy receipt route and live financial switches are
-unchanged by this code.
+The production inert overlay replaces the old receipt poll with the SMS broker, bridge, bot and
+API modes. Its deployment workflow creates separate 29-day SMS ingest and settlement logins,
+grants only the reviewed private API and Owner functions, and mounts the same protected reference
+fingerprint master in the API and broker. The SMS database route and all seven financial switches
+remain off during that deployment. A failed first deployment restores the previous disabled grants
+and logins. The digest-pinned host deploy helper must be installed separately before using the
+changed deployment workflow.
+
+The signed Android `0.5.32-receiver-sms` APK is not yet installed on the receiver phone. The
+connected receiver phone has no FetanAgent package, so installation needs a new pairing; an
+in-place update cannot preserve an absent app key. Pair and verify the phone before approving a
+separate SMS route cutover and any financial activation. No receiving-phone SMS collected before
+the cutover timestamp can be matched for automatic credit.
 
 The cutover must first verify no unresolved Transfer, back up the current release and paired-phone
 state, and take an exact production snapshot of switches, roles, claims, jobs, and receiver revision.

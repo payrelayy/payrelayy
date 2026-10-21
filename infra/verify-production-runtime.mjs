@@ -14,6 +14,7 @@ const [
   telebirrPilotBinding,
   operationalPromotionBinding,
   inertCompose,
+  gatewayCaddyfile,
   workflow,
   helper,
   sudoers,
@@ -28,6 +29,9 @@ const [
   paidPollDisableSql,
   paidSettlementActivateSql,
   paidSettlementDisableSql,
+  receiverSmsActivateSql,
+  receiverSmsDisableSql,
+  receiverSmsStopSql,
   assignmentBrokerContinuousRuntimeMigration,
   assignmentBrokerConfig,
   assignmentBrokerPostgres,
@@ -43,6 +47,7 @@ const [
   read('infra/production-telebirr-pilot-binding'),
   read('infra/production-telebirr-operational-promotion.sha256'),
   read('infra/compose.production.inert-maintenance.yaml'),
+  read('infra/gateway/Caddyfile'),
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper-v2.sh'),
   read('infra/operations/fetanagent-production-deploy-helper-v2.sudoers'),
@@ -57,6 +62,9 @@ const [
   read('infra/sql/production-routine-paid-poll-disable.sql'),
   read('infra/sql/production-routine-paid-settlement-activate.sql'),
   read('infra/sql/production-routine-paid-settlement-disable.sql'),
+  read('infra/sql/production-receiver-sms-runtimes-activate.sql'),
+  read('infra/sql/production-receiver-sms-runtimes-disable.sql'),
+  read('infra/sql/production-receiver-sms-runtimes-stop.sql'),
   read('supabase/migrations/20260916142230_telebirr_assignment_broker_continuous_runtime.sql'),
   read('apps/telebirr-assignment-broker/src/telebirr-assignment-broker-config.ts'),
   read('apps/telebirr-assignment-broker/src/postgres-telebirr-assignment-broker.ts'),
@@ -372,11 +380,13 @@ assert.doesNotMatch(telebirrAssignment, /ENROLLMENT_ONLY|network_mode: none/u);
 assert.match(inertCompose, /^services:\s*$/mu);
 const inertApi = childBlock(topLevelSection(inertCompose, 'services'), 'api');
 assert.match(inertApi, /^\s+environment:\s*$/mu);
-assert.match(inertApi, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true'/u);
+assert.match(inertApi, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'false'/u);
+assert.match(inertApi, /TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED: 'true'/u);
 assert.equal(
-  count(inertCompose, /TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'true'/gu),
+  count(inertCompose, /TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED: 'true'/gu),
   1,
 );
+assert.match(inertCompose, /BOT_RECEIVER_SMS_CANDIDATE_ENABLED: 'true'/u);
 assert.doesNotMatch(inertApi, /FINANCIAL_ACTIONS_MODE|KEMERBET_|secrets:|configs:|networks:/u);
 assert.match(inertCompose, /^  telebirr-assignment-broker:\s*$/mu);
 assert.match(inertCompose, /environment: !override/u);
@@ -385,16 +395,16 @@ assert.match(inertCompose, /TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: produc
 assert.match(inertCompose, /FINANCIAL_ACTIONS_MODE: dry_run/u);
 assert.match(inertCompose, /KEMERBET_EXECUTOR_ENABLED: 'false'/u);
 assert.match(inertCompose, /KEMERBET_FINAL_ACTION_ENABLED: 'false'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BRIDGE_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_UPLOAD_BRIDGE_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_BRIDGE_ENABLED: 'true'/u);
 assert.match(
   inertCompose,
-  /ROUTINE_PAID_POLL_DATABASE_URL_FILE: \/run\/secrets\/routine_paid_poll_database_url/u,
+  /RECEIVER_SMS_DATABASE_URL_FILE: \/run\/secrets\/receiver_sms_ingest_database_url/u,
 );
-assert.match(inertCompose, /- source: routine_paid_poll_database_url/u);
+assert.match(inertCompose, /- source: receiver_sms_ingest_database_url/u);
+assert.match(inertCompose, /- source: receiver_sms_settlement_database_url/u);
+assert.match(inertCompose, /- source: deposit_proof_reference_fingerprint_master/u);
 assert.match(inertCompose, /secrets: !override/u);
 assert.match(inertCompose, /configs: !override/u);
 assert.match(inertCompose, /networks: !override/u);
@@ -404,24 +414,8 @@ assert.doesNotMatch(
   inertCompose,
   /TELEBIRR_ASSIGNMENT_BROKER_(?:DATABASE_URL|REFERENCE_OPENING_KEY|RUNTIME_MANIFEST|SIGNER_PRIVATE_KEY)_FILE|NODE_EXTRA_CA_CERTS/u,
 );
-assert.equal(count(inertCompose, /^  [a-z][a-z0-9-]*:\s*$/gmu), 4);
-const inertSettlement = childBlock(
-  topLevelSection(inertCompose, 'services'),
-  'routine-paid-settlement',
-);
-assert.match(inertSettlement, /INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'/u);
-assert.match(inertSettlement, /FINANCIAL_ACTIONS_MODE: live/u);
-assert.match(
-  inertSettlement,
-  /ROUTINE_PAID_SETTLEMENT_DATABASE_URL_FILE: \/run\/secrets\/routine_paid_settlement_database_url/u,
-);
-assert.match(inertSettlement, /- source: routine_paid_settlement_database_url/u);
-assert.match(inertSettlement, /routine-paid-settlement-healthcheck\.js/u);
-assert.match(inertSettlement, /telebirr_assignment_database_egress/u);
-assert.doesNotMatch(
-  inertSettlement,
-  /REFERENCE_OPENING_KEY|SIGNER_PRIVATE_KEY|NODE_EXTRA_CA_CERTS|volumes:|ports:/u,
-);
+assert.equal(count(topLevelSection(inertCompose, 'services'), /^  [a-z][a-z0-9-]*:\s*$/gmu), 4);
+assert.doesNotMatch(inertCompose, /INTERNAL_ROUTINE_(?:NO_MONEY|PAID)|routine-paid-settlement:/u);
 assert.match(telebirrDeviceState, /TELEBIRR_DEVICE_STATE_BROKER_DEPLOYMENT_TARGET: production/u);
 assert.match(telebirrDeviceState, /telebirr_device_state_database_egress/u);
 assert.match(telebirrBridge, /TELEBIRR_DEVICE_BRIDGE_DEPLOYMENT_TARGET: production/u);
@@ -456,6 +450,14 @@ assert.match(gateway, /ports:\s*\r?\n      - '80:80\/tcp'\s*\r?\n      - '443:44
 assert.match(gateway, /cap_add:\s*\r?\n      - NET_BIND_SERVICE/u);
 assert.match(gateway, /- companion_device_ingress\s*\r?\n      - telebirr_device_ingress/u);
 assert.match(gateway, /telebirr-device-bridge:[\s\S]*?condition: service_healthy/u);
+assert.match(
+  gatewayCaddyfile,
+  /@production_receiver_sms_upload \{[\s\S]*?method POST[\s\S]*?path \/v1\/receiver-sms\/events:upload[\s\S]*?application\/vnd\.fetanagent\.receiver-sms-event\.v1\+json[\s\S]*?X-FetanAgent-Deployment-Target\} == "production"/u,
+);
+assert.match(
+  gatewayCaddyfile,
+  /handle @production_receiver_sms_upload \{[\s\S]*?max_size 8KiB[\s\S]*?reverse_proxy telebirr-device-bridge:8084/u,
+);
 assert.doesNotMatch(gateway, /secrets:|docker\.sock/u);
 
 assert.match(compose, /^name: fetanagent-production$/mu);
@@ -527,7 +529,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  13,
+  16,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -821,6 +823,8 @@ assert.match(
   /readonly HELPER_PATH='\/usr\/local\/sbin\/fetanagent-production-deploy-helper-v2'/u,
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
+assert.match(helper, /negative_receiver_sms_public_smoke\(\)/u);
+assert.equal(count(helper, /negative_receiver_sms_public_smoke "\$release"/gu), 2);
 assert.match(helper, /release_deployment_mode\(\)/u);
 assert.match(helper, /operational\|shadow-review\|inert-maintenance/u);
 assert.match(helper, /verify_api_financial_mode_for_release\(\)/u);
@@ -937,9 +941,10 @@ const operationalTransferBlock =
   /deploy\|deploy-shadow\|deploy-shadow-intake\)\n\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+;;/u.exec(
     workflow,
   )?.[1];
-const inertTransferBlock = /deploy-inert\)\n\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+;;/u.exec(
-  workflow,
-)?.[1];
+const inertTransferBlock =
+  /deploy-inert\)\s+if \[\[ '\$\{\{ steps\.protected\.outputs\.sms_mode \}\}' == 'true' \]\]; then\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+else/u.exec(
+    workflow,
+  )?.[1];
 assert.ok(operationalTransferBlock, 'the operational transfer inventory must exist');
 assert.ok(inertTransferBlock, 'the inert transfer inventory must exist');
 const transferredNames = (block) =>
@@ -978,25 +983,27 @@ const [
   routineFiles,
   paidPollFiles,
   paidSettlementFiles,
+  smsFiles,
   companionFiles,
 ] = [...helperCountBlock.matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu)].map(
   (match) => Number(match[1]),
 );
 assert.ok(betaFiles > 0, 'legacy beta rollback accounting must remain explicit');
 assert.match(compose, /^  production-companion-device-bridge:/mu);
-assert.match(inertCompose, /INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'/u);
-assert.match(inertCompose, /INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'/u);
+assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'/u);
 assert.equal(
   helperBaseCount + operationalFiles + companionFiles,
   operationalTransferNames.length,
   'the helper operational bundle count must match the flattened workflow transfer',
 );
 assert.equal(
-  helperBaseCount + routineFiles + paidPollFiles + paidSettlementFiles + companionFiles,
+  helperBaseCount + smsFiles + companionFiles,
   inertTransferNames.length,
   'the helper inert bundle count must match the flattened workflow transfer',
 );
+assert.equal(routineFiles + paidPollFiles + paidSettlementFiles, 6);
+assert.equal(smsFiles, 2);
 assert.match(helper, /if grep -Fq '  beta-admission:' "\$incoming\/compose\.production\.yaml"/u);
 assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
@@ -1012,6 +1019,34 @@ assert.match(helper, /routine-paid-poll-database-url/u);
 assert.match(helper, /routine-paid-settlement-database-url/u);
 assert.match(helper, /services\+=\(routine-paid-settlement\)/u);
 assert.match(helper, /routine-paid-settlement\s*$/mu);
+assert.match(
+  helper,
+  /required\+=\(receiver-sms-ingest-database-url receiver-sms-settlement-database-url\)/u,
+);
+assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-activate\.sql/u);
+assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-disable\.sql/u);
+assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-stop\.sql/u);
+assert.match(workflow, /steps\.sms_previous\.outputs\.state == 'disabled'/u);
+for (const role of ['ingest', 'settlement']) {
+  assert.match(
+    receiverSmsActivateSql,
+    new RegExp(`alter role fetanagent_receiver_sms_${role}_runtime\\s+login password :`, 'u'),
+  );
+  assert.match(
+    receiverSmsDisableSql,
+    new RegExp(`alter role fetanagent_receiver_sms_${role}_runtime nologin`, 'u'),
+  );
+  assert.match(
+    receiverSmsStopSql,
+    new RegExp(`alter role fetanagent_receiver_sms_${role}_runtime\\s+nologin`, 'u'),
+  );
+}
+assert.match(receiverSmsActivateSql, /count\(\*\) = 7 from app\.feature_switches/u);
+assert.match(receiverSmsActivateSql, /not control\.enabled/u);
+assert.match(receiverSmsDisableSql, /not control\.enabled/u);
+for (const sql of [receiverSmsActivateSql, receiverSmsDisableSql, receiverSmsStopSql]) {
+  assert.doesNotMatch(sql, /\b(?:insert|update|delete|truncate)\s+(?:into\s+|from\s+)?app\./iu);
+}
 assert.match(
   workflow,
   /ROUTINE_PAID_POLL_RUNTIME_PASSWORD: \$\{\{ secrets\.ROUTINE_PAID_POLL_RUNTIME_PASSWORD \}\}/u,
@@ -1080,7 +1115,7 @@ const predecessorDigest = createHash('sha256').update(predecessorHelper).digest(
 assert.equal(
   predecessorSudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${predecessorDigest} /usr/local/sbin/fetanagent-production-deploy-helper *\n`,
-  'the existing production status and stop helper must remain digest pinned',
+  'the predecessor production helper must remain digest pinned for rollback',
 );
 assert.match(
   workflow,
@@ -1088,8 +1123,10 @@ assert.match(
 );
 assert.match(
   workflow,
-  /helper_sha=\$\(sha256sum infra\/operations\/fetanagent-production-deploy-helper\.sh/u,
+  /helper_sha=\$\(sha256sum infra\/operations\/fetanagent-production-deploy-helper-v2\.sh/u,
 );
+assert.match(workflow, /fetanagent-production-deploy-helper-v2 status '\$GITHUB_SHA'/u);
+assert.match(workflow, /fetanagent-production-deploy-helper-v2 stop"/u);
 
 for (const role of [
   'fetanagent_beta_admission_runtime',

@@ -767,6 +767,10 @@ assert.ok(
   workflow.indexOf('Verify the stopped direct database route before any production SQL') <
     workflow.indexOf('Prove the complete inert production money boundary'),
 );
+assert.ok(
+  workflow.indexOf('[[ "$host_state" == \'absent\' ]]') <
+    workflow.indexOf('Activate exact SMS grants and short-lived runtime logins'),
+);
 assert.match(
   directSqlTunnel,
   /PGHOST="\$direct_host" PGHOSTADDR=127\.0\.0\.1 PGPORT=55432 PGUSER=postgres/u,

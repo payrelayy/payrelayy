@@ -756,6 +756,12 @@ jobs:
           export FETANAGENT_DIRECT_DB_SSH_HOST="$VM_HOST"
           export FETANAGENT_DIRECT_DB_KEY="$SECRET_DIR/deploy-key"
           export FETANAGENT_DIRECT_DB_KNOWN_HOSTS="$SECRET_DIR/known-hosts"
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          host_state="$(ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 current-state")"
+          [[ "$host_state" == 'absent' ]]
           result="$("$SECRET_DIR/psql" -X -q -A -t -v ON_ERROR_STOP=1 -c \
             "select case when current_user = 'postgres' and not pg_catalog.pg_is_in_recovery() and \
               (select ssl from pg_catalog.pg_stat_ssl where pid = pg_catalog.pg_backend_pid()) \

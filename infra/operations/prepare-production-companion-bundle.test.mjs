@@ -85,6 +85,28 @@ test('prepares the base and execution-v2 production-bound files without a databa
   assert.throws(() => prepareProductionCompanionBundle(environment, directory), /unsafe/u);
 });
 
+test('uses the exact production direct endpoint for stopped SMS recovery', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'fetanagent-companion-direct-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { environment } = fixture();
+  environment.PRODUCTION_DATABASE_ROUTE = 'direct';
+  prepareProductionCompanionBundle(environment, directory);
+  const url = new URL(readFileSync(join(directory, 'companion-device-database-url'), 'utf8'));
+  assert.equal(url.hostname, 'db.xzztugbgtulptnbpoelr.supabase.co');
+  assert.equal(url.username, 'fetanagent_companion_device_bridge_runtime');
+  assert.equal(url.port, '5432');
+  assert.equal(url.search, '?sslmode=verify-full');
+});
+
+test('rejects any unreviewed production database route', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'fetanagent-companion-route-test-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { environment } = fixture();
+  environment.PRODUCTION_DATABASE_ROUTE = 'other';
+  assert.throws(() => prepareProductionCompanionBundle(environment, directory), /unsafe/u);
+  assert.equal(readdirSync(directory).length, 0);
+});
+
 for (const [name, mutate] of [
   [
     'staging project',

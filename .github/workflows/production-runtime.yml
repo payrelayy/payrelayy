@@ -45,6 +45,14 @@ on:
         options:
           - disabled
           - enabled
+      confirm_database_route:
+        description: Pooler normally; direct over pinned SSH only for stopped SMS recovery
+        required: true
+        default: pooler
+        type: choice
+        options:
+          - pooler
+          - direct
 
 permissions:
   contents: read
@@ -58,8 +66,9 @@ env:
   PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
   PRODUCTION_DROPLET_ID: '593344964'
   PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
-  # GitHub-hosted runners are IPv4-only. Short-lived administrative SQL uses the
-  # shared transaction pooler; deployed long-lived runtimes remain on session mode 5432.
+  PRODUCTION_DATABASE_DIRECT_HOST: db.xzztugbgtulptnbpoelr.supabase.co
+  # Normal deploys use Supavisor. Stopped SMS recovery may use the direct IPv6
+  # database via a pinned SSH tunnel for runner SQL and direct host for VM runtimes.
   PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
   CUSTOMER_WEB_RUNTIME_ROLE: fetanagent_customer_web_runtime
   OWNER_RUNTIME_ROLE: fetanagent_owner_control_runtime
@@ -82,6 +91,7 @@ jobs:
           CONFIRMED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
           CONFIRMED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
           CONFIRMED_ROUTINE_TRANSPORT: ${{ inputs.confirm_routine_deposit_transport }}
+          CONFIRMED_DATABASE_ROUTE: ${{ inputs.confirm_database_route }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
@@ -95,6 +105,11 @@ jobs:
           if [[ "$REQUESTED_MODE" != 'deploy-inert' ]]; then
             [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ]]
           fi
+          case "$CONFIRMED_DATABASE_ROUTE" in
+            pooler) ;;
+            direct) [[ "$REQUESTED_MODE" == 'deploy-inert' ]] ;;
+            *) exit 1 ;;
+          esac
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
@@ -213,6 +228,7 @@ jobs:
           node infra/verify-production-runtime.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-production-deploy-helper-v2.sh
+          bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets
         shell: bash
@@ -338,6 +354,7 @@ jobs:
         shell: bash
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_DATABASE_ROUTE: ${{ inputs.confirm_database_route }}
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
@@ -433,6 +450,16 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
             echo '::error::Only the receiver SMS production overlay may be deployed.' >&2
             exit 1
+          fi
+          runtime_database_host="$PRODUCTION_DATABASE_POOLER_HOST"
+          runtime_role_suffix=".$PRODUCTION_PROJECT_REF"
+          if [[ "$REQUESTED_DATABASE_ROUTE" == 'direct' ]]; then
+            [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" == true ]]
+            [[ "$PRODUCTION_DATABASE_DIRECT_HOST" == "db.$PRODUCTION_PROJECT_REF.supabase.co" ]]
+            runtime_database_host="$PRODUCTION_DATABASE_DIRECT_HOST"
+            runtime_role_suffix=''
+          else
+            [[ "$REQUESTED_DATABASE_ROUTE" == 'pooler' ]]
           fi
           printf '%s\n' "$runtime_deployment_mode" >"$RUNNER_TEMP/release/runtime-deployment-mode"
           install -m 0600 -- "$shadow_overlay_source" \
@@ -552,15 +579,15 @@ jobs:
           writeFileSync(`${process.env.SECRET_DIR}/owner-routine-enrollment-signer-pkcs8`, encoded, { mode: 0o600 });
           NODE
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$OWNER_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/owner-database-url"
+            "$OWNER_RUNTIME_ROLE$runtime_role_suffix" "$OWNER_CONTROL_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/owner-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$CUSTOMER_WEB_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/customer-web-database-url"
+            "$CUSTOMER_WEB_RUNTIME_ROLE$runtime_role_suffix" "$CUSTOMER_WEB_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/customer-web-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full\n' \
-            "$PLAYER_ACTION_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/player-action-database-url"
+            "$PLAYER_ACTION_RUNTIME_ROLE$runtime_role_suffix" "$PLAYER_ACTION_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/player-action-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "$ASSIGNMENT_RUNTIME_ROLE.$PRODUCTION_PROJECT_REF" "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-assignment-database-url"
+            "$ASSIGNMENT_RUNTIME_ROLE$runtime_role_suffix" "$TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/telebirr-assignment-database-url"
           printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-            "fetanagent_telebirr_device_state_runtime.$PRODUCTION_PROJECT_REF" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" >"$secret_dir/telebirr-device-state-database-url"
+            "fetanagent_telebirr_device_state_runtime$runtime_role_suffix" "$TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD" "$runtime_database_host" >"$secret_dir/telebirr-device-state-database-url"
           printf '%s\n' "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" >"$secret_dir/publishable-key"
           printf '%s\n' "$CUSTOMER_WEB_RATE_LIMIT_HMAC_SECRET" >"$secret_dir/customer-web-rate-limit-hmac"
           printf '%s\n' "$BOT_TO_API_ACTION_HMAC_SECRET" >"$secret_dir/api-action-transport-hmac"
@@ -627,26 +654,26 @@ jobs:
           spki.fill(0);
           NODE
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_routine_telebirr_no_money_runtime.$PRODUCTION_PROJECT_REF" \
-              "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              "fetanagent_routine_telebirr_no_money_runtime$runtime_role_suffix" \
+              "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/routine-no-money-database-url"
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_routine_telebirr_paid_poll_runtime.$PRODUCTION_PROJECT_REF" \
-              "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              "fetanagent_routine_telebirr_paid_poll_runtime$runtime_role_suffix" \
+              "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/routine-paid-poll-database-url"
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_routine_telebirr_paid_settlement_runtime.$PRODUCTION_PROJECT_REF" \
-              "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              "fetanagent_routine_telebirr_paid_settlement_runtime$runtime_role_suffix" \
+              "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/routine-paid-settlement-database-url"
           fi
           if [[ "$sms_mode" == true ]]; then
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_receiver_sms_ingest_runtime.$PRODUCTION_PROJECT_REF" \
-              "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              "fetanagent_receiver_sms_ingest_runtime$runtime_role_suffix" \
+              "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/receiver-sms-ingest-database-url"
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_receiver_sms_settlement_runtime.$PRODUCTION_PROJECT_REF" \
-              "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" "$PRODUCTION_DATABASE_POOLER_HOST" \
+              "fetanagent_receiver_sms_settlement_runtime$runtime_role_suffix" \
+              "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/receiver-sms-settlement-database-url"
           fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
@@ -693,7 +720,8 @@ jobs:
           ' "$secret_dir/telebirr-reference-opening-key.v1.json"
           rm -f -- "$secret_dir/telebirr-assignment-derived.spki.der" \
             "$secret_dir/telebirr-bridge.spki.der" "$secret_dir/telebirr-bridge-derived.spki.der"
-          node infra/operations/prepare-production-companion-bundle.mjs "$secret_dir"
+          PRODUCTION_DATABASE_ROUTE="$REQUESTED_DATABASE_ROUTE" \
+            node infra/operations/prepare-production-companion-bundle.mjs "$secret_dir"
           helper_sha="$(sha256sum infra/operations/fetanagent-production-deploy-helper-v2.sh | cut -d ' ' -f 1)"
           bundle_bytes="$(stat --format='%s' "$RUNNER_TEMP/release/fetanagent-production-images.tar")"
           [[ "$bundle_bytes" =~ ^[1-9][0-9]*$ ]]
@@ -702,6 +730,44 @@ jobs:
           echo "bundle_bytes=$bundle_bytes" >>"$GITHUB_OUTPUT"
           echo "vm_host=$PRODUCTION_VM_HOST" >>"$GITHUB_OUTPUT"
           echo "telebirr_reference_opening_key_id=$telebirr_reference_opening_key_id" >>"$GITHUB_OUTPUT"
+
+      - name: Verify the stopped direct database route before any production SQL
+        if: inputs.confirm_database_route == 'direct'
+        shell: bash
+        env:
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGDATABASE: postgres
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGOPTIONS: -c default_transaction_read_only=on
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          [[ '${{ inputs.mode }}' == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]
+          [[ "$PRODUCTION_DATABASE_DIRECT_HOST" == "db.$PRODUCTION_PROJECT_REF.supabase.co" ]]
+          install -m 0700 infra/operations/psql-over-production-direct-tunnel.sh "$SECRET_DIR/psql"
+          export FETANAGENT_DIRECT_DB_ROUTE=stopped-sms-recovery
+          export FETANAGENT_DIRECT_DB_PROJECT_REF="$PRODUCTION_PROJECT_REF"
+          export FETANAGENT_DIRECT_DB_HOST="$PRODUCTION_DATABASE_DIRECT_HOST"
+          export FETANAGENT_DIRECT_DB_SSH_HOST="$VM_HOST"
+          export FETANAGENT_DIRECT_DB_KEY="$SECRET_DIR/deploy-key"
+          export FETANAGENT_DIRECT_DB_KNOWN_HOSTS="$SECRET_DIR/known-hosts"
+          result="$("$SECRET_DIR/psql" -X -q -A -t -v ON_ERROR_STOP=1 -c \
+            "select case when current_user = 'postgres' and not pg_catalog.pg_is_in_recovery() and \
+              (select ssl from pg_catalog.pg_stat_ssl where pid = pg_catalog.pg_backend_pid()) \
+              then 1 else 0 end")"
+          [[ "$result" == '1' ]]
+          for name in FETANAGENT_DIRECT_DB_ROUTE FETANAGENT_DIRECT_DB_PROJECT_REF \
+            FETANAGENT_DIRECT_DB_HOST FETANAGENT_DIRECT_DB_SSH_HOST \
+            FETANAGENT_DIRECT_DB_KEY FETANAGENT_DIRECT_DB_KNOWN_HOSTS; do
+            printf '%s=%s\n' "$name" "${!name}" >>"$GITHUB_ENV"
+          done
+          printf '%s\n' "$SECRET_DIR" >>"$GITHUB_PATH"
+          echo 'TLS-verified direct administrator route ready; no production row or service changed.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Prove the complete inert production money boundary
         if: inputs.mode == 'deploy-inert'
@@ -1036,6 +1102,12 @@ jobs:
           current_state="$(ssh "${ssh_opts[@]}" "$remote" \
             "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' check-release-mode '$GITHUB_SHA' '$runtime_deployment_mode' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
+          if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
+            [[ "$current_state" == 'absent' ]] || {
+              echo '::error::Direct database recovery is allowed only for stopped production.' >&2
+              exit 1
+            }
+          fi
           echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
 
       - name: Restore only stopped SMS app credentials before cold deployment

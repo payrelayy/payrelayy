@@ -56,6 +56,16 @@ export function prepareProductionCompanionBundle(environment, directory) {
     const password = environment.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD;
     if (!/^[0-9a-f]{64}$/u.test(password ?? '')) unavailable();
     if (environment.PRODUCTION_PROJECT_REF !== 'xzztugbgtulptnbpoelr') unavailable();
+    const databaseRoute = environment.PRODUCTION_DATABASE_ROUTE ?? 'pooler';
+    if (databaseRoute !== 'pooler' && databaseRoute !== 'direct') unavailable();
+    const databaseHost =
+      databaseRoute === 'direct'
+        ? 'db.xzztugbgtulptnbpoelr.supabase.co'
+        : 'aws-0-eu-west-1.pooler.supabase.com';
+    const databaseUser =
+      databaseRoute === 'direct'
+        ? 'fetanagent_companion_device_bridge_runtime'
+        : 'fetanagent_companion_device_bridge_runtime.xzztugbgtulptnbpoelr';
     const signerId = environment.COMPANION_SERVER_SIGNER_ID;
     const keyId = environment.COMPANION_SERVER_SIGNER_KEY_ID;
     if (
@@ -153,7 +163,7 @@ export function prepareProductionCompanionBundle(environment, directory) {
     const values = [
       [
         'companion-device-database-url',
-        `postgresql://fetanagent_companion_device_bridge_runtime.xzztugbgtulptnbpoelr:${password}@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=verify-full`,
+        `postgresql://${databaseUser}:${password}@${databaseHost}:5432/postgres?sslmode=verify-full`,
       ],
       ['companion-bridge-server-signer.pkcs8.der', privateBytes],
       ['companion-bridge-runtime-manifest.v2.json', manifestBytes],

@@ -220,7 +220,8 @@ class VerifierForegroundService : Service() {
       )
     return Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
       .setSmallIcon(R.drawable.ic_verifier_notification)
-      .setContentTitle(getString(R.string.app_name))
+      .setContentTitle(getString(if (BuildConfig.RECEIVER_SMS_ENABLED)
+        R.string.receiver_sms_app_name else R.string.app_name))
       .setContentText(VerifierLifecycle.from(status).label)
       .setContentIntent(openPendingIntent)
       .setCategory(Notification.CATEGORY_SERVICE)
@@ -235,10 +236,12 @@ class VerifierForegroundService : Service() {
     val channel =
       NotificationChannel(
         NOTIFICATION_CHANNEL_ID,
-        getString(R.string.notification_channel_name),
+        getString(if (BuildConfig.RECEIVER_SMS_ENABLED)
+          R.string.receiver_sms_notification_channel else R.string.notification_channel_name),
         NotificationManager.IMPORTANCE_LOW,
       ).apply {
-        description = getString(R.string.notification_channel_description)
+        description = getString(if (BuildConfig.RECEIVER_SMS_ENABLED)
+          R.string.receiver_sms_notification_description else R.string.notification_channel_description)
         setShowBadge(false)
       }
     getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

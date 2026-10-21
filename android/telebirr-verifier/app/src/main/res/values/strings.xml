@@ -1,6 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <string name="app_name">FetanAgent TeleBirr Verifier</string>
+  <string name="receiver_sms_app_name">FetanAgent SMS Verifier</string>
+  <string name="receiver_sms_running">SMS reader is on. New incoming payment SMS can be sent securely to FetanAgent.</string>
+  <string name="receiver_sms_stopped">SMS reader is stopped. New payment SMS will not be collected.</string>
+  <string name="receiver_sms_scope">Incoming TeleBirr and CBE Birr payment SMS only. Sender must be 127 or CBEBirr. This phone does not credit Players; FetanAgent decides deposits separately.</string>
+  <string name="receiver_sms_start">Start SMS reader</string>
+  <string name="receiver_sms_pairing_heading">Phone connection</string>
+  <string name="receiver_sms_pairing_instructions">Use a fresh package from the authenticated Owner page to connect this phone. Keep the package and proof private.</string>
+  <string name="receiver_sms_receipt_heading">Signed phone receipt</string>
+  <string name="receiver_sms_receipt_stored_until">Phone connection valid until %1$s. New incoming payment SMS can be uploaded while the SMS reader is on.</string>
+  <string name="receiver_sms_notification_channel">FetanAgent SMS reader</string>
+  <string name="receiver_sms_notification_description">Status and stop control for incoming payment SMS collection</string>
   <string name="automatic_operation_enabled">Automatic operation is enabled.</string>
   <string name="automatic_operation_stopped">Automatic operation is stopped.</string>
   <string name="inert_artifact_notice">This reviewed APK is inert until trusted production enrollment is provisioned.</string>

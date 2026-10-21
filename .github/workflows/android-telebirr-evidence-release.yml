@@ -1,15 +1,14 @@
-name: Android TeleBirr evidence-only release
+name: Android receiver SMS release
 
 on:
   workflow_dispatch:
     inputs:
       deployment_target:
-        description: Select the exact protected environment and APK trust target
+        description: Production receiver SMS phone
         required: true
-        default: staging
+        default: production
         type: choice
         options:
-          - staging
           - production
       confirm_deployment_target:
         description: Type the selected deployment target again
@@ -20,16 +19,14 @@ on:
         required: true
         type: string
       phone_mode:
-        description: Select no-money, paid receipt, or receiver SMS capture (the APK never credits Players)
+        description: Receiver SMS capture (the APK never credits Players)
         required: true
-        default: no_money
+        default: receiver_sms
         type: choice
         options:
-          - no_money
-          - paid_observation
           - receiver_sms
       confirm_evidence_only_phone_mode:
-        description: Type build-evidence-only-no-money, build-evidence-only-paid-observation, or build-evidence-only-receiver-sms
+        description: Type build-evidence-only-receiver-sms
         required: true
         type: string
 
@@ -42,7 +39,7 @@ concurrency:
 
 jobs:
   build-evidence-release:
-    name: Build signed evidence-only APK
+    name: Build signed receiver SMS APK
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: ${{ inputs.deployment_target }}
@@ -55,7 +52,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Require current main and exact evidence-only phone-mode confirmation
+      - name: Require current main and exact receiver SMS confirmation
         shell: bash
         env:
           DEPLOYMENT_TARGET: ${{ inputs.deployment_target }}
@@ -66,20 +63,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
-          [[ "$DEPLOYMENT_TARGET" == 'staging' || "$DEPLOYMENT_TARGET" == 'production' ]]
+          [[ "$DEPLOYMENT_TARGET" == 'production' ]]
           [[ "$CONFIRMED_DEPLOYMENT_TARGET" == "$DEPLOYMENT_TARGET" ]]
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$CONFIRMED_MAIN_COMMIT_SHA" == "$GITHUB_SHA" ]]
-          [[ "$PHONE_MODE" == 'no_money' || "$PHONE_MODE" == 'paid_observation' || "$PHONE_MODE" == 'receiver_sms' ]]
-          if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-            [[ "$DEPLOYMENT_TARGET" == 'production' ]]
-            [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-paid-observation' ]]
-          elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-            [[ "$DEPLOYMENT_TARGET" == 'production' ]]
-            [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-receiver-sms' ]]
-          else
-            [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-no-money' ]]
-          fi
+          [[ "$PHONE_MODE" == 'receiver_sms' ]]
+          [[ "$CONFIRMED_EVIDENCE_ONLY" == 'build-evidence-only-receiver-sms' ]]
 
       - name: Set up Java 17
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
@@ -183,19 +172,12 @@ jobs:
         run: |
           set -euo pipefail
           protected='${{ steps.protected.outputs.protected }}'
-          routine_args=()
-          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            routine_args=(
-              -PfetanagentRoutineLookupSignerSpkiFile="$protected/routine-lookup.spki.der"
-              -PfetanagentRoutineLookupSignerValidFrom="$ROUTINE_LOOKUP_SIGNER_VALID_FROM"
-              -PfetanagentRoutineLookupSignerValidUntil="$ROUTINE_LOOKUP_SIGNER_VALID_UNTIL"
-            )
-          fi
-          if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-            routine_args+=( -PfetanagentRoutinePaidPhoneEnabled=true )
-          elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-            routine_args+=( -PfetanagentReceiverSmsEnabled=true )
-          fi
+          routine_args=(
+            -PfetanagentRoutineLookupSignerSpkiFile="$protected/routine-lookup.spki.der"
+            -PfetanagentRoutineLookupSignerValidFrom="$ROUTINE_LOOKUP_SIGNER_VALID_FROM"
+            -PfetanagentRoutineLookupSignerValidUntil="$ROUTINE_LOOKUP_SIGNER_VALID_UNTIL"
+            -PfetanagentReceiverSmsEnabled=true
+          )
           gradle --no-daemon --stacktrace \
             -PfetanagentVerifierRuntimeMode=evidence_only \
             -PfetanagentVerifierDeploymentTarget='${{ inputs.deployment_target }}' \
@@ -214,7 +196,7 @@ jobs:
           test -s app/build/outputs/apk/release/app-release.apk
           test ! -e app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Verify evidence-only bindings, signature, and release digest
+      - name: Verify receiver SMS bindings, signature, and release digest
         id: artifact
         working-directory: android/telebirr-verifier
         shell: bash
@@ -233,31 +215,13 @@ jobs:
           grep -Fq 'VERIFIER_ENABLED = true' "$build_config"
           grep -Fq "VERIFIER_DEPLOYMENT_TARGET = \"$DEPLOYMENT_TARGET\"" "$build_config"
           grep -Fq 'VERIFIER_RUNTIME_MODE = "evidence_only"' "$build_config"
-          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
-            grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
-            grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
-            if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-              grep -Fq 'VERSION_NAME = "0.5.31-routine-paid-lane-recovery"' "$build_config"
-              grep -Fq 'VERSION_CODE = 36' "$build_config"
-              grep -Fq 'ROUTINE_PAID_ENABLED = true' "$build_config"
-              grep -Fq 'RECEIVER_SMS_ENABLED = false' "$build_config"
-            elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-              grep -Fq 'VERSION_NAME = "0.5.35-receiver-sms-incoming-only"' "$build_config"
-              grep -Fq 'VERSION_CODE = 40' "$build_config"
-              grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
-              grep -Fq 'RECEIVER_SMS_ENABLED = true' "$build_config"
-            else
-              grep -Fq 'VERSION_NAME = "0.5.17-routine-no-money"' "$build_config"
-              grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
-              grep -Fq 'RECEIVER_SMS_ENABLED = false' "$build_config"
-            fi
-          else
-            grep -Fq 'VERSION_NAME = "0.5.15-evidence-only"' "$build_config"
-            grep -Fq 'ROUTINE_NO_MONEY_ENABLED = false' "$build_config"
-            grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
-            grep -Fq 'RECEIVER_SMS_ENABLED = false' "$build_config"
-          fi
+          grep -Fq 'ROUTINE_NO_MONEY_ENABLED = true' "$build_config"
+          grep -Fq 'ROUTINE_LOOKUP_SIGNER_KEY_ID = "telebirr-routine-lookup-production-v1"' "$build_config"
+          grep -Fq "ROUTINE_LOOKUP_SIGNER_PUBLIC_KEY_SPKI_SHA256 = \"$ROUTINE_LOOKUP_SIGNER_SPKI_SHA256\"" "$build_config"
+          grep -Fq 'VERSION_NAME = "0.5.35-receiver-sms-incoming-only"' "$build_config"
+          grep -Fq 'VERSION_CODE = 40' "$build_config"
+          grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
+          grep -Fq 'RECEIVER_SMS_ENABLED = true' "$build_config"
           grep -Fq "SERVER_SIGNER_KEY_ID = \"$BRIDGE_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ASSIGNMENT_SIGNER_KEY_ID = \"$ASSIGNMENT_SIGNER_KEY_ID\"" "$build_config"
           grep -Fq "ROUTINE_RECEIPT_SIGNER_KEY_ID = \"telebirr-routine-enrollment-$DEPLOYMENT_TARGET-v1\"" "$build_config"
@@ -276,17 +240,7 @@ jobs:
           artifact_dir="$RUNNER_TEMP/fetanagent-android-telebirr-evidence-artifact"
           [[ ! -e "$artifact_dir" && ! -L "$artifact_dir" ]]
           install -d -m 0700 "$artifact_dir"
-          if [[ "$DEPLOYMENT_TARGET" == 'production' ]]; then
-            if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
-              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.31-production-routine-paid-lane-recovery.apk'
-            elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-              artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.35-production.apk'
-            else
-              artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
-            fi
-          else
-            artifact_name="FetanAgent-TeleBirr-Verifier-0.5.15-$DEPLOYMENT_TARGET-evidence-only.apk"
-          fi
+          artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.35-production.apk'
           install -m 0600 app/build/outputs/apk/release/app-release.apk "$artifact_dir/$artifact_name"
           (
             cd "$artifact_dir"
@@ -294,11 +248,7 @@ jobs:
           )
           echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-          if [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-            echo 'Signed receiver SMS APK verified. The phone only captures and uploads payment facts; it does not credit Players.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo 'Signed evidence-only APK verified. Settlement, execution, and money movement remain disabled.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo 'Signed receiver SMS APK verified. The phone only captures and uploads payment facts; it does not credit Players.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload signed evidence-only release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

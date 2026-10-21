@@ -51,13 +51,16 @@ for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]
 
 for (const workflow of [trustWorkflow, androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(workflow, /deployment_target:/);
-  assert.match(workflow, /options:\s*\r?\n\s+- staging\s*\r?\n\s+- production/);
   assert.match(workflow, /confirm_deployment_target:/);
   assert.match(workflow, /environment: \$\{\{ inputs\.deployment_target \}\}/);
   assert.match(workflow, /CONFIRMED_DEPLOYMENT_TARGET.*DEPLOYMENT_TARGET/s);
   assert.match(workflow, /telebirr-assignment-\$DEPLOYMENT_TARGET-v1/);
   assert.match(workflow, /telebirr-bridge-\$DEPLOYMENT_TARGET-v1/);
 }
+for (const workflow of [trustWorkflow, androidWorkflow]) {
+  assert.match(workflow, /options:\s*\r?\n\s+- staging\s*\r?\n\s+- production/);
+}
+assert.match(androidEvidenceWorkflow, /options:\s*\r?\n\s+- production/);
 
 for (const workflow of [androidWorkflow, androidEvidenceWorkflow]) {
   assert.match(
@@ -180,12 +183,11 @@ assert.match(
 assert.match(androidWorkflow, /retention-days: 14/);
 assert.match(androidWorkflow, /Assignment polling and money movement are disabled/);
 
-assert.match(androidEvidenceWorkflow, /build-evidence-only-no-money/);
-assert.match(androidEvidenceWorkflow, /build-evidence-only-paid-observation/);
 assert.match(androidEvidenceWorkflow, /build-evidence-only-receiver-sms/);
-assert.match(androidEvidenceWorkflow, /fetanagentRoutinePaidPhoneEnabled=true/);
+assert.doesNotMatch(androidEvidenceWorkflow, /default: no_money|default: paid_observation/u);
+assert.match(androidEvidenceWorkflow, /\[\[ "\$PHONE_MODE" == 'receiver_sms' \]\]/u);
 assert.match(androidEvidenceWorkflow, /fetanagentReceiverSmsEnabled=true/);
-assert.match(androidEvidenceWorkflow, /ROUTINE_PAID_ENABLED = true/);
+assert.match(androidEvidenceWorkflow, /ROUTINE_PAID_ENABLED = false/);
 assert.match(androidEvidenceWorkflow, /RECEIVER_SMS_ENABLED = true/);
 assert.match(androidEvidenceWorkflow, /VERSION_NAME = "0\.5\.35-receiver-sms-incoming-only"/);
 assert.match(androidEvidenceWorkflow, /VERSION_CODE = 40/);
@@ -195,11 +197,8 @@ assert.match(androidEvidenceWorkflow, /ANDROID_TELEBIRR_SIGNING_KEYSTORE_BASE64/
 assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_STORE_PASSWORD/);
 assert.match(androidEvidenceWorkflow, /FETANAGENT_ANDROID_SIGNING_KEY_PASSWORD/);
 assert.match(androidEvidenceWorkflow, /VERIFIER_RUNTIME_MODE = \"evidence_only\"/);
-assert.match(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.15-evidence-only\"/);
-assert.match(
-  androidEvidenceWorkflow,
-  /FetanAgent-TeleBirr-Verifier-0\.5\.15-\$DEPLOYMENT_TARGET-evidence-only\.apk/,
-);
+assert.doesNotMatch(androidEvidenceWorkflow, /VERSION_NAME = \"0\.5\.15-evidence-only\"/);
+assert.match(androidEvidenceWorkflow, /FetanAgent-Receiver-SMS-Verifier-0\.5\.35-production\.apk/);
 assert.match(androidEvidenceWorkflow, /apksigner verify --verbose --print-certs/);
 assert.match(androidEvidenceWorkflow, /Verified using v1 scheme \(JAR signing\): false/);
 assert.match(androidEvidenceWorkflow, /Verified using v2 scheme .*: true/);
@@ -210,7 +209,10 @@ assert.match(
   /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\.0\.1/,
 );
 assert.match(androidEvidenceWorkflow, /retention-days: 14/);
-assert.match(androidEvidenceWorkflow, /Settlement, execution, and money movement remain disabled/);
+assert.match(
+  androidEvidenceWorkflow,
+  /only captures and uploads payment facts; it does not credit Players/u,
+);
 
 assert.match(androidBuild, /fetanagentVerifierRuntimeMode"\)\.orNull \?: "inert"/);
 assert.match(androidBuild, /"pairing_only" -> "0\.5\.15-secure-pairing"/);

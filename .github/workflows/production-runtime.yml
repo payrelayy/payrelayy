@@ -4,15 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy active authority, deploy no-money receiver review, deploy no-money shadow intake, deploy inert maintenance, inspect, or stop
+        description: Build only, deploy receiver SMS runtime with money off, inspect, or stop
         required: true
         default: plan
         type: choice
         options:
           - plan
-          - deploy
-          - deploy-shadow
-          - deploy-shadow-intake
           - deploy-inert
           - status
           - stop
@@ -100,9 +97,6 @@ jobs:
           fi
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
-            'deploy:DEPLOY PRODUCTION RUNTIME'|\
-            'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'|\
-            'deploy-shadow-intake:DEPLOY PRODUCTION SHADOW INTAKE RUNTIME - NO MONEY'|\
             'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
             'status:STATUS PRODUCTION RUNTIME'|\
             'stop:STOP PRODUCTION RUNTIME') ;;
@@ -436,6 +430,10 @@ jobs:
             sms_mode=true
           fi
           echo "sms_mode=$sms_mode" >>"$GITHUB_OUTPUT"
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
+            echo '::error::Only the receiver SMS production overlay may be deployed.' >&2
+            exit 1
+          fi
           printf '%s\n' "$runtime_deployment_mode" >"$RUNNER_TEMP/release/runtime-deployment-mode"
           install -m 0600 -- "$shadow_overlay_source" \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml"

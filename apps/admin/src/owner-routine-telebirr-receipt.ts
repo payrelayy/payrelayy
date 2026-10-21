@@ -16,7 +16,9 @@ const MATERIAL_SQL = `
          device_public_key_spki_sha256, receiver_revision_id, receiver_version,
          receiver_profile_digest, expected_receiver_name_digest, valid_from,
          valid_until, issued_at, signer_valid_from, signer_valid_until
-    from app.get_owner_routine_telebirr_enrollment_receipt_material($1::uuid, $2::text, $3::text)
+    from app.get_owner_routine_telebirr_enrollment_receipt_material_exact(
+      $1::uuid, $2::uuid, $3::text, $4::text
+    )
 `;
 
 export interface OwnerRoutineTelebirrReceiptDatabase {
@@ -97,11 +99,16 @@ export class PostgresOwnerRoutineTelebirrReceipt {
     }
   }
 
-  async issue(authUserId: string): Promise<OwnerRoutineTelebirrSignedReceipt> {
-    if (!UUID_V4.test(authUserId)) throw new OwnerRoutineTelebirrReceiptRejectedError();
+  async issue(
+    authUserId: string,
+    enrollmentId: string,
+  ): Promise<OwnerRoutineTelebirrSignedReceipt> {
+    if (!UUID_V4.test(authUserId) || !UUID_V4.test(enrollmentId))
+      throw new OwnerRoutineTelebirrReceiptRejectedError();
     try {
       const result = await this.database.query(MATERIAL_SQL, [
         authUserId,
+        enrollmentId,
         this.signerKeyId,
         this.publicKeySpkiSha256,
       ]);
@@ -113,6 +120,7 @@ export class PostgresOwnerRoutineTelebirrReceipt {
       if (
         typeof value.enrollment_id !== 'string' ||
         !UUID_V4.test(value.enrollment_id) ||
+        value.enrollment_id !== enrollmentId ||
         typeof value.pairing_evidence_digest !== 'string' ||
         !DIGEST.test(value.pairing_evidence_digest) ||
         typeof value.device_id !== 'string' ||

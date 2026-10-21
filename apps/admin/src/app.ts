@@ -2081,11 +2081,12 @@ export function buildOwnerControlApp(
 
   app.post('/v1/owner/routine-telebirr-enrollment-receipt', async (request, reply) => {
     try {
-      const body = exactObject(request.body, ['confirmation', 'requestId']);
+      const body = exactObject(request.body, ['confirmation', 'enrollmentId', 'requestId']);
       if (
         body?.confirmation !==
           'owner_confirmed_existing_routine_enrollment_receipt_only_no_money' ||
-        !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId)
+        !validRoutineTelebirrPairingMutationHeaders(request.raw.rawHeaders, body.requestId) ||
+        typeof body.enrollmentId !== 'string'
       )
         return reply.code(400).send({ error: 'invalid_request' });
       if (!runtimeConfig.routineEnrollmentReceiptSigner.configured) {
@@ -2095,7 +2096,10 @@ export function buildOwnerControlApp(
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }
       const authUserId = await ownerSubject(request.raw.rawHeaders);
-      const receipt = await dependencies.runtime.routineTelebirrReceipt.issue(authUserId);
+      const receipt = await dependencies.runtime.routineTelebirrReceipt.issue(
+        authUserId,
+        body.enrollmentId,
+      );
       return reply.code(200).send(receipt);
     } catch (error) {
       if (

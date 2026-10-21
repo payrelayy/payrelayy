@@ -40,10 +40,10 @@ describe('Owner routine enrollment receipt signer', () => {
   it('signs exactly the Owner-linked no-money enrollment material, with an independent pinned key', async () => {
     const query = vi.fn(async (_sql: string, _values: readonly string[]) => ({ rows: [row] }));
     const service = new PostgresOwnerRoutineTelebirrReceipt({ query }, signerKeyId, pkcs8);
-    const output = await service.issue(ownerId);
+    const output = await service.issue(ownerId, row.enrollment_id);
     expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('app.get_owner_routine_telebirr_enrollment_receipt_material'),
-      [ownerId, signerKeyId, spkiDigest],
+      expect.stringContaining('app.get_owner_routine_telebirr_enrollment_receipt_material_exact'),
+      [ownerId, row.enrollment_id, signerKeyId, spkiDigest],
     );
     expect(output).toMatchObject({
       assignmentPollingAllowed: false,
@@ -116,22 +116,28 @@ describe('Owner routine enrollment receipt signer', () => {
       signerKeyId,
       pkcs8,
     );
-    await expect(service.issue('not-owner')).rejects.toBeInstanceOf(
+    await expect(service.issue('not-owner', row.enrollment_id)).rejects.toBeInstanceOf(
       OwnerRoutineTelebirrReceiptRejectedError,
     );
+    await expect(service.issue(ownerId, 'not-an-enrollment')).rejects.toBeInstanceOf(
+      OwnerRoutineTelebirrReceiptRejectedError,
+    );
+    await expect(
+      service.issue(ownerId, '55555555-5555-4555-8555-555555555555'),
+    ).rejects.toBeInstanceOf(OwnerRoutineTelebirrReceiptUnavailableError);
     await expect(
       new PostgresOwnerRoutineTelebirrReceipt(
         { query: async () => ({ rows: [] }) },
         signerKeyId,
         pkcs8,
-      ).issue(ownerId),
+      ).issue(ownerId, row.enrollment_id),
     ).rejects.toBeInstanceOf(OwnerRoutineTelebirrReceiptNotReadyError);
     await expect(
       new PostgresOwnerRoutineTelebirrReceipt(
         { query: async () => ({ rows: [{ ...row, valid_until: new Date('2026-10-05') }] }) },
         signerKeyId,
         pkcs8,
-      ).issue(ownerId),
+      ).issue(ownerId, row.enrollment_id),
     ).rejects.toBeInstanceOf(OwnerRoutineTelebirrReceiptUnavailableError);
     expect(
       () =>

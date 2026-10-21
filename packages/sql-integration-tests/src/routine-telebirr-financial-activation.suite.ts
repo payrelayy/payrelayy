@@ -81,6 +81,39 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
       }
     });
 
+    it('keeps a stopped prior SMS cutover inert when live prerequisites are absent', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(`update app.receiver_sms_route_control
+          set cutover_at = pg_catalog.clock_timestamp() - interval '2 hours'
+          where singleton and not enabled`);
+        await client.query('savepoint rejected_sms_resume');
+        let resumeError: unknown;
+        try {
+          await client.query(
+            'select app.activate_receiver_sms_financial_gates($1::uuid,$2::uuid)',
+            [getOwnerAuthUserId(), randomUUID()],
+          );
+        } catch (error) {
+          resumeError = error;
+        }
+        expect(String(resumeError)).not.toContain(
+          'The SMS route, switch set, or pre-cutover ledgers are not exact.',
+        );
+        expect(resumeError).toBeDefined();
+        await client.query('rollback to savepoint rejected_sms_resume');
+        const state = await client.query<{ live: string; enabled: boolean; old_cutover: boolean }>(
+          `select (select count(*)::text from app.feature_switches where mode = 'live') as live,
+                  enabled, cutover_at < pg_catalog.clock_timestamp() - interval '1 hour'
+                    as old_cutover
+             from app.receiver_sms_route_control where singleton`,
+        );
+        expect(state.rows).toEqual([{ live: '0', enabled: false, old_cutover: true }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
     it('installs only postgres-owned private operator actions and keeps money off', async () => {
       const client = getClient();
       const catalog = await client.query<{

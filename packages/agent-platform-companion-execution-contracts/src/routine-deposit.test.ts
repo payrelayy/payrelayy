@@ -22,6 +22,7 @@ import {
   type RoutineDepositCommand,
   type RoutineDepositProtocolBinding,
   type RoutineDepositProtocolLease,
+  type RoutineDepositProtocolPolicy,
   type RoutineDepositResponseBody,
   type SignedRoutineDepositResponse,
 } from './routine-deposit.js';
@@ -70,12 +71,15 @@ function leaseCommand(): RoutineDepositCommand {
   });
 }
 
-function signedLeaseResponse(command: RoutineDepositCommand) {
+function signedLeaseResponse(
+  command: RoutineDepositCommand,
+  selectedPolicy: RoutineDepositProtocolPolicy = policy,
+) {
   const signer = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const publicKey = Buffer.from(signer.publicKey.export({ format: 'der', type: 'spki' }));
   const result: RoutineDepositProtocolLease = Object.freeze({
     ...binding,
-    policy,
+    policy: selectedPolicy,
     phase: 'execute',
     paymentVerified: true,
     playerActive: true,
@@ -297,5 +301,42 @@ describe('routine deposit protocol', () => {
     expect(decodeSignedRoutineDepositResponse(tampered)).toBeUndefined();
     expect(publicKey).toHaveLength(91);
     publicKey.fill(0);
+  });
+
+  it('accepts only the paired receiver SMS policy and its SMS amount source', () => {
+    const command = leaseCommand();
+    const smsPolicy = {
+      ...policy,
+      provider: 'receiver_sms',
+      amountSource: 'receiver_sms_amount',
+    } as const;
+    const { publicKey, response } = signedLeaseResponse(command, smsPolicy);
+    expect(
+      verifySignedRoutineDepositResponse(
+        response,
+        response.signerKeyId,
+        publicKey,
+        command,
+        new Date('2026-10-05T12:00:30.000Z'),
+      ),
+    ).toEqual(response);
+    expect(
+      decodeRoutineDepositResponseBody({
+        ...response.body,
+        result: {
+          ...response.body.result,
+          policy: { ...smsPolicy, amountSource: policy.amountSource },
+        },
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeRoutineDepositResponseBody({
+        ...response.body,
+        result: {
+          ...response.body.result,
+          policy: { ...policy, amountSource: smsPolicy.amountSource },
+        },
+      }),
+    ).toBeUndefined();
   });
 });

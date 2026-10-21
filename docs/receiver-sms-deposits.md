@@ -18,7 +18,8 @@ and fenced KemerBet deposit job. The credited amount comes from the signed recei
 The database holds a match for review if its facts conflict, its amount is outside current limits,
 or it arrives after the five-minute automatic window. A missing phone SMS after five minutes is
 held for review, never called invalid. A payment older than one hour waits in the Owner page's
-"Older SMS payments" inbox. An active Owner can approve or reject the exact matched event.
+"SMS payments to review" inbox. An active Owner can approve or reject the exact matched event;
+held items appear there without an approval button so support can investigate safely.
 Approval reruns the current one-use, amount, Player, receiver, switch, and execution checks before
 one job can be queued. The existing Companion execution and reconciliation boundaries still apply.
 Masked customer messages are queued for an old payment, a review hold, an Owner rejection, and a
@@ -26,7 +27,7 @@ terminal credit result. They use the existing Telegram notification lease and re
 
 ## Before production cutover
 
-The current branch still needs Owner alerts, production runtime credential and Compose wiring,
+The current branch still needs production runtime credential and Compose wiring,
 exact catalog grant activation, and a signed phone APK rollout. The Owner list and decision SQL
 have no runtime grant at migration time so the currently deployed exact-catalog Owner service
 remains healthy. Grant access only after the new Owner app is deployed and checked. Keep the SMS

@@ -48,7 +48,7 @@ create function app.list_owner_receiver_sms_old_payments(
 ) returns table (
   candidate_id uuid, provider_code text, submitted_at timestamptz,
   payment_at timestamptz, amount_minor bigint, reference_masked text,
-  player_masked text
+  player_masked text, review_kind text, reason_code text
 ) language plpgsql security definer set search_path = pg_catalog, pg_temp as $$
 begin
   if session_user <> 'fetanagent_owner_control_runtime'
@@ -61,14 +61,23 @@ begin
   return query
   select candidate.id, candidate.provider_code, candidate.submitted_at,
     sms.occurred_at, sms.amount_minor, candidate.reference_masked,
-    '***' || pg_catalog.right(player.player_id, 4)
-  from app.receiver_sms_payment_matches matched
-  join app.receiver_sms_deposit_candidates candidate on candidate.id = matched.candidate_id
-  join app.receiver_sms_payment_events sms on sms.id = matched.payment_event_id
+    '***' || pg_catalog.right(player.player_id, 4),
+    case when matched.disposition = 'older_review' then 'older_approval'
+      else 'held_review' end,
+    case when matched.disposition = 'older_review' then 'old_payment'
+      when held.reason_code is not null then held.reason_code
+      else 'sms_match_uncertain' end
+  from app.receiver_sms_deposit_candidates candidate
+  left join app.receiver_sms_payment_matches matched on matched.candidate_id = candidate.id
+  left join app.receiver_sms_payment_events sms on sms.id = matched.payment_event_id
+  left join app.receiver_sms_settlement_holds held on held.candidate_id = candidate.id
   join app.customer_platform_players player on player.id = candidate.player_account_id
-  where matched.disposition = 'older_review'
-    and not exists (select 1 from app.receiver_sms_owner_decisions decision
-      where decision.candidate_id = candidate.id)
+  where ((matched.disposition = 'older_review' and held.candidate_id is null
+      and not exists (select 1 from app.receiver_sms_owner_decisions decision
+        where decision.candidate_id = candidate.id))
+    or matched.disposition = 'held_review' or held.candidate_id is not null)
+    and not exists (select 1 from app.receiver_sms_settlement_lineages lineage
+      where lineage.candidate_id = candidate.id)
   order by candidate.submitted_at, candidate.id
   limit p_limit;
 end;

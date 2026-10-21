@@ -119,10 +119,10 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         </section>
         <section class="review-section" aria-labelledby="receiver-sms-old-title">
           <div class="panel-heading">
-            <h2 id="receiver-sms-old-title">Older SMS payments <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
+            <h2 id="receiver-sms-old-title">SMS payments to review <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
             <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">TeleBirr and CBE Birr payments found in the receiving phone's SMS that are over one hour old need your decision. Approval starts the normal credit checks; it does not mean credit is complete.</p>
+          <p class="receipt-label">Older verified SMS payments need your decision. If no matching SMS arrived or a check failed, the payment is held for support review. Approval starts the normal credit checks; it does not mean credit is complete.</p>
           <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load older SMS payments.</p>
           <div class="request-list" id="receiver-sms-old-list"></div>
         </section>
@@ -5383,10 +5383,18 @@ function validReceiverSmsOldPayment(value) {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.candidateId) &&
     ['telebirr', 'cbe_birr'].includes(value.providerCode) &&
     typeof value.submittedAt === 'string' && Number.isFinite(Date.parse(value.submittedAt)) &&
-    typeof value.paymentAt === 'string' && Number.isFinite(Date.parse(value.paymentAt)) &&
-    typeof value.amountMinor === 'string' && /^[1-9][0-9]*$/.test(value.amountMinor) &&
+    (value.paymentAt === null ||
+      (typeof value.paymentAt === 'string' && Number.isFinite(Date.parse(value.paymentAt)))) &&
+    (value.amountMinor === null ||
+      (typeof value.amountMinor === 'string' && /^[1-9][0-9]*$/.test(value.amountMinor))) &&
     typeof value.referenceMasked === 'string' && /^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) &&
-    typeof value.playerMasked === 'string' && /^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked);
+    typeof value.playerMasked === 'string' && /^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked) &&
+    ['older_approval', 'held_review'].includes(value.reviewKind) &&
+    ['old_payment', 'no_receiver_sms_after_5m', 'settlement_preflight_failed',
+      'sms_match_uncertain'].includes(value.reasonCode) &&
+    (value.reviewKind !== 'older_approval' ||
+      (value.paymentAt !== null && value.amountMinor !== null &&
+        value.reasonCode === 'old_payment'));
 }
 
 function renderReceiverSmsOldPayment(value) {
@@ -5399,10 +5407,22 @@ function renderReceiverSmsOldPayment(value) {
   const facts = document.createElement('dl');
   facts.className = 'transaction-facts';
   transactionFact(facts, 'Submitted', transactionDate(value.submittedAt));
-  transactionFact(facts, 'Payment time', transactionDate(value.paymentAt));
-  transactionFact(facts, 'Amount', (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
+  transactionFact(facts, 'Payment time', value.paymentAt === null
+    ? 'Not verified' : transactionDate(value.paymentAt));
+  transactionFact(facts, 'Amount', value.amountMinor === null
+    ? 'Not verified' : (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
   transactionFact(facts, 'Player', value.playerMasked);
+  transactionFact(facts, 'Status', value.reviewKind === 'older_approval'
+    ? 'Waiting for your approval' : 'Held for support review');
+  if (value.reviewKind === 'held_review') {
+    transactionFact(facts, 'Reason', ({
+      no_receiver_sms_after_5m: 'No matching receiving-phone SMS after 5 minutes',
+      settlement_preflight_failed: 'Payment checks need support review',
+      sms_match_uncertain: 'SMS match needs support review',
+    })[value.reasonCode] || 'Payment needs support review');
+  }
   card.append(facts);
+  if (value.reviewKind !== 'older_approval') return card;
   const actions = document.createElement('div');
   actions.className = 'review-actions';
   for (const decision of ['approve', 'reject']) {
@@ -5419,6 +5439,7 @@ function renderReceiverSmsOldPayment(value) {
 
 async function decideReceiverSmsOldPayment(value, action) {
   if (!accessToken || receiverSmsOldBusy || !validReceiverSmsOldPayment(value) ||
+      value.reviewKind !== 'older_approval' ||
       !['approve', 'reject'].includes(action)) return;
   const provider = value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
   const prompt = action === 'approve'
@@ -5480,8 +5501,8 @@ async function loadReceiverSmsOldPayments() {
     receiverSmsOldBadge.hidden = payload.pending.length === 0;
     receiverSmsOldBadge.textContent = payload.pending.length + ' waiting';
     receiverSmsOldStatus.textContent = payload.pending.length === 0
-      ? 'No older SMS payments need approval.'
-      : payload.pending.length + ' payment(s) waiting for your decision.';
+      ? 'No SMS payments need review.'
+      : payload.pending.length + ' payment(s) need review.';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration &&
         accessToken && !isSignedOutError(error))

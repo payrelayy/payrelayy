@@ -557,6 +557,8 @@ describe('Owner older receiver SMS payments', () => {
     amountMinor: '2500',
     referenceMasked: '***AB12',
     playerMasked: '***5678',
+    reviewKind: 'older_approval',
+    reasonCode: 'old_payment',
   };
 
   it('shows a masked CBE payment and requires confirmation before rejection', async () => {
@@ -587,6 +589,29 @@ describe('Owner older receiver SMS payments', () => {
     expect(decided).toBe(true);
     expect(browser.element('#receiver-sms-old-badge').hidden).toBe(true);
     expect(list.children).toHaveLength(0);
+  });
+
+  it('shows a missing SMS as held for review without an approval button', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/receiver-sms-old-payments?')
+          ? response(200, {
+              pending: [
+                {
+                  ...pending,
+                  paymentAt: null,
+                  amountMinor: null,
+                  reviewKind: 'held_review',
+                  reasonCode: 'no_receiver_sms_after_5m',
+                },
+              ],
+            })
+          : undefined,
+    });
+    await browser.signIn();
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    expect(JSON.stringify(card)).toContain('No matching receiving-phone SMS');
+    expect(JSON.stringify(card)).not.toContain('Approve payment');
   });
 });
 

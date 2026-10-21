@@ -609,6 +609,31 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
           [candidate],
         );
         expect(heldNotice.rows).toEqual([{ outcome_code: 'held_review' }]);
+        await client.query(
+          `grant execute on function app.list_owner_receiver_sms_old_payments(uuid,integer)
+            to fetanagent_owner_control`,
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const ownerReview = await client.query<{
+          candidate_id: string;
+          review_kind: string;
+          reason_code: string;
+          payment_at: Date | null;
+          amount_minor: string | null;
+        }>(
+          `select candidate_id, review_kind, reason_code, payment_at,
+              amount_minor::text as amount_minor
+            from app.list_owner_receiver_sms_old_payments($1::uuid,25)`,
+          [getOwner()],
+        );
+        expect(ownerReview.rows).toContainEqual({
+          candidate_id: candidate,
+          review_kind: 'held_review',
+          reason_code: 'no_receiver_sms_after_5m',
+          payment_at: null,
+          amount_minor: null,
+        });
+        await client.query('reset session authorization');
         expect(
           (
             await client.query<{ outcome: string }>(
@@ -617,6 +642,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
           ).rows,
         ).toEqual([{ outcome: 'empty' }]);
       } finally {
+        await client.query('reset session authorization').catch(() => undefined);
         await client.query('rollback');
       }
     });

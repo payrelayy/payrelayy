@@ -27,6 +27,8 @@ describe('Owner older receiver SMS payments', () => {
                 amount_minor: '2500',
                 reference_masked: '***AB12',
                 player_masked: '***5678',
+                review_kind: 'older_approval',
+                reason_code: 'old_payment',
               },
             ],
           };
@@ -70,6 +72,8 @@ describe('Owner older receiver SMS payments', () => {
             amount_minor: '2500',
             reference_masked: 'FULL_REFERENCE',
             player_masked: '***5678',
+            review_kind: 'older_approval',
+            reason_code: 'old_payment',
           },
         ],
       }),

@@ -930,6 +930,8 @@ describe('Owner-control HTTP boundary', () => {
                 amountMinor: '2500',
                 referenceMasked: '***AB12',
                 playerMasked: '***5678',
+                reviewKind: 'older_approval' as const,
+                reasonCode: 'old_payment' as const,
               },
             ];
           },

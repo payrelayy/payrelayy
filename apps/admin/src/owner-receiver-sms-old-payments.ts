@@ -10,10 +10,16 @@ export interface OwnerReceiverSmsOldPayment {
   readonly candidateId: string;
   readonly providerCode: 'telebirr' | 'cbe_birr';
   readonly submittedAt: string;
-  readonly paymentAt: string;
-  readonly amountMinor: string;
+  readonly paymentAt: string | null;
+  readonly amountMinor: string | null;
   readonly referenceMasked: string;
   readonly playerMasked: string;
+  readonly reviewKind: 'older_approval' | 'held_review';
+  readonly reasonCode:
+    | 'old_payment'
+    | 'no_receiver_sms_after_5m'
+    | 'settlement_preflight_failed'
+    | 'sms_match_uncertain';
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -48,7 +54,8 @@ export class PostgresOwnerReceiverSmsOldPayments {
     try {
       const result = await this.database.query(
         `select candidate_id, provider_code, submitted_at, payment_at,
-                amount_minor::text as amount_minor, reference_masked, player_masked
+                amount_minor::text as amount_minor, reference_masked, player_masked,
+                review_kind, reason_code
            from app.list_owner_receiver_sms_old_payments($1::uuid,$2::integer)`,
         [authUserId, limit],
       );
@@ -59,22 +66,37 @@ export class PostgresOwnerReceiverSmsOldPayments {
           typeof row.candidate_id !== 'string' ||
           !UUID.test(row.candidate_id) ||
           (row.provider_code !== 'telebirr' && row.provider_code !== 'cbe_birr') ||
-          typeof row.amount_minor !== 'string' ||
-          !/^[1-9][0-9]*$/u.test(row.amount_minor) ||
+          (row.amount_minor !== null &&
+            (typeof row.amount_minor !== 'string' || !/^[1-9][0-9]*$/u.test(row.amount_minor))) ||
+          (row.payment_at !== null &&
+            (!(row.payment_at instanceof Date) || !Number.isFinite(row.payment_at.getTime()))) ||
           typeof row.reference_masked !== 'string' ||
           !MASKED_REFERENCE.test(row.reference_masked) ||
           typeof row.player_masked !== 'string' ||
-          !MASKED_PLAYER.test(row.player_masked)
+          !MASKED_PLAYER.test(row.player_masked) ||
+          (row.review_kind !== 'older_approval' && row.review_kind !== 'held_review') ||
+          ![
+            'old_payment',
+            'no_receiver_sms_after_5m',
+            'settlement_preflight_failed',
+            'sms_match_uncertain',
+          ].includes(String(row.reason_code)) ||
+          (row.review_kind === 'older_approval' &&
+            (row.payment_at === null ||
+              row.amount_minor === null ||
+              row.reason_code !== 'old_payment'))
         )
           throw new OwnerOldPaymentUnavailableError();
         return {
           candidateId: row.candidate_id,
           providerCode: row.provider_code,
           submittedAt: timestamp(row.submitted_at),
-          paymentAt: timestamp(row.payment_at),
+          paymentAt: row.payment_at === null ? null : timestamp(row.payment_at),
           amountMinor: row.amount_minor,
           referenceMasked: row.reference_masked,
           playerMasked: row.player_masked,
+          reviewKind: row.review_kind,
+          reasonCode: row.reason_code as OwnerReceiverSmsOldPayment['reasonCode'],
         };
       });
     } catch (error) {

@@ -239,16 +239,12 @@ export function presentTelegramPlayerIdFlowResult(
         };
       }
       if (result.matchStatus === 'older_review') {
-        return {
-          kind: 'message',
-          text: 'Payment found but it is older than 1 hour. Waiting for approval.',
-        };
+        // The database has already queued the durable Owner-review notice.
+        return { kind: 'deferred' };
       }
       if (result.matchStatus === 'held_review') {
-        return {
-          kind: 'message',
-          text: 'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.',
-        };
+        // The notifier owns the one customer-visible held result and its retries.
+        return { kind: 'deferred' };
       }
       return {
         kind: 'message',

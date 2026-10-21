@@ -41,8 +41,10 @@ where feature_key in (
   select 1 / 0 as rejected;
 \endif
 
+-- The guarded financial stop preserves the last cutover time for audit.
+-- A disabled route is the stopped state even when it has run before.
 select (select count(*) = 1 from app.receiver_sms_route_control
-    where singleton and not enabled and cutover_at is null)
+    where singleton and not enabled)
   and not exists (select 1 from app.deposit_jobs
     where status in ('queued', 'leased', 'retry_wait'))
   and not exists (select 1 from app.deposit_execution_attempts

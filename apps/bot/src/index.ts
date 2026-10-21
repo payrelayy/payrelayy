@@ -114,10 +114,9 @@ async function deliverPlayerAction(
   const temporary =
     temporaryAttempt?.handle ??
     (temporaryAttempt === undefined &&
+    !config.receiverSmsCandidateEnabled &&
     (action.kind === 'saved_telebirr_proof_command' ||
-      action.kind === 'saved_receiver_sms_proof_command' ||
-      (action.kind === 'deposit_proof_command' &&
-        (action.providerCode === 'telebirr' || config.receiverSmsCandidateEnabled)))
+      (action.kind === 'deposit_proof_command' && action.providerCode === 'telebirr'))
       ? await startTelegramTemporaryMessage(
           temporaryMessageDependencies,
           action.updateId,
@@ -137,7 +136,14 @@ async function deliverPlayerAction(
           }
         : { playerValidationEnabled: config.playerValidationIntakeEnabled },
     );
-    if (presentation.kind === 'deferred') return;
+    if (presentation.kind === 'deferred') {
+      // SMS review results are delivered through the durable outcome queue.
+      // Remove the media-reading notice once that result has been queued.
+      if (config.receiverSmsCandidateEnabled) {
+        await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
+      }
+      return;
+    }
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     if (presentation.kind === 'message') {
       await reply(presentation.text);
@@ -301,7 +307,9 @@ bot.on('message', async (context) => {
         temporaryMessageDependencies,
         String(metadata.updateId),
         String(context.chat.id),
-        TELEGRAM_TEMPORARY_MEDIA_TEXT,
+        config.receiverSmsCandidateEnabled
+          ? '⏳ Payment information received. Reading its reference now.'
+          : TELEGRAM_TEMPORARY_MEDIA_TEXT,
       );
       let extracted: Awaited<ReturnType<typeof extractTelegramProofMediaText>>;
       try {

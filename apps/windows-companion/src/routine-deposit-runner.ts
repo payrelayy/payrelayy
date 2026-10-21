@@ -29,7 +29,7 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
   >;
   readonly idleDelayMs?: number;
   readonly report?: (result: RoutineDepositWorkerResult) => void;
-  /** Runs only after an empty financial lease; the next lease waits for its completion. */
+  /** Runs after an empty lease or a failed pre-lease request; the next lease waits for completion. */
   readonly runReadOnlyIdleWorkOnce?: () => Promise<unknown>;
 }
 
@@ -85,10 +85,19 @@ export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
         if (result.status === 'stopped') return result;
         if (result.status === 'temporarily_unavailable') {
           consecutiveUnavailable++;
-          await delay(
-            Math.min(60_000, 5_000 * 2 ** Math.min(consecutiveUnavailable - 1, 4)),
-            controller.signal,
-          );
+          const backoffMs = Math.min(60_000, 5_000 * 2 ** Math.min(consecutiveUnavailable - 1, 4));
+          if (result.readOnlyFindSafe === true && options.runReadOnlyIdleWorkOnce) {
+            // A failed lease has not entered the browser or begun a Transfer. Keep Find
+            // responsive during the financial retry delay without overlapping a credit.
+            const retryAt = Date.now() + backoffMs;
+            while (!controller.signal.aborted && Date.now() < retryAt) {
+              if (options.session.isSignedInVerified()) await options.runReadOnlyIdleWorkOnce();
+              if (controller.signal.aborted) break;
+              await delay(Math.min(1_000, retryAt - Date.now()), controller.signal);
+            }
+          } else {
+            await delay(backoffMs, controller.signal);
+          }
           continue;
         }
         consecutiveUnavailable = 0;

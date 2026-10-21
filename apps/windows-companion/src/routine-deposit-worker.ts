@@ -109,9 +109,9 @@ export interface RoutineDepositExecutionStore {
 
 export type RoutineDepositWorkerResult =
   | {
-      readonly status:
-        'idle' | 'busy' | 'stopped' | 'awaiting_reconciliation' | 'temporarily_unavailable';
+      readonly status: 'idle' | 'busy' | 'stopped' | 'awaiting_reconciliation';
     }
+  | { readonly status: 'temporarily_unavailable'; readonly readOnlyFindSafe?: true }
   | { readonly status: 'completed' }
   | { readonly status: 'paused'; readonly reason: RoutineDepositPauseReason };
 
@@ -285,7 +285,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
           // guarded browser available while the runner backs off and retries.
           // A failed request may have prepared a durable lease on the server;
           // the next authenticated lease call must recover it before any action.
-          return Object.freeze({ status: 'temporarily_unavailable' });
+          return Object.freeze({ status: 'temporarily_unavailable', readOnlyFindSafe: true });
         }
         if (!lease) return Object.freeze({ status: 'idle' });
         if (!validLease(lease)) return await pause(lease, 'invalid_policy_or_lease');

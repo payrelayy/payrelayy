@@ -234,6 +234,45 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
+  it('continues read-only Player ID Find during a failed pre-lease backoff', async () => {
+    vi.useFakeTimers();
+    const { options } = fixture();
+    const order: string[] = [];
+    selected.runOnce
+      .mockImplementationOnce(async () => {
+        order.push('lease_unavailable');
+        return { status: 'temporarily_unavailable', readOnlyFindSafe: true };
+      })
+      .mockImplementationOnce(async () => {
+        order.push('financial_stop');
+        return { status: 'paused', reason: 'operator_stopped' };
+      });
+    const runReadOnlyIdleWorkOnce = vi.fn(async () => {
+      order.push('find');
+    });
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    expect(runReadOnlyIdleWorkOnce.mock.calls.length).toBeGreaterThanOrEqual(4);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(order[0]).toBe('lease_unavailable');
+    expect(order.at(-1)).toBe('financial_stop');
+  });
+
+  it('does not run Find during a post-fence reconciliation retry', async () => {
+    vi.useFakeTimers();
+    const { options } = fixture();
+    selected.runOnce
+      .mockResolvedValueOnce({ status: 'temporarily_unavailable' })
+      .mockResolvedValueOnce({ status: 'paused', reason: 'operator_stopped' });
+    const runReadOnlyIdleWorkOnce = vi.fn(async () => undefined);
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(runReadOnlyIdleWorkOnce).not.toHaveBeenCalled();
+  });
+
   it('does not lease a Player credit while KemerBet is signed out, then resumes in order', async () => {
     vi.useFakeTimers();
     const { options, session } = fixture();

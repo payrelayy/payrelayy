@@ -479,23 +479,36 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
         expect((await execute(runtime, certificate, command, first.identities)).result).toEqual(
           first.result,
         );
+        const recovered = await execute(runtime, certificate, {
+          ...leaseCommand(policy.accountId),
+          workerInstanceId: command.workerInstanceId,
+        });
+        expect(recovered.result).toEqual(first.result);
+        const otherWorker = await execute(runtime, certificate, leaseCommand(policy.accountId));
+        expect(otherWorker.result).toBeNull();
         const leased = await client.query<{
           attempt_id: string;
           lease_token: string;
           owner_approvals: number;
+          attempt_count: number;
           status: string;
         }>(
           `select attempt.id as attempt_id, job.lease_token::text,
-             job.status::text, count(approval.execution_job_id)::integer as owner_approvals
+             job.status::text, job.attempt_count,
+             count(approval.execution_job_id)::integer as owner_approvals
            from app.deposit_jobs job
            join app.deposit_execution_attempts attempt on attempt.deposit_job_id = job.id
            left join app.deposit_execution_owner_approvals approval on approval.execution_job_id = job.id
           where job.id = $1::uuid
-          group by attempt.id, job.lease_token, job.status`,
+          group by attempt.id, job.lease_token, job.status, job.attempt_count`,
           [deposit.jobId],
         );
         expect(leased.rows).toHaveLength(1);
-        expect(leased.rows[0]).toMatchObject({ status: 'leased', owner_approvals: 0 });
+        expect(leased.rows[0]).toMatchObject({
+          status: 'leased',
+          attempt_count: 1,
+          owner_approvals: 0,
+        });
         const binding = {
           jobId: deposit.jobId,
           intentId: deposit.depositIntentId,

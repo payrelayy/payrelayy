@@ -711,7 +711,8 @@ assert.match(workflow, /steps\.stopped_recovery\.outputs\.attempted == 'true'/u)
 assert.match(workflow, /select count\(\*\) = 5 and pg_catalog\.bool_and\(/u);
 assert.match(workflow, /select count\(\*\) = 4 and pg_catalog\.bool_and\(not rolcanlogin\)/u);
 assert.match(stoppedSmsRestoreSql, /mode = 'disabled' and settings = '\{\}'::jsonb/u);
-assert.match(stoppedSmsRestoreSql, /not control\.enabled|not enabled and cutover_at is null/u);
+assert.match(stoppedSmsRestoreSql, /where singleton and not enabled\)/u);
+assert.doesNotMatch(stoppedSmsRestoreSql, /not enabled and cutover_at is null/u);
 assert.match(stoppedSmsRestoreSql, /pg_catalog\.pg_terminate_backend\(pid, 1000\)/u);
 assert.match(stoppedSmsRestoreSql, /count\(\*\) = 5 and pg_catalog\.bool_and\(rolcanlogin/u);
 assert.doesNotMatch(

@@ -332,7 +332,7 @@ val verifierVersionName =
   when (requestedRuntimeMode) {
     "pairing_only" -> "0.5.15-secure-pairing"
     "evidence_only" -> when {
-      receiverSmsEnabled -> "0.5.32-receiver-sms"
+      receiverSmsEnabled -> "0.5.33-receiver-sms-queue-fix"
       routinePaidPhoneEnabled -> "0.5.31-routine-paid-lane-recovery"
       routineLookupTrust != null -> "0.5.17-routine-no-money"
       else -> "0.5.15-evidence-only"
@@ -348,7 +348,7 @@ android {
     applicationId = "com.fetanagent.telebirrverifier"
     minSdk = 28
     targetSdk = 35
-    versionCode = if (receiverSmsEnabled) 37 else if (routinePaidPhoneEnabled) 36 else if (routineLookupTrust != null) 22 else 20
+    versionCode = if (receiverSmsEnabled) 38 else if (routinePaidPhoneEnabled) 36 else if (routineLookupTrust != null) 22 else 20
     versionName = verifierVersionName
 
     buildConfigField("boolean", "VERIFIER_ENABLED", "false")

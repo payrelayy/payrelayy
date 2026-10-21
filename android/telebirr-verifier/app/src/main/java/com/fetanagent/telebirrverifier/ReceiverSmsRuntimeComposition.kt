@@ -29,8 +29,9 @@ internal object ReceiverSmsRuntimeComposition {
     val identity = runCatching { RoutineNoMoneyRuntimeComposition.identity() }.getOrNull()
       ?: return unavailable("sms_device_key_unavailable")
     val enrollmentStore = EncryptedRoutineEnrollmentStore.forApplication(context)
-    val outbox = runCatching { ReceiverSmsEncryptedOutbox.forApplication(context) }.getOrNull()
-      ?: return unavailable("sms_queue_unavailable")
+    val outboxResult = runCatching { ReceiverSmsEncryptedOutbox.forApplication(context) }
+    val outbox = outboxResult.getOrNull()
+      ?: return unavailable(queueInitializationCode(outboxResult.exceptionOrNull()))
     val upload = ReceiverSmsPhoneUpload(outbox, FixedReceiverSmsHttpsExchange())
     val captureCode = AtomicReference<String?>(null)
     val capture = ReceiverSmsCapture(context, outbox) { code -> captureCode.set(code) }
@@ -68,4 +69,12 @@ internal object ReceiverSmsRuntimeComposition {
       LivePilotRuntimeStatus(LivePilotRuntimeState.ENROLLMENT_REQUIRED, code)
     }, heartbeat = null,
   )
+
+  internal fun queueInitializationCode(failure: Throwable?): String = when (failure) {
+    is ReceiverSmsEncryptedOutbox.InitializationFailure -> failure.code
+    is java.io.IOException -> "sms_queue_io_failed"
+    is IllegalArgumentException -> "sms_queue_existing_file_invalid"
+    is IllegalStateException -> "sms_queue_existing_file_invalid"
+    else -> "sms_queue_unavailable"
+  }
 }

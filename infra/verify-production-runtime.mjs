@@ -620,11 +620,24 @@ assert.equal(count(workflow, /actions: read/gu), 2);
 assert.match(quality, /pnpm audit --prod --audit-level=high/u);
 assert.match(quality, /node --test infra\/operations\/require-production-ci\.test\.mjs/u);
 assert.match(quality, /node --test infra\/operations\/verify-postgres-scram-secret\.test\.mjs/u);
-assert.match(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
-assert.match(workflow, /'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'/u);
-assert.match(
+const dispatchModes =
+  /      mode:\s+description:[^\r\n]*\s+required: true\s+default: plan\s+type: choice\s+options:\s+((?:- [a-z-]+\s*)+)/u.exec(
+    workflow,
+  )?.[1];
+assert.ok(dispatchModes, 'production runtime dispatch modes must be explicit');
+assert.deepEqual(
+  [...dispatchModes.matchAll(/- ([a-z-]+)/gu)].map((match) => match[1]),
+  ['plan', 'deploy-inert', 'status', 'stop'],
+);
+assert.doesNotMatch(workflow, /'deploy:DEPLOY PRODUCTION RUNTIME'/u);
+assert.doesNotMatch(workflow, /'deploy-shadow:DEPLOY PRODUCTION SHADOW REVIEW RUNTIME'/u);
+assert.doesNotMatch(
   workflow,
   /'deploy-shadow-intake:DEPLOY PRODUCTION SHADOW INTAKE RUNTIME - NO MONEY'/u,
+);
+assert.match(
+  workflow,
+  /if \[\[ "\$REQUESTED_MODE" == 'deploy-inert' && "\$sms_mode" != true \]\]; then\s+echo '::error::Only the receiver SMS production overlay may be deployed\.'/u,
 );
 assert.match(workflow, /'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'/u);
 assert.match(workflow, /confirm_telebirr_pilot_revision_id:/u);

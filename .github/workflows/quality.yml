@@ -81,6 +81,7 @@ jobs:
         shell: bash
         run: |
           pnpm test:infra
+          node infra/verify-receipt-runtime-retirement.mjs
           pnpm verify:routine-deposits
           node infra/verify-production-companion-execution-activation-status.mjs
           node infra/verify-production-live-telebirr-receipt-shape-diagnostic-retry.mjs

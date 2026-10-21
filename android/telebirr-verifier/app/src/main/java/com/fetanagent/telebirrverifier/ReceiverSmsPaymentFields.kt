@@ -37,6 +37,27 @@ internal object ReceiverSmsPaymentFields {
   private val cbeTime =
     Regex("\\bon\\s+([0-9]{2})/([0-9]{2})/([0-9]{2})\\s+([0-9]{2}):([0-9]{2}),\\s*Txn ID\\b",
       RegexOption.IGNORE_CASE)
+  // Bind the amount, payer, time, and reference to one incoming confirmation.
+  // Finding those fields in separate parts of an outgoing SMS is not sufficient.
+  private val telebirrIncoming = Regex(
+    """\A\s*(?:Dear\s+[^,\r\n]{1,100},\s*)?You have received ETB\s+""" +
+      """(?:[0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,8})\.[0-9]{2}\s+from\s+""" +
+      """[\s\S]{1,180}?\s+on\s+[0-9]{2}/[0-9]{2}/[0-9]{4}\s+""" +
+      """[0-9]{2}:[0-9]{2}:[0-9]{2}\.\s+Your transaction number is\s+""" +
+      """[A-Z0-9]{8,32}(?=[^A-Z0-9]|\z)""",
+    RegexOption.IGNORE_CASE,
+  )
+  private val cbeIncoming = Regex(
+    """\A\s*(?:Dear\s+[^,\r\n]{1,100},\s*)?you received\s+""" +
+      """(?:[0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,8})\.[0-9]{2}Br\.\s+from\s+""" +
+      """[\s\S]{1,180}?\s+on\s+[0-9]{2}/[0-9]{2}/[0-9]{2}\s+""" +
+      """[0-9]{2}:[0-9]{2},\s*Txn ID\s+[A-Z0-9]{8,32}(?=[^A-Z0-9]|\z)""",
+    RegexOption.IGNORE_CASE,
+  )
+  private val outboundOrPayout = Regex(
+    """\b(?:sent|pay[\s-]?out|paid[\s-]+out|cash[\s-]?out|withdrawal|withdrawn|debited|reversal|reversed|refund)\b""",
+    RegexOption.IGNORE_CASE,
+  )
 
   fun extract(body: String, receivedAtMillis: Long): Result {
     if (body.toByteArray(Charsets.UTF_8).size !in 40..2_048 || receivedAtMillis <= 0)
@@ -44,6 +65,9 @@ internal object ReceiverSmsPaymentFields {
     val telebirr = body.contains("telebirr", ignoreCase = true)
     val cbe = body.contains("CBE Birr", ignoreCase = true)
     if (telebirr == cbe) return Result.Review("sms_method_ambiguous")
+    if (outboundOrPayout.containsMatchIn(body) ||
+      !(if (telebirr) telebirrIncoming else cbeIncoming).containsMatchIn(body))
+      return Result.Review("sms_not_incoming_payment")
     val providerCode = if (telebirr) "telebirr" else "cbe_birr"
     val referenceMatch = single(if (telebirr) telebirrReference else cbeReference, body)
     val amountMatch = single(if (telebirr) telebirrAmount else cbeAmount, body)

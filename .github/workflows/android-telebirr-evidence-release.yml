@@ -243,8 +243,8 @@ jobs:
               grep -Fq 'ROUTINE_PAID_ENABLED = true' "$build_config"
               grep -Fq 'RECEIVER_SMS_ENABLED = false' "$build_config"
             elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-              grep -Fq 'VERSION_NAME = "0.5.34-receiver-sms-sender-gate"' "$build_config"
-              grep -Fq 'VERSION_CODE = 39' "$build_config"
+              grep -Fq 'VERSION_NAME = "0.5.35-receiver-sms-incoming-only"' "$build_config"
+              grep -Fq 'VERSION_CODE = 40' "$build_config"
               grep -Fq 'ROUTINE_PAID_ENABLED = false' "$build_config"
               grep -Fq 'RECEIVER_SMS_ENABLED = true' "$build_config"
             else
@@ -280,7 +280,7 @@ jobs:
             if [[ "$PHONE_MODE" == 'paid_observation' ]]; then
               artifact_name='FetanAgent-TeleBirr-Verifier-0.5.31-production-routine-paid-lane-recovery.apk'
             elif [[ "$PHONE_MODE" == 'receiver_sms' ]]; then
-              artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.34-production.apk'
+              artifact_name='FetanAgent-Receiver-SMS-Verifier-0.5.35-production.apk'
             else
               artifact_name='FetanAgent-TeleBirr-Verifier-0.5.17-production-routine-no-money.apk'
             fi

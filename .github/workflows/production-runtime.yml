@@ -1038,6 +1038,35 @@ jobs:
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
           echo "current_state=$current_state" >>"$GITHUB_OUTPUT"
 
+      - name: Restore only stopped SMS app credentials before cold deployment
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true' && steps.boundary.outputs.current_state == 'absent'
+        id: stopped_recovery
+        shell: bash
+        env:
+          PRODUCTION_PROJECT_REF: ${{ env.PRODUCTION_PROJECT_REF }}
+          CUSTOMER_WEB_RUNTIME_PASSWORD: ${{ secrets.CUSTOMER_WEB_RUNTIME_PASSWORD }}
+          OWNER_CONTROL_RUNTIME_PASSWORD: ${{ secrets.OWNER_CONTROL_RUNTIME_PASSWORD }}
+          PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
+          TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_ASSIGNMENT_BROKER_RUNTIME_PASSWORD }}
+          TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD: ${{ secrets.TELEBIRR_DEVICE_STATE_RUNTIME_PASSWORD }}
+          COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD: ${{ secrets.COMPANION_DEVICE_BRIDGE_RUNTIME_PASSWORD }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_stopped_sms_runtime_restore
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          echo 'attempted=true' >>"$GITHUB_OUTPUT"
+          psql -X --quiet --file=infra/sql/production-stopped-sms-runtime-restore.sql >/dev/null
+          psql -X --quiet --file=infra/sql/production-companion-bridge-runtime-enable-continuous.sql >/dev/null
+
       - name: Verify the existing continuous least-privilege production credentials
         id: provision
         shell: bash
@@ -1074,14 +1103,13 @@ jobs:
           [[ "$companion_previous_login" == 't' ]]
           echo "companion_previous_login=$companion_previous_login" >>"$GITHUB_OUTPUT"
           runtime_catalog_ready="$(psql_with_connection_retry -X -Atc "
-            select count(*) = 6 and pg_catalog.bool_and(
+            select count(*) = 5 and pg_catalog.bool_and(
               rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb
               and not rolcreaterole and not rolreplication and not rolbypassrls
               and rolvaliduntil = 'infinity'::timestamptz
             )
             from pg_catalog.pg_roles
             where rolname in (
-              'fetanagent_beta_admission_runtime',
               'fetanagent_customer_web_runtime',
               'fetanagent_owner_control_runtime',
               'fetanagent_player_actions_runtime',
@@ -1089,6 +1117,16 @@ jobs:
               'fetanagent_telebirr_device_state_runtime'
             )")"
           [[ "$runtime_catalog_ready" == 't' ]]
+          retired_catalog_ready="$(psql_with_connection_retry -X -Atc "
+            select count(*) = 4 and pg_catalog.bool_and(not rolcanlogin)
+            from pg_catalog.pg_roles
+            where rolname in (
+              'fetanagent_beta_admission_runtime',
+              'fetanagent_routine_telebirr_no_money_runtime',
+              'fetanagent_routine_telebirr_paid_poll_runtime',
+              'fetanagent_routine_telebirr_paid_settlement_runtime'
+            )")"
+          [[ "$retired_catalog_ready" == 't' ]]
 
           # The assignment role intentionally has CONNECTION LIMIT 1, and the healthy current
           # broker owns that session. Opening a second session here would reject every rolling
@@ -1257,7 +1295,7 @@ jobs:
           echo 'The independently signed Windows companion production pairing and read-only transport is live on the production database.' >>"$GITHUB_STEP_SUMMARY"
 
       - name: Roll back a failed production activation
-        if: always() && (failure() || cancelled()) && steps.provision.outputs.attempted == 'true'
+        if: always() && (failure() || cancelled()) && (steps.provision.outputs.attempted == 'true' || steps.stopped_recovery.outputs.attempted == 'true')
         shell: bash
         env:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

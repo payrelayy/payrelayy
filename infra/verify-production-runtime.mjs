@@ -22,6 +22,7 @@ const [
   predecessorSudoers,
   provisionSql,
   disableSql,
+  stoppedSmsRestoreSql,
   assignmentRuntimeInputSql,
   shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
@@ -55,6 +56,7 @@ const [
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
   read('infra/sql/production-nonfinancial-runtimes-disable.sql'),
+  read('infra/sql/production-stopped-sms-runtime-restore.sql'),
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
   read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
@@ -529,7 +531,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  16,
+  17,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -696,11 +698,29 @@ assert.match(workflow, /Verify restricted server boundary and storage/u);
 assert.match(workflow, /current-state/u);
 assert.match(workflow, /Verify the existing continuous least-privilege production credentials/u);
 assert.doesNotMatch(deployJob, /production-nonfinancial-runtimes-provision\.sql/u);
+assert.match(workflow, /steps\.boundary\.outputs\.current_state == 'absent'/u);
+assert.match(
+  workflow,
+  /steps\.protected\.outputs\.sms_mode == 'true' && steps\.boundary\.outputs\.current_state == 'absent'/u,
+);
+assert.match(workflow, /production-stopped-sms-runtime-restore\.sql/u);
+assert.match(workflow, /production-companion-bridge-runtime-enable-continuous\.sql/u);
+assert.match(workflow, /steps\.stopped_recovery\.outputs\.attempted == 'true'/u);
+assert.match(workflow, /select count\(\*\) = 5 and pg_catalog\.bool_and\(/u);
+assert.match(workflow, /select count\(\*\) = 4 and pg_catalog\.bool_and\(not rolcanlogin\)/u);
+assert.match(stoppedSmsRestoreSql, /mode = 'disabled' and settings = '\{\}'::jsonb/u);
+assert.match(stoppedSmsRestoreSql, /not control\.enabled|not enabled and cutover_at is null/u);
+assert.match(stoppedSmsRestoreSql, /pg_catalog\.pg_terminate_backend\(pid, 1000\)/u);
+assert.match(stoppedSmsRestoreSql, /count\(\*\) = 5 and pg_catalog\.bool_and\(rolcanlogin/u);
+assert.doesNotMatch(
+  stoppedSmsRestoreSql,
+  /alter role fetanagent_(?:beta_admission|routine_telebirr_paid|routine_telebirr_no_money|receiver_sms)/u,
+);
 assert.match(workflow, /psql_with_connection_retry\(\)/u);
 assert.match(workflow, /for attempt in 1 2 3 4; do/u);
 assert.match(workflow, /"\$status" -eq 2 && "\$attempt" -lt 4/u);
 assert.match(workflow, /sleep "\$\(\(attempt \* 2\)\)"/u);
-assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 3);
+assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 4);
 assert.doesNotMatch(workflow, /assignment_login_ready=false/u);
 assert.doesNotMatch(workflow, /PGPORT=5432/u);
 assert.match(workflow, /from pg_catalog\.pg_authid/u);

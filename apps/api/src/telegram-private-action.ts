@@ -446,6 +446,11 @@ export function parseTelegramPrivateActionEnvelope(
       const identity = parseActionIdentity(parsed);
       return identity ? { ...identity, kind: 'saved_telebirr_destination_command' } : undefined;
     }
+    case 'saved_cbe_sms_destination_command': {
+      if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      return identity ? { ...identity, kind: 'saved_cbe_sms_destination_command' } : undefined;
+    }
     case 'save_player_selection_command': {
       if (!hasOnlyKeys(parsed, PLAYER_ID_TEXT_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);

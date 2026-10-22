@@ -19,6 +19,8 @@ import {
 import {
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+  isTelegramCbeSmsPaymentPromptReply,
   isTelegramGuidedDepositPromptReply,
   isTelegramGuidedDepositPlayerPromptReply,
   parseTelegramGuidedDepositInput,
@@ -170,6 +172,21 @@ export function isTelegramGuidedDepositStartCallback(
   );
 }
 
+export function isTelegramCbeSmsDepositStartCallback(
+  metadata: TelegramPlayerRegistrationCallbackMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    metadata.callbackData === TELEGRAM_GUIDED_CBE_CALLBACK_DATA
+  );
+}
+
+export function isTelegramCbeSmsDepositStartCommand(
+  metadata: TelegramDepositCommandMetadata,
+): boolean {
+  return toTelegramPrivateActionIdentity(metadata) !== undefined && metadata.command === '/cbe';
+}
+
 export function isTelegramSavedPlayerChangeCallback(
   metadata: TelegramPlayerRegistrationCallbackMetadata,
 ): boolean {
@@ -184,6 +201,13 @@ export function reduceTelegramSavedTelebirrDestinationAction(
 ): TelegramPrivateActionEnvelope | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   return identity ? { ...identity, kind: 'saved_telebirr_destination_command' } : undefined;
+}
+
+export function reduceTelegramSavedCbeSmsDestinationAction(
+  metadata: TelegramPrivateActionMetadata,
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  return identity ? { ...identity, kind: 'saved_cbe_sms_destination_command' } : undefined;
 }
 
 /** `/deposit` is the discoverable guided entry point; argument-bearing legacy commands still work. */
@@ -319,13 +343,36 @@ export function reduceTelegramSavedCbeSmsProofSubmission(
   };
 }
 
+export function reduceTelegramCbeSmsReplySubmission(
+  metadata: TelegramDepositCommandMetadata & { readonly replyToMessage: unknown },
+): TelegramDepositProofSubmission | undefined {
+  if (!isTelegramCbeSmsPaymentPromptReply(metadata.replyToMessage)) return undefined;
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.command !== 'string') return { kind: 'invalid_input' };
+  const input = reduceTelegramDepositProofInput('cbe_birr', metadata.command);
+  if (input.kind !== 'candidate') return input;
+  return {
+    kind: 'action',
+    action: {
+      ...identity,
+      kind: 'saved_receiver_sms_proof_command',
+      providerCode: 'cbe_birr',
+      transactionReference: input.transactionReference,
+    },
+  };
+}
+
 export function reduceTelegramSavedCbeSmsMediaSubmission(
-  metadata: Omit<TelegramGuidedDepositMediaMetadata, 'replyToMessage'>,
+  metadata: Omit<TelegramGuidedDepositMediaMetadata, 'replyToMessage'> & {
+    readonly replyToMessage?: unknown;
+  },
 ): TelegramDepositProofSubmission | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   if (
     !identity ||
-    (!isCbeBirrReceiptText(metadata.extractedText) && !isCbeBirrReceiptText(metadata.caption))
+    (!isCbeBirrReceiptText(metadata.extractedText) &&
+      !isCbeBirrReceiptText(metadata.caption) &&
+      !isTelegramCbeSmsPaymentPromptReply(metadata.replyToMessage))
   )
     return undefined;
   if (metadata.caption !== undefined && typeof metadata.caption !== 'string') {

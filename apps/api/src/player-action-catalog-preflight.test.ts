@@ -55,7 +55,7 @@ describe('Player-ID action catalog preflight', () => {
     );
   });
 
-  it('requires onboarding, proof, notification, and instruction functions in the exact 30-function surface', () => {
+  it('requires onboarding, proof, notification, and instruction functions in the exact 31-function surface', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.record_public_telegram_action_inbound_event(bigint,bigint,bigint,text,text)',
     );
@@ -107,7 +107,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_customer_deposit_proof(uuid,uuid)',
     );
-    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 30');
+    expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 31');
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).toContain(
       'app.get_telegram_saved_player_selection(uuid)',
     );
@@ -162,7 +162,7 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       'app.capture_telegram_routine_telebirr_untrusted_proof(uuid,text,text,text,text,text,smallint,smallint,text)',
     );
-    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 31');
+    expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 32');
     expect(PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL).toContain(
       "then array['search_path=pg_catalog']::text[]",
     );
@@ -231,7 +231,7 @@ describe('Player-ID action catalog preflight', () => {
       ),
     ).resolves.toBe(true);
     expect(queries).toEqual([PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL]);
-    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 32');
+    expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain('select count(*) = 33');
     expect(PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL).toContain(
       'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
     );

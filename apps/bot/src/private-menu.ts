@@ -5,6 +5,8 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  TELEGRAM_GUIDED_CBE_BUTTON_TEXT,
+  TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
 } from './telegram-guided-deposit.js';
 
 export interface PrivateTelegramMenuButton {
@@ -18,7 +20,7 @@ export interface PrivateTelegramMenu {
 }
 
 /** Short, non-expiry menu used when an old payment card is removed. */
-export function renderTelegramQuickMenu(): PrivateTelegramMenu {
+export function renderTelegramQuickMenu(receiverSmsCandidateEnabled = false): PrivateTelegramMenu {
   return {
     text: TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
     buttons: [
@@ -26,6 +28,14 @@ export function renderTelegramQuickMenu(): PrivateTelegramMenu {
         text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
         callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
       },
+      ...(receiverSmsCandidateEnabled
+        ? [
+            {
+              text: TELEGRAM_GUIDED_CBE_BUTTON_TEXT,
+              callbackData: TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+            },
+          ]
+        : []),
       { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
     ],
   };
@@ -40,6 +50,7 @@ export function renderPlayerRegistrationMenu(
   capabilityCallbackData: string,
   selectedPlayerId: string | null = null,
   playerValidationEnabled = false,
+  receiverSmsCandidateEnabled = false,
 ): PrivateTelegramMenu {
   if (!parseTelegramPlayerRegistrationCapabilityCallback(capabilityCallbackData)) {
     throw new Error('The Player ID menu requires a valid opaque capability callback.');
@@ -55,6 +66,14 @@ export function renderPlayerRegistrationMenu(
         text: TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT,
         callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
       },
+      ...(receiverSmsCandidateEnabled
+        ? [
+            {
+              text: TELEGRAM_GUIDED_CBE_BUTTON_TEXT,
+              callbackData: TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+            },
+          ]
+        : []),
       {
         text: selectedPlayerId === null ? '🎮 Set Player ID' : '🔄 Change Player ID',
         callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,

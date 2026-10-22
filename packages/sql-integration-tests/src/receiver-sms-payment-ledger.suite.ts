@@ -143,6 +143,128 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
   getOwner: () => string,
 ): void {
   describe('receiver SMS payment ledger', () => {
+    it('keeps the CBE instruction receiver private and closed while SMS deposits are off', async () => {
+      const client = getClient();
+      const access = await client.query<{
+        runtime_allowed: boolean;
+        anonymous_denied: boolean;
+        no_base_read: boolean;
+      }>(`select
+        pg_catalog.has_function_privilege('fetanagent_player_actions_runtime',
+          'app.prepare_telegram_live_cbe_sms_destination(uuid,text)', 'EXECUTE')
+          as runtime_allowed,
+        not pg_catalog.has_function_privilege('anon',
+          'app.prepare_telegram_live_cbe_sms_destination(uuid,text)', 'EXECUTE')
+          as anonymous_denied,
+        not pg_catalog.has_table_privilege('fetanagent_player_actions_runtime',
+          'app.receiver_accounts', 'SELECT') as no_base_read`);
+      expect(access.rows).toEqual([
+        {
+          runtime_allowed: true,
+          anonymous_denied: true,
+          no_base_read: true,
+        },
+      ]);
+      await expect(
+        client.query(
+          `select * from app.prepare_telegram_live_cbe_sms_destination($1::uuid,$2::text)`,
+          [randomUUID(), 'PLAYER-DEMO-42'],
+        ),
+      ).rejects.toThrow('CBE Birr destination is unavailable');
+    });
+
+    it('shows the active protected CBE receiver only for a selected eligible Player while SMS deposits are live', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const actor = await fixtureTelegramActor(client, randomUUID(), false);
+        const playerId = await fixtureEligiblePlayer(client, actor.customerId);
+        const inboundId = await fixtureInboundEvent(client, actor.identityId);
+        const player = await client.query<{ id: string }>(
+          `select id from app.customer_platform_players where player_id = $1::text`,
+          [playerId],
+        );
+        await client.query(
+          `insert into app.telegram_player_selections (
+            telegram_identity_id, player_account_id, origin_inbound_event_id, selected_at
+          ) values ($1::uuid,$2::uuid,$3::uuid,pg_catalog.clock_timestamp())`,
+          [actor.identityId, player.rows[0]!.id, inboundId],
+        );
+        // The disposable bootstrap seeds a pre-protection CBE receiver. Upgrade
+        // only that rolled-back fixture to exercise the current payable format.
+        await client.query(
+          `alter table app.receiver_accounts disable trigger receiver_accounts_immutable_revision`,
+        );
+        await client.query(
+          `update app.receiver_accounts receiver
+            set account_holder_name = 'Synthetic CBE Receiver',
+              account_reference_ciphertext = $1::text,
+              account_reference_masked = '***7002',
+              account_reference_fingerprint = $2::text,
+              protection_profile_version = 1, encryption_key_version = 1,
+              fingerprint_key_version = 1,
+              rotation_request_id = $3::uuid,
+              rotation_reason = 'initial_configuration',
+              active_from = pg_catalog.clock_timestamp() - interval '1 hour'
+            from app.payment_providers provider
+            where provider.id = receiver.provider_id and provider.code = 'cbe_birr'
+              and receiver.status = 'active' and receiver.retired_at is null`,
+          [
+            `receiver-v1.cbe_birr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+            hexDigest(),
+            randomUUID(),
+          ],
+        );
+        await client.query(
+          `alter table app.receiver_accounts enable trigger receiver_accounts_immutable_revision`,
+        );
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification', 'deposit_execution',
+              'cbe_birr_authoritative_verification')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() where singleton`,
+        );
+        const rows = await client.query<{
+          provider_code: string;
+          receiver_revision_id: string;
+          receiver_account_reference_ciphertext: string;
+          receiver_account_reference_fingerprint: string;
+          receiver_account_masked: string;
+          payments_enabled: boolean;
+        }>(
+          `select provider_code, receiver_revision_id,
+            receiver_account_reference_ciphertext,
+            receiver_account_reference_fingerprint,
+            receiver_account_masked, payments_enabled
+            from app.prepare_telegram_live_cbe_sms_destination($1::uuid,$2::text)`,
+          [inboundId, playerId],
+        );
+        expect(rows.rows).toHaveLength(1);
+        expect(rows.rows[0]!.provider_code).toBe('cbe_birr');
+        expect(rows.rows[0]!.receiver_revision_id).toMatch(/^[0-9a-f-]{36}$/u);
+        expect(rows.rows[0]!.receiver_account_reference_ciphertext).toMatch(
+          /^receiver-v1[.]cbe_birr[.]/u,
+        );
+        expect(rows.rows[0]!.receiver_account_reference_fingerprint).toMatch(/^[0-9a-f]{64}$/u);
+        expect(rows.rows[0]!.receiver_account_masked).toMatch(/^\*{3}[0-9]{4}$/u);
+        expect(rows.rows[0]!.payments_enabled).toBe(true);
+        const otherPlayer = await fixtureEligiblePlayer(client, actor.customerId);
+        await client.query('savepoint wrong_player');
+        await expect(
+          client.query(
+            `select * from app.prepare_telegram_live_cbe_sms_destination($1::uuid,$2::text)`,
+            [inboundId, otherPlayer],
+          ),
+        ).rejects.toThrow('CBE Birr destination is unavailable');
+        await client.query('rollback to savepoint wrong_player');
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('keeps the paired-phone inbox private and unable to issue credit', async () => {
       const client = getClient();
       const roles = await client.query<{

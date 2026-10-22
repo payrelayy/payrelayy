@@ -77,7 +77,7 @@ describe('Telegram Player-ID flow presentation', () => {
       menu: {
         text: 'FetanAgent\nSet a Player ID to deposit.',
         buttons: [
-          { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+          { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
           { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
           { text: '➕ Request Player ID review', callbackData },
         ],
@@ -266,6 +266,30 @@ describe('Telegram Player-ID flow presentation', () => {
       );
       expect(presentation.text).not.toContain('first line');
       expect(presentation.text).not.toContain('second line');
+    }
+  });
+
+  it('renders the CBE SMS payment card for the saved Player', () => {
+    const presentation = presentTelegramPlayerIdFlowResult({
+      version: 1,
+      outcome: 'cbe_sms_deposit_destination',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+      receiverAccountMasked: '***0042',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+      acceptsPayments: true,
+    });
+    expect(presentation).toEqual({
+      kind: 'force_reply',
+      text: expect.stringContaining('💳 CBE Birr deposit'),
+      placeholder: 'CBE Birr transaction reference',
+    });
+    if (presentation.kind === 'force_reply') {
+      expect(presentation.text).toContain('👤 Name: Demo Receiver');
+      expect(presentation.text).toContain('📱 Number: 0000000042');
+      expect(presentation.text).toContain('reply with the transaction reference');
     }
   });
 

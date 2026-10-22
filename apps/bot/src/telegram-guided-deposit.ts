@@ -7,9 +7,11 @@ import { isBoundedTelegramDepositProofText } from './telegram-deposit-proof-inpu
  * Player ID, payment reference, or authority to call the API.
  */
 export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
+export const TELEGRAM_GUIDED_CBE_CALLBACK_DATA = 'gd1.cbe';
 export const TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA = 'sp1.change';
 
-export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 Deposit';
+export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 TeleBirr';
+export const TELEGRAM_GUIDED_CBE_BUTTON_TEXT = '💳 CBE Birr';
 
 const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
@@ -136,6 +138,52 @@ export function buildTelegramTelebirrPaymentPrompt(
     'Valid for 1 hour. Check the receiver name before paying.',
     'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
   ].join('\n');
+}
+
+export function buildTelegramCbeSmsPaymentPrompt(
+  input: TelegramTelebirrPaymentPromptInput,
+): string {
+  if (
+    !validPlayerId(input.playerId) ||
+    input.receiverAccountHolderName !== input.receiverAccountHolderName.trim() ||
+    Array.from(input.receiverAccountHolderName).length < 2 ||
+    Array.from(input.receiverAccountHolderName).length > 160 ||
+    /[\u0000-\u001f\u007f]/u.test(input.receiverAccountHolderName) ||
+    !/^[0-9]{9,24}$/u.test(input.receiverAccountReference)
+  )
+    throw new Error('The CBE Birr payment prompt is unavailable.');
+  return [
+    '💳 CBE Birr deposit',
+    'Send 25–25,000 ETB to:',
+    `👤 Name: ${input.receiverAccountHolderName}`,
+    `📱 Number: ${input.receiverAccountReference}`,
+    `🎮 KemerBet Player ID: ${input.playerId}`,
+    'Valid for 1 hour. Check the receiver name before paying.',
+    'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).',
+    'If sending a reference separately, use /cbe followed by the reference.',
+  ].join('\n');
+}
+
+export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const message = value as TelegramReplyMessageShape;
+  if (message.from?.is_bot !== true || typeof message.text !== 'string') return false;
+  const playerId = /(?:^|\n)🎮 KemerBet Player ID: ([^\s]+)(?:\n|$)/u.exec(message.text)?.[1];
+  const holder = /(?:^|\n)👤 Name: ([^\r\n]+)(?:\n|$)/u.exec(message.text)?.[1];
+  const reference = /(?:^|\n)📱 Number: ([0-9]{9,24})(?:\n|$)/u.exec(message.text)?.[1];
+  if (!playerId || !holder || !reference) return false;
+  try {
+    return (
+      message.text ===
+      buildTelegramCbeSmsPaymentPrompt({
+        playerId,
+        receiverAccountHolderName: holder,
+        receiverAccountReference: reference,
+      })
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Exact previous card stays recognizable while customers reply to already-issued instructions. */

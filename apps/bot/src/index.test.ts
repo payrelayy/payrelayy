@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   buildTelegramTelebirrPaymentPrompt,
+  buildTelegramCbeSmsPaymentPrompt,
 } from './telegram-guided-deposit.js';
 
 const runtime = vi.hoisted(() => ({
@@ -579,12 +580,75 @@ describe('Telegram admission, private action, and ingress composition', () => {
 
     expect(context.replies[0]).toContain('FetanAgent');
     expect(keyboard?.buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
       {
         text: '➕ Request Player ID review',
         callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
       },
+    ]);
+  });
+
+  it('offers CBE Birr on the live SMS menu and routes its callback and reply to CBE', async () => {
+    await loadComposition(false, true, true, false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'menu',
+      callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+    };
+    let buttons: { text: string; callbackData: string }[] = [];
+    await runtime.messageHandler!({
+      ...messageContext('/menu'),
+      reply: async (_text: string, options?: { reply_markup?: { buttons: typeof buttons } }) => {
+        buttons = options?.reply_markup?.buttons ?? [];
+      },
+    });
+    expect(buttons.map((button) => button.text)).toEqual([
+      '💰 TeleBirr',
+      '💳 CBE Birr',
+      '🔄 Change Player ID',
+    ]);
+    runtime.actionDeliveries = [];
+    runtime.actionResult = { version: 1, outcome: 'player_selection_missing' };
+    await runtime.callbackHandler!({
+      ...messageContext(''),
+      update: { update_id: 123457 },
+      callbackQuery: { data: 'gd1.cbe' },
+      answerCallbackQuery: async () => {},
+    });
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({ kind: 'saved_cbe_sms_destination_command' }),
+    ]);
+    runtime.actionDeliveries = [];
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      matchStatus: 'pending_sms',
+    };
+    const prompt = buildTelegramCbeSmsPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    await runtime.messageHandler!({
+      ...messageContext('SYNTHCBE1234'),
+      message: {
+        text: 'SYNTHCBE1234',
+        reply_to_message: {
+          text: prompt,
+          from: { is_bot: true },
+        },
+      },
+    });
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: 'SYNTHCBE1234',
+      }),
     ]);
   });
 
@@ -604,7 +668,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       },
     });
     expect(keyboard?.buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
 

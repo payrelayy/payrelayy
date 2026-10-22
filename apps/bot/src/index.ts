@@ -23,6 +23,8 @@ import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
   isTelegramGuidedDepositStartCallback,
+  isTelegramCbeSmsDepositStartCallback,
+  isTelegramCbeSmsDepositStartCommand,
   isTelegramGuidedDepositStartCommand,
   isTelegramSavedPlayerChangeCallback,
   isCbeBirrReceiptText,
@@ -31,6 +33,8 @@ import {
   reduceTelegramGuidedDepositMediaSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramSavedTelebirrDestinationAction,
+  reduceTelegramSavedCbeSmsDestinationAction,
+  reduceTelegramCbeSmsReplySubmission,
   reduceTelegramSavedCbeSmsMediaSubmission,
   reduceTelegramSavedCbeSmsProofSubmission,
   reduceTelegramSavedTelebirrMediaSubmission,
@@ -49,6 +53,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  isTelegramCbeSmsPaymentPromptReply,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
@@ -81,7 +86,7 @@ const pollingReadiness = createTelegramPollingReadiness();
 bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
-const quickMenu = renderTelegramQuickMenu();
+const quickMenu = renderTelegramQuickMenu(config.receiverSmsCandidateEnabled);
 
 function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();
@@ -203,6 +208,7 @@ async function deliverPlayerAction(
             action.kind === 'saved_telebirr_proof_command' ||
             action.kind === 'saved_receiver_sms_proof_command' ||
             action.kind === 'saved_telebirr_destination_command' ||
+            action.kind === 'saved_cbe_sms_destination_command' ||
             action.kind === 'telebirr_deposit_destination_command' ||
             action.kind === 'cbe_birr_dry_run_instruction_command' ||
             action.kind === 'cbe_birr_bound_dry_run_proof_command'
@@ -254,6 +260,30 @@ bot.on('message', async (context) => {
     }
     if (isTelegramGuidedDepositStartCommand({ ...metadata, command: text })) {
       const action = reduceTelegramSavedTelebirrDestinationAction(metadata);
+      if (action)
+        await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
+          context.reply(
+            replyText,
+            placeholder
+              ? {
+                  reply_markup: {
+                    force_reply: true,
+                    selective: true,
+                    input_field_placeholder: placeholder,
+                  },
+                }
+              : keyboard
+                ? { reply_markup: keyboard }
+                : undefined,
+          ),
+        );
+      return;
+    }
+    if (
+      config.receiverSmsCandidateEnabled &&
+      isTelegramCbeSmsDepositStartCommand({ ...metadata, command: text })
+    ) {
+      const action = reduceTelegramSavedCbeSmsDestinationAction(metadata);
       if (action)
         await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
           context.reply(
@@ -371,9 +401,11 @@ bot.on('message', async (context) => {
       }
       const cbeMedia =
         config.receiverSmsCandidateEnabled &&
-        (isCbeBirrReceiptText(extracted.text) || isCbeBirrReceiptText(mediaMetadata.caption));
+        (isCbeBirrReceiptText(extracted.text) ||
+          isCbeBirrReceiptText(mediaMetadata.caption) ||
+          isTelegramCbeSmsPaymentPromptReply(replyToMessage));
       const mediaSubmission = cbeMedia
-        ? reduceTelegramSavedCbeSmsMediaSubmission(mediaMetadata)
+        ? reduceTelegramSavedCbeSmsMediaSubmission({ ...mediaMetadata, replyToMessage })
         : parseTelegramTelebirrPaymentPromptReply(replyToMessage)
           ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
           : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
@@ -403,7 +435,8 @@ bot.on('message', async (context) => {
       return;
     }
     const cbeSmsSubmission = config.receiverSmsCandidateEnabled
-      ? reduceTelegramSavedCbeSmsProofSubmission({ ...metadata, command: text })
+      ? (reduceTelegramCbeSmsReplySubmission({ ...metadata, command: text, replyToMessage }) ??
+        reduceTelegramSavedCbeSmsProofSubmission({ ...metadata, command: text }))
       : undefined;
     if (cbeSmsSubmission) {
       if (cbeSmsSubmission.kind === 'action') {
@@ -571,6 +604,8 @@ if (playerActions.enabled) {
       callbackData: context.callbackQuery.data,
     };
     const guidedDepositStart = isTelegramGuidedDepositStartCallback(callbackMetadata);
+    const cbeDepositStart =
+      config.receiverSmsCandidateEnabled && isTelegramCbeSmsDepositStartCallback(callbackMetadata);
     const changePlayer = isTelegramSavedPlayerChangeCallback(callbackMetadata);
     const action =
       reduceTelegramDepositProofStatusCallbackAction(callbackMetadata) ??
@@ -578,6 +613,27 @@ if (playerActions.enabled) {
     await context.answerCallbackQuery();
     if (guidedDepositStart) {
       const savedAction = reduceTelegramSavedTelebirrDestinationAction(callbackMetadata);
+      if (savedAction)
+        await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
+          context.reply(
+            replyText,
+            placeholder
+              ? {
+                  reply_markup: {
+                    force_reply: true,
+                    selective: true,
+                    input_field_placeholder: placeholder,
+                  },
+                }
+              : keyboard
+                ? { reply_markup: keyboard }
+                : undefined,
+          ),
+        );
+      return;
+    }
+    if (cbeDepositStart) {
+      const savedAction = reduceTelegramSavedCbeSmsDestinationAction(callbackMetadata);
       if (savedAction)
         await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
           context.reply(

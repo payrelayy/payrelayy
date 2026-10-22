@@ -1118,6 +1118,78 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls[1]).toContain('prepare_telegram_live_telebirr_destination');
   });
 
+  it('opens only the protected CBE SMS receiver for a saved eligible Player', async () => {
+    const protectedReceiver = protectReceiverAccountReference(
+      {
+        provider: 'cbe_birr',
+        reference: '0000000042',
+        secrets: { encryptionSecret: '1'.repeat(64), fingerprintSecret: '2'.repeat(64) },
+      },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_public_telegram_action_inbound_event'))
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-10-22T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        if (query.includes('get_telegram_saved_player_selection'))
+          return {
+            rows: [{ selected_player_id: 'PLAYER-DEMO-42' }],
+          };
+        if (query.includes('prepare_telegram_live_cbe_sms_destination'))
+          return {
+            rows: [
+              {
+                provider_code: 'cbe_birr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'Demo Receiver',
+                receiver_account_reference_ciphertext: protectedReceiver.ciphertext,
+                receiver_account_reference_fingerprint: protectedReceiver.fingerprint,
+                receiver_account_masked: protectedReceiver.masked,
+                payments_enabled: true,
+              },
+            ],
+          };
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const config = {
+      ...actionConfig,
+      financialActionsMode: 'live' as const,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        receiverSmsCandidateProductionEnabled: true,
+      },
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'saved_cbe_sms_destination_command',
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(config, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action), 'utf8'),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'cbe_sms_deposit_destination',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+      receiverAccountReference: '0000000042',
+      acceptsPayments: true,
+    });
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toContain('prepare_telegram_live_cbe_sms_destination');
+  });
+
   it('opens a non-submittable 25 ETB receiver review with payment authorization disabled', async () => {
     const protectedReceiver = protectReceiverAccountReference(
       {
@@ -1812,9 +1884,9 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(4);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 31');
+    expect(queries[0]).toContain('select count(*) = 32');
     expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
-    expect(queries[1]).toContain('select count(*) = 33');
+    expect(queries[1]).toContain('select count(*) = 34');
     expect(queries[2]).toContain('app.capture_telegram_receiver_sms_candidate');
     expect(queries[3]).toContain('app.capture_telegram_receiver_sms_candidate');
   });
@@ -1827,7 +1899,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         const row = Object.fromEntries(
           Array.from({ length: 12 }, (_, index) => [`catalog_${index}`, true]),
         );
-        if (query.includes('select count(*) = 30')) row.catalog_7 = false;
+        if (query.includes('select count(*) = 31')) row.catalog_7 = false;
         return { rows: [row] };
       },
       async end() {},
@@ -1837,8 +1909,8 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       createPostgresTelegramPlayerActionRuntime(actionConfig, database).ready(),
     ).resolves.toBe(true);
     expect(queries).toHaveLength(2);
-    expect(queries[0]).toContain('select count(*) = 30');
-    expect(queries[1]).toContain('select count(*) = 31');
+    expect(queries[0]).toContain('select count(*) = 31');
+    expect(queries[1]).toContain('select count(*) = 32');
   });
 
   it('does not fall back to shadow intake for a non-synthetic routine candidate', async () => {
@@ -1909,9 +1981,9 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     ).resolves.toBe(false);
     expect(queries).toHaveLength(4);
     expect(queries[0]).toContain('app.capture_telegram_routine_telebirr_untrusted_proof');
-    expect(queries[0]).toContain('select count(*) = 31');
+    expect(queries[0]).toContain('select count(*) = 32');
     expect(queries[1]).toContain('app.capture_telegram_cbe_birr_bound_dry_run_proof');
-    expect(queries[1]).toContain('select count(*) = 33');
+    expect(queries[1]).toContain('select count(*) = 34');
     expect(queries[2]).toContain('app.capture_telegram_receiver_sms_candidate');
     expect(queries[3]).toContain('app.capture_telegram_receiver_sms_candidate');
   });

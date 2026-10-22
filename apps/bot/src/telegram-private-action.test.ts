@@ -6,6 +6,8 @@ import {
   isRecognizedTelegramDepositStatusCommand,
   isTelegramGuidedDepositStartCallback,
   isTelegramGuidedDepositStartCommand,
+  isTelegramCbeSmsDepositStartCallback,
+  isTelegramCbeSmsDepositStartCommand,
   isTelegramSavedPlayerChangeCallback,
   isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
@@ -23,6 +25,8 @@ import {
   reduceTelegramSavedTelebirrDestinationAction,
   reduceTelegramSavedCbeSmsMediaSubmission,
   reduceTelegramSavedCbeSmsProofSubmission,
+  reduceTelegramSavedCbeSmsDestinationAction,
+  reduceTelegramCbeSmsReplySubmission,
   reduceTelegramSavedTelebirrProofSubmission,
 } from './telegram-private-action.js';
 import {
@@ -30,6 +34,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   buildTelegramTelebirrPaymentPrompt,
+  buildTelegramCbeSmsPaymentPrompt,
 } from './telegram-guided-deposit.js';
 
 const privateMetadata = {
@@ -185,6 +190,60 @@ describe('private Telegram action reducers', () => {
         command: 'CBE Birr Txn ID: SYNTHCBE1234 Txn ID: OTHERREF12',
       }),
     ).toEqual({ kind: 'selection_required' });
+  });
+
+  it('keeps the CBE instruction and its replies bound to the CBE SMS route', () => {
+    const prompt = buildTelegramCbeSmsPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    const replyToMessage = { from: { is_bot: true }, text: prompt };
+    expect(
+      isTelegramCbeSmsDepositStartCallback({
+        ...privateMetadata,
+        callbackData: 'gd1.cbe',
+      }),
+    ).toBe(true);
+    expect(
+      isTelegramCbeSmsDepositStartCommand({
+        ...privateMetadata,
+        command: '/cbe',
+      }),
+    ).toBe(true);
+    expect(reduceTelegramSavedCbeSmsDestinationAction(privateMetadata)).toMatchObject({
+      kind: 'saved_cbe_sms_destination_command',
+    });
+    expect(
+      reduceTelegramCbeSmsReplySubmission({
+        ...privateMetadata,
+        command: 'SYNTHCBE1234',
+        replyToMessage,
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: 'SYNTHCBE1234',
+      },
+    });
+    expect(
+      reduceTelegramSavedCbeSmsMediaSubmission({
+        ...privateMetadata,
+        extractedText: 'Txn ID: SYNTHCBE1234',
+        caption: undefined,
+        sourceKind: 'ocr_text',
+        replyToMessage,
+      }),
+    ).toMatchObject({ kind: 'action', action: { providerCode: 'cbe_birr' } });
+    expect(
+      reduceTelegramCbeSmsReplySubmission({
+        ...privateMetadata,
+        command: 'SYNTHCBE1234',
+        replyToMessage: { from: { is_bot: false }, text: prompt },
+      }),
+    ).toBeUndefined();
   });
   it('reduces only exact root-menu commands to an English-only envelope', () => {
     expect(reduceTelegramRootMenuAction({ ...privateMetadata, command: '/start' })).toEqual({

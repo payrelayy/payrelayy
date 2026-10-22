@@ -109,6 +109,12 @@ const PREPARE_LIVE_TELEBIRR_DESTINATION_SQL = `
          receiver_account_masked, payments_enabled, request_replayed
   from app.prepare_telegram_live_telebirr_destination($1::uuid, $2::text, $3::text)
 `;
+const PREPARE_LIVE_CBE_SMS_DESTINATION_SQL = `
+  select provider_code, receiver_revision_id, receiver_account_holder_name,
+         receiver_account_reference_ciphertext, receiver_account_reference_fingerprint,
+         receiver_account_masked, payments_enabled
+  from app.prepare_telegram_live_cbe_sms_destination($1::uuid, $2::text)
+`;
 const GET_SAVED_PLAYER_SELECTION_SQL = `
   select selected_player_id
   from app.get_telegram_saved_player_selection($1::uuid)
@@ -754,6 +760,69 @@ async function handleSavedTelebirrDestination(
     return { ...result, selectedPlayerId };
   }
   return result;
+}
+
+async function handleSavedCbeSmsDestination(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (
+    !config.telegramPlayerActionRuntime.receiverSmsCandidateProductionEnabled ||
+    config.financialActionsMode !== 'live'
+  ) {
+    return { version: 1, outcome: 'deposit_unavailable' };
+  }
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  if (selectedPlayerId === null) return { version: 1, outcome: 'player_selection_missing' };
+  const row = oneRow(
+    (
+      await database.query(PREPARE_LIVE_CBE_SMS_DESTINATION_SQL, [
+        originInboundEventId,
+        selectedPlayerId,
+      ])
+    ).rows,
+  );
+  if (
+    row.provider_code !== 'cbe_birr' ||
+    typeof row.receiver_revision_id !== 'string' ||
+    !UUID_PATTERN.test(row.receiver_revision_id) ||
+    typeof row.receiver_account_holder_name !== 'string' ||
+    row.receiver_account_holder_name !== row.receiver_account_holder_name.trim() ||
+    Array.from(row.receiver_account_holder_name).length < 2 ||
+    Array.from(row.receiver_account_holder_name).length > 160 ||
+    /[\u0000-\u001f\u007f]/u.test(row.receiver_account_holder_name) ||
+    typeof row.receiver_account_reference_ciphertext !== 'string' ||
+    typeof row.receiver_account_reference_fingerprint !== 'string' ||
+    typeof row.receiver_account_masked !== 'string' ||
+    !/^\*{3}[0-9]{4}$/u.test(row.receiver_account_masked) ||
+    row.payments_enabled !== true
+  ) {
+    throw new TelegramPlayerActionRuntimeUnavailableError();
+  }
+  const receiverAccountReference = unprotectReceiverAccountReference({
+    ciphertext: row.receiver_account_reference_ciphertext,
+    fingerprint: row.receiver_account_reference_fingerprint,
+    masked: row.receiver_account_masked,
+    provider: 'cbe_birr',
+    secrets: {
+      encryptionSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceEncryptionMasterSecret,
+      fingerprintSecret:
+        config.telegramPlayerActionRuntime.depositProofReferenceFingerprintMasterSecret,
+    },
+  });
+  return {
+    version: 1,
+    outcome: 'cbe_sms_deposit_destination',
+    providerCode: 'cbe_birr',
+    providerName: 'CBE Birr',
+    receiverAccountHolderName: row.receiver_account_holder_name,
+    receiverAccountReference,
+    receiverAccountMasked: row.receiver_account_masked,
+    acceptsPayments: true,
+    selectedPlayerId,
+  };
 }
 
 async function handleSavedTelebirrProof(
@@ -1532,6 +1601,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handlePlayerValidationRequest(pool, inboundEventId, action);
           case 'saved_telebirr_destination_command':
             return await handleSavedTelebirrDestination(pool, inboundEventId, action, config);
+          case 'saved_cbe_sms_destination_command':
+            return await handleSavedCbeSmsDestination(pool, inboundEventId, config);
           case 'saved_telebirr_proof_command':
             return await handleSavedTelebirrProof(pool, inboundEventId, action, config);
           case 'saved_receiver_sms_proof_command':

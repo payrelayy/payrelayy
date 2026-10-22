@@ -16,7 +16,7 @@ describe('English-only private customer menu', () => {
     expect(menu).toEqual({
       text: 'FetanAgent\nSet a Player ID to deposit.',
       buttons: [
-        { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+        { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
         { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
         { text: '➕ Request Player ID review', callbackData },
       ],
@@ -33,7 +33,7 @@ describe('English-only private customer menu', () => {
 
   it('hides the manual-review entry only for the automatic Find menu', () => {
     expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
   });
@@ -42,10 +42,22 @@ describe('English-only private customer menu', () => {
     expect(renderTelegramQuickMenu()).toEqual({
       text: 'FetanAgent',
       buttons: [
-        { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+        { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
         { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
       ],
     });
     expect(JSON.stringify(renderTelegramQuickMenu())).not.toMatch(/expir|withdraw|unavailable/iu);
+  });
+
+  it('shows both payment methods only when the SMS route is configured', () => {
+    expect(renderPlayerRegistrationMenu(callbackData, null, true, true).buttons).toEqual([
+      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
+      { text: '💳 CBE Birr', callbackData: 'gd1.cbe' },
+      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+    ]);
+    expect(renderTelegramQuickMenu(true).buttons[1]).toEqual({
+      text: '💳 CBE Birr',
+      callbackData: 'gd1.cbe',
+    });
   });
 });

@@ -80,7 +80,8 @@ export async function readDigitalOceanScreenshotReference(
             ],
           },
         ],
-        max_tokens: 32,
+        // Nemotron may spend several hundred tokens in reasoning_content before content appears.
+        max_tokens: 1024,
         temperature: 0,
       }),
     });
@@ -90,13 +91,15 @@ export async function readDigitalOceanScreenshotReference(
     const body: unknown = JSON.parse(text);
     if (typeof body !== 'object' || body === null) return { kind: 'unavailable' };
     const value = body as {
-      choices?: Array<{ message?: { content?: unknown } }>;
+      choices?: Array<{ finish_reason?: unknown; message?: { content?: unknown } }>;
       usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
     };
-    const content = value.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') return { kind: 'unavailable' };
+    const choice = value.choices?.[0];
     const inputTokens = usageTokens(value.usage?.prompt_tokens);
     const outputTokens = usageTokens(value.usage?.completion_tokens);
+    if (choice?.finish_reason !== 'stop') return { kind: 'unreadable', inputTokens, outputTokens };
+    const content = choice.message?.content;
+    if (typeof content !== 'string') return { kind: 'unreadable', inputTokens, outputTokens };
     const candidate = content.trim();
     if (!REFERENCE.test(candidate)) return { kind: 'unreadable', inputTokens, outputTokens };
     return { kind: 'candidate', reference: candidate.toUpperCase(), inputTokens, outputTokens };

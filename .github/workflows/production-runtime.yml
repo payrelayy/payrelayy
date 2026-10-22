@@ -390,6 +390,7 @@ jobs:
           PLAYER_ACTION_RUNTIME_PASSWORD: ${{ secrets.PLAYER_ACTION_RUNTIME_PASSWORD }}
           PRODUCTION_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PRODUCTION_SUPABASE_PUBLISHABLE_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN: ${{ secrets.PRODUCTION_TELEGRAM_BOT_TOKEN }}
+          PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY: ${{ secrets.PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY }}
           PRODUCTION_TELEGRAM_BOT_TOKEN_SHA256: ${{ vars.PRODUCTION_TELEGRAM_BOT_TOKEN_SHA256 }}
           PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
           PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
@@ -510,6 +511,7 @@ jobs:
             [[ ! " ${values[*]} " == *" $RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD "* ]]
           fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
+          [[ "$PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY" =~ ^[A-Za-z0-9_-]{40,256}$ ]]
           [[ "$PRODUCTION_VM_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
           [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
           [[ "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" == 'telebirr-assignment-production-v1' ]]
@@ -679,6 +681,7 @@ jobs:
               >"$secret_dir/receiver-sms-settlement-database-url"
           fi
           printf '%s\n' "$PRODUCTION_TELEGRAM_BOT_TOKEN" >"$secret_dir/bot-token"
+          printf '%s\n' "$PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY" >"$secret_dir/bot-screenshot-reference-model-access-key"
           printf '%s\n' "$TELEBIRR_ASSIGNMENT_SIGNER_KEY_ID" >"$secret_dir/telebirr-assignment-signer-key-id"
           chmod 0600 "$secret_dir"/*
           openssl x509 -in "$secret_dir/supabase-ca.crt" -noout -checkend 0 >/dev/null
@@ -1253,6 +1256,7 @@ jobs:
             infra/compose.production.inert-maintenance.yaml \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
             "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
+            "$SECRET_DIR"/bot-screenshot-reference-model-access-key
           )
           case "$REQUESTED_MODE" in
             deploy|deploy-shadow|deploy-shadow-intake)

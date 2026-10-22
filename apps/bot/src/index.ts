@@ -114,7 +114,7 @@ const screenshotRecognition = screenshotModelAccessKey
             },
             'Screenshot reference reader completed.',
           );
-          return result.kind === 'candidate' ? result.reference : null;
+          return result;
         },
       })
   : undefined;

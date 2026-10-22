@@ -11,7 +11,7 @@ const dependencies = { modelAccessKey: 'synthetic-key' };
 function completion(content: unknown, promptTokens = 100, completionTokens = 12): Response {
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content } }],
+      choices: [{ finish_reason: 'stop', message: { content } }],
       usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens },
     }),
   );
@@ -39,7 +39,7 @@ describe('DigitalOcean screenshot reference candidate reader', () => {
     const request = options as RequestInit;
     const body = JSON.parse(String(request.body));
     expect(body.model).toBe(DIGITALOCEAN_SCREENSHOT_MODEL);
-    expect(body.max_tokens).toBe(32);
+    expect(body.max_tokens).toBe(1024);
     expect(body.messages[0].content[1].image_url.url).toBe(
       `data:image/jpeg;base64,${image.toString('base64')}`,
     );
@@ -50,6 +50,19 @@ describe('DigitalOcean screenshot reference candidate reader', () => {
       const result = await readDigitalOceanScreenshotReference(image, 'image/jpeg', {
         ...dependencies,
         fetch: async () => completion(output),
+      });
+      expect(result.kind).toBe('unreadable');
+    }
+  });
+
+  it('withholds a reference from a truncated model response', async () => {
+    for (const content of ['CBE12345678', null]) {
+      const result = await readDigitalOceanScreenshotReference(image, 'image/png', {
+        ...dependencies,
+        fetch: async () =>
+          new Response(
+            JSON.stringify({ choices: [{ finish_reason: 'length', message: { content } }] }),
+          ),
       });
       expect(result.kind).toBe('unreadable');
     }

@@ -492,8 +492,8 @@ const configs = topLevelSection(compose, 'configs');
 assert.equal(count(configs, /^  [a-z][a-z0-9_]*:\s*$/gmu), 7);
 assert.equal(count(configs, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 7);
 const secrets = topLevelSection(compose, 'secrets');
-assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 31);
-assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 31);
+assert.equal(count(secrets, /^  [a-z][a-z0-9_]*:\s*$/gmu), 32);
+assert.equal(count(secrets, /\$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?/gu), 32);
 assert.match(
   secrets,
   /owner_routine_enrollment_signer:\s+file: \$\{FETANAGENT_PRODUCTION_SECRET_DIR:\?[^\n]+\}\/owner-routine-enrollment-signer-pkcs8/u,
@@ -1026,6 +1026,14 @@ const transferredNames = (block) =>
         : [line.replace(/\\$/u, '').trim().replaceAll('"', '').split('/').at(-1)];
     });
 const baseTransferNames = transferredNames(transferBlock);
+assert.ok(baseTransferNames.includes('bot-screenshot-reference-model-access-key'));
+assert.match(compose, /BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'/u);
+assert.match(
+  compose,
+  /BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY_FILE: \/run\/secrets\/bot_screenshot_reference_model_access_key/u,
+);
+assert.match(workflow, /secrets\.PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY/u);
+assert.match(helper, /required\+=\(bot-screenshot-reference-model-access-key\)/u);
 const operationalTransferNames = [
   ...baseTransferNames,
   ...transferredNames(operationalTransferBlock),
@@ -1045,6 +1053,7 @@ const helperCountBlock =
   /local_count="\$\(find[\s\S]*?\[\[ "\$local_count" -eq "\$expected_count"/u.exec(helper)?.[0];
 assert.ok(helperCountBlock, 'the helper bundle count gate must exist');
 const [
+  screenshotFiles,
   betaFiles,
   operationalFiles,
   routineFiles,
@@ -1055,17 +1064,18 @@ const [
 ] = [...helperCountBlock.matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu)].map(
   (match) => Number(match[1]),
 );
+assert.equal(screenshotFiles, 1);
 assert.ok(betaFiles > 0, 'legacy beta rollback accounting must remain explicit');
 assert.match(compose, /^  production-companion-device-bridge:/mu);
 assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'/u);
 assert.match(inertCompose, /INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'/u);
 assert.equal(
-  helperBaseCount + operationalFiles + companionFiles,
+  helperBaseCount + screenshotFiles + operationalFiles + companionFiles,
   operationalTransferNames.length,
   'the helper operational bundle count must match the flattened workflow transfer',
 );
 assert.equal(
-  helperBaseCount + smsFiles + companionFiles,
+  helperBaseCount + screenshotFiles + smsFiles + companionFiles,
   inertTransferNames.length,
   'the helper inert bundle count must match the flattened workflow transfer',
 );

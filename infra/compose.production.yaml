@@ -347,6 +347,8 @@ services:
       BOT_TO_API_ACTION_BASE_URL: http://api:3000/
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       BOT_TO_API_ACTION_HMAC_SECRET_FILE: /run/secrets/bot_player_action_transport_hmac
+      BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'
+      BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY_FILE: /run/secrets/bot_screenshot_reference_model_access_key
       INTERNAL_TELEGRAM_BETA_ADMISSION_PREFLIGHT_ENABLED: 'false'
       INTERNAL_POSTGRES_RUNTIME_ENABLED: 'false'
       INTERNAL_NONCE_RETENTION_RUNTIME_ENABLED: 'false'
@@ -364,6 +366,11 @@ services:
         mode: 0400
       - source: bot_player_action_transport_hmac
         target: bot_player_action_transport_hmac
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: bot_screenshot_reference_model_access_key
+        target: bot_screenshot_reference_model_access_key
         uid: '10001'
         gid: '10001'
         mode: 0400
@@ -763,6 +770,8 @@ secrets:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-token
   bot_player_action_transport_hmac:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-action-transport-hmac
+  bot_screenshot_reference_model_access_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-screenshot-reference-model-access-key
   telebirr_assignment_broker_database_url:
     file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/telebirr-assignment-database-url
   telebirr_assignment_broker_reference_opening_key:

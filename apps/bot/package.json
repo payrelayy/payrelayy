@@ -8,7 +8,8 @@
     "@fetanagent/contracts": "workspace:*",
     "@fetanagent/i18n": "workspace:*",
     "@fetanagent/telebirr-verification-foundation": "workspace:*",
-    "grammy": "^1.35.0"
+    "grammy": "^1.35.0",
+    "sharp": "0.35.5"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

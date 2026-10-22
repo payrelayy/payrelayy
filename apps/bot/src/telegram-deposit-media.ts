@@ -14,7 +14,9 @@ const runFile = promisify(execFile);
 // a single receipt reference. These limits also keep OCR from stalling the polling process.
 export const TELEGRAM_PROOF_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_PAGES = 3;
-const MAX_ACTIVE_MEDIA_JOBS = 1;
+const MAX_ACTIVE_MEDIA_JOBS = 2;
+const MAX_WAITING_MEDIA_JOBS = 24;
+const MAX_MEDIA_WAIT_MS = 30_000;
 const MAX_IMAGE_PIXELS = 8_000_000;
 const MAX_FILE_PATH_LENGTH = 256;
 const TELEGRAM_FILE_PATH = /^[A-Za-z0-9_./-]+$/u;
@@ -102,6 +104,36 @@ export type TelegramProofMediaResult =
   | { readonly kind: 'busy' };
 
 let activeMediaJobs = 0;
+const mediaJobWaiters: Array<{ resolve: (acquired: boolean) => void; timer: NodeJS.Timeout }> = [];
+
+function acquireMediaJob(): Promise<boolean> {
+  if (activeMediaJobs < MAX_ACTIVE_MEDIA_JOBS && mediaJobWaiters.length === 0) {
+    activeMediaJobs += 1;
+    return Promise.resolve(true);
+  }
+  if (mediaJobWaiters.length >= MAX_WAITING_MEDIA_JOBS) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const waiter = {
+      resolve,
+      timer: setTimeout(() => {
+        const index = mediaJobWaiters.indexOf(waiter);
+        if (index !== -1) mediaJobWaiters.splice(index, 1);
+        resolve(false);
+      }, MAX_MEDIA_WAIT_MS),
+    };
+    mediaJobWaiters.push(waiter);
+  });
+}
+
+function releaseMediaJob(): void {
+  const next = mediaJobWaiters.shift();
+  if (next) {
+    clearTimeout(next.timer);
+    next.resolve(true);
+  } else {
+    activeMediaJobs -= 1;
+  }
+}
 
 class UnreadableTelegramProof extends Error {}
 
@@ -283,13 +315,12 @@ export async function recognizeTelegramProofMedia(
   }
 }
 
-/** Media is never persisted or forwarded. Only bounded extracted text enters candidate parsing. */
+/** Media is transient; an explicitly configured recognizer may forward image bytes to DigitalOcean. */
 export async function extractTelegramProofMediaText(
   media: TelegramProofMedia,
   dependencies: TelegramProofMediaDependencies,
 ): Promise<TelegramProofMediaResult> {
-  if (activeMediaJobs >= MAX_ACTIVE_MEDIA_JOBS) return { kind: 'busy' };
-  activeMediaJobs += 1;
+  if (!(await acquireMediaJob())) return { kind: 'busy' };
   try {
     const bytes = await downloadTelegramFile(media, dependencies);
     if (bytes === 'too_large') return { kind: 'too_large' };
@@ -299,6 +330,6 @@ export async function extractTelegramProofMediaText(
   } catch (error) {
     return { kind: error instanceof UnreadableTelegramProof ? 'unreadable' : 'unavailable' };
   } finally {
-    activeMediaJobs -= 1;
+    releaseMediaJob();
   }
 }

@@ -408,6 +408,10 @@ verify_release_files() {
   if grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
     required+=(beta-database-url beta-payload-hmac beta-transport-hmac bot-transport-hmac)
   fi
+  if grep -Fq "BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'" \
+    "$release/compose.production.yaml"; then
+    required+=(bot-screenshot-reference-model-access-key)
+  fi
   if grep -Fq "INTERNAL_OWNER_CBE_BIRR_LOOKUP_KEY_LOADING_ENABLED: 'true'" \
     "$release/compose.production.yaml"; then
     required+=(
@@ -531,6 +535,13 @@ verify_release_files() {
         ;;
     esac
   done
+  if grep -Fq "BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'" \
+    "$release/compose.production.yaml"; then
+    [[ "$(stat --format='%s' "$release/secrets/bot-screenshot-reference-model-access-key")" -le 257 ]] &&
+      LC_ALL=C grep -Eq '^[A-Za-z0-9_-]{40,256}$' \
+        "$release/secrets/bot-screenshot-reference-model-access-key" ||
+      die 'the screenshot model access key is malformed'
+  fi
   [[ "$(find -P "$release/secrets" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq "${#required[@]}" ]] ||
     die 'the production secret directory contains an unexpected file'
   [[ -z "$(find -P "$release/secrets" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" ]] ||
@@ -795,6 +806,14 @@ case "${1:-}" in
     fi
     local_count="$(find -P "$incoming" -mindepth 1 -maxdepth 1 -type f | wc -l)"
     expected_count=33
+    if grep -Fq "BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'" \
+      "$incoming/compose.production.yaml"; then
+      expected_count=$((expected_count + 1))
+      [[ ! -L "$incoming/bot-screenshot-reference-model-access-key" &&
+        -f "$incoming/bot-screenshot-reference-model-access-key" &&
+        -s "$incoming/bot-screenshot-reference-model-access-key" ]] ||
+        die 'the screenshot model access key is missing'
+    fi
     if grep -Fq '  beta-admission:' "$incoming/compose.production.yaml"; then
       expected_count=$((expected_count + 4))
     fi

@@ -8,6 +8,8 @@ import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
 import {
   buildTelegramTelebirrPaymentPrompt,
+  buildTelegramCbeSmsPaymentPrompt,
+  TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
@@ -68,6 +70,7 @@ export function presentTelegramPlayerIdFlowResult(
           result.callbackData,
           result.selectedPlayerId,
           context.playerValidationEnabled,
+          context.receiverSmsCandidateEnabled,
         ),
       };
     case 'player_selection_missing':
@@ -83,6 +86,9 @@ export function presentTelegramPlayerIdFlowResult(
           text: `✅ Player ID ${result.playerId} saved.`,
           buttons: [
             { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
+            ...(context.receiverSmsCandidateEnabled
+              ? [{ text: '💳 CBE Birr', callbackData: TELEGRAM_GUIDED_CBE_CALLBACK_DATA }]
+              : []),
             { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
           ],
         },
@@ -140,6 +146,16 @@ export function presentTelegramPlayerIdFlowResult(
         placeholder: 'TeleBirr transaction number',
       };
     }
+    case 'cbe_sms_deposit_destination':
+      return {
+        kind: 'force_reply',
+        text: buildTelegramCbeSmsPaymentPrompt({
+          playerId: result.selectedPlayerId,
+          receiverAccountHolderName: result.receiverAccountHolderName,
+          receiverAccountReference: result.receiverAccountReference,
+        }),
+        placeholder: 'CBE Birr transaction reference',
+      };
     case 'deposit_instructions':
       return {
         kind: 'message',
@@ -335,9 +351,9 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
   if (receiverSmsCandidateEnabled) {
     return [
       '💰 Deposits',
-      'Save a Player ID once in /menu, then tap Deposit for the current receiver.',
+      'Save a Player ID once in /menu, then choose TeleBirr or CBE Birr to see its current receiver.',
       'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
-      'A bare reference is treated as TeleBirr. For CBE Birr, send /cbe followed by the reference, or send the CBE Birr SMS or receipt.',
+      'A bare reference is treated as TeleBirr. For CBE Birr, reply to its instruction or send /cbe followed by the reference.',
       'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',
     ].join('\n');
   }

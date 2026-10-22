@@ -9,6 +9,7 @@ const ALLOWED_FUNCTIONS = [
   'app.submit_telegram_player_registration_input(uuid,text,text)',
   'app.prepare_telegram_telebirr_destination(uuid,text,text)',
   'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
+  'app.prepare_telegram_live_cbe_sms_destination(uuid,text)',
   'app.expire_telegram_player_registration_action(uuid,text)',
   'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
   'app.capture_telegram_dry_run_deposit_reference(uuid,uuid,text,text,text,smallint,text)',
@@ -142,6 +143,9 @@ function buildPlayerActionCatalogPreflightSql(
           when routine.oid in (
             pg_catalog.to_regprocedure(
               'app.prepare_telegram_live_telebirr_destination(uuid,text,text)'
+            ),
+            pg_catalog.to_regprocedure(
+              'app.prepare_telegram_live_cbe_sms_destination(uuid,text)'
             ),
             pg_catalog.to_regprocedure(
               'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)'

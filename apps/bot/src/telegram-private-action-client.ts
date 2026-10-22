@@ -38,10 +38,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function validReceiverPresentation(value: Record<string, unknown>): boolean {
+function validReceiverPresentation(
+  value: Record<string, unknown>,
+  provider: 'telebirr' | 'cbe_birr' = 'telebirr',
+): boolean {
   return (
-    value.providerCode === 'telebirr' &&
-    value.providerName === 'TeleBirr' &&
+    value.providerCode === provider &&
+    value.providerName === (provider === 'telebirr' ? 'TeleBirr' : 'CBE Birr') &&
     typeof value.receiverAccountHolderName === 'string' &&
     value.receiverAccountHolderName === value.receiverAccountHolderName.trim() &&
     Array.from(value.receiverAccountHolderName).length >= 2 &&
@@ -282,6 +285,18 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     (keys.length === 8 || (keys.length === 9 && Object.hasOwn(value, 'selectedPlayerId'))) &&
     validReceiverPresentation(value) &&
     validOptionalSelectedPlayerId(value) &&
+    typeof value.receiverAccountReference === 'string' &&
+    /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
+    value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
+    value.acceptsPayments === true
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'cbe_sms_deposit_destination' &&
+    keys.length === 9 &&
+    validReceiverPresentation(value, 'cbe_birr') &&
+    validSelectedPlayerId(value.selectedPlayerId) &&
     typeof value.receiverAccountReference === 'string' &&
     /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
     value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&

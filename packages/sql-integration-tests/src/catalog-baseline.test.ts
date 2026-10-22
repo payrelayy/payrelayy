@@ -1304,6 +1304,7 @@ describe('disposable SQL migration baseline', () => {
       'app.issue_telegram_cbe_birr_dry_run_instruction(uuid,text,text)',
       'app.issue_telegram_player_registration_capability(uuid,uuid,text,text)',
       'app.open_telegram_dry_run_deposit_intent(uuid,text,bigint,text)',
+      'app.prepare_telegram_live_cbe_sms_destination(uuid,text)',
       'app.prepare_telegram_live_telebirr_destination(uuid,text,text)',
       'app.prepare_telegram_telebirr_destination(uuid,text,text)',
       publicActionInboundRecorder,

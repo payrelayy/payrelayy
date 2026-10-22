@@ -26,6 +26,9 @@ const [
   assignmentRuntimeInputSql,
   shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
+  cbeLivePreflightSql,
+  cbeLiveCutoverIdleSql,
+  financialSwitchFingerprintSql,
   paidPollActivateSql,
   paidPollDisableSql,
   paidSettlementActivateSql,
@@ -61,6 +64,9 @@ const [
   read('infra/sql/production-telebirr-assignment-runtime-input.sql'),
   read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
+  read('infra/sql/production-cbe-live-runtime-preflight.sql'),
+  read('infra/sql/production-cbe-live-cutover-idle.sql'),
+  read('infra/sql/production-financial-switch-fingerprint.sql'),
   read('infra/sql/production-routine-paid-poll-activate.sql'),
   read('infra/sql/production-routine-paid-poll-disable.sql'),
   read('infra/sql/production-routine-paid-settlement-activate.sql'),
@@ -533,7 +539,7 @@ assert.match(
 );
 assert.equal(
   count(workflow, /PGPORT: \$\{\{ env\.PRODUCTION_DATABASE_ADMIN_POOLER_PORT \}\}/gu),
-  17,
+  19,
   'all deployment preflight, manifest, activation, rollback, and stop steps must share the reviewed administrative pooler route',
 );
 assert.doesNotMatch(
@@ -661,9 +667,63 @@ assert.match(
   workflow,
   /if: inputs\.mode == 'deploy-shadow' \|\| inputs\.mode == 'deploy-shadow-intake'\s+shell: bash/u,
 );
-assert.match(workflow, /Prove the complete inert production money boundary/u);
-assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+shell: bash/u);
+assert.match(workflow, /Prove the exact production payment boundary/u);
+assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+id: payment_profile\s+shell: bash/u);
 assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
+assert.match(workflow, /production-cbe-live-runtime-preflight\.sql/u);
+assert.match(workflow, /production-cbe-live-cutover-idle\.sql/u);
+assert.match(workflow, /production-financial-switch-fingerprint\.sql/u);
+assert.match(
+  workflow,
+  /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1/u,
+);
+assert.match(workflow, /DEPLOY SCREENSHOT READER WITH CBE LIVE/u);
+assert.match(
+  workflow,
+  /"\$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled'/u,
+);
+assert.match(workflow, /"\$CONFIRMED_DATABASE_ROUTE" == 'pooler'/u);
+assert.match(
+  workflow,
+  /steps\.protected\.outputs\.sms_mode == 'true' && inputs\.confirm_financial_switch_profile == 'disabled'/u,
+);
+assert.match(workflow, /The CBE-live release requires the existing SMS grants and logins/u);
+assert.match(workflow, /The CBE-live release requires the reviewed running predecessor/u);
+assert.match(workflow, /Recheck CBE-live payment state before activation/u);
+assert.match(workflow, /Verify the payment switches remained unchanged/u);
+assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
+assert.match(workflow, /status '906b5b6a6486a26450d302b9f911feb3e35d30e4'/u);
+assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
+assert.match(
+  helper,
+  /readonly CBE_LIVE_PREDECESSOR_SHA='906b5b6a6486a26450d302b9f911feb3e35d30e4'/u,
+);
+assert.match(helper, /handoff_routine_marker\(\)/u);
+assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
+assert.match(helper, /pending-\$sha\.routine-marker/u);
+assert.match(
+  helper,
+  /if \[\[ "\$carry_routine_marker" == true \]\]; then\s+handoff_routine_marker/u,
+);
+assert.match(helper, /restore_routine_marker_for_rollback "\$sha" "\$previous"/u);
+assert.match(quality, /sudo bash infra\/operations\/test-production-routine-marker-handoff\.sh/u);
+assert.ok(
+  helper.indexOf('rm -f -- "$STATE_ROOT/pending-$sha.previous"') <
+    helper.indexOf('rm -f -- "$routine_receipt"'),
+  'the handoff receipt must survive every fallible finalize cleanup step',
+);
+assert.ok(
+  workflow.indexOf('Prove the exact production payment boundary') <
+    workflow.indexOf('Transfer and install the sealed release'),
+);
+assert.ok(
+  workflow.indexOf('Recheck CBE-live payment state before activation') <
+    workflow.indexOf('Atomically activate production and switch the public edge'),
+);
+assert.ok(
+  workflow.indexOf('Verify the payment switches remained unchanged') <
+    workflow.indexOf('Attest and finalize the production cutover'),
+);
 assert.match(workflow, /runtime_deployment_mode='inert-maintenance'/u);
 assert.match(
   workflow,
@@ -766,7 +826,7 @@ assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
 assert.match(workflow, /Direct database recovery is allowed only for stopped production/u);
 assert.ok(
   workflow.indexOf('Verify the stopped direct database route before any production SQL') <
-    workflow.indexOf('Prove the complete inert production money boundary'),
+    workflow.indexOf('Prove the exact production payment boundary'),
 );
 assert.ok(
   workflow.indexOf('[[ "$host_state" == \'absent\' ]]') <
@@ -1377,6 +1437,37 @@ assert.match(inertPreflightSql, /fetanagent_deposit_executor_runtime/u);
 assert.match(inertPreflightSql, /not pg_catalog\.bool_or\(role\.rolcanlogin\)/u);
 assert.match(inertPreflightSql, /pg_catalog\.pg_stat_activity/u);
 assert.match(inertPreflightSql, /rollback;/u);
+assert.match(cbeLivePreflightSql, /begin transaction isolation level serializable read only/u);
+assert.match(cbeLivePreflightSql, /exact_cbe_live_feature_switches/u);
+assert.match(cbeLivePreflightSql, /receiver_sms_route_enabled/u);
+assert.match(cbeLivePreflightSql, /receiver_sms_logins_ready/u);
+assert.match(cbeLivePreflightSql, /receiver_sms_grants_ready/u);
+assert.match(cbeLivePreflightSql, /financial_runtime_sessions_absent/u);
+assert.match(cbeLivePreflightSql, /rollback;/u);
+assert.match(cbeLiveCutoverIdleSql, /begin transaction isolation level serializable read only/u);
+assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_jobs job/u);
+assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_execution_attempts attempt/u);
+assert.match(cbeLiveCutoverIdleSql, /rollback;/u);
+for (const [feature, mode] of [
+  ['cbe_birr_authoritative_verification', 'live'],
+  ['deposit_execution', 'live'],
+  ['payment_verification', 'live'],
+  ['private_live_deposit_pilot', 'disabled'],
+  ['telebirr_authoritative_verification', 'disabled'],
+  ['withdrawal_collection', 'disabled'],
+  ['withdrawal_validation', 'disabled'],
+]) {
+  assert.match(
+    cbeLivePreflightSql,
+    new RegExp(escapeRegExp("('" + feature + "', '" + mode + "')"), 'u'),
+  );
+}
+assert.match(financialSwitchFingerprintSql, /pg_catalog\.md5\(pg_catalog\.string_agg\(/u);
+assert.match(financialSwitchFingerprintSql, /feature_switch\.updated_at::text/u);
+assert.doesNotMatch(
+  financialSwitchFingerprintSql,
+  /\b(?:insert|update|delete|alter|create|drop)\b/iu,
+);
 assert.doesNotMatch(
   inertPreflightSql.replace(/'[^']*'/gu, ''),
   /\b(?:insert|update|delete|merge|truncate|create|alter|drop|grant|revoke|comment|execute|perform)\b|pg_(?:try_)?advisory/iu,

@@ -9,9 +9,9 @@ umask 077
 
 readonly EXPECTED_DROPLET_ID='593344964'
 readonly METADATA_ID='http://169.254.169.254/metadata/v1/id'
-readonly SOURCE_REVIEW='screenshot-reference-reader-v1'
+readonly SOURCE_REVIEW='screenshot-cbe-live-release-v1'
 readonly PREDECESSOR_SHA256='8a4696f0bc2cf0a1d04761a293dceacd26408d7b0b2d43da4d0e79e66d6eafc3'
-readonly SUCCESSOR_SHA256='467463fdc334a7d0d4463b6bd2212a42c3318e60c2e0537d70e3010a800bcfba'
+readonly SUCCESSOR_SHA256='08fb54031bf6f1e11306c3ad1cd1f067fe39c6928b8baf944fdea60c0fdefe64'
 readonly HELPER='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
 readonly SUDOERS='/etc/sudoers.d/fetanagent-production-deploy-helper-v2'
 readonly STATE='/var/lib/fetanagent/production-v2-screenshot-helper-rotation-v1'

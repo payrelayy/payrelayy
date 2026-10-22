@@ -353,7 +353,7 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
       '💰 Deposits',
       'Save a Player ID once in /menu, then choose TeleBirr or CBE Birr to see its current receiver.',
       'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
-      'A bare reference is treated as TeleBirr. For CBE Birr, reply to its instruction or send /cbe followed by the reference.',
+      'We identify TeleBirr or CBE Birr from the transaction reference. You do not need to choose a method again.',
       'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',
     ].join('\n');
   }
@@ -366,9 +366,11 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
   ].join('\n');
 }
 
-export function telegramDepositReferenceSelectionText(): string {
+export function telegramDepositReferenceSelectionText(receiverSmsCandidateEnabled = false): string {
   return [
-    'I found more than one TeleBirr reference. Nothing was submitted.',
+    receiverSmsCandidateEnabled
+      ? 'I found more than one payment reference. Nothing was submitted.'
+      : 'I found more than one TeleBirr reference. Nothing was submitted.',
     'Send one reference only.',
   ].join('\n');
 }

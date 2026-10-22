@@ -14,6 +14,7 @@ import type { TelebirrCandidateSourceKind } from '@fetanagent/telebirr-verificat
 
 import {
   isBoundedTelegramDepositProofText,
+  reduceTelegramAutoReceiverSmsProofInput,
   reduceTelegramDepositProofInput,
 } from './telegram-deposit-proof-input.js';
 import {
@@ -322,6 +323,7 @@ export function isCbeBirrReceiptText(text: unknown): boolean {
 /** CBE proof identifies only a reference; the receiving phone SMS supplies amount and time. */
 export function reduceTelegramSavedCbeSmsProofSubmission(
   metadata: TelegramDepositCommandMetadata,
+  autoDetectProvider = false,
 ): TelegramDepositProofSubmission | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   const command = metadata.command;
@@ -330,14 +332,20 @@ export function reduceTelegramSavedCbeSmsProofSubmission(
   if (command.startsWith('/') && !explicit) return undefined;
   const inputText = explicit?.[1] ?? (isCbeBirrReceiptText(command) ? command : undefined);
   if (inputText === undefined) return undefined;
-  const proof = reduceTelegramDepositProofInput('cbe_birr', inputText);
+  const proof = autoDetectProvider
+    ? reduceTelegramAutoReceiverSmsProofInput(inputText)
+    : reduceTelegramDepositProofInput('cbe_birr', inputText);
   if (proof.kind !== 'candidate') return proof;
   return {
     kind: 'action',
     action: {
       ...identity,
       kind: 'saved_receiver_sms_proof_command',
-      providerCode: 'cbe_birr',
+      providerCode:
+        'providerCode' in proof &&
+        (proof.providerCode === 'telebirr' || proof.providerCode === 'cbe_birr')
+          ? proof.providerCode
+          : 'cbe_birr',
       transactionReference: proof.transactionReference,
     },
   };
@@ -494,6 +502,89 @@ export type TelegramDepositProofSubmission =
   | { readonly kind: 'selection_required' }
   | { readonly kind: 'invalid_input' };
 
+/** Choose the SMS ledger from one extracted reference, regardless of the instruction replied to. */
+export function reduceTelegramAutoReceiverSmsTextSubmission(
+  metadata: TelegramDepositCommandMetadata & { readonly replyToMessage: unknown },
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  const command = metadata.command;
+  if (!identity || typeof command !== 'string' || command.startsWith('/')) return undefined;
+
+  const paymentPlayerId = parseTelegramTelebirrPaymentPromptReply(metadata.replyToMessage);
+  const legacyReply = isTelegramGuidedDepositPromptReply(metadata.replyToMessage);
+  const cbeReply = isTelegramCbeSmsPaymentPromptReply(metadata.replyToMessage);
+  const legacyInput = legacyReply ? parseTelegramGuidedDepositInput(command) : undefined;
+  const playerId = paymentPlayerId ?? legacyInput?.playerId;
+  const proofText = legacyReply ? legacyInput?.proofText : command;
+  const looksLikeProof =
+    /^(?=[A-Za-z0-9]{8,32}$)(?=.*[0-9])[A-Za-z0-9]+$/u.test(command.trim()) ||
+    /(?:https:\/\/|transaction|receipt|reference|txn\s*id|order\s*id|invoice)/iu.test(command);
+  if (!paymentPlayerId && !legacyReply && !cbeReply && !looksLikeProof) return undefined;
+  if (typeof proofText !== 'string') return { kind: 'invalid_input' };
+  const input = reduceTelegramAutoReceiverSmsProofInput(proofText);
+  if (input.kind !== 'candidate') return input;
+  return playerId
+    ? {
+        kind: 'action',
+        action: {
+          ...identity,
+          kind: 'deposit_proof_command',
+          providerCode: input.providerCode,
+          playerId,
+          transactionReference: input.transactionReference,
+        },
+      }
+    : {
+        kind: 'action',
+        action: {
+          ...identity,
+          kind: 'saved_receiver_sms_proof_command',
+          providerCode: input.providerCode,
+          transactionReference: input.transactionReference,
+        },
+      };
+}
+
+export function reduceTelegramAutoReceiverSmsMediaSubmission(
+  metadata: TelegramGuidedDepositMediaMetadata,
+): TelegramDepositProofSubmission | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity) return undefined;
+  if (metadata.caption !== undefined && typeof metadata.caption !== 'string') {
+    return { kind: 'invalid_input' };
+  }
+  const labelBareReference = (value: string): string =>
+    /^[A-Za-z0-9]{8,32}$/u.test(value.trim()) ? `Transaction ID: ${value.trim()}` : value;
+  const caption = labelBareReference(metadata.caption ?? '');
+  const recognized = labelBareReference(metadata.extractedText);
+  const input = reduceTelegramAutoReceiverSmsProofInput(
+    caption ? `${caption}\n${recognized}` : recognized,
+    metadata.sourceKind,
+  );
+  if (input.kind !== 'candidate') return input;
+  const playerId = parseTelegramTelebirrPaymentPromptReply(metadata.replyToMessage);
+  return playerId
+    ? {
+        kind: 'action',
+        action: {
+          ...identity,
+          kind: 'deposit_proof_command',
+          providerCode: input.providerCode,
+          playerId,
+          transactionReference: input.transactionReference,
+        },
+      }
+    : {
+        kind: 'action',
+        action: {
+          ...identity,
+          kind: 'saved_receiver_sms_proof_command',
+          providerCode: input.providerCode,
+          transactionReference: input.transactionReference,
+        },
+      };
+}
+
 /**
  * Convert one explicit reply to the bot's guided prompt into the established protected action.
  * This is stateless: all required customer input is present in the new Telegram update, so no
@@ -571,6 +662,7 @@ export function reduceTelegramGuidedDepositMediaSubmission(
  */
 export function reduceTelegramDepositProofSubmission(
   metadata: TelegramDepositCommandMetadata,
+  autoDetectProvider = false,
 ): TelegramDepositProofSubmission | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   if (
@@ -591,14 +683,20 @@ export function reduceTelegramDepositProofSubmission(
   ) {
     return { kind: 'invalid_input' };
   }
-  const input = reduceTelegramDepositProofInput(providerCode, proofText);
+  const input = autoDetectProvider
+    ? reduceTelegramAutoReceiverSmsProofInput(proofText)
+    : reduceTelegramDepositProofInput(providerCode, proofText);
   if (input.kind !== 'candidate') return input;
   return {
     kind: 'action',
     action: {
       ...identity,
       kind: 'deposit_proof_command',
-      providerCode,
+      providerCode:
+        'providerCode' in input &&
+        (input.providerCode === 'telebirr' || input.providerCode === 'cbe_birr')
+          ? input.providerCode
+          : providerCode,
       playerId,
       transactionReference: input.transactionReference,
     },

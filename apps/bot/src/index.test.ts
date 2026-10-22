@@ -231,6 +231,7 @@ afterEach(() => {
 describe('Telegram admission, private action, and ingress composition', () => {
   it('shows only the OCR reference ending so a customer can correct a misread image', async () => {
     await loadComposition(false, true, false, false, true);
+    runtime.mediaResult = { kind: 'text', text: 'Transaction ID: TB12345678' };
     runtime.actionResult = {
       version: 1,
       outcome: 'receiver_sms_candidate_received',
@@ -244,9 +245,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
       message: { photo: [{ file_id: 'photo-id', file_size: 100 }] },
     });
     expect(context.replies).toHaveLength(1);
-    expect(context.replies[0]).toContain('ending 0001');
+    expect(context.replies[0]).toContain('ending 5678');
     expect(context.replies[0]).toContain('send the exact transaction number as text');
-    expect(context.replies[0]).not.toContain('SYNTB00000001');
+    expect(context.replies[0]).not.toContain('TB12345678');
     expect(runtime.actionDeliveries).toHaveLength(1);
   });
 
@@ -634,9 +635,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
       receiverAccountReference: '0000000042',
     });
     await runtime.messageHandler!({
-      ...messageContext('SYNTHCBE1234'),
+      ...messageContext('CBE12345678'),
       message: {
-        text: 'SYNTHCBE1234',
+        text: 'CBE12345678',
         reply_to_message: {
           text: prompt,
           from: { is_bot: true },
@@ -647,9 +648,54 @@ describe('Telegram admission, private action, and ingress composition', () => {
       expect.objectContaining({
         kind: 'saved_receiver_sms_proof_command',
         providerCode: 'cbe_birr',
-        transactionReference: 'SYNTHCBE1234',
+        transactionReference: 'CBE12345678',
       }),
     ]);
+  });
+
+  it('accepts either bare reference and a CBE screenshot without a method selection', async () => {
+    await loadComposition(false, true, true, false, true);
+    runtime.actionResult = {
+      version: 1,
+      outcome: 'receiver_sms_candidate_received',
+      providerCode: 'cbe_birr',
+      providerName: 'CBE Birr',
+      matchStatus: 'pending_sms',
+    };
+    await runtime.messageHandler!(messageContext('TB12345678'));
+    await runtime.messageHandler!(messageContext('CBE12345678'));
+    runtime.mediaResult = { kind: 'text', text: 'Txn ID: CBE12345678. Paid 100 ETB.' };
+    await runtime.messageHandler!({
+      ...messageContext(''),
+      message: { photo: [{ file_id: 'photo-id', file_size: 100 }] },
+    });
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'telebirr',
+        transactionReference: 'TB12345678',
+      }),
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: 'CBE12345678',
+      }),
+      expect.objectContaining({
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'cbe_birr',
+        transactionReference: 'CBE12345678',
+      }),
+    ]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('asks for one reference when a live SMS proof contains two methods', async () => {
+    await loadComposition(false, true, true, false, true);
+    const context = messageContext('Txn ID: TB12345678. Txn ID: CBE12345678.');
+    await runtime.messageHandler!(context);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+    expect(context.replies).toEqual([expect.stringContaining('more than one payment reference')]);
+    expect(JSON.stringify(context.replies)).not.toMatch(/TB12345678|CBE12345678/);
   });
 
   it('hides manual review in the opt-in menu and does not send a stale review callback', async () => {

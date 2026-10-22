@@ -289,7 +289,8 @@ describe('Telegram Player-ID flow presentation', () => {
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
       expect(presentation.text).toContain('📱 Number: 0000000042');
-      expect(presentation.text).toContain('reply with the transaction reference');
+      expect(presentation.text).toContain('send the reference');
+      expect(presentation.text).toContain('identifies CBE Birr automatically');
     }
   });
 
@@ -491,7 +492,8 @@ describe('Telegram Player-ID flow presentation', () => {
   it('explains both SMS payment methods only when the SMS route is selected', () => {
     const help = telegramDepositHelpText(true);
     expect(help).toContain('receiving phone SMS supplies the amount');
-    expect(help).toContain('/cbe followed by the reference');
+    expect(help).toContain('identify TeleBirr or CBE Birr from the transaction reference');
+    expect(help).not.toContain('/cbe followed by the reference');
     expect(help).not.toContain('CBE Birr is not live yet');
   });
 

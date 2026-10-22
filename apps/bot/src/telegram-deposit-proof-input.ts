@@ -17,6 +17,15 @@ export type TelegramDepositProofInput =
   | { readonly kind: 'selection_required' }
   | { readonly kind: 'invalid_input' };
 
+export type TelegramAutoReceiverSmsProofInput =
+  | {
+      readonly kind: 'candidate';
+      readonly providerCode: DepositProofProviderCode;
+      readonly transactionReference: string;
+    }
+  | { readonly kind: 'selection_required' }
+  | { readonly kind: 'invalid_input' };
+
 const DIRECT_REFERENCE_PATTERN = /^[A-Za-z0-9]+$/u;
 const FORBIDDEN_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const CBE_BIRR_REFERENCE_LABEL_PATTERN =
@@ -113,4 +122,55 @@ export function reduceTelegramDepositProofInput(
   return {
     kind: extraction.outcome === 'selection_required' ? 'selection_required' : 'invalid_input',
   };
+}
+
+/**
+ * The receiver phone's incoming SMS is the payment authority. This only chooses which protected
+ * SMS ledger to query, using the reference shape observed for each provider. A button, caption,
+ * sender name, or receipt branding must not override the reference itself.
+ */
+export function reduceTelegramAutoReceiverSmsProofInput(
+  text: string,
+  sourceKind: TelebirrCandidateSourceKind = 'sms',
+): TelegramAutoReceiverSmsProofInput {
+  if (!isBoundedTelegramDepositProofText(text)) return { kind: 'invalid_input' };
+
+  const trimmed = text.trim();
+  if (isDirectReference(trimmed)) return classifyReceiverSmsReference(trimmed.toUpperCase());
+
+  const telebirr = extractTelebirrReferenceCandidates({
+    contractVersion: 1,
+    sourceKind,
+    text,
+  });
+  const cbe = extractCbeBirrReferenceCandidates(text);
+  if (telebirr.outcome === 'invalid_input' || telebirr.outcome === 'selection_required') {
+    return {
+      kind: telebirr.outcome === 'selection_required' ? 'selection_required' : 'invalid_input',
+    };
+  }
+  if (cbe.kind === 'selection_required') return cbe;
+  // A malformed CBE official link must never be hidden by another labelled reference.
+  if (/cbepay1\.cbe\.com\.et/iu.test(text) && cbe.kind === 'invalid_input') {
+    return { kind: 'invalid_input' };
+  }
+
+  const candidates = new Set<string>();
+  if (telebirr.outcome === 'candidate_ready') candidates.add(telebirr.normalizedReference);
+  if (cbe.kind === 'candidate') candidates.add(cbe.transactionReference);
+  if (candidates.size > 1) return { kind: 'selection_required' };
+  if (candidates.size === 0) return { kind: 'invalid_input' };
+  return classifyReceiverSmsReference([...candidates][0]!);
+}
+
+function classifyReceiverSmsReference(reference: string): TelegramAutoReceiverSmsProofInput {
+  // A digit is required for unlabelled text so ordinary words are not mistaken for payments.
+  if (!/^[A-Z0-9]+$/u.test(reference) || !/[0-9]/u.test(reference)) {
+    return { kind: 'invalid_input' };
+  }
+  const providerCode =
+    reference.length === 10 ? 'telebirr' : reference.length === 11 ? 'cbe_birr' : null;
+  return providerCode
+    ? { kind: 'candidate', providerCode, transactionReference: reference }
+    : { kind: 'invalid_input' };
 }

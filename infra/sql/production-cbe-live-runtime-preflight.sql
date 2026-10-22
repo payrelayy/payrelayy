@@ -44,7 +44,7 @@ select not exists (
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 7 and pg_catalog.bool_and(pg_catalog.coalesce(
+select count(*) = 7 and pg_catalog.bool_and(coalesce(
     feature_switch.mode::text = expected.mode
     and feature_switch.settings = '{}'::jsonb,
     false

@@ -1,0 +1,135 @@
+name: Reconcile three Owner-credited SMS jobs without Transfer
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Type the exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Type the exact full reviewed main commit SHA
+        required: true
+        type: string
+      confirm_operation:
+        description: Type ALL THREE MANUALLY CREDITED - NO TRANSFER
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+
+jobs:
+  validate:
+    name: Require exact main and Owner attestation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Reject another target or operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_OPERATION" == 'ALL THREE MANUALLY CREDITED - NO TRANSFER' ]]
+
+  reconcile:
+    name: Cancel only the exact three unfenced jobs and retain claims
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out exact reviewed main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require passing exact-main production CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Move the three Owner-credited jobs to protected review
+        shell: bash
+        env:
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_owner_credited_sms_reconciliation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+
+          protected="$RUNNER_TEMP/owner-credited-sms-reconciliation"
+          install -d -m 0700 "$protected"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ "$protected" == "$RUNNER_TEMP/owner-credited-sms-reconciliation" && \
+                  -d "$protected" && ! -L "$protected" && \
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/supabase-ca.crt" "$protected/reconcile.out" "$protected/reconcile.err"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
+          chmod 0600 "$protected/supabase-ca.crt"
+          openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/supabase-ca.crt"
+
+          if ! timeout --signal=TERM --kill-after=5s 60s \
+              psql -X --quiet --tuples-only --no-align \
+                --file=infra/sql/production-reconcile-three-owner-credited-sms-jobs.sql \
+                >"$protected/reconcile.out" 2>"$protected/reconcile.err"; then
+            echo '::error::The guarded reconciliation failed. No SQL output was published.' >&2
+            exit 1
+          fi
+          jq -se '
+            length == 1 and
+            .[0].operation == "owner_attested_sms_manual_credit_review" and
+            .[0].jobCount == 3 and
+            .[0].moneyMovedByOperation == false and
+            .[0].identifiersRedacted == true
+          ' "$protected/reconcile.out" >/dev/null || {
+            echo '::error::The reconciliation result was not the reviewed no-Transfer result.' >&2
+            exit 1
+          }
+          echo 'Three Owner-credited SMS jobs moved to protected review. One-use claims and audit were retained; no Transfer was run.' >>"$GITHUB_STEP_SUMMARY"

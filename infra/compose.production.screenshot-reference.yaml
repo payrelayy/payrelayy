@@ -1,0 +1,17 @@
+# Optional production overlay. Load only with the authorized receiver-SMS candidate route
+# and a separately scoped DigitalOcean model access key in the protected secret directory.
+services:
+  bot:
+    environment:
+      BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true'
+      BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY_FILE: /run/secrets/bot_screenshot_reference_model_access_key
+    secrets:
+      - source: bot_screenshot_reference_model_access_key
+        target: bot_screenshot_reference_model_access_key
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+
+secrets:
+  bot_screenshot_reference_model_access_key:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/bot-screenshot-reference-model-access-key

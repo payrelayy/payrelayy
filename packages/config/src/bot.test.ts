@@ -44,6 +44,57 @@ describe('public bot support-contact configuration', () => {
   });
 });
 
+describe('Screenshot reference reader configuration', () => {
+  const enabledBot = {
+    NODE_ENV: 'test',
+    TELEGRAM_BOT_ENABLED: 'true',
+    TELEGRAM_BOT_TOKEN: '123456:test-token',
+    BOT_TO_API_INGRESS_ENABLED: 'false',
+    INTERNAL_TELEGRAM_ACTION_CHANNEL_ENABLED: 'true',
+    BOT_TO_API_ACTION_BASE_URL: 'http://api:3000/',
+    BOT_TO_API_ACTION_HMAC_SECRET: 'c'.repeat(64),
+    BOT_RECEIVER_SMS_CANDIDATE_ENABLED: 'true',
+  };
+
+  it('remains disabled unless explicitly configured and never logs its key', () => {
+    expect(loadBotConfig(enabledBot).screenshotReferenceReader).toEqual({
+      enabled: false,
+      modelAccessKey: undefined,
+    });
+    const config = loadBotConfig({
+      ...enabledBot,
+      BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true',
+      BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY: 'synthetic-model-key',
+    });
+    expect(config.screenshotReferenceReader).toEqual({
+      enabled: true,
+      modelAccessKey: 'synthetic-model-key',
+    });
+    expect(redactedBotConfigForLog(config).screenshotReferenceReader).toEqual({
+      enabled: true,
+      keyConfigured: true,
+    });
+    expect(JSON.stringify(redactedBotConfigForLog(config))).not.toContain('synthetic-model-key');
+  });
+
+  it('requires a key and the signed receiver SMS candidate route', () => {
+    expect(() =>
+      loadBotConfig({
+        ...enabledBot,
+        BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true',
+      }),
+    ).toThrow('Screenshot reference reader requires its model access key.');
+    expect(() =>
+      loadBotConfig({
+        ...enabledBot,
+        BOT_RECEIVER_SMS_CANDIDATE_ENABLED: 'false',
+        BOT_SCREENSHOT_REFERENCE_READER_ENABLED: 'true',
+        BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY: 'synthetic-model-key',
+      }),
+    ).toThrow('Screenshot reference reading requires the live receiver SMS candidate route.');
+  });
+});
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { force: true, recursive: true });

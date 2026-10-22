@@ -153,6 +153,7 @@ function botConfig(
     supportContactUrl: undefined as string | undefined,
     playerValidationIntakeEnabled,
     receiverSmsCandidateEnabled,
+    screenshotReferenceReader: { enabled: false, modelAccessKey: undefined },
     apiIngress: legacyIngressEnabled
       ? {
           enabled: true,

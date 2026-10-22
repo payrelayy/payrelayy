@@ -58,6 +58,10 @@ export type BotTelegramActionChannelConfig =
       readonly transportHmacSecret: string;
     };
 
+export type BotScreenshotReferenceReaderConfig =
+  | { readonly enabled: false; readonly modelAccessKey: undefined }
+  | { readonly enabled: true; readonly modelAccessKey: string };
+
 export interface BotConfig extends RuntimeConfig {
   readonly telegram: TelegramConfig;
   readonly apiIngress: BotApiIngressConfig;
@@ -65,6 +69,7 @@ export interface BotConfig extends RuntimeConfig {
   readonly telegramActionChannel: BotTelegramActionChannelConfig;
   readonly playerValidationIntakeEnabled: boolean;
   readonly receiverSmsCandidateEnabled: boolean;
+  readonly screenshotReferenceReader: BotScreenshotReferenceReaderConfig;
   readonly supportContactUrl: string | undefined;
 }
 
@@ -360,6 +365,32 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     false,
     'BOT_RECEIVER_SMS_CANDIDATE_ENABLED',
   );
+  const screenshotReferenceReaderEnabled = booleanFromEnv(
+    environment.BOT_SCREENSHOT_REFERENCE_READER_ENABLED,
+    false,
+    'BOT_SCREENSHOT_REFERENCE_READER_ENABLED',
+  );
+  if (screenshotReferenceReaderEnabled && (!enabled || !receiverSmsCandidateEnabled)) {
+    throw new Error('Screenshot reference reading requires the live receiver SMS candidate route.');
+  }
+  const screenshotReferenceReader: BotScreenshotReferenceReaderConfig =
+    screenshotReferenceReaderEnabled
+      ? {
+          enabled: true,
+          modelAccessKey:
+            secretFromEnvironmentOrFile(
+              environment.BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY,
+              environment.BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY_FILE,
+              'BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY',
+              'BOT_SCREENSHOT_REFERENCE_MODEL_ACCESS_KEY_FILE',
+              runtime.nodeEnv,
+              '/run/secrets/bot_screenshot_reference_model_access_key',
+            ) ?? '',
+        }
+      : { enabled: false, modelAccessKey: undefined };
+  if (screenshotReferenceReader.enabled && !screenshotReferenceReader.modelAccessKey) {
+    throw new Error('Screenshot reference reader requires its model access key.');
+  }
   if (receiverSmsCandidateEnabled && (!enabled || !telegramActionChannel.enabled)) {
     throw new Error(
       'The receiver SMS candidate route requires the private Telegram action channel.',
@@ -385,6 +416,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
       telegramActionChannel,
       playerValidationIntakeEnabled,
       receiverSmsCandidateEnabled,
+      screenshotReferenceReader,
       supportContactUrl,
     };
   }
@@ -430,6 +462,7 @@ export function loadBotConfig(environment: NodeJS.ProcessEnv = process.env): Bot
     telegramActionChannel,
     playerValidationIntakeEnabled,
     receiverSmsCandidateEnabled,
+    screenshotReferenceReader,
     supportContactUrl,
   };
 }
@@ -440,6 +473,7 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
   | 'apiIngress'
   | 'telegramBetaAdmission'
   | 'telegramActionChannel'
+  | 'screenshotReferenceReader'
   | 'supportContactUrl'
 > & {
   readonly supportContactConfigured: boolean;
@@ -455,6 +489,10 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
   };
   readonly playerValidationIntakeEnabled: boolean;
   readonly receiverSmsCandidateEnabled: boolean;
+  readonly screenshotReferenceReader: {
+    readonly enabled: boolean;
+    readonly keyConfigured: boolean;
+  };
 } {
   return {
     nodeEnv: config.nodeEnv,
@@ -478,5 +516,9 @@ export function redactedBotConfigForLog(config: BotConfig): Omit<
     },
     playerValidationIntakeEnabled: config.playerValidationIntakeEnabled,
     receiverSmsCandidateEnabled: config.receiverSmsCandidateEnabled,
+    screenshotReferenceReader: {
+      enabled: config.screenshotReferenceReader.enabled,
+      keyConfigured: config.screenshotReferenceReader.enabled,
+    },
   };
 }

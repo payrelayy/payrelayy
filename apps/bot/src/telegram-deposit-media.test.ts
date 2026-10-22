@@ -107,6 +107,35 @@ describe('Telegram receipt media intake', () => {
     expect(recognize).toHaveBeenCalledWith(image, 'photo');
   });
 
+  it('waits through a short screenshot burst instead of rejecting the third submission', async () => {
+    const releases: Array<(text: string) => void> = [];
+    const recognize = vi.fn(() => new Promise<string>((resolve) => releases.push(resolve)));
+    const getFile = vi.fn(async () => ({ file_path: 'photos/file.jpg' }));
+    const dependencies = {
+      token: 'synthetic-token',
+      getFile,
+      fetch: async () => new Response(image),
+      recognize,
+    };
+    const media = { kind: 'photo' as const, fileId: 'file-id', fileSize: image.length };
+    const jobs = Array.from({ length: 3 }, () =>
+      extractTelegramProofMediaText(media, dependencies),
+    );
+
+    await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(2));
+    expect(getFile).toHaveBeenCalledTimes(2);
+    releases.shift()!('Transaction ID: SYNTB00000001');
+    await vi.waitFor(() => expect(recognize).toHaveBeenCalledTimes(3));
+    releases.forEach((release) => release('Transaction ID: SYNTB00000001'));
+
+    expect(await Promise.all(jobs)).toEqual(
+      Array(3).fill({
+        kind: 'text',
+        text: 'Transaction ID: SYNTB00000001',
+      }),
+    );
+  });
+
   it('normalizes OCR page breaks before the strict candidate parser sees them', async () => {
     const result = await extractTelegramProofMediaText(
       { kind: 'photo', fileId: 'file-id', fileSize: image.length },

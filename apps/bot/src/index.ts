@@ -5,8 +5,14 @@ import { Bot, InlineKeyboard } from 'grammy';
 
 import {
   extractTelegramProofMediaText,
+  recognizeTelegramProofMedia,
   selectTelegramProofMedia,
 } from './telegram-deposit-media.js';
+import {
+  DIGITALOCEAN_SCREENSHOT_MODEL,
+  readDigitalOceanScreenshotReference,
+} from './digitalocean-screenshot-reference.js';
+import { recognizeScreenshotReferenceWithFallback } from './telegram-screenshot-reference.js';
 import { runTelegramDepositOutcomeNotifier } from './telegram-deposit-outcome-notifier.js';
 import { recordTelegramPaymentInstruction } from './telegram-payment-instruction-expiry.js';
 import {
@@ -86,6 +92,34 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const quickMenu = renderTelegramQuickMenu(config.receiverSmsCandidateEnabled);
+const screenshotModelAccessKey = config.screenshotReferenceReader.enabled
+  ? config.screenshotReferenceReader.modelAccessKey
+  : undefined;
+const screenshotRecognition = screenshotModelAccessKey
+  ? (bytes: Buffer, kind: 'photo' | 'image' | 'pdf') =>
+      recognizeScreenshotReferenceWithFallback(bytes, kind, {
+        local: recognizeTelegramProofMedia,
+        vision: async (image, mimeType) => {
+          const startedAt = Date.now();
+          const result = await readDigitalOceanScreenshotReference(image, mimeType, {
+            modelAccessKey: screenshotModelAccessKey,
+          });
+          console.info(
+            {
+              model: DIGITALOCEAN_SCREENSHOT_MODEL,
+              outcome: result.kind,
+              inputTokens: result.kind === 'unavailable' ? null : result.inputTokens,
+              outputTokens: result.kind === 'unavailable' ? null : result.outputTokens,
+              durationMs: Date.now() - startedAt,
+            },
+            'Screenshot reference reader completed.',
+          );
+          return result.kind === 'candidate' ? result.reference : null;
+        },
+      })
+  : undefined;
+const unreadableReferenceText =
+  'I could not read one transaction reference from that image or PDF. No payment was submitted. Please send the image as a file, or type the reference.';
 
 function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();
@@ -363,6 +397,7 @@ bot.on('message', async (context) => {
         extracted = await extractTelegramProofMediaText(selection.media, {
           token: telegramToken,
           getFile: (fileId) => bot.api.getFile(fileId),
+          ...(screenshotRecognition ? { recognize: screenshotRecognition } : {}),
         });
       } catch {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
@@ -379,7 +414,7 @@ bot.on('message', async (context) => {
             : extracted.kind === 'too_large'
               ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
               : extracted.kind === 'unreadable'
-                ? TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT
+                ? unreadableReferenceText
                 : 'We could not read your receipt right now. Please try again or type the transaction number. Nothing was submitted.',
         );
         return;
@@ -423,7 +458,7 @@ bot.on('message', async (context) => {
         await context.reply(
           mediaSubmission?.kind === 'selection_required'
             ? 'I found more than one payment reference. Nothing was submitted. Send one reference only.'
-            : 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected. Send one clear payment reference.',
+            : unreadableReferenceText,
         );
       }
       return;

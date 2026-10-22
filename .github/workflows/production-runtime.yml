@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Build only, deploy receiver SMS runtime with money off, inspect, or stop
+        description: Build only, deploy the guarded production runtime, inspect, or stop
         required: true
         default: plan
         type: choice

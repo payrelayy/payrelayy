@@ -95,6 +95,86 @@ test('requires all seven exact-SHA runs and rereads every current attempt', asyn
   }
 });
 
+function commitCheckFallback(requests, options = {}) {
+  const passing = passingFetch(requests);
+  const suites = REQUIRED_WORKFLOWS.map((_, index) => ({
+    id: 1000 + index,
+    latest_check_runs_count: 1,
+    app: { slug: 'github-actions' },
+  }));
+  const checks = REQUIRED_WORKFLOWS.map((_, index) => ({
+    id: 2000 + index,
+    head_sha: SHA,
+    check_suite: { id: 1000 + index },
+    app: { slug: 'github-actions' },
+    html_url: `https://github.com/${configuration.repository}/actions/runs/${100 + index}/job/${2000 + index}`,
+  }));
+  return async (url, fetchOptions) => {
+    requests.push({ url, options: fetchOptions });
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith(`/commits/${SHA}/check-runs`)) {
+      return response({ total_count: checks.length, check_runs: options.checks ?? checks });
+    }
+    if (parsed.pathname.endsWith(`/commits/${SHA}/check-suites`)) {
+      return response({ total_count: suites.length, check_suites: options.suites ?? suites });
+    }
+    if (parsed.pathname.endsWith('/workflows/quality.yml/runs')) {
+      requests.pop();
+      await passing(url, fetchOptions);
+      return response({ total_count: 0, workflow_runs: [] });
+    }
+    // This helper intentionally lets the normal exact-SHA listings populate
+    // passingFetch's direct-run fixture for all seven workflows.
+    requests.pop();
+    return passing(url, fetchOptions);
+  };
+}
+
+test('recovers a missing workflow-list index from complete exact-commit Actions checks', async () => {
+  const requests = [];
+  const checks = await requireProductionCi({
+    ...configuration,
+    fetchImpl: commitCheckFallback(requests),
+  });
+  assert.equal(checks.length, 7);
+  assert.ok(requests.some(({ url }) => url.includes(`/commits/${SHA}/check-runs?`)));
+  assert.ok(requests.some(({ url }) => url.includes(`/commits/${SHA}/check-suites?`)));
+  assert.ok(requests.filter(({ url }) => url.includes(`/commits/${SHA}/check-runs?`)).length >= 2);
+});
+
+test('commit fallback refuses an Actions suite without a check run', async () => {
+  const requests = [];
+  const suites = REQUIRED_WORKFLOWS.map((_, index) => ({
+    id: 1000 + index,
+    latest_check_runs_count: index === 0 ? 0 : 1,
+    app: { slug: 'github-actions' },
+  }));
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: commitCheckFallback(requests, { suites }),
+    }),
+    /unfinished Actions suite/u,
+  );
+});
+
+test('commit fallback refuses a missing check for a required workflow', async () => {
+  const requests = [];
+  const checks = REQUIRED_WORKFLOWS.slice(1).map((_, index) => ({
+    id: 2001 + index,
+    head_sha: SHA,
+    check_suite: { id: 1001 + index },
+    app: { slug: 'github-actions' },
+    html_url: `https://github.com/${configuration.repository}/actions/runs/${101 + index}/job/${2001 + index}`,
+  }));
+  await assert.rejects(
+    requireProductionCi({
+      ...configuration,
+      fetchImpl: commitCheckFallback(requests, { checks }),
+    }),
+  );
+});
+
 test('retries one transient GitHub read, then still checks all complete CI evidence', async () => {
   const requests = [];
   const delays = [];

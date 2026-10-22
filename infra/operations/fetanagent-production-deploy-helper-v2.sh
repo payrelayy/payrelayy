@@ -23,6 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
+readonly CBE_LIVE_PREDECESSOR_SHA='906b5b6a6486a26450d302b9f911feb3e35d30e4'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -222,6 +223,68 @@ routine_deposits_enabled_for_release() {
   [[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$sha" ]] || return 1
   validate_routine_deposit_material "$release"
   return 0
+}
+
+require_routine_marker() {
+  [[ ! -L "$ROUTINE_DEPOSITS_MARKER" && -f "$ROUTINE_DEPOSITS_MARKER" &&
+    "$(realpath -- "$ROUTINE_DEPOSITS_MARKER")" == "$ROUTINE_DEPOSITS_MARKER" &&
+    "$(stat --format='%u:%g:%a:%h' "$ROUTINE_DEPOSITS_MARKER")" == '0:0:600:1' ]] ||
+    die 'the routine-deposit release marker is unsafe'
+}
+
+bind_routine_marker() {
+  local sha="$1" next="$STATE_ROOT/.routine-deposits-$1.next"
+  require_sha "$sha"
+  [[ ! -e "$next" && ! -L "$next" ]] || die 'a routine-deposit marker replacement already exists'
+  printf '%s\n' "$sha" | install -o root -g root -m 0600 /dev/stdin "$next"
+  mv -Tf -- "$next" "$ROUTINE_DEPOSITS_MARKER"
+  require_routine_marker
+  [[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$sha" ]] ||
+    die 'the routine-deposit release marker was not rebound'
+}
+
+handoff_routine_marker() {
+  local sha="$1" previous="$2" release="$3" previous_sha receipt
+  previous_sha="${previous##*/}"
+  receipt="$STATE_ROOT/pending-$sha.routine-marker"
+  [[ "$previous_sha" == "$CBE_LIVE_PREDECESSOR_SHA" &&
+    "$previous" == "$(require_release "$CBE_LIVE_PREDECESSOR_SHA")" &&
+    "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] ||
+    die 'the routine-deposit handoff is outside the reviewed release'
+  [[ ! -e "$COMPANION_EXECUTION_V2_MARKER" && ! -L "$COMPANION_EXECUTION_V2_MARKER" ]] ||
+    die 'the execution-v2 marker blocks routine-deposit handoff'
+  routine_deposits_enabled_for_release "$previous" ||
+    die 'the reviewed predecessor has no active routine-deposit marker'
+  validate_routine_deposit_material "$release"
+  [[ ! -e "$receipt" && ! -L "$receipt" ]] ||
+    die 'a routine-deposit handoff receipt already exists'
+  printf '%s\n' "$previous_sha" |
+    install -o root -g root -m 0600 /dev/stdin "$receipt"
+  bind_routine_marker "$sha"
+  routine_deposits_enabled_for_release "$release" ||
+    die 'the new release did not inherit the signed routine transport'
+}
+
+restore_routine_marker_for_rollback() {
+  local sha="$1" previous="$2" receipt="$STATE_ROOT/pending-$1.routine-marker" previous_sha marker_sha
+  [[ -e "$receipt" || -L "$receipt" ]] || return 0
+  previous_sha="${previous##*/}"
+  [[ "$previous_sha" == "$CBE_LIVE_PREDECESSOR_SHA" &&
+    "$previous" == "$(require_release "$CBE_LIVE_PREDECESSOR_SHA")" &&
+    ! -L "$receipt" && -f "$receipt" &&
+    "$(stat --format='%u:%g:%a:%h' "$receipt")" == '0:0:600:1' &&
+    "$(<"$receipt")" == "$previous_sha" ]] ||
+    die 'the routine-deposit rollback receipt is unsafe'
+  require_routine_marker
+  marker_sha="$( <"$ROUTINE_DEPOSITS_MARKER" )"
+  case "$marker_sha" in
+    "$sha") bind_routine_marker "$previous_sha" ;;
+    "$previous_sha") ;;
+    *) die 'the routine-deposit marker changed outside this release' ;;
+  esac
+  routine_deposits_enabled_for_release "$previous" ||
+    die 'the predecessor routine transport was not restored'
+  rm -f -- "$receipt"
 }
 
 compose_release() {
@@ -654,6 +717,7 @@ rollback_transition() {
   validate_rollback_transition "$sha" "$release"
   previous="$ROLLBACK_PREVIOUS"
   compose_release "$release" down --remove-orphans --timeout 30 >/dev/null 2>&1 || true
+  restore_routine_marker_for_rollback "$sha" "$previous"
   stop_if_running "$(container_for "$STAGING_PROJECT" bot)"
   if [[ -n "$previous" ]]; then
     compose_release "$previous" up --detach --no-build --wait --wait-timeout 120
@@ -952,8 +1016,11 @@ case "${1:-}" in
     ;;
 
   activate)
-    [[ $# -eq 2 ]] || die 'activate requires one exact commit SHA'
+    [[ $# -eq 2 || ( $# -eq 3 && "$3" == 'carry-routine-marker' ) ]] ||
+      die 'activate requires one exact commit SHA and an optional reviewed routine-marker handoff'
     sha="$2"
+    carry_routine_marker=false
+    if [[ $# -eq 3 ]]; then carry_routine_marker=true; fi
     release="$(require_release "$sha")"
     previous_file="$STATE_ROOT/pending-$sha.previous"
     [[ ! -e "$previous_file" && ! -L "$previous_file" ]] ||
@@ -973,6 +1040,9 @@ case "${1:-}" in
     verify_images "$sha" "$tag" "$release"
     printf '%s\n' "$previous" >"$previous_file"
     trap 'rollback_transition "$sha" "$release"' ERR
+    if [[ "$carry_routine_marker" == true ]]; then
+      handoff_routine_marker "$sha" "$previous" "$release"
+    fi
     compose_release "$release" config --quiet
     core_services=(owner-control customer-web api telebirr-assignment-broker telebirr-device-state-broker)
     if grep -Fq '  beta-admission:' "$release/compose.production.yaml"; then
@@ -1063,6 +1133,15 @@ case "${1:-}" in
     release="$(require_release "$sha")"
     [[ -L "$CURRENT_LINK" && "$(readlink -f -- "$CURRENT_LINK")" == "$release" ]] ||
       die 'only the current production release can be finalized'
+    routine_receipt="$STATE_ROOT/pending-$sha.routine-marker"
+    if [[ -e "$routine_receipt" || -L "$routine_receipt" ]]; then
+      [[ ! -L "$routine_receipt" && -f "$routine_receipt" &&
+        "$(stat --format='%u:%g:%a:%h' "$routine_receipt")" == '0:0:600:1' &&
+        "$(<"$routine_receipt")" == "$CBE_LIVE_PREDECESSOR_SHA" ]] ||
+        die 'the routine-deposit handoff receipt is unsafe'
+      routine_deposits_enabled_for_release "$release" ||
+        die 'the signed routine transport was not retained'
+    fi
     for service in owner-control customer-web api beta-admission; do
       stop_if_running "$(container_for "$STAGING_PROJECT" "$service")"
     done
@@ -1078,6 +1157,11 @@ case "${1:-}" in
     done
     rm -f -- "$STATE_ROOT/pending-$sha.legacy-bridge"
     rm -f -- "$STATE_ROOT/pending-$sha.previous"
+    # Retain the handoff receipt through every fallible cleanup operation so
+    # an ERR-triggered workflow rollback can still restore the old marker.
+    if [[ -e "$routine_receipt" || -L "$routine_receipt" ]]; then
+      rm -f -- "$routine_receipt"
+    fi
     ;;
 
   rollback)

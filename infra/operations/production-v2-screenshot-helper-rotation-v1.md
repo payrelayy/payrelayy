@@ -1,9 +1,10 @@
 # Production v2 helper rotation for screenshot reading
 
 This one-use root-only rotation updates the checksum-pinned v2 production deploy helper and its
-sudoers grant so the guarded release can install the screenshot model key. It changes no running
-container, database role, financial switch, or payment. It is a separate privileged action from
-merging the application PR and from running the production deployment workflow.
+sudoers grant so the guarded release can install the screenshot model key and preserve the signed
+routine transport across the CBE-live cutover. It changes no running container, database role,
+financial switch, or payment. It is a separate privileged action from merging the application PR
+and from running the production deployment workflow.
 
 | Reviewed item                               | Exact value                                                                  |
 | ------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -11,7 +12,7 @@ merging the application PR and from running the production deployment workflow.
 | Current release and routine-deposits marker | `906b5b6a6486a26450d302b9f911feb3e35d30e4`                                   |
 | Current runtime mode                        | `inert-maintenance`                                                          |
 | Installed predecessor helper SHA-256        | `8a4696f0bc2cf0a1d04761a293dceacd26408d7b0b2d43da4d0e79e66d6eafc3`           |
-| Successor helper SHA-256                    | `467463fdc334a7d0d4463b6bd2212a42c3318e60c2e0537d70e3010a800bcfba`           |
+| Successor helper SHA-256                    | `08fb54031bf6f1e11306c3ad1cd1f067fe39c6928b8baf944fdea60c0fdefe64`           |
 | Installed helper                            | `/usr/local/sbin/fetanagent-production-deploy-helper-v2`                     |
 | Installed sudoers grant                     | `/etc/sudoers.d/fetanagent-production-deploy-helper-v2`                      |
 | Rotation script                             | `infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh` |

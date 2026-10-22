@@ -45,6 +45,14 @@ on:
         options:
           - disabled
           - enabled
+      confirm_financial_switch_profile:
+        description: Exact expected production payment switches during this release
+        required: true
+        default: disabled
+        type: choice
+        options:
+          - disabled
+          - cbe-live-v1
       confirm_database_route:
         description: Pooler normally; direct over pinned SSH only for stopped SMS recovery
         required: true
@@ -91,6 +99,7 @@ jobs:
           CONFIRMED_TELEBIRR_PILOT: ${{ inputs.confirm_telebirr_pilot_revision_id }}
           CONFIRMED_TELEBIRR_EPOCH: ${{ inputs.confirm_telebirr_activation_epoch }}
           CONFIRMED_ROUTINE_TRANSPORT: ${{ inputs.confirm_routine_deposit_transport }}
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           CONFIRMED_DATABASE_ROUTE: ${{ inputs.confirm_database_route }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
@@ -102,14 +111,28 @@ jobs:
           [[ "$CONFIRMED_DROPLET" == "$PRODUCTION_DROPLET_ID" ]]
           [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ||
             "$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled' ]]
+          [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'disabled' ||
+            "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]
           if [[ "$REQUESTED_MODE" != 'deploy-inert' ]]; then
             [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'disabled' ]]
+            [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'disabled' ]]
+          fi
+          if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            [[ "$REQUESTED_MODE" == 'deploy-inert' ]]
+            [[ "$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled' ]]
+            [[ "$CONFIRMED_DATABASE_ROUTE" == 'pooler' ]]
           fi
           case "$CONFIRMED_DATABASE_ROUTE" in
             pooler) ;;
             direct) [[ "$REQUESTED_MODE" == 'deploy-inert' ]] ;;
             *) exit 1 ;;
           esac
+          if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            [[ "$CONFIRMED_OPERATION" == 'DEPLOY SCREENSHOT READER WITH CBE LIVE' ]] || {
+              echo '::error::The CBE-live release confirmation is not exact.'
+              exit 1
+            }
+          else
           case "$REQUESTED_MODE:$CONFIRMED_OPERATION" in
             'plan:PLAN PRODUCTION RUNTIME'|\
             'deploy-inert:DEPLOY INERT PRODUCTION RUNTIME'|\
@@ -120,6 +143,7 @@ jobs:
               exit 1
               ;;
           esac
+          fi
           if [[ "$REQUESTED_MODE" == 'deploy' ]]; then
             [[ "$CONFIRMED_TELEBIRR_PILOT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
             [[ "$CONFIRMED_TELEBIRR_EPOCH" =~ ^[1-9][0-9]{0,17}$ ]]
@@ -781,10 +805,12 @@ jobs:
           printf '%s\n' "$SECRET_DIR" >>"$GITHUB_PATH"
           echo 'TLS-verified direct administrator route ready; no production row or service changed.' >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Prove the complete inert production money boundary
+      - name: Prove the exact production payment boundary
         if: inputs.mode == 'deploy-inert'
+        id: payment_profile
         shell: bash
         env:
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
@@ -798,7 +824,16 @@ jobs:
           PGPASSFILE: /dev/null
         run: |
           set -euo pipefail
-          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+          case "$CONFIRMED_FINANCIAL_PROFILE" in
+            disabled) preflight=infra/sql/production-inert-runtime-preflight.sql ;;
+            cbe-live-v1) preflight=infra/sql/production-cbe-live-runtime-preflight.sql ;;
+            *) exit 1 ;;
+          esac
+          psql -X --file="$preflight" >/dev/null
+          fingerprint="$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
+            --file=infra/sql/production-financial-switch-fingerprint.sql)"
+          [[ "$fingerprint" =~ ^[0-9a-f]{32}$ ]]
+          echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"
 
       - name: Record existing routine review login states for exact rollback
         if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
@@ -921,6 +956,7 @@ jobs:
         id: sms_previous
         shell: bash
         env:
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
           PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
@@ -948,9 +984,15 @@ jobs:
             true,true,true,true,true) echo 'state=enabled' >>"$GITHUB_OUTPUT" ;;
             *) echo '::error::The SMS grants and logins are in a mixed state.'; exit 1 ;;
           esac
+          if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            [[ "$state" == 'true,true,true,true,true' ]] || {
+              echo '::error::The CBE-live release requires the existing SMS grants and logins.'
+              exit 1
+            }
+          fi
 
       - name: Activate exact SMS grants and short-lived runtime logins
-        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode == 'true' && inputs.confirm_financial_switch_profile == 'disabled'
         id: sms_activation
         shell: bash
         env:
@@ -1099,6 +1141,7 @@ jobs:
         id: boundary
         shell: bash
         env:
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
@@ -1114,6 +1157,14 @@ jobs:
           current_state="$(ssh "${ssh_opts[@]}" "$remote" \
             "id -u | grep -vx 0 >/dev/null && id -un | grep -Fx fetanagent-admin >/dev/null && sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' check-release-mode '$GITHUB_SHA' '$runtime_deployment_mode' && sudo -n '$helper' preflight '${{ steps.protected.outputs.bundle_bytes }}' && sudo -n '$helper' current-state")"
           [[ "$current_state" == 'present' || "$current_state" == 'absent' ]]
+          if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            [[ "$current_state" == 'present' ]] || {
+              echo '::error::The CBE-live release requires the reviewed running predecessor.'
+              exit 1
+            }
+            ssh "${ssh_opts[@]}" "$remote" \
+              "sudo -n '$helper' status '906b5b6a6486a26450d302b9f911feb3e35d30e4'"
+          fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
               echo '::error::Direct database recovery is allowed only for stopped production.' >&2
@@ -1294,11 +1345,42 @@ jobs:
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' install '$GITHUB_SHA' '${GITHUB_SHA:0:12}' '$incoming'"
 
+      - name: Recheck CBE-live payment state before activation
+        if: inputs.mode == 'deploy-inert' && inputs.confirm_financial_switch_profile == 'cbe-live-v1'
+        shell: bash
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_cbe_live_pre_activation
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
+          VM_HOST: ${{ steps.protected.outputs.vm_host }}
+        run: |
+          set -euo pipefail
+          psql -X --file=infra/sql/production-cbe-live-runtime-preflight.sql >/dev/null
+          psql -X --file=infra/sql/production-cbe-live-cutover-idle.sql >/dev/null
+          fingerprint="$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
+            --file=infra/sql/production-financial-switch-fingerprint.sql)"
+          [[ "$fingerprint" == '${{ steps.payment_profile.outputs.fingerprint }}' ]]
+          ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
+          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '906b5b6a6486a26450d302b9f911feb3e35d30e4'"
+
       - name: Atomically activate production and switch the public edge
         id: activate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
@@ -1306,8 +1388,13 @@ jobs:
           node infra/operations/require-production-ci.mjs
           ssh_opts=(-F /dev/null -i "$SECRET_DIR/deploy-key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
-          ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 activate '$GITHUB_SHA'"
+          if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 activate '$GITHUB_SHA' carry-routine-marker"
+          else
+            ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
+              "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 activate '$GITHUB_SHA'"
+          fi
           echo 'completed=true' >>"$GITHUB_OUTPUT"
 
       - name: Verify live public production services
@@ -1353,10 +1440,42 @@ jobs:
             exit 1
           }
 
+      - name: Verify the payment switches remained unchanged
+        if: inputs.mode == 'deploy-inert'
+        shell: bash
+        env:
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ steps.protected.outputs.secret_dir }}/supabase-ca.crt
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_production_payment_postflight
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+        run: |
+          set -euo pipefail
+          case "$CONFIRMED_FINANCIAL_PROFILE" in
+            disabled) preflight=infra/sql/production-inert-runtime-preflight.sql ;;
+            cbe-live-v1) preflight=infra/sql/production-cbe-live-runtime-preflight.sql ;;
+            *) exit 1 ;;
+          esac
+          psql -X --file="$preflight" >/dev/null
+          fingerprint="$(psql -X -q -A -t -v ON_ERROR_STOP=1 \
+            --file=infra/sql/production-financial-switch-fingerprint.sql)"
+          [[ "$fingerprint" == '${{ steps.payment_profile.outputs.fingerprint }}' ]] || {
+            echo '::error::The production payment switch fingerprint changed during deployment.'
+            exit 1
+          }
+
       - name: Attest and finalize the production cutover
         shell: bash
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           SECRET_DIR: ${{ steps.protected.outputs.secret_dir }}
           VM_HOST: ${{ steps.protected.outputs.vm_host }}
         run: |
@@ -1366,7 +1485,9 @@ jobs:
           helper='/usr/local/sbin/fetanagent-production-deploy-helper-v2'
           ssh "${ssh_opts[@]}" "$remote" \
             "sudo -n '$helper' verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n '$helper' status '$GITHUB_SHA' && sudo -n '$helper' finalize '$GITHUB_SHA'"
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
+            echo 'Production screenshot reference reading is deployed with the existing CBE Birr payment switches and signed receiver SMS route preserved. TeleBirr authority remains disabled. No test payment was made.' >>"$GITHUB_STEP_SUMMARY"
+          elif [[ "$REQUESTED_MODE" == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
             echo 'Production web, Telegram, and receiving-phone SMS transport are deployed. The SMS database route and all seven financial switches remain disabled; no SMS claim, job, or Player credit can start.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then
             echo 'Production web, Telegram, and paired-phone receipt observation transport are live. The separate paid-review login may stage signed observations but cannot create payment claims, jobs, or Player credits. All seven financial switches remain disabled.' >>"$GITHUB_STEP_SUMMARY"

@@ -108,6 +108,13 @@ root at the exact path and metadata expected by the deploy helper:
 owner 10001:10001, mode 0400, one ordinary file, one hard link
 ```
 
+For a stopped production recovery when the session pooler cannot serve this isolated role, the
+deploy helper also accepts the exact direct database host, the same role and password, port 5432,
+and `sslmode=verify-full`. Rebind this protected URL only while production is stopped, after
+checking the financial ledger and preserving a root-only rollback copy. Confirm the role connects
+and passes its read-only catalog preflight on the direct route before changing the URL. Neither
+route is a reason to loosen the Companion's one-use or transfer fences.
+
 The bridge runs as UID 10001. Docker Compose bind-mounts file-backed secrets without applying the
 `uid`/`gid`/`mode` hints in the overlay. In the same protected parent directory, install a
 byte-for-byte copy of the existing root-owned

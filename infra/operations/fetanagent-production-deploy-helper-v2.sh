@@ -202,7 +202,10 @@ validate_routine_deposit_material() {
     "$(stat --format='%s' "$ROUTINE_DEPOSITS_DATABASE_URL")" -le 1024 ]] ||
     die 'the protected routine-deposit database credential is absent or unsafe'
   database_url="$(<"$ROUTINE_DEPOSITS_DATABASE_URL")"
-  [[ "$database_url" =~ ^postgresql://fetanagent_routine_deposit_broker_runtime\.xzztugbgtulptnbpoelr:[0-9a-f]{64}@aws-0-eu-west-1\.pooler\.supabase\.com:5432/postgres\?sslmode=verify-full$ ]] ||
+  # The protected direct route supports a separately guarded stopped SMS
+  # recovery. Both routes retain the same isolated role and TLS.
+  { [[ "$database_url" =~ ^postgresql://fetanagent_routine_deposit_broker_runtime\.xzztugbgtulptnbpoelr:[0-9a-f]{64}@aws-0-eu-west-1\.pooler\.supabase\.com:5432/postgres\?sslmode=verify-full$ ]] ||
+    [[ "$database_url" =~ ^postgresql://fetanagent_routine_deposit_broker_runtime:[0-9a-f]{64}@db\.xzztugbgtulptnbpoelr\.supabase\.co:5432/postgres\?sslmode=verify-full$ ]]; } ||
     die 'the protected routine-deposit database credential is malformed'
 }
 

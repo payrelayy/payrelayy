@@ -881,6 +881,16 @@ assert.match(
 );
 assert.match(helper, /sha256sum "\$HELPER_PATH"/u);
 assert.match(helper, /negative_receiver_sms_public_smoke\(\)/u);
+assert.ok(
+  helper.includes(
+    'fetanagent_routine_deposit_broker_runtime\\.xzztugbgtulptnbpoelr:[0-9a-f]{64}@aws-0-eu-west-1\\.pooler\\.supabase\\.com:5432/postgres\\?sslmode=verify-full$',
+  ),
+);
+assert.ok(
+  helper.includes(
+    'fetanagent_routine_deposit_broker_runtime:[0-9a-f]{64}@db\\.xzztugbgtulptnbpoelr\\.supabase\\.co:5432/postgres\\?sslmode=verify-full$',
+  ),
+);
 assert.equal(count(helper, /negative_receiver_sms_public_smoke "\$release"/gu), 2);
 assert.match(helper, /release_deployment_mode\(\)/u);
 assert.match(helper, /operational\|shadow-review\|inert-maintenance/u);

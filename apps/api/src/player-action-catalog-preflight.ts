@@ -145,9 +145,6 @@ function buildPlayerActionCatalogPreflightSql(
               'app.prepare_telegram_live_telebirr_destination(uuid,text,text)'
             ),
             pg_catalog.to_regprocedure(
-              'app.prepare_telegram_live_cbe_sms_destination(uuid,text)'
-            ),
-            pg_catalog.to_regprocedure(
               'app.capture_telegram_telebirr_shadow_proof(uuid,text,text,text,text,text,smallint,smallint,text)'
             ),
             pg_catalog.to_regprocedure(
@@ -206,18 +203,15 @@ function buildPlayerActionCatalogPreflightSql(
                 : ''
             }
           ) then array['search_path=pg_catalog']::text[]
-          ${
-            cbeBirrCandidateEnabled || receiverSmsCandidateEnabled
-              ? `when routine.oid in (
+          when routine.oid in (
             ${[
+              'app.prepare_telegram_live_cbe_sms_destination(uuid,text)',
               ...(cbeBirrCandidateEnabled ? CBE_BIRR_CANDIDATE_FUNCTIONS : []),
               ...(receiverSmsCandidateEnabled ? [RECEIVER_SMS_CANDIDATE_FUNCTION] : []),
             ]
               .map((signature) => `pg_catalog.to_regprocedure('${signature}')`)
               .join(',\n            ')}
-          ) then array['search_path=pg_catalog, pg_temp']::text[]`
-              : ''
-          }
+          ) then array['search_path=pg_catalog, pg_temp']::text[]
           else array['search_path=pg_catalog, app, pg_temp']::text[]
         end
         and owner.rolname = 'postgres'

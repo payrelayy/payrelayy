@@ -5,6 +5,7 @@ import {
   PLAYER_ACTION_CANDIDATE_CATALOG_PREFLIGHT_SQL,
   PLAYER_ACTION_CBE_BIRR_CATALOG_PREFLIGHT_SQL,
   PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
+  PLAYER_ACTION_RECEIVER_SMS_CATALOG_PREFLIGHT_SQL,
   playerActionCatalogPreflightPassed,
 } from './player-action-catalog-preflight.js';
 
@@ -53,6 +54,25 @@ describe('Player-ID action catalog preflight', () => {
     expect(PLAYER_ACTION_CATALOG_PREFLIGHT_SQL).not.toMatch(
       /^\s*(?:insert|update|delete|truncate|alter|create|drop|grant|revoke)\b/imu,
     );
+  });
+
+  it('checks the CBE SMS destination against its pg_temp-hardened function setting', () => {
+    for (const sql of [
+      PLAYER_ACTION_CATALOG_PREFLIGHT_SQL,
+      PLAYER_ACTION_RECEIVER_SMS_CATALOG_PREFLIGHT_SQL,
+    ]) {
+      const hardeningCase = sql
+        .split('and routine.proconfig = case')[1]
+        ?.split('end\n        and owner.rolname')[0];
+      expect(hardeningCase).toBeDefined();
+      const [catalogOnly = '', pgTempAndFallback = ''] = hardeningCase!.split(
+        "then array['search_path=pg_catalog']::text[]",
+      );
+      expect(catalogOnly).not.toContain('app.prepare_telegram_live_cbe_sms_destination(uuid,text)');
+      expect(
+        pgTempAndFallback.split("then array['search_path=pg_catalog, pg_temp']::text[]")[0],
+      ).toContain('app.prepare_telegram_live_cbe_sms_destination(uuid,text)');
+    }
   });
 
   it('requires onboarding, proof, notification, and instruction functions in the exact 31-function surface', () => {

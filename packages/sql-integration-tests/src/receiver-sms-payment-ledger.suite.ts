@@ -901,5 +901,105 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         await client.query('rollback');
       }
     });
+
+    it('resumes at a fresh cutoff without holding or crediting old submissions', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await persistentPolicyFixture(client, getOwner());
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+            where feature_key in ('payment_verification','deposit_execution')`,
+        );
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const oldUnmatched = await fixtureCandidate(
+          client,
+          hexDigest(),
+          new Date(Date.now() - 6 * 60_000).toISOString(),
+        );
+        const oldFingerprint = hexDigest();
+        const oldTime = (
+          await client.query<{ at: string }>(`select pg_catalog.clock_timestamp()::text as at`)
+        ).rows[0]!.at;
+        const oldReady = await fixtureCandidate(client, oldFingerprint, oldTime);
+        await fixturePaymentEvent(client, oldFingerprint, oldTime);
+        expect(
+          (
+            await client.query<{ disposition: string }>(
+              `select disposition from app.receiver_sms_payment_matches
+                where candidate_id = $1::uuid`,
+              [oldReady],
+            )
+          ).rows,
+        ).toEqual([{ disposition: 'ready' }]);
+
+        // A restart retains the one-use ledger but advances the admission clock.
+        await client.query(
+          `update app.receiver_sms_route_control set cutover_at = pg_catalog.clock_timestamp()
+            where singleton`,
+        );
+        const freshFingerprint = hexDigest();
+        const freshTime = (
+          await client.query<{ at: string }>(`select pg_catalog.clock_timestamp()::text as at`)
+        ).rows[0]!.at;
+        const fresh = await fixtureCandidate(client, freshFingerprint, freshTime);
+        await client.query(
+          `update app.inbound_events inbound set processed_at = candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id = candidate.origin_inbound_event_id
+              and candidate.id = $1::uuid`,
+          [fresh],
+        );
+        const freshEventTime = (
+          await client.query<{ at: string }>(`select pg_catalog.clock_timestamp()::text as at`)
+        ).rows[0]!.at;
+        await fixturePaymentEvent(client, freshFingerprint, freshEventTime);
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'queued' }]);
+        expect(
+          (
+            await client.query<{ outcome: string }>(
+              `select app.settle_next_receiver_sms_match() as outcome`,
+            )
+          ).rows,
+        ).toEqual([{ outcome: 'empty' }]);
+        const snapshot = await client.query<{
+          old_holds: string;
+          old_lineages: string;
+          old_matches: string;
+          fresh_lineages: string;
+        }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_holds
+              where candidate_id in ($1::uuid,$2::uuid)) as old_holds,
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id in ($1::uuid,$2::uuid)) as old_lineages,
+            (select count(*)::text from app.receiver_sms_payment_matches
+              where candidate_id = $2::uuid) as old_matches,
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id = $3::uuid) as fresh_lineages`,
+          [oldUnmatched, oldReady, fresh],
+        );
+        expect(snapshot.rows).toEqual([
+          {
+            old_holds: '0',
+            old_lineages: '0',
+            old_matches: '1',
+            fresh_lineages: '1',
+          },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
   });
 }

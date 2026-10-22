@@ -159,8 +159,8 @@ export function buildTelegramCbeSmsPaymentPrompt(
     `📱 Number: ${input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
     'Valid for 1 hour. Check the receiver name before paying.',
-    'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).',
-    'If sending a reference separately, use /cbe followed by the reference.',
+    'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    'The reference identifies CBE Birr automatically.',
   ].join('\n');
 }
 
@@ -173,14 +173,16 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
   const reference = /(?:^|\n)📱 Number: ([0-9]{9,24})(?:\n|$)/u.exec(message.text)?.[1];
   if (!playerId || !holder || !reference) return false;
   try {
-    return (
-      message.text ===
-      buildTelegramCbeSmsPaymentPrompt({
-        playerId,
-        receiverAccountHolderName: holder,
-        receiverAccountReference: reference,
-      })
+    const currentPrompt = buildTelegramCbeSmsPaymentPrompt({
+      playerId,
+      receiverAccountHolderName: holder,
+      receiverAccountReference: reference,
+    });
+    const previousPrompt = currentPrompt.replace(
+      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+      'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
     );
+    return message.text === currentPrompt || message.text === previousPrompt;
   } catch {
     return false;
   }

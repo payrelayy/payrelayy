@@ -29,13 +29,13 @@ import {
   isTelegramSavedPlayerChangeCallback,
   isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
+  reduceTelegramAutoReceiverSmsMediaSubmission,
+  reduceTelegramAutoReceiverSmsTextSubmission,
   reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositMediaSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramSavedTelebirrDestinationAction,
   reduceTelegramSavedCbeSmsDestinationAction,
-  reduceTelegramCbeSmsReplySubmission,
-  reduceTelegramSavedCbeSmsMediaSubmission,
   reduceTelegramSavedCbeSmsProofSubmission,
   reduceTelegramSavedTelebirrMediaSubmission,
   reduceTelegramSavedTelebirrProofSubmission,
@@ -53,7 +53,6 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
-  isTelegramCbeSmsPaymentPromptReply,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
@@ -399,13 +398,8 @@ bot.on('message', async (context) => {
         await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
         return;
       }
-      const cbeMedia =
-        config.receiverSmsCandidateEnabled &&
-        (isCbeBirrReceiptText(extracted.text) ||
-          isCbeBirrReceiptText(mediaMetadata.caption) ||
-          isTelegramCbeSmsPaymentPromptReply(replyToMessage));
-      const mediaSubmission = cbeMedia
-        ? reduceTelegramSavedCbeSmsMediaSubmission({ ...mediaMetadata, replyToMessage })
+      const mediaSubmission = config.receiverSmsCandidateEnabled
+        ? reduceTelegramAutoReceiverSmsMediaSubmission({ ...mediaMetadata, replyToMessage })
         : parseTelegramTelebirrPaymentPromptReply(replyToMessage)
           ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
           : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
@@ -434,9 +428,28 @@ bot.on('message', async (context) => {
       }
       return;
     }
+    const autoSmsSubmission = config.receiverSmsCandidateEnabled
+      ? reduceTelegramAutoReceiverSmsTextSubmission({ ...metadata, command: text, replyToMessage })
+      : undefined;
+    if (autoSmsSubmission) {
+      if (autoSmsSubmission.kind === 'action') {
+        await deliverPlayerAction(autoSmsSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+        );
+      } else {
+        await context.reply(
+          autoSmsSubmission.kind === 'selection_required'
+            ? 'I found more than one payment reference. Nothing was submitted. Send one reference only.'
+            : 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected. Send one clear payment reference.',
+        );
+      }
+      return;
+    }
     const cbeSmsSubmission = config.receiverSmsCandidateEnabled
-      ? (reduceTelegramCbeSmsReplySubmission({ ...metadata, command: text, replyToMessage }) ??
-        reduceTelegramSavedCbeSmsProofSubmission({ ...metadata, command: text }))
+      ? reduceTelegramSavedCbeSmsProofSubmission(
+          { ...metadata, command: text },
+          config.receiverSmsCandidateEnabled,
+        )
       : undefined;
     if (cbeSmsSubmission) {
       if (cbeSmsSubmission.kind === 'action') {
@@ -452,11 +465,9 @@ bot.on('message', async (context) => {
       }
       return;
     }
-    const guidedSubmission = reduceTelegramGuidedDepositProofSubmission({
-      ...metadata,
-      text,
-      replyToMessage,
-    });
+    const guidedSubmission = config.receiverSmsCandidateEnabled
+      ? undefined
+      : reduceTelegramGuidedDepositProofSubmission({ ...metadata, text, replyToMessage });
     if (guidedSubmission) {
       if (guidedSubmission.kind === 'action') {
         await deliverPlayerAction(
@@ -493,7 +504,10 @@ bot.on('message', async (context) => {
       );
       return;
     }
-    const proofSubmission = reduceTelegramDepositProofSubmission({ ...metadata, command: text });
+    const proofSubmission = reduceTelegramDepositProofSubmission(
+      { ...metadata, command: text },
+      config.receiverSmsCandidateEnabled,
+    );
     if (proofSubmission) {
       if (proofSubmission.kind === 'action') {
         await deliverPlayerAction(proofSubmission.action, (replyText, keyboard) =>
@@ -502,7 +516,7 @@ bot.on('message', async (context) => {
       } else {
         await context.reply(
           proofSubmission.kind === 'selection_required'
-            ? telegramDepositReferenceSelectionText()
+            ? telegramDepositReferenceSelectionText(config.receiverSmsCandidateEnabled)
             : telegramDepositHelpText(config.receiverSmsCandidateEnabled),
         );
       }
@@ -523,7 +537,9 @@ bot.on('message', async (context) => {
       await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
       return;
     }
-    const savedProof = reduceTelegramSavedTelebirrProofSubmission({ ...metadata, command: text });
+    const savedProof = config.receiverSmsCandidateEnabled
+      ? undefined
+      : reduceTelegramSavedTelebirrProofSubmission({ ...metadata, command: text });
     if (savedProof) {
       if (savedProof.kind === 'action') {
         await deliverPlayerAction(savedProof.action, (replyText, keyboard) =>

@@ -11,11 +11,14 @@ import {
   isTelegramSavedPlayerChangeCallback,
   isCbeBirrReceiptText,
   isTelegramPrivateHelpCommand,
+  reduceTelegramAutoReceiverSmsMediaSubmission,
+  reduceTelegramAutoReceiverSmsTextSubmission,
   reduceTelegramDepositIntentCommand,
   reduceTelegramCbeBirrDryRunCommand,
   reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositProofSubmission,
   reduceTelegramDepositProofCommand,
+  reduceTelegramDepositProofSubmission,
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositReferenceCommand,
   reduceTelegramDepositStatusCommand,
@@ -35,6 +38,7 @@ import {
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   buildTelegramTelebirrPaymentPrompt,
   buildTelegramCbeSmsPaymentPrompt,
+  isTelegramCbeSmsPaymentPromptReply,
 } from './telegram-guided-deposit.js';
 
 const privateMetadata = {
@@ -69,6 +73,106 @@ const priorPaymentPrompt = [
 ].join('\n');
 
 describe('private Telegram action reducers', () => {
+  it('routes typed proof by reference length even under the other method instruction', () => {
+    const telePrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    const cbePrompt = buildTelegramCbeSmsPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsTextSubmission({
+        ...privateMetadata,
+        command: 'CBE12345678',
+        replyToMessage: { from: { is_bot: true }, text: telePrompt },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'deposit_proof_command',
+        providerCode: 'cbe_birr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'CBE12345678',
+      },
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsTextSubmission({
+        ...privateMetadata,
+        command: 'TB12345678',
+        replyToMessage: { from: { is_bot: true }, text: cbePrompt },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'saved_receiver_sms_proof_command',
+        providerCode: 'telebirr',
+        transactionReference: 'TB12345678',
+      },
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsTextSubmission({
+        ...privateMetadata,
+        command: 'hello there',
+        replyToMessage: undefined,
+      }),
+    ).toBeUndefined();
+    expect(
+      reduceTelegramSavedCbeSmsProofSubmission(
+        { ...privateMetadata, command: '/cbe TB12345678' },
+        true,
+      ),
+    ).toMatchObject({
+      kind: 'action',
+      action: { providerCode: 'telebirr', transactionReference: 'TB12345678' },
+    });
+    expect(
+      reduceTelegramDepositProofSubmission(
+        { ...privateMetadata, command: '/deposit telebirr PLAYER-DEMO-42 CBE12345678' },
+        true,
+      ),
+    ).toMatchObject({
+      kind: 'action',
+      action: { providerCode: 'cbe_birr', transactionReference: 'CBE12345678' },
+    });
+  });
+
+  it('routes media by reference while withholding conflicting OCR and captions', () => {
+    const telePrompt = buildTelegramTelebirrPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receiverAccountHolderName: 'Demo Receiver',
+      receiverAccountReference: '0000000042',
+    });
+    expect(
+      reduceTelegramAutoReceiverSmsMediaSubmission({
+        ...privateMetadata,
+        extractedText: 'Txn ID: CBE12345678. Amount ETB 100.00.',
+        caption: undefined,
+        sourceKind: 'ocr_text',
+        replyToMessage: { from: { is_bot: true }, text: telePrompt },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'deposit_proof_command',
+        providerCode: 'cbe_birr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'CBE12345678',
+      },
+    });
+    const conflict = reduceTelegramAutoReceiverSmsMediaSubmission({
+      ...privateMetadata,
+      extractedText: 'Transaction ID: TB12345678.',
+      caption: 'CBE12345678',
+      sourceKind: 'pdf_text',
+      replyToMessage: undefined,
+    });
+    expect(conflict).toEqual({ kind: 'selection_required' });
+    expect(JSON.stringify(conflict)).not.toMatch(/TB12345678|CBE12345678/);
+  });
   it('accepts explicit private CBE Birr test commands with synthetic references only', () => {
     expect(
       reduceTelegramCbeBirrDryRunCommand({
@@ -199,6 +303,13 @@ describe('private Telegram action reducers', () => {
       receiverAccountReference: '0000000042',
     });
     const replyToMessage = { from: { is_bot: true }, text: prompt };
+    const previousPrompt = prompt.replace(
+      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+      'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
+    );
+    expect(
+      isTelegramCbeSmsPaymentPromptReply({ from: { is_bot: true }, text: previousPrompt }),
+    ).toBe(true);
     expect(
       isTelegramCbeSmsDepositStartCallback({
         ...privateMetadata,

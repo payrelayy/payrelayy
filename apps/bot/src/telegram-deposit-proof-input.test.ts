@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   TELEGRAM_DEPOSIT_PROOF_COMMAND_MAX_BYTES,
+  reduceTelegramAutoReceiverSmsProofInput,
   reduceTelegramDepositProofInput,
 } from './telegram-deposit-proof-input.js';
 import {
@@ -31,6 +32,72 @@ const paymentPrompt = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Telegram amount-free TeleBirr proof input', () => {
+  it('chooses the incoming SMS ledger from an exact 10 or 11 character reference', () => {
+    expect(reduceTelegramAutoReceiverSmsProofInput(' tb12345678 ')).toEqual({
+      kind: 'candidate',
+      providerCode: 'telebirr',
+      transactionReference: 'TB12345678',
+    });
+    expect(reduceTelegramAutoReceiverSmsProofInput(' cbe12345678 ')).toEqual({
+      kind: 'candidate',
+      providerCode: 'cbe_birr',
+      transactionReference: 'CBE12345678',
+    });
+    expect(reduceTelegramAutoReceiverSmsProofInput('TB1234567890')).toEqual({
+      kind: 'invalid_input',
+    });
+    expect(reduceTelegramAutoReceiverSmsProofInput('ABCDEFGHIJ')).toEqual({
+      kind: 'invalid_input',
+    });
+  });
+
+  it('uses references in pasted SMS and receipt links without opening a URL or trusting branding', () => {
+    const fetch = vi.fn(() => {
+      throw new Error('Candidate extraction must stay offline.');
+    });
+    vi.stubGlobal('fetch', fetch);
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput('TeleBirr transaction number is TB12345678.'),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'telebirr' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'Dear customer, you received 25Br. Txn ID CBE12345678.',
+      ),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'cbe_birr' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput('Receipt Number: CBE12345678.', 'pdf_text'),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'cbe_birr' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'https://cbepay1.cbe.com.et/aureceipt?TID=CBE12345678&PH=000000000000',
+      ),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'cbe_birr' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'https://transactioninfo.ethiotelecom.et/receipt/TB12345678',
+      ),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'telebirr' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput('CBE Birr receipt Transaction ID: TB12345678.'),
+    ).toMatchObject({ kind: 'candidate', providerCode: 'telebirr' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('does not choose a method for conflicting or malformed payment information', () => {
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput('Transaction ID: TB12345678. Txn ID: CBE12345678.'),
+    ).toEqual({ kind: 'selection_required' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'Transaction ID: TB12345678. https://cbepay1.cbe.com.et/aureceipt?TID=CBE12345678&PH=000000000000',
+      ),
+    ).toEqual({ kind: 'selection_required' });
+    expect(
+      reduceTelegramAutoReceiverSmsProofInput(
+        'Transaction ID: TB12345678. https://cbepay1.cbe.com.et/aureceipt?TID=short&PH=000000000000',
+      ),
+    ).toEqual({ kind: 'invalid_input' });
+  });
   it.each(['ocr_text', 'pdf_text'] as const)(
     'reduces a %s attachment to the same protected reference-only action',
     (sourceKind) => {

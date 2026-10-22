@@ -229,6 +229,7 @@ jobs:
           node infra/verify-production-runtime.mjs
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-production-deploy-helper-v2.sh
+          bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets

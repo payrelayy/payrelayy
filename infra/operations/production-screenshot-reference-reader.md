@@ -15,9 +15,11 @@ the key in Git, workflow inputs, chat, logs, or a Compose environment value.
 Before any production merge or deploy, review and install the updated checksum-pinned
 `fetanagent-production-deploy-helper-v2.sh` and matching sudoers grant through a separately
 authorized privileged helper rotation. The workflow checks the exact installed helper digest and
-will refuse a deploy until it matches. Store a DigitalOcean key restricted to the single vision
-model and no inference routers in the GitHub Actions secret. Keep the DigitalOcean spend alert in
-place without automatic pausing, as selected by the owner.
+will refuse a deploy until it matches. Store a DigitalOcean key scoped to the single vision model
+in the GitHub Actions secret. DigitalOcean currently displays **All routers** even for a key
+created with **Select routers** and zero routers checked; do not assume router access is excluded.
+Resolve or explicitly accept that scope before putting the key into production. Keep the
+DigitalOcean spend alert in place without automatic pausing, as selected by the owner.
 
 After the exact merged-main CI passes and current production financial/lease/job gates are
 rechecked, use the guarded `Production application runtime` workflow in `deploy-inert` mode for the

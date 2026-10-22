@@ -213,12 +213,14 @@ async function loadCommitWorkflowRuns(sha, token, fetchImpl, waitImpl) {
       'invalid commit Actions check',
     );
     seenSuiteIds.add(check.check_suite.id);
-    const match =
-      /^https:\/\/github\.com\/payrelayy\/payrelayy\/actions\/runs\/(\d+)\/job\/\d+$/u.exec(
-        check.html_url,
-      );
-    requireCondition(match && integer(Number(match[1])), 'invalid Actions run link');
-    runIds.add(Number(match[1]));
+    const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)\/job\/\d+$/u.exec(
+      check.html_url,
+    );
+    requireCondition(
+      match && `${match[1]}/${match[2]}` === REPOSITORY && integer(Number(match[3])),
+      'invalid Actions run link',
+    );
+    runIds.add(Number(match[3]));
   }
   requireCondition(
     actionsSuiteIds.size > 0 &&

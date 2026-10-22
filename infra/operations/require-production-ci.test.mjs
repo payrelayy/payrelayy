@@ -107,7 +107,7 @@ function commitCheckFallback(requests, options = {}) {
     head_sha: SHA,
     check_suite: { id: 1000 + index },
     app: { slug: 'github-actions' },
-    html_url: `https://github.com/payrelayy/payrelayy/actions/runs/${100 + index}/job/${2000 + index}`,
+    html_url: `https://github.com/${configuration.repository}/actions/runs/${100 + index}/job/${2000 + index}`,
   }));
   return async (url, fetchOptions) => {
     requests.push({ url, options: fetchOptions });
@@ -165,7 +165,7 @@ test('commit fallback refuses a missing check for a required workflow', async ()
     head_sha: SHA,
     check_suite: { id: 1001 + index },
     app: { slug: 'github-actions' },
-    html_url: `https://github.com/payrelayy/payrelayy/actions/runs/${101 + index}/job/${2001 + index}`,
+    html_url: `https://github.com/${configuration.repository}/actions/runs/${101 + index}/job/${2001 + index}`,
   }));
   await assert.rejects(
     requireProductionCi({

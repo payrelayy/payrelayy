@@ -152,7 +152,102 @@ async function requestJson(path, token, fetchImpl, waitImpl) {
   throw new GateError('GitHub read request failed or returned invalid data');
 }
 
-async function loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl) {
+async function loadCommitChecks(path, arrayKey, token, fetchImpl, waitImpl) {
+  const items = [];
+  let expectedTotal;
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const query = new URLSearchParams({
+      filter: 'all',
+      per_page: String(PAGE_SIZE),
+      page: String(page),
+    });
+    const result = await requestJson(`${path}?${query}`, token, fetchImpl, waitImpl);
+    requireCondition(
+      result !== null &&
+        Number.isSafeInteger(result.total_count) &&
+        result.total_count > 0 &&
+        result.total_count <= MAX_PAGES * PAGE_SIZE &&
+        Array.isArray(result[arrayKey]),
+      'missing commit checks or pagination limit exceeded',
+    );
+    expectedTotal ??= result.total_count;
+    requireCondition(
+      expectedTotal === result.total_count &&
+        result[arrayKey].length === Math.min(PAGE_SIZE, expectedTotal - items.length),
+      'incomplete or changing commit check pagination',
+    );
+    items.push(...result[arrayKey]);
+    if (items.length === expectedTotal) break;
+  }
+  requireCondition(items.length === expectedTotal, 'commit check pagination incomplete');
+  return items;
+}
+
+async function loadCommitWorkflowRuns(sha, token, fetchImpl, waitImpl) {
+  // GitHub's workflow-list head_sha filter sometimes returns zero for runs
+  // already present on the exact commit. Commit checks provide a second index.
+  // Check suites without jobs prevent an unfinished Actions workflow from
+  // disappearing behind an older passing run.
+  const [checks, suites] = await Promise.all([
+    loadCommitChecks(`commits/${sha}/check-runs`, 'check_runs', token, fetchImpl, waitImpl),
+    loadCommitChecks(`commits/${sha}/check-suites`, 'check_suites', token, fetchImpl, waitImpl),
+  ]);
+  const actionsSuiteIds = new Set();
+  for (const suite of suites) {
+    if (suite?.app?.slug !== 'github-actions') continue;
+    requireCondition(
+      integer(suite.id) && integer(suite.latest_check_runs_count),
+      'unfinished Actions suite',
+    );
+    actionsSuiteIds.add(suite.id);
+  }
+  const runIds = new Set();
+  const seenSuiteIds = new Set();
+  for (const check of checks) {
+    if (check?.app?.slug !== 'github-actions') continue;
+    requireCondition(
+      integer(check.id) &&
+        check.head_sha === sha &&
+        integer(check.check_suite?.id) &&
+        actionsSuiteIds.has(check.check_suite.id),
+      'invalid commit Actions check',
+    );
+    seenSuiteIds.add(check.check_suite.id);
+    const match =
+      /^https:\/\/github\.com\/payrelayy\/payrelayy\/actions\/runs\/(\d+)\/job\/\d+$/u.exec(
+        check.html_url,
+      );
+    requireCondition(match && integer(Number(match[1])), 'invalid Actions run link');
+    runIds.add(Number(match[1]));
+  }
+  requireCondition(
+    actionsSuiteIds.size > 0 &&
+      [...actionsSuiteIds].every((id) => seenSuiteIds.has(id)) &&
+      runIds.size > 0,
+    'missing or unfinished Actions checks',
+  );
+  const runs = await Promise.all(
+    [...runIds].map((id) => requestJson(`actions/runs/${id}`, token, fetchImpl, waitImpl)),
+  );
+  requireCondition(
+    runs.every(
+      (run) =>
+        integer(run?.id) &&
+        run.head_sha === sha &&
+        run.repository?.full_name === REPOSITORY &&
+        run.head_repository?.full_name === REPOSITORY,
+    ),
+    'commit Actions run identity mismatch',
+  );
+  return runs.filter(
+    (run) =>
+      run.head_branch === 'main' &&
+      run.event === 'push' &&
+      REQUIRED_WORKFLOWS.some((workflow) => run.path === `.github/workflows/${workflow}`),
+  );
+}
+
+async function loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl, commitRuns) {
   const runs = [];
   let expectedTotal;
   for (let page = 1; page <= MAX_PAGES; page += 1) {
@@ -170,6 +265,9 @@ async function loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl) {
       fetchImpl,
       waitImpl,
     );
+    if (page === 1 && result?.total_count === 0 && Array.isArray(result.workflow_runs)) {
+      return (await commitRuns()).filter((run) => run.path === `.github/workflows/${workflow}`);
+    }
     requireCondition(
       result !== null &&
         Number.isSafeInteger(result.total_count) &&
@@ -211,8 +309,16 @@ function runSetIdentity(runs) {
   );
 }
 
-async function checkWorkflow(workflow, sha, token, fetchImpl, waitImpl) {
-  const runs = await loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl);
+async function checkWorkflow(
+  workflow,
+  sha,
+  token,
+  fetchImpl,
+  waitImpl,
+  commitRuns,
+  refreshedCommitRuns,
+) {
+  const runs = await loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl, commitRuns);
   const selected = selectLatestRun(runs, sha, workflow);
   // Re-read the current run, not an immutable successful historical attempt.
   const current = await requestJson(`actions/runs/${selected.id}`, token, fetchImpl, waitImpl);
@@ -233,7 +339,14 @@ async function checkWorkflow(workflow, sha, token, fetchImpl, waitImpl) {
   // sibling attempts and newly created runs cannot hide behind that success.
   // This is a fresh read, not an atomic lock on GitHub; deployment checks again
   // immediately before activation as well as before using production secrets.
-  const refreshed = await loadWorkflowRuns(workflow, sha, token, fetchImpl, waitImpl);
+  const refreshed = await loadWorkflowRuns(
+    workflow,
+    sha,
+    token,
+    fetchImpl,
+    waitImpl,
+    refreshedCommitRuns,
+  );
   selectLatestRun(refreshed, sha, workflow);
   requireCondition(
     runSetIdentity(runs) === runSetIdentity(refreshed),
@@ -260,8 +373,16 @@ export async function requireProductionCi({
       token.length > 0,
     'invalid deployment target or missing read credential',
   );
+  let initialCommitRuns;
+  let refreshedCommitRuns;
+  const loadInitial = () =>
+    (initialCommitRuns ??= loadCommitWorkflowRuns(sha, token, fetchImpl, waitImpl));
+  const loadRefreshed = () =>
+    (refreshedCommitRuns ??= loadCommitWorkflowRuns(sha, token, fetchImpl, waitImpl));
   return Promise.all(
-    REQUIRED_WORKFLOWS.map((workflow) => checkWorkflow(workflow, sha, token, fetchImpl, waitImpl)),
+    REQUIRED_WORKFLOWS.map((workflow) =>
+      checkWorkflow(workflow, sha, token, fetchImpl, waitImpl, loadInitial, loadRefreshed),
+    ),
   );
 }
 

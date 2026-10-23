@@ -157,6 +157,13 @@ begin
   if context_count <> 1 then raise exception 'The activation context is unavailable.'; end if;
   execute 'alter role fetanagent_routine_telebirr_paid_poll_runtime nologin password null valid until ''1970-01-01 00:00:00+00''';
   execute 'alter role fetanagent_routine_telebirr_paid_settlement_runtime nologin password null valid until ''1970-01-01 00:00:00+00''';
+  perform pg_stat_clear_snapshot();
+  if exists (select 1 from pg_stat_activity activity
+      where activity.usename in (
+        'fetanagent_routine_telebirr_paid_poll_runtime',
+        'fetanagent_routine_telebirr_paid_settlement_runtime')) then
+    raise exception 'A paid receipt session appeared during retirement.';
+  end if;
   update app.receiver_sms_route_control control
     set cutover_at = checked_at, changed_at = checked_at
     where control.singleton and control.enabled and control.cutover_at = old_cutover;

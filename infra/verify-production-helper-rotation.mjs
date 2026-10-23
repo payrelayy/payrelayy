@@ -422,4 +422,61 @@ assert.ok(
 );
 assert.doesNotMatch(accessScript, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
+const unifiedHelperPath = 'infra/operations/fetanagent-production-deploy-helper-v2.sh';
+const unifiedRotationPath =
+  'infra/operations/fetanagent-production-v2-unified-deposit-rotation-v7.sh';
+const unifiedDocsPath = 'infra/operations/production-unified-deposit-release.md';
+const unifiedPredecessor = 'e00b5721a2b48cad8f5a7828081ebe9b05c239c6283a0123ac9f561e951ea1d2';
+const unifiedSuccessor = '255b545f55df67038bdc737eb3aeaade49ebafcee5edd054b25e1926cf391336';
+const unifiedCurrent = 'aa5db75897ac63e29917836aa7d52843b4a69ef6';
+const unifiedHelper = read(unifiedHelperPath).toString();
+const unifiedRotation = read(unifiedRotationPath).toString();
+const unifiedDocs = read(unifiedDocsPath).toString();
+assert.equal(sha256(read(unifiedHelperPath)), unifiedSuccessor);
+assert.ok(unifiedHelper.includes(`CBE_GUARDED_PREDECESSOR_SHA='${unifiedCurrent}'`));
+for (const value of [
+  unifiedPredecessor,
+  unifiedSuccessor,
+  unifiedCurrent,
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 UNIFIED DEPOSIT HELPER V7',
+]) {
+  assert.ok(unifiedRotation.includes(value), `unified rotation script does not pin ${value}`);
+  assert.ok(unifiedDocs.includes(value), `unified release runbook does not pin ${value}`);
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(unifiedRotation.includes(value), `unified rotation lost boundary: ${value}`);
+}
+const unifiedRotate = unifiedRotation.slice(unifiedRotation.indexOf('rotate() {'));
+const unifiedStep = (value) => {
+  const index = unifiedRotate.indexOf(value);
+  assert.ok(index >= 0, `unified rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(unifiedRotation.indexOf('flock --nonblock 9') < unifiedRotation.indexOf('rotate() {'));
+assert.ok(unifiedStep('acquire_lock') < unifiedStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  unifiedStep('install_record "$INTENT" intent_body') <
+    unifiedStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  unifiedStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    unifiedStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  unifiedStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    unifiedStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  unifiedStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    unifiedStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(unifiedRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

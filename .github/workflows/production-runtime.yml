@@ -264,6 +264,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/fetanagent-production-v2-owner-payment-methods-rotation-v6.sh
+          bash -n infra/operations/fetanagent-production-v2-unified-deposit-rotation-v7.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets

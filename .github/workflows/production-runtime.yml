@@ -391,6 +391,7 @@ jobs:
         env:
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_DATABASE_ROUTE: ${{ inputs.confirm_database_route }}
+          CONFIRMED_FINANCIAL_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
           API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET: ${{ secrets.API_TELEGRAM_ACTION_SEMANTIC_HMAC_SECRET }}
           API_TELEGRAM_CAPABILITY_HMAC_SECRET: ${{ secrets.API_TELEGRAM_CAPABILITY_HMAC_SECRET }}
           API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET: ${{ secrets.API_TELEGRAM_PLAYER_ACTION_PAYLOAD_HMAC_SECRET }}
@@ -488,6 +489,18 @@ jobs:
             echo '::error::Only the receiver SMS production overlay may be deployed.' >&2
             exit 1
           fi
+          routine_proof_mode=false
+          inert_overlay_source='infra/compose.production.inert-maintenance.yaml'
+          if [[ "$REQUESTED_MODE" == 'deploy-inert' &&
+                "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
+            routine_proof_mode=true
+            inert_overlay_source='infra/compose.production.cbe-stopped-phone-proof.yaml'
+            grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" "$inert_overlay_source"
+            grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" "$inert_overlay_source"
+            grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'" "$inert_overlay_source"
+            ! grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" "$inert_overlay_source"
+          fi
+          echo "routine_proof_mode=$routine_proof_mode" >>"$GITHUB_OUTPUT"
           runtime_database_host="$PRODUCTION_DATABASE_POOLER_HOST"
           runtime_role_suffix=".$PRODUCTION_PROJECT_REF"
           if [[ "$REQUESTED_DATABASE_ROUTE" == 'direct' ]]; then
@@ -503,6 +516,10 @@ jobs:
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml"
           cmp --silent -- "$shadow_overlay_source" \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml"
+          install -m 0600 -- "$inert_overlay_source" \
+            "$RUNNER_TEMP/release/compose.production.inert-maintenance.yaml"
+          cmp --silent -- "$inert_overlay_source" \
+            "$RUNNER_TEMP/release/compose.production.inert-maintenance.yaml"
           chmod 0600 "$RUNNER_TEMP/release/runtime-deployment-mode"
 
           values=(
@@ -526,16 +543,9 @@ jobs:
           )
           for value in "${values[@]}"; do [[ "$value" =~ ^[0-9a-f]{64}$ ]]; done
           [[ "$(printf '%s\n' "${values[@]}" | sort -u | wc -l)" -eq "${#values[@]}" ]]
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
+          if [[ "$routine_proof_mode" == true ]]; then
             [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
-            [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
-            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
-            [[ "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" != "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" ]]
-            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" != "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" ]]
-            [[ "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" != "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" ]]
             [[ ! " ${values[*]} " == *" $ROUTINE_NO_MONEY_RUNTIME_PASSWORD "* ]]
-            [[ ! " ${values[*]} " == *" $ROUTINE_PAID_POLL_RUNTIME_PASSWORD "* ]]
-            [[ ! " ${values[*]} " == *" $ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD "* ]]
           fi
           if [[ "$sms_mode" == true ]]; then
             [[ "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" =~ ^[0-9a-f]{64}$ ]]
@@ -543,6 +553,10 @@ jobs:
             [[ "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" != "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" ]]
             [[ ! " ${values[*]} " == *" $RECEIVER_SMS_INGEST_RUNTIME_PASSWORD "* ]]
             [[ ! " ${values[*]} " == *" $RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD "* ]]
+            if [[ "$routine_proof_mode" == true ]]; then
+              [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" != "$RECEIVER_SMS_INGEST_RUNTIME_PASSWORD" ]]
+              [[ "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" != "$RECEIVER_SMS_SETTLEMENT_RUNTIME_PASSWORD" ]]
+            fi
           fi
           [[ "$PRODUCTION_SUPABASE_PUBLISHABLE_KEY" =~ ^sb_publishable_[A-Za-z0-9_-]{20,256}$ ]]
           [[ "$PRODUCTION_SCREENSHOT_MODEL_ACCESS_KEY" =~ ^[A-Za-z0-9_-]{40,256}$ ]]
@@ -648,7 +662,7 @@ jobs:
               "$secret_dir/telebirr-reference-opening-key.v1.json"
           )"
           [[ "$telebirr_reference_opening_key_id" =~ ^sha256:[0-9a-f]{64}$ ]]
-          if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$sms_mode" != true ]]; then
+          if [[ "$routine_proof_mode" == true ]]; then
             SECRET_DIR="$secret_dir" node --input-type=module <<'NODE'
           import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
           import { writeFileSync } from 'node:fs';
@@ -695,14 +709,6 @@ jobs:
               "fetanagent_routine_telebirr_no_money_runtime$runtime_role_suffix" \
               "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" "$runtime_database_host" \
               >"$secret_dir/routine-no-money-database-url"
-            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_routine_telebirr_paid_poll_runtime$runtime_role_suffix" \
-              "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" "$runtime_database_host" \
-              >"$secret_dir/routine-paid-poll-database-url"
-            printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
-              "fetanagent_routine_telebirr_paid_settlement_runtime$runtime_role_suffix" \
-              "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" "$runtime_database_host" \
-              >"$secret_dir/routine-paid-settlement-database-url"
           fi
           if [[ "$sms_mode" == true ]]; then
             printf 'postgresql://%s:%s@%s:5432/postgres?sslmode=verify-full' \
@@ -846,7 +852,7 @@ jobs:
           echo "fingerprint=$fingerprint" >>"$GITHUB_OUTPUT"
 
       - name: Record existing routine review login states for exact rollback
-        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.routine_proof_mode == 'true'
         id: routine_previous_logins
         shell: bash
         env:
@@ -874,11 +880,15 @@ jobs:
           [[ "$previous" =~ ^(true|false),(true|false),(true|false)$ ]]
           # Alphabetical role order: no-money, paid-poll, paid-settlement.
           IFS=, read -r no_money paid_poll paid_settlement <<<"$previous"
+          [[ "$no_money" == true && "$paid_poll" == true && "$paid_settlement" == true ]] || {
+            echo '::error::The separately recovered TeleBirr review logins are unavailable.' >&2
+            exit 1
+          }
           printf 'no_money=%s\npaid_poll=%s\npaid_settlement=%s\n' \
             "$no_money" "$paid_poll" "$paid_settlement" >>"$GITHUB_OUTPUT"
 
       - name: Activate the separate no-money phone review login
-        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.sms_mode != 'true'
+        if: inputs.mode == 'deploy-inert' && steps.protected.outputs.routine_proof_mode == 'true'
         id: routine_review_activation
         shell: bash
         env:
@@ -902,7 +912,7 @@ jobs:
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           psql -X \
-            -v expected_cbe_mode=disabled \
+            -v expected_cbe_mode=live \
             -v signer_id="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID" \
             -v public_spki_digest="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256" \
             -v valid_from="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM" \
@@ -1268,15 +1278,29 @@ jobs:
             )")"
           [[ "$runtime_catalog_ready" == 't' ]]
           retired_catalog_ready="$(psql_with_connection_retry -X -Atc "
-            select count(*) = 4 and pg_catalog.bool_and(not rolcanlogin)
+            select count(*) = 1 and pg_catalog.bool_and(not rolcanlogin)
             from pg_catalog.pg_roles
-            where rolname in (
-              'fetanagent_beta_admission_runtime',
-              'fetanagent_routine_telebirr_no_money_runtime',
-              'fetanagent_routine_telebirr_paid_poll_runtime',
-              'fetanagent_routine_telebirr_paid_settlement_runtime'
-            )")"
+            where rolname = 'fetanagent_beta_admission_runtime'")"
           [[ "$retired_catalog_ready" == 't' ]]
+          if [[ '${{ steps.protected.outputs.routine_proof_mode }}' == 'true' ]]; then
+            no_money_ready="$(psql_with_connection_retry -X -Atc "
+              select count(*) = 3 and pg_catalog.bool_and(
+                role.rolcanlogin
+                and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '1 hour'
+                and not role.rolinherit and not role.rolsuper and not role.rolcreatedb
+                and not role.rolcreaterole and not role.rolreplication and not role.rolbypassrls
+              ) and pg_catalog.bool_and(
+                case when role.rolname = 'fetanagent_routine_telebirr_no_money_runtime'
+                  then role.rolconnlimit = 1 else true end
+              )
+              from pg_catalog.pg_roles role
+              where role.rolname in (
+                'fetanagent_routine_telebirr_no_money_runtime',
+                'fetanagent_routine_telebirr_paid_poll_runtime',
+                'fetanagent_routine_telebirr_paid_settlement_runtime'
+              )")"
+            [[ "$no_money_ready" == 't' ]]
+          fi
 
           # The assignment role intentionally has CONNECTION LIMIT 1, and the healthy current
           # broker owns that session. Opening a second session here would reject every rolling
@@ -1320,7 +1344,7 @@ jobs:
             infra/compose.production.companion-execution-v2.yaml \
             infra/compose.production.routine-deposits.yaml \
             "$RUNNER_TEMP/release/compose.production.shadow-review.yaml" \
-            infra/compose.production.inert-maintenance.yaml \
+            "$RUNNER_TEMP/release/compose.production.inert-maintenance.yaml" \
             "$SECRET_DIR"/{companion-device-database-url,companion-bridge-server-signer.pkcs8.der,companion-bridge-runtime-manifest.v2.json,companion-bridge-runtime-manifest.v3.json} \
             "$SECRET_DIR"/{api-action-capability-hmac,api-action-payload-hmac,api-action-semantic-hmac,api-action-transport-hmac,bot-action-transport-hmac,bot-token,cbe-deposit-reference-encryption-key,cbe-deposit-reference-fingerprint-key,cbe-deposit-reference-key-profile.v1.json,customer-web-database-url,customer-web-rate-limit-hmac,deposit-proof-reference-encryption-master,deposit-proof-reference-fingerprint-master,deposit-proof-reference-profile.v2.json,owner-cbe-birr-lookup-encryption-master,owner-cbe-birr-lookup-fingerprint-master,owner-cbe-birr-receiver-lookup-profile.v2.json,owner-database-url,owner-routine-enrollment-signer-pkcs8,player-action-database-url,publishable-key,supabase-ca.crt,telebirr-assignment-signer-key-id,telebirr-assignment.spki.der,telebirr-bridge-runtime-manifest.v1.json,telebirr-bridge-server-signer.pkcs8.der,telebirr-device-state-database-url}
             "$SECRET_DIR"/bot-screenshot-reference-model-access-key
@@ -1340,6 +1364,14 @@ jobs:
                   "$SECRET_DIR"/receiver-sms-ingest-database-url
                   "$SECRET_DIR"/receiver-sms-settlement-database-url
                 )
+                if [[ '${{ steps.protected.outputs.routine_proof_mode }}' == 'true' ]]; then
+                  transfer_files+=(
+                    "$SECRET_DIR"/routine-no-money-database-url
+                    "$SECRET_DIR"/routine-no-money-lookup-signer.pkcs8.der
+                    "$SECRET_DIR"/routine-no-money-lookup-signer.v1.json
+                    "$SECRET_DIR"/telebirr-reference-opening-key.v1.json
+                  )
+                fi
               else
                 transfer_files+=(
                   "$SECRET_DIR"/routine-no-money-database-url
@@ -1511,7 +1543,7 @@ jobs:
           if [[ "$REQUESTED_MODE" == 'deploy-inert' && "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ]]; then
             echo 'Production screenshot reference reading is deployed with the existing CBE Birr payment switches and signed receiver SMS route preserved. TeleBirr authority remains disabled. No test payment was made.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' && "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
-            echo 'Production Companion repair is deployed with the independent CBE switch preserved and both shared payment gates disabled. No payment or Player credit was attempted.' >>"$GITHUB_STEP_SUMMARY"
+            echo 'Production CBE-stopped phone transport is deployed with receiver SMS and TeleBirr no-money proof, independent CBE verification configured live, and both shared payment gates disabled. No paid receipt poll, payment, or Player credit was attempted.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' && '${{ steps.protected.outputs.sms_mode }}' == 'true' ]]; then
             echo 'Production web, Telegram, and receiving-phone SMS transport are deployed. The SMS database route and all seven financial switches remain disabled; no SMS claim, job, or Player credit can start.' >>"$GITHUB_STEP_SUMMARY"
           elif [[ "$REQUESTED_MODE" == 'deploy-inert' ]]; then

@@ -17,9 +17,10 @@ other open execution reviews as well; a cancelled job prevents an automatic
 retry but does not settle the customer obligation. If any review reveals an
 uncertain Transfer or an unresolved attempt, stop here.
 
-1. Review and merge the exact recovery release, wait for required `main` push
-   CI, and confirm the deployed server and installed Windows release still
-   match the intended code. Check that `payment_verification` and
+1. Review and merge the exact no-money proof refresh and CBE-stopped phone
+   transport release, wait for required `main` push CI, and apply its database
+   migration. Confirm the installed Windows release matches the intended code.
+   Check that `payment_verification` and
    `deposit_execution` are `disabled`, CBE verification is `live`, and the
    remaining four legacy/withdrawal switches are `disabled`, all with empty
    settings. Require zero active execution jobs and zero prepared, fenced,
@@ -32,7 +33,16 @@ uncertain Transfer or an unresolved attempt, stop here.
    only the three scoped TeleBirr phone and settlement logins. Its SQL requires
    the exact CBE-live/shared-gates-off profile. It does not start the Windows
    worker, enable financial gates, or credit a Player.
-3. Use the paired TeleBirr phone to produce a fresh signed V2 no-money receipt
+3. With separate approval, rotate the production deploy helper using the
+   checksum- and predecessor-pinned
+   `fetanagent-production-v2-cbe-stopped-phone-proof-rotation-v3.sh`, then
+   deploy the guarded `cbe-stopped-v1` phone transport overlay. It runs receiver
+   SMS and no-money proof in the same private broker;
+   it mounts no paid receipt poll or paid settlement credential. Confirm the
+   deployed server matches the reviewed code and that the private broker and
+   public no-money route pass their guarded checks. Recheck both shared gates
+   are disabled before touching the paired phone.
+4. Use the paired TeleBirr phone to produce a fresh signed V2 no-money receipt
    observation with `official_tls_origin`. Verify server policy accepted it and
    that the phone enrollment, signer, and all four broker/phone/settlement
    logins remain valid for more than one hour. In the CBE-live stopped profile,
@@ -45,7 +55,7 @@ uncertain Transfer or an unresolved attempt, stop here.
    status. If no retained candidate is eligible or the provider result goes to
    review, stop and investigate. Do not submit a new paid reference to
    manufacture this proof.
-4. The current routine Owner policy event carries an `execution_uncertain`
+5. The current routine Owner policy event carries an `execution_uncertain`
    pause for the cancelled 33 ETB attempt. After the Owner has reviewed the
    manual credit and all open execution cases, use the existing authenticated
    Owner routine-policy action to create a fresh authorization event for the
@@ -53,12 +63,12 @@ uncertain Transfer or an unresolved attempt, stop here.
    active. Never delete or edit the append-only pause to make the projection
    active. If the account, certificate, or transport has changed, use the
    guarded transport activation procedure instead of forcing an event.
-5. Start the exact installed Companion as an idle routine worker only after
+6. Start the exact installed Companion as an idle routine worker only after
    its signed transport, paired certificate, KemerBet login, protected server
    marker, and stop control are verified. Recheck empty job and unresolved
    attempt counts, and require a fresh signed broker lease. Keep shared gates
    disabled throughout this step.
-6. Obtain separate approval for `production-routine-financial-activate.yml`.
+7. Obtain separate approval for `production-routine-financial-activate.yml`.
    Select the independently observed CBE mode `live` and use its exact
    `ENABLE LIVE ROUTINE DEPOSITS WITH CBE` phrase. The database operation must
    pass exact-main CI and its fresh proof, four-login, Owner, broker-lease,

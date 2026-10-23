@@ -902,6 +902,7 @@ jobs:
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           psql -X \
+            -v expected_cbe_mode=disabled \
             -v signer_id="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID" \
             -v public_spki_digest="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256" \
             -v valid_from="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM" \
@@ -931,6 +932,7 @@ jobs:
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           psql -X \
+            -v expected_cbe_mode=disabled \
             -v runtime_password="$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
@@ -957,6 +959,7 @@ jobs:
           set -euo pipefail
           echo 'attempted=true' >>"$GITHUB_OUTPUT"
           psql -X \
+            -v expected_cbe_mode=disabled \
             -v runtime_password="$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-settlement-activate.sql >/dev/null

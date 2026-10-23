@@ -234,7 +234,7 @@ describe('Telegram Player-ID flow presentation', () => {
     }
   });
 
-  it('renders a concise force-reply payment card with the receiver name and full number', () => {
+  it('renders a concise force-reply payment card with a local copyable number', () => {
     const presentation = presentTelegramPlayerIdFlowResult(
       {
         version: 1,
@@ -242,7 +242,7 @@ describe('Telegram Player-ID flow presentation', () => {
         providerCode: 'telebirr',
         providerName: 'TeleBirr',
         receiverAccountHolderName: 'Demo Receiver',
-        receiverAccountReference: '0000000042',
+        receiverAccountReference: '251900000042',
         receiverAccountMasked: '***0042',
         acceptsPayments: true,
       },
@@ -253,9 +253,11 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'force_reply',
       text: expect.stringContaining('👤 Name: Demo Receiver'),
       placeholder: 'TeleBirr transaction number',
+      copyNumbers: [{ providerCode: 'telebirr', number: '900000042' }],
     });
     if (presentation.kind === 'force_reply') {
-      expect(presentation.text).toContain('📱 Number: 0000000042');
+      expect(presentation.text).toContain('📱 Number: 900000042');
+      expect(presentation.text).not.toContain('251900000042');
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
       expect(presentation.text).toContain('Send 25–25,000 ETB to:');
       expect(presentation.text).not.toContain('send exactly 25 ETB');
@@ -277,7 +279,7 @@ describe('Telegram Player-ID flow presentation', () => {
       providerCode: 'cbe_birr',
       providerName: 'CBE Birr',
       receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
+      receiverAccountReference: '251900000042',
       receiverAccountMasked: '***0042',
       selectedPlayerId: 'PLAYER-DEMO-42',
       acceptsPayments: true,
@@ -286,10 +288,12 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'force_reply',
       text: expect.stringContaining('💳 CBE Birr deposit'),
       placeholder: 'CBE Birr transaction reference',
+      copyNumbers: [{ providerCode: 'cbe_birr', number: '900000042' }],
     });
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
-      expect(presentation.text).toContain('📱 Number: 0000000042');
+      expect(presentation.text).toContain('📱 Number: 900000042');
+      expect(presentation.text).not.toContain('251900000042');
       expect(presentation.text).toContain('send the reference');
       expect(presentation.text).toContain('identifies CBE Birr automatically');
     }

@@ -55,10 +55,15 @@ vi.mock('grammy', () => ({
     }
   },
   InlineKeyboard: class {
-    public buttons: { text: string; callbackData: string }[] = [];
+    public buttons: { text: string; callbackData?: string; copyText?: string }[] = [];
 
     public text(text: string, callbackData: string): this {
       this.buttons.push({ text, callbackData });
+      return this;
+    }
+
+    public copyText(text: string, copyText: string): this {
+      this.buttons.push({ text, copyText });
       return this;
     }
 
@@ -644,12 +649,12 @@ describe('Telegram admission, private action, and ingress composition', () => {
         {
           providerCode: 'telebirr',
           receiverAccountHolderName: 'TeleBirr Owner Name',
-          receiverAccountReference: '0000000042',
+          receiverAccountReference: '251900000042',
         },
         {
           providerCode: 'cbe_birr',
           receiverAccountHolderName: 'CBE Owner Name',
-          receiverAccountReference: '0000000043',
+          receiverAccountReference: '251900000043',
         },
       ],
     });
@@ -685,23 +690,29 @@ describe('Telegram admission, private action, and ingress composition', () => {
           providerCode: 'telebirr',
           providerName: 'TeleBirr',
           receiverAccountHolderName: 'TeleBirr Owner Name',
-          receiverAccountReference: '0000000042',
+          receiverAccountReference: '251900000042',
           receiverAccountMasked: '***0042',
         },
         {
           providerCode: 'cbe_birr',
           providerName: 'CBE Birr',
           receiverAccountHolderName: 'CBE Owner Name',
-          receiverAccountReference: '0000000043',
+          receiverAccountReference: '251900000043',
           receiverAccountMasked: '***0043',
         },
       ],
     };
-    const replies: string[] = [];
+    const replies: {
+      text: string;
+      options: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } } | undefined;
+    }[] = [];
     await runtime.messageHandler!({
       ...messageContext('/deposit'),
-      reply: async (text: string) => {
-        replies.push(text);
+      reply: async (
+        text: string,
+        options?: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } },
+      ) => {
+        replies.push({ text, options });
         return { message_id: 42 };
       },
     });
@@ -712,11 +723,21 @@ describe('Telegram admission, private action, and ingress composition', () => {
       }),
     ]);
     expect(replies).toHaveLength(1);
-    expect(replies[0]).toContain('Name: TeleBirr Owner Name\nNumber: 0000000042');
-    expect(replies[0]).toContain('Name: CBE Owner Name\nNumber: 0000000043');
-    expect(replies[0]).toContain('Saved Player ID: PLAYER-DEMO-42');
-    expect(replies[0]).not.toContain('Choose one available method');
-    expect(replies[0]).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    expect(replies[0]!.text).toContain('Name: TeleBirr Owner Name\nNumber: 900000042');
+    expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
+    expect(replies[0]!.text).toContain('Saved Player ID: PLAYER-DEMO-42');
+    expect(replies[0]!.text).not.toContain('2519000000');
+    expect(replies[0]!.text).not.toContain('Choose one available method');
+    expect(replies[0]!.text).not.toContain(
+      'Valid for 1 hour. Check the receiver name before paying.',
+    );
+    expect(replies[0]!.options?.reply_markup).toMatchObject({
+      force_reply: true,
+      buttons: [
+        { text: 'Copy TeleBirr number', copyText: '900000042' },
+        { text: 'Copy CBE Birr number', copyText: '900000043' },
+      ],
+    });
     expect(runtime.instructionRecords).toHaveLength(1);
     expect(runtime.instructionRecords[0]).toEqual([expect.anything(), '123456', '123456789', 42]);
   });
@@ -745,18 +766,24 @@ describe('Telegram admission, private action, and ingress composition', () => {
           providerCode: 'cbe_birr',
           providerName: 'CBE Birr',
           receiverAccountHolderName: 'CBE Owner Name',
-          receiverAccountReference: '0000000043',
+          receiverAccountReference: '251900000043',
           receiverAccountMasked: '***0043',
         },
       ],
     };
-    const replies: string[] = [];
+    const replies: {
+      text: string;
+      options: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } } | undefined;
+    }[] = [];
     await runtime.callbackHandler!({
       ...messageContext(''),
       callbackQuery: { data: 'gd1.deposit' },
       answerCallbackQuery: async () => {},
-      reply: async (text: string) => {
-        replies.push(text);
+      reply: async (
+        text: string,
+        options?: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } },
+      ) => {
+        replies.push({ text, options });
         return { message_id: 42 };
       },
     });
@@ -764,9 +791,13 @@ describe('Telegram admission, private action, and ingress composition', () => {
       expect.objectContaining({ providerCodes: ['cbe_birr'] }),
     ]);
     expect(replies).toHaveLength(1);
-    expect(replies[0]).toContain('Name: CBE Owner Name\nNumber: 0000000043');
-    expect(replies[0]).not.toContain('TeleBirr\n');
-    expect(replies[0]).not.toContain('Valid for 1 hour');
+    expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
+    expect(replies[0]!.text).not.toContain('TeleBirr\n');
+    expect(replies[0]!.text).not.toContain('Valid for 1 hour');
+    expect(replies[0]!.options?.reply_markup).toMatchObject({
+      force_reply: true,
+      buttons: [{ text: 'Copy CBE Birr number', copyText: '900000043' }],
+    });
     expect(runtime.instructionRecords).toHaveLength(0);
   });
 

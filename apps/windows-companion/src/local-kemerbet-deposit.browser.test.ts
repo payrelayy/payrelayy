@@ -51,14 +51,20 @@ function renderSearch() {
 renderSearch();
 </script>`;
 
-const delayedNavigationHtml = fixtureHtml.replace(
-  'renderSearch();\n</script>',
-  `surface.innerHTML = '<div class="rt--header-right"><button class="rt--header-actions-content-icon">' +
+const delayedNavigationHtml = fixtureHtml
+  .replace(
+    '<main id="surface"></main>',
+    '<div role="menuitem">Deposit</div><main id="surface"></main>',
+  )
+  .replace(
+    'renderSearch();\n</script>',
+    `surface.innerHTML = '<div class="rt--header-right"><button class="rt--header-actions-content-icon">' +
     '<span class="icon-transfer"></span></button></div>';
   surface.querySelector('button').onclick = () => {
     setTimeout(() => {
-      surface.insertAdjacentHTML('beforeend', '<div role="menuitem">Deposit</div>');
-      surface.querySelector('[role="menuitem"]').onclick = () => {
+      surface.insertAdjacentHTML('beforeend',
+        '<div class="rt--transfer-dropdown"><div role="menuitem">Deposit</div></div>');
+      surface.querySelector('.rt--transfer-dropdown [role="menuitem"]').onclick = () => {
         setTimeout(() => {
           surface.innerHTML = '<button class="rt--transfer-item"><span class="icon-player"></span></button>';
           surface.querySelector('button').onclick = renderSearch;
@@ -67,7 +73,7 @@ const delayedNavigationHtml = fixtureHtml.replace(
     }, 150);
   };
 </script>`,
-);
+  );
 
 const delayedPreparedHtml = fixtureHtml.replace(
   `    surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
@@ -339,7 +345,7 @@ describe.skipIf(process.platform !== 'win32')(
       ).toBeUndefined();
     }, 15000);
 
-    it('waits for delayed guarded navigation controls before the no-money preflight', async () => {
+    it('uses the delayed Financial Actions menu despite an unrelated Deposit item', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(delayedNavigationHtml);
       const stages: string[] = [];
       await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>

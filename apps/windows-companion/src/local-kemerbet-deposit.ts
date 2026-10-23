@@ -26,6 +26,7 @@ const DEPOSIT_URL = `${KEMERBET_AGENT_API_ORIGIN}${KEMERBET_DEPOSIT_PATH}`;
 
 const selectors = Object.freeze({
   financialActionsTrigger: '.rt--header-right .rt--header-actions-content-icon:has(.icon-transfer)',
+  financialActionsMenu: '.rt--transfer-dropdown',
   toPlayerTile: '.rt--transfer-item:has(.icon-player)',
   findBySelectedValue: '.ant-modal-content .ant-select-selection-item',
   playerIdInput: '.ant-modal-content [data-placeholder="Enter Player ID"] input',
@@ -422,7 +423,10 @@ async function openSearchSurface(
   await (
     await waitForEnabledAuthenticatedControl(
       page,
-      page.getByRole('menuitem', { name: 'Deposit', exact: true }),
+      page.locator(selectors.financialActionsMenu).getByRole('menuitem', {
+        name: 'Deposit',
+        exact: true,
+      }),
     )
   ).click({ timeout: TIMEOUT_MS });
   reportPreflight(diagnostic, 'deposit_menu_selected');

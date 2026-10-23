@@ -712,11 +712,11 @@ assert.match(
 );
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
-assert.match(workflow, /status '5c7943a96e4d895aaf5401680fabc6e1dd51a60b'/u);
+assert.match(workflow, /status '0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'/u);
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);

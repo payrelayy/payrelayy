@@ -19,6 +19,7 @@ const [
   helper,
   sudoers,
   cbeStoppedHelperRotation,
+  cbeStoppedPhoneProofHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -59,6 +60,7 @@ const [
   read('infra/operations/fetanagent-production-deploy-helper-v2.sh'),
   read('infra/operations/fetanagent-production-deploy-helper-v2.sudoers'),
   read('infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh'),
+  read('infra/operations/fetanagent-production-v2-cbe-stopped-phone-proof-rotation-v3.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -787,7 +789,8 @@ assert.match(workflow, /production-stopped-sms-runtime-restore\.sql/u);
 assert.match(workflow, /production-companion-bridge-runtime-enable-continuous\.sql/u);
 assert.match(workflow, /steps\.stopped_recovery\.outputs\.attempted == 'true'/u);
 assert.match(workflow, /select count\(\*\) = 5 and pg_catalog\.bool_and\(/u);
-assert.match(workflow, /select count\(\*\) = 4 and pg_catalog\.bool_and\(not rolcanlogin\)/u);
+assert.match(workflow, /select count\(\*\) = 1 and pg_catalog\.bool_and\(not rolcanlogin\)/u);
+assert.match(workflow, /select count\(\*\) = 3 and pg_catalog\.bool_and\(/u);
 assert.match(stoppedSmsRestoreSql, /mode = 'disabled' and settings = '\{\}'::jsonb/u);
 assert.match(stoppedSmsRestoreSql, /where singleton and not enabled\)/u);
 assert.doesNotMatch(stoppedSmsRestoreSql, /not enabled and cutover_at is null/u);
@@ -801,7 +804,7 @@ assert.match(workflow, /psql_with_connection_retry\(\)/u);
 assert.match(workflow, /for attempt in 1 2 3 4; do/u);
 assert.match(workflow, /"\$status" -eq 2 && "\$attempt" -lt 4/u);
 assert.match(workflow, /sleep "\$\(\(attempt \* 2\)\)"/u);
-assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 4);
+assert.equal(count(workflow, /psql_with_connection_retry -X/gu), 5);
 assert.doesNotMatch(workflow, /assignment_login_ready=false/u);
 assert.doesNotMatch(workflow, /PGPORT=5432/u);
 assert.match(workflow, /from pg_catalog\.pg_authid/u);
@@ -1087,11 +1090,16 @@ const operationalTransferBlock =
     workflow,
   )?.[1];
 const inertTransferBlock =
-  /deploy-inert\)\s+if \[\[ '\$\{\{ steps\.protected\.outputs\.sms_mode \}\}' == 'true' \]\]; then\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+else/u.exec(
+  /deploy-inert\)\s+if \[\[ '\$\{\{ steps\.protected\.outputs\.sms_mode \}\}' == 'true' \]\]; then\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+if \[\[ '\$\{\{ steps\.protected\.outputs\.routine_proof_mode \}\}' == 'true' \]\]; then/u.exec(
+    workflow,
+  )?.[1];
+const inertProofTransferBlock =
+  /if \[\[ '\$\{\{ steps\.protected\.outputs\.routine_proof_mode \}\}' == 'true' \]\]; then\s+transfer_files\+=\(\n([\s\S]*?)\n\s+\)\n\s+fi\n\s+else/u.exec(
     workflow,
   )?.[1];
 assert.ok(operationalTransferBlock, 'the operational transfer inventory must exist');
 assert.ok(inertTransferBlock, 'the inert transfer inventory must exist');
+assert.ok(inertProofTransferBlock, 'the CBE-stopped proof transfer inventory must exist');
 const transferredNames = (block) =>
   block
     .split('\n')
@@ -1117,8 +1125,13 @@ const operationalTransferNames = [
   ...transferredNames(operationalTransferBlock),
 ];
 const inertTransferNames = [...baseTransferNames, ...transferredNames(inertTransferBlock)];
+const inertProofTransferNames = [
+  ...inertTransferNames,
+  ...transferredNames(inertProofTransferBlock),
+];
 assert.equal(new Set(operationalTransferNames).size, operationalTransferNames.length);
 assert.equal(new Set(inertTransferNames).size, inertTransferNames.length);
+assert.equal(new Set(inertProofTransferNames).size, inertProofTransferNames.length);
 const coreRequiredBlock = /local -a required=\(\n([\s\S]*?)\n  \)/u.exec(helper)?.[1];
 assert.ok(coreRequiredBlock, 'the helper required-secret inventory must exist');
 for (const name of coreRequiredBlock.split('\n').map((line) => line.trim())) {
@@ -1137,6 +1150,7 @@ const [
   routineFiles,
   paidPollFiles,
   paidSettlementFiles,
+  combinedSmsFiles,
   smsFiles,
   companionFiles,
 ] = [...helperCountBlock.matchAll(/expected_count=\$\(\(expected_count \+ (\d+)\)\)/gu)].map(
@@ -1157,8 +1171,14 @@ assert.equal(
   inertTransferNames.length,
   'the helper inert bundle count must match the flattened workflow transfer',
 );
+assert.equal(
+  helperBaseCount + screenshotFiles + routineFiles + combinedSmsFiles + companionFiles,
+  inertProofTransferNames.length,
+  'the helper CBE-stopped proof bundle count must match the flattened workflow transfer',
+);
 assert.equal(routineFiles + paidPollFiles + paidSettlementFiles, 6);
 assert.equal(smsFiles, 2);
+assert.equal(combinedSmsFiles, 2);
 assert.match(helper, /if grep -Fq '  beta-admission:' "\$incoming\/compose\.production\.yaml"/u);
 assert.match(helper, /owner-cbe-birr-receiver-lookup-profile\.v2\.json/u);
 assert.match(helper, /owner-routine-enrollment-signer-pkcs8/u);
@@ -1280,10 +1300,27 @@ assert.match(
 );
 assert.match(
   cbeStoppedHelperRotation,
-  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+  /readonly SUCCESSOR_SHA256='c43a22ccf97121f79c9b02183cb862b9db860c1f281d090978d135b3436a9402'/u,
 );
 assert.match(cbeStoppedHelperRotation, /require_current_release/u);
 assert.match(cbeStoppedHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
+assert.match(
+  cbeStoppedPhoneProofHelperRotation,
+  /readonly PREDECESSOR_SHA256='c43a22ccf97121f79c9b02183cb862b9db860c1f281d090978d135b3436a9402'/u,
+);
+assert.match(
+  cbeStoppedPhoneProofHelperRotation,
+  /readonly EXPECTED_CURRENT_SHA='0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'/u,
+);
+assert.match(
+  cbeStoppedPhoneProofHelperRotation,
+  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+);
+assert.match(cbeStoppedPhoneProofHelperRotation, /require_current_release/u);
+assert.match(
+  cbeStoppedPhoneProofHelperRotation,
+  /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u,
+);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

@@ -92,6 +92,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-deploy-helper.sh
           bash -n infra/operations/fetanagent-production-deploy-helper-v2.sh
           bash -n infra/operations/fetanagent-production-v2-screenshot-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh
           bash -n infra/operations/test-production-routine-marker-handoff.sh
           sudo bash infra/operations/test-production-routine-marker-handoff.sh
           sudo visudo -cf infra/operations/fetanagent-production-deploy-helper-v2.sudoers

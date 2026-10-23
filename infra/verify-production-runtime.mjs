@@ -18,6 +18,7 @@ const [
   workflow,
   helper,
   sudoers,
+  cbeStoppedHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -27,6 +28,7 @@ const [
   shadowAssignmentRuntimeInputSql,
   inertPreflightSql,
   cbeLivePreflightSql,
+  cbeStoppedPreflightSql,
   cbeLiveCutoverIdleSql,
   financialSwitchFingerprintSql,
   paidPollActivateSql,
@@ -56,6 +58,7 @@ const [
   read('.github/workflows/production-runtime.yml'),
   read('infra/operations/fetanagent-production-deploy-helper-v2.sh'),
   read('infra/operations/fetanagent-production-deploy-helper-v2.sudoers'),
+  read('infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -65,6 +68,7 @@ const [
   read('infra/sql/production-telebirr-shadow-assignment-runtime-input.sql'),
   read('infra/sql/production-inert-runtime-preflight.sql'),
   read('infra/sql/production-cbe-live-runtime-preflight.sql'),
+  read('infra/sql/production-cbe-stopped-runtime-preflight.sql'),
   read('infra/sql/production-cbe-live-cutover-idle.sql'),
   read('infra/sql/production-financial-switch-fingerprint.sql'),
   read('infra/sql/production-routine-paid-poll-activate.sql'),
@@ -671,13 +675,23 @@ assert.match(workflow, /Prove the exact production payment boundary/u);
 assert.match(workflow, /if: inputs\.mode == 'deploy-inert'\s+id: payment_profile\s+shell: bash/u);
 assert.match(workflow, /production-inert-runtime-preflight\.sql/u);
 assert.match(workflow, /production-cbe-live-runtime-preflight\.sql/u);
+assert.match(workflow, /production-cbe-stopped-runtime-preflight\.sql/u);
+assert.equal(
+  count(
+    workflow,
+    /cbe-stopped-v1\) preflight=infra\/sql\/production-cbe-stopped-runtime-preflight\.sql/gu,
+  ),
+  3,
+  'the stopped CBE profile must be checked before, immediately before, and after cutover',
+);
 assert.match(workflow, /production-cbe-live-cutover-idle\.sql/u);
 assert.match(workflow, /production-financial-switch-fingerprint\.sql/u);
 assert.match(
   workflow,
-  /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1/u,
+  /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1\s+- cbe-stopped-v1/u,
 );
 assert.match(workflow, /DEPLOY SCREENSHOT READER WITH CBE LIVE/u);
+assert.match(workflow, /DEPLOY CBE STOPPED COMPANION REPAIR/u);
 assert.match(
   workflow,
   /"\$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled'/u,
@@ -687,16 +701,20 @@ assert.match(
   workflow,
   /steps\.protected\.outputs\.sms_mode == 'true' && inputs\.confirm_financial_switch_profile == 'disabled'/u,
 );
-assert.match(workflow, /The CBE-live release requires the existing SMS grants and logins/u);
-assert.match(workflow, /The CBE-live release requires the reviewed running predecessor/u);
-assert.match(workflow, /Recheck CBE-live payment state before activation/u);
+assert.match(workflow, /The guarded CBE release requires existing SMS grants and logins/u);
+assert.match(workflow, /The guarded CBE release requires the reviewed running predecessor/u);
+assert.match(workflow, /Recheck guarded CBE payment state before activation/u);
+assert.match(
+  workflow,
+  /inputs\.confirm_financial_switch_profile == 'cbe-live-v1' \|\| inputs\.confirm_financial_switch_profile == 'cbe-stopped-v1'/u,
+);
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
-assert.match(workflow, /status '906b5b6a6486a26450d302b9f911feb3e35d30e4'/u);
+assert.match(workflow, /status '5c7943a96e4d895aaf5401680fabc6e1dd51a60b'/u);
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_LIVE_PREDECESSOR_SHA='906b5b6a6486a26450d302b9f911feb3e35d30e4'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1243,6 +1261,22 @@ assert.match(helper, /finalize\)/u);
 assert.doesNotMatch(helper, /curl[^\r\n]*-k\b|StrictHostKeyChecking=no|2026-09-0/u);
 
 const helperDigest = createHash('sha256').update(helper).digest('hex');
+assert.match(
+  cbeStoppedHelperRotation,
+  /readonly PREDECESSOR_SHA256='08fb54031bf6f1e11306c3ad1cd1f067fe39c6928b8baf944fdea60c0fdefe64'/u,
+);
+assert.match(cbeStoppedHelperRotation, /readonly EXPECTED_DROPLET_ID='593344964'/u);
+assert.match(cbeStoppedHelperRotation, /readonly SOURCE_REVIEW='cbe-stopped-companion-repair-v2'/u);
+assert.match(
+  cbeStoppedHelperRotation,
+  /readonly EXPECTED_CURRENT_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'/u,
+);
+assert.match(
+  cbeStoppedHelperRotation,
+  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+);
+assert.match(cbeStoppedHelperRotation, /require_current_release/u);
+assert.match(cbeStoppedHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,
@@ -1444,6 +1478,13 @@ assert.match(cbeLivePreflightSql, /receiver_sms_logins_ready/u);
 assert.match(cbeLivePreflightSql, /receiver_sms_grants_ready/u);
 assert.match(cbeLivePreflightSql, /financial_runtime_sessions_absent/u);
 assert.match(cbeLivePreflightSql, /rollback;/u);
+assert.match(cbeStoppedPreflightSql, /begin transaction isolation level serializable read only/u);
+assert.match(cbeStoppedPreflightSql, /exact_cbe_stopped_feature_switches/u);
+assert.match(cbeStoppedPreflightSql, /receiver_sms_route_enabled/u);
+assert.match(cbeStoppedPreflightSql, /receiver_sms_logins_ready/u);
+assert.match(cbeStoppedPreflightSql, /receiver_sms_grants_ready/u);
+assert.match(cbeStoppedPreflightSql, /financial_runtime_sessions_absent/u);
+assert.match(cbeStoppedPreflightSql, /rollback;/u);
 assert.match(cbeLiveCutoverIdleSql, /begin transaction isolation level serializable read only/u);
 assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_jobs job/u);
 assert.match(cbeLiveCutoverIdleSql, /from app\.deposit_execution_attempts attempt/u);
@@ -1459,6 +1500,20 @@ for (const [feature, mode] of [
 ]) {
   assert.match(
     cbeLivePreflightSql,
+    new RegExp(escapeRegExp("('" + feature + "', '" + mode + "')"), 'u'),
+  );
+}
+for (const [feature, mode] of [
+  ['cbe_birr_authoritative_verification', 'live'],
+  ['deposit_execution', 'disabled'],
+  ['payment_verification', 'disabled'],
+  ['private_live_deposit_pilot', 'disabled'],
+  ['telebirr_authoritative_verification', 'disabled'],
+  ['withdrawal_collection', 'disabled'],
+  ['withdrawal_validation', 'disabled'],
+]) {
+  assert.match(
+    cbeStoppedPreflightSql,
     new RegExp(escapeRegExp("('" + feature + "', '" + mode + "')"), 'u'),
   );
 }

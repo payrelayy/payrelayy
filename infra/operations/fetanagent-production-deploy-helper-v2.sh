@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_LIVE_PREDECESSOR_SHA='906b5b6a6486a26450d302b9f911feb3e35d30e4'
+readonly CBE_GUARDED_PREDECESSOR_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -247,8 +247,8 @@ handoff_routine_marker() {
   local sha="$1" previous="$2" release="$3" previous_sha receipt
   previous_sha="${previous##*/}"
   receipt="$STATE_ROOT/pending-$sha.routine-marker"
-  [[ "$previous_sha" == "$CBE_LIVE_PREDECESSOR_SHA" &&
-    "$previous" == "$(require_release "$CBE_LIVE_PREDECESSOR_SHA")" &&
+  [[ "$previous_sha" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
+    "$previous" == "$(require_release "$CBE_GUARDED_PREDECESSOR_SHA")" &&
     "$(release_deployment_mode "$release")" == 'inert-maintenance' ]] ||
     die 'the routine-deposit handoff is outside the reviewed release'
   [[ ! -e "$COMPANION_EXECUTION_V2_MARKER" && ! -L "$COMPANION_EXECUTION_V2_MARKER" ]] ||
@@ -269,8 +269,8 @@ restore_routine_marker_for_rollback() {
   local sha="$1" previous="$2" receipt="$STATE_ROOT/pending-$1.routine-marker" previous_sha marker_sha
   [[ -e "$receipt" || -L "$receipt" ]] || return 0
   previous_sha="${previous##*/}"
-  [[ "$previous_sha" == "$CBE_LIVE_PREDECESSOR_SHA" &&
-    "$previous" == "$(require_release "$CBE_LIVE_PREDECESSOR_SHA")" &&
+  [[ "$previous_sha" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
+    "$previous" == "$(require_release "$CBE_GUARDED_PREDECESSOR_SHA")" &&
     ! -L "$receipt" && -f "$receipt" &&
     "$(stat --format='%u:%g:%a:%h' "$receipt")" == '0:0:600:1' &&
     "$(<"$receipt")" == "$previous_sha" ]] ||
@@ -1137,7 +1137,7 @@ case "${1:-}" in
     if [[ -e "$routine_receipt" || -L "$routine_receipt" ]]; then
       [[ ! -L "$routine_receipt" && -f "$routine_receipt" &&
         "$(stat --format='%u:%g:%a:%h' "$routine_receipt")" == '0:0:600:1' &&
-        "$(<"$routine_receipt")" == "$CBE_LIVE_PREDECESSOR_SHA" ]] ||
+        "$(<"$routine_receipt")" == "$CBE_GUARDED_PREDECESSOR_SHA" ]] ||
         die 'the routine-deposit handoff receipt is unsafe'
       routine_deposits_enabled_for_release "$release" ||
         die 'the signed routine transport was not retained'

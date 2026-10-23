@@ -14,6 +14,7 @@ const dependencies = vi.hoisted(() => ({
   mkdir: vi.fn(),
   realpath: vi.fn(),
   releaseSessionLock: vi.fn(),
+  ensureKemerBetAgentWindow: vi.fn(),
   verifyLocalKemerBetIdentity: vi.fn(),
 }));
 
@@ -30,6 +31,9 @@ vi.mock('./session-lock.js', () => ({
 }));
 vi.mock('./local-kemerbet-identity.js', () => ({
   verifyLocalKemerBetIdentity: dependencies.verifyLocalKemerBetIdentity,
+}));
+vi.mock('./local-kemerbet-window.js', () => ({
+  ensureKemerBetAgentWindow: dependencies.ensureKemerBetAgentWindow,
 }));
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
@@ -244,6 +248,7 @@ beforeEach(() => {
     handle: { close: vi.fn(async () => undefined) },
   });
   dependencies.releaseSessionLock.mockResolvedValue(undefined);
+  dependencies.ensureKemerBetAgentWindow.mockResolvedValue(undefined);
   dependencies.verifyLocalKemerBetIdentity.mockResolvedValue({
     bindingCreated: false,
     identityVerified: true,
@@ -261,6 +266,51 @@ afterEach(async () => {
 });
 
 describe('local KemerBet enrollment session', () => {
+  it('refuses Player lookup work when its Chrome window cannot be restored', async () => {
+    const { page, session } = await start();
+    dependencies.ensureKemerBetAgentWindow.mockRejectedValue(
+      new Error('The guarded Chrome window is too small.'),
+    );
+
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).rejects.toThrow('too small');
+    await expect(
+      session.executeExactFiveLookup([
+        'PLAYER-ALPHA',
+        'PLAYER-BRAVO',
+        'PLAYER-CHARLIE',
+        'PLAYER-DELTA',
+        'PLAYER-ECHO',
+      ]),
+    ).rejects.toThrow('too small');
+
+    expect(dependencies.ensureKemerBetAgentWindow).toHaveBeenCalledTimes(2);
+    expect(dependencies.ensureKemerBetAgentWindow).toHaveBeenCalledWith(page);
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
+  it('cannot acquire a deposit final action or rehearse when the Chrome window is unavailable', async () => {
+    const routineConfig = { ...config, routineDepositsEnabled: true };
+    const { page, session } = await start(AGENTS_URL, routineConfig);
+    dependencies.ensureKemerBetAgentWindow.mockRejectedValue(
+      new Error('The guarded Chrome window is unavailable.'),
+    );
+    const acquireFinalAction = vi.fn(async () => {
+      throw new Error('A failed window guard must not request a deposit fence.');
+    });
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).rejects.toThrow('window is unavailable');
+    await expect(session.rehearseNoMoneyRoutinePreflight('12345678', 2500)).rejects.toThrow(
+      'window is unavailable',
+    );
+
+    expect(dependencies.ensureKemerBetAgentWindow).toHaveBeenCalledTimes(2);
+    expect(dependencies.ensureKemerBetAgentWindow).toHaveBeenCalledWith(page);
+    expect(acquireFinalAction).not.toHaveBeenCalled();
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
   it('starts Chrome offline and guards HTTP and WebSockets before enabling its network', async () => {
     const { context, order, page } = await start();
 

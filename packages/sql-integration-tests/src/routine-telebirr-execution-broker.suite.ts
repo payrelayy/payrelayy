@@ -430,6 +430,139 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
       }
     });
 
+    it('moves a paused unfenced lease to review without permitting a later Transfer', async () => {
+      const client = getClient();
+      const originalModes = await client.query<{ feature_key: string; mode: string }>(
+        `select feature_key, mode::text from app.feature_switches
+          where feature_key in ('payment_verification', 'deposit_execution', 'private_live_deposit_pilot')
+          order by feature_key`,
+      );
+      let jobId: string | undefined;
+      let disabled = false;
+      const password = randomBytes(32).toString('hex');
+      const runtime = createRuntimeClient(password);
+      try {
+        await client.query(
+          `update app.feature_switches set mode = case
+            when feature_key in ('payment_verification', 'deposit_execution') then 'live'::app.feature_mode
+            else 'disabled'::app.feature_mode end
+           where feature_key in ('payment_verification', 'deposit_execution', 'private_live_deposit_pilot')`,
+        );
+        const policy = await persistentPolicyFixture(client, getOwnerAuthUserId());
+        const deposit = await paidJob(client, 2501);
+        jobId = deposit.jobId;
+        const certificate = await activeCertificate(client, getOwnerAdminId());
+        await client.query(
+          `select app.activate_routine_telebirr_execution_transport(
+            $1::uuid, $2::uuid, $3::uuid, $4::text
+          )`,
+          [getOwnerAuthUserId(), certificate.certificateId, randomUUID(), password],
+        );
+        await runtime.connect();
+        const command = leaseCommand(policy.accountId);
+        const leased = (await execute(runtime, certificate, command)).result as Record<
+          string,
+          unknown
+        >;
+        const binding = {
+          jobId: deposit.jobId,
+          intentId: deposit.depositIntentId,
+          attemptId: leased.attemptId,
+          paymentClaimId: deposit.claimId,
+          platformAgentAccountId: policy.accountId,
+          playerId: deposit.playerId,
+          amountMinor: 2501,
+          currencyCode: 'ETB',
+        };
+        expect(leased).toMatchObject({ ...binding, phase: 'execute', finalActionFenced: false });
+        const pauseCommand = boundCommand(command, 'pause', binding, {
+          reason: 'execution_uncertain',
+        });
+        const paused = await execute(runtime, certificate, pauseCommand);
+        expect(paused.result).toBeNull();
+        expect(
+          (await execute(runtime, certificate, pauseCommand, paused.identities)).result,
+        ).toBeNull();
+        const state = await client.query<{
+          attempt_status: string;
+          fence_count: number;
+          intent_status: string;
+          job_status: string;
+          claim_count: number;
+          review_count: number;
+        }>(
+          `select attempt.status::text as attempt_status,
+             (attempt.final_action_fenced_at is not null)::integer as fence_count,
+             intent.status::text as intent_status, job.status::text as job_status,
+             (select count(*)::integer from app.deposit_payment_claims claim
+               where claim.deposit_intent_id = intent.id) as claim_count,
+             (select count(*)::integer from app.deposit_review_cases review
+               where review.deposit_intent_id = intent.id and review.review_kind = 'execution'
+                 and review.status = 'open') as review_count
+           from app.deposit_jobs job
+           join app.deposit_execution_attempts attempt on attempt.deposit_job_id = job.id
+           join app.deposit_intents intent on intent.id = job.deposit_intent_id
+           where job.id = $1::uuid`,
+          [deposit.jobId],
+        );
+        expect(state.rows).toEqual([
+          {
+            attempt_status: 'cancelled_before_action',
+            fence_count: 0,
+            intent_status: 'execution_review',
+            job_status: 'cancelled',
+            claim_count: 1,
+            review_count: 1,
+          },
+        ]);
+        await expect(
+          execute(runtime, certificate, boundCommand(command, 'fence', binding)),
+        ).rejects.toThrow();
+        await client.query(
+          `select app.disable_routine_telebirr_execution_transport($1::uuid, 'operator_requested')`,
+          [randomUUID()],
+        );
+        disabled = true;
+      } finally {
+        await runtime.end().catch(() => undefined);
+        try {
+          if (jobId) {
+            const prepared = await client.query<{ attempt_id: string; lease_token: string }>(
+              `select attempt.id as attempt_id, job.lease_token::text
+                 from app.deposit_execution_attempts attempt
+                 join app.deposit_jobs job on job.id = attempt.deposit_job_id
+                where job.id = $1::uuid and attempt.status = 'prepared'
+                  and job.status = 'leased' and job.lease_token is not null`,
+              [jobId],
+            );
+            for (const row of prepared.rows) {
+              await client.query(
+                `select * from app.cancel_deposit_execution_before_action(
+                  $1::uuid, $2::uuid, 'operator_stopped_before_action'
+                )`,
+                [row.attempt_id, row.lease_token],
+              );
+            }
+          }
+        } finally {
+          if (!disabled) {
+            await client
+              .query(
+                `select app.disable_routine_telebirr_execution_transport($1::uuid, 'incident_stop')`,
+                [randomUUID()],
+              )
+              .catch(() => undefined);
+          }
+          for (const row of originalModes.rows) {
+            await client.query(
+              `update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text`,
+              [row.feature_key, row.mode],
+            );
+          }
+        }
+      }
+    });
+
     it('leases and reconciles one non-pilot job without a v2 approval or Transfer retry', async () => {
       const client = getClient();
       const originalModes = await client.query<{ feature_key: string; mode: string }>(

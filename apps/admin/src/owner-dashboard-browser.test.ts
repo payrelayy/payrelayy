@@ -380,6 +380,47 @@ function ownerBrowserHarness(
   };
 }
 
+describe('Owner workspace navigation', () => {
+  it('keeps daily work first and every active control reachable', async () => {
+    const browser = ownerBrowserHarness(503);
+    const areas = {
+      home: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
+      payments: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
+      players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
+      system: [
+        'routine-processing-title',
+        'receiver-title',
+        'kemerbet-companion-title',
+        'support-contact-title',
+      ],
+      advanced: [
+        'execution-readiness-title',
+        'execution-approvals-title',
+        'pilot-title',
+        'kemerbet-readiness-cohort-title',
+        'deposit-intake-title',
+      ],
+    } as const;
+    const everySection = Object.values(areas).flat();
+
+    for (const [area, visible] of Object.entries(areas)) {
+      if (area !== 'home') {
+        await browser.element(`#owner-nav-${area}`).listeners.get('click')?.({
+          preventDefault() {},
+        });
+      }
+      expect(
+        everySection.filter(
+          (label) => !browser.element(`section[aria-labelledby="${label}"]`).hidden,
+        ),
+      ).toEqual(visible);
+      expect(browser.element(`#owner-nav-${area}`).dataset.active).toBe('true');
+    }
+    expect(browser.element('#owner-view-title').textContent).toBe('Advanced tools');
+    expect(browser.element('#owner-view-title').focused).toBe(true);
+  });
+});
+
 describe('read-only TeleBirr receiver-change review queue', () => {
   it('does not redraw a late case response after Owner sign-out', async () => {
     const pending = deferred<ReturnType<typeof response>>();

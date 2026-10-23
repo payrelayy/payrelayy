@@ -28,8 +28,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
   const deploymentLabelLower = deploymentLabel.toLowerCase();
   const lede =
     runtime.deploymentTarget === 'production'
-      ? 'Operate the authenticated FetanAgent production control plane.'
-      : 'Review transactions in the authenticated FetanAgent staging control plane.';
+      ? 'Review payments, manage Players, and keep FetanAgent running.'
+      : 'Review payments and manage the staging system.';
   const footer =
     runtime.deploymentTarget === 'production'
       ? 'Production control. Financial actions remain governed by explicit audited switches.'
@@ -40,7 +40,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light" />
     <title>FetanAgent Owner</title>
     <link rel="stylesheet" href="/owner/styles.css" />
   </head>
@@ -55,9 +55,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
       <section class="panel" id="login-panel" aria-labelledby="login-title">
         <h2 id="login-title">Owner sign in</h2>
         <p class="receipt-label">
-          After sign-in, this open tab securely renews the Owner access token for up to twelve
-          hours. The rotating refresh token is retained only in this browser tab, survives page
-          reloads, and is erased on sign-out or tab close.
+          Sign in to manage payments, Players, and system settings. This browser tab can keep
+          you signed in securely for up to twelve hours.
         </p>
         <form id="login-form">
           <label for="email">Email</label>
@@ -69,14 +68,30 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
       </section>
 
       <section class="panel" id="owner-panel" aria-labelledby="owner-title" hidden>
-        <div class="panel-heading">
+        <div class="panel-heading owner-heading">
           <div>
-            <p class="status-ok">Authenticated ${deploymentLabelLower} Owner</p>
-            <h2 id="owner-title">Owner controls</h2>
+            <p class="status-ok">${deploymentLabel} · Owner access</p>
+            <h2 id="owner-title">Your workspace</h2>
+            <p class="receipt-label">Every active Owner control is available in the sections below.</p>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
         <p class="request-meta" id="owner-session-status"></p>
+        <div class="owner-workspace">
+          <nav class="owner-navigation" aria-label="Owner workspace">
+            <p class="owner-navigation-label">WORKSPACE</p>
+            <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
+            <button id="owner-nav-payments" type="button" data-owner-view="payments">Payments &amp; SMS</button>
+            <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
+            <button id="owner-nav-system" type="button" data-owner-view="system">System</button>
+            <button id="owner-nav-advanced" type="button" data-owner-view="advanced">Advanced tools</button>
+          </nav>
+          <div class="owner-workspace-content">
+            <div class="owner-view-intro">
+              <p class="eyebrow" id="owner-view-eyebrow">HOME</p>
+              <h3 id="owner-view-title" tabindex="-1">Needs your attention</h3>
+              <p id="owner-view-description">Review payments and finish any manual credits.</p>
+            </div>
         <section class="review-section transactions-section" aria-labelledby="transactions-title">
           <div class="panel-heading">
             <div>
@@ -85,7 +100,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="transactions-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Historical TeleBirr transactions are read-only here. Use Payment review below to reserve an older payment for manual credit or reject it.</p>
+          <p class="receipt-label">Search older TeleBirr payments here. Use Payment review on Home to approve a case for manual credit or reject it.</p>
           <form id="transactions-filters" class="transactions-filters" autocomplete="off">
             <div>
               <label for="transactions-status-filter">Status</label>
@@ -122,7 +137,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-old-title">Payment review <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
             <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Approve reserves a reference for manual credit and stops automatic credit for that payment. After crediting outside FetanAgent, mark it manually credited here. Reject requires a reason. An SMS match is not required for your decision.</p>
+          <p class="receipt-label">Approve reserves the payment for you. Credit the Player outside FetanAgent, then mark it manually credited here. You can approve without a matching SMS; rejecting a payment requires a reason.</p>
           <label for="manual-payment-status-filter">Show cases</label>
           <select id="manual-payment-status-filter">
             <option value="pending">Pending review</option>
@@ -139,7 +154,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-inbox-title">Received payment SMS</h2>
             <button class="secondary" id="receiver-sms-inbox-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Verified details from the paired phone for both providers, including payments with no customer submission. Unmatched messages have no reference ending stored; the unique internal reference still prevents reuse. A Manually credited action appears only when no automatic credit is active or uncertain. Complete any linked Player credit outside FetanAgent before using it.</p>
+          <p class="receipt-label">See TeleBirr and CBE Birr payments received by the phone, including those without a customer submission. Complete any linked Player credit before marking a payment manually credited. Some unmatched SMS entries have no visible reference ending.</p>
           <p class="request-meta" id="receiver-sms-inbox-status" role="status" aria-live="polite">Sign in to load received payments.</p>
           <div class="request-list" id="receiver-sms-inbox-list"></div>
           <button class="secondary transactions-more" id="receiver-sms-inbox-more" type="button" hidden>Show older SMS</button>
@@ -524,7 +539,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <div class="panel-heading">
             <div>
               <p class="status-ok">Read-only diagnosis</p>
-              <h2 id="execution-readiness-title">Deposit execution readiness</h2>
+              <h2 id="execution-readiness-title">Private pilot execution readiness</h2>
             </div>
             <button class="secondary" id="execution-readiness-refresh" type="button">
               Refresh status
@@ -767,6 +782,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </p>
           <div class="request-list" id="deposit-intake-list"></div>
         </section>
+          </div>
+        </div>
       </section>
 
       <p class="notice" id="notice" role="status" aria-live="polite"></p>
@@ -779,35 +796,66 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
 }
 
 export const OWNER_DASHBOARD_CSS = `:root {
-  color: #f8fafc;
-  background: #09090b;
+  color: #173039;
+  background: #f4f8f8;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #20243a 0, #09090b 48%); }
+body { margin: 0; min-height: 100vh; background: linear-gradient(160deg, #eaf5f2 0, #f7fafb 38%, #f4f8f8 100%); }
 button, input, select { font: inherit; }
-.shell { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 72px 0 40px; }
-header { margin-bottom: 28px; }
-.eyebrow, .status-ok { color: #67e8f9; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
-h1 { margin: 6px 0 8px; font-size: clamp(2.4rem, 8vw, 4.6rem); line-height: 0.95; letter-spacing: -0.055em; }
-h2 { margin: 0 0 20px; font-size: 1.35rem; }
-.lede, footer, .receipt-label { color: #a1a1aa; line-height: 1.6; }
-.panel { border: 1px solid #30303a; border-radius: 18px; background: rgba(17, 17, 22, 0.94); padding: 24px; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34); }
+.shell { width: min(1320px, calc(100% - 48px)); margin: 0 auto; padding: 36px 0 48px; }
+header { margin-bottom: 24px; }
+.eyebrow, .status-ok { color: #087d71; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+h1 { margin: 6px 0 8px; font-size: clamp(2.2rem, 5vw, 3.4rem); line-height: 1.05; letter-spacing: -0.045em; }
+h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
+.lede, footer, .receipt-label { color: #51656d; line-height: 1.55; }
+.panel { border: 1px solid #dbe5e8; border-radius: 20px; background: #fff; padding: 28px; box-shadow: 0 16px 48px rgba(27, 55, 61, 0.07); }
+#login-panel { max-width: 480px; margin: 0 auto; }
 .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.owner-heading { align-items: center; }
+.owner-heading > div { min-width: 0; }
+.owner-heading h2 { margin-bottom: 3px; font-size: 1.65rem; }
+.owner-heading .receipt-label { margin: 0; }
+.owner-workspace { display: grid; grid-template-columns: 218px minmax(0, 1fr); align-items: start; gap: 24px; margin-top: 24px; }
+.owner-navigation { position: sticky; top: 20px; display: grid; gap: 5px; padding: 14px; border: 1px solid #dbe5e8; border-radius: 16px; background: #f8fbfb; }
+.owner-navigation-label { margin: 4px 12px 8px; color: #6b8087; font-size: .68rem; font-weight: 800; letter-spacing: .14em; }
+.owner-navigation button { width: 100%; min-height: 44px; padding: 11px 13px; border-radius: 10px; color: #29444b; background: transparent; text-align: left; font-weight: 720; }
+.owner-navigation button:hover { background: #e9f2f0; }
+.owner-navigation button[data-active="true"] { color: #075f55; background: #d9efea; }
+.owner-workspace-content { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.owner-view-intro { padding: 2px 4px 8px; }
+.owner-view-intro .eyebrow { margin: 0 0 6px; }
+.owner-view-intro h3 { margin: 0 0 5px; font-size: clamp(1.55rem, 3vw, 2rem); letter-spacing: -.035em; }
+.owner-view-intro p:last-child { margin: 0; color: #51656d; }
+.owner-view-intro { order: -1; }
+section[aria-labelledby="receiver-sms-old-title"],
+section[aria-labelledby="receiver-sms-inbox-title"],
+section[aria-labelledby="execution-readiness-title"] { order: 1; }
+section[aria-labelledby="telebirr-fast-alert-title"],
+section[aria-labelledby="transactions-title"],
+section[aria-labelledby="execution-approvals-title"],
+section[aria-labelledby="receiver-title"] { order: 2; }
+section[aria-labelledby="receiver-change-review-title"],
+section[aria-labelledby="pilot-title"],
+section[aria-labelledby="routine-processing-title"] { order: 3; }
+section[aria-labelledby="kemerbet-companion-title"],
+section[aria-labelledby="kemerbet-readiness-cohort-title"] { order: 4; }
+section[aria-labelledby="support-contact-title"],
+section[aria-labelledby="deposit-intake-title"] { order: 5; }
 form { display: grid; gap: 10px; }
-label { color: #d4d4d8; font-size: 0.9rem; font-weight: 700; }
-input, select { width: 100%; border: 1px solid #3f3f46; border-radius: 10px; color: #fafafa; background: #18181b; padding: 12px 14px; }
-input:focus, select:focus, button:focus, a:focus { outline: 3px solid rgba(103, 232, 249, 0.35); outline-offset: 2px; }
-button, .actions a { border: 0; border-radius: 10px; color: #071113; background: #67e8f9; padding: 12px 16px; font-weight: 850; cursor: pointer; text-align: center; text-decoration: none; }
+label { color: #2d4951; font-size: 0.9rem; font-weight: 700; }
+input, select { width: 100%; border: 1px solid #c8d6db; border-radius: 10px; color: #173039; background: #fff; padding: 12px 14px; }
+input:focus, select:focus, button:focus, a:focus { outline: 3px solid rgba(8, 125, 113, 0.3); outline-offset: 2px; }
+button, .actions a { border: 0; border-radius: 10px; color: #fff; background: #087d71; padding: 12px 16px; font-weight: 800; cursor: pointer; text-align: center; text-decoration: none; }
 form button { margin-top: 8px; }
-button.secondary { color: #e4e4e7; background: #27272a; }
-button.danger { color: #fecaca; background: #3f171b; }
+button.secondary { color: #25444b; background: #eaf1f2; }
+button.danger { color: #9d2731; background: #fce9e9; }
 button:disabled { cursor: not-allowed; opacity: 0.55; }
-.receipt { margin-top: 22px; border-top: 1px solid #30303a; padding-top: 20px; }
-.review-section { margin-top: 28px; border-top: 1px solid #30303a; padding-top: 24px; }
+.receipt { margin-top: 22px; border-top: 1px solid #dbe5e8; padding-top: 20px; }
+.review-section { border: 1px solid #dbe5e8; border-radius: 16px; background: #fff; padding: 22px; }
 .request-list { display: grid; gap: 14px; margin-top: 16px; }
-.request-card { border: 1px solid #30303a; border-radius: 12px; background: #141419; padding: 16px; }
+.request-card { border: 1px solid #dbe5e8; border-radius: 12px; background: #fbfdfd; padding: 16px; }
 .request-card h3 { margin: 0 0 6px; font-size: 1rem; overflow-wrap: anywhere; }
 .waiting-badge { display: inline-block; margin-left: 8px; border-radius: 99px; background: #fcd34d; color: #211b0e; padding: 3px 9px; font-size: .72rem; vertical-align: middle; letter-spacing: 0; }
 .transactions-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
@@ -817,52 +865,120 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .transactions-summary { margin-top: 16px; }
 .transaction-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .transaction-heading h3 { margin: 0; }
-.transaction-status { border-radius: 99px; padding: 4px 10px; font-size: .76rem; font-weight: 800; background: #27272a; color: #fafafa; }
+.transaction-status { border-radius: 99px; padding: 4px 10px; font-size: .76rem; font-weight: 800; background: #eaf1f2; color: #29444b; }
 .transaction-status.pending { color: #fde68a; background: #3b2a12; }
 .transaction-status.credited { color: #86efac; background: #123323; }
 .transaction-status.rejected { color: #fecaca; background: #3f171b; }
 .transaction-facts { display: grid; grid-template-columns: max-content 1fr; gap: 5px 12px; margin: 12px 0 0; font-size: .86rem; }
-.transaction-facts dt { color: #a1a1aa; }
+.transaction-facts dt { color: #60757e; }
 .transaction-facts dd { margin: 0; overflow-wrap: anywhere; }
 .transactions-more { margin-top: 16px; width: 100%; }
-.request-meta { margin: 0; color: #a1a1aa; font-size: 0.82rem; }
+.request-meta { margin: 0; color: #60757e; font-size: 0.82rem; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
-.manual-completion-form { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #164e63; border-radius: 10px; background: #0c1d20; }
+.manual-completion-form { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #b8ded6; border-radius: 10px; background: #f0f9f6; }
 .manual-completion-form > label:not(.confirmation-row) { display: grid; gap: 6px; }
 .manual-completion-form button { justify-self: start; }
-.empty-state { color: #a1a1aa; }
-.pilot-warning { border-left: 3px solid #fcd34d; color: #fde68a; background: #211b0e; padding: 12px 14px; line-height: 1.5; }
+.empty-state { color: #60757e; }
+.pilot-warning { border-left: 3px solid #d69b20; color: #755313; background: #fff7e6; padding: 12px 14px; line-height: 1.5; }
 .confirmation-row { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 10px; margin-top: 16px; line-height: 1.5; }
 .confirmation-row input { width: auto; margin-top: 4px; }
 .pilot-choice { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; }
 .pilot-choice input { width: auto; }
-.pilot-status { margin-top: 20px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.pilot-status { margin-top: 20px; border: 1px solid #b8ded6; border-radius: 12px; background: #f0f9f6; padding: 16px; }
 .pilot-status h3 { margin-top: 0; }
 .pilot-status dl { display: grid; grid-template-columns: minmax(150px, auto) 1fr; gap: 8px 14px; }
-.pilot-status dt { color: #a1a1aa; }
+.pilot-status dt { color: #60757e; }
 .pilot-status dd { margin: 0; overflow-wrap: anywhere; }
-.device-pairing { margin-top: 24px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.device-pairing { margin-top: 24px; border: 1px solid #b8ded6; border-radius: 12px; background: #f0f9f6; padding: 16px; }
 .device-pairing h3 { margin-top: 0; }
 .pairing-receipt { margin-top: 18px; }
-.pairing-package { display: block; max-height: 180px; overflow: auto; border: 1px solid #3f3f46; border-radius: 10px; background: #09090b; padding: 12px; color: #e4e4e7; overflow-wrap: anywhere; user-select: all; }
-.kemerbet-session { margin-top: 24px; border: 1px solid #164e63; border-radius: 12px; background: #0c1d20; padding: 16px; }
+.pairing-package { display: block; max-height: 180px; overflow: auto; border: 1px solid #c8d6db; border-radius: 10px; background: #fff; padding: 12px; color: #29444b; overflow-wrap: anywhere; user-select: all; }
+.kemerbet-session { margin-top: 24px; border: 1px solid #b8ded6; border-radius: 12px; background: #f0f9f6; padding: 16px; }
 .kemerbet-session h3 { margin-top: 0; }
 #kemerbet-session-canvas { width: 100%; height: auto; margin-top: 16px; border: 1px solid #3f3f46; border-radius: 10px; background: #000; cursor: crosshair; }
 #kemerbet-session-canvas:focus { outline: 3px solid rgba(103, 232, 249, 0.55); outline-offset: 2px; }
-output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #cffafe; background: #0c1d20; padding: 14px; }
+output { display: block; overflow-wrap: anywhere; border-radius: 10px; color: #13574f; background: #e8f5f1; padding: 14px; }
 .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
 .companion-actions { grid-template-columns: repeat(2, 1fr); }
-.actions a.secondary-link { color: #e4e4e7; background: #27272a; }
-.companion-steps { color: #d4d4d8; line-height: 1.65; padding-left: 24px; }
-.notice { min-height: 24px; color: #fcd34d; font-weight: 700; }
+.actions a.secondary-link { color: #25444b; background: #eaf1f2; }
+.companion-steps { color: #39545b; line-height: 1.65; padding-left: 24px; }
+.notice { min-height: 24px; color: #9d6418; font-weight: 700; }
 footer { margin-top: 30px; font-size: 0.85rem; }
 [hidden] { display: none !important; }
-@media (max-width: 640px) { .shell { padding-top: 36px; } .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions { grid-template-columns: 1fr; } .panel-heading { display: block; } .panel-heading .secondary { margin-bottom: 18px; } }
+@media (max-width: 900px) {
+  .owner-workspace { grid-template-columns: minmax(0, 1fr); }
+  .owner-navigation { position: sticky; top: 0; z-index: 2; display: flex; min-width: 0; max-width: 100%; overflow-x: auto; white-space: nowrap; }
+  .owner-navigation-label { display: none; }
+  .owner-navigation button { width: auto; flex: 0 0 auto; }
+}
+@media (max-width: 640px) {
+  .shell { width: min(540px, calc(100% - 20px)); padding-top: 22px; }
+  .panel { padding: 16px; }
+  .owner-heading { align-items: flex-start; }
+  .owner-heading h2 { font-size: 1.4rem; }
+  .owner-heading .receipt-label { display: none; }
+  .owner-workspace { gap: 18px; margin-top: 20px; }
+  .review-section { padding: 16px; }
+  .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions { grid-template-columns: 1fr; }
+  .panel-heading { gap: 12px; }
+  .panel-heading .secondary { flex: 0 0 auto; }
+}
 `;
 
 export const OWNER_DASHBOARD_JAVASCRIPT = `const loginPanel = document.querySelector('#login-panel');
 const ownerPanel = document.querySelector('#owner-panel');
+const ownerViewEyebrow = document.querySelector('#owner-view-eyebrow');
+const ownerViewTitle = document.querySelector('#owner-view-title');
+const ownerViewDescription = document.querySelector('#owner-view-description');
+const ownerViews = {
+  home: {
+    title: 'Needs your attention',
+    description: 'Review payments and finish any manual credits.',
+    sections: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
+  },
+  payments: {
+    title: 'Payments & SMS',
+    description: 'Check received payments, search history, and inspect receiver-change cases.',
+    sections: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
+  },
+  players: {
+    title: 'Players',
+    description: 'Review Player IDs, ownership, and deposit eligibility.',
+    sections: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
+  },
+  system: {
+    title: 'System',
+    description: 'Manage receiving accounts, phones, the Companion, and customer support.',
+    sections: ['routine-processing-title', 'receiver-title', 'kemerbet-companion-title', 'support-contact-title'],
+  },
+  advanced: {
+    title: 'Advanced tools',
+    description: 'Specialized setup, pilot, and dry-run controls remain available to the Owner.',
+    sections: ['execution-readiness-title', 'execution-approvals-title', 'pilot-title', 'kemerbet-readiness-cohort-title', 'deposit-intake-title'],
+  },
+};
+function showOwnerView(view, focusHeading = false) {
+  const selectedView = Object.hasOwn(ownerViews, view) ? view : 'home';
+  for (const [name, details] of Object.entries(ownerViews)) {
+    const selected = name === selectedView;
+    const navigation = document.querySelector('#owner-nav-' + name);
+    navigation.dataset.active = selected ? 'true' : 'false';
+    navigation.setAttribute?.('aria-current', selected ? 'page' : 'false');
+    for (const label of details.sections) {
+      document.querySelector('section[aria-labelledby="' + label + '"]').hidden = !selected;
+    }
+  }
+  const details = ownerViews[selectedView];
+  ownerViewEyebrow.textContent = selectedView === 'home' ? 'HOME' : 'OWNER WORKSPACE';
+  ownerViewTitle.textContent = details.title;
+  ownerViewDescription.textContent = details.description;
+  if (focusHeading) ownerViewTitle.focus();
+}
+for (const view of Object.keys(ownerViews)) {
+  document.querySelector('#owner-nav-' + view).addEventListener('click', () => showOwnerView(view, true));
+}
+showOwnerView('home');
 const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
@@ -2985,6 +3101,7 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxMore.hidden = true;
   manualPaymentMore.hidden = true;
   manualReceiverAccounts = [];
+  showOwnerView('home');
   ownerPanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -6612,6 +6729,7 @@ async function loadOwnerPlayerQueues() {
 async function loadOwnerDashboardAfterAuthentication(successNotice) {
   loginPanel.hidden = true;
   ownerPanel.hidden = false;
+  showOwnerView('home');
   updateRoutinePhonePairingAvailability();
   updateRoutineReceiptAvailability();
   setNotice(successNotice);

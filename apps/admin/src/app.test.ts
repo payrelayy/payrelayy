@@ -1127,9 +1127,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.headers['x-frame-options']).toBe('DENY');
     expect(response.headers['permissions-policy']).toContain('payment=()');
     expect(response.body).toContain('FetanAgent Owner');
-    expect(response.body).toMatch(
-      /securely renews the Owner access token for up to twelve\s+hours/u,
-    );
+    expect(response.body).toMatch(/keep\s+you signed in securely for up to twelve hours/u);
     expect(response.body).toContain('id="owner-session-status"');
     expect(response.body).toContain('KemerBet Player ID requests');
     expect(response.body).toContain('This does not prove ownership');
@@ -1163,7 +1161,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('id="companion-device-pairing-form"');
     expect(response.body).toContain('releases/latest/download/FetanAgent-Windows-Companion.zip');
     expect(response.body).toContain('aria-labelledby="kemerbet-session-title" hidden inert');
-    expect(response.body).toContain('survives page');
+    expect(response.body).toContain('This browser tab can keep');
     expect(response.body).toMatch(/retained\s+for up to twelve hours/u);
     expect(response.body).toContain('including across Owner-page re-authentication');
     expect(response.body).toContain('id="kemerbet-session-confirmation"');
@@ -1450,8 +1448,9 @@ describe('Owner-control HTTP boundary', () => {
       `https://${OWNER_CONTROL_STAGING_PROJECT_REFERENCE}.supabase.co`,
     );
     expect(page.body).toContain('Private production control');
-    expect(page.body).toContain('Authenticated production Owner');
-    expect(page.body).toContain('FetanAgent production control plane');
+    expect(page.body).toContain('Production · Owner access');
+    expect(page.body).toContain('Review payments, manage Players, and keep FetanAgent running.');
+    expect(page.body).toContain('id="owner-nav-advanced"');
     expect(page.body).toContain(
       'Production control. Financial actions remain governed by explicit audited switches.',
     );

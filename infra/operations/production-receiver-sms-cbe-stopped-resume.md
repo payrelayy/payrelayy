@@ -17,14 +17,15 @@ history.
 1. Confirm the exact running server release and helper digest, signed SMS
    intake within 24 hours for **both** receiving accounts from one current
    paired phone, a healthy phone reader, active Owner policy, four scoped
-   SMS/broker/no-money logins, no paid receipt sessions or recent paid poll,
+   SMS/broker/no-money logins, both paid receipt logins already disabled and
+   expired, no paid receipt sessions or recent paid poll,
    and zero active execution jobs and unresolved attempts. The installed
    Companion must be the checksum-verified v0.1.57 package; its guarded
    no-money Player lookup and deposit-form preflight must have passed.
-2. Confirm the reviewed one-use recovery migration is applied and this workflow
-   is on the exact passing `main` commit. The migration only installed a dormant,
-   postgres-only function. It did not change the route, switches, roles, claims,
-   jobs, or Player balances.
+2. Confirm the reviewed one-use recovery and pre-retired-role migrations are
+   applied and this workflow is on the exact passing `main` commit. The
+   migrations only install and narrow a dormant, postgres-only function. They
+   do not change the route, switches, roles, claims, jobs, or Player balances.
 3. Start the exact installed Companion's automatic-deposits launcher as an
    **idle** routine worker. Sign in to its dedicated KemerBet Chrome profile
    directly if needed. Confirm a fresh signed worker lease and a successful
@@ -37,8 +38,8 @@ history.
    function over verify-full TLS. The function rechecks the exact CBE-live,
    SMS-route-on, shared-gates-off profile, current Owner authority, signed
    intake for both providers, active receiver accounts, all scoped logins,
-   empty ledger, and signed worker. It retires only the two unmounted paid
-   receipt logins, advances the SMS cutoff, then enables the **two shared**
+   empty ledger, and signed worker. It requires the two unmounted paid receipt
+   logins to remain retired, advances the SMS cutoff, then enables the **two shared**
    gates in one transaction. The switch trigger requires the independent
    watchdog. The CBE switch stays live and the no-money login stays available
    for the mounted bridge, which cannot issue an assignment while the shared
@@ -51,5 +52,5 @@ history.
    its evidence for Owner review.
 
 The function rejects a repeated call after activation because the two shared
-gates are no longer disabled. Any failed transaction rolls back the role,
-cutoff, and switch changes together.
+gates are no longer disabled. Any failed transaction rolls back the cutoff and
+switch changes together.

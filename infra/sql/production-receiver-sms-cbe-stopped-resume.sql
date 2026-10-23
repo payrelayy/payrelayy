@@ -19,6 +19,27 @@ select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   select 1 / 0 as rejected;
 \endif
 
+-- Require the reviewed resume body that expects the paid receipt logins to
+-- already be retired. The original one-use function expected live logins.
+select count(*) = 1 and bool_and(
+    encode(sha256(convert_to(routine.prosrc, 'UTF8')), 'hex') =
+      '5f26cdd6567973f63f2ba581c018750dd3621cf2f7eb8b07438a8dfe15bd6de6'
+    and routine.proowner = 'postgres'::regrole
+    and not routine.prosecdef
+    and routine.proconfig = array['search_path=pg_catalog']::text[]
+    and not has_function_privilege('public', routine.oid, 'EXECUTE')
+    and not has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+    and not has_function_privilege('service_role', routine.oid, 'EXECUTE'))
+  as exact_resume_function
+from pg_catalog.pg_proc routine
+where routine.oid = to_regprocedure(
+  'app.resume_receiver_sms_cbe_stopped_financial_gates(uuid,uuid)')::oid
+\gset
+\if :exact_resume_function
+\else
+  select 1 / 0 as rejected;
+\endif
+
 begin transaction isolation level read committed;
 set local search_path = pg_catalog;
 set local statement_timeout = '25s';

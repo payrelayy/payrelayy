@@ -704,6 +704,23 @@ assert.match(
   /steps\.protected\.outputs\.sms_mode == 'true' && inputs\.confirm_financial_switch_profile == 'disabled'/u,
 );
 assert.match(workflow, /The guarded CBE release requires existing SMS grants and logins/u);
+assert.doesNotMatch(workflow, /app\.decide_owner_receiver_sms_old_payment/u);
+assert.match(workflow, /false,false,false,false\) echo 'state=disabled'/u);
+assert.match(workflow, /true,true,true,true\) echo 'state=enabled'/u);
+for (const sql of [cbeLivePreflightSql, cbeStoppedPreflightSql]) {
+  assert.match(sql, /app\.decide_owner_receiver_sms_old_payment\(uuid,uuid,text\)/u);
+  for (const signature of [
+    'app.list_owner_manual_payment_cases(uuid,text,integer,integer)',
+    'app.list_owner_receiver_sms_inbox(uuid,integer,integer)',
+    'app.decide_owner_manual_payment_case(uuid,uuid,text,text)',
+    'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)',
+  ]) {
+    assert.ok(sql.includes(signature), `CBE preflight must require ${signature}`);
+  }
+}
+for (const sql of [receiverSmsActivateSql, receiverSmsDisableSql, receiverSmsStopSql]) {
+  assert.doesNotMatch(sql, /app\.decide_owner_receiver_sms_old_payment/u);
+}
 assert.match(workflow, /The guarded CBE release requires the reviewed running predecessor/u);
 assert.match(workflow, /Recheck guarded CBE payment state before activation/u);
 assert.match(

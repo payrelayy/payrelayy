@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_GUARDED_PREDECESSOR_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'
+readonly CBE_GUARDED_PREDECESSOR_SHA='0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2
@@ -518,7 +518,8 @@ verify_release_files() {
           "$release/compose.production.inert-maintenance.yaml" ||
           die 'the routine paid upload bridge is not mounted'
       fi
-    elif grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+    fi
+    if grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
       "$release/compose.production.inert-maintenance.yaml"; then
       grep -Fq "INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'" \
         "$release/compose.production.inert-maintenance.yaml" ||
@@ -532,7 +533,14 @@ verify_release_files() {
       ! grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
         "$release/compose.production.inert-maintenance.yaml" ||
         die 'the receipt poll cannot share the SMS broker'
-    else
+      if grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" \
+        "$release/compose.production.inert-maintenance.yaml"; then
+        ! grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+          "$release/compose.production.inert-maintenance.yaml" ||
+          die 'paid settlement cannot share the no-money SMS recovery overlay'
+      fi
+    elif ! grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'" \
+      "$release/compose.production.inert-maintenance.yaml"; then
       grep -Fq 'network_mode: none' "$release/compose.production.inert-maintenance.yaml" ||
         die 'the inert-maintenance production overlay is malformed'
     fi
@@ -567,7 +575,8 @@ verify_release_files() {
         die 'the isolated paid settlement service is absent'
       required+=(routine-paid-settlement-database-url)
     fi
-  elif [[ "$deployment_mode" == 'inert-maintenance' ]] &&
+  fi
+  if [[ "$deployment_mode" == 'inert-maintenance' ]] &&
     grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
       "$release/compose.production.inert-maintenance.yaml"; then
     required+=(receiver-sms-ingest-database-url receiver-sms-settlement-database-url)
@@ -681,6 +690,23 @@ negative_receiver_sms_public_smoke() {
     --header 'Content-Type: application/vnd.fetanagent.receiver-sms-event.v1+json' \
     --data '{}' "$TELEBIRR_PUBLIC_ORIGIN/v1/receiver-sms/events:upload")"
   [[ "$status" == '404' ]] || die 'an SMS upload without a production target reached the bridge'
+}
+
+negative_no_money_public_smoke() {
+  local release="$1" status
+  if ! grep -Fq "INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'" \
+    "$release/compose.production.inert-maintenance.yaml"; then return; fi
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.telebirr-routine-no-money.v1+json' \
+    --header 'X-FetanAgent-Deployment-Target: production' \
+    --data '{}' "$TELEBIRR_PUBLIC_ORIGIN/v1/telebirr/routine/assignments:poll")"
+  [[ "$status" == '400' ]] || die 'the no-money phone route did not reach the rejecting bridge'
+  status="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --proto '=https' --tlsv1.2 --max-time 8 --request POST \
+    --header 'Content-Type: application/vnd.fetanagent.telebirr-routine-no-money.v1+json' \
+    --data '{}' "$TELEBIRR_PUBLIC_ORIGIN/v1/telebirr/routine/assignments:poll")"
+  [[ "$status" == '404' ]] || die 'a no-money request without a production target reached the bridge'
 }
 
 negative_companion_public_smoke() {
@@ -928,6 +954,20 @@ case "${1:-}" in
           ! -L "$incoming/routine-paid-settlement-database-url" ]] ||
           die 'the inert bundle unexpectedly contains a paid settlement credential'
       fi
+      if grep -Fq "INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'" \
+        "$incoming/compose.production.inert-maintenance.yaml"; then
+        ! grep -Fq "INTERNAL_ROUTINE_PAID_POLL_BROKER_ENABLED: 'true'" \
+          "$incoming/compose.production.inert-maintenance.yaml" ||
+          die 'the receipt poll cannot share the SMS broker'
+        ! grep -Fq "INTERNAL_ROUTINE_PAID_SETTLEMENT_WORKER_ENABLED: 'true'" \
+          "$incoming/compose.production.inert-maintenance.yaml" ||
+          die 'paid settlement cannot share the no-money SMS recovery overlay'
+        expected_count=$((expected_count + 2))
+        for name in receiver-sms-ingest-database-url receiver-sms-settlement-database-url; do
+          [[ ! -L "$incoming/$name" && -f "$incoming/$name" && -s "$incoming/$name" ]] ||
+            die "the SMS production bundle is missing $name"
+        done
+      fi
       for name in \
         telebirr-assignment-database-url \
         telebirr-assignment-runtime-manifest.v1.json \
@@ -1074,6 +1114,7 @@ case "${1:-}" in
     fi
     negative_telebirr_public_smoke
     negative_receiver_sms_public_smoke "$release"
+    negative_no_money_public_smoke "$release"
     negative_companion_public_smoke "$release"
     ln -sfn -- "$release" "$CURRENT_LINK.next"
     mv -Tf -- "$CURRENT_LINK.next" "$CURRENT_LINK"

@@ -1,0 +1,86 @@
+# Production receiver SMS and no-money phone proof transport. Financial authority
+# remains in the database; this composition does not mount paid receipt polling or
+# paid settlement. The no-money lane can refresh signed phone proof while the
+# shared payment gates are disabled.
+services:
+  api:
+    environment:
+      TELEGRAM_ROUTINE_TELEBIRR_CANDIDATE_PRODUCTION_ENABLED: 'false'
+      TELEGRAM_RECEIVER_SMS_CANDIDATE_PRODUCTION_ENABLED: 'true'
+  bot:
+    environment:
+      BOT_RECEIVER_SMS_CANDIDATE_ENABLED: 'true'
+  telebirr-assignment-broker:
+    environment: !override
+      NODE_ENV: production
+      FINANCIAL_ACTIONS_MODE: dry_run
+      INTERNAL_TELEBIRR_ASSIGNMENT_BROKER_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_NO_MONEY_PILOT_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_ENROLLMENT_ONLY_ENABLED: 'true'
+      TELEBIRR_ASSIGNMENT_BROKER_DEPLOYMENT_TARGET: production
+      INTERNAL_ROUTINE_NO_MONEY_BROKER_ENABLED: 'true'
+      ROUTINE_NO_MONEY_DATABASE_URL_FILE: /run/secrets/routine_no_money_database_url
+      ROUTINE_NO_MONEY_REFERENCE_OPENING_KEY_FILE: /run/secrets/routine_no_money_reference_opening_key.v1.json
+      ROUTINE_NO_MONEY_SIGNER_PRIVATE_KEY_FILE: /run/secrets/routine_no_money_lookup_signer.pkcs8.der
+      ROUTINE_NO_MONEY_SIGNER_MANIFEST_FILE: /run/secrets/routine_no_money_lookup_signer.v1.json
+      INTERNAL_RECEIVER_SMS_BROKER_ENABLED: 'true'
+      INTERNAL_RECEIVER_SMS_SETTLEMENT_ENABLED: 'true'
+      RECEIVER_SMS_DATABASE_URL_FILE: /run/secrets/receiver_sms_ingest_database_url
+      RECEIVER_SMS_REFERENCE_FINGERPRINT_MASTER_FILE: /run/secrets/receiver_sms_reference_fingerprint_master
+      RECEIVER_SMS_SETTLEMENT_DATABASE_URL_FILE: /run/secrets/receiver_sms_settlement_database_url
+      KEMERBET_EXECUTOR_ENABLED: 'false'
+      KEMERBET_FINAL_ACTION_ENABLED: 'false'
+    secrets: !override
+      - source: routine_no_money_database_url
+        target: routine_no_money_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: telebirr_assignment_broker_reference_opening_key
+        target: routine_no_money_reference_opening_key.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: routine_no_money_lookup_signer
+        target: routine_no_money_lookup_signer.pkcs8.der
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: routine_no_money_lookup_manifest
+        target: routine_no_money_lookup_signer.v1.json
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: receiver_sms_ingest_database_url
+        target: receiver_sms_ingest_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: receiver_sms_settlement_database_url
+        target: receiver_sms_settlement_database_url
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: deposit_proof_reference_fingerprint_master
+        target: receiver_sms_reference_fingerprint_master
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    configs: !override
+      - source: supabase_ca_certificate
+        target: /run/configs/supabase_ca_certificate
+        uid: '10001'
+        gid: '10001'
+        mode: 0444
+    networks: !override
+      - telebirr_assignment_database_egress
+  telebirr-device-bridge:
+    environment:
+      INTERNAL_ROUTINE_NO_MONEY_BRIDGE_ENABLED: 'true'
+      INTERNAL_RECEIVER_SMS_BRIDGE_ENABLED: 'true'
+
+secrets:
+  receiver_sms_ingest_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/receiver-sms-ingest-database-url
+  receiver_sms_settlement_database_url:
+    file: ${FETANAGENT_PRODUCTION_SECRET_DIR:?set the protected production secret directory}/receiver-sms-settlement-database-url

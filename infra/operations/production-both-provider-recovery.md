@@ -36,7 +36,8 @@ uncertain Transfer or an unresolved attempt, stop here.
 3. With separate approval, rotate the production deploy helper using the
    checksum- and predecessor-pinned
    `fetanagent-production-v2-cbe-stopped-phone-proof-rotation-v3.sh`, then
-   deploy the guarded `cbe-stopped-v1` phone transport overlay. It runs receiver
+   deploy the guarded `cbe-stopped-v1` phone transport overlay using the
+   `DEPLOY CBE STOPPED PHONE PROOF` confirmation. It runs receiver
    SMS and no-money proof in the same private broker;
    it mounts no paid receipt poll or paid settlement credential. Confirm the
    deployed server matches the reviewed code and that the private broker and

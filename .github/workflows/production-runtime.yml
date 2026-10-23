@@ -136,8 +136,8 @@ jobs:
               exit 1
             }
           elif [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-stopped-v1' ]]; then
-            [[ "$CONFIRMED_OPERATION" == 'DEPLOY CBE STOPPED COMPANION REPAIR' ]] || {
-              echo '::error::The CBE-stopped release confirmation is not exact.'
+            [[ "$CONFIRMED_OPERATION" == 'DEPLOY CBE STOPPED PHONE PROOF' ]] || {
+              echo '::error::The CBE-stopped phone-proof confirmation is not exact.'
               exit 1
             }
           else

@@ -693,7 +693,7 @@ assert.match(
   /confirm_financial_switch_profile:\s+description:[^\r\n]*\s+required: true\s+default: disabled\s+type: choice\s+options:\s+- disabled\s+- cbe-live-v1\s+- cbe-stopped-v1/u,
 );
 assert.match(workflow, /DEPLOY SCREENSHOT READER WITH CBE LIVE/u);
-assert.match(workflow, /DEPLOY CBE STOPPED COMPANION REPAIR/u);
+assert.match(workflow, /DEPLOY CBE STOPPED PHONE PROOF/u);
 assert.match(
   workflow,
   /"\$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1'[\s\S]*?"\$CONFIRMED_ROUTINE_TRANSPORT" == 'enabled'/u,

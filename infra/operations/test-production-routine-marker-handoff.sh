@@ -11,13 +11,13 @@ trap 'rm -rf -- "$test_root"' EXIT
 STATE_ROOT="$test_root/state"
 ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 COMPANION_EXECUTION_V2_MARKER="$STATE_ROOT/companion-execution-v2.release"
-CBE_LIVE_PREDECESSOR_SHA='906b5b6a6486a26450d302b9f911feb3e35d30e4'
+CBE_GUARDED_PREDECESSOR_SHA='5c7943a96e4d895aaf5401680fabc6e1dd51a60b'
 next_sha='1111111111111111111111111111111111111111'
-previous="$test_root/releases/$CBE_LIVE_PREDECESSOR_SHA"
+previous="$test_root/releases/$CBE_GUARDED_PREDECESSOR_SHA"
 successor="$test_root/releases/$next_sha"
 install -d -m 0700 "$STATE_ROOT" "$previous" "$successor"
 touch "$previous/material" "$successor/material"
-printf '%s\n' "$CBE_LIVE_PREDECESSOR_SHA" |
+printf '%s\n' "$CBE_GUARDED_PREDECESSOR_SHA" |
   install -o root -g root -m 0600 /dev/stdin "$ROUTINE_DEPOSITS_MARKER"
 
 die() { printf 'routine marker handoff test: %s\n' "$*" >&2; exit 1; }
@@ -47,20 +47,20 @@ handoff_routine_marker "$next_sha" "$previous" "$successor"
 [[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$next_sha" ]] ||
   die 'the successor marker is wrong'
 receipt="$STATE_ROOT/pending-$next_sha.routine-marker"
-[[ "$(<"$receipt")" == "$CBE_LIVE_PREDECESSOR_SHA" &&
+[[ "$(<"$receipt")" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
   "$(stat --format='%u:%g:%a:%h' "$receipt")" == '0:0:600:1' ]] ||
   die 'the rollback receipt is wrong'
 
 restore_routine_marker_for_rollback "$next_sha" "$previous"
-[[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$CBE_LIVE_PREDECESSOR_SHA" &&
+[[ "$(<"$ROUTINE_DEPOSITS_MARKER")" == "$CBE_GUARDED_PREDECESSOR_SHA" &&
   ! -e "$receipt" ]] || die 'the predecessor marker was not restored'
 
-printf '%s\n' "$CBE_LIVE_PREDECESSOR_SHA" |
+printf '%s\n' "$CBE_GUARDED_PREDECESSOR_SHA" |
   install -o root -g root -m 0600 /dev/stdin "$receipt"
 restore_routine_marker_for_rollback "$next_sha" "$previous"
 [[ ! -e "$receipt" ]] || die 'the pre-swap receipt was not cleared'
 
-printf '%s\n' "$CBE_LIVE_PREDECESSOR_SHA" |
+printf '%s\n' "$CBE_GUARDED_PREDECESSOR_SHA" |
   install -o root -g root -m 0600 /dev/stdin "$receipt"
 printf '%s\n' '2222222222222222222222222222222222222222' |
   install -o root -g root -m 0600 /dev/stdin "$ROUTINE_DEPOSITS_MARKER"

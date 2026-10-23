@@ -1,11 +1,10 @@
 \set ON_ERROR_STOP on
 
--- The reviewed database function checks current Owner authority, paired SMS
--- evidence for both providers, an idle signed worker, runtime roles and ledger.
--- Its switch trigger additionally requires a running independent watchdog.
+-- A single, money-capable operator call. The migration only installed the
+-- dormant function; this script performs the reviewed recovery transaction.
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv owner_auth_user_id FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID
-\getenv activation_request_key FETANAGENT_RECEIVER_SMS_RECOVERY_REQUEST_KEY
+\getenv activation_request_key FETANAGENT_RECEIVER_SMS_RESUME_REQUEST_KEY
 
 select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   and current_user = 'postgres' and session_user = 'postgres'
@@ -26,31 +25,11 @@ set local statement_timeout = '25s';
 set local lock_timeout = '3s';
 set local idle_in_transaction_session_timeout = '25s';
 
-select count(*) = 7 and bool_and(mode = 'disabled' and settings = '{}'::jsonb)
-  and (select count(*) = 1 from app.receiver_sms_route_control
-    where singleton and not enabled and cutover_at is not null)
-  and (select count(*) = 3 and bool_and(not rolcanlogin)
-    from pg_catalog.pg_roles where rolname in (
-      'fetanagent_routine_telebirr_no_money_runtime',
-      'fetanagent_routine_telebirr_paid_poll_runtime',
-      'fetanagent_routine_telebirr_paid_settlement_runtime'))
-  as exact_stopped_boundary
-from app.feature_switches where feature_key in (
-  'cbe_birr_authoritative_verification', 'deposit_execution',
-  'payment_verification', 'private_live_deposit_pilot',
-  'telebirr_authoritative_verification', 'withdrawal_collection',
-  'withdrawal_validation')
-\gset
-\if :exact_stopped_boundary
-\else
-  select 1 / 0 as rejected;
-\endif
-
 select cutover_at::text as prior_cutover
-from app.receiver_sms_route_control where singleton
+from app.receiver_sms_route_control where singleton and enabled
 \gset
 
-select app.activate_receiver_sms_financial_gates(
+select app.resume_receiver_sms_cbe_stopped_financial_gates(
   :'owner_auth_user_id'::uuid, :'activation_request_key'::uuid
 )::text as new_cutover
 \gset
@@ -64,17 +43,26 @@ select count(*) = 7
     'withdrawal_collection', 'withdrawal_validation')
     and mode = 'disabled' and settings = '{}'::jsonb) = 4
   and (select count(*) = 1 from app.receiver_sms_route_control
-    where singleton and enabled
-      and cutover_at = :'new_cutover'::timestamptz
+    where singleton and enabled and cutover_at = :'new_cutover'::timestamptz
       and cutover_at > :'prior_cutover'::timestamptz)
-  as exact_live_boundary
+  and (select count(*) = 2 and bool_and(not rolcanlogin)
+    from pg_catalog.pg_roles where rolname in (
+      'fetanagent_routine_telebirr_paid_poll_runtime',
+      'fetanagent_routine_telebirr_paid_settlement_runtime'))
+  and not exists (select 1 from app.deposit_jobs
+    where job_kind in ('execute_deposit', 'reconcile_execution')
+      and status in ('queued', 'leased', 'retry_wait'))
+  and not exists (select 1 from app.deposit_execution_attempts
+    where status in ('prepared', 'final_action_fenced',
+      'reconciliation_required', 'review_required'))
+  as exact_resumed_boundary
 from app.feature_switches where feature_key in (
   'cbe_birr_authoritative_verification', 'deposit_execution',
   'payment_verification', 'private_live_deposit_pilot',
   'telebirr_authoritative_verification', 'withdrawal_collection',
   'withdrawal_validation')
 \gset
-\if :exact_live_boundary
+\if :exact_resumed_boundary
 \else
   select 1 / 0 as rejected;
 \endif
@@ -83,9 +71,10 @@ commit;
 \pset format unaligned
 \pset tuples_only on
 select jsonb_build_object(
-  'operation', 'receiver_sms_incident_activate',
+  'operation', 'receiver_sms_cbe_stopped_resume',
   'deploymentTarget', 'production',
   'moneyCapable', true,
   'livePaymentPerformed', false,
   'cbeMode', 'live',
-  'freshCutover', true)::text;
+  'freshCutover', true,
+  'retiredPaidReceiptRoles', 2)::text;

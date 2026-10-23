@@ -1,0 +1,181 @@
+name: Resume production receiver SMS deposits from CBE-stopped incident
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production_project_ref:
+        description: Exact production Supabase project ref
+        required: true
+        type: string
+      confirm_main_commit_sha:
+        description: Exact reviewed main commit SHA
+        required: true
+        type: string
+      confirm_owner_auth_user_id:
+        description: Current authorizing Owner auth-user UUID
+        required: true
+        type: string
+      confirm_operation:
+        description: Type ENABLE LIVE RECEIVER SMS DEPOSITS WITH CBE
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetanagent-production-runtime
+  cancel-in-progress: false
+
+env:
+  PRODUCTION_PROJECT_REF: xzztugbgtulptnbpoelr
+  PRODUCTION_DATABASE_POOLER_HOST: aws-0-eu-west-1.pooler.supabase.com
+  PRODUCTION_DATABASE_ADMIN_POOLER_PORT: '6543'
+  EXPECTED_RUNNING_RELEASE: 22f2ecfdb112d31b1807c148b021d9b7367e3134
+  EXPECTED_DEPLOY_HELPER_SHA256: 584ed859f06e22191b908dcd5b2c6ec451dc78acf789181eadd69720365f600f
+
+jobs:
+  validate:
+    name: Require reviewed main and exact live action
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
+      CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
+      CONFIRMED_OWNER: ${{ inputs.confirm_owner_auth_user_id }}
+      CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+    steps:
+      - name: Reject another project, revision, identity or operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
+          [[ "$CONFIRMED_OWNER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$CONFIRMED_OPERATION" == 'ENABLE LIVE RECEIVER SMS DEPOSITS WITH CBE' ]]
+
+  activate:
+    name: Enable only new SMS-matched deposits
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out reviewed main without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Require passing exact-main production CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node infra/operations/require-production-ci.mjs
+
+      - name: Verify the immutable running SMS and Companion server release
+        shell: bash
+        env:
+          PRODUCTION_VM_HOST: ${{ secrets.PRODUCTION_VM_HOST }}
+          PRODUCTION_VM_KNOWN_HOSTS: ${{ secrets.PRODUCTION_VM_KNOWN_HOSTS }}
+          PRODUCTION_VM_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_VM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRODUCTION_VM_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+          [[ -n "$PRODUCTION_VM_KNOWN_HOSTS" && -n "$PRODUCTION_VM_SSH_PRIVATE_KEY" ]]
+          [[ "$(sha256sum infra/operations/fetanagent-production-deploy-helper-v2.sh | cut -d ' ' -f 1)" == "$EXPECTED_DEPLOY_HELPER_SHA256" ]]
+          protected="$(mktemp -d "$RUNNER_TEMP/receiver-sms-server.XXXXXX")"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/deploy-key" "$protected/known-hosts"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$PRODUCTION_VM_SSH_PRIVATE_KEY" >"$protected/deploy-key"
+          printf '%s\n' "$PRODUCTION_VM_KNOWN_HOSTS" >"$protected/known-hosts"
+          chmod 0600 "$protected/deploy-key" "$protected/known-hosts"
+          ssh-keygen -y -f "$protected/deploy-key" >/dev/null
+          ssh-keygen -F "$PRODUCTION_VM_HOST" -f "$protected/known-hosts" >/dev/null
+          ssh -F /dev/null -i "$protected/deploy-key" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$protected/known-hosts" \
+            -o ConnectTimeout=8 -o ConnectionAttempts=1 \
+            "fetanagent-admin@$PRODUCTION_VM_HOST" \
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '$EXPECTED_DEPLOY_HELPER_SHA256' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '$EXPECTED_RUNNING_RELEASE'" \
+            >/dev/null
+
+      - name: Resume with a fresh cutoff and no replay
+        shell: bash
+        env:
+          FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID: ${{ inputs.confirm_owner_auth_user_id }}
+          SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
+          PGPORT: ${{ env.PRODUCTION_DATABASE_ADMIN_POOLER_PORT }}
+          PGDATABASE: postgres
+          PGUSER: postgres.${{ env.PRODUCTION_PROJECT_REF }}
+          PGSSLMODE: verify-full
+          PGCONNECT_TIMEOUT: '5'
+          PGAPPNAME: fetanagent_receiver_sms_cbe_stopped_resume
+          PGSERVICEFILE: /dev/null
+          PGPASSFILE: /dev/null
+          PGOPTIONS: ''
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -n "$PGPASSWORD" && -n "$SUPABASE_CA_CERTIFICATE_PEM" ]]
+          protected="$(mktemp -d "$RUNNER_TEMP/receiver-sms-resume.XXXXXX")"
+          cleanup() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [[ -d "$protected" && ! -L "$protected" &&
+                  "$(realpath -- "$protected")" == "$protected" ]]; then
+              rm -f -- "$protected/ca.crt" "$protected/result.out" "$protected/result.err"
+              rmdir -- "$protected" || status=1
+            else
+              status=1
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/ca.crt"
+          chmod 0600 "$protected/ca.crt"
+          openssl x509 -in "$protected/ca.crt" -noout -checkend 0 >/dev/null
+          export PGSSLROOTCERT="$protected/ca.crt"
+          FETANAGENT_RECEIVER_SMS_RESUME_REQUEST_KEY="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          export FETANAGENT_RECEIVER_SMS_RESUME_REQUEST_KEY
+          if ! timeout --signal=TERM --kill-after=5s 60s \
+            psql -X --quiet --tuples-only --no-align \
+              --file=infra/sql/production-receiver-sms-cbe-stopped-resume.sql \
+              >"$protected/result.out" 2>"$protected/result.err"; then
+            echo '::error::The guarded SMS recovery failed; SQL output was withheld.' >&2
+            exit 1
+          fi
+          jq -se 'length == 1 and .[0].operation == "receiver_sms_cbe_stopped_resume" and
+            .[0].deploymentTarget == "production" and .[0].moneyCapable == true and
+            .[0].livePaymentPerformed == false and .[0].cbeMode == "live" and
+            .[0].freshCutover == true and .[0].retiredPaidReceiptRoles == 2' \
+            "$protected/result.out" >/dev/null || {
+            echo '::error::The guarded SMS recovery result was not exact.' >&2
+            exit 1
+          }
+          echo 'Signed SMS deposits for both providers enabled with a fresh cutoff. Earlier payment submissions remain for review and cannot automatically replay. No test payment or Player credit was performed.' >>"$GITHUB_STEP_SUMMARY"

@@ -52,6 +52,50 @@ export function registerRoutineTelebirrFinancialActivationSqlTests(
       expect(state.rows).toEqual([{ live: '0', enabled: false, cutover: false }]);
     });
 
+    it('installs the CBE-stopped SMS resume as a private, dormant one-use action', async () => {
+      const client = getClient();
+      const catalog = await client.query<{
+        owner: string;
+        security_definer: boolean;
+        public_execute: boolean;
+        authenticated_execute: boolean;
+      }>(`select owner.rolname as owner, routine.prosecdef as security_definer,
+                 pg_catalog.has_function_privilege('public', routine.oid, 'EXECUTE')
+                   as public_execute,
+                 pg_catalog.has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+                   as authenticated_execute
+            from pg_catalog.pg_proc routine
+            join pg_catalog.pg_roles owner on owner.oid = routine.proowner
+           where routine.oid =
+             'app.resume_receiver_sms_cbe_stopped_financial_gates(uuid,uuid)'::pg_catalog.regprocedure`);
+      expect(catalog.rows).toEqual([
+        {
+          owner: 'postgres',
+          security_definer: false,
+          public_execute: false,
+          authenticated_execute: false,
+        },
+      ]);
+      await client.query('begin');
+      try {
+        await client.query('savepoint rejected_incident_resume');
+        await expect(
+          client.query('select app.resume_receiver_sms_cbe_stopped_financial_gates($1,$2)', [
+            getOwnerAuthUserId(),
+            randomUUID(),
+          ]),
+        ).rejects.toThrow();
+        await client.query('rollback to savepoint rejected_incident_resume');
+        const state = await client.query<{ live: string; enabled: boolean }>(
+          `select (select count(*)::text from app.feature_switches where mode = 'live') as live,
+                  enabled from app.receiver_sms_route_control where singleton`,
+        );
+        expect(state.rows).toEqual([{ live: '0', enabled: false }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('fails closed when SMS activation prerequisites are absent', async () => {
       const client = getClient();
       await client.query('begin');

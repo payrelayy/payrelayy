@@ -4,6 +4,7 @@
 \getenv confirmed_project_ref PRODUCTION_PROJECT_REF
 \getenv owner_auth_user_id FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID
 \getenv activation_request_key FETANAGENT_ROUTINE_FINANCIAL_REQUEST_KEY
+\getenv cbe_expected_mode FETANAGENT_ROUTINE_CBE_EXPECTED_MODE
 
 select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   and current_user = 'postgres' and session_user = 'postgres'
@@ -11,6 +12,7 @@ select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
     '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and :'activation_request_key' ~
     '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  and :'cbe_expected_mode' in ('disabled', 'live')
   as exact_input
 \gset
 \if :exact_input
@@ -39,9 +41,13 @@ select pg_catalog.count(*) = 7
   and pg_catalog.count(*) filter (where switch.feature_key in
     ('payment_verification', 'deposit_execution')
     and switch.mode = 'live' and switch.settings = '{}'::jsonb) = 2
-  and pg_catalog.count(*) filter (where switch.feature_key not in
-    ('payment_verification', 'deposit_execution')
-    and switch.mode = 'disabled' and switch.settings = '{}'::jsonb) = 5
+  and pg_catalog.count(*) filter (where switch.feature_key =
+    'cbe_birr_authoritative_verification' and switch.mode = :'cbe_expected_mode'
+    and switch.settings = '{}'::jsonb) = 1
+  and pg_catalog.count(*) filter (where switch.feature_key in (
+    'private_live_deposit_pilot', 'telebirr_authoritative_verification',
+    'withdrawal_collection', 'withdrawal_validation')
+    and switch.mode = 'disabled' and switch.settings = '{}'::jsonb) = 4
   as exact_switch_set
 from app.feature_switches switch
 where switch.feature_key in (
@@ -63,4 +69,4 @@ select pg_catalog.jsonb_build_object(
   'schemaVersion', 1, 'operation', 'routine_telebirr_financial_activate',
   'deploymentTarget', 'production', 'moneyCapable', true,
   'livePaymentPerformed', false, 'legacyPilotEnabled', false,
-  'cbeEnabled', false)::text;
+  'cbeMode', :'cbe_expected_mode'::text)::text;

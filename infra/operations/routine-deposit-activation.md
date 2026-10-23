@@ -4,19 +4,22 @@ This is a money-capable production procedure. It is intentionally not part of mi
 or the normal production composition. Use it only for a reviewed exact release, from protected
 operator hosts, after the non-financial verification and disposable SQL suite pass.
 
-The non-pilot path is now implemented: Telegram captures a fresh paid candidate, the paired
-phone verifies the public Ethiotelecom receipt over HTTPS and signs V2 official-origin facts,
-the isolated settlement worker creates one payment claim and queued job, and the Windows worker
-credits only one verified job at a time. The disposable SQL suite tests the claim/job lineage
-and replays. A production no-money phone rehearsal must still show a recent signed V2
+The non-pilot path is now implemented: Telegram captures a fresh paid candidate. The paired phone
+verifies a TeleBirr receipt over HTTPS or signs a CBE Birr receiving-phone SMS; the isolated
+settlement worker creates one payment claim and queued job, and the Windows worker credits only
+one verified job at a time. The disposable SQL suite tests the claim/job lineage and replays. A
+production no-money TeleBirr phone rehearsal must still show a recent signed V2
 `official_tls_origin` observation matching server policy before transport activation.
 
 The activation SQL checks that observation, the dedicated phone/settlement logins and source
-guard, no unresolved routine execution attempt, and all seven financial switches **disabled**.
+guard, no unresolved routine execution attempt, and both shared deposit switches **disabled**.
+The independent CBE Birr switch must match the operator's explicit `disabled` or `live`
+confirmation; the four legacy/withdrawal switches must be disabled.
 It then provisions only the separate Windows transport login. It does not turn a switch live,
-create a paid claim, start the companion, or perform a credit. Keep the money switches off until
-the installed companion, protected server marker, and emergency stop have been verified for the
-exact release. Do not treat a successful transport activation as permission to submit a payment.
+create a paid claim, start the companion, or perform a credit. Keep the shared deposit switches
+off until the installed companion, protected server marker, and emergency stop have been verified
+for the exact release. Do not treat a successful transport activation as permission to submit a
+payment.
 
 Do not use this procedure to test whether KemerBet Transfer works. Do not create a synthetic paid
 job, reuse a payment claim, or submit a live payment as an activation check. A pre-existing fenced
@@ -35,6 +38,7 @@ line history:
 - confirmation that the execution-v2 release marker is absent;
 - confirmation that no routine attempt is prepared, fenced, reconciliation-required, or under
   review;
+- the independent CBE Birr switch's current mode, confirmed as `disabled` or `live`;
 - passing build, unit, deployment-verifier, and Docker-backed SQL results for the exact SHA.
 - a passing, reviewed non-pilot receipt-to-verified-job lineage and no-money end-to-end result;
   the existing five-Player pilot lineage does not satisfy this requirement.
@@ -46,7 +50,8 @@ release event before attempting deployment; do not bypass the CI gate.
 
 The current Owner policy must retain the fixed production scope: TeleBirr, KemerBet, ETB,
 receipt-derived 25–25,000 ETB, all active deposit-eligible Players, one concurrent deposit, and no
-daily or count quota.
+daily or count quota. CBE Birr eligibility is independently gated by its switch; enabling the
+shared gates never changes that switch.
 
 ## 1. Create the isolated runtime credential
 
@@ -74,6 +79,7 @@ export FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID='<reviewed-owner-auth-user-uuid>'
 export FETANAGENT_ROUTINE_COMPANION_CERTIFICATE_ID='<reviewed-current-certificate-uuid>'
 export FETANAGENT_ROUTINE_ACTIVATION_REQUEST_KEY='<fresh-uuidv4>'
 export FETANAGENT_ROUTINE_RUNTIME_PASSWORD="$(</protected/operator/production-routine-deposit-password)"
+export FETANAGENT_ROUTINE_CBE_EXPECTED_MODE='<disabled-or-live>'
 
 psql --no-psqlrc --file infra/sql/production-routine-deposit-activate.sql
 ```
@@ -88,7 +94,8 @@ environment, the reviewed `production-routine-deposit-transport-activation.yml` 
 can run this same SQL. First place **only the newly generated activation password** in the
 `ROUTINE_DEPOSIT_RUNTIME_PASSWORD_ACTIVATION` production-environment secret, without putting it in
 a command argument or workflow input. Dispatch for the exact passing `main` SHA and reviewed Owner
-and certificate UUIDs. Verify that the workflow reports the no-payment result, then delete that
+and certificate UUIDs, and choose the observed CBE switch mode in the workflow input. Verify that
+the workflow reports the no-payment result and the same CBE mode, then delete that
 temporary GitHub secret. Keep the separately generated URL on the protected operator host for
 step 3; never put the URL or password in workflow inputs, chat, artifacts, or logs. A failed or
 uncertain activation requires database-status inspection before retrying.
@@ -183,7 +190,7 @@ Confirm all of the following without creating a test payment:
 - no execution-v2 Windows process or production overlay is active;
 - no raw Player, payment reference, credential, or certificate data appears in logs.
 
-## 6. Enable live routine TeleBirr only after review
+## 6. Enable the shared live deposit gates only after review
 
 The migration `routine_telebirr_financial_activation_boundary` installs a dormant
 postgres-only operator procedure. Applying or deploying it changes **no** financial switch.
@@ -191,19 +198,22 @@ After the exact release is deployed, the current phone has a fresh signed V2
 `official_tls_origin` no-money proof, the paid settlement and poll roles are healthy,
 the Windows worker is connected and idle, and the stop operation is ready, dispatch
 `production-routine-financial-activate.yml` on `main`. Confirm the exact deployed SHA,
-production project ref, authorizing Owner auth-user UUID, and the explicit live
-operation phrase. The workflow requires passing exact-main CI and then calls
+production project ref, authorizing Owner auth-user UUID, and the independently observed CBE
+switch mode. Use `ENABLE LIVE ROUTINE TELEBIRR DEPOSITS` when CBE is disabled or
+`ENABLE LIVE ROUTINE DEPOSITS WITH CBE` when it is live. The workflow requires passing
+exact-main CI and then calls
 `infra/sql/production-routine-financial-activate.sql` over verify-full TLS.
 
 The database operation holds the Owner/TeleBirr/cohort/switch locks, rejects an
-active legacy pilot or executor, checks all seven switches disabled and the
+active legacy pilot or executor, checks the two shared switches and four legacy/withdrawal
+switches disabled and the CBE switch in the explicitly confirmed mode, plus the
 current routine transport and phone proof, and requires a signed Windows broker
 lease from the last 45 seconds plus a recently successful database liveness
 watchdog run. It then changes **only**
-`payment_verification` and `deposit_execution` to `live`. TeleBirr's retired pilot,
-CBE Birr, and both withdrawal switches remain disabled. It performs no test
+`payment_verification` and `deposit_execution` to `live`. The independent CBE Birr switch,
+TeleBirr's retired pilot, and both withdrawal switches are unchanged. It performs no test
 transfer, payment claim, or Player credit. Once it succeeds, new eligible Telegram
-TeleBirr references become paid candidates; the phone and settlement service may
+references for enabled providers become paid candidates; the phone and settlement service may
 verify them, and the one-connection Windows worker may credit one verified job at
 a time. Do not describe the service as live until this exact operation succeeds.
 

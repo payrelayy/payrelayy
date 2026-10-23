@@ -110,6 +110,42 @@ export function registerOwnerSupportContactSqlTests(
   createClient: () => Client,
 ): void {
   describe('Owner-controlled public Telegram support contact', () => {
+    it('starts with either the previous approval catalog or the manual-review catalog', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+
+        for (const signature of [
+          'app.list_owner_manual_payment_cases(uuid,text,integer,integer)',
+          'app.list_owner_receiver_sms_inbox(uuid,integer,integer)',
+          'app.decide_owner_manual_payment_case(uuid,uuid,text,text)',
+          'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)',
+        ]) {
+          await client.query(`drop function ${signature}`);
+        }
+        for (const signature of [
+          'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)',
+          'app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)',
+        ]) {
+          await client.query(`
+            create function ${signature} returns jsonb
+              language sql security definer set search_path = pg_catalog, pg_temp
+              as 'select ''{}''::jsonb';
+            revoke all on function ${signature}
+              from public, anon, authenticated, service_role,
+                fetanagent_owner_control, fetanagent_owner_control_runtime;
+            grant execute on function ${signature} to fetanagent_owner_control;
+          `);
+        }
+        await client.query(`
+          grant execute on function app.finalize_routine_telebirr_paid_observation(uuid)
+            to fetanagent_owner_control
+        `);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+      });
+    });
+
     it('executes the actual startup preflight before and after the three support RPCs exist', async () => {
       const client = getClient();
       await withRollback(client, async () => {

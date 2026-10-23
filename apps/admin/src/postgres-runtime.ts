@@ -207,8 +207,26 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)')::oid, 'execute'), true) as receiver_change_reviews_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 'execute'), true) as telebirr_fast_alert_read_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 'execute'), true) as telebirr_old_payment_list_allowed,
-    coalesce(not has_function_privilege(current_user, to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 'execute'), true) as obsolete_telebirr_old_approval_denied,
-    not has_function_privilege(current_user, 'app.finalize_routine_telebirr_paid_observation(uuid)', 'execute') as direct_telebirr_finalization_denied,
+    (
+      coalesce(not has_function_privilege(current_user,
+        to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid,
+        'execute'), true)
+      or (
+        to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)') is null
+        and to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)') is null
+        and to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is null
+        and to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is null
+      )
+    ) as obsolete_telebirr_old_approval_denied,
+    (
+      not has_function_privilege(current_user, 'app.finalize_routine_telebirr_paid_observation(uuid)', 'execute')
+      or (
+        to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)') is null
+        and to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)') is null
+        and to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is null
+        and to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is null
+      )
+    ) as direct_telebirr_finalization_denied,
     coalesce((
       select routine.prosecdef and routine.proowner = 'postgres'::regrole
         and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
@@ -239,9 +257,17 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user,
       to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid,
       'execute'), true) as manual_payment_complete_allowed,
-    coalesce(not has_function_privilege(current_user,
-      to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid,
-      'execute'), true) as obsolete_auto_approval_denied,
+    (
+      coalesce(not has_function_privilege(current_user,
+        to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid,
+        'execute'), true)
+      or (
+        to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)') is null
+        and to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)') is null
+        and to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is null
+        and to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is null
+      )
+    ) as obsolete_auto_approval_denied,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 'execute'), true) as telebirr_transactions_list_allowed,
     -- This additive feature deploys before its migration. Missing functions keep only
     -- support unavailable; an existing function with incorrect privileges fails closed.
@@ -328,6 +354,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)') is not null)::integer
+        + (to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)') is not null)::integer
         + coalesce(has_function_privilege(current_user,
             to_regprocedure('app.list_owner_receiver_sms_old_payments(uuid,integer)')::oid,
             'execute'), false)::integer
@@ -339,6 +366,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
+        + coalesce(has_function_privilege(current_user,
+            to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid,
+            'execute'), false)::integer
         + (to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)') is not null)::integer
         + (to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)') is not null)::integer
@@ -396,6 +426,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_receiver_change_reviews(uuid,integer,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_fast_alert_summary(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_old_payments(uuid,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_receiver_sms_old_payments(uuid,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)')::oid, 0::oid)
@@ -403,6 +434,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.get_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.enroll_owner_routine_telebirr_device_pairing_proof(uuid,uuid,text,uuid,integer,text,text,text,text,text,text,timestamptz,timestamptz)')::oid, 0::oid)

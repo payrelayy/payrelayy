@@ -49,6 +49,21 @@ const config = {
 } satisfies Extract<OwnerControlRuntimeConfig, { readonly enabled: true }>;
 
 describe('Owner-control bounded PostgreSQL pool', () => {
+  it('accepts only the old schema before manual review migration, then denies obsolete auto approval', () => {
+    const oldApproval = 'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)';
+    const newFunctions = [
+      'app.list_owner_manual_payment_cases(uuid,text,integer,integer)',
+      'app.list_owner_receiver_sms_inbox(uuid,integer,integer)',
+      'app.decide_owner_manual_payment_case(uuid,uuid,text,text)',
+      'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)',
+    ];
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(`to_regprocedure('${oldApproval}')::oid,`);
+    for (const signature of newFunctions) {
+      expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(`to_regprocedure('${signature}') is null`);
+    }
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as obsolete_auto_approval_denied');
+  });
+
   it('allows only three optional policy procedures, never routine admission or execution', () => {
     for (const signature of [
       'app.get_owner_routine_telebirr_processing(uuid)',

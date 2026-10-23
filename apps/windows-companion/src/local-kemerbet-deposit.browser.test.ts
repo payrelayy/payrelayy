@@ -63,8 +63,10 @@ const delayedNavigationHtml = fixtureHtml
   surface.querySelector('button').onclick = () => {
     setTimeout(() => {
       surface.insertAdjacentHTML('beforeend',
-        '<div class="rt--transfer-dropdown"><div role="menuitem">Deposit</div></div>');
-      surface.querySelector('.rt--transfer-dropdown [role="menuitem"]').onclick = () => {
+        '<div class="ant-dropdown rt--transfer-dropdown"><ul role="menu">' +
+        '<li role="menuitem" aria-label="Open player deposit"><span>Deposit</span></li>' +
+        '<li role="menuitem">Withdraw</li></ul></div>');
+      surface.querySelector('.rt--transfer-dropdown li[role="menuitem"]').onclick = () => {
         setTimeout(() => {
           surface.innerHTML = '<button class="rt--transfer-item"><span class="icon-player"></span></button>';
           surface.querySelector('button').onclick = renderSearch;
@@ -345,7 +347,7 @@ describe.skipIf(process.platform !== 'win32')(
       ).toBeUndefined();
     }, 15000);
 
-    it('uses the delayed Financial Actions menu despite an unrelated Deposit item', async () => {
+    it('uses the delayed Ant Financial Actions menu despite an unrelated Deposit item', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(delayedNavigationHtml);
       const stages: string[] = [];
       await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
@@ -354,6 +356,7 @@ describe.skipIf(process.platform !== 'win32')(
       expect(stages).toEqual([
         'preflight_started',
         'financial_actions_opened',
+        'deposit_menu_ready',
         'deposit_menu_selected',
         'player_tile_selected',
         'search_surface_ready',

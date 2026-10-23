@@ -798,7 +798,36 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         );
         const fingerprint = hexDigest();
         const event = await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const inboxGrant = await client.query<{ owner_allowed: boolean; public_denied: boolean }>(
+          `select has_function_privilege('fetanagent_owner_control_runtime',
+              'app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)',
+              'EXECUTE') as owner_allowed,
+            not has_function_privilege('anon',
+              'app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)',
+              'EXECUTE') as public_denied`,
+        );
+        expect(inboxGrant.rows).toEqual([{ owner_allowed: true, public_denied: true }]);
+        const overviewGrant = await client.query<{
+          owner_allowed: boolean;
+          public_denied: boolean;
+        }>(
+          `select has_function_privilege('fetanagent_owner_control_runtime',
+              'app.get_owner_system_overview(uuid)', 'EXECUTE') as owner_allowed,
+            not has_function_privilege('anon',
+              'app.get_owner_system_overview(uuid)', 'EXECUTE') as public_denied`,
+        );
+        expect(overviewGrant.rows).toEqual([{ owner_allowed: true, public_denied: true }]);
         await client.query('set session authorization fetanagent_owner_control_runtime');
+        const overview = await client.query<{
+          snapshot: {
+            telebirrSmsLastReceivedAt: string | null;
+            openDepositJobs: number;
+            awaitingManualCredits: number;
+          };
+        }>('select app.get_owner_system_overview($1::uuid) as snapshot', [getOwner()]);
+        expect(Date.parse(overview.rows[0]!.snapshot.telebirrSmsLastReceivedAt!)).not.toBeNaN();
+        expect(overview.rows[0]!.snapshot.openDepositJobs).toBeGreaterThanOrEqual(0);
+        expect(overview.rows[0]!.snapshot.awaitingManualCredits).toBeGreaterThanOrEqual(0);
         const inbox = await client.query<{
           payment_event_id: string;
           reference_masked: string | null;
@@ -812,12 +841,40 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         expect(inbox.rows).toEqual([
           { payment_event_id: event, reference_masked: null, can_mark_manually_credited: true },
         ]);
+        const filtered = await client.query<{ payment_event_id: string }>(
+          `select payment_event_id from app.list_owner_receiver_sms_inbox_filtered(
+            $1::uuid,'telebirr','unmatched',null,null,null,25,0)
+            where payment_event_id = $2::uuid`,
+          [getOwner(), event],
+        );
+        expect(filtered.rows).toEqual([{ payment_event_id: event }]);
+        for (const filters of [
+          ['cbe_birr', 'unmatched', null, null, null],
+          ['telebirr', 'manually_credited', null, null, null],
+          ['telebirr', 'unmatched', 'ABCD', null, null],
+          ['telebirr', 'unmatched', null, '2099-01-01', '2099-01-01'],
+        ] as const) {
+          const excluded = await client.query<{ payment_event_id: string }>(
+            `select payment_event_id from app.list_owner_receiver_sms_inbox_filtered(
+              $1::uuid,$2::text,$3::text,$4::text,$5::date,$6::date,25,0)
+              where payment_event_id = $7::uuid`,
+            [getOwner(), ...filters, event],
+          );
+          expect(excluded.rows).toEqual([]);
+        }
         const completed = await client.query<{ result: { status: string } }>(
           `select app.complete_owner_manual_payment_case(
             $1::uuid,null,$2::uuid,null,null,false,true) as result`,
           [getOwner(), event],
         );
         expect(completed.rows[0]?.result.status).toBe('manually_credited');
+        const completedInbox = await client.query<{ payment_event_id: string }>(
+          `select payment_event_id from app.list_owner_receiver_sms_inbox_filtered(
+            $1::uuid,'telebirr','manually_credited',null,null,null,25,0)
+            where payment_event_id = $2::uuid`,
+          [getOwner(), event],
+        );
+        expect(completedInbox.rows).toEqual([{ payment_event_id: event }]);
         await client.query('reset session authorization');
         const outcome = await client.query<{ status: string }>(
           `select app.match_receiver_sms_payment('telebirr',$1::text) as status`,

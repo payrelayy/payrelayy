@@ -2542,6 +2542,25 @@ export function buildOwnerControlApp(
     },
   );
 
+  app.get('/v1/owner/system-overview', async (request, reply) => {
+    try {
+      if (Object.keys(request.query as Record<string, unknown>).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      const actor = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.manualPayments?.systemOverview)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const overview = await dependencies.runtime.manualPayments.systemOverview(actor);
+      return reply.header('Cache-Control', 'no-store').code(200).send(overview);
+    } catch (error) {
+      if (error instanceof OwnerManualPaymentRejectedError)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      request.log.warn('Owner system overview is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
+
   app.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
     '/v1/owner/manual-payment-cases',
     async (request, reply) => {
@@ -2584,38 +2603,81 @@ export function buildOwnerControlApp(
     },
   );
 
-  app.get<{ Querystring: { limit?: string; offset?: string } }>(
-    '/v1/owner/receiver-sms-inbox',
-    async (request, reply) => {
-      try {
-        if (Object.keys(request.query).some((key) => !['limit', 'offset'].includes(key)))
-          return reply.code(400).send({ error: 'invalid_request' });
-        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
-        const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
-        if (
-          !Number.isSafeInteger(limit) ||
-          limit < 1 ||
-          limit > 50 ||
-          !Number.isSafeInteger(offset) ||
-          offset < 0 ||
-          offset > 10000
+  app.get<{
+    Querystring: {
+      limit?: string;
+      offset?: string;
+      provider?: string;
+      status?: string;
+      last4?: string;
+      from?: string;
+      to?: string;
+    };
+  }>('/v1/owner/receiver-sms-inbox', async (request, reply) => {
+    try {
+      if (
+        Object.keys(request.query).some(
+          (key) => !['limit', 'offset', 'provider', 'status', 'last4', 'from', 'to'].includes(key),
         )
-          return reply.code(400).send({ error: 'invalid_request' });
-        const actor = await ownerSubject(request.raw.rawHeaders);
-        if (!dependencies.runtime.manualPayments)
-          return reply.code(503).send({ error: 'owner_control_unavailable' });
-        const payments = await dependencies.runtime.manualPayments.listSms(actor, limit, offset);
-        return reply.code(200).send({ payments });
-      } catch (error) {
-        if (error instanceof OwnerManualPaymentRejectedError)
-          return reply.code(400).send({ error: 'invalid_request' });
-        if (error instanceof OwnerAuthenticationRejectedError)
-          return reply.code(403).send({ error: 'forbidden' });
-        request.log.warn('Owner receiving-phone inbox is unavailable.');
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+      const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
+      const provider = request.query.provider ?? 'all';
+      const status = request.query.status ?? 'all';
+      const last4 = request.query.last4;
+      const from = request.query.from;
+      const to = request.query.to;
+      if (
+        !Number.isSafeInteger(limit) ||
+        limit < 1 ||
+        limit > 50 ||
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        offset > 10000 ||
+        !['all', 'telebirr', 'cbe_birr'].includes(provider) ||
+        ![
+          'all',
+          'unmatched',
+          'submission_waiting',
+          'pending_review',
+          'auto_processing',
+          'auto_credited',
+          'auto_not_credited',
+          'auto_used',
+          'awaiting_manual_credit',
+          'manually_credited',
+          'rejected',
+        ].includes(status) ||
+        (last4 !== undefined && !/^[A-Z0-9]{4}$/u.test(last4)) ||
+        (from !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(from)) ||
+        (to !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(to)) ||
+        (from !== undefined && to !== undefined && from > to)
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      const actor = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.manualPayments)
         return reply.code(503).send({ error: 'owner_control_unavailable' });
-      }
-    },
-  );
+      const payments = await dependencies.runtime.manualPayments.listSms(
+        actor,
+        limit,
+        offset,
+        provider,
+        status,
+        last4,
+        from,
+        to,
+      );
+      return reply.code(200).send({ payments });
+    } catch (error) {
+      if (error instanceof OwnerManualPaymentRejectedError)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      request.log.warn('Owner receiving-phone inbox is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post<{ Params: { candidateId: string } }>(
     '/v1/owner/manual-payment-cases/:candidateId/decision',

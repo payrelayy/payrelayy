@@ -13,6 +13,34 @@ const ownerCase = '33333333-3333-4333-8333-333333333333';
 const sms = '44444444-4444-4444-8444-444444444444';
 
 describe('Owner manual payment boundary', () => {
+  it('returns only checked Owner system facts from the read-only overview', async () => {
+    const service = new PostgresOwnerManualPayments({
+      query: async () => ({
+        rows: [
+          {
+            overview: {
+              paymentVerificationMode: 'live',
+              depositExecutionMode: 'live',
+              telebirrReceiptLookupMode: 'disabled',
+              telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
+              cbeSmsLastReceivedAt: null,
+              openDepositJobs: 1,
+              deadDepositJobs: 0,
+              awaitingManualCredits: 2,
+              checkedAt: '2026-10-23T09:05:00Z',
+            },
+          },
+        ],
+      }),
+    });
+    expect(await service.systemOverview(actor)).toMatchObject({
+      paymentVerificationMode: 'live',
+      telebirrReceiptLookupMode: 'disabled',
+      openDepositJobs: 1,
+      awaitingManualCredits: 2,
+    });
+  });
+
   it('lists masked pending cases and reserves approval without an execution job', async () => {
     const calls: unknown[] = [];
     const service = new PostgresOwnerManualPayments({
@@ -59,34 +87,62 @@ describe('Owner manual payment boundary', () => {
   });
 
   it('shows an unmatched signed SMS without disclosing its reference', async () => {
+    const calls: unknown[] = [];
     const service = new PostgresOwnerManualPayments({
-      query: async () => ({
-        rows: [
-          {
-            payment_event_id: sms,
-            provider_code: 'telebirr',
-            payment_at: new Date('2026-10-23T09:00:00Z'),
-            received_at: new Date('2026-10-23T09:00:15Z'),
-            amount_minor: '3300',
-            receiver_account_masked: '***1234',
-            receiver_holder_name: 'Receiving account',
-            reference_masked: null,
-            candidate_id: null,
-            player_masked: null,
-            payment_status: 'unmatched',
-            case_id: null,
-            can_mark_manually_credited: true,
-          },
-        ],
-      }),
+      query: async (sql, values) => {
+        calls.push([sql, values]);
+        return {
+          rows: [
+            {
+              payment_event_id: sms,
+              provider_code: 'telebirr',
+              payment_at: new Date('2026-10-23T09:00:00Z'),
+              received_at: new Date('2026-10-23T09:00:15Z'),
+              amount_minor: '3300',
+              receiver_account_masked: '***1234',
+              receiver_holder_name: 'Receiving account',
+              reference_masked: null,
+              candidate_id: null,
+              player_masked: null,
+              payment_status: 'unmatched',
+              case_id: null,
+              can_mark_manually_credited: true,
+            },
+          ],
+        };
+      },
     });
-    expect(await service.listSms(actor)).toMatchObject([
+    expect(
+      await service.listSms(
+        actor,
+        25,
+        0,
+        'telebirr',
+        'unmatched',
+        undefined,
+        '2026-10-23',
+        '2026-10-23',
+      ),
+    ).toMatchObject([
       {
         referenceMasked: null,
         candidateId: null,
         canMarkManuallyCredited: true,
       },
     ]);
+    expect(calls).toEqual([
+      [
+        expect.stringContaining('list_owner_receiver_sms_inbox_filtered'),
+        [actor, 'telebirr', 'unmatched', null, '2026-10-23', '2026-10-23', 25, 0],
+      ],
+    ]);
+    await expect(
+      service.listSms(actor, 25, 0, 'telebirr', 'unmatched', 'ABC!'),
+    ).rejects.toBeInstanceOf(OwnerManualPaymentRejectedError);
+    await expect(
+      service.listSms(actor, 25, 0, 'telebirr', 'unmatched', undefined, '2026-02-30'),
+    ).rejects.toBeInstanceOf(OwnerManualPaymentRejectedError);
+    expect(calls).toHaveLength(1);
   });
 
   it('lists older signed TeleBirr submissions in the same manual queue', async () => {

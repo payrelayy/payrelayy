@@ -241,6 +241,8 @@ function ownerBrowserHarness(
   const email = element('#email');
   const password = element('#password');
   element('#login-form').elements = namedElements({ email, password });
+  element('#receiver-sms-inbox-provider-filter').value = 'all';
+  element('#receiver-sms-inbox-status-filter').value = 'all';
 
   element('#support-contact-form').elements = namedElements({
     telegramUsername: element('#support-contact-username'),
@@ -379,6 +381,68 @@ function ownerBrowserHarness(
     },
   };
 }
+
+describe('Owner workspace navigation', () => {
+  it('shows a bounded live status snapshot with distinct TeleBirr lookup state', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url === '/v1/owner/system-overview'
+          ? response(200, {
+              paymentVerificationMode: 'live',
+              depositExecutionMode: 'live',
+              telebirrReceiptLookupMode: 'disabled',
+              telebirrSmsLastReceivedAt: '2026-10-23T09:00:00Z',
+              cbeSmsLastReceivedAt: null,
+              openDepositJobs: 2,
+              deadDepositJobs: 0,
+              awaitingManualCredits: 1,
+              checkedAt: '2026-10-23T09:05:00Z',
+            })
+          : undefined,
+    });
+    await browser.signIn();
+    const facts = JSON.stringify(browser.element('#system-overview-facts'));
+    expect(facts).toContain('Separate TeleBirr receipt lookup');
+    expect(facts).toContain('Off');
+    expect(facts).toContain('Open deposit jobs');
+    expect(browser.element('#system-overview-status').textContent).toContain('Ethiopia time');
+  });
+
+  it('keeps daily work first and every active control reachable', async () => {
+    const browser = ownerBrowserHarness(503);
+    const areas = {
+      home: ['system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
+      payments: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
+      players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
+      system: ['routine-processing-title', 'receiver-title', 'support-contact-title'],
+      advanced: [
+        'kemerbet-companion-title',
+        'execution-readiness-title',
+        'execution-approvals-title',
+        'pilot-title',
+        'kemerbet-readiness-cohort-title',
+        'deposit-intake-title',
+      ],
+    } as const;
+    const everySection = Object.values(areas).flat();
+
+    for (const [area, visible] of Object.entries(areas)) {
+      if (area !== 'home') {
+        await browser.element(`#owner-nav-${area}`).listeners.get('click')?.({
+          preventDefault() {},
+        });
+      }
+      expect(
+        everySection.filter(
+          (label) => !browser.element(`section[aria-labelledby="${label}"]`).hidden,
+        ),
+      ).toEqual(visible);
+      expect(browser.element(`#owner-nav-${area}`).dataset.active).toBe('true');
+    }
+    expect(browser.element('#owner-view-title').textContent).toBe('Advanced tools');
+    expect(browser.element('#owner-view-title').focused).toBe(true);
+  });
+});
 
 describe('read-only TeleBirr receiver-change review queue', () => {
   it('does not redraw a late case response after Owner sign-out', async () => {
@@ -671,6 +735,37 @@ describe('Owner manual payment review', () => {
     const inbox = JSON.stringify(browser.element('#receiver-sms-inbox-list'));
     expect(inbox).toContain('I manually credited the selected Player');
     expect(inbox).toContain('Manually credited');
+  });
+
+  it('searches received SMS across pages with the applied filters', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/receiver-sms-inbox?')
+          ? response(200, { payments: [] })
+          : undefined,
+    });
+    await browser.signIn();
+    browser.element('#receiver-sms-inbox-provider-filter').value = 'cbe_birr';
+    browser.element('#receiver-sms-inbox-status-filter').value = 'unmatched';
+    browser.element('#receiver-sms-inbox-last4').value = 'ab12';
+    browser.element('#receiver-sms-inbox-from').value = '2026-10-01';
+    browser.element('#receiver-sms-inbox-to').value = '2026-10-23';
+    await browser.call('loadReceiverSmsInbox', true);
+    const requests = () =>
+      browser.fetchCalls.filter(({ url }) => url.startsWith('/v1/owner/receiver-sms-inbox?'));
+    expect(requests().at(-1)?.url).toContain(
+      'provider=cbe_birr&status=unmatched&last4=AB12&from=2026-10-01&to=2026-10-23',
+    );
+    browser.element('#receiver-sms-inbox-provider-filter').value = 'telebirr';
+    await browser.call('loadReceiverSmsInbox', false);
+    expect(requests().at(-1)?.url).toContain('provider=cbe_birr&status=unmatched');
+    browser.element('#receiver-sms-inbox-last4').value = 'BAD!';
+    const requestCount = requests().length;
+    await browser.call('loadReceiverSmsInbox', true);
+    expect(requests()).toHaveLength(requestCount);
+    expect(browser.element('#receiver-sms-inbox-status').textContent).toContain(
+      'Check the reference',
+    );
   });
 });
 
@@ -1798,10 +1893,14 @@ describe('Owner dashboard browser authentication boundary', () => {
       });
       await browser.signIn();
       expect(browser.element('#companion-connection-status').textContent).toBe(label);
+      expect(browser.element('#system-overview-companion').textContent).toBe(label);
       expect(browser.element('#companion-connection-refresh').disabled).toBe(false);
       fail = true;
       await browser.call('loadCompanionConnection');
       expect(browser.element('#companion-connection-status').textContent).toBe(
+        'Connection status unavailable',
+      );
+      expect(browser.element('#system-overview-companion').textContent).toBe(
         'Connection status unavailable',
       );
       expect(browser.element('#companion-connection-detail').textContent).toBe('');
@@ -1837,6 +1936,9 @@ describe('Owner dashboard browser authentication boundary', () => {
     browser.evaluate('document.hidden = true');
     await browser.element('document').listeners.get('visibilitychange')?.({ preventDefault() {} });
     expect(browser.element('#companion-connection-status').textContent).toBe(
+      'Connection status needs refresh',
+    );
+    expect(browser.element('#system-overview-companion').textContent).toBe(
       'Connection status needs refresh',
     );
     browser.evaluate('document.hidden = false');

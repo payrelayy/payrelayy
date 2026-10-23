@@ -5,14 +5,14 @@ while preserving the existing CBE-live financial profile, the signed routine
 deposit transport, and both current receivers. It makes no payment, Player
 credit, or receiver change.
 
-| Boundary | Exact value |
-| --- | --- |
-| Production Droplet | `593344964` |
-| Required running release and routine marker | `6b7fab30082f37f4d42ad8ed0958d77b75348929` |
-| Installed helper SHA-256 | `563c2b05a3d15d474ad71bcf33ed7b68798aff65ee6700fa4ca49c65dac76e23` |
-| Successor helper SHA-256 | `e00b5721a2b48cad8f5a7828081ebe9b05c239c6283a0123ac9f561e951ea1d2` |
-| Rotation script | `infra/operations/fetanagent-production-v2-owner-payment-methods-rotation-v6.sh` |
-| Payment profile | `cbe-live-v1`, routine deposit transport `enabled` |
+| Boundary                                    | Exact value                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------- |
+| Production Droplet                          | `593344964`                                                                      |
+| Required running release and routine marker | `6b7fab30082f37f4d42ad8ed0958d77b75348929`                                       |
+| Installed helper SHA-256                    | `563c2b05a3d15d474ad71bcf33ed7b68798aff65ee6700fa4ca49c65dac76e23`               |
+| Successor helper SHA-256                    | `e00b5721a2b48cad8f5a7828081ebe9b05c239c6283a0123ac9f561e951ea1d2`               |
+| Rotation script                             | `infra/operations/fetanagent-production-v2-owner-payment-methods-rotation-v6.sh` |
+| Payment profile                             | `cbe-live-v1`, routine deposit transport `enabled`                               |
 
 1. Require successful PR and exact-main CI. Inspect public Owner and customer
    health and read-only production state: all seven payment switches, the SMS

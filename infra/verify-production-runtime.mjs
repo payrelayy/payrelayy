@@ -1221,6 +1221,11 @@ assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-acti
 assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-disable\.sql/u);
 assert.match(workflow, /--file=infra\/sql\/production-receiver-sms-runtimes-stop\.sql/u);
 assert.match(workflow, /steps\.sms_previous\.outputs\.state == 'disabled'/u);
+const smsEnabledState = workflow.match(
+  /^\s*(true(?:,true)+)\) echo 'state=enabled' >>"\$GITHUB_OUTPUT"/mu,
+)?.[1];
+assert.equal(smsEnabledState, 'true,true,true,true');
+assert.ok(workflow.includes(`[[ "$state" == '${smsEnabledState}' ]]`));
 for (const role of ['ingest', 'settlement']) {
   assert.match(
     receiverSmsActivateSql,

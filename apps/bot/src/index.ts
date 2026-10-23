@@ -30,7 +30,6 @@ import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
   isTelegramGuidedDepositStartCallback,
-  isTelegramCbeSmsDepositStartCallback,
   isTelegramCbeSmsDepositStartCommand,
   isTelegramGuidedDepositStartCommand,
   isTelegramSavedPlayerChangeCallback,
@@ -41,8 +40,9 @@ import {
   reduceTelegramGuidedDepositDestinationSubmission,
   reduceTelegramGuidedDepositMediaSubmission,
   reduceTelegramGuidedDepositProofSubmission,
-  reduceTelegramSavedTelebirrDestinationAction,
   reduceTelegramSavedCbeSmsDestinationAction,
+  reduceTelegramSavedCombinedDestinationAction,
+  reduceTelegramSavedTelebirrDestinationAction,
   reduceTelegramSavedCbeSmsProofSubmission,
   reduceTelegramSavedTelebirrMediaSubmission,
   reduceTelegramSavedTelebirrProofSubmission,
@@ -61,6 +61,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+  TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
@@ -93,7 +94,7 @@ const pollingReadiness = createTelegramPollingReadiness();
 bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
-const quickMenu = renderTelegramQuickMenu(config.receiverSmsCandidateEnabled);
+const quickMenu = renderTelegramQuickMenu();
 async function availableMenuButtons(
   buttons: readonly PrivateTelegramMenuButton[],
 ): Promise<readonly PrivateTelegramMenuButton[]> {
@@ -103,6 +104,9 @@ async function availableMenuButtons(
   );
   return buttons.filter(
     (button) =>
+      (button.callbackData !== TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA ||
+        methods.telebirr ||
+        methods.cbe_birr) &&
       (button.callbackData !== TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA || methods.telebirr) &&
       (button.callbackData !== TELEGRAM_GUIDED_CBE_CALLBACK_DATA || methods.cbe_birr),
   );
@@ -219,9 +223,12 @@ async function deliverPlayerAction(
     if (presentation.kind === 'force_reply') {
       const sent = await reply(presentation.text, undefined, presentation.placeholder);
       if (
-        result.outcome === 'telebirr_deposit_destination' &&
-        (action.kind === 'saved_telebirr_destination_command' ||
-          action.kind === 'telebirr_deposit_destination_command')
+        (result.outcome === 'telebirr_deposit_destination' &&
+          (action.kind === 'saved_telebirr_destination_command' ||
+            action.kind === 'telebirr_deposit_destination_command')) ||
+        (result.outcome === 'combined_deposit_destination' &&
+          action.kind === 'saved_combined_destination_command' &&
+          result.receivers.some((receiver) => receiver.providerCode === 'telebirr'))
       ) {
         const messageId =
           typeof sent === 'object' && sent !== null && 'message_id' in sent
@@ -260,6 +267,7 @@ async function deliverPlayerAction(
             action.kind === 'saved_receiver_sms_proof_command' ||
             action.kind === 'saved_telebirr_destination_command' ||
             action.kind === 'saved_cbe_sms_destination_command' ||
+            action.kind === 'saved_combined_destination_command' ||
             action.kind === 'telebirr_deposit_destination_command' ||
             action.kind === 'cbe_birr_dry_run_instruction_command' ||
             action.kind === 'cbe_birr_bound_dry_run_proof_command'
@@ -310,7 +318,15 @@ bot.on('message', async (context) => {
       return;
     }
     if (isTelegramGuidedDepositStartCommand({ ...metadata, command: text })) {
-      const action = reduceTelegramSavedTelebirrDestinationAction(metadata);
+      const methods = await loadTelegramPaymentMethods(
+        config.supportContactUrl,
+        config.receiverSmsCandidateEnabled,
+      );
+      const action = config.receiverSmsCandidateEnabled
+        ? reduceTelegramSavedCombinedDestinationAction(metadata, methods)
+        : methods.telebirr
+          ? reduceTelegramSavedTelebirrDestinationAction(metadata)
+          : undefined;
       if (action)
         await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
           context.reply(
@@ -328,6 +344,7 @@ bot.on('message', async (context) => {
                 : undefined,
           ),
         );
+      else await context.reply(message('en', 'depositUnavailable'));
       return;
     }
     if (
@@ -673,15 +690,21 @@ if (playerActions.enabled) {
       callbackData: context.callbackQuery.data,
     };
     const guidedDepositStart = isTelegramGuidedDepositStartCallback(callbackMetadata);
-    const cbeDepositStart =
-      config.receiverSmsCandidateEnabled && isTelegramCbeSmsDepositStartCallback(callbackMetadata);
     const changePlayer = isTelegramSavedPlayerChangeCallback(callbackMetadata);
     const action =
       reduceTelegramDepositProofStatusCallbackAction(callbackMetadata) ??
       reduceTelegramPlayerRegistrationCallbackAction(callbackMetadata);
     await context.answerCallbackQuery();
     if (guidedDepositStart) {
-      const savedAction = reduceTelegramSavedTelebirrDestinationAction(callbackMetadata);
+      const methods = await loadTelegramPaymentMethods(
+        config.supportContactUrl,
+        config.receiverSmsCandidateEnabled,
+      );
+      const savedAction = config.receiverSmsCandidateEnabled
+        ? reduceTelegramSavedCombinedDestinationAction(callbackMetadata, methods)
+        : methods.telebirr
+          ? reduceTelegramSavedTelebirrDestinationAction(callbackMetadata)
+          : undefined;
       if (savedAction)
         await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
           context.reply(
@@ -699,27 +722,7 @@ if (playerActions.enabled) {
                 : undefined,
           ),
         );
-      return;
-    }
-    if (cbeDepositStart) {
-      const savedAction = reduceTelegramSavedCbeSmsDestinationAction(callbackMetadata);
-      if (savedAction)
-        await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
-          context.reply(
-            replyText,
-            placeholder
-              ? {
-                  reply_markup: {
-                    force_reply: true,
-                    selective: true,
-                    input_field_placeholder: placeholder,
-                  },
-                }
-              : keyboard
-                ? { reply_markup: keyboard }
-                : undefined,
-          ),
-        );
+      else await context.reply(message('en', 'depositUnavailable'));
       return;
     }
     if (changePlayer) {

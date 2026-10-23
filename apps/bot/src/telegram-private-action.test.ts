@@ -26,6 +26,7 @@ import {
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
   reduceTelegramSavedTelebirrDestinationAction,
+  reduceTelegramSavedCombinedDestinationAction,
   reduceTelegramSavedCbeSmsMediaSubmission,
   reduceTelegramSavedCbeSmsProofSubmission,
   reduceTelegramSavedCbeSmsDestinationAction,
@@ -36,6 +37,8 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  buildTelegramCombinedPaymentPrompt,
+  isTelegramCombinedPaymentPromptReply,
   buildTelegramTelebirrPaymentPrompt,
   buildTelegramCbeSmsPaymentPrompt,
   isTelegramCbeSmsPaymentPromptReply,
@@ -73,6 +76,96 @@ const priorPaymentPrompt = [
 ].join('\n');
 
 describe('private Telegram action reducers', () => {
+  it('requests only enabled methods and recognizes the exact combined Owner-configured card', () => {
+    expect(
+      reduceTelegramSavedCombinedDestinationAction(privateMetadata, {
+        telebirr: true,
+        cbe_birr: true,
+      }),
+    ).toMatchObject({
+      kind: 'saved_combined_destination_command',
+      providerCodes: ['telebirr', 'cbe_birr'],
+    });
+    expect(
+      reduceTelegramSavedCombinedDestinationAction(privateMetadata, {
+        telebirr: false,
+        cbe_birr: true,
+      }),
+    ).toMatchObject({ providerCodes: ['cbe_birr'] });
+    expect(
+      reduceTelegramSavedCombinedDestinationAction(privateMetadata, {
+        telebirr: false,
+        cbe_birr: false,
+      }),
+    ).toBeUndefined();
+    const prompt = buildTelegramCombinedPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receivers: [
+        {
+          providerCode: 'telebirr',
+          receiverAccountHolderName: 'TeleBirr Owner Name',
+          receiverAccountReference: '0000000042',
+        },
+        {
+          providerCode: 'cbe_birr',
+          receiverAccountHolderName: 'CBE Owner Name',
+          receiverAccountReference: '0000000043',
+        },
+      ],
+    });
+    expect(prompt).toContain('Name: TeleBirr Owner Name\nNumber: 0000000042');
+    expect(prompt).toContain('Name: CBE Owner Name\nNumber: 0000000043');
+    expect(prompt).toContain('Saved Player ID: PLAYER-DEMO-42');
+    expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
+      true,
+    );
+    expect(
+      reduceTelegramAutoReceiverSmsTextSubmission({
+        ...privateMetadata,
+        command: 'CBE12345678',
+        replyToMessage: { from: { is_bot: true }, text: prompt },
+      }),
+    ).toMatchObject({
+      kind: 'action',
+      action: {
+        kind: 'deposit_proof_command',
+        providerCode: 'cbe_birr',
+        playerId: 'PLAYER-DEMO-42',
+        transactionReference: 'CBE12345678',
+      },
+    });
+    expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: false }, text: prompt })).toBe(
+      false,
+    );
+    expect(
+      isTelegramCombinedPaymentPromptReply({
+        from: { is_bot: true },
+        text: prompt.replace('CBE Owner Name', 'Other Name'),
+      }),
+    ).toBe(true);
+    expect(
+      isTelegramCombinedPaymentPromptReply({
+        from: { is_bot: true },
+        text: prompt.replace('Valid for 1 hour.', 'Valid forever.'),
+      }),
+    ).toBe(false);
+    const cbeOnly = buildTelegramCombinedPaymentPrompt({
+      playerId: 'PLAYER-DEMO-42',
+      receivers: [
+        {
+          providerCode: 'cbe_birr',
+          receiverAccountHolderName: 'CBE Owner Name',
+          receiverAccountReference: '0000000043',
+        },
+      ],
+    });
+    expect(cbeOnly).not.toContain('Valid for 1 hour');
+    expect(cbeOnly).not.toContain('TeleBirr\n');
+    expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: cbeOnly })).toBe(
+      true,
+    );
+  });
+
   it('routes typed proof by reference length even under the other method instruction', () => {
     const telePrompt = buildTelegramTelebirrPaymentPrompt({
       playerId: 'PLAYER-DEMO-42',

@@ -69,6 +69,24 @@ function validOptionalSelectedPlayerId(value: Record<string, unknown>): boolean 
   return !Object.hasOwn(value, 'selectedPlayerId') || validSelectedPlayerId(value.selectedPlayerId);
 }
 
+function validCombinedReceivers(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) return false;
+  return value.every((receiver: unknown, index: number) => {
+    if (!isRecord(receiver)) return false;
+    const provider = receiver.providerCode;
+    return (
+      (provider === 'telebirr' || provider === 'cbe_birr') &&
+      (value.length === 1 || (index === 0 ? provider === 'telebirr' : provider === 'cbe_birr')) &&
+      Object.keys(receiver).sort().join(',') ===
+        'providerCode,providerName,receiverAccountHolderName,receiverAccountMasked,receiverAccountReference' &&
+      validReceiverPresentation(receiver, provider) &&
+      typeof receiver.receiverAccountReference === 'string' &&
+      /^[0-9]{9,24}$/u.test(receiver.receiverAccountReference) &&
+      receiver.receiverAccountMasked === `***${receiver.receiverAccountReference.slice(-4)}`
+    );
+  });
+}
+
 function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
   if (!isRecord(value) || value.version !== 1 || typeof value.outcome !== 'string')
     return undefined;
@@ -301,6 +319,15 @@ function parseResult(value: unknown): TelegramPrivateActionResult | undefined {
     /^[0-9]{9,24}$/u.test(value.receiverAccountReference) &&
     value.receiverAccountMasked === `***${value.receiverAccountReference.slice(-4)}` &&
     value.acceptsPayments === true
+  ) {
+    return value as unknown as TelegramPrivateActionResult;
+  }
+  if (
+    value.outcome === 'combined_deposit_destination' &&
+    keys.length === 5 &&
+    validSelectedPlayerId(value.selectedPlayerId) &&
+    value.acceptsPayments === true &&
+    validCombinedReceivers(value.receivers)
   ) {
     return value as unknown as TelegramPrivateActionResult;
   }

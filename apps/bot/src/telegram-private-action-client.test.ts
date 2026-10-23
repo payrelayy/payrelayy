@@ -27,6 +27,45 @@ const config = {
 };
 
 describe('Telegram private-action bot client', () => {
+  it('accepts only ordered, internally consistent combined receiver details', async () => {
+    const receiver = (providerCode: 'telebirr' | 'cbe_birr', receiverAccountReference: string) => ({
+      providerCode,
+      providerName: providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
+      receiverAccountHolderName: providerCode === 'telebirr' ? 'Tele Owner' : 'CBE Owner',
+      receiverAccountReference,
+      receiverAccountMasked: `***${receiverAccountReference.slice(-4)}`,
+    });
+    const telebirr = receiver('telebirr', '0000000042');
+    const cbe = receiver('cbe_birr', '0000000043');
+    const destination = {
+      version: 1,
+      outcome: 'combined_deposit_destination',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+      acceptsPayments: true,
+      receivers: [telebirr, cbe],
+    };
+    for (const receivers of [[telebirr, cbe], [telebirr], [cbe]]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => ({ ...destination, receivers }) }),
+        }),
+      ).resolves.toEqual({ ...destination, receivers });
+    }
+    for (const receivers of [
+      [],
+      [cbe, telebirr],
+      [telebirr, telebirr],
+      [{ ...telebirr, receiverAccountMasked: '***9999' }],
+      [{ ...cbe, providerName: 'TeleBirr' }],
+    ]) {
+      await expect(
+        deliverTelegramPrivateAction(action, config, {
+          fetch: async () => ({ status: 200, json: async () => ({ ...destination, receivers }) }),
+        }),
+      ).rejects.toBeInstanceOf(TelegramPrivateActionDeliveryError);
+    }
+  });
+
   it('accepts only the non-payable CBE Birr staging instruction preview', async () => {
     const preview = {
       version: 1,

@@ -8,10 +8,12 @@ import { isBoundedTelegramDepositProofText } from './telegram-deposit-proof-inpu
  */
 export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
 export const TELEGRAM_GUIDED_CBE_CALLBACK_DATA = 'gd1.cbe';
+export const TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA = 'gd1.deposit';
 export const TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA = 'sp1.change';
 
 export const TELEGRAM_GUIDED_TELEBIRR_BUTTON_TEXT = '💰 TeleBirr';
 export const TELEGRAM_GUIDED_CBE_BUTTON_TEXT = '💳 CBE Birr';
+export const TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT = '💰 Deposit';
 
 const TELEBIRR_AMOUNT_TEXT = 'Amount: choose 25–25,000 ETB in TeleBirr.';
 const PREVIOUS_TELEBIRR_PILOT_AMOUNT_TEXT = 'Amount: send exactly 25 ETB in TeleBirr.';
@@ -113,6 +115,85 @@ export interface TelegramTelebirrPaymentPromptInput {
   readonly playerId: string;
   readonly receiverAccountHolderName: string;
   readonly receiverAccountReference: string;
+}
+
+export interface TelegramCombinedPaymentReceiver {
+  readonly providerCode: 'telebirr' | 'cbe_birr';
+  readonly receiverAccountHolderName: string;
+  readonly receiverAccountReference: string;
+}
+
+export interface TelegramCombinedPaymentPromptInput {
+  readonly playerId: string;
+  readonly receivers: readonly TelegramCombinedPaymentReceiver[];
+}
+
+/** One current payable card, with each Owner-configured receiver kept under its own provider. */
+export function buildTelegramCombinedPaymentPrompt(
+  input: TelegramCombinedPaymentPromptInput,
+): string {
+  if (
+    !validPlayerId(input.playerId) ||
+    input.receivers.length < 1 ||
+    input.receivers.length > 2 ||
+    (input.receivers.length === 2 &&
+      (input.receivers[0]?.providerCode !== 'telebirr' ||
+        input.receivers[1]?.providerCode !== 'cbe_birr')) ||
+    input.receivers.some(
+      (receiver) =>
+        (receiver.providerCode !== 'telebirr' && receiver.providerCode !== 'cbe_birr') ||
+        receiver.receiverAccountHolderName !== receiver.receiverAccountHolderName.trim() ||
+        Array.from(receiver.receiverAccountHolderName).length < 2 ||
+        Array.from(receiver.receiverAccountHolderName).length > 160 ||
+        /[\u0000-\u001f\u007f]/u.test(receiver.receiverAccountHolderName) ||
+        !/^[0-9]{9,24}$/u.test(receiver.receiverAccountReference),
+    )
+  )
+    throw new Error('The combined payment prompt is unavailable.');
+  return [
+    '💰 FetanAgent deposit',
+    'Choose one available method. Send 25–25,000 ETB.',
+    ...input.receivers.flatMap((receiver) => [
+      '',
+      receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
+      `Name: ${receiver.receiverAccountHolderName}`,
+      `Number: ${receiver.receiverAccountReference}`,
+    ]),
+    '',
+    `Saved Player ID: ${input.playerId}`,
+    ...(input.receivers.some((receiver) => receiver.providerCode === 'telebirr')
+      ? ['Valid for 1 hour. Check the receiver name before paying.']
+      : ['Check the receiver name before paying.']),
+    'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+  ].join('\n');
+}
+
+export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const message = value as TelegramReplyMessageShape;
+  if (message.from?.is_bot !== true || typeof message.text !== 'string') return undefined;
+  const playerId = /(?:^|\n)Saved Player ID: ([^\s]+)(?:\n|$)/u.exec(message.text)?.[1];
+  const receivers = [
+    ...message.text.matchAll(
+      /(?:^|\n)(TeleBirr|CBE Birr)\nName: ([^\r\n]+)\nNumber: ([0-9]{9,24})(?=\n|$)/gu,
+    ),
+  ].map((match) => ({
+    providerCode: match[1] === 'TeleBirr' ? ('telebirr' as const) : ('cbe_birr' as const),
+    receiverAccountHolderName: match[2]!,
+    receiverAccountReference: match[3]!,
+  }));
+  if (!playerId) return undefined;
+  try {
+    return message.text === buildTelegramCombinedPaymentPrompt({ playerId, receivers })
+      ? playerId
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function isTelegramCombinedPaymentPromptReply(value: unknown): boolean {
+  return parseTelegramCombinedPaymentPromptReply(value) !== undefined;
 }
 
 export function buildTelegramTelebirrPaymentPrompt(

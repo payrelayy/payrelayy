@@ -825,6 +825,68 @@ async function handleSavedCbeSmsDestination(
   };
 }
 
+async function handleSavedCombinedDestination(
+  database: TelegramPlayerActionDatabase,
+  originInboundEventId: string,
+  action: Extract<
+    TelegramPrivateActionEnvelope,
+    { readonly kind: 'saved_combined_destination_command' }
+  >,
+  config: EnabledPlayerActionConfig,
+): Promise<TelegramPrivateActionResult> {
+  if (config.financialActionsMode !== 'live') return { version: 1, outcome: 'deposit_unavailable' };
+  const selectedPlayerId = await getSavedPlayerSelection(database, originInboundEventId);
+  if (selectedPlayerId === null) return { version: 1, outcome: 'player_selection_missing' };
+  const receivers: Array<{
+    providerCode: 'telebirr' | 'cbe_birr';
+    providerName: 'TeleBirr' | 'CBE Birr';
+    receiverAccountHolderName: string;
+    receiverAccountReference: string;
+    receiverAccountMasked: string;
+  }> = [];
+  for (const providerCode of action.providerCodes) {
+    if (providerCode === 'telebirr') {
+      const result = await handleTelebirrDestination(
+        database,
+        originInboundEventId,
+        { ...action, kind: 'telebirr_deposit_destination_command', playerId: selectedPlayerId },
+        config,
+      );
+      if (result.outcome !== 'telebirr_deposit_destination' || !result.acceptsPayments)
+        return { version: 1, outcome: 'deposit_unavailable' };
+      receivers.push({
+        providerCode: result.providerCode,
+        providerName: result.providerName,
+        receiverAccountHolderName: result.receiverAccountHolderName,
+        receiverAccountReference: result.receiverAccountReference,
+        receiverAccountMasked: result.receiverAccountMasked,
+      });
+    } else {
+      const result = await handleSavedCbeSmsDestination(database, originInboundEventId, config);
+      if (
+        result.outcome !== 'cbe_sms_deposit_destination' ||
+        result.selectedPlayerId !== selectedPlayerId ||
+        !result.acceptsPayments
+      )
+        return { version: 1, outcome: 'deposit_unavailable' };
+      receivers.push({
+        providerCode: result.providerCode,
+        providerName: result.providerName,
+        receiverAccountHolderName: result.receiverAccountHolderName,
+        receiverAccountReference: result.receiverAccountReference,
+        receiverAccountMasked: result.receiverAccountMasked,
+      });
+    }
+  }
+  return {
+    version: 1,
+    outcome: 'combined_deposit_destination',
+    selectedPlayerId,
+    acceptsPayments: true,
+    receivers,
+  };
+}
+
 async function handleSavedTelebirrProof(
   database: TelegramPlayerActionDatabase,
   originInboundEventId: string,
@@ -1603,6 +1665,8 @@ export function createPostgresTelegramPlayerActionRuntime(
             return await handleSavedTelebirrDestination(pool, inboundEventId, action, config);
           case 'saved_cbe_sms_destination_command':
             return await handleSavedCbeSmsDestination(pool, inboundEventId, config);
+          case 'saved_combined_destination_command':
+            return await handleSavedCombinedDestination(pool, inboundEventId, action, config);
           case 'saved_telebirr_proof_command':
             return await handleSavedTelebirrProof(pool, inboundEventId, action, config);
           case 'saved_receiver_sms_proof_command':

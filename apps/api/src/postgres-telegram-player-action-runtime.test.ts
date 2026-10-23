@@ -1190,6 +1190,130 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls[2]).toContain('prepare_telegram_live_cbe_sms_destination');
   });
 
+  it('uses each live Owner receiver for the combined card and supports CBE-only availability', async () => {
+    const secrets = { encryptionSecret: '1'.repeat(64), fingerprintSecret: '2'.repeat(64) };
+    const telebirr = protectReceiverAccountReference(
+      { provider: 'telebirr', reference: '0000000042', secrets },
+      { nonce: () => Buffer.alloc(12, 7) },
+    );
+    const cbe = protectReceiverAccountReference(
+      { provider: 'cbe_birr', reference: '0000000043', secrets },
+      { nonce: () => Buffer.alloc(12, 8) },
+    );
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_public_telegram_action_inbound_event'))
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date('2026-10-22T12:00:00.000Z'),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        if (query.includes('get_telegram_saved_player_selection'))
+          return { rows: [{ selected_player_id: 'PLAYER-DEMO-42' }] };
+        if (query.includes('prepare_telegram_live_telebirr_destination'))
+          return {
+            rows: [
+              {
+                provider_code: 'telebirr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'TeleBirr Owner Name',
+                receiver_account_reference_ciphertext: telebirr.ciphertext,
+                receiver_account_reference_fingerprint: telebirr.fingerprint,
+                receiver_account_masked: telebirr.masked,
+                payments_enabled: true,
+                request_replayed: false,
+              },
+            ],
+          };
+        if (query.includes('prepare_telegram_live_cbe_sms_destination'))
+          return {
+            rows: [
+              {
+                provider_code: 'cbe_birr',
+                receiver_revision_id: '58eeef22-21eb-4fe6-9f64-8637daed6874',
+                receiver_account_holder_name: 'CBE Owner Name',
+                receiver_account_reference_ciphertext: cbe.ciphertext,
+                receiver_account_reference_fingerprint: cbe.fingerprint,
+                receiver_account_masked: cbe.masked,
+                payments_enabled: true,
+              },
+            ],
+          };
+        throw new Error('unexpected statement');
+      },
+      async end() {},
+    };
+    const config = {
+      ...actionConfig,
+      financialActionsMode: 'live' as const,
+      telegramPlayerActionRuntime: {
+        ...enabledActionRuntime,
+        deploymentTarget: 'production' as const,
+        routineTelebirrCandidateProductionEnabled: true,
+        receiverSmsCandidateProductionEnabled: true,
+      },
+    };
+    const both: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'saved_combined_destination_command',
+      providerCodes: ['telebirr', 'cbe_birr'],
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(config, database).handle(
+        both,
+        Buffer.from(JSON.stringify(both), 'utf8'),
+      ),
+    ).resolves.toEqual({
+      version: 1,
+      outcome: 'combined_deposit_destination',
+      selectedPlayerId: 'PLAYER-DEMO-42',
+      acceptsPayments: true,
+      receivers: [
+        {
+          providerCode: 'telebirr',
+          providerName: 'TeleBirr',
+          receiverAccountHolderName: 'TeleBirr Owner Name',
+          receiverAccountReference: '0000000042',
+          receiverAccountMasked: '***0042',
+        },
+        {
+          providerCode: 'cbe_birr',
+          providerName: 'CBE Birr',
+          receiverAccountHolderName: 'CBE Owner Name',
+          receiverAccountReference: '0000000043',
+          receiverAccountMasked: '***0043',
+        },
+      ],
+    });
+    expect(
+      calls.some((query) => query.includes('prepare_telegram_live_telebirr_destination')),
+    ).toBe(true);
+    calls.length = 0;
+    const cbeOnly: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'saved_combined_destination_command',
+      providerCodes: ['cbe_birr'],
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(config, database).handle(
+        cbeOnly,
+        Buffer.from(JSON.stringify(cbeOnly), 'utf8'),
+      ),
+    ).resolves.toMatchObject({
+      outcome: 'combined_deposit_destination',
+      receivers: [{ providerCode: 'cbe_birr', receiverAccountHolderName: 'CBE Owner Name' }],
+    });
+    expect(
+      calls.some((query) => query.includes('prepare_telegram_live_telebirr_destination')),
+    ).toBe(false);
+  });
+
   it('opens a non-submittable 25 ETB receiver review with payment authorization disabled', async () => {
     const protectedReceiver = protectReceiverAccountReference(
       {

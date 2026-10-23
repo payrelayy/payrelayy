@@ -2,11 +2,12 @@
 
 The paired Samsung phone runs the SMS verifier build for both TeleBirr and CBE
 Birr. The CBE incident left the SMS route and independent CBE verification
-live, but both shared payment gates disabled. The server release
-`22f2ecfdb112d31b1807c148b021d9b7367e3134` mounts the SMS broker and
+live, but both shared payment gates disabled. The running server release
+`aa5db75897ac63e29917836aa7d52843b4a69ef6` mounts the SMS broker and
 signed Windows Companion transport; it does not mount a paid TeleBirr receipt
 poll. The separate TeleBirr receipt phone proof is irrelevant to this SMS
-recovery.
+recovery. The current deploy helper has SHA-256
+`e00b5721a2b48cad8f5a7828081ebe9b05c239c6283a0123ac9f561e951ea1d2`.
 
 The 33 ETB CBE claim remains cancelled and in Owner review. The Owner
 confirmed exactly one manual KemerBet credit. Never resubmit that reference
@@ -18,10 +19,12 @@ history.
    paired phone, a healthy phone reader, active Owner policy, four scoped
    SMS/broker/no-money logins, no paid receipt sessions or recent paid poll,
    and zero active execution jobs and unresolved attempts. The installed
-   Companion must be v0.1.55 and stopped.
-2. Merge the reviewed migration and workflow after required CI. Applying the
-   migration only installs a dormant, postgres-only one-use function. It does
-   not change the route, switches, roles, claims, jobs, or Player balances.
+   Companion must be the checksum-verified v0.1.57 package; its guarded
+   no-money Player lookup and deposit-form preflight must have passed.
+2. Confirm the reviewed one-use recovery migration is applied and this workflow
+   is on the exact passing `main` commit. The migration only installed a dormant,
+   postgres-only function. It did not change the route, switches, roles, claims,
+   jobs, or Player balances.
 3. Start the exact installed Companion's automatic-deposits launcher as an
    **idle** routine worker. Sign in to its dedicated KemerBet Chrome profile
    directly if needed. Confirm a fresh signed worker lease and a successful

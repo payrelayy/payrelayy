@@ -10,13 +10,13 @@ const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
 });
 
 describe('English-only private customer menu', () => {
-  it('puts the guided TeleBirr deposit first and preserves the opaque Player ID action', () => {
+  it('puts one Deposit action first and preserves the opaque Player ID action', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
       text: 'FetanAgent\nSet a Player ID to deposit.',
       buttons: [
-        { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
+        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
         { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
         { text: '➕ Request Player ID review', callbackData },
       ],
@@ -33,7 +33,7 @@ describe('English-only private customer menu', () => {
 
   it('hides the manual-review entry only for the automatic Find menu', () => {
     expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
-      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
   });
@@ -42,22 +42,21 @@ describe('English-only private customer menu', () => {
     expect(renderTelegramQuickMenu()).toEqual({
       text: 'FetanAgent',
       buttons: [
-        { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
+        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
         { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
       ],
     });
     expect(JSON.stringify(renderTelegramQuickMenu())).not.toMatch(/expir|withdraw|unavailable/iu);
   });
 
-  it('shows both payment methods only when the SMS route is configured', () => {
-    expect(renderPlayerRegistrationMenu(callbackData, null, true, true).buttons).toEqual([
-      { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
-      { text: '💳 CBE Birr', callbackData: 'gd1.cbe' },
+  it('keeps the menu provider-neutral when the SMS route is configured', () => {
+    expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
-    expect(renderTelegramQuickMenu(true).buttons[1]).toEqual({
-      text: '💳 CBE Birr',
-      callbackData: 'gd1.cbe',
+    expect(renderTelegramQuickMenu().buttons[0]).toEqual({
+      text: '💰 Deposit',
+      callbackData: 'gd1.deposit',
     });
   });
 });

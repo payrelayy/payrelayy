@@ -21,6 +21,8 @@ import {
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+  TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
+  parseTelegramCombinedPaymentPromptReply,
   isTelegramCbeSmsPaymentPromptReply,
   isTelegramGuidedDepositPromptReply,
   isTelegramGuidedDepositPlayerPromptReply,
@@ -169,7 +171,9 @@ export function isTelegramGuidedDepositStartCallback(
 ): boolean {
   return (
     toTelegramPrivateActionIdentity(metadata) !== undefined &&
-    metadata.callbackData === TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA
+    (metadata.callbackData === TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA ||
+      metadata.callbackData === TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA ||
+      metadata.callbackData === TELEGRAM_GUIDED_CBE_CALLBACK_DATA)
   );
 }
 
@@ -209,6 +213,24 @@ export function reduceTelegramSavedCbeSmsDestinationAction(
 ): TelegramPrivateActionEnvelope | undefined {
   const identity = toTelegramPrivateActionIdentity(metadata);
   return identity ? { ...identity, kind: 'saved_cbe_sms_destination_command' } : undefined;
+}
+
+export function reduceTelegramSavedCombinedDestinationAction(
+  metadata: TelegramPrivateActionMetadata,
+  methods: { readonly telebirr: boolean; readonly cbe_birr: boolean },
+): TelegramPrivateActionEnvelope | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity) return undefined;
+  const providerCodes = methods.telebirr
+    ? methods.cbe_birr
+      ? (['telebirr', 'cbe_birr'] as const)
+      : (['telebirr'] as const)
+    : methods.cbe_birr
+      ? (['cbe_birr'] as const)
+      : undefined;
+  return providerCodes
+    ? { ...identity, kind: 'saved_combined_destination_command', providerCodes }
+    : undefined;
 }
 
 /** `/deposit` is the discoverable guided entry point; argument-bearing legacy commands still work. */
@@ -513,13 +535,15 @@ export function reduceTelegramAutoReceiverSmsTextSubmission(
   const paymentPlayerId = parseTelegramTelebirrPaymentPromptReply(metadata.replyToMessage);
   const legacyReply = isTelegramGuidedDepositPromptReply(metadata.replyToMessage);
   const cbeReply = isTelegramCbeSmsPaymentPromptReply(metadata.replyToMessage);
+  const combinedPlayerId = parseTelegramCombinedPaymentPromptReply(metadata.replyToMessage);
   const legacyInput = legacyReply ? parseTelegramGuidedDepositInput(command) : undefined;
-  const playerId = paymentPlayerId ?? legacyInput?.playerId;
+  const playerId = paymentPlayerId ?? combinedPlayerId ?? legacyInput?.playerId;
   const proofText = legacyReply ? legacyInput?.proofText : command;
   const looksLikeProof =
     /^(?=[A-Za-z0-9]{8,32}$)(?=.*[0-9])[A-Za-z0-9]+$/u.test(command.trim()) ||
     /(?:https:\/\/|transaction|receipt|reference|txn\s*id|order\s*id|invoice)/iu.test(command);
-  if (!paymentPlayerId && !legacyReply && !cbeReply && !looksLikeProof) return undefined;
+  if (!paymentPlayerId && !legacyReply && !cbeReply && !combinedPlayerId && !looksLikeProof)
+    return undefined;
   if (typeof proofText !== 'string') return { kind: 'invalid_input' };
   const input = reduceTelegramAutoReceiverSmsProofInput(proofText);
   if (input.kind !== 'candidate') return input;

@@ -9,10 +9,10 @@ import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './privat
 import {
   buildTelegramTelebirrPaymentPrompt,
   buildTelegramCbeSmsPaymentPrompt,
-  TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
+  buildTelegramCombinedPaymentPrompt,
+  TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
-  TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
 } from './telegram-guided-deposit.js';
 
 export type TelegramPlayerIdFlowPresentation =
@@ -70,7 +70,6 @@ export function presentTelegramPlayerIdFlowResult(
           result.callbackData,
           result.selectedPlayerId,
           context.playerValidationEnabled,
-          context.receiverSmsCandidateEnabled,
         ),
       };
     case 'player_selection_missing':
@@ -85,10 +84,7 @@ export function presentTelegramPlayerIdFlowResult(
         menu: {
           text: `✅ Player ID ${result.playerId} saved.`,
           buttons: [
-            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
-            ...(context.receiverSmsCandidateEnabled
-              ? [{ text: '💳 CBE Birr', callbackData: TELEGRAM_GUIDED_CBE_CALLBACK_DATA }]
-              : []),
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA },
             { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
           ],
         },
@@ -111,6 +107,15 @@ export function presentTelegramPlayerIdFlowResult(
           'Do not send money yet. The complete wallet number will appear here when automatic processing is ready.',
           'Tap /menu to go back.',
         ].join('\n'),
+      };
+    case 'combined_deposit_destination':
+      return {
+        kind: 'force_reply',
+        text: buildTelegramCombinedPaymentPrompt({
+          playerId: result.selectedPlayerId,
+          receivers: result.receivers,
+        }),
+        placeholder: 'Payment reference or receipt',
       };
     case 'telebirr_deposit_destination_review': {
       const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
@@ -276,7 +281,7 @@ export function presentTelegramPlayerIdFlowResult(
             'This Telegram account already used it for a completed deposit. No new Player credit was made.',
             'Do not pay again. Contact support if this is unexpected.',
           ].join('\n'),
-          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA }],
+          buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA }],
         },
       };
     case 'telebirr_live_verification_queued':
@@ -295,7 +300,7 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Check status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
-            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA },
           ],
         },
       };
@@ -317,7 +322,7 @@ export function presentTelegramPlayerIdFlowResult(
               text: 'Refresh status',
               callbackData: formatTelegramDepositProofStatusCallback(result.proofToken),
             },
-            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA },
+            { text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA },
           ],
         },
       };
@@ -351,7 +356,7 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
   if (receiverSmsCandidateEnabled) {
     return [
       '💰 Deposits',
-      'Save a Player ID once in /menu, then choose TeleBirr or CBE Birr to see its current receiver.',
+      'Save a Player ID once in /menu, then tap Deposit to see the current available receivers.',
       'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
       'We identify TeleBirr or CBE Birr from the transaction reference. You do not need to choose a method again.',
       'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',

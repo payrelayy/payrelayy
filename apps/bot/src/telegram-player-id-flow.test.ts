@@ -52,7 +52,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(saved.kind).toBe('menu');
     if (saved.kind === 'menu') {
       expect(saved.menu.text).toContain('PLAYER-DEMO-42 saved');
-      expect(saved.menu.buttons[0]).toEqual({ text: '💰 Deposit', callbackData: 'gd1.telebirr' });
+      expect(saved.menu.buttons[0]).toEqual({ text: '💰 Deposit', callbackData: 'gd1.deposit' });
     }
     const missing = presentTelegramPlayerIdFlowResult({
       version: 1,
@@ -77,7 +77,7 @@ describe('Telegram Player-ID flow presentation', () => {
       menu: {
         text: 'FetanAgent\nSet a Player ID to deposit.',
         buttons: [
-          { text: '💰 TeleBirr', callbackData: 'gd1.telebirr' },
+          { text: '💰 Deposit', callbackData: 'gd1.deposit' },
           { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
           { text: '➕ Request Player ID review', callbackData },
         ],
@@ -429,7 +429,7 @@ describe('Telegram Player-ID flow presentation', () => {
           'This Telegram account already used it for a completed deposit. No new Player credit was made.',
           'Do not pay again. Contact support if this is unexpected.',
         ].join('\n'),
-        buttons: [{ text: '💰 Deposit', callbackData: 'gd1.telebirr' }],
+        buttons: [{ text: '💰 Deposit', callbackData: 'gd1.deposit' }],
       },
     });
     expect(JSON.stringify(presentation)).not.toMatch(
@@ -459,7 +459,7 @@ describe('Telegram Player-ID flow presentation', () => {
         ].join('\n'),
         buttons: [
           { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
-          { text: '💰 Deposit', callbackData: 'gd1.telebirr' },
+          { text: '💰 Deposit', callbackData: 'gd1.deposit' },
         ],
       },
     });

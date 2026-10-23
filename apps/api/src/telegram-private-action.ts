@@ -102,6 +102,7 @@ const ROOT_MENU_KEYS = new Set([
   'privateChatId',
   'preferredLocale',
 ]);
+const COMBINED_DESTINATION_KEYS = new Set([...ROOT_MENU_KEYS, 'providerCodes']);
 const SAVED_PROOF_KEYS = new Set([...ROOT_MENU_KEYS, 'transactionReference']);
 const SAVED_RECEIVER_SMS_PROOF_KEYS = new Set([
   ...ROOT_MENU_KEYS,
@@ -450,6 +451,31 @@ export function parseTelegramPrivateActionEnvelope(
       if (!hasOnlyKeys(parsed, ROOT_MENU_KEYS)) return undefined;
       const identity = parseActionIdentity(parsed);
       return identity ? { ...identity, kind: 'saved_cbe_sms_destination_command' } : undefined;
+    }
+    case 'saved_combined_destination_command': {
+      if (!hasOnlyKeys(parsed, COMBINED_DESTINATION_KEYS)) return undefined;
+      const identity = parseActionIdentity(parsed);
+      if (!identity || !Array.isArray(parsed.providerCodes)) return undefined;
+      const codes = parsed.providerCodes;
+      if (codes.length === 1 && codes[0] === 'telebirr')
+        return {
+          ...identity,
+          kind: 'saved_combined_destination_command',
+          providerCodes: ['telebirr'],
+        };
+      if (codes.length === 1 && codes[0] === 'cbe_birr')
+        return {
+          ...identity,
+          kind: 'saved_combined_destination_command',
+          providerCodes: ['cbe_birr'],
+        };
+      if (codes.length === 2 && codes[0] === 'telebirr' && codes[1] === 'cbe_birr')
+        return {
+          ...identity,
+          kind: 'saved_combined_destination_command',
+          providerCodes: ['telebirr', 'cbe_birr'],
+        };
+      return undefined;
     }
     case 'save_player_selection_command': {
       if (!hasOnlyKeys(parsed, PLAYER_ID_TEXT_KEYS)) return undefined;

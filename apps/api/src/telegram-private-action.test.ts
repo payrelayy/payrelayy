@@ -492,6 +492,42 @@ describe('private Telegram action transport contract', () => {
     }
   });
 
+  it('requires a canonical nonempty provider list for a combined destination', async () => {
+    const identity = {
+      version: 1 as const,
+      updateId: '123456',
+      telegramUserId: '28379330',
+      privateChatId: '28379330',
+      preferredLocale: 'en' as const,
+    };
+    for (const providerCodes of [['telebirr'], ['cbe_birr'], ['telebirr', 'cbe_birr']] as const) {
+      const action: TelegramPrivateActionEnvelope = {
+        ...identity,
+        kind: 'saved_combined_destination_command',
+        providerCodes,
+      };
+      const valid = signedRequest(action);
+      await expect(
+        verifyTelegramPrivateActionRequest(valid.request, valid.rawBody, verificationOptions()),
+      ).resolves.toEqual(action);
+    }
+    for (const providerCodes of [
+      [],
+      ['cbe_birr', 'telebirr'],
+      ['telebirr', 'telebirr'],
+      ['unknown'],
+    ]) {
+      const invalid = signedRequest({
+        ...identity,
+        kind: 'saved_combined_destination_command',
+        providerCodes,
+      } as unknown as TelegramPrivateActionEnvelope);
+      await expect(
+        verifyTelegramPrivateActionRequest(invalid.request, invalid.rawBody, verificationOptions()),
+      ).resolves.toBeUndefined();
+    }
+  });
+
   it('accepts only an exact provider-coded saved SMS proof', async () => {
     const identity = {
       version: 1 as const,

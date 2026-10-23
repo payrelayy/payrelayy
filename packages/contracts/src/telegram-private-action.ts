@@ -139,6 +139,12 @@ export type TelegramPrivateActionEnvelope =
       readonly kind: 'saved_cbe_sms_destination_command';
     })
   | (TelegramPrivateActionIdentity & {
+      /** Fresh public availability is advisory; each requested receiver is rechecked by SQL. */
+      readonly kind: 'saved_combined_destination_command';
+      readonly providerCodes:
+        readonly ['telebirr'] | readonly ['cbe_birr'] | readonly ['telebirr', 'cbe_birr'];
+    })
+  | (TelegramPrivateActionIdentity & {
       readonly kind: 'saved_telebirr_proof_command';
       readonly transactionReference: string;
     })
@@ -375,6 +381,19 @@ export type TelegramPrivateActionResult =
       readonly receiverAccountMasked: string;
       readonly acceptsPayments: true;
       readonly selectedPlayerId: string;
+    }
+  | {
+      readonly version: 1;
+      readonly outcome: 'combined_deposit_destination';
+      readonly selectedPlayerId: string;
+      readonly acceptsPayments: true;
+      readonly receivers: readonly {
+        readonly providerCode: DepositProofProviderCode;
+        readonly providerName: 'TeleBirr' | 'CBE Birr';
+        readonly receiverAccountHolderName: string;
+        readonly receiverAccountReference: string;
+        readonly receiverAccountMasked: string;
+      }[];
     }
   | {
       readonly version: 1;

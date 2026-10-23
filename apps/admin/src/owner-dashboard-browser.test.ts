@@ -413,8 +413,9 @@ describe('Owner workspace navigation', () => {
     const areas = {
       home: ['system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
       payments: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
+      methods: ['payment-methods-title', 'receiver-title'],
       players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
-      system: ['routine-processing-title', 'receiver-title', 'support-contact-title'],
+      system: ['routine-processing-title', 'support-contact-title'],
       advanced: [
         'kemerbet-companion-title',
         'execution-readiness-title',
@@ -2107,7 +2108,7 @@ describe('Owner dashboard browser authentication boundary', () => {
           }
           if (url === '/v1/owner/receiver-accounts') {
             reads += 1;
-            return response(200, { receivers: [receiver] });
+            return response(200, { receivers: reads === 1 ? [] : [receiver] });
           }
           return undefined;
         },
@@ -2117,6 +2118,7 @@ describe('Owner dashboard browser authentication boundary', () => {
         "kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true;",
       );
       activeTest = true;
+      await browser.call('loadReceivers');
       browser.element('#receiver-holder-name').value = 'FetanAgent Receiver';
       browser.element('#receiver-account-reference').value = '0000003456';
       browser.element('#receiver-provider').value = 'telebirr';
@@ -2135,7 +2137,7 @@ describe('Owner dashboard browser authentication boundary', () => {
       expect(browser.element('#receiver-account-reference').value).toBe('');
       expect(browser.element('#receiver-list').children).toHaveLength(1);
       expect(mutations).toBe(1);
-      expect(reads).toBe(1);
+      expect(reads).toBe(2);
       const savedFeedback = feedback.textContent;
       await browser.call('setNotice', 'A different section updated its status.');
       expect(feedback.textContent).toBe(savedFeedback);
@@ -2144,6 +2146,28 @@ describe('Owner dashboard browser authentication boundary', () => {
       expect(feedback.hidden).toBe(true);
     },
   );
+
+  it('requires a fresh receiver-history load before saving a change', async () => {
+    let mutations = 0;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url) => {
+        if (url === '/v1/owner/receiver-accounts/rotate') mutations += 1;
+        return undefined;
+      },
+    });
+    await browser.signIn();
+    browser.evaluate("kemerbetAgentProfileLoadState = 'loaded'; kemerbetRecoveryLaneKnown = true;");
+    browser.element('#receiver-provider').value = 'telebirr';
+    browser.element('#receiver-holder-name').value = 'FetanAgent Receiver';
+    browser.element('#receiver-account-reference').value = '0000003456';
+    browser.element('#receiver-confirmation').checked = true;
+    await browser.call('rotateReceiver');
+    expect(mutations).toBe(0);
+    expect(browser.element('#receiver-feedback').textContent).toContain(
+      'Refresh receiving-account history before saving a change.',
+    );
+  });
 
   it('accepts only the two retired, unprotected legacy receiver masks in browser history', async () => {
     const browser = ownerBrowserHarness(503);

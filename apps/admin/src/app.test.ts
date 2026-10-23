@@ -8,7 +8,7 @@ import {
   type OwnerControlDeploymentTarget,
   loadOwnerControlConfig,
 } from '@fetanagent/config/owner-control';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { buildOwnerControlApp as buildOwnerControlAppProduction } from './app.js';
 import {
@@ -1205,8 +1205,8 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Explicit ownership confirmation');
     expect(response.body).toContain('Player ID ownership associations');
     expect(response.body).toContain('Deposit eligibility decisions');
-    expect(response.body).toContain('Receiving accounts');
-    expect(response.body).toContain('never rewrites receipt history');
+    expect(response.body).toContain('Change a receiver');
+    expect(response.body).toContain('Previous payment records stay intact');
     expect(response.body).toMatch(/does not open a deposit[\s\S]*or move money/u);
     expect(response.body).toContain('TeleBirr five-Player pilot');
     expect(response.body).toContain('25 ETB maximum per deposit and Player');
@@ -2581,6 +2581,85 @@ describe('Owner-control HTTP boundary', () => {
     });
     expect(rotated.json()).toEqual({ receiver });
     expect(rotated.body).not.toContain('0000003456');
+    await app.close();
+  });
+
+  it('shows public availability without auth and reserves method changes for the Owner', async () => {
+    const methods = [
+      {
+        providerCode: 'cbe_birr' as const,
+        ownerEnabled: true,
+        readiness: 'ready' as const,
+        receiverName: 'Receiver',
+        receiverMasked: '***3456',
+        pendingJobs: 0,
+        fencedAttempts: 0,
+        changedAt: '2026-10-23T18:00:00.000Z',
+      },
+      {
+        providerCode: 'telebirr' as const,
+        ownerEnabled: false,
+        readiness: 'phone_not_paired' as const,
+        receiverName: 'Receiver',
+        receiverMasked: '***7890',
+        pendingJobs: 1,
+        fencedAttempts: 0,
+        changedAt: '2026-10-23T18:00:00.000Z',
+      },
+    ];
+    const set = vi.fn(async () => methods);
+    const app = buildOwnerControlApp(config(), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        paymentMethods: {
+          list: async () => methods,
+          publicStatus: async () => ({ cbe_birr: true, telebirr: false }),
+          set,
+        },
+      }),
+    });
+    const publicResponse = await app.inject({ method: 'GET', url: '/v1/public/payment-methods' });
+    expect(publicResponse.statusCode).toBe(200);
+    expect(publicResponse.json()).toEqual({ methods: { cbe_birr: true, telebirr: false } });
+    expect(publicResponse.body).not.toContain('Receiver');
+    const privateResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/owner/payment-methods',
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(privateResponse.statusCode).toBe(200);
+    expect(privateResponse.json()).toEqual({ methods });
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/payment-methods',
+      payload: {
+        confirmation: 'owner_confirmed_payment_method_control',
+        enabled: false,
+        providerCode: 'cbe_birr',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(set).not.toHaveBeenCalled();
+    const changed = await app.inject({
+      method: 'POST',
+      url: '/v1/owner/payment-methods',
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-fetanagent-owner-csrf': 'owner-payment-methods-v1',
+        'x-idempotency-key': pilotRequestId,
+      },
+      payload: {
+        confirmation: 'owner_confirmed_payment_method_control',
+        enabled: false,
+        providerCode: 'cbe_birr',
+        requestId: pilotRequestId,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(set).toHaveBeenCalledWith(authUserId, pilotRequestId, 'cbe_birr', false);
     await app.close();
   });
 

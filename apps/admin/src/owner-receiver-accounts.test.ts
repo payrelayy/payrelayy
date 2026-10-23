@@ -79,28 +79,88 @@ describe('Owner receiver-account PostgreSQL adapter', () => {
     });
   });
 
-  it.each([
-    ['telebirr', 'TeleBirr'],
-    ['cbe_birr', 'CBE Birr'],
-  ] as const)(
-    'accepts the actual rotation return contract for %s without a display-name column',
-    async (providerCode, providerDisplayName) => {
-      const query = vi.fn<OwnerReceiverDatabase['query']>(async () => ({
-        rows: [rotationRow({ provider_code: providerCode })],
-      }));
-      const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
-      const result = await control.rotate(authUserId, {
+  it('accepts the TeleBirr rotation return contract without a display-name column', async () => {
+    const providerCode = 'telebirr';
+    const providerDisplayName = 'TeleBirr';
+    const query = vi.fn<OwnerReceiverDatabase['query']>(async () => ({
+      rows: [rotationRow({ provider_code: providerCode })],
+    }));
+    const control = new PostgresOwnerReceiverAccounts({ query }, secrets);
+    const result = await control.rotate(authUserId, {
+      accountHolderName: 'FetanAgent Receiver',
+      accountReference: '0000003456',
+      providerCode,
+      requestId,
+      rotationReason: 'account_rotation',
+    });
+    expect(result).toMatchObject({ providerCode, providerDisplayName, receiverStatus: 'active' });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toMatch(/cipher|fingerprint|0000003456/iu);
+  });
+
+  it('rotates a CBE receiving phone through the v2 lookup-protected path', async () => {
+    const oldReceiver = row({ provider_code: 'cbe_birr', provider_display_name: 'CBE Birr' });
+    const retiredReceiver = {
+      ...oldReceiver,
+      receiver_status: 'inactive',
+      retired_at: new Date('2026-10-23T18:00:00Z'),
+    };
+    const newReceiver = row({
+      provider_code: 'cbe_birr',
+      provider_display_name: 'CBE Birr',
+      receiver_revision_id: requestId,
+      revision: 3,
+    });
+    let listCalls = 0;
+    const query = vi.fn<OwnerReceiverDatabase['query']>(async (sql, values) => {
+      if (sql.includes('list_owner_receiver_accounts')) {
+        listCalls += 1;
+        return { rows: listCalls === 1 ? [oldReceiver] : [retiredReceiver, newReceiver] };
+      }
+      expect(sql).toContain('rotate_owner_cbe_birr_receiver_lookup_v2');
+      expect(values.slice(0, 5)).toEqual([
+        authUserId,
+        requestId,
+        requestId,
+        3,
+        'FetanAgent Receiver',
+      ]);
+      expect(values[5]).toMatch(/^receiver-v1\.cbe_birr\./u);
+      expect(values[8]).toMatch(/^cbe-receiver-v2\./u);
+      expect(values[11]).toBe('account_rotation');
+      expect(JSON.stringify(values)).not.toContain('251000003456');
+      return {
+        rows: [
+          {
+            receiver_revision_id: requestId,
+            revision: 3,
+            receiver_status: 'active',
+            active_from: new Date(),
+            lookup_protected: true,
+          },
+        ],
+      };
+    });
+    const control = new PostgresOwnerReceiverAccounts({ query }, secrets, {
+      encryptionSecret: 'e'.repeat(64),
+      fingerprintSecret: 'f'.repeat(64),
+    });
+    await expect(
+      control.rotate(authUserId, {
         accountHolderName: 'FetanAgent Receiver',
-        accountReference: providerCode === 'cbe_birr' ? '251000003456' : '0000003456',
-        providerCode,
+        accountReference: '251000003456',
+        providerCode: 'cbe_birr',
         requestId,
         rotationReason: 'account_rotation',
-      });
-      expect(result).toMatchObject({ providerCode, providerDisplayName, receiverStatus: 'active' });
-      expect(query).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(result)).not.toMatch(/cipher|fingerprint|0000003456/iu);
-    },
-  );
+      }),
+    ).resolves.toMatchObject({
+      providerCode: 'cbe_birr',
+      receiverRevisionId: requestId,
+      revision: 3,
+      protectedReference: true,
+    });
+    expect(query).toHaveBeenCalledTimes(3);
+  });
 
   it('requires a full 251 phone for new CBE Birr revisions without changing TeleBirr rules', async () => {
     expect(validOwnerReceiverAccountReference('cbe_birr', '251000003456')).toBe(true);

@@ -112,6 +112,141 @@ export function registerOwnerReceiverAccountControlSqlTests(
       ]);
     });
 
+    it('pauses one provider without changing the other provider or erasing its ledger', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const actor = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        const provider = await client.query<{ code: string; id: string }>(
+          `select code, id from app.payment_providers
+             where code in ('telebirr','cbe_birr') order by code`,
+        );
+        expect(provider.rows).toHaveLength(2);
+        const requestId = randomUUID();
+        const off = await queryAsOwnerControl<{ result: boolean }>(
+          client,
+          `select app.set_owner_provider_deposit_control(
+             $1::uuid,$2::uuid,'telebirr',false) as result`,
+          [actor.rows[0]!.auth_user_id, requestId],
+        );
+        expect(off).toEqual([{ result: false }]);
+        const state = await client.query<{ provider_code: string; enabled: boolean }>(
+          `select provider_code, enabled from app.owner_provider_deposit_controls
+             order by provider_code`,
+        );
+        expect(state.rows).toEqual([
+          { provider_code: 'cbe_birr', enabled: true },
+          { provider_code: 'telebirr', enabled: false },
+        ]);
+        const telebirr = provider.rows.find((row) => row.code === 'telebirr')!;
+        const cbe = provider.rows.find((row) => row.code === 'cbe_birr')!;
+        await client.query('savepoint paused_provider_check');
+        await expect(
+          client.query(`select app.require_owner_provider_deposit_enabled($1::uuid)`, [
+            telebirr.id,
+          ]),
+        ).rejects.toThrow(/paused by the Owner/u);
+        await client.query('rollback to savepoint paused_provider_check');
+        await client.query(`select app.require_owner_provider_deposit_enabled($1::uuid)`, [cbe.id]);
+        expect(
+          await queryAsOwnerControl(
+            client,
+            `select app.set_owner_provider_deposit_control(
+             $1::uuid,$2::uuid,'telebirr',false) as result`,
+            [actor.rows[0]!.auth_user_id, requestId],
+          ),
+        ).toEqual([{ result: false }]);
+        await expectFailure(
+          client,
+          `select app.set_owner_provider_deposit_control(
+             $1::uuid,$2::uuid,'cbe_birr',false)`,
+          [actor.rows[0]!.auth_user_id, requestId],
+          /already used differently/u,
+        );
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('changes a TeleBirr receiver while shared payments stay live and waits for new phone pairing', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const actor = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        const authUserId = actor.rows[0]!.auth_user_id;
+        const first = await queryAsOwnerControl<{ receiver_revision_id: string; revision: number }>(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+             $1::uuid,$2::uuid,'telebirr','First SQL Receiver',
+             $3::text,$4::text,'***1234',1::smallint,1::smallint,1::smallint,
+             'initial_configuration')`,
+          [
+            authUserId,
+            randomUUID(),
+            `receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`,
+            'a'.repeat(64),
+          ],
+        );
+        await client.query(`update app.feature_switches set mode='live'
+          where feature_key in ('payment_verification','deposit_execution')`);
+        const replacement = await queryAsOwnerControl<{
+          receiver_revision_id: string;
+          revision: number;
+          receiver_status: string;
+        }>(
+          client,
+          `select * from app.rotate_owner_receiver_account(
+             $1::uuid,$2::uuid,'telebirr','Replacement SQL Receiver',
+             $3::text,$4::text,'***5678',1::smallint,1::smallint,1::smallint,
+             'account_rotation')`,
+          [
+            authUserId,
+            randomUUID(),
+            `receiver-v1.telebirr.${'D'.repeat(16)}.${'E'.repeat(22)}.${'F'.repeat(16)}`,
+            'b'.repeat(64),
+          ],
+        );
+        expect(replacement).toMatchObject([
+          { revision: first[0]!.revision + 1, receiver_status: 'active' },
+        ]);
+        const state = await client.query<{
+          provider_code: string;
+          enabled: boolean;
+          receiver_rotation_pending: boolean;
+        }>(`select provider_code, enabled, receiver_rotation_pending
+             from app.owner_provider_deposit_controls order by provider_code`);
+        expect(state.rows).toEqual([
+          { provider_code: 'cbe_birr', enabled: true, receiver_rotation_pending: false },
+          { provider_code: 'telebirr', enabled: true, receiver_rotation_pending: true },
+        ]);
+        const previous = await client.query<{ status: string; retired_at: Date }>(
+          `select status, retired_at from app.receiver_accounts where id=$1::uuid`,
+          [first[0]!.receiver_revision_id],
+        );
+        expect(previous.rows[0]).toMatchObject({
+          status: 'inactive',
+          retired_at: expect.any(Date),
+        });
+        const switches = await client.query<{ feature_key: string; mode: string }>(
+          `select feature_key,mode from app.feature_switches
+             where feature_key in ('payment_verification','deposit_execution')
+             order by feature_key`,
+        );
+        expect(switches.rows).toEqual([
+          { feature_key: 'deposit_execution', mode: 'live' },
+          { feature_key: 'payment_verification', mode: 'live' },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
     it('creates one protected CBE revision, retires any old revision, and replays exactly', async () => {
       const client = getClient();
       await client.query('begin');
@@ -278,6 +413,10 @@ export function registerOwnerReceiverAccountControlSqlTests(
           [authUserId, randomUUID(), legacyCiphertext, legacyFingerprint],
         );
         expect(prior).toHaveLength(1);
+        const unprotected = await client.query<{ readiness: string }>(
+          `select app.owner_provider_deposit_readiness('cbe_birr') as readiness`,
+        );
+        expect(unprotected.rows).toEqual([{ readiness: 'receiver_not_protected' }]);
 
         const deployedGrant = await client.query<{ readonly owner_function: boolean }>(`
           select has_function_privilege(
@@ -395,7 +534,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
           client,
           rotateSql.replace("'protection_upgrade'", "'account_rotation'"),
           values,
-          /requires every payment switch disabled/u,
+          /needs v2 protection before replacement/u,
         );
         for (const [key, mode] of [
           ['cbe_birr_authoritative_verification', 'dry_run'],
@@ -528,6 +667,109 @@ export function registerOwnerReceiverAccountControlSqlTests(
           ),
         ).rejects.toThrow(/immutable/u);
         await client.query('rollback to savepoint immutable_lookup');
+
+        const liveReplacementId = randomUUID();
+        const liveReplacement = await queryAsOwnerControl<{
+          readonly receiver_revision_id: string;
+          readonly receiver_status: string;
+          readonly revision: number;
+          readonly lookup_protected: boolean;
+        }>(
+          client,
+          `select * from app.rotate_owner_cbe_birr_receiver_lookup_v2(
+            $1::uuid,$2::uuid,$2::uuid,$3::integer,'Replacement SQL Receiver',
+            $4::text,$5::text,'***4321',$6::text,$7::text,'***4321',
+            'account_rotation')`,
+          [
+            authUserId,
+            liveReplacementId,
+            created[0]!.revision + 1,
+            `receiver-v1.cbe_birr.${'M'.repeat(16)}.${'N'.repeat(22)}.${'O'.repeat(16)}`,
+            'e'.repeat(64),
+            `cbe-receiver-v2.${'P'.repeat(16)}.${'Q'.repeat(22)}.${'R'.repeat(16)}`,
+            'f'.repeat(64),
+          ],
+        );
+        expect(liveReplacement).toEqual([
+          {
+            receiver_revision_id: liveReplacementId,
+            receiver_status: 'active',
+            revision: created[0]!.revision + 1,
+            lookup_protected: true,
+            active_from: expect.any(Date),
+          },
+        ]);
+        const providerState = await client.query<{
+          readonly enabled: boolean;
+          readonly receiver_rotation_pending: boolean;
+        }>(`select enabled, receiver_rotation_pending
+             from app.owner_provider_deposit_controls where provider_code = 'cbe_birr'`);
+        expect(providerState.rows).toEqual([
+          {
+            enabled: true,
+            receiver_rotation_pending: true,
+          },
+        ]);
+        const publicState = await client.query<{ provider_code: string; accepting: boolean }>(
+          `select * from app.public_provider_deposit_controls()
+             where provider_code = 'cbe_birr'`,
+        );
+        expect(publicState.rows).toEqual([{ provider_code: 'cbe_birr', accepting: false }]);
+
+        const oldReceiverCustomer = await client.query<{ id: string }>(
+          'insert into app.customers default values returning id',
+        );
+        const oldReceiverPlatform = await client.query<{ id: string }>(
+          `select id from app.platforms where code = 'kemerbet'`,
+        );
+        const oldReceiverPlayer = await client.query<{ id: string }>(
+          `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+           values ($1::uuid, $2::uuid, $3::text) returning id`,
+          [
+            oldReceiverCustomer.rows[0]!.id,
+            oldReceiverPlatform.rows[0]!.id,
+            `OLD-RECEIVER-${liveReplacementId}`,
+          ],
+        );
+        await client.query(
+          `insert into app.player_validation_attempts (
+             player_account_id, attempt_number, outcome, reason_code, adapter_version,
+             started_at, completed_at, result_digest
+           ) values (
+             $1::uuid, 1, 'valid', 'sql_eligibility_fixture', 'sql_eligibility_fixture_v1',
+             clock_timestamp() - interval '1 second', clock_timestamp(),
+             'sql-eligibility-fixture'
+           )`,
+          [oldReceiverPlayer.rows[0]!.id],
+        );
+        await client.query(
+          `update app.customer_platform_players set validation_status = 'valid'
+            where id = $1::uuid`,
+          [oldReceiverPlayer.rows[0]!.id],
+        );
+        await client.query(
+          `insert into app.player_deposit_eligibility_decisions (
+             player_account_id, decision_version, decision, reason_code, actor_kind
+           ) values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
+          [oldReceiverPlayer.rows[0]!.id],
+        );
+        const oldReceiverInsert = `insert into app.deposit_intents (
+          customer_id, platform_id, player_account_id, payment_provider_id,
+          receiver_account_id, expected_amount_minor
+        ) values ($1::uuid, $2::uuid, $3::uuid,
+          (select id from app.payment_providers where code = 'cbe_birr'),
+          $4::uuid, 2500)`;
+        await client.query('savepoint old_receiver_auto_credit');
+        await expect(
+          client.query(oldReceiverInsert, [
+            oldReceiverCustomer.rows[0]!.id,
+            oldReceiverPlatform.rows[0]!.id,
+            oldReceiverPlayer.rows[0]!.id,
+            created[0]!.receiver_revision_id,
+          ]),
+        ).rejects.toThrow(/previous receiver requires Owner review/u);
+        await client.query('rollback to savepoint old_receiver_auto_credit');
+        await client.query('release savepoint old_receiver_auto_credit');
 
         await client.query(`update app.feature_switches set mode = 'disabled'
           where feature_key in ('payment_verification', 'deposit_execution')`);

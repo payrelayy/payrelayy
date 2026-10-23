@@ -6796,6 +6796,7 @@ describe('disposable SQL migration baseline', () => {
     `);
     expect(depositInsertTriggers.rows.map((row) => row.trigger_name)).toEqual([
       'deposit_intents_enforce_player_deposit_eligibility',
+      'deposit_intents_owner_provider_pause',
       'deposit_intents_populate_receiver_sms_snapshot',
       'deposit_intents_populate_routine_paid_snapshot',
       'deposit_intents_populate_snapshot',

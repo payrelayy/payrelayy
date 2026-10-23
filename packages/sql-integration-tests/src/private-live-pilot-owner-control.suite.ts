@@ -248,6 +248,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature: 'app.list_owner_player_registration_association_candidates(uuid,integer)',
         },
         { signature: 'app.list_owner_player_registration_requests(uuid,integer)' },
+        { signature: 'app.list_owner_provider_deposit_controls(uuid)' },
         { signature: 'app.list_owner_receiver_accounts(uuid)' },
         { signature: 'app.list_owner_receiver_sms_inbox(uuid,integer,integer)' },
         {
@@ -269,6 +270,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         },
         { signature: 'app.prepare_owner_kemerbet_agent_profile(uuid,uuid,text)' },
         { signature: 'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)' },
+        { signature: 'app.public_provider_deposit_controls()' },
         {
           signature: 'app.record_owner_dry_run_fixture_assessment(uuid,uuid,text,text,text)',
         },
@@ -298,6 +300,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
             'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)',
         },
         { signature: 'app.save_owner_routine_telebirr_processing(uuid,uuid,uuid)' },
+        { signature: 'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)' },
         { signature: 'app.set_owner_support_contact(uuid,text,integer)' },
         { signature: 'app.stop_owner_routine_telebirr_processing(uuid,uuid)' },
         { signature: 'app.stop_private_live_deposit_pilot(uuid,uuid,text)' },

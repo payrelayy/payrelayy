@@ -25,6 +25,7 @@ import {
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
 import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './telegram-support.js';
+import { loadTelegramPaymentMethods } from './telegram-payment-methods.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
   isRecognizedTelegramDepositStatusCommand,
@@ -59,6 +60,7 @@ import {
   TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
   TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT,
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
+  TELEGRAM_GUIDED_CBE_CALLBACK_DATA,
   TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
   parseTelegramTelebirrPaymentPromptReply,
 } from './telegram-guided-deposit.js';
@@ -92,6 +94,19 @@ bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
 const quickMenu = renderTelegramQuickMenu(config.receiverSmsCandidateEnabled);
+async function availableMenuButtons(
+  buttons: readonly PrivateTelegramMenuButton[],
+): Promise<readonly PrivateTelegramMenuButton[]> {
+  const methods = await loadTelegramPaymentMethods(
+    config.supportContactUrl,
+    config.receiverSmsCandidateEnabled,
+  );
+  return buttons.filter(
+    (button) =>
+      (button.callbackData !== TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA || methods.telebirr) &&
+      (button.callbackData !== TELEGRAM_GUIDED_CBE_CALLBACK_DATA || methods.cbe_birr),
+  );
+}
 const screenshotModelAccessKey = config.screenshotReferenceReader.enabled
   ? config.screenshotReferenceReader.modelAccessKey
   : undefined;
@@ -227,7 +242,10 @@ async function deliverPlayerAction(
       }
       return;
     }
-    await reply(presentation.menu.text, inlineMenu(presentation.menu.buttons));
+    await reply(
+      presentation.menu.text,
+      inlineMenu(await availableMenuButtons(presentation.menu.buttons)),
+    );
   } catch {
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     console.warn(
@@ -770,16 +788,18 @@ await runTelegramPolling(
         outcomeNotifier = runTelegramDepositOutcomeNotifier(
           {
             request: (action) => deliverTelegramPrivateActionWithRetry(action, playerActions),
-            send: (chatId, text, showDepositButton) =>
+            send: async (chatId, text, showDepositButton) =>
               bot.api.sendMessage(
                 chatId,
                 text,
-                showDepositButton ? { reply_markup: inlineMenu(quickMenu.buttons) } : undefined,
+                showDepositButton
+                  ? { reply_markup: inlineMenu(await availableMenuButtons(quickMenu.buttons)) }
+                  : undefined,
               ),
             delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
-            sendMenu: (chatId) =>
+            sendMenu: async (chatId) =>
               bot.api.sendMessage(chatId, quickMenu.text, {
-                reply_markup: inlineMenu(quickMenu.buttons),
+                reply_markup: inlineMenu(await availableMenuButtons(quickMenu.buttons)),
               }),
           },
           outcomeNotifierAbort.signal,

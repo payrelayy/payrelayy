@@ -34,7 +34,7 @@ describe('default-off Owner CBE Birr v2 receiver adapter', () => {
   it('passes only independently protected material to the atomic Owner function', async () => {
     const query = vi.fn<OwnerReceiverDatabase['query']>(async (sql, values) => {
       expect(sql).toContain('app.rotate_owner_cbe_birr_receiver_lookup_v2');
-      expect(sql).toContain("'protection_upgrade'");
+      expect(sql).toContain('$12::text');
       expect(values.slice(0, 5)).toEqual([actor, requestId, requestId, 2, 'Synthetic Receiver']);
       expect(values[5]).toMatch(/^receiver-v1\.cbe_birr\./u);
       expect(values[6]).toMatch(/^[0-9a-f]{64}$/u);
@@ -42,6 +42,7 @@ describe('default-off Owner CBE Birr v2 receiver adapter', () => {
       expect(values[8]).toMatch(/^cbe-receiver-v2\./u);
       expect(values[9]).toMatch(/^[0-9a-f]{64}$/u);
       expect(values[10]).toBe('***3456');
+      expect(values[11]).toBe('protection_upgrade');
       expect(JSON.stringify(values)).not.toContain(phone);
       return { rows: [rotationRow()] };
     });

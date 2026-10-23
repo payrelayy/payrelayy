@@ -83,6 +83,10 @@ export type LocalKemerBetRoutinePreflightStage =
   | 'session_unavailable'
   | 'preflight_started'
   | 'financial_actions_opened'
+  | 'financial_actions_page_unavailable'
+  | 'deposit_menu_unavailable'
+  | 'deposit_menu_ready'
+  | 'deposit_menu_click_failed'
   | 'deposit_menu_selected'
   | 'player_tile_selected'
   | 'search_surface_ready'
@@ -419,16 +423,32 @@ async function openSearchSurface(
     timeout: TIMEOUT_MS,
   });
   reportPreflight(diagnostic, 'financial_actions_opened');
-  await requireAuthenticatedAgentPage(page);
-  await (
-    await waitForEnabledAuthenticatedControl(
-      page,
-      page.locator(selectors.financialActionsMenu).getByRole('menuitem', {
-        name: 'Deposit',
-        exact: true,
-      }),
-    )
-  ).click({ timeout: TIMEOUT_MS });
+  try {
+    await requireAuthenticatedAgentPage(page);
+  } catch {
+    reportPreflight(diagnostic, 'financial_actions_page_unavailable');
+    throw new LocalKemerBetDepositError();
+  }
+  // The live Ant menu renders a role=menuitem <li> with a visible title span.
+  // Match the exact visible text inside that menu, independently of Ant's ARIA label.
+  const depositItem = page
+    .locator(selectors.financialActionsMenu)
+    .locator('li[role="menuitem"]')
+    .filter({ hasText: /^\s*Deposit\s*$/u });
+  let enabledDepositItem: Locator;
+  try {
+    enabledDepositItem = await waitForEnabledAuthenticatedControl(page, depositItem);
+  } catch {
+    reportPreflight(diagnostic, 'deposit_menu_unavailable');
+    throw new LocalKemerBetDepositError();
+  }
+  reportPreflight(diagnostic, 'deposit_menu_ready');
+  try {
+    await enabledDepositItem.click({ timeout: TIMEOUT_MS });
+  } catch {
+    reportPreflight(diagnostic, 'deposit_menu_click_failed');
+    throw new LocalKemerBetDepositError();
+  }
   reportPreflight(diagnostic, 'deposit_menu_selected');
   await requireAuthenticatedAgentPage(page);
   await (

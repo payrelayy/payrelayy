@@ -15,8 +15,15 @@ on:
         description: Current authorizing Owner auth-user UUID
         required: true
         type: string
+      confirm_cbe_switch_mode:
+        description: Confirm the current independent CBE Birr switch mode; this workflow does not change it
+        required: true
+        type: choice
+        options:
+          - disabled
+          - live
       confirm_operation:
-        description: Type ENABLE LIVE ROUTINE TELEBIRR DEPOSITS
+        description: Type ENABLE LIVE ROUTINE TELEBIRR DEPOSITS when CBE is disabled, or ENABLE LIVE ROUTINE DEPOSITS WITH CBE when it is live
         required: true
         type: string
 
@@ -41,6 +48,7 @@ jobs:
       CONFIRMED_PROJECT: ${{ inputs.confirm_production_project_ref }}
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_OWNER: ${{ inputs.confirm_owner_auth_user_id }}
+      CONFIRMED_CBE_MODE: ${{ inputs.confirm_cbe_switch_mode }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
     steps:
       - name: Reject another project, revision, identity, or operation
@@ -51,7 +59,12 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
           [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_OWNER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
-          [[ "$CONFIRMED_OPERATION" == 'ENABLE LIVE ROUTINE TELEBIRR DEPOSITS' ]]
+          [[ "$CONFIRMED_CBE_MODE" == 'disabled' || "$CONFIRMED_CBE_MODE" == 'live' ]]
+          if [[ "$CONFIRMED_CBE_MODE" == 'live' ]]; then
+            [[ "$CONFIRMED_OPERATION" == 'ENABLE LIVE ROUTINE DEPOSITS WITH CBE' ]]
+          else
+            [[ "$CONFIRMED_OPERATION" == 'ENABLE LIVE ROUTINE TELEBIRR DEPOSITS' ]]
+          fi
 
   activate:
     name: Enable only the two shared deposit switches
@@ -82,6 +95,7 @@ jobs:
         shell: bash
         env:
           FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID: ${{ inputs.confirm_owner_auth_user_id }}
+          FETANAGENT_ROUTINE_CBE_EXPECTED_MODE: ${{ inputs.confirm_cbe_switch_mode }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           PGHOST: ${{ env.PRODUCTION_DATABASE_POOLER_HOST }}
@@ -127,16 +141,16 @@ jobs:
             echo '::error::The guarded financial activation failed; no SQL output was published.' >&2
             exit 1
           fi
-          jq -se '
+          jq --arg cbe_mode "$FETANAGENT_ROUTINE_CBE_EXPECTED_MODE" -se '
             length == 1 and
             .[0].operation == "routine_telebirr_financial_activate" and
             .[0].deploymentTarget == "production" and
             .[0].moneyCapable == true and
             .[0].livePaymentPerformed == false and
             .[0].legacyPilotEnabled == false and
-            .[0].cbeEnabled == false
+            .[0].cbeMode == $cbe_mode
           ' "$protected/activation.out" >/dev/null || {
             echo '::error::The guarded activation response was not exact.' >&2
             exit 1
           }
-          echo 'Live routine TeleBirr intake and serial execution gates enabled; no test payment or Player credit was performed by this workflow.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Shared live intake and serial execution gates enabled with the confirmed independent CBE mode unchanged; no test payment or Player credit was performed by this workflow.' >>"$GITHUB_STEP_SUMMARY"

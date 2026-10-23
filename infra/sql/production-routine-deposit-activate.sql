@@ -9,6 +9,7 @@
 \getenv certificate_id FETANAGENT_ROUTINE_COMPANION_CERTIFICATE_ID
 \getenv activation_request_key FETANAGENT_ROUTINE_ACTIVATION_REQUEST_KEY
 \getenv runtime_password FETANAGENT_ROUTINE_RUNTIME_PASSWORD
+\getenv cbe_expected_mode FETANAGENT_ROUTINE_CBE_EXPECTED_MODE
 
 select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   and current_user = 'postgres' and session_user = 'postgres'
@@ -16,6 +17,7 @@ select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
   and :'certificate_id' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and :'activation_request_key' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   and :'runtime_password' ~ '^[0-9a-f]{64}$'
+  and :'cbe_expected_mode' in ('disabled', 'live')
   as exact_activation_input
 \gset
 \if :exact_activation_input
@@ -32,11 +34,18 @@ set local idle_in_transaction_session_timeout = '20s';
 
 -- Fail closed on the exact production path, not the retired pilot lineage. A recent
 -- no-money signed V2 official-origin observation proves the paired-phone source route;
--- disposable SQL tests prove the one-use claim/job path. Keep every financial switch
--- disabled while provisioning this separate Windows transport credential.
+-- disposable SQL tests prove the one-use claim/job path. Keep both shared
+-- financial gates disabled while provisioning this separate Windows transport
+-- credential. The independently managed CBE switch must match the operator's
+-- explicit expected mode; this operation never changes it.
 select (
   select pg_catalog.count(*) = 7
-    and pg_catalog.bool_and(feature_switch.mode = 'disabled')
+    and pg_catalog.count(*) filter (where feature_switch.feature_key =
+      'cbe_birr_authoritative_verification' and feature_switch.mode = :'cbe_expected_mode'
+      and feature_switch.settings = '{}'::jsonb) = 1
+    and pg_catalog.count(*) filter (where feature_switch.feature_key <>
+      'cbe_birr_authoritative_verification' and feature_switch.mode = 'disabled'
+      and feature_switch.settings = '{}'::jsonb) = 6
     from app.feature_switches feature_switch
    where feature_switch.feature_key in (
      'cbe_birr_authoritative_verification', 'deposit_execution',
@@ -122,6 +131,8 @@ select pg_catalog.jsonb_build_object(
   'operation', 'routine_deposit_activate',
   'deploymentTarget', 'production',
   'runtimeLogin', 'active',
+  'cbeMode', :'cbe_expected_mode'::text,
+  'sharedFinancialGatesDisabled', true,
   'validUntil', :'valid_until'::timestamptz,
   'livePaymentPerformed', false
 )::text;

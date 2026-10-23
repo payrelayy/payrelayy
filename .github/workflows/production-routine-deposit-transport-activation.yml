@@ -1,4 +1,4 @@
-name: Activate production routine-deposit transport (deposits off)
+name: Activate production routine-deposit transport (shared deposits off)
 
 on:
   workflow_dispatch:
@@ -19,6 +19,13 @@ on:
         description: Current paired Windows companion certificate UUID
         required: true
         type: string
+      confirm_cbe_switch_mode:
+        description: Confirm the current independent CBE Birr switch mode; this workflow does not change it
+        required: true
+        type: choice
+        options:
+          - disabled
+          - live
       confirm_operation:
         description: Type ACTIVATE ROUTINE TRANSPORT - DEPOSITS OFF
         required: true
@@ -46,6 +53,7 @@ jobs:
       CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
       CONFIRMED_OWNER: ${{ inputs.confirm_owner_auth_user_id }}
       CONFIRMED_CERTIFICATE: ${{ inputs.confirm_companion_certificate_id }}
+      CONFIRMED_CBE_MODE: ${{ inputs.confirm_cbe_switch_mode }}
       CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
     steps:
       - name: Reject another project, revision, identity, or operation
@@ -57,6 +65,7 @@ jobs:
           [[ "$CONFIRMED_PROJECT" == "$PRODUCTION_PROJECT_REF" ]]
           [[ "$CONFIRMED_OWNER" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
           [[ "$CONFIRMED_CERTIFICATE" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$CONFIRMED_CBE_MODE" == 'disabled' || "$CONFIRMED_CBE_MODE" == 'live' ]]
           [[ "$CONFIRMED_OPERATION" == 'ACTIVATE ROUTINE TRANSPORT - DEPOSITS OFF' ]]
 
   activate:
@@ -84,11 +93,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node infra/operations/require-production-ci.mjs
 
-      - name: Activate transport with all financial switches disabled
+      - name: Activate transport with shared financial switches disabled
         shell: bash
         env:
           FETANAGENT_ROUTINE_OWNER_AUTH_USER_ID: ${{ inputs.confirm_owner_auth_user_id }}
           FETANAGENT_ROUTINE_COMPANION_CERTIFICATE_ID: ${{ inputs.confirm_companion_certificate_id }}
+          FETANAGENT_ROUTINE_CBE_EXPECTED_MODE: ${{ inputs.confirm_cbe_switch_mode }}
           FETANAGENT_ROUTINE_RUNTIME_PASSWORD: ${{ secrets.ROUTINE_DEPOSIT_RUNTIME_PASSWORD_ACTIVATION }}
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
@@ -141,14 +151,16 @@ jobs:
             echo '::error::The guarded production transport activation failed; no secret or SQL output was published.' >&2
             exit 1
           fi
-          jq -se '
+          jq --arg cbe_mode "$FETANAGENT_ROUTINE_CBE_EXPECTED_MODE" -se '
             length == 1 and
             .[0].operation == "routine_deposit_activate" and
             .[0].deploymentTarget == "production" and
             .[0].runtimeLogin == "active" and
+            .[0].cbeMode == $cbe_mode and
+            .[0].sharedFinancialGatesDisabled == true and
             .[0].livePaymentPerformed == false
           ' "$protected/activation.out" >/dev/null || {
             echo '::error::The guarded activation response was not the expected no-payment result.' >&2
             exit 1
           }
-          echo 'Routine execution transport login provisioned. The activation required all deposit switches disabled and performed no Player credit.' >>"$GITHUB_STEP_SUMMARY"
+          echo 'Routine execution transport login provisioned with shared deposit switches disabled and the confirmed independent CBE mode unchanged. No Player credit was performed.' >>"$GITHUB_STEP_SUMMARY"

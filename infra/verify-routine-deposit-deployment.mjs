@@ -317,6 +317,12 @@ assert.doesNotMatch(
 );
 assert.match(financialActivateSql, /app\.activate_routine_telebirr_financial_gates/u);
 assert.match(financialActivateSql, /'legacyPilotEnabled', false/u);
+for (const source of [activateSql, financialActivateSql]) {
+  assert.match(source, /FETANAGENT_ROUTINE_CBE_EXPECTED_MODE/u);
+  assert.match(source, /:'cbe_expected_mode' in \('disabled', 'live'\)/u);
+  assert.match(source, /'cbeMode', :'cbe_expected_mode'::text/u);
+}
+assert.match(activateSql, /'sharedFinancialGatesDisabled', true/u);
 assert.match(financialStopSql, /app\.stop_routine_telebirr_financial_gates/u);
 assert.match(financialStopSql, /'financialGatesDisabled', true/u);
 for (const workflow of [financialActivationWorkflow, financialStopWorkflow]) {
@@ -327,6 +333,12 @@ for (const workflow of [financialActivationWorkflow, financialStopWorkflow]) {
   assert.doesNotMatch(workflow, /\bpush:/u);
 }
 assert.match(financialActivationWorkflow, /ENABLE LIVE ROUTINE TELEBIRR DEPOSITS/u);
+assert.match(financialActivationWorkflow, /ENABLE LIVE ROUTINE DEPOSITS WITH CBE/u);
+for (const workflow of [transportActivationWorkflow, financialActivationWorkflow]) {
+  assert.match(workflow, /confirm_cbe_switch_mode/u);
+  assert.match(workflow, /FETANAGENT_ROUTINE_CBE_EXPECTED_MODE/u);
+  assert.match(workflow, /\.\[0\]\.cbeMode == \$cbe_mode/u);
+}
 assert.match(financialActivationWorkflow, /require-production-ci\.mjs/u);
 assert.match(financialActivationWorkflow, /production-routine-financial-activate\.sql/u);
 assert.match(financialStopWorkflow, /STOP ROUTINE TELEBIRR DEPOSITS/u);

@@ -20,6 +20,7 @@ const [
   sudoers,
   cbeStoppedHelperRotation,
   cbeStoppedPhoneProofHelperRotation,
+  ownerManualReviewHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -61,6 +62,7 @@ const [
   read('infra/operations/fetanagent-production-deploy-helper-v2.sudoers'),
   read('infra/operations/fetanagent-production-v2-cbe-stopped-helper-rotation-v2.sh'),
   read('infra/operations/fetanagent-production-v2-cbe-stopped-phone-proof-rotation-v3.sh'),
+  read('infra/operations/fetanagent-production-v2-owner-manual-payment-review-rotation-v4.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -704,6 +706,23 @@ assert.match(
   /steps\.protected\.outputs\.sms_mode == 'true' && inputs\.confirm_financial_switch_profile == 'disabled'/u,
 );
 assert.match(workflow, /The guarded CBE release requires existing SMS grants and logins/u);
+assert.doesNotMatch(workflow, /app\.decide_owner_receiver_sms_old_payment/u);
+assert.match(workflow, /false,false,false,false\) echo 'state=disabled'/u);
+assert.match(workflow, /true,true,true,true\) echo 'state=enabled'/u);
+for (const sql of [cbeLivePreflightSql, cbeStoppedPreflightSql]) {
+  assert.match(sql, /app\.decide_owner_receiver_sms_old_payment\(uuid,uuid,text\)/u);
+  for (const signature of [
+    'app.list_owner_manual_payment_cases(uuid,text,integer,integer)',
+    'app.list_owner_receiver_sms_inbox(uuid,integer,integer)',
+    'app.decide_owner_manual_payment_case(uuid,uuid,text,text)',
+    'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)',
+  ]) {
+    assert.ok(sql.includes(signature), `CBE preflight must require ${signature}`);
+  }
+}
+for (const sql of [receiverSmsActivateSql, receiverSmsDisableSql, receiverSmsStopSql]) {
+  assert.doesNotMatch(sql, /app\.decide_owner_receiver_sms_old_payment/u);
+}
 assert.match(workflow, /The guarded CBE release requires the reviewed running predecessor/u);
 assert.match(workflow, /Recheck guarded CBE payment state before activation/u);
 assert.match(
@@ -712,11 +731,11 @@ assert.match(
 );
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
-assert.match(workflow, /status '0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'/u);
+assert.match(workflow, /status '22f2ecfdb112d31b1807c148b021d9b7367e3134'/u);
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='22f2ecfdb112d31b1807c148b021d9b7367e3134'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1314,13 +1333,27 @@ assert.match(
 );
 assert.match(
   cbeStoppedPhoneProofHelperRotation,
-  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+  /readonly SUCCESSOR_SHA256='584ed859f06e22191b908dcd5b2c6ec451dc78acf789181eadd69720365f600f'/u,
 );
 assert.match(cbeStoppedPhoneProofHelperRotation, /require_current_release/u);
 assert.match(
   cbeStoppedPhoneProofHelperRotation,
   /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u,
 );
+assert.match(
+  ownerManualReviewHelperRotation,
+  /readonly PREDECESSOR_SHA256='584ed859f06e22191b908dcd5b2c6ec451dc78acf789181eadd69720365f600f'/u,
+);
+assert.match(
+  ownerManualReviewHelperRotation,
+  /readonly EXPECTED_CURRENT_SHA='22f2ecfdb112d31b1807c148b021d9b7367e3134'/u,
+);
+assert.match(
+  ownerManualReviewHelperRotation,
+  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+);
+assert.match(ownerManualReviewHelperRotation, /require_current_release/u);
+assert.match(ownerManualReviewHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

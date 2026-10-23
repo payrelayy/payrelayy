@@ -79,8 +79,6 @@ grant execute on function app.capture_telegram_receiver_sms_candidate(
 ) to fetanagent_player_actions;
 grant execute on function app.list_owner_receiver_sms_old_payments(uuid,integer)
   to fetanagent_owner_control;
-grant execute on function app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)
-  to fetanagent_owner_control;
 
 alter role fetanagent_receiver_sms_ingest_runtime
   login password :'ingest_password' valid until :'valid_until';

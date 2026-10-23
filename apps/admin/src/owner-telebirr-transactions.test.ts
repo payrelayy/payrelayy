@@ -90,6 +90,37 @@ describe('Owner TeleBirr Transactions adapter', () => {
     }
   });
 
+  it('accepts an audited Owner manual outcome in read-only history', async () => {
+    const manual = {
+      ...pending,
+      statusGroup: 'credited',
+      statusDetail: 'manually_credited',
+      reason: 'Owner marked manually credited',
+      decidedBy: 'Owner',
+      decidedAt: '2026-10-20T10:05:00Z',
+      canDecide: false,
+    };
+    const adapter = new PostgresOwnerTelebirrTransactions({
+      query: async () => ({
+        rows: [
+          {
+            transactions: {
+              rows: [manual],
+              total: 1,
+              pending: 0,
+              credited: 1,
+              rejected: 0,
+              waitingCount: 0,
+            },
+          },
+        ],
+      }),
+    });
+    expect(await adapter.list(owner, { status: 'all', limit: 25, offset: 0 })).toMatchObject({
+      rows: [manual],
+    });
+  });
+
   it('rejects malformed filters before any database call', async () => {
     let calls = 0;
     const adapter = new PostgresOwnerTelebirrTransactions({

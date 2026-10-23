@@ -600,7 +600,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
-    it('requires an Owner decision for an old SMS and queues one ordinary job after approval', async () => {
+    it('reserves an old signed SMS for manual credit without creating a claim or job', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -654,36 +654,49 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
             )
           ).rows,
         ).toEqual([{ outcome: 'empty' }]);
-        await client.query(
-          `grant execute on function app.list_owner_receiver_sms_old_payments(uuid,integer),
-            app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)
-            to fetanagent_owner_control`,
-        );
         await client.query('set session authorization fetanagent_owner_control_runtime');
         const list = await client.query<{ candidate_id: string; reference_masked: string }>(
           `select candidate_id, reference_masked
-            from app.list_owner_receiver_sms_old_payments($1::uuid,25)`,
+            from app.list_owner_manual_payment_cases($1::uuid,'pending',25,0)`,
           [getOwner()],
         );
         expect(list.rows).toContainEqual({ candidate_id: candidate, reference_masked: '***ABCD' });
-        const decided = await client.query<{ decision: { decision: string } }>(
-          `select app.decide_owner_receiver_sms_old_payment(
-            $1::uuid,$2::uuid,'approve') as decision`,
+        const decided = await client.query<{ decision: { caseId: string; status: string } }>(
+          `select app.decide_owner_manual_payment_case(
+            $1::uuid,$2::uuid,'approve',null) as decision`,
           [getOwner(), candidate],
         );
-        expect(decided.rows[0]?.decision.decision).toBe('approved');
+        expect(decided.rows[0]?.decision.status).toBe('awaiting_manual_credit');
+        const manualCaseId = decided.rows[0]!.decision.caseId;
+        expect(
+          (
+            await client.query<{ completed: { status: string } }>(
+              `select app.complete_owner_manual_payment_case(
+            $1::uuid,$2::uuid,null,null,null,false,true) as completed`,
+              [getOwner(), manualCaseId],
+            )
+          ).rows[0]?.completed.status,
+        ).toBe('manually_credited');
         await client.query('reset session authorization');
-        const lineage = await client.query<{ jobs: string; claims: string }>(
+        const lineage = await client.query<{
+          jobs: string;
+          claims: string;
+          notifications: string;
+        }>(
           `select
             (select count(*)::text from app.receiver_sms_settlement_lineages
               where candidate_id = $1::uuid) as jobs,
             (select count(*)::text from app.deposit_payment_claims claim
               join app.receiver_sms_intent_openings opening
                 on opening.deposit_intent_id = claim.deposit_intent_id
-              where opening.candidate_id = $1::uuid) as claims`,
+              where opening.candidate_id = $1::uuid) as claims,
+            (select count(*)::text from app.telegram_deposit_outcome_deliveries delivery
+              where delivery.candidate_id = $1::uuid
+                and delivery.notification_stage = 'manual_final'
+                and delivery.outcome_code = 'credited') as notifications`,
           [candidate],
         );
-        expect(lineage.rows).toEqual([{ jobs: '1', claims: '1' }]);
+        expect(lineage.rows).toEqual([{ jobs: '0', claims: '0', notifications: '1' }]);
         expect(
           (
             await client.query<{ outcome: string }>(
@@ -691,6 +704,192 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
             )
           ).rows,
         ).toEqual([{ outcome: 'empty' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('requires an Owner amount and receiving account for manual completion without SMS', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        const receiver = await client.query<{ id: string }>(
+          `select receiver.id from app.receiver_accounts receiver
+            join app.payment_providers provider on provider.id = receiver.provider_id
+            where provider.code = 'telebirr' and receiver.status = 'active'
+              and receiver.retired_at is null`,
+        );
+        expect(receiver.rows).toHaveLength(1);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const approved = await client.query<{ decision: { caseId: string; status: string } }>(
+          `select app.decide_owner_manual_payment_case(
+            $1::uuid,$2::uuid,'approve',null) as decision`,
+          [getOwner(), candidate],
+        );
+        expect(approved.rows[0]?.decision.status).toBe('awaiting_manual_credit');
+        const caseId = approved.rows[0]!.decision.caseId;
+        const completed = await client.query<{ result: { status: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,$2::uuid,null,3300,$3::uuid,true,true) as result`,
+          [getOwner(), caseId, receiver.rows[0]!.id],
+        );
+        expect(completed.rows[0]?.result.status).toBe('manually_credited');
+        const replay = await client.query<{ result: { caseId: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,$2::uuid,null,3300,$3::uuid,true,true) as result`,
+          [getOwner(), caseId, receiver.rows[0]!.id],
+        );
+        expect(replay.rows[0]?.result.caseId).toBe(caseId);
+        await client.query('reset session authorization');
+        await client.query('savepoint blocked_automatic_evidence');
+        await expect(
+          client.query(
+            `insert into app.provider_payment_evidence (
+            payment_provider_id,canonical_reference_ciphertext,
+            canonical_reference_fingerprint,canonical_reference_masked,
+            reference_encryption_key_version,evidence_source,amount_minor,
+            occurred_at,evidence_digest,adapter_version,normalization_version,
+            retrieved_at
+          ) values (
+            (select id from app.payment_providers where code='telebirr'),
+            'synthetic-ciphertext',$1::text,'***ABCD',2,
+            'provider_receipt_lookup',3300,pg_catalog.clock_timestamp(),
+            $2::text,'synthetic_test','synthetic_test',pg_catalog.clock_timestamp()
+          )`,
+            [fingerprint, `sha256:${hexDigest()}`],
+          ),
+        ).rejects.toThrow('reserved for Owner resolution');
+        await client.query('rollback to savepoint blocked_automatic_evidence');
+        const snapshot = await client.query<{
+          jobs: string;
+          notifications: string;
+          evidence: string;
+        }>(
+          `select
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id = $1::uuid) as jobs,
+            (select count(*)::text from app.telegram_deposit_outcome_deliveries
+              where candidate_id = $1::uuid and notification_stage = 'manual_final'
+                and outcome_code = 'credited' and amount_minor = 3300) as notifications,
+            (select count(*)::text from app.provider_payment_evidence evidence
+              join app.payment_providers provider on provider.id = evidence.payment_provider_id
+              where provider.code = 'telebirr'
+                and evidence.canonical_reference_fingerprint = $2::text) as evidence`,
+          [candidate, fingerprint],
+        );
+        expect(snapshot.rows).toEqual([{ jobs: '0', notifications: '1', evidence: '0' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('lets the Owner consume an unmatched signed SMS without a Player link', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        await client.query(
+          `update app.receiver_sms_route_control set enabled = true,
+            cutover_at = pg_catalog.clock_timestamp() - interval '1 day'
+            where singleton`,
+        );
+        const fingerprint = hexDigest();
+        const event = await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const inbox = await client.query<{
+          payment_event_id: string;
+          reference_masked: string | null;
+          can_mark_manually_credited: boolean;
+        }>(
+          `select payment_event_id,reference_masked,can_mark_manually_credited
+            from app.list_owner_receiver_sms_inbox($1::uuid,25,0)
+            where payment_event_id = $2::uuid`,
+          [getOwner(), event],
+        );
+        expect(inbox.rows).toEqual([
+          { payment_event_id: event, reference_masked: null, can_mark_manually_credited: true },
+        ]);
+        const completed = await client.query<{ result: { status: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,null,$2::uuid,null,null,false,true) as result`,
+          [getOwner(), event],
+        );
+        expect(completed.rows[0]?.result.status).toBe('manually_credited');
+        await client.query('reset session authorization');
+        const outcome = await client.query<{ status: string }>(
+          `select app.match_receiver_sms_payment('telebirr',$1::text) as status`,
+          [fingerprint],
+        );
+        expect(outcome.rows).toEqual([{ status: 'owner_review' }]);
+        const notifications = await client.query<{ count: string }>(
+          `select count(*)::text as count from app.telegram_deposit_outcome_deliveries
+            where notification_stage = 'manual_final' and reference_masked = '***ABCD'`,
+        );
+        expect(notifications.rows).toEqual([{ count: '0' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
+
+    it('records a later manual credit correction while retaining the rejected audit reason', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const candidate = await fixtureCandidate(client, hexDigest(), new Date().toISOString());
+        const receiver = await client.query<{ id: string }>(
+          `select receiver.id from app.receiver_accounts receiver
+            join app.payment_providers provider on provider.id = receiver.provider_id
+            where provider.code = 'telebirr' and receiver.status = 'active'
+              and receiver.retired_at is null`,
+        );
+        expect(receiver.rows).toHaveLength(1);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const rejected = await client.query<{ decision: { caseId: string; status: string } }>(
+          `select app.decide_owner_manual_payment_case(
+            $1::uuid,$2::uuid,'reject','Confirmed payment needed') as decision`,
+          [getOwner(), candidate],
+        );
+        expect(rejected.rows[0]?.decision.status).toBe('rejected');
+        const caseId = rejected.rows[0]!.decision.caseId;
+        const corrected = await client.query<{ result: { status: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,$2::uuid,null,3300,$3::uuid,true,true) as result`,
+          [getOwner(), caseId, receiver.rows[0]!.id],
+        );
+        expect(corrected.rows[0]?.result.status).toBe('manually_credited');
+        await client.query('reset session authorization');
+        const audit = await client.query<{
+          status: string;
+          rejection_reason: string;
+          rejected_delivery: string;
+          correction_delivery: string;
+          jobs: string;
+        }>(
+          `select owner_case.status,owner_case.rejection_reason,
+            (select outcome_code from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$2::uuid and notification_stage='manual_final')
+              as rejected_delivery,
+            (select outcome_code from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$2::uuid and notification_stage='manual_correction')
+              as correction_delivery,
+            (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$2::uuid) as jobs
+            from app.owner_manual_payment_cases owner_case where owner_case.id=$1::uuid`,
+          [caseId, candidate],
+        );
+        expect(audit.rows).toEqual([
+          {
+            status: 'manually_credited',
+            rejection_reason: 'Confirmed payment needed',
+            rejected_delivery: 'rejected',
+            correction_delivery: 'credited',
+            jobs: '0',
+          },
+        ]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
         await client.query('rollback');
@@ -876,7 +1075,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
               and candidate.id = $1::uuid`,
           [candidate],
         );
-        await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
+        const event = await fixturePaymentEvent(client, fingerprint, new Date().toISOString());
         const dispatched = await client.query<{ outcome: string }>(
           `select app.settle_next_receiver_sms_match() as outcome`,
         );
@@ -925,6 +1124,66 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
             intent_status: 'execution_pending',
             job_status: 'queued',
             admissible: '1',
+          },
+        ]);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const activeInbox = await client.query<{ can_mark_manually_credited: boolean }>(
+          `select can_mark_manually_credited from app.list_owner_receiver_sms_inbox(
+            $1::uuid,25,0) where payment_event_id=$2::uuid`,
+          [getOwner(), event],
+        );
+        expect(activeInbox.rows).toEqual([{ can_mark_manually_credited: false }]);
+        await client.query('reset session authorization');
+        await client.query(
+          `update app.deposit_jobs set status='cancelled',completed_at=clock_timestamp()
+            where id=$1::uuid`,
+          [first.rows[0]!.execution_job_id],
+        );
+        await client.query(
+          `update app.deposit_intents set status='execution_review'
+            where id=$1::uuid`,
+          [first.rows[0]!.deposit_intent_id],
+        );
+        await client.query(
+          `update app.deposit_intents
+            set status='rejected',rejection_reason_code='owner_manual_resolution'
+            where id=$1::uuid`,
+          [first.rows[0]!.deposit_intent_id],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const terminalInbox = await client.query<{ can_mark_manually_credited: boolean }>(
+          `select can_mark_manually_credited from app.list_owner_receiver_sms_inbox(
+            $1::uuid,25,0) where payment_event_id=$2::uuid`,
+          [getOwner(), event],
+        );
+        expect(terminalInbox.rows).toEqual([{ can_mark_manually_credited: true }]);
+        const marked = await client.query<{ result: { status: string } }>(
+          `select app.complete_owner_manual_payment_case(
+            $1::uuid,null,$2::uuid,null,null,false,true) as result`,
+          [getOwner(), event],
+        );
+        expect(marked.rows[0]!.result.status).toBe('manually_credited');
+        await client.query('reset session authorization');
+        const manualResult = await client.query<{
+          linked_candidate: string;
+          jobs: string;
+          notice: string;
+        }>(
+          `select owner_case.candidate_id as linked_candidate,
+            (select count(*)::text from app.deposit_jobs job
+              where job.deposit_intent_id=$2::uuid and job.status='cancelled') as jobs,
+            (select outcome_code from app.telegram_deposit_outcome_deliveries delivery
+              where delivery.candidate_id=$3::uuid
+                and delivery.notification_stage='manual_final') as notice
+            from app.owner_manual_payment_cases owner_case
+            where owner_case.payment_event_id=$1::uuid`,
+          [event, first.rows[0]!.deposit_intent_id, candidate],
+        );
+        expect(manualResult.rows).toEqual([
+          {
+            linked_candidate: candidate,
+            jobs: '1',
+            notice: 'credited',
           },
         ]);
       } finally {

@@ -102,10 +102,56 @@ select pg_catalog.has_function_privilege(
     'fetanagent_owner_control_runtime',
     'app.list_owner_receiver_sms_old_payments(uuid,integer)',
     'EXECUTE'
-  ) and pg_catalog.has_function_privilege(
-    'fetanagent_owner_control_runtime',
-    'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)',
-    'EXECUTE'
+  ) and (
+    (
+      coalesce(pg_catalog.has_function_privilege(
+        'fetanagent_owner_control_runtime',
+        pg_catalog.to_regprocedure(
+          'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)'
+        )::oid, 'EXECUTE'
+      ), false)
+      and pg_catalog.to_regprocedure(
+        'app.list_owner_manual_payment_cases(uuid,text,integer,integer)'
+      ) is null
+      and pg_catalog.to_regprocedure(
+        'app.list_owner_receiver_sms_inbox(uuid,integer,integer)'
+      ) is null
+      and pg_catalog.to_regprocedure(
+        'app.decide_owner_manual_payment_case(uuid,uuid,text,text)'
+      ) is null
+      and pg_catalog.to_regprocedure(
+        'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)'
+      ) is null
+    )
+    or (
+      pg_catalog.to_regprocedure(
+        'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)'
+      ) is null
+      and coalesce(pg_catalog.has_function_privilege(
+        'fetanagent_owner_control_runtime',
+        pg_catalog.to_regprocedure(
+          'app.list_owner_manual_payment_cases(uuid,text,integer,integer)'
+        )::oid, 'EXECUTE'
+      ), false)
+      and coalesce(pg_catalog.has_function_privilege(
+        'fetanagent_owner_control_runtime',
+        pg_catalog.to_regprocedure(
+          'app.list_owner_receiver_sms_inbox(uuid,integer,integer)'
+        )::oid, 'EXECUTE'
+      ), false)
+      and coalesce(pg_catalog.has_function_privilege(
+        'fetanagent_owner_control_runtime',
+        pg_catalog.to_regprocedure(
+          'app.decide_owner_manual_payment_case(uuid,uuid,text,text)'
+        )::oid, 'EXECUTE'
+      ), false)
+      and coalesce(pg_catalog.has_function_privilege(
+        'fetanagent_owner_control_runtime',
+        pg_catalog.to_regprocedure(
+          'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)'
+        )::oid, 'EXECUTE'
+      ), false)
+    )
   ) as receiver_sms_grants_ready
 \gset
 \if :receiver_sms_grants_ready

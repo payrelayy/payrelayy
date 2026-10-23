@@ -110,6 +110,42 @@ export function registerOwnerSupportContactSqlTests(
   createClient: () => Client,
 ): void {
   describe('Owner-controlled public Telegram support contact', () => {
+    it('starts with either the previous approval catalog or the manual-review catalog', async () => {
+      const client = getClient();
+      await withRollback(client, async () => {
+        await client.query('alter role fetanagent_owner_control_runtime login');
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+
+        for (const signature of [
+          'app.list_owner_manual_payment_cases(uuid,text,integer,integer)',
+          'app.list_owner_receiver_sms_inbox(uuid,integer,integer)',
+          'app.decide_owner_manual_payment_case(uuid,uuid,text,text)',
+          'app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)',
+        ]) {
+          await client.query(`drop function ${signature}`);
+        }
+        for (const signature of [
+          'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)',
+          'app.decide_owner_routine_telebirr_old_payment(uuid,uuid,text)',
+        ]) {
+          await client.query(`
+            create function ${signature} returns jsonb
+              language sql security definer set search_path = pg_catalog, pg_temp
+              as 'select ''{}''::jsonb';
+            revoke all on function ${signature}
+              from public, anon, authenticated, service_role,
+                fetanagent_owner_control, fetanagent_owner_control_runtime;
+            grant execute on function ${signature} to fetanagent_owner_control;
+          `);
+        }
+        await client.query(`
+          grant execute on function app.finalize_routine_telebirr_paid_observation(uuid)
+            to fetanagent_owner_control
+        `);
+        expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
+      });
+    });
+
     it('executes the actual startup preflight before and after the three support RPCs exist', async () => {
       const client = getClient();
       await withRollback(client, async () => {
@@ -121,14 +157,14 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(`drop function ${signature}`);
         }
         // The three routine-policy configuration RPCs are additive, not execution grants.
-        expect(await executableOwnerFunctionCount(client)).toBe(56);
+        expect(await executableOwnerFunctionCount(client)).toBe(58);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
 
         // Restore the actual checked-in migration's functions and ACLs, not test doubles.
         // This models the formerly healthy process restarting after that additive migration.
         await client.query('rollback to savepoint support_pre_migration_catalog');
         await client.query('release savepoint support_pre_migration_catalog');
-        expect(await executableOwnerFunctionCount(client)).toBe(59);
+        expect(await executableOwnerFunctionCount(client)).toBe(61);
         expectEveryPreflightCheckReady(await runActualOwnerPreflight(client));
       });
     });
@@ -202,7 +238,7 @@ export function registerOwnerSupportContactSqlTests(
           await client.query(
             `revoke execute on function ${signature} from fetanagent_owner_control`,
           );
-          expect(await executableOwnerFunctionCount(client)).toBe(58);
+          expect(await executableOwnerFunctionCount(client)).toBe(60);
           const row = await runActualOwnerPreflight(client);
           expect(row[check]).toBe(false);
           expect(row.exact_app_execute_count).toBe(false);
@@ -221,7 +257,7 @@ export function registerOwnerSupportContactSqlTests(
           revoke all on function app.sql_integration_unexpected_support_probe() from public;
           grant execute on function app.sql_integration_unexpected_support_probe() to fetanagent_owner_control;
         `);
-        expect(await executableOwnerFunctionCount(client)).toBe(60);
+        expect(await executableOwnerFunctionCount(client)).toBe(62);
         const row = await runActualOwnerPreflight(client);
         expect(row.exact_app_execute_count).toBe(false);
         expect(row.all_other_app_functions_denied).toBe(false);

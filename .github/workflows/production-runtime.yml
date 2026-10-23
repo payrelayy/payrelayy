@@ -999,12 +999,10 @@ jobs:
               pg_catalog.has_function_privilege('fetanagent_player_actions_runtime',
                 'app.capture_telegram_receiver_sms_candidate(uuid,text,text,text,text,text,smallint,smallint,text)', 'EXECUTE')::text || ',' ||
               pg_catalog.has_function_privilege('fetanagent_owner_control_runtime',
-                'app.list_owner_receiver_sms_old_payments(uuid,integer)', 'EXECUTE')::text || ',' ||
-              pg_catalog.has_function_privilege('fetanagent_owner_control_runtime',
-                'app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)', 'EXECUTE')::text")"
+                'app.list_owner_receiver_sms_old_payments(uuid,integer)', 'EXECUTE')::text")"
           case "$state" in
-            false,false,false,false,false) echo 'state=disabled' >>"$GITHUB_OUTPUT" ;;
-            true,true,true,true,true) echo 'state=enabled' >>"$GITHUB_OUTPUT" ;;
+            false,false,false,false) echo 'state=disabled' >>"$GITHUB_OUTPUT" ;;
+            true,true,true,true) echo 'state=enabled' >>"$GITHUB_OUTPUT" ;;
             *) echo '::error::The SMS grants and logins are in a mixed state.'; exit 1 ;;
           esac
           if [[ "$CONFIRMED_FINANCIAL_PROFILE" == 'cbe-live-v1' ||
@@ -1188,7 +1186,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'"
+              "sudo -n '$helper' status '22f2ecfdb112d31b1807c148b021d9b7367e3134'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1426,7 +1424,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '0c78afd0cf706ce8c351c50134a9ac0aaf4ff48d'"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '22f2ecfdb112d31b1807c148b021d9b7367e3134'"
 
       - name: Atomically activate production and switch the public edge
         id: activate

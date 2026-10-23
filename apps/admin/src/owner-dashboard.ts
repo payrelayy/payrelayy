@@ -85,7 +85,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="transactions-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See what happened to each submission. Approving a verified old payment starts the normal credit checks; it does not mean the Player has been credited yet.</p>
+          <p class="receipt-label">Historical TeleBirr transactions are read-only here. Use Payment review below to reserve an older payment for manual credit or reject it.</p>
           <form id="transactions-filters" class="transactions-filters" autocomplete="off">
             <div>
               <label for="transactions-status-filter">Status</label>
@@ -119,12 +119,30 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         </section>
         <section class="review-section" aria-labelledby="receiver-sms-old-title">
           <div class="panel-heading">
-            <h2 id="receiver-sms-old-title">SMS payments to review <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
+            <h2 id="receiver-sms-old-title">Payment review <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
             <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Older verified SMS payments need your decision. If no matching SMS arrived or a check failed, the payment is held for support review. Approval starts the normal credit checks; it does not mean credit is complete.</p>
-          <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load older SMS payments.</p>
+          <p class="receipt-label">Approve reserves a reference for manual credit and stops automatic credit for that payment. After crediting outside FetanAgent, mark it manually credited here. Reject requires a reason. An SMS match is not required for your decision.</p>
+          <label for="manual-payment-status-filter">Show cases</label>
+          <select id="manual-payment-status-filter">
+            <option value="pending">Pending review</option>
+            <option value="awaiting_manual_credit">Awaiting manual credit</option>
+            <option value="manually_credited">Manually credited</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <p class="request-meta" id="receiver-sms-old-status" role="status" aria-live="polite">Sign in to load payment cases.</p>
           <div class="request-list" id="receiver-sms-old-list"></div>
+          <button class="secondary transactions-more" id="manual-payment-more" type="button" hidden>Show older cases</button>
+        </section>
+        <section class="review-section" aria-labelledby="receiver-sms-inbox-title">
+          <div class="panel-heading">
+            <h2 id="receiver-sms-inbox-title">Received payment SMS</h2>
+            <button class="secondary" id="receiver-sms-inbox-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">Verified details from the paired phone for both providers, including payments with no customer submission. Unmatched messages have no reference ending stored; the unique internal reference still prevents reuse. A Manually credited action appears only when no automatic credit is active or uncertain. Complete any linked Player credit outside FetanAgent before using it.</p>
+          <p class="request-meta" id="receiver-sms-inbox-status" role="status" aria-live="polite">Sign in to load received payments.</p>
+          <div class="request-list" id="receiver-sms-inbox-list"></div>
+          <button class="secondary transactions-more" id="receiver-sms-inbox-more" type="button" hidden>Show older SMS</button>
         </section>
         <section class="review-section" aria-labelledby="telebirr-fast-alert-title">
           <h2 id="telebirr-fast-alert-title">TeleBirr payment reviews</h2>
@@ -810,6 +828,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .request-meta { margin: 0; color: #a1a1aa; font-size: 0.82rem; }
 .review-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 14px; }
 .review-actions button { padding: 10px 12px; font-size: 0.83rem; }
+.manual-completion-form { display: grid; gap: 12px; margin-top: 16px; padding: 14px; border: 1px solid #164e63; border-radius: 10px; background: #0c1d20; }
+.manual-completion-form > label:not(.confirmation-row) { display: grid; gap: 6px; }
+.manual-completion-form button { justify-self: start; }
 .empty-state { color: #a1a1aa; }
 .pilot-warning { border-left: 3px solid #fcd34d; color: #fde68a; background: #211b0e; padding: 12px 14px; line-height: 1.5; }
 .confirmation-row { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 10px; margin-top: 16px; line-height: 1.5; }
@@ -862,11 +883,20 @@ const receiverSmsOldBadge = document.querySelector('#receiver-sms-old-badge');
 const receiverSmsOldStatus = document.querySelector('#receiver-sms-old-status');
 const receiverSmsOldList = document.querySelector('#receiver-sms-old-list');
 const receiverSmsOldRefresh = document.querySelector('#receiver-sms-old-refresh');
+const manualPaymentStatusFilter = document.querySelector('#manual-payment-status-filter');
+const manualPaymentMore = document.querySelector('#manual-payment-more');
+const receiverSmsInboxRefresh = document.querySelector('#receiver-sms-inbox-refresh');
+const receiverSmsInboxStatus = document.querySelector('#receiver-sms-inbox-status');
+const receiverSmsInboxList = document.querySelector('#receiver-sms-inbox-list');
+const receiverSmsInboxMore = document.querySelector('#receiver-sms-inbox-more');
 let transactionsLoadGeneration = 0;
 let transactionsOffset = 0;
-let transactionsBusy = false;
 let receiverSmsOldLoadGeneration = 0;
 let receiverSmsOldBusy = false;
+let manualPaymentOffset = 0;
+let receiverSmsInboxOffset = 0;
+let receiverSmsInboxLoadGeneration = 0;
+let manualReceiverAccounts = [];
 const supportContactForm = document.querySelector('#support-contact-form');
 const supportContactUsername = document.querySelector('#support-contact-username');
 const supportContactConfirmation = document.querySelector('#support-contact-confirmation');
@@ -2947,6 +2977,14 @@ function signOut(message = 'Signed out.') {
   receiverSmsOldBadge.hidden = true;
   receiverSmsOldBadge.textContent = '';
   receiverSmsOldStatus.textContent = 'Sign in to load older SMS payments.';
+  manualPaymentOffset = 0;
+  receiverSmsInboxOffset = 0;
+  receiverSmsInboxLoadGeneration += 1;
+  receiverSmsInboxList.replaceChildren();
+  receiverSmsInboxStatus.textContent = 'Sign in to load received payments.';
+  receiverSmsInboxMore.hidden = true;
+  manualPaymentMore.hidden = true;
+  manualReceiverAccounts = [];
   ownerPanel.hidden = true;
   loginPanel.hidden = false;
   setNotice(message);
@@ -5208,7 +5246,8 @@ function validTransaction(value) {
       typeof value.referenceMasked !== 'string' || !/^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) ||
       typeof value.playerMasked !== 'string' || !/^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked) ||
       !['pending', 'credited', 'rejected'].includes(value.statusGroup) ||
-      !['waiting_approval', 'held_review', 'checking', 'credited', 'rejected'].includes(value.statusDetail) ||
+      !['waiting_approval', 'held_review', 'checking', 'credited', 'rejected',
+        'awaiting_manual_credit', 'manually_credited'].includes(value.statusDetail) ||
       (value.reason !== null && typeof value.reason !== 'string') ||
       (value.decidedBy !== null && typeof value.decidedBy !== 'string') ||
       (value.decidedAt !== null &&
@@ -5242,6 +5281,8 @@ function renderTransaction(value) {
     held_review: 'Held for review',
     checking: 'Checking',
     credited: 'Approved and credited',
+    awaiting_manual_credit: 'Awaiting manual credit',
+    manually_credited: 'Manually credited',
     rejected: 'Rejected',
   })[value.statusDetail];
   heading.append(title, status);
@@ -5259,17 +5300,10 @@ function renderTransaction(value) {
   }
   card.append(facts);
   if (value.canDecide) {
-    const actions = document.createElement('div');
-    actions.className = 'review-actions';
-    for (const decision of ['approve', 'reject']) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = decision === 'reject' ? 'danger' : '';
-      button.textContent = decision === 'approve' ? 'Approve payment' : 'Reject payment';
-      button.addEventListener('click', () => void decideTransaction(value, decision));
-      actions.append(button);
-    }
-    card.append(actions);
+    const note = document.createElement('p');
+    note.className = 'request-meta';
+    note.textContent = 'Available in Payment review for a manual decision.';
+    card.append(note);
   } else if (value.statusDetail === 'held_review') {
     const note = document.createElement('p');
     note.className = 'request-meta';
@@ -5277,47 +5311,6 @@ function renderTransaction(value) {
     card.append(note);
   }
   return card;
-}
-
-async function decideTransaction(value, decision) {
-  if (!accessToken || transactionsBusy || !value.canDecide) return;
-  const action = decision === 'approve' ? 'approve' : 'reject';
-  const prompt = action === 'approve'
-    ? 'Approve the verified old payment ' + value.referenceMasked + ' for ' + value.playerMasked +
-      '? All credit checks will run again. Approval does not mean credit has completed.'
-    : 'Reject the verified old payment ' + value.referenceMasked + ' for ' + value.playerMasked +
-      '? The customer will be told it was not credited.';
-  if (!window.confirm(prompt)) return;
-  const requestId = crypto.randomUUID();
-  const generation = ownerAuthGeneration;
-  transactionsBusy = true;
-  transactionsSummary.textContent = 'Recording your decision…';
-  try {
-    const response = await ownerRequest(
-      '/v1/owner/telebirr-old-payments/' + encodeURIComponent(value.candidateId) + '/decision', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json',
-          'x-fetanagent-owner-csrf': 'owner-telebirr-old-payment-v1',
-          'x-idempotency-key': requestId },
-        body: JSON.stringify({ decision: action, requestId, confirmed: true }),
-      });
-    if (response.status !== 200) throw new Error('decision_status');
-    if (generation !== ownerAuthGeneration || !accessToken) return;
-    const payload = await response.json();
-    if (!payload || !payload.decision ||
-        payload.decision.decision !== (action === 'approve' ? 'approved' : 'rejected'))
-      throw new Error('decision_response');
-    setNotice(action === 'approve'
-      ? 'Owner approval recorded. The normal credit path is running; check the transaction again for the final result.'
-      : 'Owner rejection recorded. The customer will receive the result.');
-  } catch (error) {
-    if (generation === ownerAuthGeneration && accessToken && !isSignedOutError(error)) {
-      setNotice('The decision could not be confirmed. It may already be recorded. Check the refreshed transaction before acting again.');
-    }
-  } finally {
-    transactionsBusy = false;
-    if (generation === ownerAuthGeneration && accessToken) await loadTransactions(true);
-  }
 }
 
 async function loadTransactions(reset) {
@@ -5381,143 +5374,384 @@ async function loadTransactions(reset) {
   }
 }
 
-function validReceiverSmsOldPayment(value) {
+function validManualPaymentCase(value) {
   return value && typeof value === 'object' &&
-    typeof value.candidateId === 'string' &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.candidateId) &&
-    ['telebirr', 'cbe_birr'].includes(value.providerCode) &&
-    typeof value.submittedAt === 'string' && Number.isFinite(Date.parse(value.submittedAt)) &&
-    (value.paymentAt === null ||
-      (typeof value.paymentAt === 'string' && Number.isFinite(Date.parse(value.paymentAt)))) &&
+    ['pending','awaiting_manual_credit','manually_credited','rejected'].includes(value.status) &&
+    ['telebirr','cbe_birr'].includes(value.providerCode) &&
+    (value.caseId === null || (typeof value.caseId === 'string' && value.caseId.length === 36)) &&
+    (value.candidateId === null || (typeof value.candidateId === 'string' && value.candidateId.length === 36)) &&
+    (value.legacyCandidateId === null ||
+      (typeof value.legacyCandidateId === 'string' && value.legacyCandidateId.length === 36)) &&
+    (value.paymentEventId === null || (typeof value.paymentEventId === 'string' && value.paymentEventId.length === 36)) &&
+    (value.referenceMasked === null ||
+      (typeof value.referenceMasked === 'string' && value.referenceMasked.startsWith('***') &&
+        value.referenceMasked.length === 7)) &&
     (value.amountMinor === null ||
-      (typeof value.amountMinor === 'string' && /^[1-9][0-9]*$/.test(value.amountMinor))) &&
-    typeof value.referenceMasked === 'string' && /^\\*{3}[A-Z0-9]{4}$/.test(value.referenceMasked) &&
-    typeof value.playerMasked === 'string' && /^\\*{3}[^\\s\\u0000-\\u001f\\u007f]{1,4}$/.test(value.playerMasked) &&
-    ['older_approval', 'held_review'].includes(value.reviewKind) &&
-    ['old_payment', 'no_receiver_sms_after_5m', 'settlement_preflight_failed',
-      'sms_match_uncertain'].includes(value.reasonCode) &&
-    (value.reviewKind !== 'older_approval' ||
-      (value.paymentAt !== null && value.amountMinor !== null &&
-        value.reasonCode === 'old_payment'));
+      (typeof value.amountMinor === 'string' && Number.isSafeInteger(Number(value.amountMinor)) &&
+        Number(value.amountMinor) >= 2500 && Number(value.amountMinor) <= 2500000)) &&
+    (value.receiverAccountId === null ||
+      (typeof value.receiverAccountId === 'string' && value.receiverAccountId.length === 36)) &&
+    (value.receiverAccountMasked === null || typeof value.receiverAccountMasked === 'string') &&
+    (value.playerMasked === null || typeof value.playerMasked === 'string') &&
+    (value.submittedAt === null || Number.isFinite(Date.parse(value.submittedAt))) &&
+    (value.paymentAt === null || Number.isFinite(Date.parse(value.paymentAt))) &&
+    (value.decidedAt === null || Number.isFinite(Date.parse(value.decidedAt))) &&
+    (value.completedAt === null || Number.isFinite(Date.parse(value.completedAt))) &&
+    (value.rejectionReason === null || typeof value.rejectionReason === 'string');
 }
 
-function renderReceiverSmsOldPayment(value) {
+function minorEtb(value) {
+  return (Number(value) / 100).toFixed(2) + ' ETB';
+}
+
+function manualPaymentHeaders(requestId) {
+  return { 'content-type': 'application/json',
+    'x-fetanagent-owner-csrf': 'owner-manual-payment-v1',
+    'x-idempotency-key': requestId };
+}
+
+async function refreshManualReceiverAccounts() {
+  const response = await ownerRequest('/v1/owner/receiver-accounts', {
+    method: 'GET', headers: {},
+  });
+  if (!response.ok) throw new Error('manual_receivers');
+  const payload = await response.json();
+  if (!payload || !Array.isArray(payload.receivers) || payload.receivers.length > 100)
+    throw new Error('manual_receivers');
+  const receivers = payload.receivers.map(validReceiver);
+  if (receivers.some((receiver) => !receiver)) throw new Error('manual_receivers');
+  manualReceiverAccounts = receivers;
+}
+
+async function decideManualPaymentCase(value, action) {
+  if (!accessToken || receiverSmsOldBusy || value.status !== 'pending' ||
+      !(value.candidateId || value.legacyCandidateId)) return;
+  let reason = null;
+  if (action === 'reject') {
+    reason = window.prompt('Enter the reason for rejection (10–240 characters). It is kept for the Owner; the customer receives a normal not-credited message.');
+    if (reason === null) return;
+    reason = reason.trim();
+    if (reason.length < 10 || reason.length > 240) {
+      setNotice('Enter a reason of 10–240 characters.');
+      return;
+    }
+  }
+  const reference = value.referenceMasked || 'this reference';
+  const message = action === 'approve'
+    ? 'Reserve ' + reference + ' for manual credit? No automatic Player credit will start. Credit the selected Player outside FetanAgent before marking it manually credited.'
+    : 'Reject ' + reference + '? The linked customer will receive a not-credited result.';
+  if (!window.confirm(message)) return;
+  receiverSmsOldBusy = true;
+  const requestId = crypto.randomUUID();
+  try {
+    const response = await ownerRequest(
+      '/v1/owner/manual-payment-cases/' +
+        encodeURIComponent(value.candidateId || value.legacyCandidateId) + '/decision', {
+        method: 'POST', headers: manualPaymentHeaders(requestId),
+        body: JSON.stringify({ decision: action, reason, requestId, confirmed: true }),
+      });
+    if (!response.ok) throw new Error('manual_decision');
+    setNotice(action === 'approve'
+      ? 'Reference reserved. Credit the Player manually, then record completion here.'
+      : 'Rejection recorded. The customer will receive a normal not-credited result.');
+    manualPaymentStatusFilter.value = action === 'approve' ? 'awaiting_manual_credit' : 'rejected';
+  } catch (error) {
+    if (!isSignedOutError(error))
+      setNotice('Decision could not be confirmed. Refresh before trying again.');
+  } finally {
+    receiverSmsOldBusy = false;
+    if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
+  }
+}
+
+function parseEtbMinor(raw) {
+  if (typeof raw !== 'string' || !/^[0-9]{1,5}(?:\\.[0-9]{1,2})?$/.test(raw)) return null;
+  const parts = raw.split('.');
+  const minor = Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2,'0'));
+  return Number.isSafeInteger(minor) && minor >= 2500 && minor <= 2500000
+    ? String(minor) : null;
+}
+
+async function completeManualPayment(value, form) {
+  if (!accessToken || receiverSmsOldBusy) return;
+  const directSms = !value.caseId;
+  const unlinkedSms = directSms && !value.candidateId;
+  const signedSms = value.paymentEventId !== null;
+  let amountMinor = null;
+  let receiverAccountId = null;
+  let bankPaymentConfirmed = false;
+  if (!signedSms) {
+    amountMinor = parseEtbMinor(form.elements.amountEtb.value.trim());
+    receiverAccountId = form.elements.receiverAccountId.value;
+    bankPaymentConfirmed = form.elements.bankPaymentConfirmed.checked;
+    if (amountMinor === null || !receiverAccountId || !bankPaymentConfirmed) {
+      setNotice('Enter the confirmed ETB amount, select the receiving account, and confirm the bank record.');
+      return;
+    }
+  }
+  if (!form.elements.creditConfirmed.checked) {
+    setNotice('Confirm the manual credit or resolution before recording it.');
+    return;
+  }
+  const message = unlinkedSms
+    ? 'Mark this unmatched received payment as manually credited without a linked Player? This permanently blocks reuse of its reference; no customer is notified.'
+    : value.status === 'rejected'
+      ? 'Correct this rejection after completing the outside Player credit? The reference stays blocked, and the customer will receive Deposit complete.'
+      : 'Confirm that the outside Player credit is complete? FetanAgent will permanently mark this reference used and send the customer Deposit complete.';
+  if (!window.confirm(message)) return;
+  receiverSmsOldBusy = true;
+  const requestId = crypto.randomUUID();
+  try {
+    const response = await ownerRequest('/v1/owner/manual-payments/complete', {
+      method: 'POST', headers: manualPaymentHeaders(requestId),
+      body: JSON.stringify({ caseId: value.caseId || null,
+        paymentEventId: directSms ? value.paymentEventId : null,
+        amountMinor, receiverAccountId, bankPaymentConfirmed,
+        playerCreditedConfirmed: true, requestId }),
+    });
+    if (!response.ok) throw new Error('manual_completion');
+    if (!directSms) manualPaymentStatusFilter.value = 'manually_credited';
+    setNotice(unlinkedSms
+      ? 'Received payment marked manually credited. Its reference cannot be reused.'
+      : 'Manual credit recorded. The customer will receive Deposit complete.');
+  } catch (error) {
+    if (!isSignedOutError(error))
+      setNotice('Completion could not be confirmed. Refresh and check the status before acting again.');
+  } finally {
+    receiverSmsOldBusy = false;
+    if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
+  }
+}
+
+function manualCompletionForm(value) {
+  const form = document.createElement('form');
+  form.className = 'manual-completion-form';
+  const hasSms = value.paymentEventId !== null;
+  if (!hasSms) {
+    const amountLabel = document.createElement('label');
+    amountLabel.textContent = 'Confirmed amount (ETB)';
+    const amountInput = document.createElement('input');
+    amountInput.type = 'text';
+    amountInput.name = 'amountEtb';
+    amountInput.inputMode = 'decimal';
+    amountInput.placeholder = '25.00';
+    amountLabel.append(amountInput);
+    const receiverLabel = document.createElement('label');
+    receiverLabel.textContent = 'Receiving account';
+    const receiverSelect = document.createElement('select');
+    receiverSelect.name = 'receiverAccountId';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select the account shown in your bank record';
+    receiverSelect.append(placeholder);
+    for (const receiver of manualReceiverAccounts.filter((item) =>
+      item.providerCode === value.providerCode)) {
+      const option = document.createElement('option');
+      option.value = receiver.receiverRevisionId;
+      option.textContent = receiver.accountHolderName + ' · ' +
+        receiver.accountReferenceMasked + ' · revision ' + receiver.revision;
+      receiverSelect.append(option);
+    }
+    receiverLabel.append(receiverSelect);
+    const bankLabel = document.createElement('label');
+    bankLabel.className = 'confirmation-row';
+    const bankCheck = document.createElement('input');
+    bankCheck.type = 'checkbox';
+    bankCheck.name = 'bankPaymentConfirmed';
+    const bankText = document.createElement('span');
+    bankText.textContent = 'I confirmed this payment in the provider’s bank records.';
+    bankLabel.append(bankCheck,bankText);
+    form.append(amountLabel,receiverLabel,bankLabel);
+  }
+  const creditLabel = document.createElement('label');
+  creditLabel.className = 'confirmation-row';
+  const creditCheck = document.createElement('input');
+  creditCheck.type = 'checkbox';
+  creditCheck.name = 'creditConfirmed';
+  const creditText = document.createElement('span');
+  creditText.textContent = value.caseId || value.candidateId
+    ? 'I manually credited the selected Player in KemerBet.'
+    : 'I manually resolved this payment outside FetanAgent; no Player is linked.';
+  creditLabel.append(creditCheck,creditText);
+  const button = document.createElement('button');
+  button.type = 'submit';
+  button.textContent = 'Manually credited';
+  form.append(creditLabel,button);
+  form.addEventListener('submit',(event) => {
+    event.preventDefault();
+    void completeManualPayment(value,form);
+  });
+  return form;
+}
+
+function renderManualPaymentCase(value) {
   const card = document.createElement('article');
   card.className = 'request-card';
   const title = document.createElement('h3');
   title.textContent = (value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
-    ' · reference ' + value.referenceMasked;
-  card.append(title);
+    ' · ' + (value.referenceMasked || 'reference ending unavailable');
   const facts = document.createElement('dl');
   facts.className = 'transaction-facts';
-  transactionFact(facts, 'Submitted', transactionDate(value.submittedAt));
-  transactionFact(facts, 'Payment time', value.paymentAt === null
-    ? 'Not verified' : transactionDate(value.paymentAt));
-  transactionFact(facts, 'Amount', value.amountMinor === null
-    ? 'Not verified' : (Number(value.amountMinor) / 100).toFixed(2) + ' ETB');
-  transactionFact(facts, 'Player', value.playerMasked);
-  transactionFact(facts, 'Status', value.reviewKind === 'older_approval'
-    ? 'Waiting for your approval' : 'Held for support review');
-  if (value.reviewKind === 'held_review') {
-    transactionFact(facts, 'Reason', ({
-      no_receiver_sms_after_5m: 'No matching receiving-phone SMS after 5 minutes',
-      settlement_preflight_failed: 'Payment checks need support review',
-      sms_match_uncertain: 'SMS match needs support review',
-    })[value.reasonCode] || 'Payment needs support review');
+  transactionFact(facts,'Status',({ pending: 'Pending review',
+    awaiting_manual_credit: 'Awaiting manual credit',
+    manually_credited: 'Manually credited', rejected: 'Rejected' })[value.status]);
+  if (value.submittedAt) transactionFact(facts,'Submitted',transactionDate(value.submittedAt));
+  if (value.legacyCandidateId)
+    transactionFact(facts,'Proof','Older signed TeleBirr receipt');
+  transactionFact(facts,'Payment time',value.paymentAt
+    ? transactionDate(value.paymentAt) : 'No matching phone SMS');
+  transactionFact(facts,'Amount',value.amountMinor ? minorEtb(value.amountMinor) : 'Not verified');
+  transactionFact(facts,'Receiving account',value.receiverAccountMasked || 'Not verified');
+  transactionFact(facts,'Player',value.playerMasked || 'No linked Player');
+  if (value.rejectionReason) transactionFact(facts,'Owner reason',value.rejectionReason);
+  if (value.decidedAt) transactionFact(facts,'Decision',transactionDate(value.decidedAt));
+  if (value.completedAt) transactionFact(facts,'Completed',transactionDate(value.completedAt));
+  card.append(title,facts);
+  if (value.status === 'pending') {
+    const actions = document.createElement('div');
+    actions.className = 'review-actions';
+    for (const action of ['approve','reject']) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = action === 'reject' ? 'danger' : '';
+      button.textContent = action === 'approve' ? 'Approve for manual credit' : 'Reject';
+      button.addEventListener('click',() => void decideManualPaymentCase(value,action));
+      actions.append(button);
+    }
+    card.append(actions);
+  } else if (value.status === 'awaiting_manual_credit' || value.status === 'rejected') {
+    if (value.status === 'rejected') {
+      const note = document.createElement('p');
+      note.className = 'request-meta';
+      note.textContent = 'If you later confirmed this payment and credited the Player outside FetanAgent, record the correction below. The original rejection remains in the Owner record.';
+      card.append(note);
+    }
+    card.append(manualCompletionForm(value));
   }
-  card.append(facts);
-  if (value.reviewKind !== 'older_approval') return card;
-  const actions = document.createElement('div');
-  actions.className = 'review-actions';
-  for (const decision of ['approve', 'reject']) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = decision === 'reject' ? 'danger' : '';
-    button.textContent = decision === 'approve' ? 'Approve payment' : 'Reject payment';
-    button.addEventListener('click', () => void decideReceiverSmsOldPayment(value, decision));
-    actions.append(button);
-  }
-  card.append(actions);
   return card;
 }
 
-async function decideReceiverSmsOldPayment(value, action) {
-  if (!accessToken || receiverSmsOldBusy || !validReceiverSmsOldPayment(value) ||
-      value.reviewKind !== 'older_approval' ||
-      !['approve', 'reject'].includes(action)) return;
-  const provider = value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
-  const prompt = action === 'approve'
-    ? 'Approve the older ' + provider + ' payment ' + value.referenceMasked +
-      ' for ' + value.playerMasked + '? All credit checks will run again.'
-    : 'Reject the older ' + provider + ' payment ' + value.referenceMasked +
-      ' for ' + value.playerMasked + '?';
-  if (!window.confirm(prompt)) return;
-  const generation = ownerAuthGeneration;
-  const requestId = crypto.randomUUID();
-  receiverSmsOldBusy = true;
-  receiverSmsOldStatus.textContent = 'Recording your decision…';
-  try {
-    const response = await ownerRequest(
-      '/v1/owner/receiver-sms-old-payments/' + encodeURIComponent(value.candidateId) +
-      '/decision', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json',
-          'x-fetanagent-owner-csrf': 'owner-receiver-sms-old-payment-v1',
-          'x-idempotency-key': requestId },
-        body: JSON.stringify({ decision: action, requestId, confirmed: true }),
-      });
-    if (response.status !== 200) throw new Error('decision_status');
-    if (generation !== ownerAuthGeneration || !accessToken) return;
-    const payload = await response.json();
-    if (!payload || !payload.decision ||
-        payload.decision.decision !== (action === 'approve' ? 'approved' : 'rejected'))
-      throw new Error('decision_response');
-    setNotice(action === 'approve'
-      ? 'Approval recorded. The normal credit path is running; check for the final result.'
-      : 'Rejection recorded. No Player credit was started.');
-  } catch (error) {
-    if (generation === ownerAuthGeneration && accessToken && !isSignedOutError(error))
-      setNotice('The decision could not be confirmed. Refresh before acting again.');
-  } finally {
-    receiverSmsOldBusy = false;
-    if (generation === ownerAuthGeneration && accessToken) await loadReceiverSmsOldPayments();
-  }
-}
-
-async function loadReceiverSmsOldPayments() {
+async function loadManualPaymentCases(reset) {
   if (!accessToken) return;
   const generation = ownerAuthGeneration;
   const loadGeneration = ++receiverSmsOldLoadGeneration;
+  const status = manualPaymentStatusFilter.value;
+  const offset = reset ? 0 : manualPaymentOffset;
   receiverSmsOldRefresh.disabled = true;
-  receiverSmsOldStatus.textContent = 'Loading older SMS payments…';
+  manualPaymentMore.disabled = true;
+  receiverSmsOldStatus.textContent = 'Loading payment cases…';
   try {
-    const response = await ownerRequest('/v1/owner/receiver-sms-old-payments?limit=25', {
-      method: 'GET', headers: {},
-    });
-    if (!response.ok) throw new Error('sms_old_payments');
+    if (status === 'awaiting_manual_credit' || status === 'rejected')
+      await refreshManualReceiverAccounts();
+    const response = await ownerRequest('/v1/owner/manual-payment-cases?status=' +
+      encodeURIComponent(status) + '&limit=25&offset=' + offset, {
+        method: 'GET', headers: {},
+      });
+    if (!response.ok) throw new Error('manual_cases');
     const payload = await response.json();
-    if (!payload || !Array.isArray(payload.pending) || payload.pending.length > 25 ||
-        !payload.pending.every(validReceiverSmsOldPayment)) throw new Error('sms_old_payments');
+    if (!payload || !Array.isArray(payload.cases) || payload.cases.length > 25 ||
+        !payload.cases.every(validManualPaymentCase) ||
+        payload.cases.some((value) => value.status !== status)) throw new Error('manual_cases');
     if (generation !== ownerAuthGeneration || loadGeneration !== receiverSmsOldLoadGeneration ||
-        !accessToken) return;
-    receiverSmsOldList.replaceChildren();
-    for (const value of payload.pending) receiverSmsOldList.append(renderReceiverSmsOldPayment(value));
-    receiverSmsOldBadge.hidden = payload.pending.length === 0;
-    receiverSmsOldBadge.textContent = payload.pending.length + ' waiting';
-    receiverSmsOldStatus.textContent = payload.pending.length === 0
-      ? 'No SMS payments need review.'
-      : payload.pending.length + ' payment(s) need review.';
+        !accessToken || manualPaymentStatusFilter.value !== status) return;
+    if (reset) receiverSmsOldList.replaceChildren();
+    for (const value of payload.cases) receiverSmsOldList.append(renderManualPaymentCase(value));
+    manualPaymentOffset = offset + payload.cases.length;
+    manualPaymentMore.hidden = payload.cases.length < 25;
+    receiverSmsOldBadge.hidden = status !== 'pending' || payload.cases.length === 0;
+    receiverSmsOldBadge.textContent = payload.cases.length + ' shown';
+    receiverSmsOldStatus.textContent = payload.cases.length === 0 && reset
+      ? 'No cases in this view.' : 'Showing ' + manualPaymentOffset + ' case(s).';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration &&
-        accessToken && !isSignedOutError(error))
-      receiverSmsOldStatus.textContent = 'Older SMS payments are unavailable. Refresh to try again.';
+        !isSignedOutError(error))
+      receiverSmsOldStatus.textContent = 'Payment cases are unavailable. Refresh to try again.';
   } finally {
-    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration)
+    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsOldLoadGeneration) {
       receiverSmsOldRefresh.disabled = false;
+      manualPaymentMore.disabled = false;
+    }
   }
 }
 
-receiverSmsOldRefresh.addEventListener('click', () => void loadReceiverSmsOldPayments());
+function validSmsInboxPayment(value) {
+  return value && typeof value === 'object' &&
+    typeof value.paymentEventId === 'string' && value.paymentEventId.length === 36 &&
+    ['telebirr','cbe_birr'].includes(value.providerCode) &&
+    Number.isFinite(Date.parse(value.paymentAt)) &&
+    Number.isFinite(Date.parse(value.receivedAt)) &&
+    typeof value.amountMinor === 'string' && Number.isSafeInteger(Number(value.amountMinor)) &&
+    typeof value.receiverAccountMasked === 'string' &&
+    typeof value.receiverHolderName === 'string' &&
+    (value.referenceMasked === null || typeof value.referenceMasked === 'string') &&
+    (value.playerMasked === null || typeof value.playerMasked === 'string') &&
+    typeof value.status === 'string' &&
+    typeof value.canMarkManuallyCredited === 'boolean';
+}
+
+function renderSmsInboxPayment(value) {
+  const card = document.createElement('article');
+  card.className = 'request-card';
+  const title = document.createElement('h3');
+  title.textContent = (value.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr') +
+    ' · ' + (value.referenceMasked || 'reference ending unavailable');
+  const facts = document.createElement('dl');
+  facts.className = 'transaction-facts';
+  transactionFact(facts,'Amount',minorEtb(value.amountMinor));
+  transactionFact(facts,'Payment time',transactionDate(value.paymentAt));
+  transactionFact(facts,'Received by phone',transactionDate(value.receivedAt));
+  transactionFact(facts,'Receiving account',value.receiverHolderName +
+    ' · ' + value.receiverAccountMasked);
+  transactionFact(facts,'Player',value.playerMasked || 'No linked Player');
+  transactionFact(facts,'Status',value.status.replaceAll('_',' '));
+  card.append(title,facts);
+  if (value.canMarkManuallyCredited) card.append(manualCompletionForm({
+    caseId: null, paymentEventId: value.paymentEventId, providerCode: value.providerCode,
+    candidateId: value.candidateId, playerMasked: value.playerMasked,
+  }));
+  return card;
+}
+
+async function loadReceiverSmsInbox(reset) {
+  if (!accessToken) return;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++receiverSmsInboxLoadGeneration;
+  const offset = reset ? 0 : receiverSmsInboxOffset;
+  receiverSmsInboxRefresh.disabled = true;
+  receiverSmsInboxMore.disabled = true;
+  receiverSmsInboxStatus.textContent = 'Loading received payments…';
+  try {
+    const response = await ownerRequest('/v1/owner/receiver-sms-inbox?limit=25&offset=' +
+      offset, { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('sms_inbox');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.payments) || payload.payments.length > 25 ||
+        !payload.payments.every(validSmsInboxPayment)) throw new Error('sms_inbox');
+    if (generation !== ownerAuthGeneration || loadGeneration !== receiverSmsInboxLoadGeneration ||
+        !accessToken) return;
+    if (reset) receiverSmsInboxList.replaceChildren();
+    for (const value of payload.payments) receiverSmsInboxList.append(renderSmsInboxPayment(value));
+    receiverSmsInboxOffset = offset + payload.payments.length;
+    receiverSmsInboxMore.hidden = payload.payments.length < 25;
+    receiverSmsInboxStatus.textContent = payload.payments.length === 0 && reset
+      ? 'No received payment SMS yet.' : 'Showing ' + receiverSmsInboxOffset + ' received payment(s).';
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsInboxLoadGeneration &&
+        !isSignedOutError(error))
+      receiverSmsInboxStatus.textContent = 'Received payments are unavailable. Refresh to try again.';
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === receiverSmsInboxLoadGeneration) {
+      receiverSmsInboxRefresh.disabled = false;
+      receiverSmsInboxMore.disabled = false;
+    }
+  }
+}
+
+receiverSmsOldRefresh.addEventListener('click', () => void loadManualPaymentCases(true));
+manualPaymentStatusFilter.addEventListener('change', () => void loadManualPaymentCases(true));
+manualPaymentMore.addEventListener('click', () => void loadManualPaymentCases(false));
+receiverSmsInboxRefresh.addEventListener('click', () => void loadReceiverSmsInbox(true));
+receiverSmsInboxMore.addEventListener('click', () => void loadReceiverSmsInbox(false));
 
 transactionsFilters.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -6360,7 +6594,8 @@ async function loadOwnerPlayerQueues() {
       loadReceiverChangeReviews(),
       loadTelebirrFastAlerts(),
       loadTransactions(true),
-      loadReceiverSmsOldPayments(),
+      loadManualPaymentCases(true),
+      loadReceiverSmsInbox(true),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),

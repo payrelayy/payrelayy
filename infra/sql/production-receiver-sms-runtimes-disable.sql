@@ -25,7 +25,5 @@ revoke execute on function app.capture_telegram_receiver_sms_candidate(
 ) from fetanagent_player_actions;
 revoke execute on function app.list_owner_receiver_sms_old_payments(uuid,integer)
   from fetanagent_owner_control;
-revoke execute on function app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)
-  from fetanagent_owner_control;
 
 commit;

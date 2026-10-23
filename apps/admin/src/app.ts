@@ -14,6 +14,12 @@ import {
 } from './owner-manual-payments.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
+import {
+  OwnerPaymentMethodsConflictError,
+  OwnerPaymentMethodsRejectedError,
+  OwnerPaymentMethodsUnavailableError,
+  type PaymentMethodCode,
+} from './owner-payment-methods.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
 import {
   OwnerCompanionExecutionReadinessRejectedError,
@@ -180,6 +186,7 @@ const OWNER_COMPANION_LOOKUP_CSRF_HEADER_VALUE = 'owner-companion-exact-five-loo
 const OWNER_TELEBIRR_DEVICE_PAIRING_CSRF_HEADER_VALUE = 'owner-telebirr-device-pairing-v1';
 const OWNER_ROUTINE_TELEBIRR_PAIRING_CSRF_HEADER_VALUE = 'owner-routine-telebirr-pairing-v1';
 const OWNER_RECEIVER_CSRF_HEADER_VALUE = 'owner-receiver-rotation-v1';
+const OWNER_PAYMENT_METHODS_CSRF_HEADER_VALUE = 'owner-payment-methods-v1';
 const OWNER_KEMERBET_AGENT_CSRF_HEADER_VALUE = 'owner-kemerbet-agent-profile-v1';
 const OWNER_KEMERBET_READINESS_COHORT_CSRF_HEADER_VALUE = 'owner-kemerbet-readiness-cohort-v1';
 const OWNER_KEMERBET_SESSION_CSRF_HEADER_VALUE = 'owner-kemerbet-session-v1';
@@ -600,6 +607,21 @@ export function buildOwnerControlApp(
       exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
       privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
       exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') === OWNER_RECEIVER_CSRF_HEADER_VALUE &&
+      exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
+    );
+  }
+
+  function validPaymentMethodsMutationHeaders(
+    rawHeaders: readonly string[],
+    requestId: unknown,
+  ): boolean {
+    return (
+      typeof requestId === 'string' &&
+      UUID_V4_PATTERN.test(requestId) &&
+      exactRawHeader(rawHeaders, 'content-type') === 'application/json' &&
+      privatePilotMutationOrigins.has(exactRawHeader(rawHeaders, 'origin') ?? '') &&
+      exactRawHeader(rawHeaders, 'x-fetanagent-owner-csrf') ===
+        OWNER_PAYMENT_METHODS_CSRF_HEADER_VALUE &&
       exactRawHeader(rawHeaders, 'x-idempotency-key') === requestId
     );
   }
@@ -1247,6 +1269,78 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/public/payment-methods',
+    async (request, reply) => {
+      if (Object.keys(request.query).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      try {
+        const methods = await dependencies.runtime.paymentMethods?.publicStatus();
+        if (!methods) throw new OwnerPaymentMethodsUnavailableError();
+        return reply.header('cache-control', 'no-store').send({ methods });
+      } catch {
+        return reply.code(503).send({ error: 'payment_methods_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: Record<string, string> }>(
+    '/v1/owner/payment-methods',
+    async (request, reply) => {
+      if (Object.keys(request.query).length !== 0)
+        return reply.code(400).send({ error: 'invalid_request' });
+      try {
+        const authUserId = await ownerSubject(request.raw.rawHeaders);
+        const methods = await dependencies.runtime.paymentMethods?.list(authUserId);
+        if (!methods) throw new OwnerPaymentMethodsUnavailableError();
+        return reply.header('cache-control', 'no-store').send({ methods });
+      } catch (error) {
+        if (
+          error instanceof OwnerAuthenticationRejectedError ||
+          error instanceof OwnerPaymentMethodsRejectedError
+        )
+          return reply.code(403).send({ error: 'forbidden' });
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post('/v1/owner/payment-methods', async (request, reply) => {
+    const body = exactObject(request.body, [
+      'confirmation',
+      'enabled',
+      'providerCode',
+      'requestId',
+    ]);
+    if (
+      body?.confirmation !== 'owner_confirmed_payment_method_control' ||
+      (body.providerCode !== 'telebirr' && body.providerCode !== 'cbe_birr') ||
+      typeof body.enabled !== 'boolean' ||
+      !validPaymentMethodsMutationHeaders(request.raw.rawHeaders, body.requestId)
+    )
+      return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      const authUserId = await ownerSubject(request.raw.rawHeaders);
+      const methods = await dependencies.runtime.paymentMethods?.set(
+        authUserId,
+        body.requestId as string,
+        body.providerCode as PaymentMethodCode,
+        body.enabled,
+      );
+      if (!methods) throw new OwnerPaymentMethodsUnavailableError();
+      return reply.header('cache-control', 'no-store').send({ methods });
+    } catch (error) {
+      if (
+        error instanceof OwnerAuthenticationRejectedError ||
+        error instanceof OwnerPaymentMethodsRejectedError
+      )
+        return reply.code(403).send({ error: 'forbidden' });
+      if (error instanceof OwnerPaymentMethodsConflictError)
+        return reply.code(409).send({ error: 'payment_method_not_ready' });
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post('/v1/owner/receiver-accounts/rotate', async (request, reply) => {
     try {

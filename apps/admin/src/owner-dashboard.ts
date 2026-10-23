@@ -82,6 +82,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <p class="owner-navigation-label">WORKSPACE</p>
             <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
             <button id="owner-nav-payments" type="button" data-owner-view="payments">Payments &amp; SMS</button>
+            <button id="owner-nav-methods" type="button" data-owner-view="methods">Payment methods</button>
             <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
             <button id="owner-nav-system" type="button" data-owner-view="system">System</button>
             <button id="owner-nav-advanced" type="button" data-owner-view="advanced">Advanced tools</button>
@@ -333,26 +334,31 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </form>
         </section>
 
+        <section class="review-section" aria-labelledby="payment-methods-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Your payment methods</p>
+              <h2 id="payment-methods-title">TeleBirr and CBE Birr</h2>
+            </div>
+            <button class="secondary" id="payment-methods-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">Turn a method off to stop new deposits and automatic Player credits for it. Received SMS and payments needing review stay visible under Payments &amp; SMS.</p>
+          <div class="request-list" id="payment-methods-list"></div>
+          <p class="request-meta" id="payment-methods-feedback" role="status" aria-live="polite">Sign in to load payment methods.</p>
+        </section>
         <section class="review-section" aria-labelledby="receiver-title">
           <div class="panel-heading">
             <div>
-              <p class="status-ok">Immutable Owner configuration</p>
-              <h2 id="receiver-title">Receiving accounts</h2>
+              <p class="status-ok">Receiving details</p>
+              <h2 id="receiver-title">Change a receiver</h2>
             </div>
             <button class="secondary" id="receiver-refresh-button" type="button">Refresh</button>
           </div>
+          <p class="receipt-label">Choose a method, enter its official receiving name and number, then save. Previous payment records stay intact. For security, the full number will not be shown again.</p>
           <p class="receipt-label">
-            Add or change the active TeleBirr and CBE Birr receiving accounts here. A change creates
-            a new revision and retires the previous one; it never rewrites receipt history. The
-            complete account number is encrypted in server memory and is never displayed again.
+            A receiver change pauses that method until its checks pass. The other method stays as it is.
+            Resolve any in-progress credit first; earlier payments and SMS remain available for review.
           </p>
-          <p class="pilot-warning">
-            TeleBirr receiver changes and CBE Birr account rotations require the financial switches
-            to be off. The first CBE Birr receiver and a one-time same-account protection upgrade
-            may preserve live TeleBirr when their exact server guards allow it. CBE Birr verification
-            stays off. Stop any pilot for the provider before changing its receiver.
-          </p>
-          <div class="request-list" id="receiver-list"></div>
           <form id="receiver-form" autocomplete="off">
             <label for="receiver-provider">Provider</label>
             <select id="receiver-provider" name="providerCode" required>
@@ -366,8 +372,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <input id="receiver-account-reference" name="accountReference" type="password"
               inputmode="numeric" pattern="[0-9]{9,24}" minlength="9" maxlength="24"
               autocomplete="new-password" required />
-            <label for="receiver-rotation-reason">Reason</label>
-            <select id="receiver-rotation-reason" name="rotationReason" required>
+            <label class="sr-only" for="receiver-rotation-reason">Reason</label>
+            <select id="receiver-rotation-reason" name="rotationReason" required hidden>
               <option value="initial_configuration">Initial configuration</option>
               <option value="account_rotation">Account rotation</option>
               <option value="provider_incident_recovery">Provider incident recovery</option>
@@ -375,15 +381,20 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </select>
             <label class="confirmation-row" for="receiver-confirmation">
               <input id="receiver-confirmation" name="confirmation" type="checkbox" required />
-              I checked the official receiver name and complete account number and approve creating
-              a new immutable active revision.
+              I checked the official receiver name and complete number. For a CBE Birr change,
+              I also confirmed the paired verifier uses the new receiving SIM and no longer
+              receives CBE Birr SMS for the previous receiver.
             </label>
-            <button id="receiver-submit-button" type="submit">Save new active receiver</button>
+            <button id="receiver-submit-button" type="submit">Save receiving details</button>
           </form>
+          <details>
+            <summary>View receiving-account history</summary>
+            <div class="request-list" id="receiver-list"></div>
+          </details>
           ${
             runtime.cbeBirrReceiverV2RotationEnabled
               ? `
-          <form id="cbe-upgrade-form" autocomplete="off">
+          <form id="cbe-upgrade-form" autocomplete="off" hidden>
             <h3>Protect the current CBE Birr receiver for receipt lookup</h3>
             <p class="receipt-label" id="cbe-upgrade-status" role="status" aria-live="polite">
               Refresh receiving-account history before preparing this upgrade.
@@ -1007,6 +1018,11 @@ const ownerViews = {
     description: 'Check received payments, search history, and inspect receiver-change cases.',
     sections: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
   },
+  methods: {
+    title: 'Payment methods',
+    description: 'Check each receiver and turn TeleBirr or CBE Birr on or off.',
+    sections: ['payment-methods-title', 'receiver-title'],
+  },
   players: {
     title: 'Players',
     description: 'Review Player IDs, ownership, and deposit eligibility.',
@@ -1014,8 +1030,8 @@ const ownerViews = {
   },
   system: {
     title: 'System',
-    description: 'Manage receiving accounts, TeleBirr policy, and customer support.',
-    sections: ['routine-processing-title', 'receiver-title', 'support-contact-title'],
+    description: 'Check TeleBirr policy and customer support.',
+    sections: ['routine-processing-title', 'support-contact-title'],
   },
   advanced: {
     title: 'Advanced tools',
@@ -1114,6 +1130,9 @@ const kemerbetReadinessCohortConfirmation = document.querySelector('#kemerbet-re
 const kemerbetReadinessCohortButton = document.querySelector('#kemerbet-readiness-cohort-button');
 const kemerbetReadinessCohortStatus = document.querySelector('#kemerbet-readiness-cohort-status');
 const receiverList = document.querySelector('#receiver-list');
+const paymentMethodsList = document.querySelector('#payment-methods-list');
+const paymentMethodsFeedback = document.querySelector('#payment-methods-feedback');
+const paymentMethodsRefresh = document.querySelector('#payment-methods-refresh');
 const receiverForm = document.querySelector('#receiver-form');
 const receiverFeedback = document.querySelector('#receiver-feedback');
 const receiverRefreshButton = document.querySelector('#receiver-refresh-button');
@@ -1243,6 +1262,8 @@ let supportContactLoading = false;
 let supportContactSaving = false;
 let supportContactDirty = false;
 let eligibleCbeUpgradeReceiver;
+let loadedReceiverHistory = [];
+let loadedReceiverHistoryReady = false;
 let pendingKemerbetReadinessCohortRequestId;
 let pendingKemerbetAgentProfileRequest;
 let currentPilot;
@@ -1952,6 +1973,8 @@ function clearReceivers() {
   receiverAccountReference.value = '';
   receiverConfirmation.checked = false;
   eligibleCbeUpgradeReceiver = undefined;
+  loadedReceiverHistory = [];
+  loadedReceiverHistoryReady = false;
   if (cbeUpgradeForm) {
     cbeUpgradePhone.value = '';
     cbeUpgradeConfirmation.checked = false;
@@ -1959,6 +1982,11 @@ function clearReceivers() {
     cbeUpgradeSubmit.disabled = true;
   }
   setReceiverFeedback('');
+}
+
+function clearPaymentMethods() {
+  paymentMethodsList.replaceChildren();
+  paymentMethodsFeedback.textContent = 'Sign in to load payment methods.';
 }
 
 function updateKemerbetAgentProfileStatus() {
@@ -3137,6 +3165,7 @@ function signOut(message = 'Signed out.') {
   clearPlayerEligibility();
   clearKemerbetReadinessCohort();
   clearReceivers();
+  clearPaymentMethods();
   clearSupportContact();
   clearKemerbetAgentProfiles();
   clearCompanionDevicePairingPackage();
@@ -3510,6 +3539,7 @@ function selectCbeUpgradeReceiver(receivers) {
     !receivers.some((receiver) =>
       receiver.providerCode === 'cbe_birr' && receiver.rotationReason === 'protection_upgrade')
     ? active[0] : undefined;
+  cbeUpgradeForm.hidden = !eligibleCbeUpgradeReceiver;
   cbeUpgradeStatus.textContent = eligibleCbeUpgradeReceiver
     ? 'Active CBE Birr revision ' + eligibleCbeUpgradeReceiver.revision + ' for ' +
       eligibleCbeUpgradeReceiver.accountHolderName + ' ending ' +
@@ -3545,6 +3575,152 @@ function renderReceivers(receivers) {
   }
 }
 
+const paymentMethodReadinessText = Object.freeze({
+  ready: 'Ready',
+  provider_unavailable: 'Provider unavailable',
+  receiver_missing: 'Add a receiver first',
+  receiver_not_protected: 'CBE receiver needs protected receipt lookup',
+  payments_paused: 'System payments are paused',
+  sms_route_paused: 'SMS checking is paused',
+  verification_paused: 'CBE verification is paused',
+  credit_worker_offline: 'Credit worker has not checked in',
+  phone_not_paired: 'TeleBirr phone needs pairing',
+  new_receiver_sms_not_seen: 'Waiting for a fresh signed CBE SMS',
+});
+
+function validPaymentMethod(value) {
+  if (!value || typeof value !== 'object' ||
+    !['telebirr','cbe_birr'].includes(value.providerCode) ||
+    typeof value.ownerEnabled !== 'boolean' ||
+    !Object.hasOwn(paymentMethodReadinessText, value.readiness) ||
+    (value.receiverName !== null && typeof value.receiverName !== 'string') ||
+    (value.receiverMasked !== null &&
+      (typeof value.receiverMasked !== 'string' || !/^\\*{3}[0-9]{4}$/.test(value.receiverMasked))) ||
+    !Number.isSafeInteger(value.pendingJobs) || value.pendingJobs < 0 ||
+    !Number.isSafeInteger(value.fencedAttempts) || value.fencedAttempts < 0 ||
+    typeof value.changedAt !== 'string' || !Number.isFinite(Date.parse(value.changedAt)))
+    return undefined;
+  return value;
+}
+
+function renderPaymentMethods(methods) {
+  paymentMethodsList.replaceChildren();
+  for (const method of methods) {
+    const card = document.createElement('article');
+    card.className = 'request-card payment-method-card';
+    const title = document.createElement('h3');
+    const label = method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
+    title.textContent = label;
+    const status = document.createElement('p');
+    status.className = method.ownerEnabled && method.readiness === 'ready'
+      ? 'status-ok' : 'request-meta';
+    status.textContent = method.ownerEnabled && method.readiness === 'ready'
+      ? 'On — accepting deposits'
+      : method.ownerEnabled
+        ? 'Unavailable — ' + paymentMethodReadinessText[method.readiness]
+        : 'Off — new deposits and automatic credits paused' +
+          (method.readiness === 'ready' ? '' : ' · ' + paymentMethodReadinessText[method.readiness]);
+    const receiver = document.createElement('p');
+    receiver.className = 'request-meta';
+    receiver.textContent = method.receiverName
+      ? method.receiverName + ' · ' + method.receiverMasked
+      : 'No receiver configured';
+    const pending = document.createElement('p');
+    pending.className = 'request-meta';
+    pending.textContent = method.pendingJobs + ' open credit jobs · ' +
+      method.fencedAttempts + ' final-step or unresolved credits';
+    const controls = document.createElement('div');
+    controls.className = 'request-actions';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.textContent = method.ownerEnabled ? 'Turn off' : 'Turn on';
+    toggle.disabled = !method.ownerEnabled && method.readiness !== 'ready';
+    toggle.addEventListener('click', () => void setPaymentMethod(method, !method.ownerEnabled));
+    const change = document.createElement('button');
+    change.type = 'button';
+    change.className = 'secondary';
+    change.textContent = 'Change receiver';
+    change.addEventListener('click', () => {
+      receiverForm.elements.providerCode.value = method.providerCode;
+      updateReceiverAccountReferenceFormat();
+      document.querySelector('#receiver-title').scrollIntoView?.({ behavior: 'smooth' });
+      receiverForm.elements.accountHolderName.focus();
+    });
+    controls.append(toggle, change);
+    card.append(title, status, receiver, pending, controls);
+    paymentMethodsList.append(card);
+  }
+}
+
+async function loadPaymentMethods() {
+  paymentMethodsRefresh.disabled = true;
+  try {
+    const response = await ownerRequest('/v1/owner/payment-methods', {
+      method: 'GET', headers: {},
+    });
+    if (!response.ok) throw new Error('payment_methods');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.methods) || payload.methods.length !== 2)
+      throw new Error('payment_methods');
+    const methods = payload.methods.map(validPaymentMethod);
+    if (methods.some((method) => !method) ||
+      new Set(methods.map((method) => method.providerCode)).size !== 2)
+      throw new Error('payment_methods');
+    renderPaymentMethods(methods);
+    paymentMethodsFeedback.textContent = 'Updated just now.';
+  } catch (error) {
+    paymentMethodsList.replaceChildren();
+    if (!isSignedOutError(error))
+      paymentMethodsFeedback.textContent = 'Payment method status is unavailable. Refresh before making a change.';
+  } finally {
+    paymentMethodsRefresh.disabled = false;
+  }
+}
+
+async function setPaymentMethod(method, enabled) {
+  const label = method.providerCode === 'cbe_birr' ? 'CBE Birr' : 'TeleBirr';
+  const message = enabled
+    ? 'Turn on ' + label + '? The current receiver and payment checks must pass.'
+    : 'Turn off ' + label + ' now? New deposits and automatic Player credits will stop. Already-finalized credit steps may still finish and need review.';
+  if (!window.confirm(message)) return;
+  const requestId = crypto.randomUUID();
+  paymentMethodsRefresh.disabled = true;
+  paymentMethodsFeedback.textContent = enabled ? 'Checking ' + label + '…' : 'Pausing ' + label + '…';
+  try {
+    const response = await ownerRequest('/v1/owner/payment-methods', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fetanagent-owner-csrf': 'owner-payment-methods-v1',
+        'x-idempotency-key': requestId,
+      },
+      body: JSON.stringify({
+        confirmation: 'owner_confirmed_payment_method_control',
+        enabled, providerCode: method.providerCode, requestId,
+      }),
+    });
+    if (!response.ok) throw new Error('payment_methods');
+    const payload = await response.json();
+    if (!payload || !Array.isArray(payload.methods) || payload.methods.length !== 2 ||
+      payload.methods.map(validPaymentMethod).some((entry) => !entry) ||
+      new Set(payload.methods.map((entry) => entry.providerCode)).size !== 2)
+      throw new Error('payment_methods');
+    renderPaymentMethods(payload.methods);
+    paymentMethodsFeedback.textContent = label + (enabled ? ' is on.' : ' is off. Existing SMS and review cases remain visible.');
+    await loadSystemOverview();
+  } catch (error) {
+    if (!isSignedOutError(error)) {
+      const failureMessage = enabled
+        ? label + ' could not be enabled. Check the readiness message and refresh.'
+        : 'The pause could not be confirmed. Refresh the status before trying again.';
+      await loadPaymentMethods();
+      paymentMethodsFeedback.textContent = failureMessage;
+    }
+  } finally {
+    paymentMethodsRefresh.disabled = false;
+  }
+}
+
 async function loadReceivers() {
   receiverRefreshButton.disabled = true;
   try {
@@ -3554,6 +3730,8 @@ async function loadReceivers() {
     if (!payload || !Array.isArray(payload.receivers) || payload.receivers.length > 100) throw new Error('receivers');
     const receivers = payload.receivers.map(validReceiver);
     if (receivers.some((receiver) => !receiver)) throw new Error('receivers');
+    loadedReceiverHistory = receivers;
+    loadedReceiverHistoryReady = true;
     renderReceivers(receivers);
     selectCbeUpgradeReceiver(receivers);
     const activeCount = receivers.filter((receiver) => receiver.receiverStatus === 'active').length;
@@ -3561,6 +3739,8 @@ async function loadReceivers() {
       (activeCount === 1 ? ' active receiving account.' : ' active receiving accounts.'));
   } catch (error) {
     receiverList.replaceChildren();
+    loadedReceiverHistory = [];
+    loadedReceiverHistoryReady = false;
     eligibleCbeUpgradeReceiver = undefined;
     if (cbeUpgradeForm) {
       cbeUpgradeStatus.textContent = 'Receiving-account history is unavailable. Refresh before upgrading.';
@@ -3586,6 +3766,9 @@ function receiverMutationHeaders(requestId) {
 
 function updateReceiverAccountReferenceFormat() {
   const cbeBirr = receiverForm.elements.providerCode.value === 'cbe_birr';
+  receiverForm.elements.rotationReason.value = loadedReceiverHistory.some((receiver) =>
+    receiver.providerCode === receiverForm.elements.providerCode.value &&
+    receiver.receiverStatus === 'active') ? 'account_rotation' : 'initial_configuration';
   receiverAccountReferenceLabel.textContent = cbeBirr
     ? 'CBE Birr receiving phone (251 + nine digits)'
     : 'TeleBirr receiving number (digits only)';
@@ -3598,10 +3781,16 @@ function updateReceiverAccountReferenceFormat() {
 
 async function rotateReceiver() {
   if (!requireOrdinaryKemerbetMutation()) return;
+  if (!loadedReceiverHistoryReady) {
+    setReceiverFeedback('Refresh receiving-account history before saving a change.');
+    return;
+  }
   const providerCode = receiverForm.elements.providerCode.value;
   const accountHolderName = receiverForm.elements.accountHolderName.value;
   const accountReference = receiverForm.elements.accountReference.value;
-  const rotationReason = receiverForm.elements.rotationReason.value;
+  const rotationReason = loadedReceiverHistory.some((receiver) =>
+    receiver.providerCode === providerCode && receiver.receiverStatus === 'active')
+    ? 'account_rotation' : 'initial_configuration';
   const validReference = providerCode === 'cbe_birr'
     ? /^251[0-9]{9}$/.test(accountReference)
     : providerCode === 'telebirr' && /^[0-9]{9,24}$/.test(accountReference);
@@ -3637,9 +3826,9 @@ async function rotateReceiver() {
     receiverConfirmation.checked = false;
     const message = receiver.providerDisplayName + ' receiver revision ' + receiver.revision +
       (receiver.receiverStatus === 'active' ? ' is active.' : ' was already applied and has since been superseded.') +
-      ' The full account number is not displayed. Payment switches were not changed.' +
-      (providerCode === 'cbe_birr' ? ' CBE Birr deposits remain disabled until separate activation.' : '');
+      ' The full account number is not displayed. Check the payment-method status for automatic resumption.';
     await loadReceivers();
+    await loadPaymentMethods();
     setReceiverFeedback(message);
     setNotice(message);
   } catch (error) {
@@ -3668,7 +3857,7 @@ async function upgradeCbeBirrReceiverProtection() {
   }
   if (!window.confirm('Create CBE Birr protection revision ' + (receiver.revision + 1) +
       ' for ' + receiver.accountHolderName + ' ending ' + phone.slice(-4) +
-      '? The previous revision will be retired. CBE Birr deposits remain disabled.')) return;
+      '? The previous revision will be retired. This action does not turn deposits on.')) return;
   const requestId = crypto.randomUUID();
   setBusy(cbeUpgradeForm, true);
   cbeUpgradeStatus.textContent = 'Protecting the same receiver and saving its new revision…';
@@ -3697,7 +3886,7 @@ async function upgradeCbeBirrReceiverProtection() {
     }
     await loadReceivers();
     const message = 'CBE Birr protection revision ' + saved.revision +
-      ' was saved for the same receiver. CBE Birr deposits remain disabled.';
+      ' was saved for the same receiver. Check payment-method status before accepting deposits.';
     cbeUpgradeStatus.textContent = message;
     setNotice(message);
   } catch (error) {
@@ -6921,6 +7110,7 @@ async function loadOwnerPlayerQueues() {
       loadAssociationCandidates(),
       loadPlayerEligibility(),
       loadReceivers(),
+      loadPaymentMethods(),
       loadDepositIntake(),
       loadReceiverChangeReviews(),
       loadTelebirrFastAlerts(),
@@ -7107,6 +7297,7 @@ kemerbetReadinessCohortForm.addEventListener('submit', async (event) => {
   await prepareKemerbetReadinessCohort();
 });
 receiverRefreshButton.addEventListener('click', loadReceivers);
+paymentMethodsRefresh.addEventListener('click', loadPaymentMethods);
 receiverForm.elements.providerCode.addEventListener('change', updateReceiverAccountReferenceFormat);
 updateReceiverAccountReferenceFormat();
 receiverForm.addEventListener('submit', async (event) => {

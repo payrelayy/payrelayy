@@ -153,7 +153,7 @@ const ROTATE_CBE_BIRR_V2_SQL = `
   select receiver_revision_id, revision, receiver_status, active_from, lookup_protected
     from app.rotate_owner_cbe_birr_receiver_lookup_v2(
       $1::uuid, $2::uuid, $3::uuid, $4::integer, $5::text, $6::text,
-      $7::text, $8::text, $9::text, $10::text, $11::text, 'protection_upgrade'
+      $7::text, $8::text, $9::text, $10::text, $11::text, $12::text
     )
 `;
 
@@ -355,6 +355,61 @@ export class PostgresOwnerReceiverAccounts {
   ): Promise<OwnerReceiverAccount> {
     validateRotation(authUserId, request);
     try {
+      if (request.providerCode === 'cbe_birr') {
+        if (!this.cbeBirrLookupSecrets) throw new OwnerReceiverAccountUnavailableError();
+        const history = await this.list(authUserId);
+        const cbeHistory = history.filter((receiver) => receiver.providerCode === 'cbe_birr');
+        const priorRequest = cbeHistory.find(
+          (receiver) => receiver.receiverRevisionId === request.requestId,
+        );
+        const expectedVersion =
+          priorRequest?.revision ??
+          Math.max(0, ...cbeHistory.map((receiver) => receiver.revision)) + 1;
+        if (!Number.isSafeInteger(expectedVersion) || expectedVersion > 2_147_483_647)
+          throw new OwnerReceiverAccountUnavailableError();
+        const prepared = prepareCbeBirrReceiverRotation({
+          receiverRevisionId: request.requestId,
+          receiverVersion: expectedVersion,
+          receiverPhone: request.accountReference,
+          referenceSecrets: this.secrets,
+          lookupSecrets: this.cbeBirrLookupSecrets,
+        });
+        const result = await this.database.query(ROTATE_CBE_BIRR_V2_SQL, [
+          authUserId,
+          request.requestId,
+          request.requestId,
+          expectedVersion,
+          request.accountHolderName,
+          prepared.reference.ciphertext,
+          prepared.reference.fingerprint,
+          prepared.reference.masked,
+          prepared.lookup.ciphertext,
+          prepared.lookup.fingerprint,
+          prepared.lookup.masked,
+          request.rotationReason,
+        ]);
+        const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
+        if (
+          !row ||
+          row.receiver_revision_id !== request.requestId ||
+          row.revision !== expectedVersion ||
+          row.lookup_protected !== true
+        )
+          throw new OwnerReceiverAccountUnavailableError();
+        const receiver = (await this.list(authUserId)).find(
+          (entry) => entry.receiverRevisionId === request.requestId,
+        );
+        if (
+          !receiver ||
+          receiver.providerCode !== 'cbe_birr' ||
+          receiver.accountHolderName !== request.accountHolderName ||
+          receiver.accountReferenceMasked !== prepared.reference.masked ||
+          receiver.rotationReason !== request.rotationReason ||
+          !receiver.protectedReference
+        )
+          throw new OwnerReceiverAccountUnavailableError();
+        return Object.freeze(receiver);
+      }
       const protectedReference = protectReceiverAccountReference({
         provider: request.providerCode,
         reference: request.accountReference,
@@ -432,6 +487,7 @@ export class PostgresOwnerReceiverAccounts {
         prepared.lookup.ciphertext,
         prepared.lookup.fingerprint,
         prepared.lookup.masked,
+        'protection_upgrade',
       ]);
       const row = result.rows.length === 1 ? rowObject(result.rows[0]) : undefined;
       if (

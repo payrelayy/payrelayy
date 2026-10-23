@@ -9,6 +9,7 @@ import { PostgresOwnerDryRunFixtureAssessments } from './owner-dry-run-fixture-a
 import { PostgresOwnerPlayerRegistrationReviews } from './owner-player-registration-reviews.js';
 import { PostgresOwnerPrivateLivePilotControl } from './owner-private-live-pilot.js';
 import { PostgresOwnerReceiverAccounts } from './owner-receiver-accounts.js';
+import { PostgresOwnerPaymentMethods } from './owner-payment-methods.js';
 import { PostgresOwnerCompanionDevicePairing } from './owner-companion-device-pairing.js';
 import { PostgresOwnerCompanionConnection } from './owner-companion-connection.js';
 import { PostgresOwnerCompanionExecutionReadiness } from './owner-companion-execution-readiness.js';
@@ -73,6 +74,7 @@ export interface OwnerControlPostgresRuntime {
         'readCbeBirrProvisioningSnapshot' | 'upgradeCbeBirrProtection'
       >
     >;
+  readonly paymentMethods?: Pick<PostgresOwnerPaymentMethods, 'list' | 'set' | 'publicStatus'>;
   readonly telebirrDevicePairing: Pick<PostgresOwnerTelebirrDevicePairing, 'issue'> | undefined;
   readonly routineTelebirrPairing?:
     | (Pick<PostgresOwnerRoutineTelebirrPairing, 'issue' | 'enroll'> &
@@ -300,6 +302,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.issue_private_telebirr_device_pairing(uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz)', 'execute') as internal_telebirr_device_pairing_issue_denied,
     has_function_privilege(current_user, 'app.list_owner_receiver_accounts(uuid)', 'execute') as receiver_list_allowed,
     has_function_privilege(current_user, 'app.rotate_owner_receiver_account(uuid,uuid,text,text,text,text,text,smallint,smallint,smallint,text)', 'execute') as receiver_rotate_allowed,
+    has_function_privilege(current_user, 'app.list_owner_provider_deposit_controls(uuid)', 'execute') as provider_controls_list_allowed,
+    has_function_privilege(current_user, 'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)', 'execute') as provider_controls_set_allowed,
+    has_function_privilege(current_user, 'app.public_provider_deposit_controls()', 'execute') as provider_controls_public_allowed,
     coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false) as cbe_birr_receiver_v2_rotate_allowed,
     -- The metadata function may arrive before this app, and its Owner grant may arrive later.
     -- Either state is safe only while the function stays private and hardened.
@@ -348,7 +353,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     not has_function_privilege(current_user, 'app.redeem_telegram_beta_invite(bigint,bigint,bigint,text,text,text)', 'execute') as redemption_denied,
     not has_function_privilege(current_user, 'app.record_admitted_telegram_private_inbound_event(bigint,bigint,bigint,text,text)', 'execute') as recorder_denied,
     (
-      select count(*) = 33
+      select count(*) = 36
         + has_function_privilege(current_user, 'app.issue_telegram_beta_invite(uuid,text,timestamptz)', 'execute')::integer
         + has_function_privilege(current_user, 'app.revoke_telegram_beta_invite(uuid,uuid,text)', 'execute')::integer
         + coalesce(has_function_privilege(current_user, to_regprocedure('app.rotate_owner_cbe_birr_receiver_lookup_v2(uuid,uuid,uuid,integer,text,text,text,text,text,text,text,text)')::oid, 'execute'), false)::integer
@@ -469,6 +474,9 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,'app.prepare_owner_kemerbet_readiness_cohort_claim(uuid,uuid)'::regprocedure
           ,'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)'::regprocedure
           ,'app.record_owner_kemerbet_readiness_cohort_root_receipt(uuid,uuid,text,text)'::regprocedure
+          ,'app.list_owner_provider_deposit_controls(uuid)'::regprocedure
+          ,'app.set_owner_provider_deposit_control(uuid,uuid,text,boolean)'::regprocedure
+          ,'app.public_provider_deposit_controls()'::regprocedure
         )
     ) as all_other_app_functions_denied
 `;
@@ -622,6 +630,9 @@ export async function createOwnerControlPostgresRuntime(
           }
         : undefined,
     ),
+    paymentMethods: new PostgresOwnerPaymentMethods({
+      query: async (sql, values) => pool.query(sql, [...values]),
+    }),
     telebirrDevicePairing: config.devicePairing.configured
       ? new PostgresOwnerTelebirrDevicePairing(
           { query: async (sql, values) => pool.query(sql, [...values]) },

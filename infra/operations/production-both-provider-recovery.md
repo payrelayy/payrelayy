@@ -35,8 +35,16 @@ uncertain Transfer or an unresolved attempt, stop here.
 3. Use the paired TeleBirr phone to produce a fresh signed V2 no-money receipt
    observation with `official_tls_origin`. Verify server policy accepted it and
    that the phone enrollment, signer, and all four broker/phone/settlement
-   logins remain valid for more than one hour. Do not submit a new paid
-   reference to manufacture this proof.
+   logins remain valid for more than one hour. In the CBE-live stopped profile,
+   the reviewed no-money phone path may recheck a retained TeleBirr candidate
+   that already had an accepted V2 official-origin observation more than 24
+   hours ago. This refresh does not create a payment claim or Player credit;
+   it stops issuing assignments once that enrolled phone has a fresh accepted
+   proof. Start the enrolled phone's existing verification service only while
+   the shared gates are disabled, then check the protected server observation
+   status. If no retained candidate is eligible or the provider result goes to
+   review, stop and investigate. Do not submit a new paid reference to
+   manufacture this proof.
 4. The current routine Owner policy event carries an `execution_uncertain`
    pause for the cancelled 33 ETB attempt. After the Owner has reviewed the
    manual credit and all open execution cases, use the existing authenticated

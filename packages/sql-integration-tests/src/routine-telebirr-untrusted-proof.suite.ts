@@ -1606,6 +1606,183 @@ export function registerRoutineTelebirrUntrustedProofSqlTests(
       });
     });
 
+    it('accepts no-money phone evidence with CBE configured live only while shared deposits are stopped', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+             where feature_key = 'cbe_birr_authoritative_verification'`,
+        );
+        const stopped = await snapshot(client);
+        const expiresAt = new Date(Date.now() + 40_000).toISOString();
+        const input = [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+          trust.signerId,
+        ];
+        const issued = await client.query<{ challenge_id: string; candidate_id: string }>(
+          ISSUE_NO_MONEY_POLL,
+          input,
+        );
+        expect(issued.rows).toHaveLength(1);
+        expect(issued.rows[0]!.candidate_id).toBe(candidateId);
+        const challengeId = issued.rows[0]!.challenge_id;
+        const material = await client.query(
+          'select * from app.load_routine_telebirr_no_money_observation_material($1::uuid)',
+          [challengeId],
+        );
+        expect(material.rows).toHaveLength(1);
+        const stage = `select app.stage_routine_telebirr_no_money_observation_digest(
+          $1::uuid, $2::text, $3::text, $4::text, $5::text) as status`;
+        const digests = [
+          challengeId,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+          `sha256:${digest()}`,
+        ];
+        expect((await client.query(stage, digests)).rows).toEqual([{ status: 'recorded' }]);
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+             where feature_key = 'withdrawal_validation'`,
+        );
+        await rejected(client, ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+          trust.signerId,
+        ]);
+        await rejected(client, stage, digests);
+        await client.query(
+          `update app.feature_switches set mode = 'disabled'
+             where feature_key = 'withdrawal_validation'`,
+        );
+        expect(await snapshot(client)).toBe(stopped);
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+             where feature_key in ('payment_verification', 'deposit_execution')`,
+        );
+        const livePoll = await client.query(ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          expiresAt,
+          trust.signerId,
+        ]);
+        expect(livePoll.rows).toEqual([]);
+      });
+    });
+
+    it('rechecks a previously accepted no-money receipt after its 24-hour proof expires', async () => {
+      const client = getClient();
+      await rollback(client, async () => {
+        const actor = await fixtureTelegramActor(client, getOwnerAdminId());
+        const playerId = await fixtureEligiblePlayer(client);
+        await fixtureTelebirrReceiver(client);
+        const captured = await client.query<CaptureRow>(CAPTURE, [
+          ...captureArguments(await fixtureInboundEvent(client, actor.identityId), playerId),
+        ]);
+        const candidateId = captured.rows[0]!.proof_request_id;
+        const trust = await fixtureRoutineLookupTrust(client, candidateId);
+        const oldChallengeId = randomUUID();
+        const oldBodyDigest = `sha256:${digest()}`;
+        const oldReplay = `sha256:${digest()}`;
+        // Build a protected historical ledger fixture directly. The one-microsecond
+        // challenge is expired before the poll, and no provider lookup is performed.
+        await client.query(
+          `insert into app.routine_telebirr_lookup_challenges (
+             challenge_id, candidate_id, receiver_account_id,
+             receiver_account_version, candidate_reference_fingerprint,
+             candidate_submitted_at, device_id, device_key_id,
+             device_public_key_spki_sha256, device_enrollment_id,
+             assignment_signer_id, receiver_profile_digest,
+             expected_receiver_name_digest, challenge_digest,
+             issued_at, expires_at, issuance_mode
+           ) select $4::uuid, candidate.id, candidate.receiver_account_id,
+                    candidate.receiver_account_version,
+                    candidate.candidate_reference_fingerprint,
+                    candidate.submitted_at, enrollment.device_id,
+                    enrollment.device_key_id,
+                    enrollment.device_public_key_spki_sha256,
+                    enrollment.id, signer.id,
+                    enrollment.receiver_profile_digest,
+                    enrollment.expected_receiver_name_digest,
+                    $5::text, statement_timestamp(),
+                    statement_timestamp() + interval '1 microsecond',
+                    'no_money'
+               from app.routine_telebirr_untrusted_proof_requests candidate
+               join app.routine_telebirr_device_enrollments enrollment
+                 on enrollment.id = $2::uuid
+               join app.routine_telebirr_lookup_signers signer
+                 on signer.id = $3::uuid
+              where candidate.id = $1::uuid`,
+          [candidateId, trust.enrollmentId, trust.signerId, oldChallengeId, `sha256:${digest()}`],
+        );
+        await client.query(
+          `insert into app.routine_telebirr_observation_receipts (
+             challenge_id, assignment_body_digest, observation_body_digest,
+             observation_signature_digest, replay_identity, received_at
+           ) values ($1::uuid, $2::text, $3::text, $4::text, $5::text,
+             clock_timestamp() - interval '25 hours')`,
+          [oldChallengeId, `sha256:${digest()}`, oldBodyDigest, `sha256:${digest()}`, oldReplay],
+        );
+        await client.query(
+          `insert into app.routine_telebirr_signed_observation_payloads (
+             challenge_id, observation_body_digest, replay_identity,
+             signed_observation, server_policy_result, recorded_at
+           ) values ($1::uuid, $2::text, $3::text,
+             jsonb_build_object(
+               'contractVersion', '2', 'bodyDigest', $2::text,
+               'signature', 'fixture',
+               'body', jsonb_build_object(
+                 'challengeId', $1::text,
+                 'facts', jsonb_build_object(
+                   'sourceOriginAttestation', 'official_tls_origin'))),
+             'signed_evidence_matches_policy',
+             clock_timestamp() - interval '25 hours')`,
+          [oldChallengeId, oldBodyDigest, oldReplay],
+        );
+        await client.query(
+          `update app.feature_switches set mode = 'live'
+             where feature_key = 'cbe_birr_authoritative_verification'`,
+        );
+        const before = await snapshot(client);
+        const first = await client.query<{ challenge_id: string; candidate_id: string }>(
+          ISSUE_NO_MONEY_POLL,
+          [
+            trust.enrollmentId,
+            randomUUID(),
+            `sha256:${digest()}`,
+            new Date(Date.now() + 40_000).toISOString(),
+            trust.signerId,
+          ],
+        );
+        expect(first.rows).toHaveLength(1);
+        expect(first.rows[0]!.candidate_id).toBe(candidateId);
+        expect(first.rows[0]!.challenge_id).not.toBe(oldChallengeId);
+        const second = await client.query(ISSUE_NO_MONEY_POLL, [
+          trust.enrollmentId,
+          randomUUID(),
+          `sha256:${digest()}`,
+          new Date(Date.now() + 40_000).toISOString(),
+          trust.signerId,
+        ]);
+        expect(second.rows).toEqual([]);
+        expect(await snapshot(client)).toBe(before);
+      });
+    });
+
     it('removes expired no-money poll identifiers through the existing retention job', async () => {
       const client = getClient();
       await rollback(client, async () => {

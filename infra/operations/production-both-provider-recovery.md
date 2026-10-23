@@ -10,11 +10,12 @@ The 33 ETB CBE payment has one retained payment claim, a cancelled job, and an
 attempt cancelled before Transfer. The Owner reported manually crediting it
 once. Never resubmit, replay, automatically credit, or refund that claim as a
 recovery test. Before changing Owner policy, check KemerBet history for exactly
-one manual credit to the originally selected Player and record the disposition
-through the protected Owner review process. Inspect the other open execution
-reviews as well; a cancelled job prevents an automatic retry but does not settle
-the customer obligation. If any review reveals an uncertain Transfer or an
-unresolved attempt, stop here.
+one manual credit to the originally selected Player and retain the finding in
+the protected operator incident record. Keep the database Owner review open
+until a separately reviewed one-use disposition is available. Inspect the
+other open execution reviews as well; a cancelled job prevents an automatic
+retry but does not settle the customer obligation. If any review reveals an
+uncertain Transfer or an unresolved attempt, stop here.
 
 1. Review and merge the exact recovery release, wait for required `main` push
    CI, and confirm the deployed server and installed Windows release still

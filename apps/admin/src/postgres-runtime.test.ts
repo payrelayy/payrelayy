@@ -64,6 +64,22 @@ describe('Owner-control bounded PostgreSQL pool', () => {
     expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as obsolete_auto_approval_denied');
   });
 
+  it('includes the filtered Owner SMS projection in the exact grant boundary', () => {
+    const signature =
+      'app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)';
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(`to_regprocedure('${signature}')::oid,`);
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      `coalesce(to_regprocedure('${signature}')::oid, 0::oid)`,
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain('as receiver_sms_inbox_filtered_list_allowed');
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "to_regprocedure('app.get_owner_system_overview(uuid)')::oid,",
+    );
+    expect(OWNER_CONTROL_PREFLIGHT_SQL).toContain(
+      "coalesce(to_regprocedure('app.get_owner_system_overview(uuid)')::oid, 0::oid)",
+    );
+  });
+
   it('allows only three optional policy procedures, never routine admission or execution', () => {
     for (const signature of [
       'app.get_owner_routine_telebirr_processing(uuid)',

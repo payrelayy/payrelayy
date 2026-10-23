@@ -43,7 +43,9 @@ export interface OwnerControlPostgresRuntime {
   readonly telebirrOldPayments?: Pick<PostgresOwnerTelebirrOldPayments, 'list'> | undefined;
   readonly receiverSmsOldPayments?: Pick<PostgresOwnerReceiverSmsOldPayments, 'list'> | undefined;
   readonly manualPayments?:
-    Pick<PostgresOwnerManualPayments, 'listCases' | 'listSms' | 'decide' | 'complete'> | undefined;
+    | (Pick<PostgresOwnerManualPayments, 'listCases' | 'listSms' | 'decide' | 'complete'> &
+        Partial<Pick<PostgresOwnerManualPayments, 'systemOverview'>>)
+    | undefined;
   readonly telebirrTransactions?: Pick<PostgresOwnerTelebirrTransactions, 'list'> | undefined;
   readonly supportContact?:
     Pick<PostgresOwnerSupportContact, 'get' | 'set' | 'publicContact'> | undefined;
@@ -252,6 +254,12 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)')::oid,
       'execute'), true) as receiver_sms_inbox_list_allowed,
     coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)')::oid,
+      'execute'), true) as receiver_sms_inbox_filtered_list_allowed,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.get_owner_system_overview(uuid)')::oid,
+      'execute'), true) as system_overview_read_allowed,
+    coalesce(has_function_privilege(current_user,
       to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid,
       'execute'), true) as manual_payment_decide_allowed,
     coalesce(has_function_privilege(current_user,
@@ -363,6 +371,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
             'execute'), false)::integer
         + (to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)') is not null)::integer
         + (to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.get_owner_system_overview(uuid)') is not null)::integer
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
@@ -431,6 +441,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_manual_payment_cases(uuid,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_receiver_sms_inbox(uuid,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_receiver_sms_inbox_filtered(uuid,text,text,text,date,date,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.get_owner_system_overview(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)

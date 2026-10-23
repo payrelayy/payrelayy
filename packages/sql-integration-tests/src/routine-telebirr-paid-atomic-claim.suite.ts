@@ -984,6 +984,47 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
             [sourceId, paidEvent, submittedAt],
           )
         ).rows[0]!.id;
+        await client.query('savepoint settled_history_projection');
+        await client.query(
+          `insert into app.routine_telebirr_fast_results
+            (candidate_id, outcome_code, reason_code)
+           values ($1::uuid, 'held_review', 'network_unavailable')`,
+          [paidId],
+        );
+        await client.query(
+          `insert into app.telegram_deposit_outcome_deliveries
+            (candidate_id, notification_stage, private_chat_id, reference_masked, outcome_code)
+           select id, 'final', 123456789, candidate_reference_masked, 'not_verified'
+             from app.routine_telebirr_untrusted_proof_requests where id = $1::uuid`,
+          [paidId],
+        );
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        try {
+          const settled = await client.query<{
+            snapshot: {
+              rows: Array<{
+                candidateId: string;
+                statusGroup: string;
+                statusDetail: string;
+              }>;
+            };
+          }>(
+            `select app.list_owner_routine_telebirr_transactions(
+              $1::uuid,'rejected',null,null,null,50,0) as snapshot`,
+            [getOwnerAuthUserId()],
+          );
+          expect(settled.rows[0]!.snapshot.rows).toContainEqual(
+            expect.objectContaining({
+              candidateId: paidId,
+              statusGroup: 'rejected',
+              statusDetail: 'rejected',
+            }),
+          );
+        } finally {
+          await client.query('reset session authorization');
+        }
+        await client.query('rollback to savepoint settled_history_projection');
+        await client.query('release savepoint settled_history_projection');
         const trust = await fixtureRoutineLookupTrust(client, paidId);
         await client.query(`update app.feature_switches set mode='live'
           where feature_key in ('payment_verification','deposit_execution')`);

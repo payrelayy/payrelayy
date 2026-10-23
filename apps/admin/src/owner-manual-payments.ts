@@ -46,6 +46,18 @@ export interface OwnerReceiverSmsInboxItem {
   readonly canMarkManuallyCredited: boolean;
 }
 
+export interface OwnerSystemOverview {
+  readonly paymentVerificationMode: 'disabled' | 'dry_run' | 'live' | null;
+  readonly depositExecutionMode: 'disabled' | 'dry_run' | 'live' | null;
+  readonly telebirrReceiptLookupMode: 'disabled' | 'dry_run' | 'live' | null;
+  readonly telebirrSmsLastReceivedAt: string | null;
+  readonly cbeSmsLastReceivedAt: string | null;
+  readonly openDepositJobs: number;
+  readonly deadDepositJobs: number;
+  readonly awaitingManualCredits: number;
+  readonly checkedAt: string;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MASKED_REFERENCE = /^\*{3}[A-Z0-9]{4}$/u;
 const MASKED_PLAYER = /^\*{3}[^\s\u0000-\u001f\u007f]{1,4}$/u;
@@ -63,6 +75,13 @@ const SMS_STATUSES = new Set([
   'manually_credited',
   'rejected',
 ]);
+
+function isoDate(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 function object(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
@@ -108,6 +127,25 @@ function provider(value: unknown): 'telebirr' | 'cbe_birr' {
   return value;
 }
 
+function mode(value: unknown): OwnerSystemOverview['paymentVerificationMode'] {
+  if (value === null || value === 'disabled' || value === 'dry_run' || value === 'live')
+    return value;
+  throw new OwnerManualPaymentUnavailableError();
+}
+
+function overviewTime(value: unknown, optional = false): string | null {
+  if (optional && value === null) return null;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))
+    throw new OwnerManualPaymentUnavailableError();
+  return value;
+}
+
+function overviewCount(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0)
+    throw new OwnerManualPaymentUnavailableError();
+  return value as number;
+}
+
 function errorCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String(error.code)
@@ -125,6 +163,31 @@ function translate(error: unknown): never {
 /** Every query is an Owner-only, security-definer projection; no raw SMS or reference. */
 export class PostgresOwnerManualPayments {
   constructor(private readonly database: OwnerManualPaymentDatabase) {}
+
+  async systemOverview(actor: string): Promise<OwnerSystemOverview> {
+    if (!UUID.test(actor)) throw new OwnerManualPaymentRejectedError();
+    try {
+      const result = await this.database.query(
+        'select app.get_owner_system_overview($1::uuid) as overview',
+        [actor],
+      );
+      if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();
+      const value = object(object(result.rows[0]).overview);
+      return {
+        paymentVerificationMode: mode(value.paymentVerificationMode),
+        depositExecutionMode: mode(value.depositExecutionMode),
+        telebirrReceiptLookupMode: mode(value.telebirrReceiptLookupMode),
+        telebirrSmsLastReceivedAt: overviewTime(value.telebirrSmsLastReceivedAt, true),
+        cbeSmsLastReceivedAt: overviewTime(value.cbeSmsLastReceivedAt, true),
+        openDepositJobs: overviewCount(value.openDepositJobs),
+        deadDepositJobs: overviewCount(value.deadDepositJobs),
+        awaitingManualCredits: overviewCount(value.awaitingManualCredits),
+        checkedAt: overviewTime(value.checkedAt)!,
+      };
+    } catch (error) {
+      translate(error);
+    }
+  }
 
   async listCases(
     actor: string,
@@ -193,9 +256,20 @@ export class PostgresOwnerManualPayments {
     actor: string,
     limit = 25,
     offset = 0,
+    providerFilter = 'all',
+    statusFilter = 'all',
+    referenceLast4?: string,
+    receivedFrom?: string,
+    receivedTo?: string,
   ): Promise<readonly OwnerReceiverSmsInboxItem[]> {
     if (
       !UUID.test(actor) ||
+      !['all', 'telebirr', 'cbe_birr'].includes(providerFilter) ||
+      (statusFilter !== 'all' && !SMS_STATUSES.has(statusFilter)) ||
+      (referenceLast4 !== undefined && !/^[A-Z0-9]{4}$/u.test(referenceLast4)) ||
+      !isoDate(receivedFrom) ||
+      !isoDate(receivedTo) ||
+      (receivedFrom !== undefined && receivedTo !== undefined && receivedFrom > receivedTo) ||
       !Number.isSafeInteger(limit) ||
       limit < 1 ||
       limit > 50 ||
@@ -210,8 +284,18 @@ export class PostgresOwnerManualPayments {
                 amount_minor::text as amount_minor, receiver_account_masked,
                 receiver_holder_name, reference_masked, candidate_id,
                 player_masked, payment_status, case_id, can_mark_manually_credited
-           from app.list_owner_receiver_sms_inbox($1::uuid,$2::integer,$3::integer)`,
-        [actor, limit, offset],
+           from app.list_owner_receiver_sms_inbox_filtered(
+             $1::uuid,$2::text,$3::text,$4::text,$5::date,$6::date,$7::integer,$8::integer)`,
+        [
+          actor,
+          providerFilter,
+          statusFilter,
+          referenceLast4 ?? null,
+          receivedFrom ?? null,
+          receivedTo ?? null,
+          limit,
+          offset,
+        ],
       );
       if (result.rows.length > limit) throw new OwnerManualPaymentUnavailableError();
       return result.rows.map((raw) => {

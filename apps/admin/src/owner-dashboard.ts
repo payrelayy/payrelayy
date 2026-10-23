@@ -92,6 +92,19 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <h3 id="owner-view-title" tabindex="-1">Needs your attention</h3>
               <p id="owner-view-description">Review payments and finish any manual credits.</p>
             </div>
+        <section class="review-section" aria-labelledby="system-overview-title">
+          <div class="panel-heading">
+            <div>
+              <p class="status-ok">Live snapshot</p>
+              <h2 id="system-overview-title">System status</h2>
+            </div>
+            <button class="secondary" id="system-overview-refresh" type="button">Refresh</button>
+          </div>
+          <p class="receipt-label">See payment switches, recorded SMS activity, and deposit-job counts. A recent SMS does not confirm phone connectivity or Windows Companion readiness.</p>
+          <dl class="overview-grid" id="system-overview-facts"></dl>
+          <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
+          <button class="secondary" id="system-overview-open-system" type="button">Open system controls</button>
+        </section>
         <section class="review-section transactions-section" aria-labelledby="transactions-title">
           <div class="panel-heading">
             <div>
@@ -154,7 +167,50 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-inbox-title">Received payment SMS</h2>
             <button class="secondary" id="receiver-sms-inbox-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See TeleBirr and CBE Birr payments received by the phone, including those without a customer submission. Complete any linked Player credit before marking a payment manually credited. Some unmatched SMS entries have no visible reference ending.</p>
+          <p class="receipt-label">See TeleBirr and CBE Birr payments received by the phone, including those without a customer submission. Complete any linked Player credit before marking a payment manually credited.</p>
+          <form id="receiver-sms-inbox-filters" class="transactions-filters" autocomplete="off">
+            <div>
+              <label for="receiver-sms-inbox-provider-filter">Provider</label>
+              <select id="receiver-sms-inbox-provider-filter">
+                <option value="all">Both providers</option>
+                <option value="telebirr">TeleBirr</option>
+                <option value="cbe_birr">CBE Birr</option>
+              </select>
+            </div>
+            <div>
+              <label for="receiver-sms-inbox-status-filter">Status</label>
+              <select id="receiver-sms-inbox-status-filter">
+                <option value="all">All statuses</option>
+                <option value="unmatched">No customer submission</option>
+                <option value="submission_waiting">Waiting for payment match</option>
+                <option value="pending_review">Pending review</option>
+                <option value="awaiting_manual_credit">Awaiting manual credit</option>
+                <option value="auto_processing">Automatic credit processing</option>
+                <option value="auto_credited">Automatically credited</option>
+                <option value="manually_credited">Manually credited</option>
+                <option value="auto_not_credited">Automatic credit stopped</option>
+                <option value="auto_used">Reference already used</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+            <div>
+              <label for="receiver-sms-inbox-last4">Reference last 4 (linked only)</label>
+              <input id="receiver-sms-inbox-last4" type="text" maxlength="4" pattern="[A-Za-z0-9]{4}" placeholder="AB12" spellcheck="false" autocapitalize="characters" />
+            </div>
+            <div>
+              <label for="receiver-sms-inbox-from">Received from</label>
+              <input id="receiver-sms-inbox-from" type="date" />
+            </div>
+            <div>
+              <label for="receiver-sms-inbox-to">Received through</label>
+              <input id="receiver-sms-inbox-to" type="date" />
+            </div>
+            <div class="transactions-filter-actions">
+              <button type="submit">Find payments</button>
+              <button class="secondary" id="receiver-sms-inbox-clear" type="button">Clear</button>
+            </div>
+          </form>
+          <p class="receipt-label">Times use Ethiopia time. Reference search applies only after a customer submission provides a visible ending.</p>
           <p class="request-meta" id="receiver-sms-inbox-status" role="status" aria-live="polite">Sign in to load received payments.</p>
           <div class="request-list" id="receiver-sms-inbox-list"></div>
           <button class="secondary transactions-more" id="receiver-sms-inbox-more" type="button" hidden>Show older SMS</button>
@@ -392,7 +448,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
           <div class="kemerbet-session" aria-labelledby="kemerbet-companion-title">
             <p class="status-ok">Local identity validation</p>
-            <h2 id="kemerbet-companion-title">KemerBet Windows companion</h2>
+            <h2 id="kemerbet-companion-title">KemerBet no-money Companion setup</h2>
             <p class="receipt-label">
               Use a separate Chrome window on this computer for KemerBet sign-in. This
               moves sign-in off the datacenter and remote preview. Complete any CAPTCHA normally
@@ -575,8 +631,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <button id="routine-processing-save" type="button" disabled>Save persistent routine policy</button>
             <button class="danger" id="routine-processing-stop" type="button" disabled>Stop routine policy</button>
           </div>
-          <div class="device-pairing" aria-labelledby="routine-phone-pairing-title">
-            <h3 id="routine-phone-pairing-title">Routine TeleBirr phone proof — no money</h3>
+          <details class="device-pairing" aria-labelledby="routine-phone-pairing-title">
+            <summary id="routine-phone-pairing-title">Phone setup and recovery</summary>
             <p class="receipt-label">This is separate from the five-Player pilot. Create a twelve-hour
               challenge, paste it directly into the dedicated Android app, then paste its signed
               proof back to this same Owner tab promptly. Sign in before creating the challenge;
@@ -641,7 +697,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               <button id="routine-revoke-button" type="button" disabled>Revoke this routine phone</button>
               <p class="request-meta" id="routine-revoke-status" role="status"></p>
             </div>
-          </div>
+          </details>
         </section>
 
         <section class="review-section" aria-labelledby="execution-approvals-title">
@@ -829,6 +885,7 @@ h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
 .owner-view-intro h3 { margin: 0 0 5px; font-size: clamp(1.55rem, 3vw, 2rem); letter-spacing: -.035em; }
 .owner-view-intro p:last-child { margin: 0; color: #51656d; }
 .owner-view-intro { order: -1; }
+section[aria-labelledby="system-overview-title"] { order: 2; }
 section[aria-labelledby="receiver-sms-old-title"],
 section[aria-labelledby="receiver-sms-inbox-title"],
 section[aria-labelledby="execution-readiness-title"] { order: 1; }
@@ -857,6 +914,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .request-list { display: grid; gap: 14px; margin-top: 16px; }
 .request-card { border: 1px solid #dbe5e8; border-radius: 12px; background: #fbfdfd; padding: 16px; }
 .request-card h3 { margin: 0 0 6px; font-size: 1rem; overflow-wrap: anywhere; }
+.overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.overview-grid > div { min-width: 0; border: 1px solid #dbe5e8; border-radius: 10px; background: #fbfdfd; padding: 12px; }
+.overview-grid dt { color: #60757e; font-size: .76rem; line-height: 1.35; }
+.overview-grid dd { margin: 6px 0 0; color: #173039; font-weight: 800; overflow-wrap: anywhere; }
 .waiting-badge { display: inline-block; margin-left: 8px; border-radius: 99px; background: #fcd34d; color: #211b0e; padding: 3px 9px; font-size: .72rem; vertical-align: middle; letter-spacing: 0; }
 .transactions-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
 .transactions-filters > div { display: grid; gap: 6px; }
@@ -892,6 +953,8 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .pilot-status dd { margin: 0; overflow-wrap: anywhere; }
 .device-pairing { margin-top: 24px; border: 1px solid #b8ded6; border-radius: 12px; background: #f0f9f6; padding: 16px; }
 .device-pairing h3 { margin-top: 0; }
+.device-pairing summary { cursor: pointer; color: #173039; font-weight: 800; }
+.device-pairing[open] summary { margin-bottom: 12px; }
 .pairing-receipt { margin-top: 18px; }
 .pairing-package { display: block; max-height: 180px; overflow: auto; border: 1px solid #c8d6db; border-radius: 10px; background: #fff; padding: 12px; color: #29444b; overflow-wrap: anywhere; user-select: all; }
 .kemerbet-session { margin-top: 24px; border: 1px solid #b8ded6; border-radius: 12px; background: #f0f9f6; padding: 16px; }
@@ -908,6 +971,7 @@ footer { margin-top: 30px; font-size: 0.85rem; }
 [hidden] { display: none !important; }
 @media (max-width: 900px) {
   .owner-workspace { grid-template-columns: minmax(0, 1fr); }
+  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .owner-navigation { position: sticky; top: 0; z-index: 2; display: flex; min-width: 0; max-width: 100%; overflow-x: auto; white-space: nowrap; }
   .owner-navigation-label { display: none; }
   .owner-navigation button { width: auto; flex: 0 0 auto; }
@@ -935,7 +999,7 @@ const ownerViews = {
   home: {
     title: 'Needs your attention',
     description: 'Review payments and finish any manual credits.',
-    sections: ['receiver-sms-old-title', 'telebirr-fast-alert-title'],
+    sections: ['system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
   },
   payments: {
     title: 'Payments & SMS',
@@ -949,13 +1013,13 @@ const ownerViews = {
   },
   system: {
     title: 'System',
-    description: 'Manage receiving accounts, phones, the Companion, and customer support.',
-    sections: ['routine-processing-title', 'receiver-title', 'kemerbet-companion-title', 'support-contact-title'],
+    description: 'Manage receiving accounts, TeleBirr policy, and customer support.',
+    sections: ['routine-processing-title', 'receiver-title', 'support-contact-title'],
   },
   advanced: {
     title: 'Advanced tools',
-    description: 'Specialized setup, pilot, and dry-run controls remain available to the Owner.',
-    sections: ['execution-readiness-title', 'execution-approvals-title', 'pilot-title', 'kemerbet-readiness-cohort-title', 'deposit-intake-title'],
+    description: 'Specialized Companion setup, pilot, and dry-run controls remain available to the Owner.',
+    sections: ['kemerbet-companion-title', 'execution-readiness-title', 'execution-approvals-title', 'pilot-title', 'kemerbet-readiness-cohort-title', 'deposit-intake-title'],
   },
 };
 function showOwnerView(view, focusHeading = false) {
@@ -983,6 +1047,11 @@ const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
 const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
+const systemOverviewRefresh = document.querySelector('#system-overview-refresh');
+const systemOverviewStatus = document.querySelector('#system-overview-status');
+const systemOverviewFacts = document.querySelector('#system-overview-facts');
+const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
+let systemOverviewLoadGeneration = 0;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
 const transactionsFilters = document.querySelector('#transactions-filters');
 const transactionsStatusFilter = document.querySelector('#transactions-status-filter');
@@ -1002,6 +1071,13 @@ const receiverSmsOldRefresh = document.querySelector('#receiver-sms-old-refresh'
 const manualPaymentStatusFilter = document.querySelector('#manual-payment-status-filter');
 const manualPaymentMore = document.querySelector('#manual-payment-more');
 const receiverSmsInboxRefresh = document.querySelector('#receiver-sms-inbox-refresh');
+const receiverSmsInboxFilters = document.querySelector('#receiver-sms-inbox-filters');
+const receiverSmsInboxProviderFilter = document.querySelector('#receiver-sms-inbox-provider-filter');
+const receiverSmsInboxStatusFilter = document.querySelector('#receiver-sms-inbox-status-filter');
+const receiverSmsInboxLast4 = document.querySelector('#receiver-sms-inbox-last4');
+const receiverSmsInboxFrom = document.querySelector('#receiver-sms-inbox-from');
+const receiverSmsInboxTo = document.querySelector('#receiver-sms-inbox-to');
+const receiverSmsInboxClear = document.querySelector('#receiver-sms-inbox-clear');
 const receiverSmsInboxStatus = document.querySelector('#receiver-sms-inbox-status');
 const receiverSmsInboxList = document.querySelector('#receiver-sms-inbox-list');
 const receiverSmsInboxMore = document.querySelector('#receiver-sms-inbox-more');
@@ -1012,6 +1088,9 @@ let receiverSmsOldBusy = false;
 let manualPaymentOffset = 0;
 let receiverSmsInboxOffset = 0;
 let receiverSmsInboxLoadGeneration = 0;
+let receiverSmsInboxAppliedFilters = {
+  provider: 'all', status: 'all', last4: '', from: '', to: '',
+};
 let manualReceiverAccounts = [];
 const supportContactForm = document.querySelector('#support-contact-form');
 const supportContactUsername = document.querySelector('#support-contact-username');
@@ -3096,9 +3175,20 @@ function signOut(message = 'Signed out.') {
   manualPaymentOffset = 0;
   receiverSmsInboxOffset = 0;
   receiverSmsInboxLoadGeneration += 1;
+  receiverSmsInboxProviderFilter.value = 'all';
+  receiverSmsInboxStatusFilter.value = 'all';
+  receiverSmsInboxLast4.value = '';
+  receiverSmsInboxFrom.value = '';
+  receiverSmsInboxTo.value = '';
+  receiverSmsInboxAppliedFilters = {
+    provider: 'all', status: 'all', last4: '', from: '', to: '',
+  };
   receiverSmsInboxList.replaceChildren();
   receiverSmsInboxStatus.textContent = 'Sign in to load received payments.';
   receiverSmsInboxMore.hidden = true;
+  systemOverviewLoadGeneration += 1;
+  systemOverviewFacts.replaceChildren();
+  systemOverviewStatus.textContent = 'Sign in to load system status.';
   manualPaymentMore.hidden = true;
   manualReceiverAccounts = [];
   showOwnerView('home');
@@ -5806,6 +5896,70 @@ function validSmsInboxPayment(value) {
     typeof value.canMarkManuallyCredited === 'boolean';
 }
 
+function validSystemOverview(value) {
+  const modes = ['disabled', 'dry_run', 'live', null];
+  const validTime = (time) => time === null ||
+    (typeof time === 'string' && Number.isFinite(Date.parse(time)));
+  return value && typeof value === 'object' &&
+    modes.includes(value.paymentVerificationMode) &&
+    modes.includes(value.depositExecutionMode) &&
+    modes.includes(value.telebirrReceiptLookupMode) &&
+    validTime(value.telebirrSmsLastReceivedAt) &&
+    validTime(value.cbeSmsLastReceivedAt) &&
+    ['openDepositJobs','deadDepositJobs','awaitingManualCredits'].every((key) =>
+      Number.isSafeInteger(value[key]) && value[key] >= 0) &&
+    typeof value.checkedAt === 'string' && Number.isFinite(Date.parse(value.checkedAt));
+}
+
+function systemOverviewFact(label, detail) {
+  const item = document.createElement('div');
+  const term = document.createElement('dt');
+  const value = document.createElement('dd');
+  term.textContent = label;
+  value.textContent = detail;
+  item.append(term,value);
+  systemOverviewFacts.append(item);
+}
+
+async function loadSystemOverview() {
+  if (!accessToken) return;
+  const generation = ownerAuthGeneration;
+  const loadGeneration = ++systemOverviewLoadGeneration;
+  systemOverviewRefresh.disabled = true;
+  systemOverviewStatus.textContent = 'Loading system status…';
+  try {
+    const response = await ownerRequest('/v1/owner/system-overview',
+      { method: 'GET', headers: {} });
+    if (!response.ok) throw new Error('system_overview');
+    const value = await response.json();
+    if (!validSystemOverview(value)) throw new Error('system_overview');
+    if (generation !== ownerAuthGeneration || loadGeneration !== systemOverviewLoadGeneration ||
+        !accessToken) return;
+    const modeLabel = (mode) => mode === 'live' ? 'Live' :
+      mode === 'dry_run' ? 'Dry run' : mode === 'disabled' ? 'Off' : 'Unknown';
+    systemOverviewFacts.replaceChildren();
+    systemOverviewFact('Payment verification',modeLabel(value.paymentVerificationMode));
+    systemOverviewFact('Deposit execution',modeLabel(value.depositExecutionMode));
+    systemOverviewFact('Separate TeleBirr receipt lookup',modeLabel(value.telebirrReceiptLookupMode));
+    systemOverviewFact('Open deposit jobs',String(value.openDepositJobs));
+    systemOverviewFact('TeleBirr · last payment SMS',value.telebirrSmsLastReceivedAt ?
+      transactionDate(value.telebirrSmsLastReceivedAt) : 'None recorded');
+    systemOverviewFact('CBE Birr · last payment SMS',value.cbeSmsLastReceivedAt ?
+      transactionDate(value.cbeSmsLastReceivedAt) : 'None recorded');
+    systemOverviewFact('Dead deposit jobs',String(value.deadDepositJobs));
+    systemOverviewFact('Awaiting manual credit',String(value.awaitingManualCredits));
+    systemOverviewStatus.textContent = 'Checked ' + transactionDate(value.checkedAt) +
+      ' · Ethiopia time';
+  } catch (error) {
+    if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration &&
+        !isSignedOutError(error))
+      systemOverviewStatus.textContent = 'System status is unavailable. Refresh to try again.';
+  } finally {
+    if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration)
+      systemOverviewRefresh.disabled = false;
+  }
+}
+
 function renderSmsInboxPayment(value) {
   const card = document.createElement('article');
   card.className = 'request-card';
@@ -5820,7 +5974,19 @@ function renderSmsInboxPayment(value) {
   transactionFact(facts,'Receiving account',value.receiverHolderName +
     ' · ' + value.receiverAccountMasked);
   transactionFact(facts,'Player',value.playerMasked || 'No linked Player');
-  transactionFact(facts,'Status',value.status.replaceAll('_',' '));
+  const statusLabels = {
+    unmatched: 'No customer submission',
+    submission_waiting: 'Waiting for payment match',
+    pending_review: 'Pending review',
+    auto_processing: 'Automatic credit in progress',
+    auto_credited: 'Automatically credited',
+    auto_not_credited: 'Automatic credit stopped',
+    auto_used: 'Reference already used',
+    awaiting_manual_credit: 'Awaiting manual credit',
+    manually_credited: 'Manually credited',
+    rejected: 'Rejected',
+  };
+  transactionFact(facts,'Status',statusLabels[value.status] || value.status.replaceAll('_',' '));
   card.append(title,facts);
   if (value.canMarkManuallyCredited) card.append(manualCompletionForm({
     caseId: null, paymentEventId: value.paymentEventId, providerCode: value.providerCode,
@@ -5831,6 +5997,22 @@ function renderSmsInboxPayment(value) {
 
 async function loadReceiverSmsInbox(reset) {
   if (!accessToken) return;
+  const filters = reset ? {
+    provider: receiverSmsInboxProviderFilter.value,
+    status: receiverSmsInboxStatusFilter.value,
+    last4: receiverSmsInboxLast4.value.trim().toUpperCase(),
+    from: receiverSmsInboxFrom.value,
+    to: receiverSmsInboxTo.value,
+  } : receiverSmsInboxAppliedFilters;
+  if ((filters.last4 && !/^[A-Z0-9]{4}$/.test(filters.last4)) ||
+      (filters.from && filters.to && filters.from > filters.to)) {
+    receiverSmsInboxStatus.textContent = 'Check the reference ending and received dates.';
+    return;
+  }
+  if (reset) {
+    receiverSmsInboxLast4.value = filters.last4;
+    receiverSmsInboxAppliedFilters = filters;
+  }
   const generation = ownerAuthGeneration;
   const loadGeneration = ++receiverSmsInboxLoadGeneration;
   const offset = reset ? 0 : receiverSmsInboxOffset;
@@ -5838,8 +6020,14 @@ async function loadReceiverSmsInbox(reset) {
   receiverSmsInboxMore.disabled = true;
   receiverSmsInboxStatus.textContent = 'Loading received payments…';
   try {
-    const response = await ownerRequest('/v1/owner/receiver-sms-inbox?limit=25&offset=' +
-      offset, { method: 'GET', headers: {} });
+    const query = 'limit=25&offset=' + offset +
+      '&provider=' + encodeURIComponent(filters.provider) +
+      '&status=' + encodeURIComponent(filters.status) +
+      (filters.last4 ? '&last4=' + encodeURIComponent(filters.last4) : '') +
+      (filters.from ? '&from=' + encodeURIComponent(filters.from) : '') +
+      (filters.to ? '&to=' + encodeURIComponent(filters.to) : '');
+    const response = await ownerRequest('/v1/owner/receiver-sms-inbox?' + query,
+      { method: 'GET', headers: {} });
     if (!response.ok) throw new Error('sms_inbox');
     const payload = await response.json();
     if (!payload || !Array.isArray(payload.payments) || payload.payments.length > 25 ||
@@ -5849,9 +6037,10 @@ async function loadReceiverSmsInbox(reset) {
     if (reset) receiverSmsInboxList.replaceChildren();
     for (const value of payload.payments) receiverSmsInboxList.append(renderSmsInboxPayment(value));
     receiverSmsInboxOffset = offset + payload.payments.length;
-    receiverSmsInboxMore.hidden = payload.payments.length < 25;
+    receiverSmsInboxMore.hidden = payload.payments.length < 25 || receiverSmsInboxOffset > 10000;
     receiverSmsInboxStatus.textContent = payload.payments.length === 0 && reset
-      ? 'No received payment SMS yet.' : 'Showing ' + receiverSmsInboxOffset + ' received payment(s).';
+      ? 'No received payments match these filters.'
+      : 'Showing ' + receiverSmsInboxOffset + ' received payment(s).';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsInboxLoadGeneration &&
         !isSignedOutError(error))
@@ -5868,7 +6057,21 @@ receiverSmsOldRefresh.addEventListener('click', () => void loadManualPaymentCase
 manualPaymentStatusFilter.addEventListener('change', () => void loadManualPaymentCases(true));
 manualPaymentMore.addEventListener('click', () => void loadManualPaymentCases(false));
 receiverSmsInboxRefresh.addEventListener('click', () => void loadReceiverSmsInbox(true));
+systemOverviewRefresh.addEventListener('click', () => void loadSystemOverview());
+systemOverviewOpenSystem.addEventListener('click', () => showOwnerView('system',true));
 receiverSmsInboxMore.addEventListener('click', () => void loadReceiverSmsInbox(false));
+receiverSmsInboxFilters.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void loadReceiverSmsInbox(true);
+});
+receiverSmsInboxClear.addEventListener('click', () => {
+  receiverSmsInboxProviderFilter.value = 'all';
+  receiverSmsInboxStatusFilter.value = 'all';
+  receiverSmsInboxLast4.value = '';
+  receiverSmsInboxFrom.value = '';
+  receiverSmsInboxTo.value = '';
+  void loadReceiverSmsInbox(true);
+});
 
 transactionsFilters.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -6703,6 +6906,7 @@ async function loadOwnerPlayerQueues() {
     // change Player, receiver, readiness, or pilot state.
     await loadKemerbetAgentProfiles();
     await Promise.all([
+      loadSystemOverview(),
       loadPlayerRequests(),
       loadAssociationCandidates(),
       loadPlayerEligibility(),

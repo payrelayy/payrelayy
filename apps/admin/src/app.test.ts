@@ -1066,6 +1066,77 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
+  it('validates Owner SMS search filters before querying the read-only inbox', async () => {
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        manualPayments: {
+          listCases: async () => [],
+          listSms: async (actor, limit, offset, provider, status, last4, from, to) => {
+            calls.push([actor, limit, offset, provider, status, last4, from, to]);
+            return [];
+          },
+          systemOverview: async () => ({
+            paymentVerificationMode: 'live' as const,
+            depositExecutionMode: 'live' as const,
+            telebirrReceiptLookupMode: 'disabled' as const,
+            telebirrSmsLastReceivedAt: null,
+            cbeSmsLastReceivedAt: null,
+            openDepositJobs: 0,
+            deadDepositJobs: 0,
+            awaitingManualCredits: 0,
+            checkedAt: '2026-10-23T09:05:00Z',
+          }),
+          decide: async () => ({
+            caseId: '33333333-3333-4333-8333-333333333333',
+            status: 'awaiting_manual_credit' as const,
+          }),
+          complete: async () => ({
+            caseId: '33333333-3333-4333-8333-333333333333',
+            status: 'manually_credited' as const,
+          }),
+        },
+      }),
+    });
+    try {
+      const url =
+        '/v1/owner/receiver-sms-inbox?provider=cbe_birr&status=unmatched' +
+        '&last4=AB12&from=2026-10-01&to=2026-10-23&limit=25&offset=50';
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(403);
+      const found = await app.inject({
+        method: 'GET',
+        url,
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(found.statusCode).toBe(200);
+      expect(found.json()).toEqual({ payments: [] });
+      expect(calls).toEqual([
+        [authUserId, 25, 50, 'cbe_birr', 'unmatched', 'AB12', '2026-10-01', '2026-10-23'],
+      ]);
+      const invalid = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/receiver-sms-inbox?provider=other&limit=25',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(calls).toHaveLength(1);
+      const overview = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/system-overview',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(overview.statusCode).toBe(200);
+      expect(overview.headers['cache-control']).toContain('no-store');
+      expect(overview.json()).toMatchObject({
+        paymentVerificationMode: 'live',
+        openDepositJobs: 0,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('registers support configuration with verified Owner identity and no-store public projection', async () => {
     const baseline = { telegramUsername: null, revision: 0, updatedAt: null };
     const calls: unknown[] = [];
@@ -1146,7 +1217,7 @@ describe('Owner-control HTTP boundary', () => {
     expect(response.body).toContain('Dry-run deposit intake');
     expect(response.body).toContain('Private KemerBet sign-in');
     expect(response.body).toContain('Transfer is blocked');
-    expect(response.body).toContain('KemerBet Windows companion');
+    expect(response.body).toContain('KemerBet no-money Companion setup');
     expect(response.body).toContain('Local identity validation');
     expect(response.body).toContain('Windows-protected fingerprint');
     expect(response.body).toContain('Required no-money lookup setup');

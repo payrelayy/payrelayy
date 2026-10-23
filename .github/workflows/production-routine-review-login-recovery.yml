@@ -1,4 +1,4 @@
-name: Restore inert TeleBirr review logins
+name: Restore stopped TeleBirr review logins
 
 on:
   workflow_dispatch:
@@ -8,9 +8,16 @@ on:
         required: true
         type: string
       confirm_operation:
-        description: Type RESTORE INERT ROUTINE REVIEW LOGINS
+        description: Type the operation phrase for the selected stopped profile
         required: true
         type: string
+      confirm_financial_switch_profile:
+        description: Exact currently observed stopped production profile
+        required: true
+        type: choice
+        options:
+          - inert-v1
+          - cbe-stopped-v1
 
 permissions:
   contents: read
@@ -21,7 +28,7 @@ concurrency:
 
 jobs:
   recover:
-    name: Restore only existing review-only database logins
+    name: Restore only existing scoped review database logins
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     environment: production
@@ -39,20 +46,24 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Require exact passing main and no-money recovery phrase
+      - name: Require exact passing main and matching stopped-profile phrase
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CONFIRMED_COMMIT: ${{ inputs.confirm_main_commit_sha }}
           CONFIRMED_OPERATION: ${{ inputs.confirm_operation }}
+          CONFIRMED_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == 'refs/heads/main' ]]
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$CONFIRMED_COMMIT" == "$GITHUB_SHA" ]]
-          [[ "$CONFIRMED_OPERATION" == 'RESTORE INERT ROUTINE REVIEW LOGINS' ]]
+          case "$CONFIRMED_PROFILE:$CONFIRMED_OPERATION" in
+            'inert-v1:RESTORE INERT ROUTINE REVIEW LOGINS'|'cbe-stopped-v1:RESTORE CBE STOPPED ROUTINE REVIEW LOGINS') ;;
+            *) echo '::error::The exact stopped profile and operation phrase are required.' >&2; exit 1 ;;
+          esac
           node infra/operations/require-production-ci.mjs
 
-      - name: Re-activate only the three already-scoped inert review logins
+      - name: Re-activate only the three already-scoped review logins
         shell: bash
         env:
           SUPABASE_CA_CERTIFICATE_PEM: ${{ secrets.SUPABASE_CA_CERTIFICATE_PEM }}
@@ -73,6 +84,7 @@ jobs:
           TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256 }}
           TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM }}
           TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL: ${{ vars.TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL }}
+          CONFIRMED_PROFILE: ${{ inputs.confirm_financial_switch_profile }}
         run: |
           set -euo pipefail
           umask 077
@@ -94,12 +106,33 @@ jobs:
           [[ -n "$SUPABASE_CA_CERTIFICATE_PEM" && -n "$PGPASSWORD" &&
             -n "$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" && -n "$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" &&
             -n "$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" ]]
+          case "$CONFIRMED_PROFILE" in
+            inert-v1)
+              preflight=infra/sql/production-inert-runtime-preflight.sql
+              expected_cbe_mode=disabled ;;
+            cbe-stopped-v1)
+              preflight=infra/sql/production-cbe-stopped-runtime-preflight.sql
+              expected_cbe_mode=live ;;
+            *) echo '::error::The stopped profile changed.' >&2; exit 1 ;;
+          esac
           printf '%s\n' "$SUPABASE_CA_CERTIFICATE_PEM" >"$protected/supabase-ca.crt"
           chmod 0600 "$protected/supabase-ca.crt"
           openssl x509 -in "$protected/supabase-ca.crt" -noout -checkend 0 >/dev/null
           export PGSSLROOTCERT="$protected/supabase-ca.crt"
-          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
+          psql -X --file="$preflight" >/dev/null
+          ledger_ready="$(psql -X -q -A -t -v ON_ERROR_STOP=1 -c "
+            select not exists (
+              select 1 from app.deposit_jobs job
+              where job.job_kind in ('execute_deposit', 'reconcile_execution')
+                and job.status in ('queued', 'leased', 'retry_wait')
+            ) and not exists (
+              select 1 from app.deposit_execution_attempts attempt
+              where attempt.status in ('prepared', 'final_action_fenced',
+                'reconciliation_required', 'review_required')
+            )")"
+          [[ "$ledger_ready" == 't' ]]
           psql -X \
+            -v expected_cbe_mode="$expected_cbe_mode" \
             -v signer_id="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_ID" \
             -v public_spki_digest="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_PUBLIC_SPKI_SHA256" \
             -v valid_from="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_FROM" \
@@ -107,10 +140,12 @@ jobs:
             -v runtime_password="$ROUTINE_NO_MONEY_RUNTIME_PASSWORD" \
             --file=infra/sql/production-routine-no-money-activate.sql >/dev/null
           psql -X \
+            -v expected_cbe_mode="$expected_cbe_mode" \
             -v runtime_password="$ROUTINE_PAID_POLL_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-poll-activate.sql >/dev/null
           psql -X \
+            -v expected_cbe_mode="$expected_cbe_mode" \
             -v runtime_password="$ROUTINE_PAID_SETTLEMENT_RUNTIME_PASSWORD" \
             -v valid_until="$TELEBIRR_ROUTINE_LOOKUP_SIGNER_VALID_UNTIL" \
             --file=infra/sql/production-routine-paid-settlement-activate.sql >/dev/null
@@ -123,5 +158,5 @@ jobs:
             ) and role.rolcanlogin
               and role.rolvaliduntil > pg_catalog.clock_timestamp() + interval '10 minutes'")"
           [[ "$result" == '3' ]]
-          psql -X --file=infra/sql/production-inert-runtime-preflight.sql >/dev/null
-          echo 'Three review-only logins are restored. All seven financial switches remain disabled; no Player was credited.' >>"$GITHUB_STEP_SUMMARY"
+          psql -X --file="$preflight" >/dev/null
+          echo "Three scoped review logins are restored under $CONFIRMED_PROFILE. Both shared payment gates remain disabled; no Player was credited." >>"$GITHUB_STEP_SUMMARY"

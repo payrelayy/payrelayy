@@ -1,8 +1,9 @@
 \set ON_ERROR_STOP on
 
--- Runs only after production-inert-runtime-preflight.sql, using the exact
+-- Runs after the exact inert or CBE-stopped runtime preflight, using the exact
 -- production postgres session. These credentials authorize four no-money
 -- lookup/review functions only; they do not activate any financial switch.
+-- expected_cbe_mode must be supplied explicitly by the reviewed workflow.
 begin;
 set local search_path = pg_catalog;
 set local statement_timeout = '15s';
@@ -24,7 +25,17 @@ select current_user = 'postgres' and session_user = 'postgres'
   select 1 / 0 as rejected;
 \endif
 
-select count(*) = 7 as financial_switches_disabled
+select :'expected_cbe_mode' in ('disabled', 'live')
+  and count(*) = 7
+  and count(*) filter (
+    where switch.feature_key = 'cbe_birr_authoritative_verification'
+      and switch.mode::text = :'expected_cbe_mode'
+      and switch.settings = '{}'::jsonb
+  ) = 1
+  and count(*) filter (
+    where switch.feature_key <> 'cbe_birr_authoritative_verification'
+      and switch.mode = 'disabled' and switch.settings = '{}'::jsonb
+  ) = 6 as exact_stopped_switch_profile
 from app.feature_switches switch
 where switch.feature_key in (
   'cbe_birr_authoritative_verification', 'deposit_execution',
@@ -32,11 +43,10 @@ where switch.feature_key in (
   'telebirr_authoritative_verification', 'withdrawal_collection',
   'withdrawal_validation'
 )
-  and switch.mode = 'disabled' and switch.settings = '{}'::jsonb
 \gset
-\if :financial_switches_disabled
+\if :exact_stopped_switch_profile
 \else
-  \warn 'The seven financial switches are not all disabled.'
+  \warn 'The exact stopped financial-switch profile is unavailable.'
   select 1 / 0 as rejected;
 \endif
 

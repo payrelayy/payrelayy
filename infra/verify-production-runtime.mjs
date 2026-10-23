@@ -1207,6 +1207,7 @@ assert.match(
   /ROUTINE_PAID_POLL_RUNTIME_PASSWORD: \$\{\{ secrets\.ROUTINE_PAID_POLL_RUNTIME_PASSWORD \}\}/u,
 );
 assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-activate\.sql/u);
+assert.match(workflow, /-v expected_cbe_mode=disabled/u);
 assert.match(workflow, /--file=infra\/sql\/production-routine-paid-poll-disable\.sql/u);
 assert.match(workflow, /"\$SECRET_DIR"\/routine-paid-poll-database-url/u);
 assert.match(
@@ -1220,7 +1221,14 @@ assert.match(
   paidPollActivateSql,
   /alter role fetanagent_routine_telebirr_paid_poll_runtime\s+login password :'runtime_password' valid until :'valid_until'/u,
 );
-assert.match(paidPollActivateSql, /count\(\*\) = 7 as financial_switches_disabled/u);
+for (const sql of [paidPollActivateSql, paidSettlementActivateSql]) {
+  assert.match(sql, /:'expected_cbe_mode' in \('disabled', 'live'\)/u);
+  assert.match(sql, /count\(\*\) = 7/u);
+  assert.match(sql, /switch\.feature_key = 'cbe_birr_authoritative_verification'/u);
+  assert.match(sql, /switch\.feature_key <> 'cbe_birr_authoritative_verification'/u);
+  assert.match(sql, /\) = 6 as exact_stopped_switch_profile/u);
+  assert.match(sql, /\\if :exact_stopped_switch_profile/u);
+}
 assert.match(paidPollActivateSql, /count\(\*\) = 4 and pg_catalog\.bool_and/u);
 assert.doesNotMatch(
   paidPollActivateSql,
@@ -1231,7 +1239,6 @@ assert.match(
   paidSettlementActivateSql,
   /alter role fetanagent_routine_telebirr_paid_settlement_runtime\s+login password :'runtime_password' valid until :'valid_until'/u,
 );
-assert.match(paidSettlementActivateSql, /count\(\*\) = 7 as financial_switches_disabled/u);
 assert.match(paidSettlementActivateSql, /count\(\*\) = 2 and pg_catalog\.bool_and/u);
 assert.match(
   paidSettlementDisableSql,

@@ -40,6 +40,7 @@ import {
   buildTelegramCombinedPaymentPrompt,
   isTelegramCombinedPaymentPromptReply,
   buildTelegramTelebirrPaymentPrompt,
+  parseTelegramTelebirrPaymentPromptReply,
   buildTelegramCbeSmsPaymentPrompt,
   isTelegramCbeSmsPaymentPromptReply,
 } from './telegram-guided-deposit.js';
@@ -116,9 +117,21 @@ describe('private Telegram action reducers', () => {
     expect(prompt).toContain('Name: TeleBirr Owner Name\nNumber: 0000000042');
     expect(prompt).toContain('Name: CBE Owner Name\nNumber: 0000000043');
     expect(prompt).toContain('Saved Player ID: PLAYER-DEMO-42');
+    expect(prompt).toContain('Send 25–25,000 ETB.');
+    expect(prompt).not.toContain('Choose one available method');
+    expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
       true,
     );
+    const previousPrompt = prompt
+      .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
+      .replace(
+        '\nAfter paying,',
+        '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+      );
+    expect(
+      isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: previousPrompt }),
+    ).toBe(true);
     expect(
       reduceTelegramAutoReceiverSmsTextSubmission({
         ...privateMetadata,
@@ -146,7 +159,7 @@ describe('private Telegram action reducers', () => {
     expect(
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
-        text: prompt.replace('Valid for 1 hour.', 'Valid forever.'),
+        text: prompt.replace('Send 25–25,000 ETB.', 'Send any amount.'),
       }),
     ).toBe(false);
     const cbeOnly = buildTelegramCombinedPaymentPrompt({
@@ -160,10 +173,19 @@ describe('private Telegram action reducers', () => {
       ],
     });
     expect(cbeOnly).not.toContain('Valid for 1 hour');
+    expect(cbeOnly).not.toContain('Check the receiver name before paying.');
     expect(cbeOnly).not.toContain('TeleBirr\n');
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: cbeOnly })).toBe(
       true,
     );
+    expect(
+      isTelegramCombinedPaymentPromptReply({
+        from: { is_bot: true },
+        text: cbeOnly
+          .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
+          .replace('\nAfter paying,', '\nCheck the receiver name before paying.\nAfter paying,'),
+      }),
+    ).toBe(true);
   });
 
   it('routes typed proof by reference length even under the other method instruction', () => {
@@ -177,6 +199,17 @@ describe('private Telegram action reducers', () => {
       receiverAccountHolderName: 'Demo Receiver',
       receiverAccountReference: '0000000042',
     });
+    expect(telePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    expect(cbePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    expect(
+      parseTelegramTelebirrPaymentPromptReply({
+        from: { is_bot: true },
+        text: telePrompt.replace(
+          '\nAfter paying,',
+          '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+        ),
+      }),
+    ).toBe('PLAYER-DEMO-42');
     expect(
       reduceTelegramAutoReceiverSmsTextSubmission({
         ...privateMetadata,
@@ -396,10 +429,15 @@ describe('private Telegram action reducers', () => {
       receiverAccountReference: '0000000042',
     });
     const replyToMessage = { from: { is_bot: true }, text: prompt };
-    const previousPrompt = prompt.replace(
-      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
-      'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
-    );
+    const previousPrompt = prompt
+      .replace(
+        '\nAfter paying,',
+        '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+      )
+      .replace(
+        'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+        'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
+      );
     expect(
       isTelegramCbeSmsPaymentPromptReply({ from: { is_bot: true }, text: previousPrompt }),
     ).toBe(true);

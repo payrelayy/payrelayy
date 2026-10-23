@@ -432,8 +432,9 @@ const unifiedCurrent = 'aa5db75897ac63e29917836aa7d52843b4a69ef6';
 const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
-assert.equal(sha256(read(unifiedHelperPath)), unifiedSuccessor);
-assert.ok(unifiedHelper.includes(`CBE_GUARDED_PREDECESSOR_SHA='${unifiedCurrent}'`));
+assert.ok(
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='08420128eb114b33ef1b8fdaf8d41dc9fa3f4277'"),
+);
 for (const value of [
   unifiedPredecessor,
   unifiedSuccessor,
@@ -478,5 +479,69 @@ assert.ok(
     unifiedStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(unifiedRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const shortDepositRotationPath =
+  'infra/operations/fetanagent-production-v2-short-deposit-rotation-v8.sh';
+const shortDepositDocsPath = 'infra/operations/production-short-deposit-release.md';
+const shortDepositPredecessor = unifiedSuccessor;
+const shortDepositSuccessor = 'a345584d30466ef0d2265e1347f5ea5d8bece054e1e2d98ad9ee842fa101dd1b';
+const shortDepositCurrent = '08420128eb114b33ef1b8fdaf8d41dc9fa3f4277';
+const shortDepositRotation = read(shortDepositRotationPath).toString();
+const shortDepositDocs = read(shortDepositDocsPath).toString();
+assert.equal(sha256(read(unifiedHelperPath)), shortDepositSuccessor);
+for (const value of [
+  shortDepositPredecessor,
+  shortDepositSuccessor,
+  shortDepositCurrent,
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 SHORT DEPOSIT HELPER V8',
+]) {
+  assert.ok(
+    shortDepositRotation.includes(value),
+    `short deposit rotation script does not pin ${value}`,
+  );
+  assert.ok(
+    shortDepositDocs.includes(value),
+    `short deposit release runbook does not pin ${value}`,
+  );
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(shortDepositRotation.includes(value), `short deposit rotation lost boundary: ${value}`);
+}
+const shortDepositRotate = shortDepositRotation.slice(shortDepositRotation.indexOf('rotate() {'));
+const shortDepositStep = (value) => {
+  const index = shortDepositRotate.indexOf(value);
+  assert.ok(index >= 0, `short deposit rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  shortDepositRotation.indexOf('flock --nonblock 9') < shortDepositRotation.indexOf('rotate() {'),
+);
+assert.ok(
+  shortDepositStep('acquire_lock') < shortDepositStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  shortDepositStep('install_record "$INTENT" intent_body') <
+    shortDepositStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  shortDepositStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    shortDepositStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  shortDepositStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    shortDepositStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  shortDepositStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    shortDepositStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(shortDepositRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

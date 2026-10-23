@@ -128,9 +128,10 @@ export interface TelegramCombinedPaymentPromptInput {
   readonly receivers: readonly TelegramCombinedPaymentReceiver[];
 }
 
-/** One current payable card, with each Owner-configured receiver kept under its own provider. */
-export function buildTelegramCombinedPaymentPrompt(
+/** One payable card, with each Owner-configured receiver kept under its own provider. */
+function renderTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
+  previousWording: boolean,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -152,7 +153,7 @@ export function buildTelegramCombinedPaymentPrompt(
     throw new Error('The combined payment prompt is unavailable.');
   return [
     '💰 FetanAgent deposit',
-    'Choose one available method. Send 25–25,000 ETB.',
+    previousWording ? 'Choose one available method. Send 25–25,000 ETB.' : 'Send 25–25,000 ETB.',
     ...input.receivers.flatMap((receiver) => [
       '',
       receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
@@ -161,11 +162,21 @@ export function buildTelegramCombinedPaymentPrompt(
     ]),
     '',
     `Saved Player ID: ${input.playerId}`,
-    ...(input.receivers.some((receiver) => receiver.providerCode === 'telebirr')
-      ? ['Valid for 1 hour. Check the receiver name before paying.']
-      : ['Check the receiver name before paying.']),
+    ...(previousWording
+      ? [
+          input.receivers.some((receiver) => receiver.providerCode === 'telebirr')
+            ? 'Valid for 1 hour. Check the receiver name before paying.'
+            : 'Check the receiver name before paying.',
+        ]
+      : []),
     'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
   ].join('\n');
+}
+
+export function buildTelegramCombinedPaymentPrompt(
+  input: TelegramCombinedPaymentPromptInput,
+): string {
+  return renderTelegramCombinedPaymentPrompt(input, false);
 }
 
 export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
@@ -184,7 +195,9 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
   }));
   if (!playerId) return undefined;
   try {
-    return message.text === buildTelegramCombinedPaymentPrompt({ playerId, receivers })
+    const input = { playerId, receivers };
+    return message.text === renderTelegramCombinedPaymentPrompt(input, false) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, true)
       ? playerId
       : undefined;
   } catch {
@@ -216,7 +229,6 @@ export function buildTelegramTelebirrPaymentPrompt(
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
-    'Valid for 1 hour. Check the receiver name before paying.',
     'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
   ].join('\n');
 }
@@ -239,7 +251,6 @@ export function buildTelegramCbeSmsPaymentPrompt(
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
-    'Valid for 1 hour. Check the receiver name before paying.',
     'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
     'The reference identifies CBE Birr automatically.',
   ].join('\n');
@@ -259,11 +270,19 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     });
-    const previousPrompt = currentPrompt.replace(
+    const precedingPrompt = currentPrompt.replace(
+      '\nAfter paying,',
+      '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+    );
+    const previousPrompt = precedingPrompt.replace(
       'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
       'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
     );
-    return message.text === currentPrompt || message.text === previousPrompt;
+    return (
+      message.text === currentPrompt ||
+      message.text === precedingPrompt ||
+      message.text === previousPrompt
+    );
   } catch {
     return false;
   }
@@ -308,6 +327,10 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
     });
+    const precedingPrompt = currentPrompt.replace(
+      '\nAfter paying,',
+      '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+    );
     const priorPrompt = buildPriorTelegramTelebirrPaymentPrompt({
       playerId,
       receiverAccountHolderName: holder,
@@ -330,6 +353,7 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
     );
     return message.text === currentPrompt ||
+      message.text === precedingPrompt ||
       message.text === priorPrompt ||
       message.text === previousPilotPrompt ||
       message.text === legacyPrompt ||

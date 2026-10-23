@@ -715,6 +715,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]).toContain('Name: TeleBirr Owner Name\nNumber: 0000000042');
     expect(replies[0]).toContain('Name: CBE Owner Name\nNumber: 0000000043');
     expect(replies[0]).toContain('Saved Player ID: PLAYER-DEMO-42');
+    expect(replies[0]).not.toContain('Choose one available method');
+    expect(replies[0]).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(runtime.instructionRecords).toHaveLength(1);
     expect(runtime.instructionRecords[0]).toEqual([expect.anything(), '123456', '123456789', 42]);
   });

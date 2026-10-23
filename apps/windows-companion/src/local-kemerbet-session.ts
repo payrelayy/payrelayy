@@ -31,6 +31,7 @@ import {
   type LocalKemerBetLookupOutcome,
   type LocalKemerBetLookupTiming,
 } from './local-kemerbet-lookup.js';
+import { ensureKemerBetPlayerLookupWindow } from './local-kemerbet-window.js';
 import {
   routineHistoryReadAuthorization,
   scanRoutineKemerBetHistory,
@@ -656,6 +657,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
+        await ensureKemerBetPlayerLookupWindow(page);
         return await executeSingleLocalKemerBetLookup(page, playerId, lookupAuthorization, observe);
       } finally {
         lookupAuthorization.clear();
@@ -676,6 +678,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
+        await ensureKemerBetPlayerLookupWindow(page);
         return await executeExactFiveLocalKemerBetLookup(page, playerIds, lookupAuthorization);
       } finally {
         lookupAuthorization.clear();

@@ -14,6 +14,7 @@ const dependencies = vi.hoisted(() => ({
   mkdir: vi.fn(),
   realpath: vi.fn(),
   releaseSessionLock: vi.fn(),
+  ensureKemerBetPlayerLookupWindow: vi.fn(),
   verifyLocalKemerBetIdentity: vi.fn(),
 }));
 
@@ -30,6 +31,9 @@ vi.mock('./session-lock.js', () => ({
 }));
 vi.mock('./local-kemerbet-identity.js', () => ({
   verifyLocalKemerBetIdentity: dependencies.verifyLocalKemerBetIdentity,
+}));
+vi.mock('./local-kemerbet-window.js', () => ({
+  ensureKemerBetPlayerLookupWindow: dependencies.ensureKemerBetPlayerLookupWindow,
 }));
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
@@ -244,6 +248,7 @@ beforeEach(() => {
     handle: { close: vi.fn(async () => undefined) },
   });
   dependencies.releaseSessionLock.mockResolvedValue(undefined);
+  dependencies.ensureKemerBetPlayerLookupWindow.mockResolvedValue(undefined);
   dependencies.verifyLocalKemerBetIdentity.mockResolvedValue({
     bindingCreated: false,
     identityVerified: true,
@@ -261,6 +266,28 @@ afterEach(async () => {
 });
 
 describe('local KemerBet enrollment session', () => {
+  it('refuses Player lookup work when its Chrome window cannot be restored', async () => {
+    const { page, session } = await start();
+    dependencies.ensureKemerBetPlayerLookupWindow.mockRejectedValue(
+      new Error('The guarded Chrome window is too small.'),
+    );
+
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).rejects.toThrow('too small');
+    await expect(
+      session.executeExactFiveLookup([
+        'PLAYER-ALPHA',
+        'PLAYER-BRAVO',
+        'PLAYER-CHARLIE',
+        'PLAYER-DELTA',
+        'PLAYER-ECHO',
+      ]),
+    ).rejects.toThrow('too small');
+
+    expect(dependencies.ensureKemerBetPlayerLookupWindow).toHaveBeenCalledTimes(2);
+    expect(dependencies.ensureKemerBetPlayerLookupWindow).toHaveBeenCalledWith(page);
+    expect(session.isSignedInVerified()).toBe(true);
+  });
+
   it('starts Chrome offline and guards HTTP and WebSockets before enabling its network', async () => {
     const { context, order, page } = await start();
 

@@ -149,6 +149,40 @@ function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboa
   return keyboard;
 }
 
+function paymentCopyKeyboard(
+  copyNumbers: readonly {
+    readonly providerCode: 'telebirr' | 'cbe_birr';
+    readonly number: string;
+  }[],
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const [index, receiver] of copyNumbers.entries()) {
+    if (index > 0) keyboard.row();
+    keyboard.copyText(
+      receiver.providerCode === 'telebirr' ? 'Copy TeleBirr number' : 'Copy CBE Birr number',
+      receiver.number,
+    );
+  }
+  return keyboard;
+}
+
+function replyOptions(keyboard?: InlineKeyboard, placeholder?: string) {
+  if (keyboard && placeholder) {
+    // Bot API 10.3 allows inline copy buttons and a forced proof reply on one message.
+    return { reply_markup: Object.assign(keyboard, { force_reply: true }) };
+  }
+  if (keyboard) return { reply_markup: keyboard };
+  if (placeholder)
+    return {
+      reply_markup: {
+        force_reply: true as const,
+        selective: true,
+        input_field_placeholder: placeholder,
+      },
+    };
+  return undefined;
+}
+
 const temporaryMessageDependencies = {
   request: (action: TelegramPrivateActionEnvelope) => {
     if (!playerActions.enabled) throw new Error('Telegram player actions are disabled.');
@@ -221,7 +255,11 @@ async function deliverPlayerAction(
       return;
     }
     if (presentation.kind === 'force_reply') {
-      const sent = await reply(presentation.text, undefined, presentation.placeholder);
+      const sent = await reply(
+        presentation.text,
+        presentation.copyNumbers ? paymentCopyKeyboard(presentation.copyNumbers) : undefined,
+        presentation.placeholder,
+      );
       if (
         (result.outcome === 'telebirr_deposit_destination' &&
           (action.kind === 'saved_telebirr_destination_command' ||
@@ -329,20 +367,7 @@ bot.on('message', async (context) => {
           : undefined;
       if (action)
         await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
-          context.reply(
-            replyText,
-            placeholder
-              ? {
-                  reply_markup: {
-                    force_reply: true,
-                    selective: true,
-                    input_field_placeholder: placeholder,
-                  },
-                }
-              : keyboard
-                ? { reply_markup: keyboard }
-                : undefined,
-          ),
+          context.reply(replyText, replyOptions(keyboard, placeholder)),
         );
       else await context.reply(message('en', 'depositUnavailable'));
       return;
@@ -354,20 +379,7 @@ bot.on('message', async (context) => {
       const action = reduceTelegramSavedCbeSmsDestinationAction(metadata);
       if (action)
         await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
-          context.reply(
-            replyText,
-            placeholder
-              ? {
-                  reply_markup: {
-                    force_reply: true,
-                    selective: true,
-                    input_field_placeholder: placeholder,
-                  },
-                }
-              : keyboard
-                ? { reply_markup: keyboard }
-                : undefined,
-          ),
+          context.reply(replyText, replyOptions(keyboard, placeholder)),
         );
       return;
     }
@@ -382,20 +394,7 @@ bot.on('message', async (context) => {
         await deliverPlayerAction(
           destinationSubmission.action,
           (replyText, keyboard, forceReplyPlaceholder) =>
-            context.reply(
-              replyText,
-              forceReplyPlaceholder
-                ? {
-                    reply_markup: {
-                      force_reply: true,
-                      selective: true,
-                      input_field_placeholder: forceReplyPlaceholder,
-                    },
-                  }
-                : keyboard
-                  ? { reply_markup: keyboard }
-                  : undefined,
-            ),
+            context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder)),
         );
       } else {
         await context.reply(TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT);
@@ -543,20 +542,7 @@ bot.on('message', async (context) => {
         await deliverPlayerAction(
           guidedSubmission.action,
           (replyText, keyboard, forceReplyPlaceholder) =>
-            context.reply(
-              replyText,
-              forceReplyPlaceholder
-                ? {
-                    reply_markup: {
-                      force_reply: true,
-                      selective: true,
-                      input_field_placeholder: forceReplyPlaceholder,
-                    },
-                  }
-                : keyboard
-                  ? { reply_markup: keyboard }
-                  : undefined,
-            ),
+            context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder)),
         );
       } else {
         await context.reply(
@@ -707,20 +693,7 @@ if (playerActions.enabled) {
           : undefined;
       if (savedAction)
         await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
-          context.reply(
-            replyText,
-            placeholder
-              ? {
-                  reply_markup: {
-                    force_reply: true,
-                    selective: true,
-                    input_field_placeholder: placeholder,
-                  },
-                }
-              : keyboard
-                ? { reply_markup: keyboard }
-                : undefined,
-          ),
+          context.reply(replyText, replyOptions(keyboard, placeholder)),
         );
       else await context.reply(message('en', 'depositUnavailable'));
       return;
@@ -752,20 +725,7 @@ if (playerActions.enabled) {
       return;
     }
     await deliverPlayerAction(action, (replyText, keyboard, forceReplyPlaceholder) =>
-      context.reply(
-        replyText,
-        forceReplyPlaceholder
-          ? {
-              reply_markup: {
-                force_reply: true,
-                selective: true,
-                input_field_placeholder: forceReplyPlaceholder,
-              },
-            }
-          : keyboard
-            ? { reply_markup: keyboard }
-            : undefined,
-      ),
+      context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder)),
     );
   });
 }

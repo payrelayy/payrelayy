@@ -128,10 +128,16 @@ export interface TelegramCombinedPaymentPromptInput {
   readonly receivers: readonly TelegramCombinedPaymentReceiver[];
 }
 
+/** Keep the stored 251-prefixed account intact; shorten only Ethiopian mobile numbers on cards. */
+export function toTelegramLocalReceiverNumber(accountReference: string): string {
+  return /^251[0-9]{9}$/u.test(accountReference) ? accountReference.slice(3) : accountReference;
+}
+
 /** One payable card, with each Owner-configured receiver kept under its own provider. */
 function renderTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
   previousWording: boolean,
+  localNumbers: boolean,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -158,7 +164,7 @@ function renderTelegramCombinedPaymentPrompt(
       '',
       receiver.providerCode === 'telebirr' ? 'TeleBirr' : 'CBE Birr',
       `Name: ${receiver.receiverAccountHolderName}`,
-      `Number: ${receiver.receiverAccountReference}`,
+      `Number: ${localNumbers ? toTelegramLocalReceiverNumber(receiver.receiverAccountReference) : receiver.receiverAccountReference}`,
     ]),
     '',
     `Saved Player ID: ${input.playerId}`,
@@ -176,7 +182,7 @@ function renderTelegramCombinedPaymentPrompt(
 export function buildTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
 ): string {
-  return renderTelegramCombinedPaymentPrompt(input, false);
+  return renderTelegramCombinedPaymentPrompt(input, false, true);
 }
 
 export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
@@ -196,8 +202,9 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
   if (!playerId) return undefined;
   try {
     const input = { playerId, receivers };
-    return message.text === renderTelegramCombinedPaymentPrompt(input, false) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, true)
+    return message.text === renderTelegramCombinedPaymentPrompt(input, false, true) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, false, false) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, true, false)
       ? playerId
       : undefined;
   } catch {
@@ -209,8 +216,9 @@ export function isTelegramCombinedPaymentPromptReply(value: unknown): boolean {
   return parseTelegramCombinedPaymentPromptReply(value) !== undefined;
 }
 
-export function buildTelegramTelebirrPaymentPrompt(
+function renderTelegramTelebirrPaymentPrompt(
   input: TelegramTelebirrPaymentPromptInput,
+  localNumber: boolean,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -227,14 +235,21 @@ export function buildTelegramTelebirrPaymentPrompt(
     '💰 TeleBirr deposit',
     'Send 25–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
-    `📱 Number: ${input.receiverAccountReference}`,
+    `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
     'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
   ].join('\n');
 }
 
-export function buildTelegramCbeSmsPaymentPrompt(
+export function buildTelegramTelebirrPaymentPrompt(
   input: TelegramTelebirrPaymentPromptInput,
+): string {
+  return renderTelegramTelebirrPaymentPrompt(input, true);
+}
+
+function renderTelegramCbeSmsPaymentPrompt(
+  input: TelegramTelebirrPaymentPromptInput,
+  localNumber: boolean,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -249,11 +264,17 @@ export function buildTelegramCbeSmsPaymentPrompt(
     '💳 CBE Birr deposit',
     'Send 25–25,000 ETB to:',
     `👤 Name: ${input.receiverAccountHolderName}`,
-    `📱 Number: ${input.receiverAccountReference}`,
+    `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
     'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
     'The reference identifies CBE Birr automatically.',
   ].join('\n');
+}
+
+export function buildTelegramCbeSmsPaymentPrompt(
+  input: TelegramTelebirrPaymentPromptInput,
+): string {
+  return renderTelegramCbeSmsPaymentPrompt(input, true);
 }
 
 export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
@@ -265,24 +286,27 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
   const reference = /(?:^|\n)📱 Number: ([0-9]{9,24})(?:\n|$)/u.exec(message.text)?.[1];
   if (!playerId || !holder || !reference) return false;
   try {
-    const currentPrompt = buildTelegramCbeSmsPaymentPrompt({
+    const input = {
       playerId,
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
+    };
+    return [true, false].some((localNumber) => {
+      const currentPrompt = renderTelegramCbeSmsPaymentPrompt(input, localNumber);
+      const precedingPrompt = currentPrompt.replace(
+        '\nAfter paying,',
+        '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+      );
+      const previousPrompt = precedingPrompt.replace(
+        'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+        'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
+      );
+      return (
+        message.text === currentPrompt ||
+        message.text === precedingPrompt ||
+        message.text === previousPrompt
+      );
     });
-    const precedingPrompt = currentPrompt.replace(
-      '\nAfter paying,',
-      '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
-    );
-    const previousPrompt = precedingPrompt.replace(
-      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
-      'After paying, reply with the transaction reference, SMS, receipt link, screenshot or PDF (max 5 MB).\nIf sending a reference separately, use /cbe followed by the reference.',
-    );
-    return (
-      message.text === currentPrompt ||
-      message.text === precedingPrompt ||
-      message.text === previousPrompt
-    );
   } catch {
     return false;
   }
@@ -322,15 +346,21 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
     const holder = /(?:^|\n)👤 Name: ([^\r\n]+)(?:\n|$)/u.exec(message.text)?.[1];
     const reference = /(?:^|\n)📱 Number: ([0-9]{9,24})(?:\n|$)/u.exec(message.text)?.[1];
     if (!holder || !reference) return undefined;
-    const currentPrompt = buildTelegramTelebirrPaymentPrompt({
+    const input = {
       playerId,
       receiverAccountHolderName: holder,
       receiverAccountReference: reference,
+    };
+    const currentPrompts = [true, false].flatMap((localNumber) => {
+      const currentPrompt = renderTelegramTelebirrPaymentPrompt(input, localNumber);
+      return [
+        currentPrompt,
+        currentPrompt.replace(
+          '\nAfter paying,',
+          '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+        ),
+      ];
     });
-    const precedingPrompt = currentPrompt.replace(
-      '\nAfter paying,',
-      '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
-    );
     const priorPrompt = buildPriorTelegramTelebirrPaymentPrompt({
       playerId,
       receiverAccountHolderName: holder,
@@ -352,8 +382,7 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
       CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT,
       PREVIOUS_TELEBIRR_PROOF_OPTIONS_TEXT,
     );
-    return message.text === currentPrompt ||
-      message.text === precedingPrompt ||
+    return currentPrompts.includes(message.text) ||
       message.text === priorPrompt ||
       message.text === previousPilotPrompt ||
       message.text === legacyPrompt ||

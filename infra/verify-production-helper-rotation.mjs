@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='08420128eb114b33ef1b8fdaf8d41dc9fa3f4277'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='05de2df452f844bcd49f022d52559eb7aff8ab78'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -488,7 +488,6 @@ const shortDepositSuccessor = 'a345584d30466ef0d2265e1347f5ea5d8bece054e1e2d98ad
 const shortDepositCurrent = '08420128eb114b33ef1b8fdaf8d41dc9fa3f4277';
 const shortDepositRotation = read(shortDepositRotationPath).toString();
 const shortDepositDocs = read(shortDepositDocsPath).toString();
-assert.equal(sha256(read(unifiedHelperPath)), shortDepositSuccessor);
 for (const value of [
   shortDepositPredecessor,
   shortDepositSuccessor,
@@ -543,5 +542,66 @@ assert.ok(
     shortDepositStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(shortDepositRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const copyNumbersRotationPath =
+  'infra/operations/fetanagent-production-v2-copy-numbers-rotation-v9.sh';
+const copyNumbersDocsPath = 'infra/operations/production-copy-numbers-release.md';
+const copyNumbersPredecessor = shortDepositSuccessor;
+const copyNumbersSuccessor = '4df544545234de40bdb0a4fbf3f624e5938abbdc06619dd4b688088e2fac4329';
+const copyNumbersCurrent = '05de2df452f844bcd49f022d52559eb7aff8ab78';
+const copyNumbersRotation = read(copyNumbersRotationPath).toString();
+const copyNumbersDocs = read(copyNumbersDocsPath).toString();
+assert.equal(sha256(read(unifiedHelperPath)), copyNumbersSuccessor);
+for (const value of [
+  copyNumbersPredecessor,
+  copyNumbersSuccessor,
+  copyNumbersCurrent,
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 COPY NUMBERS HELPER V9',
+]) {
+  assert.ok(
+    copyNumbersRotation.includes(value),
+    `copy numbers rotation script does not pin ${value}`,
+  );
+  assert.ok(copyNumbersDocs.includes(value), `copy numbers release runbook does not pin ${value}`);
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(copyNumbersRotation.includes(value), `copy numbers rotation lost boundary: ${value}`);
+}
+const copyNumbersRotate = copyNumbersRotation.slice(copyNumbersRotation.indexOf('rotate() {'));
+const copyNumbersStep = (value) => {
+  const index = copyNumbersRotate.indexOf(value);
+  assert.ok(index >= 0, `copy numbers rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  copyNumbersRotation.indexOf('flock --nonblock 9') < copyNumbersRotation.indexOf('rotate() {'),
+);
+assert.ok(
+  copyNumbersStep('acquire_lock') < copyNumbersStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  copyNumbersStep('install_record "$INTENT" intent_body') <
+    copyNumbersStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  copyNumbersStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    copyNumbersStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  copyNumbersStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    copyNumbersStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  copyNumbersStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    copyNumbersStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(copyNumbersRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

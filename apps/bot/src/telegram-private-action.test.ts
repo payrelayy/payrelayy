@@ -105,17 +105,18 @@ describe('private Telegram action reducers', () => {
         {
           providerCode: 'telebirr',
           receiverAccountHolderName: 'TeleBirr Owner Name',
-          receiverAccountReference: '0000000042',
+          receiverAccountReference: '251900000042',
         },
         {
           providerCode: 'cbe_birr',
           receiverAccountHolderName: 'CBE Owner Name',
-          receiverAccountReference: '0000000043',
+          receiverAccountReference: '251900000043',
         },
       ],
     });
-    expect(prompt).toContain('Name: TeleBirr Owner Name\nNumber: 0000000042');
-    expect(prompt).toContain('Name: CBE Owner Name\nNumber: 0000000043');
+    expect(prompt).toContain('Name: TeleBirr Owner Name\nNumber: 900000042');
+    expect(prompt).toContain('Name: CBE Owner Name\nNumber: 900000043');
+    expect(prompt).not.toContain('2519000000');
     expect(prompt).toContain('Saved Player ID: PLAYER-DEMO-42');
     expect(prompt).toContain('Send 25–25,000 ETB.');
     expect(prompt).not.toContain('Choose one available method');
@@ -123,7 +124,18 @@ describe('private Telegram action reducers', () => {
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
       true,
     );
+    const currentInternationalPrompt = prompt
+      .replace('Number: 900000042', 'Number: 251900000042')
+      .replace('Number: 900000043', 'Number: 251900000043');
+    expect(
+      isTelegramCombinedPaymentPromptReply({
+        from: { is_bot: true },
+        text: currentInternationalPrompt,
+      }),
+    ).toBe(true);
     const previousPrompt = prompt
+      .replace('Number: 900000042', 'Number: 251900000042')
+      .replace('Number: 900000043', 'Number: 251900000043')
       .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
       .replace(
         '\nAfter paying,',
@@ -136,7 +148,7 @@ describe('private Telegram action reducers', () => {
       reduceTelegramAutoReceiverSmsTextSubmission({
         ...privateMetadata,
         command: 'CBE12345678',
-        replyToMessage: { from: { is_bot: true }, text: prompt },
+        replyToMessage: { from: { is_bot: true }, text: currentInternationalPrompt },
       }),
     ).toMatchObject({
       kind: 'action',
@@ -192,15 +204,30 @@ describe('private Telegram action reducers', () => {
     const telePrompt = buildTelegramTelebirrPaymentPrompt({
       playerId: 'PLAYER-DEMO-42',
       receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
+      receiverAccountReference: '251900000042',
     });
     const cbePrompt = buildTelegramCbeSmsPaymentPrompt({
       playerId: 'PLAYER-DEMO-42',
       receiverAccountHolderName: 'Demo Receiver',
-      receiverAccountReference: '0000000042',
+      receiverAccountReference: '251900000042',
     });
+    expect(telePrompt).toContain('📱 Number: 900000042');
+    expect(cbePrompt).toContain('📱 Number: 900000042');
+    expect(telePrompt).not.toContain('251900000042');
     expect(telePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(cbePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    expect(
+      parseTelegramTelebirrPaymentPromptReply({
+        from: { is_bot: true },
+        text: telePrompt.replace('📱 Number: 900000042', '📱 Number: 251900000042'),
+      }),
+    ).toBe('PLAYER-DEMO-42');
+    expect(
+      isTelegramCbeSmsPaymentPromptReply({
+        from: { is_bot: true },
+        text: cbePrompt.replace('📱 Number: 900000042', '📱 Number: 251900000042'),
+      }),
+    ).toBe(true);
     expect(
       parseTelegramTelebirrPaymentPromptReply({
         from: { is_bot: true },

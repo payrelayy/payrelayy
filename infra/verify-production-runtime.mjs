@@ -25,6 +25,7 @@ const [
   ownerPaymentMethodsHelperRotation,
   unifiedDepositHelperRotation,
   shortDepositHelperRotation,
+  copyNumbersHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -71,6 +72,7 @@ const [
   read('infra/operations/fetanagent-production-v2-owner-payment-methods-rotation-v6.sh'),
   read('infra/operations/fetanagent-production-v2-unified-deposit-rotation-v7.sh'),
   read('infra/operations/fetanagent-production-v2-short-deposit-rotation-v8.sh'),
+  read('infra/operations/fetanagent-production-v2-copy-numbers-rotation-v9.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -740,14 +742,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '08420128eb114b33ef1b8fdaf8d41dc9fa3f4277'/gu)].length,
+  [...workflow.matchAll(/status '05de2df452f844bcd49f022d52559eb7aff8ab78'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='08420128eb114b33ef1b8fdaf8d41dc9fa3f4277'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='05de2df452f844bcd49f022d52559eb7aff8ab78'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1426,10 +1428,24 @@ assert.match(
 );
 assert.match(
   shortDepositHelperRotation,
-  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+  /readonly SUCCESSOR_SHA256='a345584d30466ef0d2265e1347f5ea5d8bece054e1e2d98ad9ee842fa101dd1b'/u,
 );
 assert.match(shortDepositHelperRotation, /require_current_release/u);
 assert.match(shortDepositHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
+assert.match(
+  copyNumbersHelperRotation,
+  /readonly PREDECESSOR_SHA256='a345584d30466ef0d2265e1347f5ea5d8bece054e1e2d98ad9ee842fa101dd1b'/u,
+);
+assert.match(
+  copyNumbersHelperRotation,
+  /readonly EXPECTED_CURRENT_SHA='05de2df452f844bcd49f022d52559eb7aff8ab78'/u,
+);
+assert.match(
+  copyNumbersHelperRotation,
+  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+);
+assert.match(copyNumbersHelperRotation, /require_current_release/u);
+assert.match(copyNumbersHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

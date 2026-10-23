@@ -142,7 +142,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(duplicate).toBe(
-      'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.',
+      'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
     );
     expect(duplicate).not.toContain('30.00');
     expect(duplicate).not.toContain('fake');

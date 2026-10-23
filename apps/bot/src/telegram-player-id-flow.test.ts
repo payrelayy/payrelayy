@@ -397,6 +397,21 @@ describe('Telegram Player-ID flow presentation', () => {
     },
   );
 
+  it('does not imply a prior CBE submission was credited when its reference is submitted again', () => {
+    expect(
+      presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome: 'receiver_sms_candidate_received',
+        providerCode: 'cbe_birr',
+        providerName: 'CBE Birr',
+        matchStatus: 'already_used',
+      }),
+    ).toEqual({
+      kind: 'message',
+      text: 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
+    });
+  });
+
   it('immediately explains a same-customer completed duplicate without exposing the reference', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,

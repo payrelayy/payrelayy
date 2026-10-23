@@ -1,6 +1,12 @@
 export type OwnerTransactionGroup = 'all' | 'pending' | 'credited' | 'rejected';
 export type OwnerTransactionDetail =
-  'waiting_approval' | 'held_review' | 'checking' | 'credited' | 'rejected';
+  | 'waiting_approval'
+  | 'held_review'
+  | 'checking'
+  | 'credited'
+  | 'rejected'
+  | 'awaiting_manual_credit'
+  | 'manually_credited';
 
 export interface OwnerTransactionFilters {
   readonly status: OwnerTransactionGroup;
@@ -61,6 +67,8 @@ const REASONS = new Set([
   'Payment could not be verified',
   'Owner approved; credit in progress',
   'Credit in progress',
+  'Awaiting manual credit',
+  'Owner marked manually credited',
 ]);
 
 function record(value: unknown): Record<string, unknown> {
@@ -103,10 +111,26 @@ function transaction(value: unknown): OwnerTransaction {
     typeof row.playerMasked !== 'string' ||
     !MASKED_PLAYER.test(row.playerMasked) ||
     !['pending', 'credited', 'rejected'].includes(String(row.statusGroup)) ||
-    !['waiting_approval', 'held_review', 'checking', 'credited', 'rejected'].includes(
-      String(row.statusDetail),
-    ) ||
-    (row.reason !== null && (typeof row.reason !== 'string' || !REASONS.has(row.reason))) ||
+    ![
+      'waiting_approval',
+      'held_review',
+      'checking',
+      'credited',
+      'rejected',
+      'awaiting_manual_credit',
+      'manually_credited',
+    ].includes(String(row.statusDetail)) ||
+    (row.reason !== null &&
+      (typeof row.reason !== 'string' ||
+        (!REASONS.has(row.reason) &&
+          !(
+            row.statusDetail === 'rejected' &&
+            row.decidedBy === 'Owner' &&
+            row.reason.trim() === row.reason &&
+            row.reason.length >= 10 &&
+            row.reason.length <= 240 &&
+            !/[\u0000-\u001f\u007f]/u.test(row.reason)
+          )))) ||
     (row.decidedBy !== null &&
       (typeof row.decidedBy !== 'string' ||
         row.decidedBy.length > 100 ||
@@ -114,7 +138,9 @@ function transaction(value: unknown): OwnerTransaction {
     (row.decidedAt !== null && !timestamp(row.decidedAt)) ||
     typeof row.canDecide !== 'boolean' ||
     (row.canDecide && (row.statusDetail !== 'waiting_approval' || row.statusGroup !== 'pending')) ||
-    (row.statusGroup === 'credited' && row.statusDetail !== 'credited') ||
+    (row.statusGroup === 'credited' &&
+      row.statusDetail !== 'credited' &&
+      row.statusDetail !== 'manually_credited') ||
     (row.statusGroup === 'rejected' && row.statusDetail !== 'rejected')
   )
     throw new OwnerTransactionsUnavailableError();

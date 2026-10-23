@@ -8,6 +8,10 @@ import {
   OwnerOldPaymentRejectedError,
 } from './owner-telebirr-old-payments.js';
 import { OwnerTransactionsRejectedError } from './owner-telebirr-transactions.js';
+import {
+  OwnerManualPaymentConflictError,
+  OwnerManualPaymentRejectedError,
+} from './owner-manual-payments.js';
 import Fastify, { LogController } from 'fastify';
 import { registerSupportContactRoutes } from './support-contact-routes.js';
 import { OwnerCompanionConnectionRejectedError } from './owner-companion-connection.js';
@@ -2520,15 +2524,10 @@ export function buildOwnerControlApp(
           exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
         )
           return reply.code(400).send({ error: 'invalid_request' });
-        const authUserId = await ownerSubject(request.raw.rawHeaders);
-        if (!dependencies.runtime.receiverSmsOldPayments)
-          return reply.code(503).send({ error: 'owner_control_unavailable' });
-        const decision = await dependencies.runtime.receiverSmsOldPayments.decide(
-          authUserId,
-          request.params.candidateId,
-          body.decision,
-        );
-        return reply.code(200).send({ decision });
+        await ownerSubject(request.raw.rawHeaders);
+        // The old procedure enqueues an automatic transfer. It is intentionally
+        // unavailable now that Owner approval means a manual reservation.
+        return reply.code(409).send({ error: 'use_manual_payment_review' });
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
@@ -2542,6 +2541,193 @@ export function buildOwnerControlApp(
       }
     },
   );
+
+  app.get<{ Querystring: { status?: string; limit?: string; offset?: string } }>(
+    '/v1/owner/manual-payment-cases',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => !['status', 'limit', 'offset'].includes(key)))
+          return reply.code(400).send({ error: 'invalid_request' });
+        const status = request.query.status ?? 'pending';
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
+        if (
+          !['pending', 'awaiting_manual_credit', 'manually_credited', 'rejected'].includes(
+            status,
+          ) ||
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset > 10000
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const cases = await dependencies.runtime.manualPayments.listCases(
+          actor,
+          status as 'pending' | 'awaiting_manual_credit' | 'manually_credited' | 'rejected',
+          limit,
+          offset,
+        );
+        return reply.code(200).send({ cases });
+      } catch (error) {
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        request.log.warn('Owner manual payment cases are unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.get<{ Querystring: { limit?: string; offset?: string } }>(
+    '/v1/owner/receiver-sms-inbox',
+    async (request, reply) => {
+      try {
+        if (Object.keys(request.query).some((key) => !['limit', 'offset'].includes(key)))
+          return reply.code(400).send({ error: 'invalid_request' });
+        const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+        const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
+        if (
+          !Number.isSafeInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset > 10000
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const payments = await dependencies.runtime.manualPayments.listSms(actor, limit, offset);
+        return reply.code(200).send({ payments });
+      } catch (error) {
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        request.log.warn('Owner receiving-phone inbox is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post<{ Params: { candidateId: string } }>(
+    '/v1/owner/manual-payment-cases/:candidateId/decision',
+    async (request, reply) => {
+      try {
+        const body = exactObject(request.body, ['decision', 'reason', 'requestId', 'confirmed']);
+        if (
+          !body ||
+          !UUID_V4_PATTERN.test(request.params.candidateId) ||
+          typeof body.requestId !== 'string' ||
+          !UUID_V4_PATTERN.test(body.requestId) ||
+          (body.decision !== 'approve' && body.decision !== 'reject') ||
+          (body.decision === 'approve' && body.reason !== null) ||
+          (body.decision === 'reject' &&
+            (typeof body.reason !== 'string' ||
+              body.reason.trim() !== body.reason ||
+              body.reason.length < 10 ||
+              body.reason.length > 240 ||
+              /[\u0000-\u001f\u007f]/u.test(body.reason))) ||
+          body.confirmed !== true ||
+          Object.keys(request.query as object).length !== 0 ||
+          exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+          !privatePilotMutationOrigins.has(
+            exactRawHeader(request.raw.rawHeaders, 'origin') ?? '',
+          ) ||
+          exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+            'owner-manual-payment-v1' ||
+          exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+        )
+          return reply.code(400).send({ error: 'invalid_request' });
+        const actor = await ownerSubject(request.raw.rawHeaders);
+        if (!dependencies.runtime.manualPayments)
+          return reply.code(503).send({ error: 'owner_control_unavailable' });
+        const decision = await dependencies.runtime.manualPayments.decide(
+          actor,
+          request.params.candidateId,
+          body.decision,
+          body.reason as string | null,
+        );
+        return reply.code(200).send({ decision });
+      } catch (error) {
+        if (error instanceof OwnerAuthenticationRejectedError)
+          return reply.code(403).send({ error: 'forbidden' });
+        if (error instanceof OwnerManualPaymentRejectedError)
+          return reply.code(400).send({ error: 'invalid_request' });
+        if (error instanceof OwnerManualPaymentConflictError)
+          return reply.code(409).send({ error: 'payment_not_ready' });
+        request.log.warn('Owner manual payment decision is unavailable.');
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      }
+    },
+  );
+
+  app.post('/v1/owner/manual-payments/complete', async (request, reply) => {
+    try {
+      const body = exactObject(request.body, [
+        'caseId',
+        'paymentEventId',
+        'amountMinor',
+        'receiverAccountId',
+        'bankPaymentConfirmed',
+        'playerCreditedConfirmed',
+        'requestId',
+      ]);
+      if (
+        !body ||
+        typeof body.requestId !== 'string' ||
+        !UUID_V4_PATTERN.test(body.requestId) ||
+        (body.caseId !== null &&
+          (typeof body.caseId !== 'string' || !UUID_V4_PATTERN.test(body.caseId))) ||
+        (body.paymentEventId !== null &&
+          (typeof body.paymentEventId !== 'string' ||
+            !UUID_V4_PATTERN.test(body.paymentEventId))) ||
+        (body.caseId === null) === (body.paymentEventId === null) ||
+        (body.amountMinor !== null &&
+          (typeof body.amountMinor !== 'string' || !/^[1-9][0-9]*$/u.test(body.amountMinor))) ||
+        (body.receiverAccountId !== null &&
+          (typeof body.receiverAccountId !== 'string' ||
+            !UUID_V4_PATTERN.test(body.receiverAccountId))) ||
+        typeof body.bankPaymentConfirmed !== 'boolean' ||
+        body.playerCreditedConfirmed !== true ||
+        Object.keys(request.query as object).length !== 0 ||
+        exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
+        !privatePilotMutationOrigins.has(exactRawHeader(request.raw.rawHeaders, 'origin') ?? '') ||
+        exactRawHeader(request.raw.rawHeaders, 'x-fetanagent-owner-csrf') !==
+          'owner-manual-payment-v1' ||
+        exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
+      )
+        return reply.code(400).send({ error: 'invalid_request' });
+      const actor = await ownerSubject(request.raw.rawHeaders);
+      if (!dependencies.runtime.manualPayments)
+        return reply.code(503).send({ error: 'owner_control_unavailable' });
+      const completed = await dependencies.runtime.manualPayments.complete(actor, {
+        caseId: body.caseId as string | null,
+        paymentEventId: body.paymentEventId as string | null,
+        amountMinor: body.amountMinor as string | null,
+        receiverAccountId: body.receiverAccountId as string | null,
+        bankPaymentConfirmed: body.bankPaymentConfirmed as boolean,
+        playerCreditedConfirmed: true,
+      });
+      return reply.code(200).send({ completed });
+    } catch (error) {
+      if (error instanceof OwnerAuthenticationRejectedError)
+        return reply.code(403).send({ error: 'forbidden' });
+      if (error instanceof OwnerManualPaymentRejectedError)
+        return reply.code(400).send({ error: 'invalid_request' });
+      if (error instanceof OwnerManualPaymentConflictError)
+        return reply.code(409).send({ error: 'payment_not_ready' });
+      request.log.warn('Owner manual payment completion is unavailable.');
+      return reply.code(503).send({ error: 'owner_control_unavailable' });
+    }
+  });
 
   app.post<{ Params: { candidateId: string } }>(
     '/v1/owner/telebirr-old-payments/:candidateId/decision',
@@ -2565,23 +2751,14 @@ export function buildOwnerControlApp(
           exactRawHeader(request.raw.rawHeaders, 'x-idempotency-key') !== body.requestId
         )
           return reply.code(400).send({ error: 'invalid_request' });
-        const authUserId = await ownerSubject(request.raw.rawHeaders);
-        if (!dependencies.runtime.telebirrOldPayments)
-          return reply.code(503).send({ error: 'owner_control_unavailable' });
-        const decision = await dependencies.runtime.telebirrOldPayments.decide(
-          authUserId,
-          request.params.candidateId,
-          body.decision,
-        );
-        return reply.code(200).send({ decision });
+        await ownerSubject(request.raw.rawHeaders);
+        return reply.code(409).send({ error: 'use_manual_payment_review' });
       } catch (error) {
         if (
           error instanceof OwnerAuthenticationRejectedError ||
           error instanceof OwnerOldPaymentRejectedError
         )
           return reply.code(403).send({ error: 'forbidden' });
-        if (error instanceof OwnerOldPaymentConflictError)
-          return reply.code(409).send({ error: 'payment_not_ready' });
         request.log.warn('Owner old-payment decision is unavailable.');
         return reply.code(503).send({ error: 'owner_control_unavailable' });
       }

@@ -14,13 +14,6 @@ export interface OwnerOldPaymentPending {
   readonly playerMasked: string;
 }
 
-export interface OwnerOldPaymentDecision {
-  readonly decision: 'approved' | 'rejected';
-  readonly decidedAt: string;
-  readonly depositIntentId?: string;
-  readonly executionJobId?: string;
-}
-
 export class OwnerOldPaymentRejectedError extends Error {}
 export class OwnerOldPaymentConflictError extends Error {}
 export class OwnerOldPaymentUnavailableError extends Error {}
@@ -86,58 +79,6 @@ export class PostgresOwnerTelebirrOldPayments {
     } catch (error) {
       if (error instanceof OwnerOldPaymentUnavailableError) throw error;
       if (errorCode(error) === '42501') throw new OwnerOldPaymentRejectedError();
-      throw new OwnerOldPaymentUnavailableError();
-    }
-  }
-
-  async decide(
-    authUserId: string,
-    candidateId: string,
-    action: 'approve' | 'reject',
-  ): Promise<OwnerOldPaymentDecision> {
-    if (
-      !UUID.test(authUserId) ||
-      !UUID.test(candidateId) ||
-      (action !== 'approve' && action !== 'reject')
-    )
-      throw new OwnerOldPaymentRejectedError();
-    try {
-      const result = await this.database.query(
-        `select app.decide_owner_routine_telebirr_old_payment(
-          $1::uuid,$2::uuid,$3::text) as decision`,
-        [authUserId, candidateId, action],
-      );
-      if (result.rows.length !== 1) throw new OwnerOldPaymentUnavailableError();
-      const data = object(object(result.rows[0]).decision);
-      if (
-        (data.decision !== 'approved' && data.decision !== 'rejected') ||
-        typeof data.decidedAt !== 'string' ||
-        Number.isNaN(Date.parse(data.decidedAt))
-      )
-        throw new OwnerOldPaymentUnavailableError();
-      if (data.decision === 'approved') {
-        if (
-          typeof data.depositIntentId !== 'string' ||
-          !UUID.test(data.depositIntentId) ||
-          typeof data.executionJobId !== 'string' ||
-          !UUID.test(data.executionJobId)
-        )
-          throw new OwnerOldPaymentUnavailableError();
-        return {
-          decision: 'approved',
-          decidedAt: data.decidedAt,
-          depositIntentId: data.depositIntentId,
-          executionJobId: data.executionJobId,
-        };
-      }
-      if ('depositIntentId' in data || 'executionJobId' in data)
-        throw new OwnerOldPaymentUnavailableError();
-      return { decision: 'rejected', decidedAt: data.decidedAt };
-    } catch (error) {
-      if (error instanceof OwnerOldPaymentUnavailableError) throw error;
-      if (errorCode(error) === '42501') throw new OwnerOldPaymentRejectedError();
-      if (errorCode(error) === 'P0001' || errorCode(error) === '23505')
-        throw new OwnerOldPaymentConflictError();
       throw new OwnerOldPaymentUnavailableError();
     }
   }

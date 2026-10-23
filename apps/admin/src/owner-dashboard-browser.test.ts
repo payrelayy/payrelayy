@@ -458,64 +458,9 @@ describe('Owner Transactions page', () => {
     expect(list.children).toHaveLength(1);
     expect(browser.element('#transactions-badge').textContent).toBe('1 waiting');
     const card = list.children[0] as FakeElement;
-    const actions = card.children.at(-1) as FakeElement;
-    const approve = actions.children[0] as FakeElement;
-    await approve.listeners.get('click')?.({ preventDefault() {} });
+    expect(JSON.stringify(card)).toContain('Available in Payment review');
     expect(decisionCalls).toBe(0);
     expect(JSON.stringify(list)).not.toContain('FULL_REFERENCE');
-  });
-
-  it('records a confirmed rejection through the existing Owner decision route and refreshes the audit row', async () => {
-    const decisions: Array<{ action: string; candidateId: string }> = [];
-    let rejected = false;
-    const browser = ownerBrowserHarness(503, {
-      confirm: true,
-      fetchOverride: (url, init) => {
-        if (url.startsWith('/v1/owner/transactions?'))
-          return response(200, {
-            rows: rejected
-              ? [
-                  {
-                    ...oldPayment,
-                    statusGroup: 'rejected',
-                    statusDetail: 'rejected',
-                    reason: 'Payment older than 1 hour',
-                    decidedBy: 'Owner',
-                    decidedAt: '2026-10-20T10:05:00Z',
-                    canDecide: false,
-                  },
-                ]
-              : [oldPayment],
-            total: 1,
-            pending: rejected ? 0 : 1,
-            credited: 0,
-            rejected: rejected ? 1 : 0,
-            waitingCount: rejected ? 0 : 1,
-          });
-        if (url.endsWith('/telebirr-old-payments/' + oldPayment.candidateId + '/decision')) {
-          const body = JSON.parse(String(init.body)) as { decision: string };
-          decisions.push({ action: body.decision, candidateId: oldPayment.candidateId });
-          rejected = true;
-          return response(200, {
-            decision: { decision: 'rejected', decidedAt: '2026-10-20T10:05:00Z' },
-          });
-        }
-        return undefined;
-      },
-    });
-    await browser.signIn();
-    const actions = (browser.element('#transactions-list').children[0] as FakeElement).children.at(
-      -1,
-    ) as FakeElement;
-    expect(actions.children).toHaveLength(2);
-    await browser.call('decideTransaction', oldPayment, 'reject');
-    expect(decisions).toHaveLength(1);
-    expect(decisions[0]?.action).toBe('reject');
-    expect(decisions[0]?.candidateId).toBe(oldPayment.candidateId);
-    expect(browser.element('#transactions-badge').hidden).toBe(true);
-    const reviewed = browser.element('#transactions-list').children[0] as FakeElement;
-    expect(JSON.stringify(reviewed)).toContain('Owner');
-    expect(JSON.stringify(reviewed)).toContain('Rejected');
   });
 
   it('keeps held and checking rows read-only and clears history on sign-out', async () => {
@@ -546,72 +491,186 @@ describe('Owner Transactions page', () => {
     expect(browser.element('#transactions-list').children).toHaveLength(0);
     expect(browser.element('#transactions-badge').hidden).toBe(true);
   });
+
+  it('shows the manual outcome in older TeleBirr history', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/transactions?')
+          ? response(200, {
+              rows: [
+                {
+                  ...oldPayment,
+                  statusGroup: 'credited',
+                  statusDetail: 'manually_credited',
+                  canDecide: false,
+                  reason: 'Owner marked manually credited',
+                  decidedBy: 'Owner',
+                  decidedAt: '2026-10-20T10:05:00Z',
+                },
+              ],
+              total: 1,
+              pending: 0,
+              credited: 1,
+              rejected: 0,
+              waitingCount: 0,
+            })
+          : undefined,
+    });
+    await browser.signIn();
+    expect(JSON.stringify(browser.element('#transactions-list'))).toContain('Manually credited');
+  });
 });
 
-describe('Owner older receiver SMS payments', () => {
+describe('Owner manual payment review', () => {
   const pending = {
+    caseId: null,
     candidateId: '22222222-2222-4222-8222-222222222222',
+    legacyCandidateId: null,
+    paymentEventId: null,
     providerCode: 'cbe_birr',
     submittedAt: '2026-10-20T10:00:00Z',
-    paymentAt: '2026-10-20T08:59:00Z',
-    amountMinor: '2500',
+    paymentAt: null,
+    amountMinor: null,
     referenceMasked: '***AB12',
+    receiverAccountId: null,
+    receiverAccountMasked: null,
     playerMasked: '***5678',
-    reviewKind: 'older_approval',
-    reasonCode: 'old_payment',
+    status: 'pending',
+    rejectionReason: null,
+    decidedAt: null,
+    completedAt: null,
   };
 
-  it('shows a masked CBE payment and requires confirmation before rejection', async () => {
+  it('shows a masked CBE payment and reserves approval without automatic credit', async () => {
     let decided = false;
     const browser = ownerBrowserHarness(503, {
       confirm: true,
       fetchOverride: (url, init) => {
-        if (url.startsWith('/v1/owner/receiver-sms-old-payments?'))
-          return response(200, { pending: decided ? [] : [pending] });
-        if (url.endsWith('/receiver-sms-old-payments/' + pending.candidateId + '/decision')) {
+        if (url.startsWith('/v1/owner/manual-payment-cases?'))
+          return response(200, { cases: decided ? [] : [pending] });
+        if (url.endsWith('/manual-payment-cases/' + pending.candidateId + '/decision')) {
           const body = JSON.parse(String(init.body)) as { decision: string; confirmed: boolean };
-          expect(body).toMatchObject({ decision: 'reject', confirmed: true });
+          expect(body).toMatchObject({ decision: 'approve', confirmed: true });
           decided = true;
           return response(200, {
-            decision: { decision: 'rejected', decidedAt: '2026-10-20T10:05:00Z' },
+            decision: {
+              caseId: '33333333-3333-4333-8333-333333333333',
+              status: 'awaiting_manual_credit',
+            },
           });
         }
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
         return undefined;
       },
     });
+    browser.element('#manual-payment-status-filter').value = 'pending';
     await browser.signIn();
     const list = browser.element('#receiver-sms-old-list');
     expect(list.children).toHaveLength(1);
-    expect(browser.element('#receiver-sms-old-badge').textContent).toBe('1 waiting');
+    expect(browser.element('#receiver-sms-old-badge').textContent).toBe('1 shown');
     expect(JSON.stringify(list)).toContain('CBE Birr');
     expect(JSON.stringify(list)).not.toContain('FULL_REFERENCE');
-    await browser.call('decideReceiverSmsOldPayment', pending, 'reject');
+    await browser.call('decideManualPaymentCase', pending, 'approve');
     expect(decided).toBe(true);
+    expect(browser.element('#manual-payment-status-filter').value).toBe('awaiting_manual_credit');
     expect(browser.element('#receiver-sms-old-badge').hidden).toBe(true);
     expect(list.children).toHaveLength(0);
+    expect(
+      browser.fetchCalls.some(
+        (call) => call.url.includes('/receiver-sms-old-payments/') && call.init.method === 'POST',
+      ),
+    ).toBe(false);
   });
 
-  it('shows a missing SMS as held for review without an approval button', async () => {
+  it('allows Owner review when no matching SMS exists', async () => {
     const browser = ownerBrowserHarness(503, {
       fetchOverride: (url) =>
-        url.startsWith('/v1/owner/receiver-sms-old-payments?')
+        url.startsWith('/v1/owner/manual-payment-cases?')
+          ? response(200, { cases: [pending] })
+          : undefined,
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
+    expect(JSON.stringify(card)).toContain('No matching phone SMS');
+    expect(JSON.stringify(card)).toContain('Approve for manual credit');
+  });
+
+  it('routes older signed TeleBirr receipts through the manual approval action', async () => {
+    const older = {
+      ...pending,
+      candidateId: null,
+      legacyCandidateId: '44444444-4444-4444-8444-444444444444',
+      providerCode: 'telebirr',
+      amountMinor: '2500',
+      paymentAt: '2026-10-20T08:59:00Z',
+    };
+    let approved = false;
+    const browser = ownerBrowserHarness(503, {
+      confirm: true,
+      fetchOverride: (url, init) => {
+        if (url.startsWith('/v1/owner/manual-payment-cases?'))
+          return response(200, { cases: approved ? [] : [older] });
+        if (url.endsWith('/manual-payment-cases/' + older.legacyCandidateId + '/decision')) {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            decision: 'approve',
+            confirmed: true,
+          });
+          approved = true;
+          return response(200, {
+            decision: {
+              caseId: '33333333-3333-4333-8333-333333333333',
+              status: 'awaiting_manual_credit',
+            },
+          });
+        }
+        if (url === '/v1/owner/receiver-accounts') return response(200, { receivers: [] });
+        return undefined;
+      },
+    });
+    browser.element('#manual-payment-status-filter').value = 'pending';
+    await browser.signIn();
+    expect(JSON.stringify(browser.element('#receiver-sms-old-list'))).toContain(
+      'Older signed TeleBirr receipt',
+    );
+    await browser.call('decideManualPaymentCase', older, 'approve');
+    expect(approved).toBe(true);
+    expect(
+      browser.fetchCalls.some(
+        (call) => call.url.includes('/telebirr-old-payments/') && call.init.method === 'POST',
+      ),
+    ).toBe(false);
+  });
+
+  it('shows the manual completion action for a stopped automatic credit with a linked Player', async () => {
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/receiver-sms-inbox?')
           ? response(200, {
-              pending: [
+              payments: [
                 {
-                  ...pending,
-                  paymentAt: null,
-                  amountMinor: null,
-                  reviewKind: 'held_review',
-                  reasonCode: 'no_receiver_sms_after_5m',
+                  paymentEventId: '44444444-4444-4444-8444-444444444444',
+                  providerCode: 'cbe_birr',
+                  paymentAt: '2026-10-23T09:00:00Z',
+                  receivedAt: '2026-10-23T09:00:10Z',
+                  amountMinor: '3300',
+                  receiverAccountMasked: '***1234',
+                  receiverHolderName: 'Receiver',
+                  referenceMasked: '***AB12',
+                  candidateId: '22222222-2222-4222-8222-222222222222',
+                  playerMasked: '***5678',
+                  status: 'auto_not_credited',
+                  caseId: null,
+                  canMarkManuallyCredited: true,
                 },
               ],
             })
           : undefined,
     });
     await browser.signIn();
-    const card = browser.element('#receiver-sms-old-list').children[0] as FakeElement;
-    expect(JSON.stringify(card)).toContain('No matching receiving-phone SMS');
-    expect(JSON.stringify(card)).not.toContain('Approve payment');
+    const inbox = JSON.stringify(browser.element('#receiver-sms-inbox-list'));
+    expect(inbox).toContain('I manually credited the selected Player');
+    expect(inbox).toContain('Manually credited');
   });
 });
 

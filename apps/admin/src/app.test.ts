@@ -766,7 +766,7 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
-  it('allows only a confirmed Owner decision for a masked older-payment inbox', async () => {
+  it('keeps the older-payment inbox read-only and routes decisions to manual review', async () => {
     const candidateId = '66666666-6666-4666-8666-666666666666';
     const requestId = '77777777-7777-4777-8777-777777777777';
     const calls: unknown[] = [];
@@ -786,10 +786,6 @@ describe('Owner-control HTTP boundary', () => {
                 playerMasked: '***5678',
               },
             ];
-          },
-          decide: async (actor, candidate, action) => {
-            calls.push(['decide', actor, candidate, action]);
-            return { decision: 'rejected' as const, decidedAt: '2026-10-20T10:01:00.000Z' };
           },
         },
       }),
@@ -827,17 +823,9 @@ describe('Owner-control HTTP boundary', () => {
           'x-idempotency-key': requestId,
         },
       });
-      expect(decided.statusCode).toBe(200);
-      expect(decided.json()).toEqual({
-        decision: {
-          decision: 'rejected',
-          decidedAt: '2026-10-20T10:01:00.000Z',
-        },
-      });
-      expect(calls).toEqual([
-        ['list', authUserId, 25],
-        ['decide', authUserId, candidateId, 'reject'],
-      ]);
+      expect(decided.statusCode).toBe(409);
+      expect(decided.json()).toEqual({ error: 'use_manual_payment_review' });
+      expect(calls).toEqual([['list', authUserId, 25]]);
     } finally {
       await app.close();
     }
@@ -911,7 +899,7 @@ describe('Owner-control HTTP boundary', () => {
     }
   });
 
-  it('requires Owner identity and confirmation for an older SMS payment decision', async () => {
+  it('retains the older SMS read view but disables its automatic-credit decision', async () => {
     const candidateId = '22222222-2222-4222-8222-222222222222';
     const requestId = '77777777-7777-4777-8777-777777777777';
     const calls: unknown[] = [];
@@ -934,10 +922,6 @@ describe('Owner-control HTTP boundary', () => {
                 reasonCode: 'old_payment' as const,
               },
             ];
-          },
-          decide: async (actor, candidate, action) => {
-            calls.push(['decide', actor, candidate, action]);
-            return { decision: 'rejected' as const, decidedAt: '2026-10-20T10:01:00.000Z' };
           },
         },
       }),
@@ -975,11 +959,107 @@ describe('Owner-control HTTP boundary', () => {
           'x-idempotency-key': requestId,
         },
       });
+      expect(decided.statusCode).toBe(409);
+      expect(decided.json().error).toBe('use_manual_payment_review');
+      expect(calls).toEqual([['list', authUserId, 25]]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('requires Owner identity and explicit confirmation for manual payment decisions', async () => {
+    const candidateId = '22222222-2222-4222-8222-222222222222';
+    const caseId = '33333333-3333-4333-8333-333333333333';
+    const requestId = '77777777-7777-4777-8777-777777777777';
+    const calls: unknown[] = [];
+    const app = buildOwnerControlApp(config(false, false, 'staging'), {
+      fetch: verifiedAuthFetch(),
+      runtime: runtime({
+        manualPayments: {
+          listCases: async () => [],
+          listSms: async () => [],
+          decide: async (actor, candidate, decision, reason) => {
+            calls.push([actor, candidate, decision, reason]);
+            return { caseId, status: 'awaiting_manual_credit' as const };
+          },
+          complete: async (actor, completion) => {
+            calls.push(['complete', actor, completion]);
+            return { caseId, status: 'manually_credited' as const };
+          },
+        },
+      }),
+    });
+    try {
+      const url = `/v1/owner/manual-payment-cases/${candidateId}/decision`;
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url,
+            payload: { decision: 'approve', reason: null, requestId, confirmed: true },
+          })
+        ).statusCode,
+      ).toBe(400);
+      const decided = await app.inject({
+        method: 'POST',
+        url,
+        payload: { decision: 'approve', reason: null, requestId, confirmed: true },
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+          origin: 'http://127.0.0.1:3002',
+          'x-fetanagent-owner-csrf': 'owner-manual-payment-v1',
+          'x-idempotency-key': requestId,
+        },
+      });
       expect(decided.statusCode).toBe(200);
-      expect(decided.json().decision.decision).toBe('rejected');
-      expect(calls).toEqual([
-        ['list', authUserId, 25],
-        ['decide', authUserId, candidateId, 'reject'],
+      expect(decided.json()).toEqual({ decision: { caseId, status: 'awaiting_manual_credit' } });
+      expect(calls).toEqual([[authUserId, candidateId, 'approve', null]]);
+      const completion = {
+        caseId,
+        paymentEventId: null,
+        amountMinor: '3300',
+        receiverAccountId: '55555555-5555-4555-8555-555555555555',
+        bankPaymentConfirmed: true,
+        playerCreditedConfirmed: true,
+        requestId,
+      };
+      const headers = {
+        authorization: `Bearer ${bearer}`,
+        'content-type': 'application/json',
+        origin: 'http://127.0.0.1:3002',
+        'x-fetanagent-owner-csrf': 'owner-manual-payment-v1',
+        'x-idempotency-key': requestId,
+      };
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/v1/owner/manual-payments/complete',
+            payload: { ...completion, playerCreditedConfirmed: false },
+            headers,
+          })
+        ).statusCode,
+      ).toBe(400);
+      const finished = await app.inject({
+        method: 'POST',
+        url: '/v1/owner/manual-payments/complete',
+        payload: completion,
+        headers,
+      });
+      expect(finished.statusCode).toBe(200);
+      expect(finished.json()).toEqual({ completed: { caseId, status: 'manually_credited' } });
+      expect(calls[1]).toEqual([
+        'complete',
+        authUserId,
+        {
+          caseId,
+          paymentEventId: null,
+          amountMinor: '3300',
+          receiverAccountId: completion.receiverAccountId,
+          bankPaymentConfirmed: true,
+          playerCreditedConfirmed: true,
+        },
       ]);
     } finally {
       await app.close();

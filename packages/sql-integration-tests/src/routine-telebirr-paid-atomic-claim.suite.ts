@@ -22,7 +22,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
   getOwnerAuthUserId: () => string,
 ): void {
   describe('isolated atomic routine TeleBirr paid claim boundary', () => {
-    it('limits the Owner settlement grant to old-payment finalization', async () => {
+    it('removes the Owner direct settlement grant after manual review replaces approval', async () => {
       const grants = await getClient().query<{ is_finalize: boolean; grantee: string }>(
         `select routine.oid = $1::pg_catalog.regprocedure as is_finalize,
                 pg_catalog.pg_get_userbyid(privilege.grantee) as grantee
@@ -37,7 +37,6 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         [procedure, scanProcedure],
       );
       expect(grants.rows).toEqual([
-        { is_finalize: true, grantee: 'fetanagent_owner_control' },
         {
           is_finalize: true,
           grantee: 'fetanagent_routine_telebirr_paid_settlement',
@@ -166,8 +165,6 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         [procedure],
       );
       expect(appGrants.rows).toEqual([
-        { role_name: 'fetanagent_owner_control' },
-        { role_name: 'fetanagent_owner_control_runtime' },
         { role_name: 'fetanagent_routine_telebirr_paid_settlement' },
         { role_name: 'fetanagent_routine_telebirr_paid_settlement_runtime' },
       ]);
@@ -925,7 +922,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
       }
     });
 
-    it('keeps an old signed receipt pending, then requires Owner approval and all live claim gates', async () => {
+    it('routes an older signed receipt to manual Owner credit without creating a claim or job', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -1105,6 +1102,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           [exact.receiver_account_id, occurredAt],
         );
         expect(receiverWindow.rows).toEqual([{ receiver_valid_at_payment: true }]);
+        let approvedCaseId: string;
         await client.query('set session authorization fetanagent_owner_control_runtime');
         try {
           const list = await client.query<{ candidate_id: string }>(
@@ -1147,140 +1145,87 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
             [getOwnerAuthUserId(), suffix],
           );
           expect(searched.rows[0]!.snapshot.total).toBeGreaterThanOrEqual(1);
-          await client.query('savepoint old_reject_preview');
-          const rejected = await client.query<{ decision: { decision: string } }>(
-            `select app.decide_owner_routine_telebirr_old_payment(
-              $1::uuid,$2::uuid,'reject') as decision`,
+          const manualPending = await client.query<{ legacy_candidate_id: string }>(
+            `select legacy_candidate_id from app.list_owner_manual_payment_cases(
+              $1::uuid,'pending',25,0) where legacy_candidate_id=$2::uuid`,
             [getOwnerAuthUserId(), paidId],
           );
-          expect(rejected.rows[0]!.decision.decision).toBe('rejected');
+          expect(manualPending.rows).toEqual([{ legacy_candidate_id: paidId }]);
+          await client.query('savepoint old_reject_preview');
+          const rejected = await client.query<{ decision: { status: string } }>(
+            `select app.decide_owner_manual_payment_case(
+              $1::uuid,$2::uuid,'reject','Payment not accepted') as decision`,
+            [getOwnerAuthUserId(), paidId],
+          );
+          expect(rejected.rows[0]!.decision.status).toBe('rejected');
           await client.query('rollback to savepoint old_reject_preview');
           await client.query('release savepoint old_reject_preview');
+          const approved = await client.query<{
+            decision: { caseId: string; status: string };
+          }>(
+            `select app.decide_owner_manual_payment_case(
+              $1::uuid,$2::uuid,'approve',null) as decision`,
+            [getOwnerAuthUserId(), paidId],
+          );
+          expect(approved.rows[0]!.decision.status).toBe('awaiting_manual_credit');
+          approvedCaseId = approved.rows[0]!.decision.caseId;
         } finally {
           await client.query('reset session authorization');
         }
-        await client.query(`update app.feature_switches set mode='disabled'
-          where feature_key in ('payment_verification','deposit_execution')`);
-        await client.query('savepoint old_stopped_approval');
-        await client.query('set session authorization fetanagent_owner_control_runtime');
-        try {
-          await expect(
-            client.query(
-              `select app.decide_owner_routine_telebirr_old_payment(
-              $1::uuid,$2::uuid,'approve')`,
-              [getOwnerAuthUserId(), paidId],
-            ),
-          ).rejects.toThrow(/settlement is stopped/iu);
-        } finally {
-          await client.query('rollback to savepoint old_stopped_approval');
-          await client.query('release savepoint old_stopped_approval');
-          await client.query('reset session authorization');
-        }
-        const stopped = await client.query<{ decisions: string; jobs: string }>(
-          `select (select count(*)::text from app.routine_telebirr_old_payment_decisions
+        const held = await client.query<{
+          decisions: string;
+          evidence: string;
+          claims: string;
+          jobs: string;
+        }>(
+          `select
+            (select count(*)::text from app.routine_telebirr_old_payment_decisions
               where candidate_id=$1::uuid) as decisions,
+            (select count(*)::text from app.provider_payment_evidence
+              where payment_provider_id=$2::uuid
+                and canonical_reference_fingerprint=$3::text) as evidence,
+            (select count(*)::text from app.deposit_payment_claims claim
+              join app.provider_payment_evidence evidence
+                on evidence.id=claim.provider_payment_evidence_id
+              where evidence.payment_provider_id=$2::uuid
+                and evidence.canonical_reference_fingerprint=$3::text) as claims,
             (select count(*)::text from app.deposit_jobs job
               join app.routine_telebirr_paid_intent_openings opening
                 on opening.deposit_intent_id=job.deposit_intent_id
               where opening.candidate_id=$1::uuid) as jobs`,
-          [paidId],
+          [paidId, exact.payment_provider_id, exact.reference_fingerprint],
         );
-        expect(stopped.rows).toEqual([{ decisions: '0', jobs: '0' }]);
-        await client.query(`update app.feature_switches set mode='live'
-          where feature_key in ('payment_verification','deposit_execution')`);
-        await client.query('savepoint old_receiver_retired');
-        await client.query(
-          `update app.receiver_accounts
-          set status='inactive', retired_at=clock_timestamp()
-          where id=$1::uuid`,
-          [historicalReceiver.id],
-        );
+        expect(held.rows).toEqual([{ decisions: '0', evidence: '0', claims: '0', jobs: '0' }]);
         await client.query('set session authorization fetanagent_owner_control_runtime');
         try {
-          await expect(
-            client.query(
-              `select app.decide_owner_routine_telebirr_old_payment(
-              $1::uuid,$2::uuid,'approve')`,
-              [getOwnerAuthUserId(), paidId],
-            ),
-          ).rejects.toThrow();
-        } finally {
-          await client.query('rollback to savepoint old_receiver_retired');
-          await client.query('release savepoint old_receiver_retired');
-        }
-        await client.query('savepoint old_player_ineligible');
-        await client.query(
-          `update app.customer_platform_players set status='inactive'
-          where id=(select player_account_id
-            from app.routine_telebirr_untrusted_proof_requests where id=$1::uuid)`,
-          [paidId],
-        );
-        await client.query('set session authorization fetanagent_owner_control_runtime');
-        try {
-          await expect(
-            client.query(
-              `select app.decide_owner_routine_telebirr_old_payment(
-              $1::uuid,$2::uuid,'approve')`,
-              [getOwnerAuthUserId(), paidId],
-            ),
-          ).rejects.toThrow();
-        } finally {
-          await client.query('rollback to savepoint old_player_ineligible');
-          await client.query('release savepoint old_player_ineligible');
-        }
-        await client.query('set session authorization fetanagent_owner_control_runtime');
-        let approved: { decision: string; depositIntentId: string; executionJobId: string };
-        try {
-          approved = (
-            await client.query<{ decision: typeof approved }>(
-              `select app.decide_owner_routine_telebirr_old_payment(
-              $1::uuid,$2::uuid,'approve') as decision`,
-              [getOwnerAuthUserId(), paidId],
-            )
-          ).rows[0]!.decision;
-          await client.query('reset session authorization');
-        } catch (error) {
-          await client.query('rollback');
-          throw error;
-        }
-        expect(approved.decision).toBe('approved');
-        const lineage = await client.query<{
-          decisions: string;
-          claims: string;
-          jobs: string;
-          eligible: string;
-          audit_actor: string;
-        }>(
-          `select (select count(*)::text from app.routine_telebirr_old_payment_decisions
-              where candidate_id=$1::uuid and decision='approved'
-                and actor_admin_id=$4::uuid) as decisions,
-            (select count(*)::text from app.deposit_payment_claims
-              where deposit_intent_id=$2::uuid) as claims,
-            (select count(*)::text from app.deposit_jobs where id=$3::uuid
-              and status='queued') as jobs,
-            (select count(*)::text from app.assess_routine_telebirr_execution_job($3::uuid))
-              as eligible,
-            (select actor_admin_id::text from app.routine_telebirr_old_payment_decisions
-              where candidate_id=$1::uuid) as audit_actor`,
-          [paidId, approved.depositIntentId, approved.executionJobId, getOwnerAdminId()],
-        );
-        expect(lineage.rows[0]).toMatchObject({
-          decisions: '1',
-          claims: '1',
-          jobs: '1',
-          eligible: '1',
-          audit_actor: getOwnerAdminId(),
-        });
-        await client.query('set session authorization fetanagent_owner_control_runtime');
-        try {
-          const reviewed = await client.query<{
+          const awaiting = await client.query<{
+            snapshot: {
+              rows: Array<{ candidateId: string; statusDetail: string; canDecide: boolean }>;
+            };
+          }>(
+            `select app.list_owner_routine_telebirr_transactions(
+              $1::uuid,'all',null,null,null,50,0) as snapshot`,
+            [getOwnerAuthUserId()],
+          );
+          expect(awaiting.rows[0]!.snapshot.rows).toContainEqual(
+            expect.objectContaining({
+              candidateId: paidId,
+              statusDetail: 'awaiting_manual_credit',
+              canDecide: false,
+            }),
+          );
+          const completed = await client.query<{ result: { status: string } }>(
+            `select app.complete_owner_manual_payment_case(
+              $1::uuid,$2::uuid,null,2500,$3::uuid,true,true) as result`,
+            [getOwnerAuthUserId(), approvedCaseId, historicalReceiver.id],
+          );
+          expect(completed.rows[0]!.result.status).toBe('manually_credited');
+          const history = await client.query<{
             snapshot: {
               rows: Array<{
                 candidateId: string;
                 statusGroup: string;
                 statusDetail: string;
-                decidedBy: string;
-                decidedAt: string;
                 canDecide: boolean;
               }>;
             };
@@ -1289,19 +1234,45 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
               $1::uuid,'all',null,null,null,50,0) as snapshot`,
             [getOwnerAuthUserId()],
           );
-          expect(reviewed.rows[0]!.snapshot.rows).toContainEqual(
+          expect(history.rows[0]!.snapshot.rows).toContainEqual(
             expect.objectContaining({
               candidateId: paidId,
-              statusGroup: 'pending',
-              statusDetail: 'checking',
-              decidedBy: expect.any(String),
-              decidedAt: expect.any(String),
+              statusGroup: 'credited',
+              statusDetail: 'manually_credited',
               canDecide: false,
             }),
           );
         } finally {
           await client.query('reset session authorization');
         }
+        const final = await client.query<{
+          manual_status: string;
+          delivery: string;
+          evidence: string;
+          jobs: string;
+        }>(
+          `select
+            (select status from app.owner_manual_payment_cases
+              where legacy_candidate_id=$1::uuid) as manual_status,
+            (select outcome_code from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$1::uuid and notification_stage='manual_final') as delivery,
+            (select count(*)::text from app.provider_payment_evidence
+              where payment_provider_id=$2::uuid
+                and canonical_reference_fingerprint=$3::text) as evidence,
+            (select count(*)::text from app.deposit_jobs job
+              join app.routine_telebirr_paid_intent_openings opening
+                on opening.deposit_intent_id=job.deposit_intent_id
+              where opening.candidate_id=$1::uuid) as jobs`,
+          [paidId, exact.payment_provider_id, exact.reference_fingerprint],
+        );
+        expect(final.rows).toEqual([
+          {
+            manual_status: 'manually_credited',
+            delivery: 'credited',
+            evidence: '0',
+            jobs: '0',
+          },
+        ]);
       } finally {
         await client.query('rollback');
       }

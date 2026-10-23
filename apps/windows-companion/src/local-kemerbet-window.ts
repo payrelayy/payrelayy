@@ -7,7 +7,7 @@ const MIN_LOOKUP_WINDOW_HEIGHT = 650;
 
 export class LocalKemerBetWindowUnavailableError extends Error {
   constructor() {
-    super('The KemerBet Player lookup window is unavailable.');
+    super('The KemerBet agent window is unavailable.');
     this.name = 'LocalKemerBetWindowUnavailableError';
   }
 }
@@ -16,8 +16,8 @@ function unavailable(): never {
   throw new LocalKemerBetWindowUnavailableError();
 }
 
-/** Restore the guarded Chrome window before any read-only Player lookup touches the page. */
-export async function ensureKemerBetPlayerLookupWindow(page: Page): Promise<void> {
+/** Restore the guarded Chrome window before Player lookup or deposit UI work. */
+export async function ensureKemerBetAgentWindow(page: Page): Promise<void> {
   let cdp: CDPSession | undefined;
   try {
     cdp = await page.context().newCDPSession(page);

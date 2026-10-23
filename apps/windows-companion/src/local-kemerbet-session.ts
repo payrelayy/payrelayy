@@ -31,7 +31,7 @@ import {
   type LocalKemerBetLookupOutcome,
   type LocalKemerBetLookupTiming,
 } from './local-kemerbet-lookup.js';
-import { ensureKemerBetPlayerLookupWindow } from './local-kemerbet-window.js';
+import { ensureKemerBetAgentWindow } from './local-kemerbet-window.js';
 import {
   routineHistoryReadAuthorization,
   scanRoutineKemerBetHistory,
@@ -657,7 +657,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
-        await ensureKemerBetPlayerLookupWindow(page);
+        await ensureKemerBetAgentWindow(page);
         return await executeSingleLocalKemerBetLookup(page, playerId, lookupAuthorization, observe);
       } finally {
         lookupAuthorization.clear();
@@ -678,7 +678,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
-        await ensureKemerBetPlayerLookupWindow(page);
+        await ensureKemerBetAgentWindow(page);
         return await executeExactFiveLocalKemerBetLookup(page, playerIds, lookupAuthorization);
       } finally {
         lookupAuthorization.clear();
@@ -702,6 +702,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
+        await ensureKemerBetAgentWindow(page);
         return await executeExactOneUseLocalKemerBetDeposit(
           page,
           playerId,
@@ -738,6 +739,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
+        await ensureKemerBetAgentWindow(page);
         return await executeRoutineOneUseLocalKemerBetDeposit(
           page,
           playerId,
@@ -777,6 +779,7 @@ export async function startLocalKemerBetSession(
       disarmSignedInReload();
       report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
       try {
+        await ensureKemerBetAgentWindow(page);
         return await scanRoutineKemerBetHistory(page, playerId, amountMinor, window);
       } finally {
         historyReadAuthorization = undefined;
@@ -812,6 +815,7 @@ export async function startLocalKemerBetSession(
       }
       operationInProgress = true;
       try {
+        await ensureKemerBetAgentWindow(page);
         await rehearseNoMoneyRoutineDepositPreflight(
           page,
           playerId,

@@ -2,7 +2,7 @@ import type { Page } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  ensureKemerBetPlayerLookupWindow,
+  ensureKemerBetAgentWindow,
   LocalKemerBetWindowUnavailableError,
 } from './local-kemerbet-window.js';
 
@@ -46,7 +46,7 @@ describe('KemerBet Player lookup window recovery', () => {
   it('restores a minimized window before maximizing it and beginning the lookup', async () => {
     const window = fakeWindow('minimized');
 
-    await ensureKemerBetPlayerLookupWindow(window.page);
+    await ensureKemerBetAgentWindow(window.page);
 
     expect(window.changes).toEqual(['normal', 'maximized']);
     expect(window.bringToFront).toHaveBeenCalledOnce();
@@ -56,7 +56,7 @@ describe('KemerBet Player lookup window recovery', () => {
   it('maximizes a small restored window before beginning the lookup', async () => {
     const window = fakeWindow('normal');
 
-    await ensureKemerBetPlayerLookupWindow(window.page);
+    await ensureKemerBetAgentWindow(window.page);
 
     expect(window.changes).toEqual(['maximized']);
     expect(window.bringToFront).toHaveBeenCalledOnce();
@@ -65,7 +65,7 @@ describe('KemerBet Player lookup window recovery', () => {
   it('does not begin a lookup if the host display remains too small', async () => {
     const window = fakeWindow('minimized', { width: 800, height: 600 });
 
-    await expect(ensureKemerBetPlayerLookupWindow(window.page)).rejects.toBeInstanceOf(
+    await expect(ensureKemerBetAgentWindow(window.page)).rejects.toBeInstanceOf(
       LocalKemerBetWindowUnavailableError,
     );
 
@@ -78,7 +78,7 @@ describe('KemerBet Player lookup window recovery', () => {
     const window = fakeWindow('normal');
     window.send.mockRejectedValueOnce(new Error('CDP unavailable'));
 
-    await expect(ensureKemerBetPlayerLookupWindow(window.page)).rejects.toBeInstanceOf(
+    await expect(ensureKemerBetAgentWindow(window.page)).rejects.toBeInstanceOf(
       LocalKemerBetWindowUnavailableError,
     );
 

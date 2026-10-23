@@ -252,7 +252,7 @@ export function presentTelegramPlayerIdFlowResult(
       if (result.matchStatus === 'already_used') {
         return {
           kind: 'message',
-          text: 'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.',
+          text: 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
         };
       }
       if (result.matchStatus === 'older_review') {

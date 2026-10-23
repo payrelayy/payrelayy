@@ -53,7 +53,7 @@ export function presentTelegramDepositOutcome(delivery: Delivery): string {
     ].join('\n');
   }
   if (delivery.outcomeCode === 'already_used') {
-    return 'Deposit not credited. Reason: payment already used. Contact support if this is unexpected.';
+    return 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.';
   }
   if (delivery.outcomeCode === 'wrong_receiver') {
     return 'Deposit not credited. Reason: wrong receiver. Contact support if this is unexpected.';

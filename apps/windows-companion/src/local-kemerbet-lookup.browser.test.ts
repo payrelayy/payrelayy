@@ -24,6 +24,7 @@ const delayedDepositFixture = `<!doctype html>
 <html>
   <head><meta charset="utf-8"><title>Delayed KemerBet fixture</title></head>
   <body>
+    <div role="menuitem">Deposit</div>
     <div class="rt--header-right" id="header-right"></div>
     <main id="surface"></main>
     <script>
@@ -58,6 +59,8 @@ const delayedDepositFixture = `<!doctype html>
         });
       };
       const openDepositMenu = () => {
+        const dropdown = document.createElement('div');
+        dropdown.className = 'rt--transfer-dropdown';
         const deposit = document.createElement('button');
         deposit.setAttribute('role', 'menuitem');
         deposit.textContent = 'Deposit';
@@ -71,7 +74,8 @@ const delayedDepositFixture = `<!doctype html>
             surface.replaceChildren(tile);
           }, 250);
         });
-        surface.replaceChildren(deposit);
+        dropdown.append(deposit);
+        surface.replaceChildren(dropdown);
       };
       window.setTimeout(() => {
         const financialActions = document.createElement('button');

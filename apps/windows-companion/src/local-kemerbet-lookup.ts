@@ -18,6 +18,7 @@ const LOOKUP_TIMEOUT_MS = 30_000;
 
 const selectors = Object.freeze({
   financialActionsTrigger: '.rt--header-right .rt--header-actions-content-icon:has(.icon-transfer)',
+  financialActionsMenu: '.rt--transfer-dropdown',
   toPlayerTile: '.rt--transfer-item:has(.icon-player)',
   findBySelectedValue: '.ant-modal-content .ant-select-selection-item',
   playerIdInput: '.ant-modal-content [data-placeholder="Enter Player ID"] input',
@@ -214,7 +215,10 @@ async function openSearchSurface(page: Page): Promise<void> {
   await (
     await waitForEnabledAuthenticatedControl(
       page,
-      page.getByRole('menuitem', { name: 'Deposit', exact: true }),
+      page.locator(selectors.financialActionsMenu).getByRole('menuitem', {
+        name: 'Deposit',
+        exact: true,
+      }),
     )
   ).click({
     timeout: LOOKUP_TIMEOUT_MS,

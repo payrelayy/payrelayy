@@ -102,6 +102,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           </div>
           <p class="receipt-label">See payment switches, recorded SMS activity, and deposit-job counts. A recent SMS does not confirm phone connectivity or Windows Companion readiness.</p>
           <dl class="overview-grid" id="system-overview-facts"></dl>
+          <p class="request-meta">Windows Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
           <button class="secondary" id="system-overview-open-system" type="button">Open system controls</button>
         </section>
@@ -1050,6 +1051,7 @@ const ownerSessionStatus = document.querySelector('#owner-session-status');
 const systemOverviewRefresh = document.querySelector('#system-overview-refresh');
 const systemOverviewStatus = document.querySelector('#system-overview-status');
 const systemOverviewFacts = document.querySelector('#system-overview-facts');
+const systemOverviewCompanion = document.querySelector('#system-overview-companion');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
 let systemOverviewLoadGeneration = 0;
 const telebirrFastAlertStatus = document.querySelector('#telebirr-fast-alert-status');
@@ -4877,6 +4879,10 @@ function renderCompanionLookup(status) {
   renderPilotCandidates(eligiblePilotPlayers);
 }
 
+function syncCompanionOverview() {
+  systemOverviewCompanion.textContent = companionConnectionStatus.textContent;
+}
+
 function clearCompanionConnection() {
   companionConnectionRequest += 1;
   companionConnectionLoading = false;
@@ -4885,6 +4891,7 @@ function clearCompanionConnection() {
   companionConnectionPollTimer = undefined;
   companionConnectionExpiryTimer = undefined;
   companionConnectionStatus.textContent = 'Sign in to check the companion connection.';
+  syncCompanionOverview();
   companionConnectionDetail.textContent = '';
   companionConnectionGuidance.textContent = '';
   companionConnectionRefresh.disabled = true;
@@ -4946,6 +4953,7 @@ async function loadCompanionConnection() {
       companionConnectionExpiryTimer = window.setTimeout(() => {
         if (!current()) return;
         companionConnectionStatus.textContent = 'Connection status needs refresh';
+        syncCompanionOverview();
         companionConnectionGuidance.textContent = 'The last displayed check-in is no longer recent. Refresh to check again.';
         void loadCompanionConnection();
       }, freshnessRemaining);
@@ -4961,6 +4969,7 @@ async function loadCompanionConnection() {
     }
   } finally {
     if (current()) {
+      syncCompanionOverview();
       companionConnectionLoading = false;
       companionConnectionRefresh.disabled = false;
       companionConnectionPollTimer = window.setTimeout(() => void loadCompanionConnection(), 20_000);
@@ -4973,6 +4982,7 @@ document.addEventListener('visibilitychange', () => {
   clearCompanionConnection();
   if (accessToken) {
     companionConnectionStatus.textContent = 'Connection status needs refresh';
+    syncCompanionOverview();
     if (!document.hidden) void loadCompanionConnection();
   }
 });

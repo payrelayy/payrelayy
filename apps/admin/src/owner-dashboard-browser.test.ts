@@ -1893,10 +1893,14 @@ describe('Owner dashboard browser authentication boundary', () => {
       });
       await browser.signIn();
       expect(browser.element('#companion-connection-status').textContent).toBe(label);
+      expect(browser.element('#system-overview-companion').textContent).toBe(label);
       expect(browser.element('#companion-connection-refresh').disabled).toBe(false);
       fail = true;
       await browser.call('loadCompanionConnection');
       expect(browser.element('#companion-connection-status').textContent).toBe(
+        'Connection status unavailable',
+      );
+      expect(browser.element('#system-overview-companion').textContent).toBe(
         'Connection status unavailable',
       );
       expect(browser.element('#companion-connection-detail').textContent).toBe('');
@@ -1932,6 +1936,9 @@ describe('Owner dashboard browser authentication boundary', () => {
     browser.evaluate('document.hidden = true');
     await browser.element('document').listeners.get('visibilitychange')?.({ preventDefault() {} });
     expect(browser.element('#companion-connection-status').textContent).toBe(
+      'Connection status needs refresh',
+    );
+    expect(browser.element('#system-overview-companion').textContent).toBe(
       'Connection status needs refresh',
     );
     browser.evaluate('document.hidden = false');

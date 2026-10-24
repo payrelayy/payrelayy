@@ -24,10 +24,6 @@ export type TelegramPlayerIdFlowPresentation =
       readonly kind: 'force_reply';
       readonly text: string;
       readonly placeholder: string;
-      readonly copyNumbers?: readonly {
-        readonly providerCode: 'telebirr' | 'cbe_birr';
-        readonly number: string;
-      }[];
     };
 
 export interface TelegramPlayerIdFlowContext {
@@ -125,10 +121,6 @@ export function presentTelegramPlayerIdFlowResult(
           receivers: result.receivers,
         }),
         placeholder: 'Payment reference or receipt',
-        copyNumbers: result.receivers.map((receiver) => ({
-          providerCode: receiver.providerCode,
-          number: toTelegramLocalReceiverNumber(receiver.receiverAccountReference),
-        })),
       };
     case 'telebirr_deposit_destination_review': {
       const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
@@ -162,12 +154,6 @@ export function presentTelegramPlayerIdFlowResult(
           receiverAccountReference: result.receiverAccountReference,
         }),
         placeholder: 'TeleBirr transaction number',
-        copyNumbers: [
-          {
-            providerCode: 'telebirr',
-            number: toTelegramLocalReceiverNumber(result.receiverAccountReference),
-          },
-        ],
       };
     }
     case 'cbe_sms_deposit_destination':
@@ -179,12 +165,6 @@ export function presentTelegramPlayerIdFlowResult(
           receiverAccountReference: result.receiverAccountReference,
         }),
         placeholder: 'CBE Birr transaction reference',
-        copyNumbers: [
-          {
-            providerCode: 'cbe_birr',
-            number: toTelegramLocalReceiverNumber(result.receiverAccountReference),
-          },
-        ],
       };
     case 'deposit_instructions':
       return {

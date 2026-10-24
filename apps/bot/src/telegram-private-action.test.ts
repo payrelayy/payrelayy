@@ -39,6 +39,7 @@ import {
   TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA,
   buildTelegramCombinedPaymentPrompt,
   isTelegramCombinedPaymentPromptReply,
+  telegramReceiverNumberCodeEntities,
   buildTelegramTelebirrPaymentPrompt,
   parseTelegramTelebirrPaymentPromptReply,
   buildTelegramCbeSmsPaymentPrompt,
@@ -121,10 +122,29 @@ describe('private Telegram action reducers', () => {
     expect(prompt).toContain('Send 25–25,000 ETB.');
     expect(prompt).not.toContain('Choose one available method');
     expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    expect(prompt).toContain(
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+    );
+    expect(
+      telegramReceiverNumberCodeEntities(prompt).map((entity) => ({
+        type: entity.type,
+        text: prompt.slice(entity.offset, entity.offset + entity.length),
+      })),
+    ).toEqual([
+      { type: 'code', text: '900000042' },
+      { type: 'code', text: '900000043' },
+    ]);
     expect(isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: prompt })).toBe(
       true,
     );
-    const currentInternationalPrompt = prompt
+    const priorLocalPrompt = prompt.replace(
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    );
+    expect(
+      isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: priorLocalPrompt }),
+    ).toBe(true);
+    const currentInternationalPrompt = priorLocalPrompt
       .replace('Number: 900000042', 'Number: 251900000042')
       .replace('Number: 900000043', 'Number: 251900000043');
     expect(
@@ -133,7 +153,7 @@ describe('private Telegram action reducers', () => {
         text: currentInternationalPrompt,
       }),
     ).toBe(true);
-    const previousPrompt = prompt
+    const previousPrompt = priorLocalPrompt
       .replace('Number: 900000042', 'Number: 251900000042')
       .replace('Number: 900000043', 'Number: 251900000043')
       .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
@@ -194,6 +214,10 @@ describe('private Telegram action reducers', () => {
       isTelegramCombinedPaymentPromptReply({
         from: { is_bot: true },
         text: cbeOnly
+          .replace(
+            'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+            'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+          )
           .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
           .replace('\nAfter paying,', '\nCheck the receiver name before paying.\nAfter paying,'),
       }),

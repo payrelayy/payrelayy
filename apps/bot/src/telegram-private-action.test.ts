@@ -240,6 +240,26 @@ describe('private Telegram action reducers', () => {
     expect(telePrompt).not.toContain('251900000042');
     expect(telePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(cbePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
+    const previouslyIssuedTeleBirrCard = telePrompt.replace(
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    );
+    const previouslyIssuedCbeCard = cbePrompt.replace(
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+    );
+    expect(
+      parseTelegramTelebirrPaymentPromptReply({
+        from: { is_bot: true },
+        text: previouslyIssuedTeleBirrCard,
+      }),
+    ).toBe('PLAYER-DEMO-42');
+    expect(
+      isTelegramCbeSmsPaymentPromptReply({
+        from: { is_bot: true },
+        text: previouslyIssuedCbeCard,
+      }),
+    ).toBe(true);
     expect(
       parseTelegramTelebirrPaymentPromptReply({
         from: { is_bot: true },

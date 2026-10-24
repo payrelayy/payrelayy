@@ -37,7 +37,7 @@ describe('Telegram Player validation outcome notifier', () => {
       },
     });
     expect(processed).toBe('processed');
-    expect(texts).toEqual([expect.stringContaining('Player ID verified and saved')]);
+    expect(texts).toEqual([expect.stringContaining('Player ID verified')]);
     expect(texts[0]).not.toContain('28379330');
     expect(actions).toEqual([
       { version: 1, kind: 'player_validation_outcome_claim' },
@@ -73,8 +73,8 @@ describe('Telegram Player validation outcome notifier', () => {
       ...delivery,
       outcomeCode: 'review_required',
     });
-    expect(text).toContain('not verified');
-    expect(text).toContain('saved Player ID has not changed');
+    expect(text).toContain('Could not verify');
+    expect(text).toContain('saved ID is unchanged');
     expect(text).not.toContain('invalid');
     expect(text).not.toContain('deposit complete');
   });

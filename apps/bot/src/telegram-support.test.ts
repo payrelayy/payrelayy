@@ -279,7 +279,7 @@ describe('private human /support routing', () => {
       }),
     ).toBe('handled');
     expect(reply).toHaveBeenCalledWith(
-      'For FetanAgent app or account-access help, contact support:\nhttps://t.me/help_team\nNever share your password or one-time code (OTP).',
+      'Contact support: https://t.me/help_team\nNever share your password or login code.',
     );
     expect(JSON.stringify(fetchContact.mock.calls)).not.toContain('123456789');
   });

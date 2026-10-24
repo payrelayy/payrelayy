@@ -58,7 +58,7 @@ describe('Telegram deposit outcome notifier', () => {
     expect(result).toBe('processed');
     expect(messages).toHaveLength(1);
     expect(messages[0]).toContain('30.00 ETB credited');
-    expect(messages[0]).toContain('1A2B');
+    expect(messages[0]).not.toContain('1A2B');
     expect(actions).toEqual([
       { version: 1, kind: 'deposit_outcome_claim' },
       {
@@ -97,9 +97,9 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'verified_waiting',
       amountMinor: null,
     });
-    expect(waiting).toContain('payment verified');
-    expect(waiting).toContain('waiting for Player credit');
-    expect(waiting).toContain('1A2B');
+    expect(waiting).toContain('Payment confirmed');
+    expect(waiting).toContain('Finishing your deposit');
+    expect(waiting).not.toContain('1A2B');
     expect(waiting).not.toContain('30.00');
     expect(waiting).not.toContain('Deposit complete');
   });
@@ -124,11 +124,11 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'checking',
       amountMinor: null,
     });
-    expect(checking).toContain('Still checking your TeleBirr payment');
-    expect(checking).toContain('has not been verified or credited yet');
-    expect(checking).toContain('1A2B');
-    expect(checking).toContain('final result');
-    expect(checking).toContain('Please do not pay again');
+    expect(checking).toContain('Still checking your payment');
+    expect(checking).toContain('We’ll update you here');
+    expect(checking).not.toContain('1A2B');
+    expect(checking).not.toContain('phone SMS');
+    expect(checking).not.toContain('pay again');
     expect(checking).not.toContain('pending');
     expect(checking).not.toContain('Deposit complete');
     expect(checking).not.toContain('rejected');
@@ -142,7 +142,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(duplicate).toBe(
-      'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
+      'This payment was submitted before. If your Player balance is missing, contact support.',
     );
     expect(duplicate).not.toContain('30.00');
     expect(duplicate).not.toContain('fake');
@@ -155,7 +155,7 @@ describe('Telegram deposit outcome notifier', () => {
       amountMinor: null,
     });
     expect(wrongReceiver).toBe(
-      'Deposit not credited. Reason: wrong receiver. Contact support if this is unexpected.',
+      'Deposit not credited. Payment went to a different receiver. Contact support.',
     );
     expect(wrongReceiver).not.toContain('30.00');
   });
@@ -166,9 +166,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'invalid_reference',
       amountMinor: null,
     });
-    expect(invalid).toBe(
-      'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
-    );
+    expect(invalid).toBe('Deposit not credited. Check the reference or contact support.');
     expect(invalid).not.toContain('30.00');
     expect(invalid).not.toContain('fake');
   });
@@ -179,9 +177,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'unrelated_receipt',
       amountMinor: null,
     });
-    expect(unrelated).toBe(
-      'Deposit not credited. Reason: unrelated receipt. Contact support if this is unexpected.',
-    );
+    expect(unrelated).toBe('Deposit not credited. This receipt does not match. Contact support.');
     expect(unrelated).not.toContain('1A2B');
   });
 
@@ -191,9 +187,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'held_review',
       amountMinor: null,
     });
-    expect(held).toBe(
-      'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.',
-    );
+    expect(held).toBe('⚠️ Your deposit needs review. We’ll update you here.');
     expect(held).not.toContain('1A2B');
     expect(held).not.toContain('invalid');
   });
@@ -204,7 +198,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'older_pending',
       amountMinor: null,
     });
-    expect(pending).toBe('Payment found but it is older than 1 hour. Waiting for approval.');
+    expect(pending).toBe('⚠️ Your deposit needs review. We’ll update you here.');
     expect(pending).not.toContain('1A2B');
     expect(pending).not.toContain('credited');
     const rejected = presentTelegramDepositOutcome({
@@ -212,9 +206,7 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'old_rejected',
       amountMinor: null,
     });
-    expect(rejected).toBe(
-      'Deposit not credited. Reason: payment older than 1 hour. Contact support if this is unexpected.',
-    );
+    expect(rejected).toBe('Deposit not credited. This payment is too old. Contact support.');
   });
 
   it('holds a rotated-instruction submission for review without implying rejection', () => {
@@ -223,9 +215,9 @@ describe('Telegram deposit outcome notifier', () => {
       outcomeCode: 'manual_review',
       amountMinor: null,
     });
-    expect(held).toContain('Deposit needs review');
-    expect(held).toContain('not automatically credited');
-    expect(held).toContain('Do not pay again');
+    expect(held).toContain('deposit needs review');
+    expect(held).toContain('We’ll update you here');
+    expect(held).not.toContain('receiving number');
     expect(held).not.toContain('Deposit rejected');
     expect(held).not.toContain('30.00');
   });
@@ -243,10 +235,9 @@ describe('Telegram deposit outcome notifier', () => {
     });
     expect(rejected).toContain('Deposit not credited');
     expect(unverified).toContain('Deposit not credited');
-    expect(unverified).toContain('couldn’t verify');
-    expect(unverified).toContain('No Player credit was recorded for this submission');
+    expect(unverified).toContain('Check the reference');
     for (const text of [rejected, unverified]) {
-      expect(text).toContain('do not pay again');
+      expect(text).not.toContain('pay again');
       expect(text).not.toContain('30.00');
       expect(text).not.toContain('refunded');
       expect(text).not.toContain('fake');

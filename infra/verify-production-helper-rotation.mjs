@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='0cf74de563b8e332cc84b57eea21d64b331e1f7c'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='45535eca31446b0d652850398b3777eefb345507'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -779,7 +779,7 @@ const uncertainIsolationRotation = read(
 ).toString();
 for (const value of [
   pausedCreditHelperDigest,
-  sha256(read(unifiedHelperPath)),
+  'be573f41360106411a4e121a7dc5a88a90944b87440b03712bbffea8ee255e85',
   '0cf74de563b8e332cc84b57eea21d64b331e1f7c',
   '593344964',
   'ROTATE EXACT PRODUCTION V2 UNCERTAIN ISOLATION HELPER V1',
@@ -810,5 +810,42 @@ assert.ok(
     isolationStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
 );
 assert.doesNotMatch(uncertainIsolationRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const customerCopyRotation = read(
+  'infra/operations/fetanagent-production-v2-customer-copy-helper-rotation-v1.sh',
+).toString();
+for (const value of [
+  'be573f41360106411a4e121a7dc5a88a90944b87440b03712bbffea8ee255e85',
+  sha256(read(unifiedHelperPath)),
+  '45535eca31446b0d652850398b3777eefb345507',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 CUSTOMER COPY HELPER V1',
+  'production-v2-customer-copy-helper-rotation-v1',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(customerCopyRotation.includes(value), `Customer-copy rotation lost ${value}`);
+}
+const customerCopyRotate = customerCopyRotation.slice(customerCopyRotation.indexOf('rotate() {'));
+const customerCopyStep = (value) => {
+  const index = customerCopyRotate.indexOf(value);
+  assert.ok(index >= 0, `Customer-copy rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  customerCopyStep('acquire_lock') < customerCopyStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  customerCopyStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    customerCopyStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  customerCopyStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    customerCopyStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(customerCopyRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

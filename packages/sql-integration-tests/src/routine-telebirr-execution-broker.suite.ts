@@ -563,6 +563,179 @@ export function registerRoutineTelebirrExecutionBrokerSqlTests(
       }
     });
 
+    it('reviews a fenced uncertain credit, skips that Player, and leases another payment', async () => {
+      const client = getClient();
+      const originalModes = await client.query<{ feature_key: string; mode: string }>(
+        `select feature_key, mode::text from app.feature_switches
+          where feature_key in ('payment_verification', 'deposit_execution', 'private_live_deposit_pilot')
+          order by feature_key`,
+      );
+      const password = randomBytes(32).toString('hex');
+      const runtime = createRuntimeClient(password);
+      let disabled = false;
+      try {
+        await client.query(
+          `update app.feature_switches set mode = case
+            when feature_key in ('payment_verification', 'deposit_execution') then 'live'::app.feature_mode
+            else 'disabled'::app.feature_mode end
+           where feature_key in ('payment_verification', 'deposit_execution', 'private_live_deposit_pilot')`,
+        );
+        const policy = await persistentPolicyFixture(client, getOwnerAuthUserId());
+        const first = await paidJob(client, 2501);
+        const firstPlayer = await client.query<{
+          customer_id: string;
+          player_account_id: string;
+        }>(`select customer_id, player_account_id from app.deposit_intents where id = $1::uuid`, [
+          first.depositIntentId,
+        ]);
+        const samePlayer = await paidJob(client, 2502, 'telebirr', true, {
+          customerId: firstPlayer.rows[0]!.customer_id,
+          playerAccountId: firstPlayer.rows[0]!.player_account_id,
+          playerId: first.playerId,
+        });
+        const otherPlayer = await paidJob(client, 2503);
+        const certificate = await activeCertificate(client, getOwnerAdminId());
+        await client.query(
+          `select app.activate_routine_telebirr_execution_transport(
+            $1::uuid, $2::uuid, $3::uuid, $4::text
+          )`,
+          [getOwnerAuthUserId(), certificate.certificateId, randomUUID(), password],
+        );
+        await runtime.connect();
+        const worker = leaseCommand(policy.accountId);
+        const leased = (await execute(runtime, certificate, worker)).result as Record<
+          string,
+          unknown
+        >;
+        expect(leased.jobId).toBe(first.jobId);
+        const firstBinding = {
+          jobId: first.jobId,
+          intentId: first.depositIntentId,
+          attemptId: leased.attemptId,
+          paymentClaimId: first.claimId,
+          platformAgentAccountId: policy.accountId,
+          playerId: first.playerId,
+          amountMinor: 2501,
+          currencyCode: 'ETB',
+        };
+        await execute(runtime, certificate, boundCommand(worker, 'fence', firstBinding));
+        const reviewCommand = boundCommand(worker, 'pause', firstBinding, {
+          reason: 'execution_uncertain',
+        });
+        const reviewed = await execute(runtime, certificate, reviewCommand);
+        expect(reviewed.result).toBeNull();
+        expect(
+          (await execute(runtime, certificate, reviewCommand, reviewed.identities)).result,
+        ).toBeNull();
+        const state = await client.query<{
+          attempt_status: string;
+          intent_status: string;
+          exact_player_credit_match: boolean;
+          routine_review_isolated: boolean;
+          reconciliation_outcome: string;
+          review_count: number;
+          runtime_pause_count: number;
+          claim_count: number;
+        }>(
+          `select attempt.status::text as attempt_status,
+             intent.status::text as intent_status,
+             attempt.exact_player_credit_match,
+             attempt.routine_review_isolated,
+             reconciliation.outcome::text as reconciliation_outcome,
+             (select count(*)::integer from app.deposit_review_cases review
+               where review.deposit_intent_id = intent.id
+                 and review.review_kind = 'execution' and review.status = 'open') as review_count,
+             (select count(*)::integer from app.routine_telebirr_runtime_pauses) as runtime_pause_count,
+             (select count(*)::integer from app.deposit_payment_claims claim
+               where claim.deposit_intent_id = intent.id) as claim_count
+           from app.deposit_intents intent
+           join app.deposit_execution_attempts attempt on attempt.deposit_intent_id = intent.id
+           join app.execution_reconciliations reconciliation
+             on reconciliation.deposit_execution_attempt_id = attempt.id
+           where intent.id = $1::uuid`,
+          [first.depositIntentId],
+        );
+        expect(state.rows).toEqual([
+          {
+            attempt_status: 'review_required',
+            intent_status: 'execution_review',
+            exact_player_credit_match: false,
+            routine_review_isolated: true,
+            reconciliation_outcome: 'ambiguous',
+            review_count: 1,
+            runtime_pause_count: 0,
+            claim_count: 1,
+          },
+        ]);
+        expect(
+          (await execute(runtime, certificate, boundCommand(worker, 'reconcile', firstBinding)))
+            .result,
+        ).toEqual({ outcome: 'uncertain' });
+        await expect(
+          execute(runtime, certificate, boundCommand(worker, 'fence', firstBinding)),
+        ).rejects.toThrow();
+
+        const next = (
+          await execute(runtime, certificate, {
+            ...leaseCommand(policy.accountId),
+            workerInstanceId: worker.workerInstanceId,
+          })
+        ).result as Record<string, unknown>;
+        expect(next.jobId).toBe(otherPlayer.jobId);
+        expect(next.playerId).toBe(otherPlayer.playerId);
+        const samePlayerState = await client.query<{ status: string; attempt_count: number }>(
+          `select job.status::text as status,
+             (select count(*)::integer from app.deposit_execution_attempts attempt
+               where attempt.deposit_intent_id = job.deposit_intent_id) as attempt_count
+           from app.deposit_jobs job where job.id = $1::uuid`,
+          [samePlayer.jobId],
+        );
+        expect(samePlayerState.rows).toEqual([{ status: 'queued', attempt_count: 0 }]);
+        const nextBinding = {
+          jobId: otherPlayer.jobId,
+          intentId: otherPlayer.depositIntentId,
+          attemptId: next.attemptId,
+          paymentClaimId: otherPlayer.claimId,
+          platformAgentAccountId: policy.accountId,
+          playerId: otherPlayer.playerId,
+          amountMinor: 2503,
+          currencyCode: 'ETB',
+        };
+        expect(
+          (
+            await execute(
+              runtime,
+              certificate,
+              boundCommand(worker, 'pause', nextBinding, {
+                reason: 'execution_uncertain',
+              }),
+            )
+          ).result,
+        ).toBeNull();
+        await client.query(
+          `select app.disable_routine_telebirr_execution_transport($1::uuid, 'operator_requested')`,
+          [randomUUID()],
+        );
+        disabled = true;
+      } finally {
+        await runtime.end().catch(() => undefined);
+        if (!disabled) {
+          await client
+            .query(
+              `select app.disable_routine_telebirr_execution_transport($1::uuid, 'incident_stop')`,
+              [randomUUID()],
+            )
+            .catch(() => undefined);
+        }
+        for (const row of originalModes.rows) {
+          await client.query(
+            `update app.feature_switches set mode = $2::app.feature_mode where feature_key = $1::text`,
+            [row.feature_key, row.mode],
+          );
+        }
+      }
+    });
+
     it('leases and reconciles one non-pilot job without a v2 approval or Transfer retry', async () => {
       const client = getClient();
       const originalModes = await client.query<{ feature_key: string; mode: string }>(

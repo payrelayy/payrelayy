@@ -84,6 +84,11 @@ export async function paidJob(
   amountMinor = 2500,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
   withPaidLineage = true,
+  existingPlayer?: {
+    readonly customerId: string;
+    readonly playerAccountId: string;
+    readonly playerId: string;
+  },
 ) {
   if (providerCode === 'telebirr') {
     // The shared catalog seeds CBE Birr only. Use the same synthetic TeleBirr receiver mask
@@ -110,6 +115,7 @@ export async function paidJob(
   const fixture = await createVerifiedDepositFixture(client, 'routine-' + randomUUID(), {
     providerCode,
     amountMinor,
+    ...(existingPlayer === undefined ? {} : { existingPlayer }),
   });
   const settled = await client.query<{ execution_job_id: string; payment_claim_id: string }>(
     `

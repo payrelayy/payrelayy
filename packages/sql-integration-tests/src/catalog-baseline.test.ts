@@ -8489,6 +8489,7 @@ describe('disposable SQL migration baseline', () => {
           'created_at',
           'updated_at',
           'exact_player_credit_match',
+          'routine_review_isolated',
         ],
         table_name: 'deposit_execution_attempts',
       },
@@ -9065,6 +9066,11 @@ describe('disposable SQL migration baseline', () => {
         (row) => row.indexname === 'deposit_execution_attempts_one_blocking_agent_idx',
       )?.indexdef,
     ).toContain("'review_required'::app.deposit_execution_attempt_status");
+    expect(
+      indexRows.rows.find(
+        (row) => row.indexname === 'deposit_execution_attempts_one_blocking_agent_idx',
+      )?.indexdef,
+    ).toContain('not routine_review_isolated');
     expect(
       indexRows.rows.find((row) => row.indexname === 'deposit_jobs_one_active_execution_intent_idx')
         ?.indexdef,

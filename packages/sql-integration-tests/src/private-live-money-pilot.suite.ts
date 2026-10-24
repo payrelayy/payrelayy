@@ -194,11 +194,12 @@ async function expectFailureAtSavepoint(
 }
 
 async function neutralizeBlockingExecutionRows(client: Client): Promise<void> {
-  await client.query(`set local session_replication_role = 'replica'`);
+  await client.query(`set session_replication_role = 'replica'`);
   try {
     await client.query(`
       update app.deposit_execution_attempts
          set status = 'confirmed_executed',
+             routine_review_isolated = false,
              final_action_fenced_at = coalesce(final_action_fenced_at, clock_timestamp()),
              reconciliation_required_at = coalesce(
                reconciliation_required_at,
@@ -225,7 +226,7 @@ async function neutralizeBlockingExecutionRows(client: Client): Promise<void> {
          and status in ('queued', 'leased', 'retry_wait')
     `);
   } finally {
-    await client.query(`set local session_replication_role = 'origin'`);
+    await client.query(`set session_replication_role = 'origin'`);
   }
 }
 

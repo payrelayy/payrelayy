@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='b4f0449a3956256a4cf2345956476745a43f2ebc'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='6fc3b00b492efb1b9ee7f6bbdad41d6225d62293'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -891,7 +891,7 @@ const shortMenuRunbook = read(
 ).toString();
 for (const value of [
   '01f94e178365dd2c237f9b2c79bea139193a57f2e5096e03dd4b731e5ee988f8',
-  sha256(read(unifiedHelperPath)),
+  '263535acea17f8c16fa2ef6cbc866989905a6134d7b7258ac091f1ec08ba67e4',
   'b4f0449a3956256a4cf2345956476745a43f2ebc',
   '593344964',
   'ROTATE EXACT PRODUCTION V2 SHORT PLAYER ID MENU HELPER V1',
@@ -924,5 +924,44 @@ assert.ok(
     shortMenuStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
 );
 assert.doesNotMatch(shortMenuRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const speedRotation = read(
+  'infra/operations/fetanagent-production-v2-player-credit-speed-helper-rotation-v1.sh',
+).toString();
+const speedRunbook = read('infra/operations/production-player-credit-speed-release.md').toString();
+for (const value of [
+  '263535acea17f8c16fa2ef6cbc866989905a6134d7b7258ac091f1ec08ba67e4',
+  sha256(read(unifiedHelperPath)),
+  '6fc3b00b492efb1b9ee7f6bbdad41d6225d62293',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 PLAYER CREDIT SPEED HELPER V1',
+]) {
+  assert.ok(speedRotation.includes(value), `speed rotation lost ${value}`);
+  assert.ok(speedRunbook.includes(value), `speed runbook lost ${value}`);
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(speedRotation.includes(value), `speed rotation lost boundary: ${value}`);
+}
+const speedRotate = speedRotation.slice(speedRotation.indexOf('rotate() {'));
+const speedStep = (value) => {
+  const index = speedRotate.indexOf(value);
+  assert.ok(index >= 0, `speed rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(speedStep('acquire_lock') < speedStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  speedStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    speedStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  speedStep('mv -T -- "$NEXT_HELPER" "$HELPER"') < speedStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(speedRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

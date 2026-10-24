@@ -66,6 +66,14 @@ export type LocalKemerBetSessionState =
   | 'stopped'
   | 'failed';
 
+/** The browser was not admitted for a lookup, so no provider Find could have started. */
+export class LocalKemerBetSessionUnavailableError extends Error {
+  constructor() {
+    super('The local KemerBet lookup session is unavailable.');
+    this.name = 'LocalKemerBetSessionUnavailableError';
+  }
+}
+
 export interface LocalKemerBetSessionEvent {
   readonly state: LocalKemerBetSessionState;
   readonly transferDisabled: true;
@@ -634,6 +642,38 @@ export async function startLocalKemerBetSession(
     throw new Error('The protected local KemerBet browser could not start.');
   }
 
+  const resetVerifiedAgentPage = async (page: Page): Promise<void> => {
+    if (terminal || stopping || reviewPaused)
+      throw new Error('The guarded session is unavailable.');
+    // A failed Find or amount preparation can leave a modal in an unknown state.
+    // Reload through the same guarded context, then verify the bound account again
+    // before doing any more UI work. This never requests a financial fence.
+    signedInVerified = false;
+    identityVerificationEpoch += 1;
+    lookupAuthorization.clear();
+    depositAuthorization.clear();
+    disarmSignedInReload();
+    report({ state: 'verifying_identity', transferDisabled: true, detailsRedacted: true });
+    try {
+      await page.goto(KEMERBET_AGENT_AUTHENTICATED_CANDIDATE_URL, {
+        waitUntil: 'commit',
+        timeout: 15_000,
+      });
+    } finally {
+      await observePage(page);
+    }
+    if (
+      !signedInVerified ||
+      terminal ||
+      stopping ||
+      reviewPaused ||
+      phase !== 'signed_in_read_only'
+    ) {
+      throw new Error('The guarded session could not be reverified.');
+    }
+    await ensureKemerBetAgentWindow(page);
+  };
+
   return Object.freeze({
     done,
     verified,
@@ -653,12 +693,29 @@ export async function startLocalKemerBetSession(
         operationInProgress ||
         !page
       ) {
-        throw new Error('The local KemerBet lookup session is unavailable.');
+        throw new LocalKemerBetSessionUnavailableError();
       }
       operationInProgress = true;
       try {
         await ensureKemerBetAgentWindow(page);
-        return await executeSingleLocalKemerBetLookup(page, playerId, lookupAuthorization, observe);
+        const first = await executeSingleLocalKemerBetLookup(
+          page,
+          playerId,
+          lookupAuthorization,
+          observe,
+        );
+        if (first === 'found') return first;
+        try {
+          await resetVerifiedAgentPage(page);
+          return await executeSingleLocalKemerBetLookup(
+            page,
+            playerId,
+            lookupAuthorization,
+            observe,
+          );
+        } catch {
+          return 'review_required';
+        }
       } finally {
         lookupAuthorization.clear();
         operationInProgress = false;
@@ -740,15 +797,34 @@ export async function startLocalKemerBetSession(
       operationInProgress = true;
       try {
         await ensureKemerBetAgentWindow(page);
-        return await executeRoutineOneUseLocalKemerBetDeposit(
-          page,
-          playerId,
-          amountMinor,
-          lookupAuthorization,
-          depositAuthorization,
-          acquireFinalAction,
-          reportRoutinePreflight,
-        );
+        let fenceRequested = false;
+        const acquire = async () => {
+          // An ambiguous fence request or later Transfer must never be replayed.
+          // Check the visible Chrome window again immediately before fencing: the
+          // Owner may have minimized it while the Player and amount were prepared.
+          if (terminal || stopping || reviewPaused || !signedInVerified)
+            throw new Error('The guarded session is unavailable.');
+          await ensureKemerBetAgentWindow(page);
+          fenceRequested = true;
+          return acquireFinalAction();
+        };
+        const prepareAndExecute = () =>
+          executeRoutineOneUseLocalKemerBetDeposit(
+            page,
+            playerId,
+            amountMinor,
+            lookupAuthorization,
+            depositAuthorization,
+            acquire,
+            reportRoutinePreflight,
+          );
+        try {
+          return await prepareAndExecute();
+        } catch (error) {
+          if (fenceRequested || terminal || stopping || reviewPaused) throw error;
+          await resetVerifiedAgentPage(page);
+          return await prepareAndExecute();
+        }
       } finally {
         lookupAuthorization.clear();
         depositAuthorization.clear();

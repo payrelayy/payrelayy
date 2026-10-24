@@ -38,6 +38,8 @@ import {
   type CompanionPlayerValidationWorkerEvent,
   type CompanionPlayerValidationTimingEvent,
 } from './lookup-worker.js';
+import { LocalKemerBetSessionUnavailableError } from './local-kemerbet-session.js';
+import { LocalKemerBetWindowUnavailableError } from './local-kemerbet-window.js';
 import type { WindowsCurrentUserDataProtector } from './windows-data-protection.js';
 
 const roots: string[] = [];
@@ -481,6 +483,46 @@ describe('dormant Windows companion single-Player validation worker', () => {
     expect(reports.events[1]?.outcome).toBe('review_required');
     expect(reports.events[2]?.outcome).toBe('review_required');
   });
+
+  it.each([new LocalKemerBetSessionUnavailableError(), new LocalKemerBetWindowUnavailableError()])(
+    'keeps the signed assignment pending when Find could not start: %s',
+    async (error) => {
+      const root = await temporaryRoot();
+      const value = runtimeFixture();
+      const controller = new AbortController();
+      const selectedProtector = protector();
+      const executeSingleLookup = vi
+        .fn()
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce('found');
+      const fetchImplementation = vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith(AGENT_PLATFORM_COMPANION_PLAYER_VALIDATION_POLL_PATH)
+          ? jsonResponse({ assignment: value.assignment })
+          : jsonResponse({ accepted: true, replayed: false }, 201),
+      );
+      const events: CompanionPlayerValidationWorkerEvent[] = [];
+      const worker = await createCompanionPlayerValidationWorker({
+        dataRoot: root,
+        device: value.runtime,
+        session: { executeSingleLookup },
+        signal: controller.signal,
+        report: (event) => events.push(event),
+        fetch: fetchImplementation as unknown as typeof fetch,
+        now: () => new Date(now),
+        protector: selectedProtector,
+      });
+
+      await expect(worker.runOnce()).resolves.toBe('temporarily_unavailable');
+      expect(await readdir(join(root, 'device'))).toEqual([
+        'player-validation.assignment.secure.json',
+      ]);
+      expect(fetchImplementation).toHaveBeenCalledOnce();
+      await expect(worker.runOnce()).resolves.toBe('accepted');
+      expect(executeSingleLookup).toHaveBeenCalledTimes(2);
+      expect(events.at(-2)?.outcome).toBe('found');
+      expect(await readdir(join(root, 'device'))).toEqual([]);
+    },
+  );
 
   it('replays a protected signed result after a transport failure without repeating Find', async () => {
     const root = await temporaryRoot();

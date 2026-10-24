@@ -757,7 +757,9 @@ const pausedCreditStep = (value) => {
 assert.ok(
   pausedCreditRotation.indexOf('flock --nonblock 9') < pausedCreditRotation.indexOf('rotate() {'),
 );
-assert.ok(pausedCreditStep('acquire_lock') < pausedCreditStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  pausedCreditStep('acquire_lock') < pausedCreditStep('install_record "$INTENT" intent_body'),
+);
 assert.ok(
   pausedCreditStep('install_record "$INTENT" intent_body') <
     pausedCreditStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),

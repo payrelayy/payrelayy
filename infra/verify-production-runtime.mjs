@@ -1490,7 +1490,10 @@ assert.match(
   pausedCreditHelperRotation,
   /readonly PREDECESSOR_SHA256='455e3aa718e11d5d729861c02e507b3a1eb4f23905625c1f3bad8455a43dbd5e'/u,
 );
-assert.match(pausedCreditHelperRotation, new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'));
+assert.match(
+  pausedCreditHelperRotation,
+  new RegExp(`readonly SUCCESSOR_SHA256='${helperDigest}'`, 'u'),
+);
 assert.match(pausedCreditHelperRotation, /require_current_release/u);
 assert.match(pausedCreditHelperRotation, /require_sudoers "\$SUDOERS" "\$SUCCESSOR_SHA256"/u);
 assert.equal(

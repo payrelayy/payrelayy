@@ -35,7 +35,9 @@ export interface RoutineDepositQueueOptions extends Omit<RoutineDepositWorkerOpt
 
 /** Explicitly invoked, never started by the read-only/v2 entry points. No deposit-count limit. */
 export function startRoutineDepositQueue(options: RoutineDepositQueueOptions) {
-  const idleDelayMs = options.idleDelayMs ?? 1000;
+  // This is only the empty-queue delay. Browser work remains serial and a
+  // completed/fenced credit still follows the one-use reconciliation path.
+  const idleDelayMs = options.idleDelayMs ?? 500;
   if (!Number.isSafeInteger(idleDelayMs) || idleDelayMs < 100 || idleDelayMs > 60000) {
     throw new Error('Routine queue interval is invalid.');
   }

@@ -48,8 +48,8 @@ export function renderPlayerRegistrationMenu(
   return {
     text:
       selectedPlayerId === null
-        ? `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nSend your 8-digit Player ID.`
-        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}\nSend a new 8-digit ID to change it.`,
+        ? TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT
+        : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}`,
     buttons: [
       {
         text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,

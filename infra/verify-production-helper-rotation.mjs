@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='b4f0449a3956256a4cf2345956476745a43f2ebc'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -853,7 +853,7 @@ const playerIdRotation = read(
 ).toString();
 for (const value of [
   '136f2a70767a1bc51e330f595116ded5f3af5eb7a9726b65ed38a4e4b695c620',
-  sha256(read(unifiedHelperPath)),
+  '01f94e178365dd2c237f9b2c79bea139193a57f2e5096e03dd4b731e5ee988f8',
   '40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a',
   '593344964',
   'ROTATE EXACT PRODUCTION V2 PLAYER ID AUTO DETECT HELPER V1',
@@ -882,5 +882,47 @@ assert.ok(
     playerIdStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
 );
 assert.doesNotMatch(playerIdRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const shortMenuRotation = read(
+  'infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh',
+).toString();
+const shortMenuRunbook = read(
+  'infra/operations/production-short-player-id-menu-release.md',
+).toString();
+for (const value of [
+  '01f94e178365dd2c237f9b2c79bea139193a57f2e5096e03dd4b731e5ee988f8',
+  sha256(read(unifiedHelperPath)),
+  'b4f0449a3956256a4cf2345956476745a43f2ebc',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 SHORT PLAYER ID MENU HELPER V1',
+]) {
+  assert.ok(shortMenuRotation.includes(value), `short-menu rotation lost ${value}`);
+  assert.ok(shortMenuRunbook.includes(value), `short-menu runbook lost ${value}`);
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(shortMenuRotation.includes(value), `short-menu rotation lost boundary: ${value}`);
+}
+const shortMenuRotate = shortMenuRotation.slice(shortMenuRotation.indexOf('rotate() {'));
+const shortMenuStep = (value) => {
+  const index = shortMenuRotate.indexOf(value);
+  assert.ok(index >= 0, `short-menu rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(shortMenuStep('acquire_lock') < shortMenuStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  shortMenuStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    shortMenuStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  shortMenuStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    shortMenuStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(shortMenuRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

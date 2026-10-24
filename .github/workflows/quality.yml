@@ -101,6 +101,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-copy-numbers-rotation-v9.sh
           bash -n infra/operations/fetanagent-production-v2-customer-copy-helper-rotation-v1.sh
           bash -n infra/operations/fetanagent-production-v2-player-id-auto-detect-helper-rotation-v1.sh
+          bash -n infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh
           bash -n infra/operations/test-production-routine-marker-handoff.sh
           sudo bash infra/operations/test-production-routine-marker-handoff.sh
           sudo visudo -cf infra/operations/fetanagent-production-deploy-helper-v2.sudoers

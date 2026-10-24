@@ -23,7 +23,7 @@ select :'confirmed_project_ref' = 'xzztugbgtulptnbpoelr'
 -- already be retired. The original one-use function expected live logins.
 select count(*) = 1 and bool_and(
     encode(sha256(convert_to(routine.prosrc, 'UTF8')), 'hex') =
-      '5f26cdd6567973f63f2ba581c018750dd3621cf2f7eb8b07438a8dfe15bd6de6'
+      '3516e005212b34f9c98cea4a175dd0a940416267cbe0230ebafd847aa127c6a9'
     and routine.proowner = 'postgres'::regrole
     and not routine.prosecdef
     and routine.proconfig = array['search_path=pg_catalog']::text[]

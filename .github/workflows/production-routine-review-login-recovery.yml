@@ -128,7 +128,9 @@ jobs:
             ) and not exists (
               select 1 from app.deposit_execution_attempts attempt
               where attempt.status in ('prepared', 'final_action_fenced',
-                'reconciliation_required', 'review_required')
+                'reconciliation_required')
+                or (attempt.status = 'review_required'
+                  and not attempt.routine_review_isolated)
             )")"
           [[ "$ledger_ready" == 't' ]]
           psql -X \

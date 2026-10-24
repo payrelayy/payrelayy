@@ -47,9 +47,11 @@ select (select count(*) = 1 from app.receiver_sms_route_control
     where singleton and not enabled)
   and not exists (select 1 from app.deposit_jobs
     where status in ('queued', 'leased', 'retry_wait'))
-  and not exists (select 1 from app.deposit_execution_attempts
-    where status in ('prepared', 'final_action_fenced',
-      'reconciliation_required', 'review_required'))
+  and not exists (select 1 from app.deposit_execution_attempts attempt
+    where attempt.status in ('prepared', 'final_action_fenced',
+      'reconciliation_required')
+      or (attempt.status = 'review_required'
+        and not attempt.routine_review_isolated))
   and not exists (select 1 from app.routine_telebirr_paid_poll_claims
     where claimed_at >= pg_catalog.clock_timestamp() - interval '5 minutes')
   and not exists (select 1 from pg_catalog.pg_stat_activity

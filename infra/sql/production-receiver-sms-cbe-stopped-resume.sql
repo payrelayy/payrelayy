@@ -73,9 +73,11 @@ select count(*) = 7
   and not exists (select 1 from app.deposit_jobs
     where job_kind in ('execute_deposit', 'reconcile_execution')
       and status in ('queued', 'leased', 'retry_wait'))
-  and not exists (select 1 from app.deposit_execution_attempts
-    where status in ('prepared', 'final_action_fenced',
-      'reconciliation_required', 'review_required'))
+  and not exists (select 1 from app.deposit_execution_attempts attempt
+    where attempt.status in ('prepared', 'final_action_fenced',
+      'reconciliation_required')
+      or (attempt.status = 'review_required'
+        and not attempt.routine_review_isolated))
   as exact_resumed_boundary
 from app.feature_switches where feature_key in (
   'cbe_birr_authoritative_verification', 'deposit_execution',

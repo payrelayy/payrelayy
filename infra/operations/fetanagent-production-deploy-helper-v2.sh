@@ -23,7 +23,7 @@ readonly COMPANION_EXECUTION_SECRETS='/etc/fetanagent/companion-execution-secret
 readonly ROUTINE_DEPOSITS_MARKER="$STATE_ROOT/routine-deposits.release"
 readonly ROUTINE_DEPOSITS_CONTAINER_SIGNER="$COMPANION_EXECUTION_SECRETS/production-routine-execution-signer.pkcs8.der"
 readonly ROUTINE_DEPOSITS_DATABASE_URL='/etc/fetanagent/companion-execution-secrets/production-routine-deposit-database-url'
-readonly CBE_GUARDED_PREDECESSOR_SHA='40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'
+readonly CBE_GUARDED_PREDECESSOR_SHA='b4f0449a3956256a4cf2345956476745a43f2ebc'
 
 die() {
   printf 'fetanagent production deploy helper: %s\n' "$*" >&2

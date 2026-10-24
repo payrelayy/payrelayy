@@ -75,7 +75,7 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({
       kind: 'menu',
       menu: {
-        text: 'FetanAgent\nSend your 8-digit Player ID.',
+        text: 'FetanAgent',
         buttons: [
           { text: '💰 Deposit', callbackData: 'gd1.deposit' },
           { text: '🎮 Set Player ID', callbackData: 'sp1.change' },

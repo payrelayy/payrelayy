@@ -269,6 +269,7 @@ jobs:
           bash -n infra/operations/fetanagent-production-v2-short-deposit-rotation-v8.sh
           bash -n infra/operations/fetanagent-production-v2-copy-numbers-rotation-v9.sh
           bash -n infra/operations/fetanagent-production-v2-inline-numbers-rotation-v10.sh
+          bash -n infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh
           bash -n infra/operations/psql-over-production-direct-tunnel.sh
 
       - name: Build commit-labelled images without runtime secrets
@@ -1194,7 +1195,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'"
+              "sudo -n '$helper' status 'b4f0449a3956256a4cf2345956476745a43f2ebc'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1426,7 +1427,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status 'b4f0449a3956256a4cf2345956476745a43f2ebc'"
 
       - name: Atomically activate production and switch the public edge
         id: activate

@@ -55,6 +55,7 @@ import {
   reduceTelegramDepositProofStatusCallbackAction,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
+  reduceTelegramStandalonePlayerIdSubmission,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
 } from './telegram-private-action.js';
@@ -362,6 +363,17 @@ bot.on('message', async (context) => {
         await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
           context.reply(replyText, replyOptions(keyboard, placeholder, replyText)),
         );
+      return;
+    }
+    const standalonePlayerId = reduceTelegramStandalonePlayerIdSubmission({
+      ...metadata,
+      text,
+      playerValidationEnabled: config.playerValidationIntakeEnabled,
+    });
+    if (standalonePlayerId) {
+      await deliverPlayerAction(standalonePlayerId, (replyText, keyboard) =>
+        context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
+      );
       return;
     }
     const destinationSubmission = reduceTelegramGuidedDepositDestinationSubmission({

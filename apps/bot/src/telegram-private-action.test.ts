@@ -23,6 +23,7 @@ import {
   reduceTelegramDepositReferenceCommand,
   reduceTelegramDepositStatusCommand,
   reduceTelegramPlayerIdTextAction,
+  reduceTelegramStandalonePlayerIdSubmission,
   reduceTelegramPlayerRegistrationCallbackAction,
   reduceTelegramRootMenuAction,
   reduceTelegramSavedTelebirrDestinationAction,
@@ -931,6 +932,62 @@ describe('private Telegram action reducers', () => {
       playerId: 'player-123',
       preferredLocale: 'en',
     });
+  });
+
+  it('routes a standalone eight-digit Player ID to signed validation without a prompt reply', () => {
+    expect(
+      reduceTelegramStandalonePlayerIdSubmission({
+        ...privateMetadata,
+        text: ' 28379330 ',
+        playerValidationEnabled: true,
+      }),
+    ).toEqual({
+      version: 1,
+      kind: 'player_validation_request_command',
+      updateId: '123456',
+      telegramUserId: '123456789',
+      privateChatId: '123456789',
+      preferredLocale: 'en',
+      playerId: '28379330',
+    });
+  });
+
+  it('uses the existing selection action when signed validation is disabled', () => {
+    expect(
+      reduceTelegramStandalonePlayerIdSubmission({
+        ...privateMetadata,
+        text: '28379330',
+        playerValidationEnabled: false,
+      }),
+    ).toMatchObject({ kind: 'save_player_selection_command', playerId: '28379330' });
+  });
+
+  it.each([
+    '1234567',
+    '123456789',
+    'ID 12345678',
+    '12345678 paid',
+    '/12345678',
+    '１２３４５６７８',
+  ])('does not mistake other text for a standalone Player ID: %s', (text) => {
+    expect(
+      reduceTelegramStandalonePlayerIdSubmission({
+        ...privateMetadata,
+        text,
+        playerValidationEnabled: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('does not accept a standalone Player ID outside the matching private chat', () => {
+    expect(
+      reduceTelegramStandalonePlayerIdSubmission({
+        ...privateMetadata,
+        chat: { id: -123456789, type: 'group' },
+        text: '28379330',
+        playerValidationEnabled: true,
+      }),
+    ).toBeUndefined();
   });
 
   it('reduces only exact deposit commands', () => {

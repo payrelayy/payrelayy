@@ -31,6 +31,7 @@ const [
   pausedCreditHelperRotation,
   uncertainIsolationHelperRotation,
   customerCopyHelperRotation,
+  playerIdHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -83,6 +84,7 @@ const [
   read('infra/operations/fetanagent-production-v2-paused-credit-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-uncertain-isolation-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-customer-copy-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-player-id-auto-detect-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -752,14 +754,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '45535eca31446b0d652850398b3777eefb345507'/gu)].length,
+  [...workflow.matchAll(/status '40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='45535eca31446b0d652850398b3777eefb345507'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1521,12 +1523,23 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='45535eca31446b0d652850398b3777eefb345507'",
   "readonly PREDECESSOR_SHA256='be573f41360106411a4e121a7dc5a88a90944b87440b03712bbffea8ee255e85'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='136f2a70767a1bc51e330f595116ded5f3af5eb7a9726b65ed38a4e4b695c620'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 CUSTOMER COPY HELPER V1',
 ]) {
   assert.ok(customerCopyHelperRotation.includes(value));
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'",
+  "readonly PREDECESSOR_SHA256='136f2a70767a1bc51e330f595116ded5f3af5eb7a9726b65ed38a4e4b695c620'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 PLAYER ID AUTO DETECT HELPER V1',
+]) {
+  assert.ok(playerIdHelperRotation.includes(value));
 }
 assert.equal(
   sudoers,

@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='ded01070ec1521af1ad940c4ab580abf47fc9d78'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='f86b00e8e566428c3b81303a012973f8adb53137'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -674,11 +674,8 @@ assert.doesNotMatch(inlineNumbersRotation, /\b(?:docker|psql|rm|sed|chmod|chown)
 const telebirrRevisionRotation = read(
   'infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh',
 ).toString();
-const telebirrRevisionHelperDigest = sha256(read(unifiedHelperPath));
-assert.equal(
-  telebirrRevisionHelperDigest,
-  '455e3aa718e11d5d729861c02e507b3a1eb4f23905625c1f3bad8455a43dbd5e',
-);
+const telebirrRevisionHelperDigest =
+  '455e3aa718e11d5d729861c02e507b3a1eb4f23905625c1f3bad8455a43dbd5e';
 for (const value of [
   inlineNumbersSuccessor,
   telebirrRevisionHelperDigest,
@@ -727,5 +724,58 @@ assert.ok(
   ) < telebirrRevisionStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(telebirrRevisionRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const pausedCreditRotation = read(
+  'infra/operations/fetanagent-production-v2-paused-credit-helper-rotation-v1.sh',
+).toString();
+const pausedCreditHelperDigest = sha256(read(unifiedHelperPath));
+assert.equal(
+  pausedCreditHelperDigest,
+  '040cf1ceb65e514e4812503d6010e2f0c3a86506e764076d63d904fd6428e429',
+);
+for (const value of [
+  telebirrRevisionHelperDigest,
+  pausedCreditHelperDigest,
+  'f86b00e8e566428c3b81303a012973f8adb53137',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 PAUSED CREDIT HELPER V1',
+  'production-v2-paused-credit-helper-rotation-v1',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(pausedCreditRotation.includes(value), `Paused credit rotation lost ${value}`);
+}
+const pausedCreditRotate = pausedCreditRotation.slice(pausedCreditRotation.indexOf('rotate() {'));
+const pausedCreditStep = (value) => {
+  const index = pausedCreditRotate.indexOf(value);
+  assert.ok(index >= 0, `Paused credit rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  pausedCreditRotation.indexOf('flock --nonblock 9') < pausedCreditRotation.indexOf('rotate() {'),
+);
+assert.ok(
+  pausedCreditStep('acquire_lock') < pausedCreditStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  pausedCreditStep('install_record "$INTENT" intent_body') <
+    pausedCreditStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  pausedCreditStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    pausedCreditStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  pausedCreditStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    pausedCreditStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  pausedCreditStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    pausedCreditStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(pausedCreditRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

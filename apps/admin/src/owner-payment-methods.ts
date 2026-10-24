@@ -12,6 +12,7 @@ export interface OwnerPaymentMethod {
     | 'sms_route_paused'
     | 'verification_paused'
     | 'credit_worker_offline'
+    | 'credit_worker_paused'
     | 'phone_not_paired'
     | 'new_receiver_sms_not_seen';
   readonly receiverName: string | null;
@@ -40,6 +41,7 @@ const READINESS = new Set([
   'sms_route_paused',
   'verification_paused',
   'credit_worker_offline',
+  'credit_worker_paused',
   'phone_not_paired',
   'new_receiver_sms_not_seen',
 ]);

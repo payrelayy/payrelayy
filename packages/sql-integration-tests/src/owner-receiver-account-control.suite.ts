@@ -306,6 +306,10 @@ export function registerOwnerReceiverAccountControlSqlTests(
         await client.query(`create or replace function app.routine_telebirr_signed_worker_recent(p_max_age interval)
           returns boolean language sql volatile security invoker set search_path=pg_catalog
           as $$ select true $$`);
+        await client.query(`create or replace function app.routine_telebirr_runtime_is_active(
+            p_authorization_id uuid default null)
+          returns boolean language sql stable security definer set search_path=pg_catalog
+          as $$ select true $$`);
         const readiness = async () =>
           (
             await client.query<{ readiness: string }>(
@@ -377,6 +381,21 @@ export function registerOwnerReceiverAccountControlSqlTests(
             where provider_code = 'telebirr'`,
         );
         expect(publicAfter.rows).toEqual([{ accepting: true }]);
+
+        // A fresh heartbeat alone cannot advertise deposits while the credit
+        // lane is durably paused. The same readiness gate must hide public intake.
+        await client.query('savepoint paused_credit_lane');
+        await client.query(`create or replace function app.routine_telebirr_runtime_is_active(
+            p_authorization_id uuid default null)
+          returns boolean language sql stable security definer set search_path=pg_catalog
+          as $$ select false $$`);
+        expect(await readiness()).toBe('credit_worker_paused');
+        const publicWhilePaused = await client.query<{ accepting: boolean }>(
+          `select accepting from app.public_provider_deposit_controls()
+            where provider_code = 'telebirr'`,
+        );
+        expect(publicWhilePaused.rows).toEqual([{ accepting: false }]);
+        await client.query('rollback to savepoint paused_credit_lane');
 
         // Reverting the number cannot borrow the old enrollment's proof from
         // before the intervening number change.

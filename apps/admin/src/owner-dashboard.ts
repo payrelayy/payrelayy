@@ -3584,6 +3584,7 @@ const paymentMethodReadinessText = Object.freeze({
   sms_route_paused: 'SMS checking is paused',
   verification_paused: 'CBE verification is paused',
   credit_worker_offline: 'Credit worker has not checked in',
+  credit_worker_paused: 'Credit worker is paused for review',
   phone_not_paired: 'TeleBirr phone needs pairing',
   new_receiver_sms_not_seen: 'Waiting for payment SMS on the new receiver',
 });

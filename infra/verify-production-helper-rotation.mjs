@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='45535eca31446b0d652850398b3777eefb345507'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -816,7 +816,7 @@ const customerCopyRotation = read(
 ).toString();
 for (const value of [
   'be573f41360106411a4e121a7dc5a88a90944b87440b03712bbffea8ee255e85',
-  sha256(read(unifiedHelperPath)),
+  '136f2a70767a1bc51e330f595116ded5f3af5eb7a9726b65ed38a4e4b695c620',
   '45535eca31446b0d652850398b3777eefb345507',
   '593344964',
   'ROTATE EXACT PRODUCTION V2 CUSTOMER COPY HELPER V1',
@@ -847,5 +847,40 @@ assert.ok(
     customerCopyStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
 );
 assert.doesNotMatch(customerCopyRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const playerIdRotation = read(
+  'infra/operations/fetanagent-production-v2-player-id-auto-detect-helper-rotation-v1.sh',
+).toString();
+for (const value of [
+  '136f2a70767a1bc51e330f595116ded5f3af5eb7a9726b65ed38a4e4b695c620',
+  sha256(read(unifiedHelperPath)),
+  '40dd8c1c02eb3f787d66d89ff7f9bd23d8fe518a',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 PLAYER ID AUTO DETECT HELPER V1',
+  'production-v2-player-id-auto-detect-helper-rotation-v1',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(playerIdRotation.includes(value), `Player-ID rotation lost ${value}`);
+}
+const playerIdRotate = playerIdRotation.slice(playerIdRotation.indexOf('rotate() {'));
+const playerIdStep = (value) => {
+  const index = playerIdRotate.indexOf(value);
+  assert.ok(index >= 0, `Player-ID rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(playerIdStep('acquire_lock') < playerIdStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  playerIdStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    playerIdStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  playerIdStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    playerIdStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(playerIdRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

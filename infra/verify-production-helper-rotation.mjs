@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='f86b00e8e566428c3b81303a012973f8adb53137'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='0cf74de563b8e332cc84b57eea21d64b331e1f7c'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -728,11 +728,7 @@ assert.doesNotMatch(telebirrRevisionRotation, /\b(?:docker|psql|rm|sed|chmod|cho
 const pausedCreditRotation = read(
   'infra/operations/fetanagent-production-v2-paused-credit-helper-rotation-v1.sh',
 ).toString();
-const pausedCreditHelperDigest = sha256(read(unifiedHelperPath));
-assert.equal(
-  pausedCreditHelperDigest,
-  '040cf1ceb65e514e4812503d6010e2f0c3a86506e764076d63d904fd6428e429',
-);
+const pausedCreditHelperDigest = '040cf1ceb65e514e4812503d6010e2f0c3a86506e764076d63d904fd6428e429';
 for (const value of [
   telebirrRevisionHelperDigest,
   pausedCreditHelperDigest,
@@ -777,5 +773,42 @@ assert.ok(
     pausedCreditStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(pausedCreditRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const uncertainIsolationRotation = read(
+  'infra/operations/fetanagent-production-v2-uncertain-isolation-helper-rotation-v1.sh',
+).toString();
+for (const value of [
+  pausedCreditHelperDigest,
+  sha256(read(unifiedHelperPath)),
+  '0cf74de563b8e332cc84b57eea21d64b331e1f7c',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 UNCERTAIN ISOLATION HELPER V1',
+  'production-v2-uncertain-isolation-helper-rotation-v1',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(uncertainIsolationRotation.includes(value), `Isolation rotation lost ${value}`);
+}
+const isolationRotate = uncertainIsolationRotation.slice(
+  uncertainIsolationRotation.indexOf('rotate() {'),
+);
+const isolationStep = (value) => {
+  const index = isolationRotate.indexOf(value);
+  assert.ok(index >= 0, `Isolation rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(isolationStep('acquire_lock') < isolationStep('install_record "$INTENT" intent_body'));
+assert.ok(
+  isolationStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    isolationStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  isolationStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    isolationStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.doesNotMatch(uncertainIsolationRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

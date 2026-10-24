@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import type { LocalKemerBetRoutineDepositDispatchOutcome } from './local-kemerbet-deposit.js';
 import type { RoutineHistoryScan } from './routine-kemerbet-history.js';
 
 import {
@@ -103,7 +104,7 @@ function fixture(lease = makeLease()) {
         acquire: Parameters<
           import('./local-kemerbet-session.js').LocalKemerBetSession['executeRoutineOneUseDeposit']
         >[2],
-      ) => {
+      ): Promise<LocalKemerBetRoutineDepositDispatchOutcome> => {
         const authority = await acquire();
         if (!authority.isFresh()) throw new Error('stale');
         return {
@@ -196,6 +197,24 @@ describe('routine production serial deposit worker', () => {
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(store.completeConfirmed).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves repeated missing History observations to Owner review so other requests can proceed', async () => {
+    const { worker, store, session, lease } = fixture();
+    store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
+    store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
+    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
+    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
+    expect(await worker.runOnce()).toEqual({
+      status: 'contained',
+      reason: 'reconciliation_uncertain',
+    });
+    expect(store.pause).toHaveBeenCalledWith(
+      expect.objectContaining({ attemptId: lease.attemptId }),
+      'reconciliation_uncertain',
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
   });
 
   it('confirms exactly one approved history row after dispatch without a second Transfer', async () => {
@@ -419,6 +438,22 @@ describe('routine production serial deposit worker', () => {
     expect(store.leaseNext).toHaveBeenCalledTimes(2);
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
     expect(store.pause).toHaveBeenCalledWith(lease, 'execution_uncertain');
+  });
+
+  it('routes a locally uncertain Transfer to Owner review and keeps the next lease available', async () => {
+    const { worker, store, session, lease } = fixture();
+    store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
+    session.executeRoutineOneUseDeposit.mockImplementationOnce(
+      async (_player, _amount, acquire) => {
+        await acquire();
+        return { outcome: 'local_uncertain', providerResponseDigest: null };
+      },
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
+    expect(store.pause).toHaveBeenCalledWith(lease, 'execution_uncertain');
+    expect(store.recordDispatch).not.toHaveBeenCalled();
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
   });
 
   it('cannot regain expired authority when the wall clock moves backwards', async () => {

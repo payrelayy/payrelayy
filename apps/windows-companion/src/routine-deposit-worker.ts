@@ -209,6 +209,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   let pauseReason: RoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
   let historyScanFailures = 0;
+  let historyNotObservedCount = 0;
 
   async function pause(
     lease: RoutineDepositLease | null,
@@ -239,6 +240,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     }
     awaitingReconciliation = undefined;
     historyScanFailures = 0;
+    historyNotObservedCount = 0;
     return Object.freeze({ status: 'contained', reason });
   }
 
@@ -269,8 +271,13 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
           ? Object.freeze({ status: 'temporarily_unavailable' })
           : containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
       }
-      if (scan.outcome === 'not_observed')
-        return Object.freeze({ status: 'awaiting_reconciliation' });
+      if (scan.outcome === 'not_observed') {
+        historyNotObservedCount += 1;
+        return historyNotObservedCount < 3
+          ? Object.freeze({ status: 'awaiting_reconciliation' })
+          : containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+      }
+      historyNotObservedCount = 0;
       if (scan.outcome === 'ambiguous')
         return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
       try {
@@ -299,6 +306,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     if (!matchesBinding(lease, completed))
       return pause(awaitingReconciliation, 'confirmation_mismatch');
     awaitingReconciliation = undefined;
+    historyNotObservedCount = 0;
     return Object.freeze({ status: 'completed' });
   }
 
@@ -428,9 +436,11 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
             ? await pause(selected, 'confirmation_mismatch')
             : await containUncertain(selected, 'execution_uncertain');
         }
+        if (!fenceGranted || !actionAuthority)
+          return await pause(selected, 'confirmation_mismatch');
+        if (dispatch.outcome === 'local_uncertain')
+          return await containUncertain(selected, 'execution_uncertain');
         if (
-          !fenceGranted ||
-          !actionAuthority ||
           dispatch.outcome !== 'submission_attempted' ||
           dispatch.exactPlayerCreditMatch !== true ||
           !DIGEST.test(dispatch.providerResponseDigest)

@@ -122,7 +122,7 @@ export interface LocalKemerBetSession {
     window: RoutineDepositHistoryWindow,
   ): Promise<RoutineHistoryScan>;
   rehearseNoMoneyRoutinePreflight(playerId: string, amountMinor: number): Promise<void>;
-  /** Permanently disarm this routine launch after an uncertain attempt without hiding Chrome. */
+  /** Permanently disarm this launch after an integrity or review-persistence failure without hiding Chrome. */
   pauseForReview(): void;
   stop(): Promise<void>;
 }

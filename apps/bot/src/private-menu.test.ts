@@ -14,7 +14,7 @@ describe('English-only private customer menu', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
-      text: 'FetanAgent\nSet a Player ID to deposit.',
+      text: 'FetanAgent\nSend your 8-digit Player ID.',
       buttons: [
         { text: '💰 Deposit', callbackData: 'gd1.deposit' },
         { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
@@ -36,6 +36,12 @@ describe('English-only private customer menu', () => {
       { text: '💰 Deposit', callbackData: 'gd1.deposit' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
+  });
+
+  it('tells a customer how to replace a saved Player ID without using the button', () => {
+    expect(renderPlayerRegistrationMenu(callbackData, '28379330', true).text).toBe(
+      'FetanAgent\nPlayer ID: 28379330\nSend a new 8-digit ID to change it.',
+    );
   });
 
   it('shows a neutral, compact menu after cleanup without an expiry alert or unavailable action', () => {

@@ -1053,6 +1053,49 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
 
+  it('checks an unprompted eight-digit Player ID before the automatic payment-reference route', async () => {
+    await loadComposition(false, true, true, false, true);
+    runtime.actionResult = { version: 1, outcome: 'player_validation_queued' };
+    const context = messageContext('28379330');
+    await runtime.messageHandler!(context);
+
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'player_validation_request_command',
+        playerId: '28379330',
+      }),
+    ]);
+    expect(context.replies).toEqual([expect.stringContaining('Checking your Player ID')]);
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+  });
+
+  it('treats eight digits replying to payment instructions as a Player ID, not a payment', async () => {
+    await loadComposition(false, true, true, false, true);
+    runtime.actionResult = { version: 1, outcome: 'player_validation_queued' };
+    const prompt = buildTelegramCombinedPaymentPrompt({
+      playerId: '28379330',
+      receivers: [
+        {
+          providerCode: 'telebirr',
+          receiverAccountHolderName: 'Demo Receiver',
+          receiverAccountReference: '251900000042',
+        },
+      ],
+    });
+    const context = messageContext('12345678');
+    await runtime.messageHandler!({
+      ...context,
+      message: { text: '12345678', reply_to_message: { text: prompt, from: { is_bot: true } } },
+    });
+
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'player_validation_request_command',
+        playerId: '12345678',
+      }),
+    ]);
+  });
+
   it('does not reinterpret unrelated free text as a Player-ID Find request', async () => {
     await loadComposition(false, true, true);
     await runtime.messageHandler!(messageContext('NOT-A-PLAYER-ID'));

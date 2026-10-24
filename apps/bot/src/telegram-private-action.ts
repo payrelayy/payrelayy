@@ -66,6 +66,11 @@ export interface TelegramGuidedDepositReplyMetadata extends TelegramPrivateActio
   readonly playerValidationEnabled?: boolean;
 }
 
+export interface TelegramStandalonePlayerIdMetadata extends TelegramPrivateActionMetadata {
+  readonly text: unknown;
+  readonly playerValidationEnabled?: boolean;
+}
+
 export interface TelegramGuidedDepositMediaMetadata extends TelegramPrivateActionMetadata {
   readonly replyToMessage: unknown;
   readonly caption: unknown;
@@ -306,6 +311,28 @@ export function reduceTelegramPlayerIdTextAction(
     ...identity,
     kind: 'player_id_text',
     playerId: metadata.text,
+  };
+}
+
+/** A whole private text message of eight digits is a Player ID, even without a prompt reply. */
+export function reduceTelegramStandalonePlayerIdSubmission(
+  metadata: TelegramStandalonePlayerIdMetadata,
+):
+  | Extract<
+      TelegramPrivateActionEnvelope,
+      { kind: 'save_player_selection_command' | 'player_validation_request_command' }
+    >
+  | undefined {
+  const identity = toTelegramPrivateActionIdentity(metadata);
+  if (!identity || typeof metadata.text !== 'string') return undefined;
+  const playerId = metadata.text.trim();
+  if (!/^[0-9]{8}$/u.test(playerId)) return undefined;
+  return {
+    ...identity,
+    kind: metadata.playerValidationEnabled
+      ? 'player_validation_request_command'
+      : 'save_player_selection_command',
+    playerId,
   };
 }
 

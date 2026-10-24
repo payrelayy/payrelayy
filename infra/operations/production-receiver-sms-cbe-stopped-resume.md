@@ -3,11 +3,11 @@
 The paired Samsung phone runs the SMS verifier build for both TeleBirr and CBE
 Birr. The CBE incident left the SMS route and independent CBE verification
 live, but both shared payment gates disabled. The running server release
-`aa5db75897ac63e29917836aa7d52843b4a69ef6` mounts the SMS broker and
+`0cf74de563b8e332cc84b57eea21d64b331e1f7c` mounts the SMS broker and
 signed Windows Companion transport; it does not mount a paid TeleBirr receipt
 poll. The separate TeleBirr receipt phone proof is irrelevant to this SMS
 recovery. The current deploy helper has SHA-256
-`e00b5721a2b48cad8f5a7828081ebe9b05c239c6283a0123ac9f561e951ea1d2`.
+`040cf1ceb65e514e4812503d6010e2f0c3a86506e764076d63d904fd6428e429`.
 
 The 33 ETB CBE claim remains cancelled and in Owner review. The Owner
 confirmed exactly one manual KemerBet credit. Never resubmit that reference

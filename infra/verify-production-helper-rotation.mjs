@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='05de2df452f844bcd49f022d52559eb7aff8ab78'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='e0a880a808477397c800986856de2fd2c94184f9'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -551,7 +551,6 @@ const copyNumbersSuccessor = '4df544545234de40bdb0a4fbf3f624e5938abbdc06619dd4b6
 const copyNumbersCurrent = '05de2df452f844bcd49f022d52559eb7aff8ab78';
 const copyNumbersRotation = read(copyNumbersRotationPath).toString();
 const copyNumbersDocs = read(copyNumbersDocsPath).toString();
-assert.equal(sha256(read(unifiedHelperPath)), copyNumbersSuccessor);
 for (const value of [
   copyNumbersPredecessor,
   copyNumbersSuccessor,
@@ -603,5 +602,74 @@ assert.ok(
     copyNumbersStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(copyNumbersRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const inlineNumbersRotationPath =
+  'infra/operations/fetanagent-production-v2-inline-numbers-rotation-v10.sh';
+const inlineNumbersDocsPath = 'infra/operations/production-inline-numbers-release.md';
+const inlineNumbersPredecessor = copyNumbersSuccessor;
+const inlineNumbersSuccessor = '7f775dee43c95aa9a044bacdcc10b2e8479c06165257e85c463545c5912c1c04';
+const inlineNumbersCurrent = 'e0a880a808477397c800986856de2fd2c94184f9';
+const inlineNumbersRotation = read(inlineNumbersRotationPath).toString();
+const inlineNumbersDocs = read(inlineNumbersDocsPath).toString();
+assert.equal(sha256(read(unifiedHelperPath)), inlineNumbersSuccessor);
+for (const value of [
+  inlineNumbersPredecessor,
+  inlineNumbersSuccessor,
+  inlineNumbersCurrent,
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 INLINE NUMBERS HELPER V10',
+]) {
+  assert.ok(
+    inlineNumbersRotation.includes(value),
+    `inline numbers rotation script does not pin ${value}`,
+  );
+  assert.ok(
+    inlineNumbersDocs.includes(value),
+    `inline numbers release runbook does not pin ${value}`,
+  );
+}
+for (const value of [
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(
+    inlineNumbersRotation.includes(value),
+    `inline numbers rotation lost boundary: ${value}`,
+  );
+}
+const inlineNumbersRotate = inlineNumbersRotation.slice(
+  inlineNumbersRotation.indexOf('rotate() {'),
+);
+const inlineNumbersStep = (value) => {
+  const index = inlineNumbersRotate.indexOf(value);
+  assert.ok(index >= 0, `inline numbers rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  inlineNumbersRotation.indexOf('flock --nonblock 9') < inlineNumbersRotation.indexOf('rotate() {'),
+);
+assert.ok(
+  inlineNumbersStep('acquire_lock') < inlineNumbersStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  inlineNumbersStep('install_record "$INTENT" intent_body') <
+    inlineNumbersStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  inlineNumbersStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    inlineNumbersStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  inlineNumbersStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    inlineNumbersStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  inlineNumbersStep('runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"') <
+    inlineNumbersStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(inlineNumbersRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

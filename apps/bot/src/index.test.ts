@@ -55,15 +55,10 @@ vi.mock('grammy', () => ({
     }
   },
   InlineKeyboard: class {
-    public buttons: { text: string; callbackData?: string; copyText?: string }[] = [];
+    public buttons: { text: string; callbackData?: string }[] = [];
 
     public text(text: string, callbackData: string): this {
       this.buttons.push({ text, callbackData });
-      return this;
-    }
-
-    public copyText(text: string, copyText: string): this {
-      this.buttons.push({ text, copyText });
       return this;
     }
 
@@ -704,13 +699,21 @@ describe('Telegram admission, private action, and ingress composition', () => {
     };
     const replies: {
       text: string;
-      options: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } } | undefined;
+      options:
+        | {
+            reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+            entities?: { type: string; offset: number; length: number }[];
+          }
+        | undefined;
     }[] = [];
     await runtime.messageHandler!({
       ...messageContext('/deposit'),
       reply: async (
         text: string,
-        options?: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } },
+        options?: {
+          reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+          entities?: { type: string; offset: number; length: number }[];
+        },
       ) => {
         replies.push({ text, options });
         return { message_id: 42 };
@@ -731,13 +734,20 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).not.toContain(
       'Valid for 1 hour. Check the receiver name before paying.',
     );
-    expect(replies[0]!.options?.reply_markup).toMatchObject({
-      force_reply: true,
-      buttons: [
-        { text: 'Copy TeleBirr number', copyText: '900000042' },
-        { text: 'Copy CBE Birr number', copyText: '900000043' },
-      ],
-    });
+    expect(replies[0]!.text).toContain(
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+    );
+    expect(replies[0]!.options?.reply_markup).toMatchObject({ force_reply: true });
+    expect(replies[0]!.options?.reply_markup).not.toHaveProperty('buttons');
+    expect(
+      replies[0]!.options?.entities?.map((entity) => ({
+        type: entity.type,
+        text: replies[0]!.text.slice(entity.offset, entity.offset + entity.length),
+      })),
+    ).toEqual([
+      { type: 'code', text: '900000042' },
+      { type: 'code', text: '900000043' },
+    ]);
     expect(runtime.instructionRecords).toHaveLength(1);
     expect(runtime.instructionRecords[0]).toEqual([expect.anything(), '123456', '123456789', 42]);
   });
@@ -773,7 +783,12 @@ describe('Telegram admission, private action, and ingress composition', () => {
     };
     const replies: {
       text: string;
-      options: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } } | undefined;
+      options:
+        | {
+            reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+            entities?: { type: string; offset: number; length: number }[];
+          }
+        | undefined;
     }[] = [];
     await runtime.callbackHandler!({
       ...messageContext(''),
@@ -781,7 +796,10 @@ describe('Telegram admission, private action, and ingress composition', () => {
       answerCallbackQuery: async () => {},
       reply: async (
         text: string,
-        options?: { reply_markup?: { buttons?: unknown[]; force_reply?: boolean } },
+        options?: {
+          reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+          entities?: { type: string; offset: number; length: number }[];
+        },
       ) => {
         replies.push({ text, options });
         return { message_id: 42 };
@@ -794,10 +812,13 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(replies[0]!.text).not.toContain('TeleBirr\n');
     expect(replies[0]!.text).not.toContain('Valid for 1 hour');
-    expect(replies[0]!.options?.reply_markup).toMatchObject({
-      force_reply: true,
-      buttons: [{ text: 'Copy CBE Birr number', copyText: '900000043' }],
-    });
+    expect(replies[0]!.options?.reply_markup).toMatchObject({ force_reply: true });
+    expect(replies[0]!.options?.reply_markup).not.toHaveProperty('buttons');
+    expect(
+      replies[0]!.options?.entities?.map((entity) =>
+        replies[0]!.text.slice(entity.offset, entity.offset + entity.length),
+      ),
+    ).toEqual(['900000043']);
     expect(runtime.instructionRecords).toHaveLength(0);
   });
 

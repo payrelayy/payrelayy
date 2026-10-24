@@ -133,11 +133,30 @@ export function toTelegramLocalReceiverNumber(accountReference: string): string 
   return /^251[0-9]{9}$/u.test(accountReference) ? accountReference.slice(3) : accountReference;
 }
 
+/** Telegram code entities make the receiver digits easy to copy without extra buttons. */
+export function telegramReceiverNumberCodeEntities(
+  text: string,
+): Array<{ type: 'code'; offset: number; length: number }> {
+  if (
+    !text.startsWith('💰 FetanAgent deposit\n') &&
+    !text.startsWith('💰 TeleBirr deposit\n') &&
+    !text.startsWith('💳 CBE Birr deposit\n')
+  )
+    return [];
+  return [...text.matchAll(/(?:^|\n)(?:📱 )?Number: ([0-9]{9,24})(?=\n|$)/gu)].map((match) => ({
+    type: 'code' as const,
+    // Telegram counts UTF-16 code units, like JavaScript string indexes.
+    offset: match.index + match[0].length - match[1]!.length,
+    length: match[1]!.length,
+  }));
+}
+
 /** One payable card, with each Owner-configured receiver kept under its own provider. */
 function renderTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
   previousWording: boolean,
   localNumbers: boolean,
+  conciseProofText: boolean,
 ): string {
   if (
     !validPlayerId(input.playerId) ||
@@ -175,14 +194,16 @@ function renderTelegramCombinedPaymentPrompt(
             : 'Check the receiver name before paying.',
         ]
       : []),
-    'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    conciseProofText
+      ? 'After paying, send reference, SMS, receipt link, screenshot or PDF here.'
+      : 'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
   ].join('\n');
 }
 
 export function buildTelegramCombinedPaymentPrompt(
   input: TelegramCombinedPaymentPromptInput,
 ): string {
-  return renderTelegramCombinedPaymentPrompt(input, false, true);
+  return renderTelegramCombinedPaymentPrompt(input, false, true, true);
 }
 
 export function parseTelegramCombinedPaymentPromptReply(value: unknown): string | undefined {
@@ -202,9 +223,10 @@ export function parseTelegramCombinedPaymentPromptReply(value: unknown): string 
   if (!playerId) return undefined;
   try {
     const input = { playerId, receivers };
-    return message.text === renderTelegramCombinedPaymentPrompt(input, false, true) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, false, false) ||
-      message.text === renderTelegramCombinedPaymentPrompt(input, true, false)
+    return message.text === renderTelegramCombinedPaymentPrompt(input, false, true, true) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, false, true, false) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, false, false, false) ||
+      message.text === renderTelegramCombinedPaymentPrompt(input, true, false, false)
       ? playerId
       : undefined;
   } catch {

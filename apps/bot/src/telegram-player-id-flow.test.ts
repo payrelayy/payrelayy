@@ -253,7 +253,6 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'force_reply',
       text: expect.stringContaining('👤 Name: Demo Receiver'),
       placeholder: 'TeleBirr transaction number',
-      copyNumbers: [{ providerCode: 'telebirr', number: '900000042' }],
     });
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('📱 Number: 900000042');
@@ -288,7 +287,6 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'force_reply',
       text: expect.stringContaining('💳 CBE Birr deposit'),
       placeholder: 'CBE Birr transaction reference',
-      copyNumbers: [{ providerCode: 'cbe_birr', number: '900000042' }],
     });
     if (presentation.kind === 'force_reply') {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');

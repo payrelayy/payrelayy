@@ -16,6 +16,8 @@ const dependencies = vi.hoisted(() => ({
   releaseSessionLock: vi.fn(),
   ensureKemerBetAgentWindow: vi.fn(),
   verifyLocalKemerBetIdentity: vi.fn(),
+  executeSingleLocalKemerBetLookup: vi.fn(),
+  executeRoutineOneUseLocalKemerBetDeposit: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -34,6 +36,14 @@ vi.mock('./local-kemerbet-identity.js', () => ({
 }));
 vi.mock('./local-kemerbet-window.js', () => ({
   ensureKemerBetAgentWindow: dependencies.ensureKemerBetAgentWindow,
+}));
+vi.mock('./local-kemerbet-lookup.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./local-kemerbet-lookup.js')>()),
+  executeSingleLocalKemerBetLookup: dependencies.executeSingleLocalKemerBetLookup,
+}));
+vi.mock('./local-kemerbet-deposit.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./local-kemerbet-deposit.js')>()),
+  executeRoutineOneUseLocalKemerBetDeposit: dependencies.executeRoutineOneUseLocalKemerBetDeposit,
 }));
 
 const AGENTS_URL = 'https://agentsystem.admindigi.com/agents';
@@ -249,6 +259,7 @@ beforeEach(() => {
   });
   dependencies.releaseSessionLock.mockResolvedValue(undefined);
   dependencies.ensureKemerBetAgentWindow.mockResolvedValue(undefined);
+  dependencies.executeSingleLocalKemerBetLookup.mockResolvedValue('found');
   dependencies.verifyLocalKemerBetIdentity.mockResolvedValue({
     bindingCreated: false,
     identityVerified: true,
@@ -266,6 +277,122 @@ afterEach(async () => {
 });
 
 describe('local KemerBet enrollment session', () => {
+  it('reverifies the bound agent and retries an inconclusive read-only Find once', async () => {
+    const { page, session } = await start();
+    dependencies.executeSingleLocalKemerBetLookup
+      .mockResolvedValueOnce('review_required')
+      .mockResolvedValueOnce('found');
+
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).resolves.toBe('found');
+    expect(dependencies.executeSingleLocalKemerBetLookup).toHaveBeenCalledTimes(2);
+    expect(dependencies.verifyLocalKemerBetIdentity).toHaveBeenCalledTimes(2);
+    expect(page.goto).toHaveBeenCalledWith(AGENTS_URL, {
+      waitUntil: 'commit',
+      timeout: 15_000,
+    });
+  });
+
+  it('bounds repeated inconclusive Player lookups to two read-only Find cycles', async () => {
+    const { session } = await start();
+    dependencies.executeSingleLocalKemerBetLookup.mockResolvedValue('review_required');
+
+    await expect(session.executeSingleLookup('PLAYER-ALPHA')).resolves.toBe('review_required');
+    expect(dependencies.executeSingleLocalKemerBetLookup).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries one deposit preparation only before requesting a fence', async () => {
+    const { page, session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    const acquireFinalAction = vi.fn(async () => ({
+      playerId: '12345678',
+      amountMinor: 2500,
+      isFresh: () => true,
+    }));
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit
+      .mockRejectedValueOnce(new Error('Search surface unavailable'))
+      .mockImplementationOnce(
+        async (_page, _playerId, _amountMinor, _lookup, _deposit, acquire) => {
+          await acquire();
+          return {
+            outcome: 'submission_attempted',
+            providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+            exactPlayerCreditMatch: true,
+          };
+        },
+      );
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).resolves.toMatchObject({ outcome: 'submission_attempted' });
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
+    expect(page.goto).toHaveBeenCalledWith(AGENTS_URL, {
+      waitUntil: 'commit',
+      timeout: 15_000,
+    });
+    expect(acquireFinalAction).toHaveBeenCalledOnce();
+  });
+
+  it('never retries after a deposit has requested the final fence', async () => {
+    const { page, session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    const acquireFinalAction = vi.fn(async () => {
+      throw new Error('Ambiguous fence response');
+    });
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockImplementationOnce(
+      async (_page, _playerId, _amountMinor, _lookup, _deposit, acquire) => acquire(),
+    );
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).rejects.toThrow('Ambiguous fence response');
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledOnce();
+    expect(acquireFinalAction).toHaveBeenCalledOnce();
+    expect(page.goto).not.toHaveBeenCalledWith(AGENTS_URL, {
+      waitUntil: 'commit',
+      timeout: 15_000,
+    });
+  });
+
+  it('bounds repeated pre-fence preparation failures without requesting a fence', async () => {
+    const { session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    const acquireFinalAction = vi.fn();
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockRejectedValue(
+      new Error('Search surface unavailable'),
+    );
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).rejects.toThrow('Search surface unavailable');
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
+    expect(acquireFinalAction).not.toHaveBeenCalled();
+  });
+
+  it('restores Chrome before fencing when it was minimized during preparation', async () => {
+    const { session } = await start(AGENTS_URL, { ...config, routineDepositsEnabled: true });
+    dependencies.ensureKemerBetAgentWindow
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Window minimized'));
+    const acquireFinalAction = vi.fn(async () => ({
+      playerId: '12345678',
+      amountMinor: 2500,
+      isFresh: () => true,
+    }));
+    dependencies.executeRoutineOneUseLocalKemerBetDeposit.mockImplementation(
+      async (_page, _playerId, _amountMinor, _lookup, _deposit, acquire) => {
+        await acquire();
+        return {
+          outcome: 'submission_attempted',
+          providerResponseDigest: `sha256:${'a'.repeat(64)}`,
+          exactPlayerCreditMatch: true,
+        };
+      },
+    );
+
+    await expect(
+      session.executeRoutineOneUseDeposit('12345678', 2500, acquireFinalAction),
+    ).resolves.toMatchObject({ outcome: 'submission_attempted' });
+    expect(dependencies.executeRoutineOneUseLocalKemerBetDeposit).toHaveBeenCalledTimes(2);
+    expect(acquireFinalAction).toHaveBeenCalledOnce();
+  });
+
   it('refuses Player lookup work when its Chrome window cannot be restored', async () => {
     const { page, session } = await start();
     dependencies.ensureKemerBetAgentWindow.mockRejectedValue(

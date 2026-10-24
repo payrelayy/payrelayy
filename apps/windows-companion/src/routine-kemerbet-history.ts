@@ -31,16 +31,21 @@ export type RoutineHistoryScan =
   | { readonly outcome: 'ambiguous' }
   | { readonly outcome: 'exact_match'; readonly observation: RoutineHistoryObservation };
 
-interface HistoryRow {
-  readonly transactionId: string;
-  readonly requestId: string;
+interface HistoryRowBase {
   readonly occurredAt: string;
   readonly occurredAtMs: number;
+}
+
+interface ApprovedHistoryRow extends HistoryRowBase {
+  readonly transactionId: string;
+  readonly requestId: string;
   readonly playerId: string;
   readonly amountMinor: number;
   readonly currencyCode: 'ETB';
-  readonly approvedDeposit: boolean;
+  readonly approvedDeposit: true;
 }
+
+type HistoryRow = ApprovedHistoryRow | (HistoryRowBase & { readonly approvedDeposit: false });
 
 interface HistoryPage {
   readonly total: number;
@@ -80,26 +85,44 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
   const rows: HistoryRow[] = [];
   for (const raw of rawRows) {
     if (!record(raw)) return undefined;
+    const rawTime = raw.transactionTime;
+    const timeMatch = typeof rawTime === 'string' ? UTC_FRACTIONAL_MICROSECOND.exec(rawTime) : null;
+    if (!timeMatch) return undefined;
+    // Preserve the provider's UTC instant at the six-digit wire precision, without rounding.
+    const occurredAt = `${timeMatch[1]}.${timeMatch[2]!.padEnd(6, '0')}Z`;
+    const occurredAtMs = Date.parse(occurredAt);
+    if (!Number.isSafeInteger(occurredAtMs) || occurredAtMs <= 0) return undefined;
+    const approvedDeposit =
+      raw.state === 1 &&
+      raw.paymentType === 4 &&
+      raw.transactionType === 1 &&
+      raw.notes === 'Player Epos Deposit';
+    if (!approvedDeposit) {
+      const clearlyOtherOperation =
+        (typeof raw.state === 'number' && raw.state !== 1) ||
+        (typeof raw.paymentType === 'number' && raw.paymentType !== 4) ||
+        (typeof raw.transactionType === 'number' && raw.transactionType !== 1) ||
+        (typeof raw.notes === 'string' && raw.notes !== 'Player Epos Deposit');
+      if (!clearlyOtherOperation) return undefined;
+      // Other activity on the same agent account may have different ID, Player, or amount
+      // fields. Its timestamp still participates in pagination/order validation, but it
+      // cannot confirm a FetanAgent credit. A possible EPOS credit stays strictly parsed.
+      rows.push(Object.freeze({ occurredAt, occurredAtMs, approvedDeposit: false }));
+      continue;
+    }
     const transactionId = numericId(raw.walletTransactionId);
     const requestId = numericId(raw.transactionId);
     const playerId = raw.playerId;
     const amountMinor = moneyMinor(raw.amount);
-    const rawTime = raw.transactionTime;
-    const timeMatch = typeof rawTime === 'string' ? UTC_FRACTIONAL_MICROSECOND.exec(rawTime) : null;
     if (
       !transactionId ||
       !requestId ||
       typeof playerId !== 'string' ||
       !PLAYER_ID.test(playerId) ||
       amountMinor === undefined ||
-      raw.currencyCode !== 'ETB' ||
-      !timeMatch
+      raw.currencyCode !== 'ETB'
     )
       return undefined;
-    // Preserve the provider's UTC instant at the six-digit wire precision, without rounding.
-    const occurredAt = `${timeMatch[1]}.${timeMatch[2]!.padEnd(6, '0')}Z`;
-    const occurredAtMs = Date.parse(occurredAt);
-    if (!Number.isSafeInteger(occurredAtMs) || occurredAtMs <= 0) return undefined;
     rows.push(
       Object.freeze({
         transactionId,
@@ -109,11 +132,7 @@ export function parseRoutineKemerBetHistoryPage(candidate: unknown): HistoryPage
         playerId,
         amountMinor,
         currencyCode: 'ETB',
-        approvedDeposit:
-          raw.state === 1 &&
-          raw.paymentType === 4 &&
-          raw.transactionType === 1 &&
-          raw.notes === 'Player Epos Deposit',
+        approvedDeposit: true,
       }),
     );
   }
@@ -244,7 +263,7 @@ export async function scanRoutineKemerBetHistory(
   const filter = await applyHistoryWindowFilter(page, authorization);
   let expectedTotal: number | undefined;
   let previousOldestMs = Number.POSITIVE_INFINITY;
-  const matches: HistoryRow[] = [];
+  const matches: ApprovedHistoryRow[] = [];
   for (let pageNumber = 1; pageNumber <= MAX_PAGES; pageNumber += 1) {
     let response: Response;
     if (pageNumber === 1) {
@@ -282,12 +301,12 @@ export async function scanRoutineKemerBetHistory(
     if (newestMs > previousOldestMs) throw new Error('KemerBet history order changed.');
     previousOldestMs = oldestMs;
     for (const row of historyPage.rows) {
+      if (!row.approvedDeposit) continue;
       if (
         row.occurredAt >= window.from &&
         row.occurredAt <= window.until &&
         row.playerId === playerId &&
-        row.amountMinor === amountMinor &&
-        row.approvedDeposit
+        row.amountMinor === amountMinor
       )
         matches.push(row);
     }

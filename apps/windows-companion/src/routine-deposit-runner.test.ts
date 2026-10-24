@@ -133,7 +133,12 @@ describe('automatic routine queue loop', () => {
     const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
     await vi.advanceTimersByTimeAsync(200);
     await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
-    expect(order).toEqual(['first_credit_reviewed', 'player_verified', 'next_credit_completed']);
+    expect(order).toEqual([
+      'first_credit_reviewed',
+      'player_verified',
+      'next_credit_completed',
+      'player_verified',
+    ]);
     expect(session.pauseForReview).not.toHaveBeenCalled();
     expect(selected.runOnce).toHaveBeenCalledTimes(3);
   });
@@ -166,7 +171,7 @@ describe('automatic routine queue loop', () => {
     expect(order).toEqual(['financial_idle', 'find_processed', 'financial_stop']);
   });
 
-  it('does not run read-only work while a credit is completed, uncertain, or signed out', async () => {
+  it('runs read-only work after a completed credit, but not during reconciliation or sign-out', async () => {
     vi.useFakeTimers();
     const { options, session } = fixture();
     const runReadOnlyIdleWorkOnce = vi.fn(async () => undefined);
@@ -180,7 +185,7 @@ describe('automatic routine queue loop', () => {
     const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
     await vi.advanceTimersByTimeAsync(200);
     expect(selected.runOnce).toHaveBeenCalledTimes(3);
-    expect(runReadOnlyIdleWorkOnce).not.toHaveBeenCalled();
+    expect(runReadOnlyIdleWorkOnce).toHaveBeenCalledOnce();
     await queue.stop();
   });
 

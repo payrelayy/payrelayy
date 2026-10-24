@@ -25,8 +25,12 @@ import type {
   CompanionDeviceSigningRuntime,
   ExactFiveCompanionLookupOutcomes,
 } from './device-enrollment.js';
-import type { LocalKemerBetSession } from './local-kemerbet-session.js';
+import {
+  LocalKemerBetSessionUnavailableError,
+  type LocalKemerBetSession,
+} from './local-kemerbet-session.js';
 import type { LocalKemerBetLookupStage } from './local-kemerbet-lookup.js';
+import { LocalKemerBetWindowUnavailableError } from './local-kemerbet-window.js';
 import {
   createWindowsCurrentUserDataProtector,
   type WindowsCurrentUserDataProtector,
@@ -784,8 +788,18 @@ export async function createCompanionPlayerValidationWorker(
               (stage, elapsedMs) => reportTiming(stage, elapsedMs),
             );
             if (observed === 'found') outcome = 'found';
-          } catch {
-            // A busy, disconnected, or uncertain local session is never positive evidence.
+          } catch (error) {
+            if (
+              error instanceof LocalKemerBetSessionUnavailableError ||
+              error instanceof LocalKemerBetWindowUnavailableError
+            ) {
+              // These guards run before Find. Release only their started marker so
+              // the same signed assignment can be tried when Chrome is ready.
+              await rm(startedPath, { force: true });
+              report('temporarily_unavailable');
+              return 'temporarily_unavailable';
+            }
+            // An interrupted provider Find is inconclusive. Never call it found.
           }
         }
         result = options.device.createSignedPlayerValidationResult(

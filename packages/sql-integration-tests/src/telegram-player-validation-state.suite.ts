@@ -822,10 +822,10 @@ export function registerTelegramPlayerValidationStateSqlTests(
         expect(sent.map((message) => message.chatId).sort()).toEqual([89650000032, 89650000033]);
         expect(sent.every((message) => message.showDepositButton)).toBe(true);
         expect(sent.find((message) => message.chatId === 89650000032)?.text).toContain(
-          'Player ID verified and saved',
+          'Player ID verified. You can deposit now.',
         );
         expect(sent.find((message) => message.chatId === 89650000033)?.text).toContain(
-          'saved Player ID has not changed',
+          'Your saved ID is unchanged.',
         );
         expect(sent.map((message) => message.text).join(' ')).not.toMatch(
           /E2E-(FOUND|REVIEW)-PLAYER/u,

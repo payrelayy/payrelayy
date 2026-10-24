@@ -136,6 +136,46 @@ describe('read-only KemerBet deposit history parser', () => {
     }
   });
 
+  it('does not require credit-only fields from an explicitly unrelated operation', async () => {
+    const credit = response().value.item2[0]!;
+    const manualDeposit = {
+      transactionTime: '2026-10-12T18:33:14.2000',
+      state: 1,
+      paymentType: 3,
+      transactionType: 1,
+      notes: 'Manual Deposit',
+      playerId: '28379330',
+      amount: 29,
+      currencyCode: 'ETB',
+    };
+    const withdrawal = {
+      transactionTime: '2026-10-12T18:33:14.1000',
+      state: 1,
+      paymentType: 4,
+      transactionType: 2,
+      notes: 'Player Epos Withdrawal',
+      playerId: null,
+      amount: -29,
+      currencyCode: null,
+    };
+    const result = await scanRoutineKemerBetHistory(
+      fakeHistoryPage([credit, manualDeposit, withdrawal]),
+      '28379330',
+      2900,
+      window,
+    );
+    expect(result).toMatchObject({ outcome: 'exact_match' });
+    if (result.outcome === 'exact_match') {
+      expect(result.observation.transactionId).toBe('110891902');
+      expect(result.observation.approvedHistoryMatchCount).toBe(1);
+    }
+  });
+
+  it('does not skip a potentially approved credit with an unknown operation marker', () => {
+    expect(parseRoutineKemerBetHistoryPage(response({ notes: undefined }))).toBeUndefined();
+    expect(parseRoutineKemerBetHistoryPage(response({ state: undefined }))).toBeUndefined();
+  });
+
   it('rejects malformed or rounded money, truncated timestamps, and missing IDs', () => {
     for (const override of [
       { amount: 29.005 },

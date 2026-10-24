@@ -8,6 +8,7 @@ import {
   presentTelegramDepositOutcome,
   processOneTelegramDepositOutcome,
   processOneTelegramDepositTemporaryCleanup,
+  runTelegramDepositOutcomeNotifier,
   type TelegramDepositOutcomeNotifierDependencies,
 } from './telegram-deposit-outcome-notifier.js';
 
@@ -40,6 +41,40 @@ function dependencies(
 }
 
 describe('Telegram deposit outcome notifier', () => {
+  it('checks again after a short idle wait so completed Player and credit results are delivered promptly', async () => {
+    const controller = new AbortController();
+    const waits: number[] = [];
+    await runTelegramDepositOutcomeNotifier(
+      {
+        request: async (action) => {
+          if (action.kind === 'deposit_outcome_claim') {
+            return { version: 1, outcome: 'deposit_outcome_none' };
+          }
+          if (action.kind === 'player_validation_outcome_claim') {
+            return { version: 1, outcome: 'player_validation_outcome_none' };
+          }
+          if (action.kind === 'deposit_temporary_cleanup_claim') {
+            return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
+          }
+          throw new Error('Unexpected action.');
+        },
+        send: async () => {
+          throw new Error('No notification should be sent.');
+        },
+        delete: async () => {
+          throw new Error('No message should be deleted.');
+        },
+        sleep: async (milliseconds, signal) => {
+          expect(signal.aborted).toBe(false);
+          waits.push(milliseconds);
+          controller.abort();
+        },
+      },
+      controller.signal,
+    );
+    expect(waits).toEqual([2_000]);
+  });
+
   it('sends confirmed credit only after a final delivery is claimed, then acknowledges it', async () => {
     const actions: TelegramPrivateActionEnvelope[] = [];
     const messages: string[] = [];

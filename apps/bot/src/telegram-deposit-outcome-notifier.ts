@@ -16,6 +16,11 @@ type Delivery = Extract<
   { readonly outcome: 'deposit_outcome_delivery' }
 >;
 
+// The durable notification claims are cheap when empty. A shorter idle wait makes
+// completed Player checks and credits visible promptly without changing delivery
+// leases, Telegram retry semantics, or any financial authorization.
+const IDLE_OUTCOME_POLL_MS = 2_000;
+
 export interface TelegramDepositOutcomeNotifierDependencies {
   readonly request: (action: TelegramPrivateActionEnvelope) => Promise<TelegramPrivateActionResult>;
   readonly send: (
@@ -210,7 +215,7 @@ export async function runTelegramDepositOutcomeNotifier(
         playerValidation === 'none' &&
         cleanup === 'none' &&
         instruction === 'none'
-          ? 10_000
+          ? IDLE_OUTCOME_POLL_MS
           : 0;
     } catch {
       console.warn('Telegram deposit outcome delivery is temporarily unavailable.');

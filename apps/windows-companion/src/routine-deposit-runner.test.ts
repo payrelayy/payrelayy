@@ -242,6 +242,24 @@ describe('automatic routine queue loop', () => {
     expect(session.stop).toHaveBeenCalledTimes(1);
   });
 
+  it('checks the empty credit queue again within half a second by default', async () => {
+    vi.useFakeTimers();
+    const { options } = fixture();
+    selected.runOnce
+      .mockResolvedValueOnce({ status: 'idle' })
+      .mockResolvedValueOnce({ status: 'paused', reason: 'operator_stopped' });
+    const defaultOptions = { ...options };
+    delete defaultOptions.idleDelayMs;
+    const queue = startRoutineDepositQueue(defaultOptions);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(selected.runOnce).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(selected.runOnce).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps Chrome open through an idle database outage and backs off before retrying', async () => {
     vi.useFakeTimers();
     const { options, session } = fixture();

@@ -82,8 +82,9 @@ export type RoutineDepositPauseReason =
 
 /**
  * Durable serialization is the store's responsibility, not a JavaScript mutex or an expiring
- * worker lease. The store must retain the existing account's blocking execution-attempt row until
- * exact positive reconciliation; a crash/timeout must return that attempt in reconcile mode.
+ * worker lease. A fenced attempt blocks the account until exact positive reconciliation or an
+ * immutable ambiguous outcome with an Owner review case. A reviewed payment remains one-use;
+ * another payment for that same Player is held until the review is resolved.
  * It must recheck active policy, verified one-use payment claim, destination eligibility and
  * untouched job under the same transaction when claiming, fencing and completing. Do not adapt
  * the v2 fixed-amount/pilot broker or fabricate individual Owner approvals to implement this port.
@@ -113,6 +114,10 @@ export type RoutineDepositWorkerResult =
     }
   | { readonly status: 'temporarily_unavailable'; readonly readOnlyFindSafe?: true }
   | { readonly status: 'completed' }
+  | {
+      readonly status: 'contained';
+      readonly reason: 'execution_uncertain' | 'reconciliation_uncertain';
+    }
   | { readonly status: 'paused'; readonly reason: RoutineDepositPauseReason };
 
 export interface RoutineDepositWorkerOptions {
@@ -196,7 +201,7 @@ function validLease(lease: RoutineDepositLease): boolean {
   );
 }
 
-/** No provider retry, parallel submission, implicit resume after uncertainty, or v2 widening. */
+/** No provider retry, parallel submission, or v2 widening. */
 export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions) {
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
@@ -204,6 +209,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
   let pauseReason: RoutineDepositPauseReason | undefined;
   let awaitingReconciliation: RoutineDepositLease | undefined;
   let historyScanFailures = 0;
+  let historyNotObservedCount = 0;
 
   async function pause(
     lease: RoutineDepositLease | null,
@@ -220,13 +226,36 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
     return Object.freeze({ status: 'paused' as const, reason });
   }
 
+  async function containUncertain(
+    lease: RoutineDepositLease,
+    reason: 'execution_uncertain' | 'reconciliation_uncertain',
+  ): Promise<RoutineDepositWorkerResult> {
+    try {
+      // The signed broker response is the proof that this one-use attempt is now
+      // either confirmed or in durable Owner review. Never continue on a timeout.
+      await options.store.pause(lease, reason);
+    } catch {
+      pauseReason = 'database_unavailable';
+      return Object.freeze({ status: 'paused', reason: 'database_unavailable' });
+    }
+    awaitingReconciliation = undefined;
+    historyScanFailures = 0;
+    historyNotObservedCount = 0;
+    return Object.freeze({ status: 'contained', reason });
+  }
+
   async function reconcile(lease: RoutineDepositLease): Promise<RoutineDepositWorkerResult> {
     awaitingReconciliation = Object.freeze({
       ...lease,
       phase: 'reconcile',
       finalActionFenced: true,
     });
-    let outcome = await options.store.reconcile(awaitingReconciliation);
+    let outcome: RoutineDepositReconciliation;
+    try {
+      outcome = await options.store.reconcile(awaitingReconciliation);
+    } catch {
+      return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+    }
     if (outcome.outcome === 'pending') {
       let scan: Awaited<ReturnType<LocalKemerBetSession['scanRoutineDepositHistory']>>;
       try {
@@ -240,16 +269,25 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
         historyScanFailures += 1;
         return historyScanFailures < 3
           ? Object.freeze({ status: 'temporarily_unavailable' })
-          : pause(awaitingReconciliation, 'reconciliation_uncertain');
+          : containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
       }
-      if (scan.outcome === 'not_observed')
-        return Object.freeze({ status: 'awaiting_reconciliation' });
+      if (scan.outcome === 'not_observed') {
+        historyNotObservedCount += 1;
+        return historyNotObservedCount < 3
+          ? Object.freeze({ status: 'awaiting_reconciliation' })
+          : containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+      }
+      historyNotObservedCount = 0;
       if (scan.outcome === 'ambiguous')
-        return pause(awaitingReconciliation, 'reconciliation_uncertain');
-      outcome = await options.store.confirmHistory(awaitingReconciliation, scan.observation);
+        return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+      try {
+        outcome = await options.store.confirmHistory(awaitingReconciliation, scan.observation);
+      } catch {
+        return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+      }
     }
     if (outcome.outcome !== 'confirmed_executed') {
-      return pause(awaitingReconciliation, 'reconciliation_uncertain');
+      return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
     }
     if (
       !matchesBinding(lease, outcome) ||
@@ -259,10 +297,16 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
       outcome.playerCreditConfirmed !== true
     )
       return pause(awaitingReconciliation, 'confirmation_mismatch');
-    const completed = await options.store.completeConfirmed(lease, outcome.reconciliationId);
+    let completed: RoutineDepositBinding;
+    try {
+      completed = await options.store.completeConfirmed(lease, outcome.reconciliationId);
+    } catch {
+      return containUncertain(awaitingReconciliation, 'reconciliation_uncertain');
+    }
     if (!matchesBinding(lease, completed))
       return pause(awaitingReconciliation, 'confirmation_mismatch');
     awaitingReconciliation = undefined;
+    historyNotObservedCount = 0;
     return Object.freeze({ status: 'completed' });
   }
 
@@ -297,6 +341,7 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
         const selected = lease;
         let fenceRequested = false;
         let fenceGranted = false;
+        let integrityFailure = false;
         let actionAuthority: LocalKemerBetRoutineFinalAction | undefined;
         let dispatch: LocalKemerBetDepositDispatchOutcome;
         try {
@@ -317,8 +362,10 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
               if (
                 !Number.isSafeInteger(requestStartedAt) ||
                 !Number.isFinite(requestStartedMonotonic)
-              )
+              ) {
+                integrityFailure = true;
                 throw new Error('Routine action unavailable.');
+              }
               const fence = await options.store.fenceFinalAction(selected);
               const observedAt = now();
               const observedAtMonotonic = monotonicNow();
@@ -328,16 +375,26 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
                 fence.firstFenceAcquired !== true ||
                 !Number.isSafeInteger(fence.issuedAtMs) ||
                 !Number.isSafeInteger(fence.validUntilMs) ||
-                !Number.isSafeInteger(observedAt) ||
-                !Number.isFinite(observedAtMonotonic) ||
                 fence.issuedAtMs <= 0 ||
                 lifetimeMs <= 0 ||
-                lifetimeMs > ACTION_LIFETIME_MS ||
+                lifetimeMs > ACTION_LIFETIME_MS
+              ) {
+                integrityFailure = true;
+                throw new Error('Routine action unavailable.');
+              }
+              if (
+                !Number.isSafeInteger(observedAt) ||
+                !Number.isFinite(observedAtMonotonic) ||
                 observedAt < requestStartedAt ||
-                observedAt - requestStartedAt >= lifetimeMs ||
                 observedAtMonotonic < requestStartedMonotonic ||
-                observedAtMonotonic - requestStartedMonotonic >= lifetimeMs ||
                 options.signal.aborted
+              ) {
+                integrityFailure = true;
+                throw new Error('Routine action unavailable.');
+              }
+              if (
+                observedAt - requestStartedAt >= lifetimeMs ||
+                observedAtMonotonic - requestStartedMonotonic >= lifetimeMs
               )
                 throw new Error('Routine action unavailable.');
               fenceGranted = true;
@@ -352,6 +409,11 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
                 isFresh: () => {
                   const wallNow = now();
                   const monoNow = monotonicNow();
+                  integrityFailure ||=
+                    !Number.isSafeInteger(wallNow) ||
+                    !Number.isFinite(monoNow) ||
+                    wallNow < lastWallNow ||
+                    monoNow < lastMonotonicNow;
                   expired ||=
                     options.signal.aborted ||
                     !Number.isSafeInteger(wallNow) ||
@@ -369,19 +431,28 @@ export function createRoutineDepositWorker(options: RoutineDepositWorkerOptions)
             },
           );
         } catch {
-          return await pause(selected, 'execution_uncertain');
+          if (options.signal.aborted) return await pause(selected, 'operator_stopped');
+          return integrityFailure
+            ? await pause(selected, 'confirmation_mismatch')
+            : await containUncertain(selected, 'execution_uncertain');
         }
+        if (!fenceGranted || !actionAuthority)
+          return await pause(selected, 'confirmation_mismatch');
+        if (dispatch.outcome === 'local_uncertain')
+          return await containUncertain(selected, 'execution_uncertain');
         if (
-          !fenceGranted ||
-          !actionAuthority ||
           dispatch.outcome !== 'submission_attempted' ||
           dispatch.exactPlayerCreditMatch !== true ||
           !DIGEST.test(dispatch.providerResponseDigest)
         )
-          return await pause(selected, 'execution_uncertain');
+          return await pause(selected, 'confirmation_mismatch');
         // An HTTP 200/digest is NOT credit confirmation. Only exact database reconciliation
         // can release the durable lane and allow a subsequent job to be claimed.
-        await options.store.recordDispatch(selected, dispatch);
+        try {
+          await options.store.recordDispatch(selected, dispatch);
+        } catch {
+          return await containUncertain(selected, 'execution_uncertain');
+        }
         return await reconcile(selected);
       } catch {
         return await pause(lease, 'database_unavailable');

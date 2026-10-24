@@ -113,6 +113,31 @@ describe('automatic routine queue loop', () => {
     expect(order).toEqual(['financial_idle', 'find_started', 'find_completed', 'financial_stop']);
   });
 
+  it('keeps Player verification and later credits running after one durable Owner review', async () => {
+    vi.useFakeTimers();
+    const { options, session } = fixture();
+    const order: string[] = [];
+    selected.runOnce
+      .mockImplementationOnce(async () => {
+        order.push('first_credit_reviewed');
+        return { status: 'contained', reason: 'execution_uncertain' };
+      })
+      .mockImplementationOnce(async () => {
+        order.push('next_credit_completed');
+        return { status: 'completed' };
+      })
+      .mockResolvedValueOnce({ status: 'paused', reason: 'operator_stopped' });
+    const runReadOnlyIdleWorkOnce = vi.fn(async () => {
+      order.push('player_verified');
+    });
+    const queue = startRoutineDepositQueue({ ...options, runReadOnlyIdleWorkOnce });
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(queue.done).resolves.toEqual({ status: 'paused', reason: 'operator_stopped' });
+    expect(order).toEqual(['first_credit_reviewed', 'player_verified', 'next_credit_completed']);
+    expect(session.pauseForReview).not.toHaveBeenCalled();
+    expect(selected.runOnce).toHaveBeenCalledTimes(3);
+  });
+
   it('checks for a new Find at the next idle slot before another financial lease', async () => {
     vi.useFakeTimers();
     const { options } = fixture();

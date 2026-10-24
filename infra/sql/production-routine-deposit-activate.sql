@@ -96,8 +96,9 @@ select (
   join app.deposit_execution_attempts attempt
     on attempt.deposit_job_id = binding.execution_job_id
    where attempt.status in (
-     'prepared', 'final_action_fenced', 'reconciliation_required', 'review_required'
-   )
+     'prepared', 'final_action_fenced', 'reconciliation_required'
+   ) or (attempt.status = 'review_required'
+     and not attempt.routine_review_isolated)
 ) as routine_activation_readiness
 \gset
 \if :routine_activation_readiness

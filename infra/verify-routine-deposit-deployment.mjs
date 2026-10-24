@@ -40,7 +40,11 @@ const [
   workerLivenessMigration,
   offlineQueueMigration,
   liveNoMoneyPollMigration,
+  isolationMigration,
+  isolatedRecoveryMigration,
   activateSql,
+  stoppedRestoreSql,
+  cbeStoppedResumeSql,
   disableSql,
   financialActivateSql,
   financialStopSql,
@@ -77,7 +81,11 @@ const [
   read('supabase/migrations/20261010012000_routine_telebirr_worker_liveness_stop.sql'),
   read('supabase/migrations/20261013103229_routine_telebirr_offline_verified_queue.sql'),
   read('supabase/migrations/20261009210922_routine_no_money_poll_yields_during_live_deposits.sql'),
+  read('supabase/migrations/20261024083926_isolate_uncertain_routine_credits.sql'),
+  read('supabase/migrations/20261024085932_allow_isolated_review_recovery.sql'),
   read('infra/sql/production-routine-deposit-activate.sql'),
+  read('infra/sql/production-stopped-sms-runtime-restore.sql'),
+  read('infra/sql/production-receiver-sms-cbe-stopped-resume.sql'),
   read('infra/sql/production-routine-deposit-disable.sql'),
   read('infra/sql/production-routine-financial-activate.sql'),
   read('infra/sql/production-routine-financial-stop.sql'),
@@ -89,6 +97,16 @@ const [
 const route = '/v3/companion/device/routine-deposits:command';
 const mode = 'windows_companion_routine_deposit_execution_v1';
 const capability = 'kemerbet.deposit.submit.verified_receipt_amount.routine.v1';
+for (const source of [
+  isolationMigration,
+  isolatedRecoveryMigration,
+  activateSql,
+  stoppedRestoreSql,
+  cbeStoppedResumeSql,
+  reviewLoginRecoveryWorkflow,
+]) {
+  assert.match(source, /routine_review_isolated/u);
+}
 for (const source of [protocol, migration]) {
   assert.match(source, new RegExp(mode, 'u'));
   assert.match(source, new RegExp(capability.replaceAll('.', '\\.'), 'u'));

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import type { LocalKemerBetRoutineDepositDispatchOutcome } from './local-kemerbet-deposit.js';
 import type { RoutineHistoryScan } from './routine-kemerbet-history.js';
 
 import {
@@ -103,7 +104,7 @@ function fixture(lease = makeLease()) {
         acquire: Parameters<
           import('./local-kemerbet-session.js').LocalKemerBetSession['executeRoutineOneUseDeposit']
         >[2],
-      ) => {
+      ): Promise<LocalKemerBetRoutineDepositDispatchOutcome> => {
         const authority = await acquire();
         if (!authority.isFresh()) throw new Error('stale');
         return {
@@ -198,6 +199,24 @@ describe('routine production serial deposit worker', () => {
     expect(store.completeConfirmed).toHaveBeenCalledTimes(1);
   });
 
+  it('moves repeated missing History observations to Owner review so other requests can proceed', async () => {
+    const { worker, store, session, lease } = fixture();
+    store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
+    store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
+    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
+    expect(await worker.runOnce()).toEqual({ status: 'awaiting_reconciliation' });
+    expect(await worker.runOnce()).toEqual({
+      status: 'contained',
+      reason: 'reconciliation_uncertain',
+    });
+    expect(store.pause).toHaveBeenCalledWith(
+      expect.objectContaining({ attemptId: lease.attemptId }),
+      'reconciliation_uncertain',
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
+  });
+
   it('confirms exactly one approved history row after dispatch without a second Transfer', async () => {
     const { worker, store, session, lease } = fixture();
     store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
@@ -229,12 +248,12 @@ describe('routine production serial deposit worker', () => {
     );
   });
 
-  it('pauses an ambiguous history without crediting or retrying Transfer', async () => {
+  it('contains an ambiguous history in Owner review without retrying Transfer', async () => {
     const { worker, store, session } = fixture();
     store.reconcile.mockResolvedValueOnce({ outcome: 'pending', historyWindow });
     session.scanRoutineDepositHistory.mockResolvedValueOnce({ outcome: 'ambiguous' });
     expect(await worker.runOnce()).toEqual({
-      status: 'paused',
+      status: 'contained',
       reason: 'reconciliation_uncertain',
     });
     expect(store.confirmHistory).not.toHaveBeenCalled();
@@ -242,14 +261,14 @@ describe('routine production serial deposit worker', () => {
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
   });
 
-  it('pauses after three unreadable history scans without retrying Transfer', async () => {
+  it('contains three unreadable history scans without retrying Transfer', async () => {
     const { worker, store, session } = fixture();
     store.reconcile.mockResolvedValue({ outcome: 'pending', historyWindow });
     session.scanRoutineDepositHistory.mockRejectedValue(new Error('history unavailable'));
     expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
     expect(await worker.runOnce()).toEqual({ status: 'temporarily_unavailable' });
     expect(await worker.runOnce()).toEqual({
-      status: 'paused',
+      status: 'contained',
       reason: 'reconciliation_uncertain',
     });
     expect(store.confirmHistory).not.toHaveBeenCalled();
@@ -335,8 +354,8 @@ describe('routine production serial deposit worker', () => {
       issuedAtMs: NOW,
       validUntilMs: NOW + 10000,
     }));
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
     expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
     expect(store.recordDispatch).not.toHaveBeenCalled();
@@ -360,7 +379,7 @@ describe('routine production serial deposit worker', () => {
           ...override,
         }) as Awaited<ReturnType<RoutineDepositExecutionStore['fenceFinalAction']>>,
     );
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
     expect(store.recordDispatch).not.toHaveBeenCalled();
   });
 
@@ -378,7 +397,7 @@ describe('routine production serial deposit worker', () => {
       setMonotonicTime(11_000);
       return { ...lease, firstFenceAcquired: true, issuedAtMs: NOW, validUntilMs: NOW + 10_000 };
     });
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
     expect(store.recordDispatch).not.toHaveBeenCalled();
   });
 
@@ -388,7 +407,7 @@ describe('routine production serial deposit worker', () => {
       setTime(NOW - 1);
       return { ...lease, firstFenceAcquired: true, issuedAtMs: NOW, validUntilMs: NOW + 10_000 };
     });
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
     expect(store.recordDispatch).not.toHaveBeenCalled();
   });
 
@@ -406,16 +425,35 @@ describe('routine production serial deposit worker', () => {
         throw new Error('Not dispatched');
       },
     );
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'operator_stopped' });
   });
 
   it('burns an ambiguous fence request without retrying it', async () => {
-    const { worker, store } = fixture();
+    const { worker, store, lease, session } = fixture();
+    store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
     store.fenceFinalAction.mockRejectedValueOnce(new Error('connection lost after commit'));
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
     expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
-    expect(store.leaseNext).toHaveBeenCalledTimes(1);
+    expect(store.leaseNext).toHaveBeenCalledTimes(2);
+    expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
+    expect(store.pause).toHaveBeenCalledWith(lease, 'execution_uncertain');
+  });
+
+  it('routes a locally uncertain Transfer to Owner review and keeps the next lease available', async () => {
+    const { worker, store, session, lease } = fixture();
+    store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(null);
+    session.executeRoutineOneUseDeposit.mockImplementationOnce(
+      async (_player, _amount, acquire) => {
+        await acquire();
+        return { outcome: 'local_uncertain', providerResponseDigest: null };
+      },
+    );
+    expect(await worker.runOnce()).toEqual({ status: 'contained', reason: 'execution_uncertain' });
+    expect(store.pause).toHaveBeenCalledWith(lease, 'execution_uncertain');
+    expect(store.recordDispatch).not.toHaveBeenCalled();
+    expect(await worker.runOnce()).toEqual({ status: 'idle' });
+    expect(store.fenceFinalAction).toHaveBeenCalledTimes(1);
   });
 
   it('cannot regain expired authority when the wall clock moves backwards', async () => {
@@ -433,7 +471,7 @@ describe('routine production serial deposit worker', () => {
         throw new Error('expired');
       },
     );
-    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+    expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
   });
 
   it.each([NaN, Infinity])(
@@ -441,7 +479,7 @@ describe('routine production serial deposit worker', () => {
     async (clock) => {
       const { worker, store, setTime } = fixture();
       setTime(clock);
-      expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'execution_uncertain' });
+      expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'confirmation_mismatch' });
       expect(store.recordDispatch).not.toHaveBeenCalled();
     },
   );
@@ -464,7 +502,7 @@ describe('routine production serial deposit worker', () => {
   });
 
   it.each(['uncertain', 'wrong_amount', 'wrong_player', 'no_credit', 'multiple_history_matches'])(
-    'pauses permanently for this instance when reconciliation is %s',
+    'contains only a durable uncertain case but stops on mismatched reconciliation: %s',
     async (kind) => {
       const { worker, store } = fixture();
       store.reconcile.mockImplementationOnce(async (lease) => {
@@ -477,22 +515,42 @@ describe('routine production serial deposit worker', () => {
           ...(kind === 'multiple_history_matches' ? { exactHistoryMatchCount: 2 } : {}),
         } as RoutineDepositReconciliation;
       });
-      expect(await worker.runOnce()).toMatchObject({ status: 'paused' });
-      expect(await worker.runOnce()).toMatchObject({ status: 'paused' });
-      expect(store.leaseNext).toHaveBeenCalledTimes(1);
+      if (kind === 'uncertain') {
+        expect(await worker.runOnce()).toEqual({
+          status: 'contained',
+          reason: 'reconciliation_uncertain',
+        });
+        expect(store.pause).toHaveBeenCalledWith(expect.any(Object), 'reconciliation_uncertain');
+      } else {
+        expect(await worker.runOnce()).toEqual({
+          status: 'paused',
+          reason: 'confirmation_mismatch',
+        });
+        expect(await worker.runOnce()).toMatchObject({ status: 'paused' });
+        expect(store.leaseNext).toHaveBeenCalledTimes(1);
+      }
       expect(store.completeConfirmed).not.toHaveBeenCalled();
     },
   );
 
   it.each(['recordDispatch', 'reconcile', 'completeConfirmed'] as const)(
-    'holds the lane and does not retry provider submission if %s fails',
+    'contains %s uncertainty and accepts a different request after durable review',
     async (operation) => {
-      const { worker, store, session } = fixture();
+      const { worker, store, session, lease } = fixture();
+      const next = makeLease({ playerId: 'OTHER-PLAYER' });
+      store.leaseNext.mockResolvedValueOnce(lease).mockResolvedValueOnce(next);
       store[operation].mockRejectedValueOnce(new Error('database unavailable'));
-      expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
-      expect(await worker.runOnce()).toEqual({ status: 'paused', reason: 'database_unavailable' });
-      expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(1);
+      expect(await worker.runOnce()).toEqual({
+        status: 'contained',
+        reason: operation === 'recordDispatch' ? 'execution_uncertain' : 'reconciliation_uncertain',
+      });
+      expect(await worker.runOnce()).toEqual({ status: 'completed' });
+      expect(session.executeRoutineOneUseDeposit).toHaveBeenCalledTimes(2);
       expect(store.pause).toHaveBeenCalledTimes(1);
+      expect(store.pause).toHaveBeenCalledWith(
+        expect.objectContaining({ attemptId: lease.attemptId }),
+        operation === 'recordDispatch' ? 'execution_uncertain' : 'reconciliation_uncertain',
+      );
     },
   );
 

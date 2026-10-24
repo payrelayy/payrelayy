@@ -12,7 +12,8 @@ production no-money TeleBirr phone rehearsal must still show a recent signed V2
 `official_tls_origin` observation matching server policy before transport activation.
 
 The activation SQL checks that observation, the dedicated phone/settlement logins and source
-guard, no unresolved routine execution attempt, and both shared deposit switches **disabled**.
+guard, no active or unisolated routine execution attempt, and both shared deposit switches
+**disabled**. A durably isolated Owner-review case retains its one-use payment claim.
 The independent CBE Birr switch must match the operator's explicit `disabled` or `live`
 confirmation; the four legacy/withdrawal switches must be disabled.
 It then provisions only the separate Windows transport login. It does not turn a switch live,
@@ -36,8 +37,8 @@ line history:
 - platform-agent account UUID from that authorization;
 - installed Windows release tree and paired-device preflight result;
 - confirmation that the execution-v2 release marker is absent;
-- confirmation that no routine attempt is prepared, fenced, reconciliation-required, or under
-  review;
+- confirmation that no routine attempt is prepared, fenced, or reconciliation-required,
+  and that any reviewed attempt has a durable isolated Owner case;
 - the independent CBE Birr switch's current mode, confirmed as `disabled` or `live`;
 - passing build, unit, deployment-verifier, and Docker-backed SQL results for the exact SHA.
 - a passing, reviewed non-pilot receipt-to-verified-job lineage and no-money end-to-end result;
@@ -143,8 +144,8 @@ release if both modes are selected, if the credential or marker is a link, if me
 if the account/host/TLS URL is not exact, or if the release SHA differs.
 
 The marker is bound to one release. Before a later inert production deployment intended to retain
-the signed Windows routine transport, stop the financial gates, check there is no unresolved
-execution attempt, and replace the marker with that **new** reviewed main SHA using the same
+the signed Windows routine transport, stop the financial gates, check there is no active or
+unisolated execution attempt, and replace the marker with that **new** reviewed main SHA using the same
 root-owned mode-0600 contract. Select `confirm_routine_deposit_transport: enabled` for the
 `deploy-inert` workflow. Its no-money public smoke requires the signed Windows routine endpoint
 to reject a malformed unauthenticated request as an active route; a dormant route fails the
@@ -244,12 +245,12 @@ first naturally occurring eligible live deposit through the Owner and protected
 operator channels; never create a synthetic paid job or retry an uncertain
 Transfer to prove the path.
 
-If a routine execution becomes uncertain, the Windows worker stops permanently
-for that launch and clears its local lookup and Transfer allowances. The guarded
-Chrome window remains visible in a read-only review hold, with fixed redacted
-checkpoints around the final action. It cannot resume crediting after another
-KemerBet sign-in; the Owner must still reconcile the durable fenced attempt and
-review the provider history before any new activation. Closing the window does
+If a routine execution becomes uncertain, the signed broker must first record the
+one-use claim and Owner-review case. Once that handoff is acknowledged, the
+Companion continues Player checks and credits for other Players. A later payment
+to the same Player waits for resolution of the review. A failed review handoff,
+binding mismatch, or other integrity failure still disarms the launch and keeps
+the guarded Chrome window available for investigation. Closing the window does
 not resolve the attempt.
 
 ## Emergency or planned stop

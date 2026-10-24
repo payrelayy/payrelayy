@@ -181,7 +181,15 @@ async function rotateActiveKemerbetAgent(client: Client, suffix: string): Promis
 export async function createVerifiedDepositFixture(
   client: Client,
   suffix: string,
-  options: { readonly providerCode?: 'cbe_birr' | 'telebirr'; readonly amountMinor?: number } = {},
+  options: {
+    readonly providerCode?: 'cbe_birr' | 'telebirr';
+    readonly amountMinor?: number;
+    readonly existingPlayer?: {
+      readonly customerId: string;
+      readonly playerAccountId: string;
+      readonly playerId: string;
+    };
+  } = {},
 ): Promise<VerifiedDepositFixture> {
   const amountMinor = options.amountMinor ?? 2500;
   const referenceFingerprint = createHash('sha256')
@@ -190,43 +198,48 @@ export async function createVerifiedDepositFixture(
   await enableLiveDepositSwitches(client);
   await ensureActiveKemerbetAgent(client);
 
-  const customer = await client.query<{ readonly id: string }>(
-    `insert into app.customers default values returning id`,
-  );
+  const customer = options.existingPlayer
+    ? null
+    : await client.query<{ readonly id: string }>(
+        `insert into app.customers default values returning id`,
+      );
+  const customerId = options.existingPlayer?.customerId ?? customer!.rows[0]!.id;
   const platform = await client.query<{ readonly id: string }>(
     `select id from app.platforms where code = 'kemerbet'`,
   );
-  const playerId = `PRODUCTION-${suffix}`;
-  const player = await client.query<{ readonly id: string }>(
-    `insert into app.customer_platform_players (customer_id, platform_id, player_id)
-     values ($1::uuid, $2::uuid, $3::text)
-     returning id`,
-    [customer.rows[0]!.id, platform.rows[0]!.id, playerId],
-  );
-  const playerAccountId = player.rows[0]!.id;
-
-  await client.query(
-    `insert into app.player_validation_attempts (
-       player_account_id, attempt_number, outcome, reason_code, adapter_version,
-       started_at, completed_at, result_digest
-     ) values (
-       $1::uuid, 1, 'valid', 'production_command_fixture', 'fixture_v1',
-       clock_timestamp() - interval '1 second', clock_timestamp(), $2::text
-     )`,
-    [playerAccountId, `production-command-validation-${suffix}`],
-  );
-  await client.query(
-    `update app.customer_platform_players
-        set validation_status = 'valid'
-      where id = $1::uuid`,
-    [playerAccountId],
-  );
-  await client.query(
-    `insert into app.player_deposit_eligibility_decisions (
-       player_account_id, decision_version, decision, reason_code, actor_kind
-     ) values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
-    [playerAccountId],
-  );
+  const playerId = options.existingPlayer?.playerId ?? `PRODUCTION-${suffix}`;
+  let playerAccountId = options.existingPlayer?.playerAccountId;
+  if (!playerAccountId) {
+    const player = await client.query<{ readonly id: string }>(
+      `insert into app.customer_platform_players (customer_id, platform_id, player_id)
+       values ($1::uuid, $2::uuid, $3::text)
+       returning id`,
+      [customerId, platform.rows[0]!.id, playerId],
+    );
+    playerAccountId = player.rows[0]!.id;
+    await client.query(
+      `insert into app.player_validation_attempts (
+         player_account_id, attempt_number, outcome, reason_code, adapter_version,
+         started_at, completed_at, result_digest
+       ) values (
+         $1::uuid, 1, 'valid', 'production_command_fixture', 'fixture_v1',
+         clock_timestamp() - interval '1 second', clock_timestamp(), $2::text
+       )`,
+      [playerAccountId, `production-command-validation-${suffix}`],
+    );
+    await client.query(
+      `update app.customer_platform_players
+          set validation_status = 'valid'
+        where id = $1::uuid`,
+      [playerAccountId],
+    );
+    await client.query(
+      `insert into app.player_deposit_eligibility_decisions (
+         player_account_id, decision_version, decision, reason_code, actor_kind
+       ) values ($1::uuid, 1, 'eligible', 'financial_eligibility_approved', 'system')`,
+      [playerAccountId],
+    );
+  }
 
   const paymentBoundary = await client.query<{
     readonly payment_provider_id: string;
@@ -258,7 +271,7 @@ export async function createVerifiedDepositFixture(
      ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::bigint)
      returning id, opened_at, payment_deadline_at, receiver_account_version`,
     [
-      customer.rows[0]!.id,
+      customerId,
       platform.rows[0]!.id,
       playerAccountId,
       paymentBoundary.rows[0]!.payment_provider_id,

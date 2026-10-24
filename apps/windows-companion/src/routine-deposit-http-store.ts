@@ -265,7 +265,8 @@ export function createRoutineDepositHttpStore(
       value.operation === 'record_dispatch' ||
       value.operation === 'reconcile' ||
       value.operation === 'confirm_history' ||
-      value.operation === 'complete';
+      value.operation === 'complete' ||
+      value.operation === 'pause';
     for (let attempt = 1; attempt <= (replayable ? 2 : 1); attempt += 1) {
       if (options.signal.aborted) {
         reportDiagnostic(value.operation, 'request_aborted');

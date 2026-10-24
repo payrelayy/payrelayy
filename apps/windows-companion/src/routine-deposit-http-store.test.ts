@@ -240,6 +240,21 @@ describe('routine deposit HTTP store', () => {
     );
   });
 
+  it('replays the identical signed review report after a lost acknowledgement', async () => {
+    const selected = fixture();
+    selected.fetchImplementation.mockRejectedValueOnce(new Error('lost review acknowledgement'));
+
+    await expect(
+      selected.store.pause(leaseBinding, 'reconciliation_uncertain'),
+    ).resolves.toBeUndefined();
+    expect(selected.fetchImplementation).toHaveBeenCalledTimes(2);
+    expect(selected.createSignedHttpRequest).toHaveBeenCalledOnce();
+    expect(selected.fetchImplementation.mock.calls[0]?.[1]?.body).toBe(
+      selected.fetchImplementation.mock.calls[1]?.[1]?.body,
+    );
+    expect(selected.operations).toEqual(['pause']);
+  });
+
   it('fails closed without retrying when the execution signature is invalid', async () => {
     const selected = fixture(true);
 

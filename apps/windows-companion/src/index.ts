@@ -238,7 +238,9 @@ function reportRoutineDeposit(result: RoutineDepositWorkerResult): void {
       component: 'fetanagent_windows_companion',
       event: 'routine_deposit_state_changed',
       state: result.status,
-      ...(result.status === 'paused' ? { reason: result.reason } : {}),
+      ...(result.status === 'paused' || result.status === 'contained'
+        ? { reason: result.reason }
+        : {}),
       detailsRedacted: true,
       identifiersRedacted: true,
     }),
@@ -497,8 +499,8 @@ export async function runWindowsCompanion(): Promise<void> {
         if (handoffExpiryTimer) clearTimeout(handoffExpiryTimer);
         if (handoff || config.routineDepositsEnabled) {
           lookupAbort.abort();
-          // A fenced uncertainty must not restart or disappear behind an automatic
-          // browser close. Wait for the operator to close the permanently disarmed page.
+          // An integrity pause must not restart or disappear behind an automatic
+          // browser close. A durably isolated credit uncertainty never reaches here.
           if (handoff) await session.stop();
           else if (routineReviewHeld) await session.done;
           else await session.stop();

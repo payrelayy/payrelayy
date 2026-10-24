@@ -261,7 +261,11 @@ export function registerOwnerReceiverAccountControlSqlTests(
         );
         const authUserId = owner.rows[0]!.auth_user_id;
         const rotate = async (name: string, letter: string, reason: string) =>
-          queryAsOwnerControl<{ receiver_revision_id: string; revision: number; active_from: Date }>(
+          queryAsOwnerControl<{
+            receiver_revision_id: string;
+            revision: number;
+            active_from: Date;
+          }>(
             client,
             `select * from app.rotate_owner_receiver_account(
               $1::uuid,$2::uuid,'telebirr',$3::text,$4::text,$5::text,
@@ -281,8 +285,16 @@ export function registerOwnerReceiverAccountControlSqlTests(
            values ($1,$2,$3,$4,$5,$6,$7,$8,
              pg_catalog.clock_timestamp() - interval '1 hour',
              pg_catalog.clock_timestamp() + interval '1 day') returning id`,
-          [digest(), deviceId, deviceKeyId, devicePublicKey,
-            first.receiver_revision_id, first.revision, digest(), digest()],
+          [
+            digest(),
+            deviceId,
+            deviceKeyId,
+            devicePublicKey,
+            first.receiver_revision_id,
+            first.revision,
+            digest(),
+            digest(),
+          ],
         );
         await client.query(`update app.feature_switches set mode='live'
           where feature_key in ('payment_verification','deposit_execution')`);
@@ -294,16 +306,21 @@ export function registerOwnerReceiverAccountControlSqlTests(
         await client.query(`create or replace function app.routine_telebirr_signed_worker_recent(p_max_age interval)
           returns boolean language sql volatile security invoker set search_path=pg_catalog
           as $$ select true $$`);
-        const readiness = async () => (await client.query<{ readiness: string }>(
-          `select app.owner_provider_deposit_readiness('telebirr') as readiness`,
-        )).rows[0]!.readiness;
+        const readiness = async () =>
+          (
+            await client.query<{ readiness: string }>(
+              `select app.owner_provider_deposit_readiness('telebirr') as readiness`,
+            )
+          ).rows[0]!.readiness;
         expect(await readiness()).toBe('ready');
 
         // A new revision for the same protected number inherits the existing
         // pairing; changing the number pauses new deposits without re-pairing.
         await rotate('Corrected Synthetic Receiver', 'A', 'owner_correction');
         expect(await readiness()).toBe('ready');
-        const changedNumber = (await rotate('Other Synthetic Receiver', 'B', 'account_rotation'))[0]!;
+        const changedNumber = (
+          await rotate('Other Synthetic Receiver', 'B', 'account_rotation')
+        )[0]!;
         expect(await readiness()).toBe('new_receiver_sms_not_seen');
         const publicBefore = await client.query<{ accepting: boolean }>(
           `select accepting from app.public_provider_deposit_controls()
@@ -311,14 +328,23 @@ export function registerOwnerReceiverAccountControlSqlTests(
         );
         expect(publicBefore.rows).toEqual([{ accepting: false }]);
 
-        const signedSms = async (occurredAt: string) => client.query<{ outcome: string }>(
-          `select app.record_receiver_sms_payment_event(
+        const signedSms = async (occurredAt: string) =>
+          client.query<{ outcome: string }>(
+            `select app.record_receiver_sms_payment_event(
             'telebirr',$1::text,$2::text,3300,$3::timestamptz,
             $3::timestamptz,pg_catalog.clock_timestamp(),$4::text,$5::text,
             $6::text,$7::text,$8::text,1) as outcome`,
-          [digest(), createHash('sha256').update(randomUUID()).digest('hex'),
-            occurredAt, digest(), digest(), deviceId, deviceKeyId, devicePublicKey],
-        );
+            [
+              digest(),
+              createHash('sha256').update(randomUUID()).digest('hex'),
+              occurredAt,
+              digest(),
+              digest(),
+              deviceId,
+              deviceKeyId,
+              devicePublicKey,
+            ],
+          );
         const firstBoundary = await client.query<{ occurred_at: string }>(
           `select active_from::text as occurred_at from app.receiver_accounts
             where id=$1::uuid`,

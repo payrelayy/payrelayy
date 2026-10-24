@@ -15,10 +15,8 @@ export interface TelegramTemporaryMessageDependencies {
   readonly delete: (privateChatId: number, messageId: number) => Promise<unknown>;
 }
 
-export const TELEGRAM_TEMPORARY_PAYMENT_TEXT =
-  '⏳ Submission received. Checking your TeleBirr payment. Please do not pay again.';
-export const TELEGRAM_TEMPORARY_MEDIA_TEXT =
-  '⏳ Receipt received. Reading and checking it now. Please do not pay again.';
+export const TELEGRAM_TEMPORARY_PAYMENT_TEXT = '⏳ Payment details received. Checking now.';
+export const TELEGRAM_TEMPORARY_MEDIA_TEXT = '⏳ Reading your receipt.';
 
 /** The acknowledgment is presentation only; a failed Telegram or DB call never authorizes money. */
 export async function startTelegramTemporaryMessage(

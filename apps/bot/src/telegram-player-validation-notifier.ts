@@ -20,11 +20,11 @@ export interface TelegramPlayerValidationNotifierDependencies {
 /** No raw Player ID or ownership claim appears in a background notification. */
 export function presentTelegramPlayerValidationOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'selected') {
-    return '✅ Player ID verified and saved. You can now deposit. Check Menu for your current ID.';
+    return '✅ Player ID verified. You can deposit now.';
   }
   return [
-    '⚠️ Player ID not verified.',
-    'Your saved Player ID has not changed. Try again or contact support if this continues.',
+    '⚠️ Could not verify your Player ID.',
+    'Your saved ID is unchanged. Try again or contact support.',
   ].join('\n');
 }
 

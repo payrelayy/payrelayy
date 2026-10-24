@@ -3,9 +3,9 @@ import { BOT_PUBLIC_SUPPORT_CONTACT_URL } from '@fetanagent/config/bot';
 const MAX_RESPONSE_BYTES = 2048;
 const REQUEST_TIMEOUT_MS = 3000;
 
-export const TELEGRAM_SUPPORT_HELP_TEXT = 'For app or account-access help, use /support.';
+export const TELEGRAM_SUPPORT_HELP_TEXT = 'Help: /support.';
 export const TELEGRAM_SUPPORT_UNAVAILABLE_TEXT =
-  'FetanAgent support contact is not available right now. Please try /support again later.\nNever share your password or one-time code (OTP).';
+  'Support is unavailable right now. Please try again later.\nNever share your password or login code.';
 
 interface SupportMessage {
   readonly text?: string | undefined;
@@ -169,7 +169,7 @@ export async function handleTelegramSupportMessage(
   const contact = await loadTelegramSupportContact(url, dependencies.fetchContact);
   await dependencies.reply(
     contact
-      ? `For FetanAgent app or account-access help, contact support:\n${contact}\nNever share your password or one-time code (OTP).`
+      ? `Contact support: ${contact}\nNever share your password or login code.`
       : TELEGRAM_SUPPORT_UNAVAILABLE_TEXT,
   );
   return 'handled';

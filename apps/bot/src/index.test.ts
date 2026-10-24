@@ -256,7 +256,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     });
     expect(context.replies).toHaveLength(1);
     expect(context.replies[0]).toContain('ending 5678');
-    expect(context.replies[0]).toContain('send the exact transaction number as text');
+    expect(context.replies[0]).toContain('send the correct reference');
     expect(context.replies[0]).not.toContain('TB12345678');
     expect(runtime.actionDeliveries).toHaveLength(1);
   });
@@ -345,9 +345,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('CBE Birr receipt Txn ID TESTCBE123456');
     await runtime.messageHandler!(context);
-    expect(context.replies).toEqual([
-      expect.stringContaining('CBE Birr deposits are not available'),
-    ]);
+    expect(context.replies).toEqual([expect.stringContaining('CBE Birr deposits are unavailable')]);
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
@@ -369,7 +367,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
         },
       },
     });
-    expect(context.replies).toEqual([expect.stringContaining('Nothing was submitted.')]);
+    expect(context.replies).toEqual([expect.stringContaining('couldn’t read that receipt')]);
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
 
@@ -385,7 +383,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       for (const command of ['/support', '/support@FetanAgentBot', '/support@fetanagentbot help']) {
         const context = messageContext(command);
         await runtime.messageHandler!(context);
-        expect(context.replies[0]).toContain('support contact is not available');
+        expect(context.replies[0]).toContain('Support is unavailable');
       }
       expect(runtime.admissionCalls).toHaveLength(0);
       expect(runtime.actionDeliveries).toHaveLength(0);
@@ -460,9 +458,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('For app or account-access help, use /support.');
-    expect(context.replies[0]).toContain('Save a Player ID once');
-    expect(context.replies[0]).toContain('/deposit_status');
+    expect(context.replies[0]).toContain('Help: /support.');
+    expect(context.replies[0]).toContain('Tap Deposit for payment details.');
   });
 
   it.each([
@@ -863,7 +860,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('Txn ID: TB12345678. Txn ID: CBE12345678.');
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
-    expect(context.replies).toEqual([expect.stringContaining('more than one payment reference')]);
+    expect(context.replies).toEqual([expect.stringContaining('more than one reference')]);
     expect(JSON.stringify(context.replies)).not.toMatch(/TB12345678|CBE12345678/);
   });
 
@@ -945,9 +942,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
 
     expect(callbackAnswered).toBe(true);
     expect(runtime.actionDeliveries).toHaveLength(1);
-    expect(replies).toEqual([
-      'Player ID saved — pending validation. It cannot be used for a deposit yet.',
-    ]);
+    expect(replies).toEqual(['Your Player ID is being checked. We’ll update you here.']);
   });
 
   it.each(['command', 'button'] as const)(
@@ -1096,7 +1091,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
         transactionReference: 'SYNTB00000001',
       }),
     ]);
-    expect(context.replies[0]).toContain('Transaction number received');
+    expect(context.replies[0]).toContain('Test reference received');
     expect(JSON.stringify(context.replies)).not.toMatch(/SYNTB|PLAYER-DEMO|0000000042/);
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
@@ -1119,7 +1114,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
     expect(context.replies).toHaveLength(1);
-    expect(context.replies[0]).toContain('Invalid Player ID');
+    expect(context.replies[0]).toContain('Player ID doesn’t look right');
     expect(context.replies[0]).not.toMatch(/PLAYER-DEMO|PRIVATE-INVALID/);
   });
 
@@ -1170,9 +1165,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       ]);
       expect(runtime.ingressDeliveries).toHaveLength(0);
       expect(context.replies[0]).toContain('p1.AAAAAAAAAAAAAAAAAAAAAA');
-      expect(context.replies[0]).toContain(
-        'Automatic credit and money movement are not enabled yet',
-      );
+      expect(context.replies[0]).toContain('No Player credit will be made');
       expect(JSON.stringify(context.replies)).not.toMatch(
         /SYNTB|PLAYER-DEMO|900|5\.00|https:|Synthetic Receiver/,
       );
@@ -1188,8 +1181,8 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies).toEqual([expect.stringContaining('more than one TeleBirr reference')]);
-    expect(context.replies[0]).toContain('Send one reference only.');
+    expect(context.replies).toEqual([expect.stringContaining('more than one reference')]);
+    expect(context.replies[0]).toContain('Send just one.');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO|example\.invalid/);
   });
 
@@ -1201,7 +1194,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await runtime.messageHandler!(context);
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
-    expect(context.replies[0]).toContain('tap Deposit for the current receiver.');
+    expect(context.replies[0]).toContain('Tap Deposit for payment details.');
     expect(context.replies[0]).not.toMatch(/SYNTB|PLAYER-DEMO/);
   });
 
@@ -1303,7 +1296,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     }
     expect(malformed.replies).toEqual(unavailable.replies);
     expect(failed.replies).toEqual(unavailable.replies);
-    expect(malformed.replies[0]).toContain('could not load that deposit status');
+    expect(malformed.replies[0]).toContain('Deposit status is unavailable');
     expect(malformed.replies[0]).not.toContain('private-invalid-input');
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });
@@ -1318,7 +1311,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       answerCallbackQuery,
     });
     expect(answerCallbackQuery).toHaveBeenCalledOnce();
-    expect(context.replies[0]).toContain('could not load that deposit status');
+    expect(context.replies[0]).toContain('Deposit status is unavailable');
     expect(context.replies[0]).not.toContain('private-invalid-input');
     expect(runtime.actionDeliveries).toHaveLength(0);
   });
@@ -1327,9 +1320,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
     await loadComposition(false, true);
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
-    expect(context.replies[0]).toContain('Save a Player ID once');
+    expect(context.replies[0]).toContain('Tap Deposit for payment details.');
     expect(context.replies[0]).toContain('send your reference');
-    expect(context.replies[0]).toContain('/deposit_status');
+    expect(context.replies[0]).toContain('/support');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });

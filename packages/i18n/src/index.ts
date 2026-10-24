@@ -14,58 +14,58 @@ export function normalizeLocale(_languageCode: string | undefined): Locale {
 
 export const messages = {
   welcome: {
-    en: 'Welcome to FetanAgent. Secure account setup is being prepared.',
+    en: 'Welcome to FetanAgent.',
   },
   privateChatOnly: {
-    en: 'For your privacy, please use FetanAgent in a private chat with the bot.',
+    en: 'Please message FetanAgent in a private chat.',
   },
   stageZero: {
-    en: 'FetanAgent is being prepared. Financial actions are not available yet.',
+    en: 'Deposits are not available yet.',
   },
   inboxUnavailable: {
-    en: 'FetanAgent cannot receive requests right now. Please try again shortly.',
+    en: 'FetanAgent is unavailable right now. Please try again shortly.',
   },
   betaAdmissionWelcome: {
-    en: 'Welcome to FetanAgent private beta. Your access is active. Payments are not enabled yet.',
+    en: 'Welcome to FetanAgent beta. Deposits are not available yet.',
   },
   betaAdmissionUnavailable: {
-    en: 'FetanAgent private beta is temporarily unavailable. Please try again shortly.',
+    en: 'FetanAgent is unavailable right now. Please try again shortly.',
   },
   playerRegistrationMenu: {
-    en: 'Choose Deposit to start, or add a KemerBet Player ID.',
+    en: 'Tap Deposit or add a Player ID.',
   },
   addKemerBetPlayerId: {
-    en: 'Add KemerBet Player ID',
+    en: 'Add Player ID',
   },
   enterKemerBetPlayerId: {
-    en: 'Send your KemerBet Player ID now. It will be saved as pending validation.',
+    en: 'Send your KemerBet Player ID.',
   },
   playerIdPending: {
-    en: 'Player ID saved — pending validation. It cannot be used for a deposit yet.',
+    en: 'Your Player ID is being checked. We’ll update you here.',
   },
   playerIdExists: {
-    en: 'That Player ID is already registered on your FetanAgent account.',
+    en: 'That Player ID is already saved.',
   },
   invalidPlayerId: {
-    en: 'That Player ID format is not accepted. Send one value without spaces, up to 64 characters.',
+    en: 'That Player ID doesn’t look right. Send it again without spaces.',
   },
   playerActionRestart: {
-    en: 'That action expired or is no longer available. Send /menu to start again.',
+    en: 'That action expired. Open /menu and try again.',
   },
   playerActionMenuRequired: {
-    en: 'Send /menu, then choose Add KemerBet Player ID.',
+    en: 'Open /menu to add a Player ID.',
   },
   playerActionUnavailable: {
-    en: 'Player ID setup is temporarily unavailable. Please try again shortly.',
+    en: 'Player ID setup is unavailable right now. Please try again later.',
   },
   depositInputInvalid: {
-    en: 'Use /deposit cbe_birr PLAYER_ID TRANSACTION_ID or /deposit telebirr PLAYER_ID TRANSACTION_ID.',
+    en: 'Open /menu, tap Deposit, then send your payment reference.',
   },
   depositUnavailable: {
-    en: 'Deposit intake is temporarily unavailable. No payment action was started.',
+    en: 'Deposits are unavailable right now. Please try again later.',
   },
   depositReferenceReceived: {
-    en: 'Transaction reference received. Check the deposit status for progress.',
+    en: 'Payment details received. We’ll update you here.',
   },
 } as const satisfies Record<string, Record<Locale, string>>;
 

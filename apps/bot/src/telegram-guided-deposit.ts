@@ -1,6 +1,10 @@
 import { TELEGRAM_PRIVATE_ACTION_PLAYER_ID_MAX_CODE_POINTS } from '@fetanagent/contracts';
 
 import { isBoundedTelegramDepositProofText } from './telegram-deposit-proof-input.js';
+import {
+  TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
+  TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
+} from './telegram-customer-copy.js';
 
 /**
  * This callback only opens a Telegram reply prompt. It carries no capability, customer data,
@@ -30,6 +34,11 @@ export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = 'FetanAgent';
 
 /** First step of the current deposit wizard. */
 export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = [
+  '🎮 Send your KemerBet Player ID.',
+  '/menu to cancel.',
+].join('\n');
+
+const PRECEDING_GUIDED_DEPOSIT_PROMPT_TEXT = [
   '🎮 Player ID',
   'Send your KemerBet Player ID. Future deposits will use it.',
   '/menu to cancel.',
@@ -73,19 +82,13 @@ export const TELEGRAM_GUIDED_DEPOSIT_LEGACY_PROMPT_TEXT = [
 ].join('\n');
 
 export const TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT = [
-  'Invalid Player ID. Send the KemerBet Player ID only.',
+  'That Player ID doesn’t look right. Send the ID only.',
   '/menu to cancel.',
 ].join('\n');
 
-export const TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT = [
-  'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
-  'No payment was submitted. Send one clear TeleBirr reference or receipt.',
-].join('\n');
+export const TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT = TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT;
 
-export const TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT = [
-  'I found more than one TeleBirr reference. Nothing was submitted.',
-  'Send one reference only.',
-].join('\n');
+export const TELEGRAM_GUIDED_DEPOSIT_SELECTION_TEXT = TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT;
 
 interface TelegramReplyMessageShape {
   readonly text?: unknown;
@@ -105,6 +108,7 @@ export function isTelegramGuidedDepositPlayerPromptReply(value: unknown): boolea
   const message = value as TelegramReplyMessageShape;
   return (
     (message.text === TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT ||
+      message.text === PRECEDING_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PRIOR_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PREVIOUS_GUIDED_DEPOSIT_PROMPT_TEXT) &&
     message.from?.is_bot === true
@@ -259,7 +263,7 @@ function renderTelegramTelebirrPaymentPrompt(
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
-    'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+    'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
   ].join('\n');
 }
 
@@ -288,8 +292,7 @@ function renderTelegramCbeSmsPaymentPrompt(
     `👤 Name: ${input.receiverAccountHolderName}`,
     `📱 Number: ${localNumber ? toTelegramLocalReceiverNumber(input.receiverAccountReference) : input.receiverAccountReference}`,
     `🎮 KemerBet Player ID: ${input.playerId}`,
-    'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
-    'The reference identifies CBE Birr automatically.',
+    'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
   ].join('\n');
 }
 
@@ -315,7 +318,11 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
     };
     return [true, false].some((localNumber) => {
       const currentPrompt = renderTelegramCbeSmsPaymentPrompt(input, localNumber);
-      const precedingPrompt = currentPrompt.replace(
+      const recentPrompt = currentPrompt.replace(
+        'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+        'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+      );
+      const precedingPrompt = recentPrompt.replace(
         '\nAfter paying,',
         '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
       );
@@ -325,6 +332,12 @@ export function isTelegramCbeSmsPaymentPromptReply(value: unknown): boolean {
       );
       return (
         message.text === currentPrompt ||
+        message.text ===
+          currentPrompt.replace(
+            '\nAfter paying,',
+            '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+          ) ||
+        message.text === recentPrompt ||
         message.text === precedingPrompt ||
         message.text === previousPrompt
       );
@@ -375,9 +388,18 @@ export function parseTelegramTelebirrPaymentPromptReply(value: unknown): string 
     };
     const currentPrompts = [true, false].flatMap((localNumber) => {
       const currentPrompt = renderTelegramTelebirrPaymentPrompt(input, localNumber);
+      const recentPrompt = currentPrompt.replace(
+        'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+        'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
+      );
       return [
         currentPrompt,
         currentPrompt.replace(
+          '\nAfter paying,',
+          '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
+        ),
+        recentPrompt,
+        recentPrompt.replace(
           '\nAfter paying,',
           '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
         ),

@@ -5,6 +5,11 @@ import {
 } from '@fetanagent/contracts';
 import { DEFAULT_LOCALE, message } from '@fetanagent/i18n';
 
+import {
+  TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
+  TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
+  TELEGRAM_PAYMENT_RECEIVED_TEXT,
+} from './telegram-customer-copy.js';
 import { renderPlayerRegistrationMenu, type PrivateTelegramMenu } from './private-menu.js';
 import {
   buildTelegramTelebirrPaymentPrompt,
@@ -33,7 +38,7 @@ export interface TelegramPlayerIdFlowContext {
 }
 
 export const TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT =
-  'I could not load that deposit status. Check the tracking reference in this private chat, or try again shortly.';
+  'Deposit status is unavailable. Please try again shortly.';
 
 /**
  * Maps the API's deliberately small, non-sensitive result union to English-only Telegram copy.
@@ -66,7 +71,7 @@ export function presentTelegramPlayerIdFlowResult(
     case 'player_validation_queued':
       return {
         kind: 'message',
-        text: '🔎 Checking your Player ID. We’ll confirm it here. Your saved ID stays unchanged until verified.',
+        text: '🔎 Checking your Player ID. We’ll update you here.',
       };
     case 'menu':
       return {
@@ -104,13 +109,8 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          '🔒 TeleBirr deposits are not live yet.',
-          '',
-          `Configured receiver: ${result.receiverAccountHolderName}`,
-          `Wallet: ${result.receiverAccountMasked}`,
-          '',
-          'Do not send money yet. The complete wallet number will appear here when automatic processing is ready.',
-          'Tap /menu to go back.',
+          'TeleBirr deposits are unavailable right now.',
+          'Do not send money to this receiver yet.',
         ].join('\n'),
       };
     case 'combined_deposit_destination':
@@ -128,18 +128,11 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'message',
         text: [
-          '🔎 TeleBirr receiver — review only',
-          '',
-          'Receiver:',
-          `👤 Name: ${result.receiverAccountHolderName}`,
-          `📱 Number: ${toTelegramLocalReceiverNumber(result.receiverAccountReference)}`,
-          '',
-          `🎮 KemerBet Player ID: ${selectedPlayerId}`,
-          '💵 Amount: 25 ETB',
-          '',
-          'NO PAYMENT YET.',
-          'This screen is information only and cannot accept payment proof.',
-          'Tap /menu to cancel.',
+          'TeleBirr receiver preview',
+          `Name: ${result.receiverAccountHolderName}`,
+          `Number: ${toTelegramLocalReceiverNumber(result.receiverAccountReference)}`,
+          `Player ID: ${selectedPlayerId}`,
+          'Do not send money yet. Deposits are unavailable from this screen.',
         ].join('\n'),
       };
     }
@@ -172,23 +165,19 @@ export function presentTelegramPlayerIdFlowResult(
         text:
           result.financialMode === 'live'
             ? [
-                `CBE Birr deposit: ${formatMinorEtb(result.amountMinor)} ETB.`,
-                `Status: ${result.depositStatus.label}.`,
+                '💳 CBE Birr deposit',
+                `Amount: ${formatMinorEtb(result.amountMinor)} ETB`,
+                `Receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked})`,
                 result.customerInstruction,
-                `Receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
-                `Payment deadline: ${result.paymentDeadline}.`,
-                `After paying, send /reference ${result.depositToken} YOUR_TRANSACTION_REFERENCE.`,
-                `Check progress with /deposit_status ${result.depositToken}.`,
+                `Pay by: ${result.paymentDeadline}`,
+                `After paying: /reference ${result.depositToken} YOUR_REFERENCE`,
+                `Status: /deposit_status ${result.depositToken}`,
               ].join('\n')
             : [
-                'SIMULATION ONLY — DO NOT SEND MONEY.',
-                `Dry-run CBE Birr deposit simulation: ${formatMinorEtb(result.amountMinor)} ETB.`,
-                `Status: ${result.depositStatus.label}.`,
-                `Test instruction: ${result.customerInstruction}`,
-                `Synthetic receiver: ${result.receiverAccountHolderName} (${result.receiverAccountMasked}).`,
-                `Test deadline: ${result.paymentDeadline}.`,
-                `To test protected reference capture, send /reference ${result.depositToken} TEST_REFERENCE.`,
-                'No payment is verified or executed in this simulation.',
+                '🧪 Test only — do not send money.',
+                `Amount: ${formatMinorEtb(result.amountMinor)} ETB`,
+                `Test reference: /reference ${result.depositToken} TEST_REFERENCE`,
+                'No payment or Player credit will be made.',
               ].join('\n'),
       };
     case 'cbe_birr_dry_run_instruction_preview': {
@@ -198,10 +187,8 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'message',
         text: [
           '🧪 CBE Birr test only — do not send money.',
-          `Test instruction expires: ${result.expiresAt}.`,
-          'No payment receiver is shown or enabled.',
-          `To test a synthetic proof, send /cbe_test_proof ${result.instructionToken} ${playerId} SYNTHCBE0001.`,
-          'No receipt lookup or Player credit will occur.',
+          `To test: /cbe_test_proof ${result.instructionToken} ${playerId} SYNTHCBE0001`,
+          'No Player credit will be made.',
         ].join('\n'),
       };
     }
@@ -210,8 +197,8 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'message',
         text:
           result.financialMode === 'live'
-            ? `Reference received. Status: ${result.depositStatus.label}.`
-            : `Simulation reference received. Status: ${result.depositStatus.label}.`,
+            ? TELEGRAM_PAYMENT_RECEIVED_TEXT
+            : '🧪 Test reference received. No Player credit will be made.',
       };
     case 'deposit_proof_received':
     case 'deposit_proof_status':
@@ -219,11 +206,8 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'menu',
         menu: {
           text: [
-            '✅ Reference received.',
-            `Payment method: ${result.providerName}.`,
-            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            `To check it later, send /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            'Automatic credit and money movement are not enabled yet.',
+            '🧪 Test reference received. No Player credit will be made.',
+            `Status: /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
           ].join('\n'),
           buttons: [
             {
@@ -236,21 +220,12 @@ export function presentTelegramPlayerIdFlowResult(
     case 'telebirr_shadow_verification_queued':
       return {
         kind: 'message',
-        text: [
-          '✅ Transaction number received',
-          'Status: Being checked',
-          '',
-          'Automatic credit is not live yet.',
-        ].join('\n'),
+        text: '🧪 Test reference received. No Player credit will be made.',
       };
     case 'telebirr_routine_candidate_recorded_no_money':
       return {
         kind: 'message',
-        text: [
-          '🧪 Simulation only — test transaction number recorded.',
-          'No payment was checked or verified. No KemerBet deposit or credit will be made.',
-          'Do not send money. This is not a payment-status confirmation.',
-        ].join('\n'),
+        text: '🧪 Test reference received. No payment was verified or credited. Do not send money.',
       };
     case 'telebirr_routine_candidate_recorded_paid_pending':
       // The signed phone result normally arrives quickly. A permanent acknowledgment
@@ -262,7 +237,7 @@ export function presentTelegramPlayerIdFlowResult(
       if (result.matchStatus === 'already_used') {
         return {
           kind: 'message',
-          text: 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
+          text: TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
         };
       }
       if (result.matchStatus === 'older_review') {
@@ -275,17 +250,13 @@ export function presentTelegramPlayerIdFlowResult(
       }
       return {
         kind: 'message',
-        text: `${result.providerName} reference received. Checking against the receiving phone SMS. Please do not pay again.`,
+        text: TELEGRAM_PAYMENT_RECEIVED_TEXT,
       };
     case 'telebirr_routine_candidate_already_used':
       return {
         kind: 'menu',
         menu: {
-          text: [
-            '⚠️ Reference already used.',
-            'This Telegram account already used it for a completed deposit. No new Player credit was made.',
-            'Do not pay again. Contact support if this is unexpected.',
-          ].join('\n'),
+          text: TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
           buttons: [{ text: '💰 Deposit', callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA }],
         },
       };
@@ -294,11 +265,8 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'menu',
         menu: {
           text: [
-            '✅ Transaction number received',
-            `Status: ${result.depositStatus.label}`,
-            '',
-            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-            'FetanAgent will verify the payment and prepare the KemerBet deposit automatically.',
+            TELEGRAM_PAYMENT_RECEIVED_TEXT,
+            `Status: /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
           ].join('\n'),
           buttons: [
             {
@@ -314,13 +282,11 @@ export function presentTelegramPlayerIdFlowResult(
         kind: 'menu',
         menu: {
           text: [
-            '💳 TeleBirr deposit',
+            '💰 Deposit',
             `Status: ${result.depositStatus.label}`,
             ...(result.amountMinor === null
               ? []
               : [`Amount: ${formatMinorEtb(result.amountMinor)} ETB`]),
-            '',
-            `Tracking reference: ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
           ].join('\n'),
           buttons: [
             {
@@ -361,28 +327,23 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
   if (receiverSmsCandidateEnabled) {
     return [
       '💰 Deposits',
-      'Save a Player ID once in /menu, then tap Deposit to see the current available receivers.',
-      'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
-      'We identify TeleBirr or CBE Birr from the transaction reference. You do not need to choose a method again.',
-      'The receiving phone SMS supplies the amount. Status: /deposit_status. Help: /support.',
+      'Tap Deposit for payment details.',
+      'After paying, send your reference, SMS, receipt link, screenshot or PDF here.',
+      'Help: /support.',
     ].join('\n');
   }
   return [
-    '💰 TeleBirr deposit',
-    'Save a Player ID once in /menu, then tap Deposit for the current receiver.',
-    'After paying, send your reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
-    'A direct reference is treated as TeleBirr. CBE Birr is not live yet.',
-    'Status: /deposit_status with your tracking code. Help: /support.',
+    '💰 TeleBirr deposits',
+    'Tap Deposit for payment details.',
+    'After paying, send your reference, SMS, receipt link, screenshot or PDF here.',
+    'Help: /support.',
   ].join('\n');
 }
 
-export function telegramDepositReferenceSelectionText(receiverSmsCandidateEnabled = false): string {
-  return [
-    receiverSmsCandidateEnabled
-      ? 'I found more than one payment reference. Nothing was submitted.'
-      : 'I found more than one TeleBirr reference. Nothing was submitted.',
-    'Send one reference only.',
-  ].join('\n');
+export function telegramDepositReferenceSelectionText(
+  _receiverSmsCandidateEnabled = false,
+): string {
+  return TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT;
 }
 
 function formatMinorEtb(value: string): string {

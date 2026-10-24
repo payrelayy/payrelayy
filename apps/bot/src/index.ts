@@ -24,7 +24,11 @@ import {
 } from './telegram-deposit-temporary-message.js';
 import { runTelegramPolling } from './telegram-polling-lifecycle.js';
 import { createTelegramPollingReadiness } from './telegram-polling-readiness.js';
-import { handleTelegramSupportMessage, TELEGRAM_SUPPORT_HELP_TEXT } from './telegram-support.js';
+import { handleTelegramSupportMessage } from './telegram-support.js';
+import {
+  TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
+  TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT,
+} from './telegram-customer-copy.js';
 import { loadTelegramPaymentMethods } from './telegram-payment-methods.js';
 import {
   isRecognizedTelegramDepositProofStatusCallback,
@@ -139,7 +143,7 @@ const screenshotRecognition = screenshotModelAccessKey
       })
   : undefined;
 const unreadableReferenceText =
-  'I could not read one transaction reference from that image or PDF. No payment was submitted. Please send the image as a file, or type the reference.';
+  'I couldn’t read the reference. Send a clearer image or type the reference.';
 
 function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboard {
   const keyboard = new InlineKeyboard();
@@ -232,7 +236,7 @@ async function deliverPlayerAction(
         result.outcome === 'receiver_sms_candidate_received' &&
           result.matchStatus === 'pending_sms' &&
           mediaReferenceMask
-          ? `${presentation.text}\nI read a reference ending ${mediaReferenceMask.slice(-4)} from your image. If that ending does not match your payment confirmation, send the exact transaction number as text here. Do not pay again.`
+          ? `${presentation.text}\nRead reference ending ${mediaReferenceMask.slice(-4)}. If it’s wrong, send the correct reference.`
           : presentation.text,
       );
       return;
@@ -322,9 +326,7 @@ bot.on('message', async (context) => {
     const replyToMessage =
       'reply_to_message' in context.message ? context.message.reply_to_message : undefined;
     if (isTelegramPrivateHelpCommand({ ...metadata, command: text })) {
-      await context.reply(
-        `${telegramDepositHelpText(config.receiverSmsCandidateEnabled)}\n${TELEGRAM_SUPPORT_HELP_TEXT}`,
-      );
+      await context.reply(telegramDepositHelpText(config.receiverSmsCandidateEnabled));
       return;
     }
     const rootAction = reduceTelegramRootMenuAction({ ...metadata, command: text });
@@ -390,10 +392,10 @@ bot.on('message', async (context) => {
       if (selection.kind !== 'selected') {
         await context.reply(
           selection.kind === 'too_large'
-            ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
+            ? 'File too large. Send an image or PDF under 5 MB, or type the reference.'
             : config.receiverSmsCandidateEnabled
-              ? 'Please send a JPG/PNG screenshot or PDF, or type the payment transaction number.'
-              : 'Please send a JPG/PNG screenshot or PDF, or type the TeleBirr transaction number.',
+              ? 'Send a JPG, PNG or PDF, or type the payment reference.'
+              : 'Send a JPG, PNG or PDF, or type the TeleBirr reference.',
         );
         return;
       }
@@ -401,9 +403,7 @@ bot.on('message', async (context) => {
         temporaryMessageDependencies,
         String(metadata.updateId),
         String(context.chat.id),
-        config.receiverSmsCandidateEnabled
-          ? '⏳ Payment information received. Reading its reference now.'
-          : TELEGRAM_TEMPORARY_MEDIA_TEXT,
+        TELEGRAM_TEMPORARY_MEDIA_TEXT,
       );
       let extracted: Awaited<ReturnType<typeof extractTelegramProofMediaText>>;
       try {
@@ -414,21 +414,19 @@ bot.on('message', async (context) => {
         });
       } catch {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
-        await context.reply(
-          'We could not read your receipt right now. Please try again or type the transaction number. Nothing was submitted.',
-        );
+        await context.reply('I couldn’t read that receipt. Try again or type the reference.');
         return;
       }
       if (extracted.kind !== 'text') {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply(
           extracted.kind === 'busy'
-            ? 'Receipt reading is busy. Please try again shortly or type the transaction number.'
+            ? 'Receipt reading is busy. Try again or type the reference.'
             : extracted.kind === 'too_large'
-              ? 'The receipt file is too large (maximum 5 MB). Send a smaller image or PDF, or type the transaction number.'
+              ? 'File too large. Send an image or PDF under 5 MB, or type the reference.'
               : extracted.kind === 'unreadable'
                 ? unreadableReferenceText
-                : 'We could not read your receipt right now. Please try again or type the transaction number. Nothing was submitted.',
+                : 'I couldn’t read that receipt. Try again or type the reference.',
         );
         return;
       }
@@ -443,7 +441,9 @@ bot.on('message', async (context) => {
         (isCbeBirrReceiptText(extracted.text) || isCbeBirrReceiptText(mediaMetadata.caption))
       ) {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
-        await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
+        await context.reply(
+          'CBE Birr deposits are unavailable. Contact support if you already paid.',
+        );
         return;
       }
       const mediaSubmission = config.receiverSmsCandidateEnabled
@@ -470,7 +470,7 @@ bot.on('message', async (context) => {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
         await context.reply(
           mediaSubmission?.kind === 'selection_required'
-            ? 'I found more than one payment reference. Nothing was submitted. Send one reference only.'
+            ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
             : unreadableReferenceText,
         );
       }
@@ -487,8 +487,8 @@ bot.on('message', async (context) => {
       } else {
         await context.reply(
           autoSmsSubmission.kind === 'selection_required'
-            ? 'I found more than one payment reference. Nothing was submitted. Send one reference only.'
-            : 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected. Send one clear payment reference.',
+            ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
+            : TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
         );
       }
       return;
@@ -507,8 +507,8 @@ bot.on('message', async (context) => {
       } else {
         await context.reply(
           cbeSmsSubmission.kind === 'selection_required'
-            ? 'I found more than one CBE Birr reference. Nothing was submitted. Send one reference only.'
-            : 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected. Send one clear CBE Birr reference.',
+            ? TELEGRAM_MULTIPLE_PAYMENT_REFERENCES_TEXT
+            : TELEGRAM_INVALID_PAYMENT_REFERENCE_TEXT,
         );
       }
       return;
@@ -569,7 +569,9 @@ bot.on('message', async (context) => {
       return;
     }
     if (!config.receiverSmsCandidateEnabled && isCbeBirrReceiptText(text)) {
-      await context.reply('CBE Birr deposits are not available yet. No payment was submitted.');
+      await context.reply(
+        'CBE Birr deposits are unavailable. Contact support if you already paid.',
+      );
       return;
     }
     const savedProof = config.receiverSmsCandidateEnabled

@@ -4,6 +4,10 @@ import type {
   TelegramPrivateActionEnvelope,
   TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
+import {
+  TELEGRAM_PAYMENT_ALREADY_USED_TEXT,
+  TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT,
+} from './telegram-customer-copy.js';
 import { processOneTelegramPaymentInstructionExpiry } from './telegram-payment-instruction-expiry.js';
 import { processOneTelegramPlayerValidationOutcome } from './telegram-player-validation-notifier.js';
 
@@ -32,73 +36,48 @@ function formatMinorEtb(amountMinor: string): string {
 /** Customer-safe copy: no full receipt reference, Player ID, or internal job state. */
 export function presentTelegramDepositOutcome(delivery: Delivery): string {
   if (delivery.outcomeCode === 'checking') {
-    return [
-      '⏳ Still checking your TeleBirr payment',
-      `Reference ending ${delivery.referenceMasked.slice(-4)} has not been verified or credited yet.`,
-      'We’ll send the final result here. Please do not pay again.',
-    ].join('\n');
+    return '⏳ Still checking your payment. We’ll update you here.';
   }
   if (delivery.outcomeCode === 'verified_waiting') {
-    return [
-      '✅ TeleBirr payment verified',
-      `Transaction ending ${delivery.referenceMasked.slice(-4)} is waiting for Player credit.`,
-      'No action needed. We’ll send the final result here.',
-    ].join('\n');
+    return '✅ Payment confirmed. Finishing your deposit.';
   }
   if (delivery.outcomeCode === 'credited' && delivery.amountMinor !== null) {
     return [
       '✅ Deposit complete',
-      `${formatMinorEtb(delivery.amountMinor)} ETB credited to the selected Player account.`,
-      `Transaction ending ${delivery.referenceMasked.slice(-4)}.`,
+      `${formatMinorEtb(delivery.amountMinor)} ETB credited to your Player account.`,
     ].join('\n');
   }
   if (delivery.outcomeCode === 'already_used') {
-    return 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.';
+    return TELEGRAM_PAYMENT_ALREADY_USED_TEXT;
   }
   if (delivery.outcomeCode === 'wrong_receiver') {
-    return 'Deposit not credited. Reason: wrong receiver. Contact support if this is unexpected.';
+    return 'Deposit not credited. Payment went to a different receiver. Contact support.';
   }
   if (delivery.outcomeCode === 'invalid_reference') {
-    return 'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.';
+    return 'Deposit not credited. Check the reference or contact support.';
   }
   if (delivery.outcomeCode === 'unrelated_receipt') {
-    return 'Deposit not credited. Reason: unrelated receipt. Contact support if this is unexpected.';
+    return 'Deposit not credited. This receipt does not match. Contact support.';
   }
   if (delivery.outcomeCode === 'held_review') {
-    return 'We could not finish checking your payment right now. It is waiting for review. Please do not pay again.';
+    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
   }
   if (delivery.outcomeCode === 'older_pending') {
-    return 'Payment found but it is older than 1 hour. Waiting for approval.';
+    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
   }
   if (delivery.outcomeCode === 'old_rejected') {
-    return 'Deposit not credited. Reason: payment older than 1 hour. Contact support if this is unexpected.';
+    return 'Deposit not credited. This payment is too old. Contact support.';
   }
   if (delivery.outcomeCode === 'manual_review') {
-    return [
-      '⚠️ Deposit needs review',
-      `The receiving number changed while your instructions were open. We have not automatically credited submission ending ${delivery.referenceMasked.slice(-4)}.`,
-      'Do not pay again. Contact support with your reference so the payment can be checked.',
-    ].join('\n');
+    return TELEGRAM_PAYMENT_NEEDS_REVIEW_TEXT;
   }
   if (delivery.outcomeCode === 'rejected') {
-    return [
-      '❌ Deposit not credited',
-      `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not credit the selected Player account.`,
-      'If money left your wallet, do not pay again. Contact support with the reference.',
-    ].join('\n');
+    return '❌ Deposit not credited. Contact support if you need help.';
   }
   if (delivery.outcomeCode === 'not_credited') {
-    return [
-      '⚠️ Deposit not credited',
-      `This submission (reference ending ${delivery.referenceMasked.slice(-4)}) did not result in a Player credit.`,
-      'If money left your wallet, do not pay again. Contact support with the reference.',
-    ].join('\n');
+    return '⚠️ We couldn’t confirm your deposit. Contact support.';
   }
-  return [
-    '❌ Deposit not credited',
-    `We couldn’t verify the TeleBirr reference ending ${delivery.referenceMasked.slice(-4)} within the allowed time. No Player credit was recorded for this submission.`,
-    'Check the reference. If money left your wallet, do not pay again—contact support.',
-  ].join('\n');
+  return '❌ Deposit not credited. Check the reference or contact support.';
 }
 
 function telegramErrorCode(error: unknown): number | undefined {

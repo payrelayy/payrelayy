@@ -16,10 +16,8 @@ const pdf = Buffer.from('%PDF-1.7\nsynthetic test');
 
 describe('Telegram receipt media intake', () => {
   it('explains unreadable input without implying a payment was checked', () => {
-    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).toContain(
-      'Deposit not credited. Reason: invalid payment information. Contact support if this is unexpected.',
-    );
-    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).toContain('No payment was submitted');
+    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).toContain('Send one reference or receipt');
+    expect(TELEGRAM_GUIDED_DEPOSIT_INVALID_TEXT).not.toContain('credited');
   });
   it('selects only a bounded photo or JPG/PNG/PDF document', () => {
     expect(

@@ -38,7 +38,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation.kind).toBe('message');
     if (presentation.kind === 'message') {
       expect(presentation.text).toContain('Checking your Player ID');
-      expect(presentation.text).toContain('saved ID stays unchanged');
+      expect(presentation.text).toContain('We’ll update you here');
       expect(presentation.text).not.toContain('verified and saved');
     }
   });
@@ -86,12 +86,12 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it.each([
-    ['awaiting_player_id', 'Send your KemerBet Player ID now.'],
-    ['player_id_pending', 'Player ID saved — pending validation.'],
-    ['player_id_exists', 'That Player ID is already registered on your FetanAgent account.'],
-    ['invalid_player_id', 'That Player ID format is not accepted.'],
-    ['restart_required', 'That action expired or is no longer available.'],
-    ['menu_required', 'Send /menu, then choose Add KemerBet Player ID.'],
+    ['awaiting_player_id', 'Send your KemerBet Player ID.'],
+    ['player_id_pending', 'Your Player ID is being checked.'],
+    ['player_id_exists', 'That Player ID is already saved.'],
+    ['invalid_player_id', 'That Player ID doesn’t look right.'],
+    ['restart_required', 'That action expired.'],
+    ['menu_required', 'Open /menu to add a Player ID.'],
   ] as const)('maps %s to safe customer copy', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
     expect(presentation.kind).toBe('message');
@@ -117,21 +117,20 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'message',
       text: expect.stringContaining(
-        'To test protected reference capture, send /reference AAAAAAAAAAAAAAAAAAAAAA TEST_REFERENCE.',
+        'Test reference: /reference AAAAAAAAAAAAAAAAAAAAAA TEST_REFERENCE',
       ),
     });
     if (presentation.kind === 'message') {
       expect(presentation.text).toContain('25.00 ETB');
-      expect(presentation.text).toContain('Status: Ready to start.');
-      expect(presentation.text).toContain('SIMULATION ONLY — DO NOT SEND MONEY.');
-      expect(presentation.text).toContain('Synthetic receiver:');
-      expect(presentation.text).toContain('No payment is verified or executed in this simulation');
+      expect(presentation.text).toContain('do not send money');
+      expect(presentation.text).toContain('No payment or Player credit will be made');
+      expect(presentation.text).not.toContain('FETANAGENT STAGING SIMULATION');
     }
   });
 
   it.each([
-    ['deposit_input_invalid', 'Save a Player ID once'],
-    ['deposit_unavailable', 'No payment action was started'],
+    ['deposit_input_invalid', 'Tap Deposit for payment details'],
+    ['deposit_unavailable', 'Deposits are unavailable right now'],
     ['deposit_status_unavailable', TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT],
   ] as const)('maps %s to an explicit safe-state message', (outcome, expected) => {
     const presentation = presentTelegramPlayerIdFlowResult({ version: 1, outcome });
@@ -156,7 +155,7 @@ describe('Telegram Player-ID flow presentation', () => {
     });
     expect(live.kind).toBe('message');
     if (live.kind === 'message') {
-      expect(live.text).toContain('CBE Birr deposit: 25.00 ETB');
+      expect(live.text).toContain('Amount: 25.00 ETB');
       expect(live.text).toContain('/deposit_status AAAAAAAAAAAAAAAAAAAAAA');
       expect(live.text).not.toMatch(/simulation|test reference/iu);
     }
@@ -168,7 +167,7 @@ describe('Telegram Player-ID flow presentation', () => {
         depositStatus: { label: 'Checking payment', tone: 'working' },
         financialMode: 'live',
       }),
-    ).toEqual({ kind: 'message', text: 'Reference received. Status: Checking payment.' });
+    ).toEqual({ kind: 'message', text: '⏳ Payment details received. We’ll update you here.' });
     expect(
       presentTelegramPlayerIdFlowResult({
         version: 1,
@@ -180,7 +179,7 @@ describe('Telegram Player-ID flow presentation', () => {
     ).toEqual({ kind: 'message', text: 'Deposit 25.00 ETB — Preparing deposit.' });
   });
 
-  it('shows the verified receiver name and mask without inviting a disabled payment', () => {
+  it('does not invite payment to a disabled receiver', () => {
     const presentation = presentTelegramPlayerIdFlowResult({
       version: 1,
       outcome: 'telebirr_deposit_preview',
@@ -193,12 +192,12 @@ describe('Telegram Player-ID flow presentation', () => {
 
     expect(presentation).toEqual({
       kind: 'message',
-      text: expect.stringContaining('Configured receiver: Demo Receiver'),
+      text: expect.stringContaining('TeleBirr deposits are unavailable right now.'),
     });
     if (presentation.kind === 'message') {
-      expect(presentation.text).toContain('Wallet: ***0042');
-      expect(presentation.text).toContain('Do not send money yet');
-      expect(presentation.text).not.toMatch(/0000000042|send money to/iu);
+      expect(presentation.text).not.toContain('Demo Receiver');
+      expect(presentation.text).toContain('Do not send money to this receiver yet');
+      expect(presentation.text).not.toContain('0000000042');
     }
   });
 
@@ -221,14 +220,13 @@ describe('Telegram Player-ID flow presentation', () => {
 
     expect(presentation).toEqual({
       kind: 'message',
-      text: expect.stringContaining('🔎 TeleBirr receiver — review only'),
+      text: expect.stringContaining('TeleBirr receiver preview'),
     });
     if (presentation.kind === 'message') {
-      expect(presentation.text).toContain('👤 Name: Demo Receiver');
-      expect(presentation.text).toContain('📱 Number: 0000000042');
-      expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
-      expect(presentation.text).toContain('💵 Amount: 25 ETB');
-      expect(presentation.text).toContain('NO PAYMENT YET');
+      expect(presentation.text).toContain('Name: Demo Receiver');
+      expect(presentation.text).toContain('Number: 0000000042');
+      expect(presentation.text).toContain('Player ID: PLAYER-DEMO-42');
+      expect(presentation.text).toContain('Do not send money yet');
       expect(presentation.text).not.toContain('Live');
       expect(presentation.text).not.toMatch(/transaction number|receipt|full SMS/iu);
     }
@@ -263,9 +261,7 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).not.toContain('Valid for 1 hour');
       expect(presentation.text).not.toContain('Check the receiver name before paying.');
       expect(presentation.text).not.toContain('valid for 12 hours');
-      expect(presentation.text).toContain(
-        'send the reference, SMS, receipt link, screenshot or PDF',
-      );
+      expect(presentation.text).toContain('send reference, SMS, receipt link, screenshot or PDF');
       expect(presentation.text).not.toContain('first line');
       expect(presentation.text).not.toContain('second line');
     }
@@ -292,8 +288,8 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
       expect(presentation.text).toContain('📱 Number: 900000042');
       expect(presentation.text).not.toContain('251900000042');
-      expect(presentation.text).toContain('send the reference');
-      expect(presentation.text).toContain('identifies CBE Birr automatically');
+      expect(presentation.text).toContain('send reference');
+      expect(presentation.text).not.toContain('identifies CBE Birr automatically');
     }
   });
 
@@ -314,16 +310,13 @@ describe('Telegram Player-ID flow presentation', () => {
         kind: 'menu',
         menu: {
           text: [
-            '✅ Reference received.',
-            'Payment method: TeleBirr.',
-            'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
-            'To check it later, send /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
-            'Automatic credit and money movement are not enabled yet.',
+            '🧪 Test reference received. No Player credit will be made.',
+            'Status: /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
           ].join('\n'),
           buttons: [{ text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' }],
         },
       });
-      expect(JSON.stringify(presentation)).not.toMatch(/amount|player/i);
+      expect(JSON.stringify(presentation)).not.toMatch(/Amount:|PLAYER-DEMO-42/i);
     },
   );
 
@@ -339,14 +332,9 @@ describe('Telegram Player-ID flow presentation', () => {
 
     expect(presentation).toEqual({
       kind: 'message',
-      text: [
-        '✅ Transaction number received',
-        'Status: Being checked',
-        '',
-        'Automatic credit is not live yet.',
-      ].join('\n'),
+      text: '🧪 Test reference received. No Player credit will be made.',
     });
-    expect(JSON.stringify(presentation)).not.toMatch(/player|SYNTB|token|uuid|amount/iu);
+    expect(JSON.stringify(presentation)).not.toMatch(/PLAYER-DEMO-42|SYNTB|token|uuid|amount/iu);
     expect(JSON.stringify(presentation)).not.toMatch(/completed|successful/iu);
   });
 
@@ -362,11 +350,7 @@ describe('Telegram Player-ID flow presentation', () => {
 
     expect(presentation).toEqual({
       kind: 'message',
-      text: [
-        '🧪 Simulation only — test transaction number recorded.',
-        'No payment was checked or verified. No KemerBet deposit or credit will be made.',
-        'Do not send money. This is not a payment-status confirmation.',
-      ].join('\n'),
+      text: '🧪 Test reference received. No payment was verified or credited. Do not send money.',
     });
     expect(JSON.stringify(presentation)).not.toMatch(/PLAYER|FETANTEST|uuid|token|amount/iu);
   });
@@ -400,6 +384,21 @@ describe('Telegram Player-ID flow presentation', () => {
     },
   );
 
+  it('acknowledges an SMS-route submission without exposing the checking process', () => {
+    expect(
+      presentTelegramPlayerIdFlowResult({
+        version: 1,
+        outcome: 'receiver_sms_candidate_received',
+        providerCode: 'cbe_birr',
+        providerName: 'CBE Birr',
+        matchStatus: 'pending_sms',
+      }),
+    ).toEqual({
+      kind: 'message',
+      text: '⏳ Payment details received. We’ll update you here.',
+    });
+  });
+
   it('does not imply a prior CBE submission was credited when its reference is submitted again', () => {
     expect(
       presentTelegramPlayerIdFlowResult({
@@ -411,7 +410,7 @@ describe('Telegram Player-ID flow presentation', () => {
       }),
     ).toEqual({
       kind: 'message',
-      text: 'This payment reference was submitted before. No additional Player credit will be made for this submission. If you have not received credit, contact support. Please do not pay again.',
+      text: 'This payment was submitted before. If your Player balance is missing, contact support.',
     });
   });
 
@@ -427,11 +426,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'menu',
       menu: {
-        text: [
-          '⚠️ Reference already used.',
-          'This Telegram account already used it for a completed deposit. No new Player credit was made.',
-          'Do not pay again. Contact support if this is unexpected.',
-        ].join('\n'),
+        text: 'This payment was submitted before. If your Player balance is missing, contact support.',
         buttons: [{ text: '💰 Deposit', callbackData: 'gd1.deposit' }],
       },
     });
@@ -454,11 +449,8 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'menu',
       menu: {
         text: [
-          '✅ Transaction number received',
-          'Status: Checking payment',
-          '',
-          'Tracking reference: p1.AAAAAAAAAAAAAAAAAAAAAA',
-          'FetanAgent will verify the payment and prepare the KemerBet deposit automatically.',
+          '⏳ Payment details received. We’ll update you here.',
+          'Status: /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
         ].join('\n'),
         buttons: [
           { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
@@ -498,9 +490,7 @@ describe('Telegram Player-ID flow presentation', () => {
   });
 
   it('explains the button-first flow and tracking without requiring command syntax', () => {
-    expect(telegramDepositHelpText()).toContain('Save a Player ID once');
-    expect(telegramDepositHelpText()).toContain('tap Deposit for the current receiver');
-    expect(telegramDepositHelpText()).toContain('/deposit_status');
+    expect(telegramDepositHelpText()).toContain('Tap Deposit for payment details');
     expect(telegramDepositHelpText()).toContain('receipt link, screenshot or PDF');
     expect(telegramDepositHelpText()).not.toContain('first line');
     expect(telegramDepositHelpText()).not.toContain('second line');
@@ -509,15 +499,14 @@ describe('Telegram Player-ID flow presentation', () => {
 
   it('explains both SMS payment methods only when the SMS route is selected', () => {
     const help = telegramDepositHelpText(true);
-    expect(help).toContain('receiving phone SMS supplies the amount');
-    expect(help).toContain('identify TeleBirr or CBE Birr from the transaction reference');
+    expect(help).toContain('Tap Deposit for payment details');
+    expect(help).not.toContain('receiving phone SMS');
     expect(help).not.toContain('/cbe followed by the reference');
     expect(help).not.toContain('CBE Birr is not live yet');
   });
 
   it('asks the customer to choose one reference without exposing the candidate list', () => {
-    expect(telegramDepositReferenceSelectionText()).toContain('Nothing was submitted.');
-    expect(telegramDepositReferenceSelectionText()).toContain('Send one reference only.');
+    expect(telegramDepositReferenceSelectionText()).toContain('Send just one.');
     expect(telegramDepositReferenceSelectionText()).not.toContain('PLAYER_ID TRANSACTION_ID');
   });
 });

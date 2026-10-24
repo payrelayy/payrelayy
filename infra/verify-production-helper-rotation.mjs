@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='e0a880a808477397c800986856de2fd2c94184f9'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='ded01070ec1521af1ad940c4ab580abf47fc9d78'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -611,7 +611,6 @@ const inlineNumbersSuccessor = '7f775dee43c95aa9a044bacdcc10b2e8479c06165257e85c
 const inlineNumbersCurrent = 'e0a880a808477397c800986856de2fd2c94184f9';
 const inlineNumbersRotation = read(inlineNumbersRotationPath).toString();
 const inlineNumbersDocs = read(inlineNumbersDocsPath).toString();
-assert.equal(sha256(read(unifiedHelperPath)), inlineNumbersSuccessor);
 for (const value of [
   inlineNumbersPredecessor,
   inlineNumbersSuccessor,
@@ -671,5 +670,62 @@ assert.ok(
     inlineNumbersStep('install_record "$COMPLETE" complete_body'),
 );
 assert.doesNotMatch(inlineNumbersRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+
+const telebirrRevisionRotation = read(
+  'infra/operations/fetanagent-production-v2-telebirr-revision-helper-rotation-v1.sh',
+).toString();
+const telebirrRevisionHelperDigest = sha256(read(unifiedHelperPath));
+assert.equal(
+  telebirrRevisionHelperDigest,
+  '455e3aa718e11d5d729861c02e507b3a1eb4f23905625c1f3bad8455a43dbd5e',
+);
+for (const value of [
+  inlineNumbersSuccessor,
+  telebirrRevisionHelperDigest,
+  'ded01070ec1521af1ad940c4ab580abf47fc9d78',
+  '593344964',
+  'ROTATE EXACT PRODUCTION V2 TELEBIRR REVISION HELPER V1',
+  'require_staged_successor',
+  'require_file "$PREDECESSOR_ARCHIVE" 400 "$PREDECESSOR_SHA256"',
+  'require_sudoers "$DISABLED_SUDOERS" "$PREDECESSOR_SHA256"',
+  'visudo -cf /etc/sudoers',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+]) {
+  assert.ok(telebirrRevisionRotation.includes(value), `TeleBirr receiver rotation lost ${value}`);
+}
+const telebirrRevisionRotate = telebirrRevisionRotation.slice(
+  telebirrRevisionRotation.indexOf('rotate() {'),
+);
+const telebirrRevisionStep = (value) => {
+  const index = telebirrRevisionRotate.indexOf(value);
+  assert.ok(index >= 0, `TeleBirr receiver rotation step absent: ${value}`);
+  return index;
+};
+assert.ok(
+  telebirrRevisionRotation.indexOf('flock --nonblock 9') <
+    telebirrRevisionRotation.indexOf('rotate() {'),
+);
+assert.ok(
+  telebirrRevisionStep('acquire_lock') <
+    telebirrRevisionStep('install_record "$INTENT" intent_body'),
+);
+assert.ok(
+  telebirrRevisionStep('install_record "$INTENT" intent_body') <
+    telebirrRevisionStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'),
+);
+assert.ok(
+  telebirrRevisionStep('mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"') <
+    telebirrRevisionStep('mv -T -- "$NEXT_HELPER" "$HELPER"'),
+);
+assert.ok(
+  telebirrRevisionStep('mv -T -- "$NEXT_HELPER" "$HELPER"') <
+    telebirrRevisionStep('mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'),
+);
+assert.ok(
+  telebirrRevisionStep(
+    'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  ) < telebirrRevisionStep('install_record "$COMPLETE" complete_body'),
+);
+assert.doesNotMatch(telebirrRevisionRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
 
 console.log('Production helper rotation pins and no-runtime-change ordering verified.');

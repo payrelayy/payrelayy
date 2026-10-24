@@ -1,6 +1,6 @@
 # Receiver SMS deposits
 
-This is a default-off replacement for receipt and provider-page checks. It is not active in production.
+This receiver-SMS path replaced receipt and provider-page checks and is active in production.
 
 When the verifier foreground service is online, it receives direct payment SMS for both receiver
 accounts. Before queuing a message, the phone requires the exact SMS sender `127` for TeleBirr or
@@ -48,6 +48,16 @@ matches the installed app before an in-place upgrade, then verify the existing p
 permission, and reader status. A different phone needs a separate pairing. Approve the SMS route
 cutover and any financial activation separately. No receiving-phone SMS collected before the
 cutover timestamp can be matched for automatic credit.
+
+The paired signing key belongs to the phone, not to each Owner receiver revision. An Owner edit
+to the TeleBirr receiver name while keeping the same protected number inherits the current
+phone proof. A new number does not require pairing the same phone again, but TeleBirr stays
+unavailable for new deposits until that phone records a signed TeleBirr payment SMS after the
+number change. The Owner confirms the phone now receives the new account's SMS and no longer
+receives the previous account's SMS before saving the change. The incoming SMS does not contain
+the receiving number, so this Owner confirmation is necessary. Earlier payments remain attached
+to their original receiver revision for review. Replacing or revoking the phone still requires
+the separate phone-pairing procedure.
 
 The cutover must first verify no unresolved Transfer, back up the current release and paired-phone
 state, and take an exact production snapshot of switches, roles, claims, jobs, and receiver revision.

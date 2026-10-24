@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { Client, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -171,7 +171,7 @@ export function registerOwnerReceiverAccountControlSqlTests(
       }
     });
 
-    it('changes a TeleBirr receiver while shared payments stay live and waits for new phone pairing', async () => {
+    it('changes a TeleBirr receiver while shared payments stay live without changing the phone key', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -242,6 +242,124 @@ export function registerOwnerReceiverAccountControlSqlTests(
           { feature_key: 'deposit_execution', mode: 'live' },
           { feature_key: 'payment_verification', mode: 'live' },
         ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('carries a signed TeleBirr phone across name and number revisions, but waits for new-number SMS', async () => {
+      const client = getClient();
+      const digest = () => `sha256:${createHash('sha256').update(randomUUID()).digest('hex')}`;
+      const fingerprint = (letter: string) => letter.toLowerCase().repeat(64);
+      const ciphertext = (letter: string) =>
+        `receiver-v1.telebirr.${letter.repeat(16)}.${letter.repeat(22)}.${letter.repeat(16)}`;
+      await client.query('begin');
+      try {
+        const owner = await client.query<{ auth_user_id: string }>(
+          `select auth_user_id from app.admin_users where id = $1::uuid`,
+          [getOwnerAdminId()],
+        );
+        const authUserId = owner.rows[0]!.auth_user_id;
+        const rotate = async (name: string, letter: string, reason: string) =>
+          queryAsOwnerControl<{ receiver_revision_id: string; revision: number; active_from: Date }>(
+            client,
+            `select * from app.rotate_owner_receiver_account(
+              $1::uuid,$2::uuid,'telebirr',$3::text,$4::text,$5::text,
+              '***1234',1::smallint,1::smallint,1::smallint,$6::text)`,
+            [authUserId, randomUUID(), name, ciphertext(letter), fingerprint(letter), reason],
+          );
+        const first = (await rotate('First Synthetic Receiver', 'A', 'initial_configuration'))[0]!;
+        const deviceId = `device_${randomUUID().replaceAll('-', '')}`;
+        const deviceKeyId = `key_${randomUUID().replaceAll('-', '')}`;
+        const devicePublicKey = digest();
+        const enrollment = await client.query<{ id: string }>(
+          `insert into app.routine_telebirr_device_enrollments (
+             pairing_evidence_digest,device_id,device_key_id,
+             device_public_key_spki_sha256,receiver_account_id,
+             receiver_account_version,receiver_profile_digest,
+             expected_receiver_name_digest,valid_from,valid_until)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,
+             pg_catalog.clock_timestamp() - interval '1 hour',
+             pg_catalog.clock_timestamp() + interval '1 day') returning id`,
+          [digest(), deviceId, deviceKeyId, devicePublicKey,
+            first.receiver_revision_id, first.revision, digest(), digest()],
+        );
+        await client.query(`update app.feature_switches set mode='live'
+          where feature_key in ('payment_verification','deposit_execution')`);
+        await client.query(`update app.receiver_sms_route_control
+          set enabled=true, cutover_at=pg_catalog.clock_timestamp()
+          where singleton`);
+        // This disposable transaction isolates the receiver proof logic from
+        // the independent signed Windows worker lease tested elsewhere.
+        await client.query(`create or replace function app.routine_telebirr_signed_worker_recent(p_max_age interval)
+          returns boolean language sql volatile security invoker set search_path=pg_catalog
+          as $$ select true $$`);
+        const readiness = async () => (await client.query<{ readiness: string }>(
+          `select app.owner_provider_deposit_readiness('telebirr') as readiness`,
+        )).rows[0]!.readiness;
+        expect(await readiness()).toBe('ready');
+
+        // A new revision for the same protected number inherits the existing
+        // pairing; changing the number pauses new deposits without re-pairing.
+        await rotate('Corrected Synthetic Receiver', 'A', 'owner_correction');
+        expect(await readiness()).toBe('ready');
+        const changedNumber = (await rotate('Other Synthetic Receiver', 'B', 'account_rotation'))[0]!;
+        expect(await readiness()).toBe('new_receiver_sms_not_seen');
+        const publicBefore = await client.query<{ accepting: boolean }>(
+          `select accepting from app.public_provider_deposit_controls()
+            where provider_code = 'telebirr'`,
+        );
+        expect(publicBefore.rows).toEqual([{ accepting: false }]);
+
+        const signedSms = async (occurredAt: string) => client.query<{ outcome: string }>(
+          `select app.record_receiver_sms_payment_event(
+            'telebirr',$1::text,$2::text,3300,$3::timestamptz,
+            $3::timestamptz,pg_catalog.clock_timestamp(),$4::text,$5::text,
+            $6::text,$7::text,$8::text,1) as outcome`,
+          [digest(), createHash('sha256').update(randomUUID()).digest('hex'),
+            occurredAt, digest(), digest(), deviceId, deviceKeyId, devicePublicKey],
+        );
+        const firstBoundary = await client.query<{ occurred_at: string }>(
+          `select active_from::text as occurred_at from app.receiver_accounts
+            where id=$1::uuid`,
+          [first.receiver_revision_id],
+        );
+        const delayedOldSms = await signedSms(firstBoundary.rows[0]!.occurred_at);
+        expect(delayedOldSms.rows).toEqual([{ outcome: 'recorded' }]);
+        const oldEvent = await client.query<{ receiver_account_id: string }>(
+          `select receiver_account_id from app.receiver_sms_payment_events
+            where device_enrollment_id=$1::uuid`,
+          [enrollment.rows[0]!.id],
+        );
+        expect(oldEvent.rows).toEqual([{ receiver_account_id: first.receiver_revision_id }]);
+        expect(await readiness()).toBe('new_receiver_sms_not_seen');
+
+        const currentTime = await client.query<{ occurred_at: string }>(
+          `select pg_catalog.clock_timestamp()::text as occurred_at`,
+        );
+        const currentSms = await signedSms(currentTime.rows[0]!.occurred_at);
+        expect(currentSms.rows).toEqual([{ outcome: 'recorded' }]);
+        const currentEvent = await client.query<{ count: string }>(
+          `select count(*) from app.receiver_sms_payment_events
+            where device_enrollment_id=$1::uuid and receiver_account_id=$2::uuid`,
+          [enrollment.rows[0]!.id, changedNumber.receiver_revision_id],
+        );
+        expect(currentEvent.rows).toEqual([{ count: '1' }]);
+        expect(await readiness()).toBe('ready');
+        const publicAfter = await client.query<{ accepting: boolean }>(
+          `select accepting from app.public_provider_deposit_controls()
+            where provider_code = 'telebirr'`,
+        );
+        expect(publicAfter.rows).toEqual([{ accepting: true }]);
+
+        // Reverting the number cannot borrow the old enrollment's proof from
+        // before the intervening number change.
+        await rotate('First Synthetic Receiver Again', 'A', 'account_rotation');
+        expect(await readiness()).toBe('new_receiver_sms_not_seen');
+        const jobs = await client.query<{ count: string }>(
+          `select count(*) from app.deposit_jobs where job_kind='execute_deposit'`,
+        );
+        expect(jobs.rows).toEqual([{ count: '0' }]);
       } finally {
         await client.query('rollback');
       }

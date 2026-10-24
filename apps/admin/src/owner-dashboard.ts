@@ -381,9 +381,9 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </select>
             <label class="confirmation-row" for="receiver-confirmation">
               <input id="receiver-confirmation" name="confirmation" type="checkbox" required />
-              I checked the official receiver name and complete number. For a CBE Birr change,
-              I also confirmed the paired verifier uses the new receiving SIM and no longer
-              receives CBE Birr SMS for the previous receiver.
+              I checked the official receiver name and complete number. If the number changed,
+              I confirmed the existing verifier phone now receives this account's payment SMS
+              and no longer receives payment SMS for the previous account.
             </label>
             <button id="receiver-submit-button" type="submit">Save receiving details</button>
           </form>
@@ -3585,7 +3585,7 @@ const paymentMethodReadinessText = Object.freeze({
   verification_paused: 'CBE verification is paused',
   credit_worker_offline: 'Credit worker has not checked in',
   phone_not_paired: 'TeleBirr phone needs pairing',
-  new_receiver_sms_not_seen: 'Waiting for a fresh signed CBE SMS',
+  new_receiver_sms_not_seen: 'Waiting for payment SMS on the new receiver',
 });
 
 function validPaymentMethod(value) {

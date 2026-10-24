@@ -1194,7 +1194,7 @@ jobs:
               exit 1
             }
             ssh "${ssh_opts[@]}" "$remote" \
-              "sudo -n '$helper' status '0cf74de563b8e332cc84b57eea21d64b331e1f7c'"
+              "sudo -n '$helper' status '45535eca31446b0d652850398b3777eefb345507'"
           fi
           if [[ '${{ inputs.confirm_database_route }}' == 'direct' ]]; then
             [[ "$current_state" == 'absent' ]] || {
@@ -1426,7 +1426,7 @@ jobs:
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
             -o UserKnownHostsFile="$SECRET_DIR/known-hosts")
           ssh "${ssh_opts[@]}" "fetanagent-admin@$VM_HOST" \
-            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '0cf74de563b8e332cc84b57eea21d64b331e1f7c'"
+            "sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 verify '${{ steps.protected.outputs.helper_sha }}' && sudo -n /usr/local/sbin/fetanagent-production-deploy-helper-v2 status '45535eca31446b0d652850398b3777eefb345507'"
 
       - name: Atomically activate production and switch the public edge
         id: activate

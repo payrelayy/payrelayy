@@ -829,7 +829,13 @@ assert.match(workflow, /production-companion-bridge-runtime-enable-continuous\.s
 assert.match(workflow, /steps\.stopped_recovery\.outputs\.attempted == 'true'/u);
 assert.match(workflow, /select count\(\*\) = 5 and pg_catalog\.bool_and\(/u);
 assert.match(workflow, /select count\(\*\) = 1 and pg_catalog\.bool_and\(not rolcanlogin\)/u);
-assert.match(workflow, /select count\(\*\) = 3 and pg_catalog\.bool_and\(/u);
+assert.match(workflow, /\[\[ "\$no_money" == true \]\]/u);
+assert.doesNotMatch(
+  workflow,
+  /\[\[ "\$no_money" == true && "\$paid_poll" == true && "\$paid_settlement" == true \]\]/u,
+);
+assert.match(workflow, /select count\(\*\) = 1 and pg_catalog\.bool_and\(/u);
+assert.match(workflow, /where role\.rolname = 'fetanagent_routine_telebirr_no_money_runtime'/u);
 assert.match(stoppedSmsRestoreSql, /mode = 'disabled' and settings = '\{\}'::jsonb/u);
 assert.match(stoppedSmsRestoreSql, /where singleton and not enabled\)/u);
 assert.doesNotMatch(stoppedSmsRestoreSql, /not enabled and cutover_at is null/u);

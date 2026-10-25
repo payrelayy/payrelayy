@@ -17,18 +17,15 @@ export interface PrivateTelegramMenu {
   readonly buttons: readonly PrivateTelegramMenuButton[];
 }
 
-/** Short, non-expiry menu used when an old payment card is removed. */
-export function renderTelegramQuickMenu(): PrivateTelegramMenu {
-  return {
-    text: TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT,
-    buttons: [
-      {
-        text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
-        callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
-      },
-      { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
-    ],
-  };
+/** Action buttons accompany an outcome, without creating a separate menu message. */
+export function renderTelegramOutcomeActions(): readonly PrivateTelegramMenuButton[] {
+  return [
+    {
+      text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
+      callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
+    },
+    { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
+  ];
 }
 
 /**

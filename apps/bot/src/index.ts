@@ -72,7 +72,7 @@ import {
   telegramReceiverNumberCodeEntities,
 } from './telegram-guided-deposit.js';
 import { deliverTelegramPrivateActionWithRetry } from './telegram-private-action-client.js';
-import { renderTelegramQuickMenu, type PrivateTelegramMenuButton } from './private-menu.js';
+import { renderTelegramOutcomeActions, type PrivateTelegramMenuButton } from './private-menu.js';
 import {
   TELEGRAM_DEPOSIT_STATUS_UNAVAILABLE_TEXT,
   presentTelegramPlayerIdFlowResult,
@@ -100,7 +100,7 @@ const pollingReadiness = createTelegramPollingReadiness();
 bot.api.config.use(pollingReadiness.transformer);
 const playerActions = config.telegramActionChannel;
 const apiIngress = config.apiIngress;
-const quickMenu = renderTelegramQuickMenu();
+const outcomeActions = renderTelegramOutcomeActions();
 async function availableMenuButtons(
   buttons: readonly PrivateTelegramMenuButton[],
 ): Promise<readonly PrivateTelegramMenuButton[]> {
@@ -617,7 +617,17 @@ bot.on('message', async (context) => {
     }
   }
 
-  if (!apiIngress.enabled) return;
+  if (!apiIngress.enabled) {
+    if (
+      playerActions.enabled &&
+      context.chat?.type === 'private' &&
+      context.from?.id === context.chat.id &&
+      context.from.is_bot === false
+    ) {
+      await context.reply(message('en', 'unrecognizedPrivateMessage'));
+    }
+    return;
+  }
 
   const inbound = toTelegramPrivateInboundEvent({
     updateId: context.update.update_id,
@@ -651,7 +661,12 @@ bot.on('message', async (context) => {
     return;
   }
 
-  await context.reply(message(inbound.preferredLocale, 'stageZero'));
+  await context.reply(
+    message(
+      inbound.preferredLocale,
+      playerActions.enabled ? 'unrecognizedPrivateMessage' : 'stageZero',
+    ),
+  );
 });
 
 if (playerActions.enabled) {
@@ -749,14 +764,10 @@ await runTelegramPolling(
                 chatId,
                 text,
                 showDepositButton
-                  ? { reply_markup: inlineMenu(await availableMenuButtons(quickMenu.buttons)) }
+                  ? { reply_markup: inlineMenu(await availableMenuButtons(outcomeActions)) }
                   : undefined,
               ),
             delete: (chatId, messageId) => bot.api.deleteMessage(chatId, messageId),
-            sendMenu: async (chatId) =>
-              bot.api.sendMessage(chatId, quickMenu.text, {
-                reply_markup: inlineMenu(await availableMenuButtons(quickMenu.buttons)),
-              }),
           },
           outcomeNotifierAbort.signal,
         );

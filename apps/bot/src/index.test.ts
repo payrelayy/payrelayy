@@ -914,10 +914,26 @@ describe('Telegram admission, private action, and ingress composition', () => {
   it('falls through from an unknown command to ingress when admission is disabled', async () => {
     await loadComposition(false, true);
 
-    await runtime.messageHandler!(messageContext('/unknown'));
+    const context = messageContext('/unknown');
+    await runtime.messageHandler!(context);
 
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(1);
+    expect(context.replies).toEqual([
+      'I didn’t understand that. Open /menu for Deposit or Player ID, or /support for help.',
+    ]);
+  });
+
+  it('guides an unrecognized private message when legacy ingress is disabled', async () => {
+    await loadComposition(false, true, true, false);
+
+    const context = messageContext('hello');
+    await runtime.messageHandler!(context);
+
+    expect(runtime.ingressDeliveries).toHaveLength(0);
+    expect(context.replies).toEqual([
+      'I didn’t understand that. Open /menu for Deposit or Player ID, or /support for help.',
+    ]);
   });
 
   it('handles action callbacks when admission is disabled', async () => {

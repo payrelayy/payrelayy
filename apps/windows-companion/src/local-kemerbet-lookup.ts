@@ -207,28 +207,39 @@ async function openSearchSurface(page: Page): Promise<void> {
     await requireSearchOnlySurface(page);
     return;
   }
-  // Reuse the provider dropdown when it is already open. The trigger toggles
-  // it closed, which would otherwise turn a valid Player ID into a review case.
-  if ((await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0) {
-    await (
-      await waitForEnabledAuthenticatedControl(
-        page,
-        page.locator(selectors.financialActionsTrigger),
-      )
-    ).click({
-      timeout: LOOKUP_TIMEOUT_MS,
-    });
-  }
-  await requireAuthenticatedAgentPage(page);
+  let openAttempts = 0;
+  let nextOpenAt = 0;
+  let searchOpenedDuringRecovery = false;
   await waitUntil(async () => {
     await requireAuthenticatedAgentPage(page);
+    if (await searchSurfaceReady(page)) {
+      await requireSearchOnlySurface(page);
+      searchOpenedDuringRecovery = true;
+      return true;
+    }
     const item = await uniqueVisibleMenuItemWithText(
       page,
       selectors.financialActionsMenu,
       'Deposit',
     );
-    return item !== undefined && (await item.isEnabled());
+    if (item !== undefined && (await item.isEnabled())) return true;
+    // A provider rerender or lost click can close the dropdown. Reopen only
+    // when it is closed, and never toggle an already-visible menu off.
+    if (
+      openAttempts < 3 &&
+      Date.now() >= nextOpenAt &&
+      (await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0
+    ) {
+      const trigger = await exactlyOneVisible(page.locator(selectors.financialActionsTrigger));
+      if (trigger && (await trigger.isEnabled())) {
+        openAttempts += 1;
+        nextOpenAt = Date.now() + 2_000;
+        await trigger.click({ timeout: 3_000 });
+      }
+    }
+    return false;
   });
+  if (searchOpenedDuringRecovery) return;
   await requireAuthenticatedAgentPage(page);
   const depositItem = await uniqueVisibleMenuItemWithText(
     page,
@@ -277,28 +288,33 @@ function exactLookupResponse(response: Response, playerId: string): boolean {
   );
 }
 
-async function verifyRenderedResultAndReset(page: Page): Promise<void> {
-  await waitUntil(
-    async () => (await exactlyOneVisible(page.locator(selectors.lookupRoot))) !== undefined,
-  );
+async function verifyRenderedResultAndReset(
+  page: Page,
+  expectedIdentities: readonly string[],
+): Promise<void> {
+  // KemerBet can render the Player card before its amount and notes controls.
+  // Wait for the whole empty form, not just its first DOM node.
+  await waitUntil(async () => {
+    await requireAuthenticatedAgentPage(page);
+    const lookupRoot = await exactlyOneVisible(page.locator(selectors.lookupRoot));
+    const prepared = await exactlyOneVisible(page.locator(selectors.preparedDeposit));
+    const amount = await exactlyOneVisible(page.locator(selectors.amountInput));
+    const notes = await exactlyOneVisible(page.locator(selectors.notesInput));
+    const transfer = await exactlyOneVisible(modalRole(page, 'button', 'Transfer'));
+    if (!lookupRoot || !prepared || !amount || !notes || !transfer) return false;
+    const identity = await exactlyOneVisible(lookupRoot.locator(selectors.resolvedIdentity));
+    const currency = await exactlyOneVisible(lookupRoot.locator(selectors.currencyCode));
+    return (
+      identity !== undefined &&
+      currency !== undefined &&
+      expectedIdentities.includes((await identity.innerText()).trim()) &&
+      (await currency.innerText()).trim() === 'ETB' &&
+      (await amount.inputValue()) === '' &&
+      (await notes.inputValue()) === ''
+    );
+  });
   const lookupRoot = await exactlyOneVisible(page.locator(selectors.lookupRoot));
-  const prepared = await exactlyOneVisible(page.locator(selectors.preparedDeposit));
-  const amount = await exactlyOneVisible(page.locator(selectors.amountInput));
-  const notes = await exactlyOneVisible(page.locator(selectors.notesInput));
-  const transfer = await exactlyOneVisible(modalRole(page, 'button', 'Transfer'));
-  if (!lookupRoot || !prepared || !amount || !notes || !transfer) unavailable();
-  const identity = await exactlyOneVisible(lookupRoot.locator(selectors.resolvedIdentity));
-  const currency = await exactlyOneVisible(lookupRoot.locator(selectors.currencyCode));
-  if (
-    !identity ||
-    !currency ||
-    (await identity.innerText()).trim().length < 1 ||
-    (await currency.innerText()).trim() !== 'ETB' ||
-    (await amount.inputValue()) !== '' ||
-    (await notes.inputValue()) !== ''
-  ) {
-    unavailable();
-  }
+  if (!lookupRoot) unavailable();
   const reset = await lookupRoot.evaluate((element) => {
     if (!element.isConnected) return false;
     const view = element.ownerDocument.defaultView;
@@ -324,6 +340,7 @@ async function lookupOne(
   authorization: MutableLocalKemerBetLookupAuthorization,
   observe?: LocalKemerBetLookupTiming,
 ): Promise<void> {
+  let expectedIdentities: readonly string[] = [];
   const exactFind = await timedStage('prepare_find', observe, async () => {
     await requireSearchOnlySurface(page);
     const input = await requireEnabled(page.locator(selectors.playerIdInput));
@@ -365,6 +382,18 @@ async function lookupOne(
         ) {
           unavailable();
         }
+        const parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)) as {
+          value: { userName?: unknown; email?: unknown };
+        };
+        expectedIdentities = [...new Set([parsed.value.userName, parsed.value.email])].filter(
+          (candidate): candidate is string =>
+            typeof candidate === 'string' &&
+            candidate.length > 0 &&
+            candidate === candidate.trim() &&
+            Buffer.byteLength(candidate, 'utf8') <= 256 &&
+            !/[\u0000-\u001f\u007f]/u.test(candidate),
+        );
+        if (expectedIdentities.length < 1) unavailable();
       } finally {
         body?.fill(0);
       }
@@ -375,7 +404,9 @@ async function lookupOne(
   } finally {
     authorization.clear();
   }
-  await timedStage('render_and_reset', observe, () => verifyRenderedResultAndReset(page));
+  await timedStage('render_and_reset', observe, () =>
+    verifyRenderedResultAndReset(page, expectedIdentities),
+  );
 }
 
 /** A single server-assigned Player ID. Only positive provider and empty-form evidence is usable. */

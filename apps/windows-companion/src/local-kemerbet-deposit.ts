@@ -153,10 +153,15 @@ export function routineDepositAmountText(amountMinor: number): string {
 function exactAmountRenderings(amountMinor: number): readonly string[] {
   const amount = routineDepositAmountText(amountMinor);
   const integer = amount.slice(0, -3);
-  const groupedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
   const fraction = amount.slice(-3);
-  const renderings = [amount, `${groupedInteger}${fraction}`];
-  if (amountMinor % ETB_SCALE === 0) renderings.push(integer, groupedInteger);
+  // KemerBet's amount control uses different thousands separators across its
+  // rendered variants. Keep every accepted string tied to the exact leased
+  // integer amount; never parse a displayed float or discard arbitrary spaces.
+  const groupedIntegers = [',', ' ', '\u00a0', '\u202f'].map((separator) =>
+    integer.replace(/\B(?=(\d{3})+(?!\d))/gu, separator),
+  );
+  const renderings = [amount, ...groupedIntegers.map((grouped) => `${grouped}${fraction}`)];
+  if (amountMinor % ETB_SCALE === 0) renderings.push(integer, ...groupedIntegers);
   return [...new Set(renderings)];
 }
 

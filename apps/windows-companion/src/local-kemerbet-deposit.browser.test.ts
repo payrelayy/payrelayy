@@ -119,6 +119,19 @@ const groupedAmountHtml = fixtureHtml
     ".toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })",
   );
 
+const spaceGroupedAmountHtml = fixtureHtml
+  .replace(
+    `    document.getElementById('transfer').onclick = async () => {`,
+    `    surface.querySelector('[data-placeholder="Enter Amount"] input').addEventListener('input', (event) => {
+      const input = event.currentTarget;
+      const [whole, fraction] = input.value.replaceAll(' ', '').split('.');
+      input.value = whole.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ' ') +
+        (fraction === undefined ? '' : '.' + fraction);
+    });
+    document.getElementById('transfer').onclick = async () => {`,
+  )
+  .replaceAll('Number(amount)', "Number(amount.replaceAll(' ', ''))");
+
 const successTableHtml = fixtureHtml.replace(
   `'<p>Player Balance +' + Number(amount).toFixed(2) + ' ETB Success</p></div>';`,
   `'<table><thead><tr><th>Name</th><th>Wallet Type</th><th>Amount</th><th>Message</th></tr></thead>' +
@@ -169,6 +182,14 @@ describe('strict KemerBet success table', () => {
   it('accepts only exact canonical grouped renderings of the leased amount', () => {
     expect(exactKemerBetAmountInputMatches('1,102.00', 110200)).toBe(true);
     expect(exactKemerBetAmountInputMatches('\u200e1,102', 110200)).toBe(true);
+    for (const separator of [' ', '\u00a0', '\u202f']) {
+      expect(exactKemerBetAmountInputMatches(`3${separator}000.00`, 300000)).toBe(true);
+      expect(exactKemerBetAmountInputMatches(`3${separator}000`, 300000)).toBe(true);
+      expect(exactKemerBetAmountInputMatches(`3${separator}000.01`, 300000)).toBe(false);
+      expect(exactKemerBetAmountInputMatches(`30${separator}00.00`, 300000)).toBe(false);
+    }
+    expect(exactKemerBetAmountInputMatches('3\t000.00', 300000)).toBe(false);
+    expect(exactKemerBetAmountInputMatches('3  000.00', 300000)).toBe(false);
     expect(exactKemerBetAmountInputMatches('1,102.01', 110200)).toBe(false);
     expect(exactKemerBetAmountInputMatches('11,02.00', 110200)).toBe(false);
     expect(exactKemerBetAmountInputMatches('1,102.00\u200e', 110200)).toBe(false);
@@ -183,6 +204,12 @@ describe('strict KemerBet success table', () => {
         110200,
       ),
     ).toBe(false);
+    const spaceGroupedTable = successTableText
+      .replaceAll('\t30\t', '\t3 000.00\t')
+      .replace('\t-30\t', '\t-3 000.00\t');
+    expect(exactKemerBetSuccessTableMatches(spaceGroupedTable, ['fixture-identity'], 300000)).toBe(
+      true,
+    );
   });
 });
 
@@ -463,6 +490,32 @@ describe.skipIf(process.platform !== 'win32')(
       expect(outcome.outcome).toBe('submission_attempted');
       expect(submitted).toEqual([{ playerId: 42, amount: 1102, notes: null }]);
       expect(blocked).toEqual([]);
+      expect(stages.at(-1)).toBe('success_modal_confirmed');
+    }, 15000);
+
+    it('prepares and confirms a space-grouped 3,000 ETB amount once', async () => {
+      const { page, lookup, deposit, submitted, blocked } =
+        await startFixture(spaceGroupedAmountHtml);
+      const stages: string[] = [];
+      let fences = 0;
+      const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        300000,
+        lookup,
+        deposit,
+        async () => {
+          expect(await amountText(page)).toBe('3 000.00');
+          expect(submitted).toEqual([]);
+          fences += 1;
+          return { playerId: PLAYER_ID, amountMinor: 300000, isFresh: () => true };
+        },
+        (stage) => stages.push(stage),
+      );
+      expect(outcome.outcome).toBe('submission_attempted');
+      expect(submitted).toEqual([{ playerId: 42, amount: 3000, notes: null }]);
+      expect(blocked).toEqual([]);
+      expect(fences).toBe(1);
       expect(stages.at(-1)).toBe('success_modal_confirmed');
     }, 15000);
 

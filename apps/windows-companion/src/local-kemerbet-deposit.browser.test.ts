@@ -64,7 +64,7 @@ const delayedNavigationHtml = fixtureHtml
     setTimeout(() => {
       surface.insertAdjacentHTML('beforeend',
         '<div class="ant-dropdown rt--transfer-dropdown"><ul role="menu">' +
-        '<li role="menuitem" aria-label="Open player deposit"><span>Deposit</span></li>' +
+        '<li role="menuitem" aria-label="Open player deposit"><span hidden>Internal action</span><span>Deposit</span></li>' +
         '<li role="menuitem">Withdraw</li></ul></div>');
       surface.querySelector('.rt--transfer-dropdown li[role="menuitem"]').onclick = () => {
         setTimeout(() => {

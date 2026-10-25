@@ -63,7 +63,8 @@ const delayedDepositFixture = `<!doctype html>
         dropdown.className = 'rt--transfer-dropdown';
         const deposit = document.createElement('button');
         deposit.setAttribute('role', 'menuitem');
-        deposit.textContent = 'Deposit';
+        deposit.setAttribute('aria-label', 'Open player deposit');
+        deposit.innerHTML = '<span hidden>Internal action</span><span>Deposit</span>';
         deposit.addEventListener('click', () => {
           deposit.remove();
           window.setTimeout(() => {

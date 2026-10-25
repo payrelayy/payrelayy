@@ -12,6 +12,7 @@ import type { Locator, Page, Response } from 'playwright-core';
 import { DEPOSIT_MAXIMUM_MINOR, DEPOSIT_MINIMUM_MINOR, ETB_SCALE } from '@fetanagent/domain';
 
 import type { MutableLocalKemerBetLookupAuthorization } from './local-kemerbet-lookup.js';
+import { uniqueVisibleMenuItemWithText } from './local-kemerbet-menu.js';
 import { KEMERBET_DEPOSIT_PATH } from './request-guard.js';
 import type {
   ConsumedLocalKemerBetDepositAuthorization,
@@ -429,15 +430,25 @@ async function openSearchSurface(
     reportPreflight(diagnostic, 'financial_actions_page_unavailable');
     throw new LocalKemerBetDepositError();
   }
-  // The live Ant menu renders a role=menuitem <li> with a visible title span.
-  // Match the exact visible text inside that menu, independently of Ant's ARIA label.
-  const depositItem = page
-    .locator(selectors.financialActionsMenu)
-    .locator('li[role="menuitem"]')
-    .filter({ hasText: /^\s*Deposit\s*$/u });
   let enabledDepositItem: Locator;
   try {
-    enabledDepositItem = await waitForEnabledAuthenticatedControl(page, depositItem);
+    await waitUntil(async () => {
+      await requireAuthenticatedAgentPage(page);
+      const item = await uniqueVisibleMenuItemWithText(
+        page,
+        selectors.financialActionsMenu,
+        'Deposit',
+      );
+      return item !== undefined && (await item.isEnabled());
+    });
+    await requireAuthenticatedAgentPage(page);
+    const item = await uniqueVisibleMenuItemWithText(
+      page,
+      selectors.financialActionsMenu,
+      'Deposit',
+    );
+    if (!item || !(await item.isEnabled())) unavailable();
+    enabledDepositItem = item;
   } catch {
     reportPreflight(diagnostic, 'deposit_menu_unavailable');
     throw new LocalKemerBetDepositError();

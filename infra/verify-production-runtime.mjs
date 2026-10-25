@@ -35,6 +35,7 @@ const [
   shortPlayerIdMenuHelperRotation,
   playerCreditSpeedHelperRotation,
   botExpiryMenuHelperRotation,
+  ownerControlPanelHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -91,6 +92,7 @@ const [
   read('infra/operations/fetanagent-production-v2-short-player-id-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-player-credit-speed-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -760,14 +762,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '2fb198cf9a4f2a7a2ac8a3b22d3ad43130f02943'/gu)].length,
+  [...workflow.matchAll(/status '0d3d6dafc55e1ae8d1fb4ff6ae74e089b9a39dbe'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='2fb198cf9a4f2a7a2ac8a3b22d3ad43130f02943'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='0d3d6dafc55e1ae8d1fb4ff6ae74e089b9a39dbe'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1573,12 +1575,45 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='2fb198cf9a4f2a7a2ac8a3b22d3ad43130f02943'",
   "readonly PREDECESSOR_SHA256='64e976802d4f6719a4589ffe47e3029dba772d3690fa1f6762642d01cfb65e0e'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='bf9f012fc93e16f8b4be7fe92a372751d56d69a0198e6c4679a57c10a612d6ad'",
   'require_current_release',
   'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
   'ROTATE EXACT PRODUCTION V2 BOT EXPIRY MENU HELPER V1',
 ]) {
   assert.ok(botExpiryMenuHelperRotation.includes(value));
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='0d3d6dafc55e1ae8d1fb4ff6ae74e089b9a39dbe'",
+  "readonly PREDECESSOR_SHA256='bf9f012fc93e16f8b4be7fe92a372751d56d69a0198e6c4679a57c10a612d6ad'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-control-panel-release-v1'",
+  "readonly STAGED_HELPER='/root/fetanagent-production-v2-owner-control-panel-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'flock --nonblock 9',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER CONTROL PANEL HELPER V1',
+]) {
+  assert.ok(ownerControlPanelHelperRotation.includes(value));
+}
+const ownerRotationSteps = ownerControlPanelHelperRotation.slice(
+  ownerControlPanelHelperRotation.indexOf('rotate() {'),
+);
+for (const [before, after] of [
+  ['acquire_lock', 'install_record "$INTENT" intent_body'],
+  ['install_record "$INTENT" intent_body', 'mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'],
+  ['mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"', 'mv -T -- "$NEXT_HELPER" "$HELPER"'],
+  ['mv -T -- "$NEXT_HELPER" "$HELPER"', 'mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'],
+  [
+    'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+    'install_record "$COMPLETE" complete_body',
+  ],
+]) {
+  assert.ok(
+    ownerRotationSteps.indexOf(before) >= 0 &&
+      ownerRotationSteps.indexOf(before) < ownerRotationSteps.indexOf(after),
+  );
 }
 assert.equal(
   sudoers,

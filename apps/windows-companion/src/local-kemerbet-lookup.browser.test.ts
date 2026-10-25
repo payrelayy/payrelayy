@@ -47,7 +47,7 @@ const delayedDepositFixture = `<!doctype html>
             <div class="ant-modal-content">
               <div class="rt--transfer-player-info">
                 <div class="rt--transfer-player-info-details">
-                  <div class="rt--flex"><b>Fixture identity</b></div>
+                  <div class="rt--flex"><b>fixture-identity</b></div>
                   <div class="rt--flex"><b>ETB</b></div>
                 </div>
               </div>
@@ -95,6 +95,40 @@ const delayedDepositFixture = `<!doctype html>
   </body>
 </html>`;
 
+const missedFirstMenuFixture = delayedDepositFixture.replace(
+  '      const openDepositMenu = () => {',
+  `      let ignoredFirstMenuClick = false;
+      const openDepositMenu = () => {
+        document.body.dataset.menuClickCount = String(
+          Number(document.body.dataset.menuClickCount || '0') + 1,
+        );
+        if (!ignoredFirstMenuClick) { ignoredFirstMenuClick = true; return; }`,
+);
+
+const delayedLookupControlsFixture = delayedDepositFixture
+  .replace(
+    '<div data-placeholder="Enter Amount"><input></div>\n              <div data-placeholder="Enter Notes"><textarea></textarea></div>\n              <button>Transfer</button>',
+    '<div id="pending-controls"></div>',
+  )
+  .replace(
+    '</body>',
+    `<script>
+      const pendingControls = new MutationObserver(() => {
+        const slot = document.getElementById('pending-controls');
+        if (!slot) return;
+        pendingControls.disconnect();
+        document.body.dataset.delayedControls = 'pending';
+        window.setTimeout(() => {
+          slot.outerHTML = '<div data-placeholder="Enter Amount"><input></div>' +
+            '<div data-placeholder="Enter Notes"><textarea></textarea></div>' +
+            '<button>Transfer</button>';
+          document.body.dataset.delayedControls = 'rendered';
+        }, 250);
+      });
+      pendingControls.observe(document.getElementById('surface'), { childList: true, subtree: true });
+    </script></body>`,
+  );
+
 describe.skipIf(process.platform !== 'win32')(
   'local KemerBet lookup in real Windows Chrome (loopback responses only)',
   () => {
@@ -113,6 +147,81 @@ describe.skipIf(process.platform !== 'win32')(
     afterAll(async () => {
       await browser?.close();
     });
+
+    async function startSingleLookupFixture(html: string) {
+      const requestedPlayerIds: string[] = [];
+      const blockedMethods: string[] = [];
+      context = await browser.newContext({ serviceWorkers: 'block' });
+      await context.route('**/*', async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() === 'GET' && url.href === AGENTS_URL) {
+          await route.fulfill({ status: 200, contentType: 'text/html', body: html });
+          return;
+        }
+        if (
+          request.method() === 'GET' &&
+          url.origin === API_ORIGIN &&
+          url.pathname === LOOKUP_PATH &&
+          [...url.searchParams.keys()].length === 1 &&
+          url.searchParams.get('externalId') === PLAYER_IDS[0]
+        ) {
+          requestedPlayerIds.push(PLAYER_IDS[0]);
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            headers: { 'access-control-allow-origin': '*' },
+            body: JSON.stringify({
+              value: {
+                id: 1,
+                externalId: PLAYER_IDS[0],
+                currencyCode: 'ETB',
+                userName: 'fixture-identity',
+                email: null,
+              },
+            }),
+          });
+          return;
+        }
+        blockedMethods.push(request.method());
+        await route.abort('blockedbyclient');
+      });
+      const page = await context.newPage();
+      await page.goto(AGENTS_URL, { waitUntil: 'domcontentloaded' });
+      return { page, requestedPlayerIds, blockedMethods };
+    }
+
+    it('recovers a lost menu click before one read-only Player lookup', async () => {
+      const { page, requestedPlayerIds, blockedMethods } =
+        await startSingleLookupFixture(missedFirstMenuFixture);
+      expect(
+        await executeSingleLocalKemerBetLookup(
+          page,
+          PLAYER_IDS[0],
+          createLocalKemerBetLookupAuthorization(),
+        ),
+      ).toBe('found');
+      expect(requestedPlayerIds).toEqual([PLAYER_IDS[0]]);
+      expect(blockedMethods).toEqual([]);
+      expect(await page.locator('body').getAttribute('data-menu-click-count')).toBe('2');
+    }, 30_000);
+
+    it('waits for the whole rendered Player card and empty form', async () => {
+      const { page, requestedPlayerIds, blockedMethods } = await startSingleLookupFixture(
+        delayedLookupControlsFixture,
+      );
+      expect(
+        await executeSingleLocalKemerBetLookup(
+          page,
+          PLAYER_IDS[0],
+          createLocalKemerBetLookupAuthorization(),
+        ),
+      ).toBe('found');
+      expect(requestedPlayerIds).toEqual([PLAYER_IDS[0]]);
+      expect(blockedMethods).toEqual([]);
+      expect(await page.locator('body').getAttribute('data-delayed-controls')).toBe('rendered');
+      expect(await page.locator('[data-placeholder="Enter Amount"] input').count()).toBe(0);
+    }, 30_000);
 
     it('waits for the asynchronous entry control and To Player tile before five Find-only lookups', async () => {
       const requestedPlayerIds: string[] = [];
@@ -205,7 +314,7 @@ describe.skipIf(process.platform !== 'win32')(
                 id: 1,
                 externalId: playerId,
                 currencyCode: 'ETB',
-                userName: 'fixture',
+                userName: 'fixture-identity',
                 email: null,
               },
             }),

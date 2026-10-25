@@ -2,7 +2,11 @@ import { createContext, runInContext } from 'node:vm';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { OWNER_DASHBOARD_JAVASCRIPT } from './owner-dashboard.js';
+import {
+  OWNER_CONTROL_GROUPS,
+  OWNER_DASHBOARD_JAVASCRIPT,
+  ownerDashboardHtml,
+} from './owner-dashboard.js';
 
 type BrowserEvent = Readonly<{ preventDefault(): void }>;
 type BrowserListener = (event: BrowserEvent) => Promise<void> | void;
@@ -405,13 +409,30 @@ describe('Owner workspace navigation', () => {
     expect(facts).toContain('Separate TeleBirr receipt lookup');
     expect(facts).toContain('Off');
     expect(facts).toContain('Open deposit jobs');
+    expect(browser.element('#system-overview-attention').textContent).toContain(
+      '1 manual credit waiting',
+    );
+    expect(browser.element('#system-overview-attention').textContent).not.toContain('stopped');
     expect(browser.element('#system-overview-status').textContent).toContain('Ethiopia time');
+    await browser.element('#system-overview-open-system').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    expect(browser.element('#routine-processing-title').focused).toBe(true);
+    await browser.call('signOut');
+    expect(browser.element('#system-overview-attention').textContent).toBe(
+      'Sign in to check work that needs attention.',
+    );
   });
 
   it('keeps daily work first and every active control reachable', async () => {
     const browser = ownerBrowserHarness(503);
     const areas = {
-      home: ['system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
+      home: [
+        'owner-controls-title',
+        'system-overview-title',
+        'receiver-sms-old-title',
+        'telebirr-fast-alert-title',
+      ],
       payments: ['receiver-sms-inbox-title', 'transactions-title', 'receiver-change-review-title'],
       methods: ['payment-methods-title', 'receiver-title'],
       players: ['player-review-title', 'player-association-title', 'player-eligibility-title'],
@@ -442,6 +463,62 @@ describe('Owner workspace navigation', () => {
     }
     expect(browser.element('#owner-view-title').textContent).toBe('Advanced tools');
     expect(browser.element('#owner-view-title').focused).toBe(true);
+  });
+
+  it('lists every existing Owner section and opens the exact control without executing it', async () => {
+    const browser = ownerBrowserHarness(503);
+    const views = browser.evaluate('ownerViews') as Record<string, { sections: string[] }>;
+    const controls: Array<{ view: string; section: string }> = [];
+    for (const group of OWNER_CONTROL_GROUPS) controls.push(...group.controls);
+    const listedSections = new Set(controls.map((control) => control.section));
+    const availableSections = Object.values(views)
+      .flatMap((view) => view.sections)
+      .filter((section) => !['owner-controls-title', 'system-overview-title'].includes(section));
+    expect(listedSections).toEqual(new Set(availableSections));
+    const html = ownerDashboardHtml({
+      deploymentTarget: 'production',
+    } as Parameters<typeof ownerDashboardHtml>[0]);
+    for (const control of controls) {
+      expect(views[control.view]?.sections).toContain(control.section);
+      expect(html).toContain(
+        `data-owner-control-view="${control.view}" data-owner-control-section="${control.section}"`,
+      );
+    }
+    for (const group of OWNER_CONTROL_GROUPS) {
+      for (const control of group.controls) {
+        if ('focus' in control) expect(html).toContain(`id="${control.focus}"`);
+      }
+    }
+
+    const directoryClick = browser.element('#owner-control-directory').listeners.get('click');
+    const requestsBeforeClick = browser.fetchCalls.length;
+    await directoryClick?.({
+      preventDefault() {},
+      target: {
+        closest: () => ({
+          dataset: {
+            ownerControlView: 'methods',
+            ownerControlSection: 'receiver-title',
+          },
+        }),
+      },
+    } as unknown as BrowserEvent);
+    expect(browser.element('#owner-nav-methods').dataset.active).toBe('true');
+    expect(browser.element('#receiver-title').focused).toBe(true);
+    expect(browser.fetchCalls.length).toBe(requestsBeforeClick);
+
+    await browser.element('#owner-nav-controls').listeners.get('click')?.({ preventDefault() {} });
+    expect(browser.element('#owner-nav-home').dataset.active).toBe('true');
+    expect(browser.element('#owner-controls-title').focused).toBe(true);
+
+    await browser.call(
+      'openOwnerControl',
+      'advanced',
+      'kemerbet-companion-title',
+      'companion-connection-title',
+    );
+    expect(browser.element('#owner-nav-advanced').dataset.active).toBe('true');
+    expect(browser.element('#companion-connection-title').focused).toBe(true);
   });
 });
 

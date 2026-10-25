@@ -12,6 +12,7 @@ import type { ExactFivePlayerIds } from '@fetanagent/agent-platform-companion-co
 import type { Locator, Page, Response } from 'playwright-core';
 
 import type { LocalKemerBetLookupAuthorization } from './provider-route.js';
+import { uniqueVisibleMenuItemWithText } from './local-kemerbet-menu.js';
 
 const PLAYER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const LOOKUP_TIMEOUT_MS = 30_000;
@@ -212,15 +213,23 @@ async function openSearchSurface(page: Page): Promise<void> {
     timeout: LOOKUP_TIMEOUT_MS,
   });
   await requireAuthenticatedAgentPage(page);
-  await (
-    await waitForEnabledAuthenticatedControl(
+  await waitUntil(async () => {
+    await requireAuthenticatedAgentPage(page);
+    const item = await uniqueVisibleMenuItemWithText(
       page,
-      page.locator(selectors.financialActionsMenu).getByRole('menuitem', {
-        name: 'Deposit',
-        exact: true,
-      }),
-    )
-  ).click({
+      selectors.financialActionsMenu,
+      'Deposit',
+    );
+    return item !== undefined && (await item.isEnabled());
+  });
+  await requireAuthenticatedAgentPage(page);
+  const depositItem = await uniqueVisibleMenuItemWithText(
+    page,
+    selectors.financialActionsMenu,
+    'Deposit',
+  );
+  if (!depositItem || !(await depositItem.isEnabled())) unavailable();
+  await depositItem.click({
     timeout: LOOKUP_TIMEOUT_MS,
   });
   await requireAuthenticatedAgentPage(page);

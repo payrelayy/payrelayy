@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   createLocalKemerBetDepositAuthorization,
+  exactKemerBetAmountInputMatches,
   exactKemerBetSuccessTableMatches,
   executeExactOneUseLocalKemerBetDeposit,
   executeRoutineOneUseLocalKemerBetDeposit,
@@ -82,6 +83,11 @@ const toggleNavigationHtml = delayedNavigationHtml.replace(
   "  surface.querySelector('button').onclick = () => {\n    const existingMenu = surface.querySelector('.rt--transfer-dropdown');\n    if (existingMenu) { existingMenu.remove(); return; }\n    setTimeout(() => {",
 );
 
+const missedFirstMenuHtml = delayedNavigationHtml.replace(
+  "  surface.querySelector('button').onclick = () => {\n    setTimeout(() => {",
+  "  let ignoredFirstClick = false;\n  surface.querySelector('button').onclick = () => {\n    if (!ignoredFirstClick) { ignoredFirstClick = true; return; }\n    setTimeout(() => {",
+);
+
 const delayedPreparedHtml = fixtureHtml.replace(
   `    surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
   `    await new Promise((resolve) => setTimeout(resolve, 250));
@@ -95,6 +101,23 @@ const directionMarkedAmountHtml = fixtureHtml.replace(
     });
     document.getElementById('transfer').onclick = async () => {`,
 );
+
+const groupedAmountHtml = fixtureHtml
+  .replace(
+    `    document.getElementById('transfer').onclick = async () => {`,
+    `    surface.querySelector('[data-placeholder="Enter Amount"] input').addEventListener('input', (event) => {
+      const input = event.currentTarget;
+      const [whole, fraction] = input.value.replaceAll(',', '').split('.');
+      input.value = whole.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',') +
+        (fraction === undefined ? '' : '.' + fraction);
+    });
+    document.getElementById('transfer').onclick = async () => {`,
+  )
+  .replaceAll('Number(amount)', "Number(amount.replaceAll(',', ''))")
+  .replace(
+    '.toFixed(2)',
+    ".toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })",
+  );
 
 const successTableHtml = fixtureHtml.replace(
   `'<p>Player Balance +' + Number(amount).toFixed(2) + ' ETB Success</p></div>';`,
@@ -141,6 +164,25 @@ describe('strict KemerBet success table', () => {
     ['missing close', successTableText.replace('\nClose', '')],
   ])('rejects %s', (_caseName, text) => {
     expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 3000)).toBe(false);
+  });
+
+  it('accepts only exact canonical grouped renderings of the leased amount', () => {
+    expect(exactKemerBetAmountInputMatches('1,102.00', 110200)).toBe(true);
+    expect(exactKemerBetAmountInputMatches('\u200e1,102', 110200)).toBe(true);
+    expect(exactKemerBetAmountInputMatches('1,102.01', 110200)).toBe(false);
+    expect(exactKemerBetAmountInputMatches('11,02.00', 110200)).toBe(false);
+    expect(exactKemerBetAmountInputMatches('1,102.00\u200e', 110200)).toBe(false);
+    const groupedTable = successTableText
+      .replaceAll('\t30\t', '\t1,102.00\t')
+      .replace('\t-30\t', '\t-1,102.00\t');
+    expect(exactKemerBetSuccessTableMatches(groupedTable, ['fixture-identity'], 110200)).toBe(true);
+    expect(
+      exactKemerBetSuccessTableMatches(
+        groupedTable.replace('\t1,102.00\tSuccess', '\t1,102.01\tSuccess'),
+        ['fixture-identity'],
+        110200,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -389,6 +431,39 @@ describe.skipIf(process.platform !== 'win32')(
       expect(stages).not.toContain('financial_actions_opened');
       expect(submitted).toEqual([]);
       expect(blocked).toEqual([]);
+    }, 15000);
+
+    it('reopens the Financial Actions menu when a first click is lost', async () => {
+      const { page, lookup, submitted, blocked } = await startFixture(missedFirstMenuHtml);
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(stages.filter((stage) => stage === 'financial_actions_opened')).toHaveLength(2);
+      expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
+    }, 15000);
+
+    it('prepares and confirms a grouped amount without changing the leased amount', async () => {
+      const { page, lookup, deposit, submitted, blocked } = await startFixture(groupedAmountHtml);
+      const stages: string[] = [];
+      const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
+        page,
+        PLAYER_ID,
+        110200,
+        lookup,
+        deposit,
+        async () => {
+          expect(await amountText(page)).toBe('1,102.00');
+          return { playerId: PLAYER_ID, amountMinor: 110200, isFresh: () => true };
+        },
+        (stage) => stages.push(stage),
+      );
+      expect(outcome.outcome).toBe('submission_attempted');
+      expect(submitted).toEqual([{ playerId: 42, amount: 1102, notes: null }]);
+      expect(blocked).toEqual([]);
+      expect(stages.at(-1)).toBe('success_modal_confirmed');
     }, 15000);
 
     it('waits for the exact prepared form after the verified read-only response', async () => {

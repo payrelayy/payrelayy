@@ -418,12 +418,19 @@ async function openSearchSurface(
     await requireSearchOnlySurface(page);
     return;
   }
-  await (
-    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.financialActionsTrigger))
-  ).click({
-    timeout: TIMEOUT_MS,
-  });
-  reportPreflight(diagnostic, 'financial_actions_opened');
+  // The provider can leave this dropdown open after navigation. Clicking its
+  // trigger again closes it and makes an otherwise ready deposit unavailable.
+  if ((await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0) {
+    await (
+      await waitForEnabledAuthenticatedControl(
+        page,
+        page.locator(selectors.financialActionsTrigger),
+      )
+    ).click({
+      timeout: TIMEOUT_MS,
+    });
+    reportPreflight(diagnostic, 'financial_actions_opened');
+  }
   try {
     await requireAuthenticatedAgentPage(page);
   } catch {

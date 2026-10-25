@@ -59,6 +59,8 @@ const delayedDepositFixture = `<!doctype html>
         });
       };
       const openDepositMenu = () => {
+        const existingMenu = surface.querySelector('.rt--transfer-dropdown');
+        if (existingMenu) { existingMenu.remove(); return; }
         const dropdown = document.createElement('div');
         dropdown.className = 'rt--transfer-dropdown';
         const deposit = document.createElement('button');
@@ -169,7 +171,7 @@ describe.skipIf(process.platform !== 'win32')(
       expect(requestedPlayerIds).toEqual(PLAYER_IDS);
     }, 30_000);
 
-    it('accepts one exact successful Find as read-only evidence', async () => {
+    it('accepts one exact successful Find from an already-open menu', async () => {
       const requestedPlayerIds: string[] = [];
       context = await browser.newContext({ serviceWorkers: 'block' });
       await context.route('**/*', async (route) => {
@@ -214,6 +216,8 @@ describe.skipIf(process.platform !== 'win32')(
       });
       const page = await context.newPage();
       await page.goto(AGENTS_URL, { waitUntil: 'domcontentloaded' });
+      await page.locator('#financial-actions').click();
+      await page.locator('.rt--transfer-dropdown').waitFor({ state: 'visible' });
       expect(
         await executeSingleLocalKemerBetLookup(
           page,

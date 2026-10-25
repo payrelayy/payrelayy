@@ -113,6 +113,33 @@ try {
     exit 0
   }
 
+  # Console QuickEdit suspends both worker loops when text is selected in the
+  # status window. Disable it while Node shares this console, then restore it.
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class FetanAgentConsoleInputMode {
+  [DllImport("kernel32.dll", SetLastError = true)]
+  public static extern IntPtr GetStdHandle(int handle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+'@
+  $consoleInput = [FetanAgentConsoleInputMode]::GetStdHandle(-10)
+  [uint32] $originalInputMode = 0
+  if ($consoleInput -eq [IntPtr]::Zero -or $consoleInput.ToInt64() -eq -1 -or
+      -not [FetanAgentConsoleInputMode]::GetConsoleMode($consoleInput, [ref]$originalInputMode)) {
+    throw 'The status window input mode could not be checked.'
+  }
+  [uint32] $protectedInputMode = ($originalInputMode -bor 0x80) -band 0xffffffbf
+  if (-not [FetanAgentConsoleInputMode]::SetConsoleMode($consoleInput, $protectedInputMode)) {
+    throw 'The status window could not be protected against selection pauses.'
+  }
+
   $env:FETANAGENT_COMPANION_DATA_ROOT = $dataRoot
   $env:FETANAGENT_COMPANION_RELEASE_SHA = $releaseSha
   $env:FETANAGENT_COMPANION_ROUTINE_PLATFORM_AGENT_ACCOUNT_ID =
@@ -125,8 +152,15 @@ try {
     $env:FETANAGENT_COMPANION_ROUTINE_PREFLIGHT_AMOUNT_MINOR =
       [string]$NoMoneyPreflightAmountMinor
   }
-  & $node $entry
-  if ($LASTEXITCODE -ne 0) { throw 'The protected routine-deposit session stopped.' }
+  try {
+    & $node $entry
+    $nodeExitCode = $LASTEXITCODE
+  } finally {
+    if (-not [FetanAgentConsoleInputMode]::SetConsoleMode($consoleInput, $originalInputMode)) {
+      [Console]::Error.WriteLine('The status window input mode could not be restored.')
+    }
+  }
+  if ($nodeExitCode -ne 0) { throw 'The protected routine-deposit session stopped.' }
   if ($preflightPlayerProvided) {
     Write-Output 'The no-money preflight session ended. No transfer was authorized.'
   } else {

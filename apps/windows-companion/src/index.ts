@@ -187,7 +187,10 @@ function reportLookup(event: CompanionLookupWorkerEvent): void {
   );
 }
 
+let lastPlayerValidationState: CompanionPlayerValidationWorkerEvent['state'] | undefined;
 function reportPlayerValidation(event: CompanionPlayerValidationWorkerEvent): void {
+  if (event.state === 'waiting_for_assignment' && lastPlayerValidationState === event.state) return;
+  lastPlayerValidationState = event.state;
   console.info(
     JSON.stringify({
       component: 'fetanagent_windows_companion',
@@ -232,7 +235,10 @@ function reportExecution(event: CompanionExecutionWorkerEvent): void {
   );
 }
 
+let lastRoutineDepositStatus: RoutineDepositWorkerResult['status'] | undefined;
 function reportRoutineDeposit(result: RoutineDepositWorkerResult): void {
+  if (result.status === 'idle' && lastRoutineDepositStatus === result.status) return;
+  lastRoutineDepositStatus = result.status;
   console.info(
     JSON.stringify({
       component: 'fetanagent_windows_companion',

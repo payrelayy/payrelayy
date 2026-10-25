@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatTelegramPlayerRegistrationCapabilityCallback } from '@fetanagent/contracts';
 
-import { renderPlayerRegistrationMenu, renderTelegramQuickMenu } from './private-menu.js';
+import { renderPlayerRegistrationMenu, renderTelegramOutcomeActions } from './private-menu.js';
 
 const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
   compactCapabilityId: 'AAAAAAAAAAAAAAAAAAAAAA',
@@ -44,15 +44,14 @@ describe('English-only private customer menu', () => {
     );
   });
 
-  it('shows a neutral, compact menu after cleanup without an expiry alert or unavailable action', () => {
-    expect(renderTelegramQuickMenu()).toEqual({
-      text: 'FetanAgent',
-      buttons: [
-        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-        { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
-      ],
-    });
-    expect(JSON.stringify(renderTelegramQuickMenu())).not.toMatch(/expir|withdraw|unavailable/iu);
+  it('shows compact outcome actions without an expiry alert or unavailable action', () => {
+    expect(renderTelegramOutcomeActions()).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+      { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
+    ]);
+    expect(JSON.stringify(renderTelegramOutcomeActions())).not.toMatch(
+      /expir|withdraw|unavailable/iu,
+    );
   });
 
   it('keeps the menu provider-neutral when the SMS route is configured', () => {
@@ -60,7 +59,7 @@ describe('English-only private customer menu', () => {
       { text: '💰 Deposit', callbackData: 'gd1.deposit' },
       { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
     ]);
-    expect(renderTelegramQuickMenu().buttons[0]).toEqual({
+    expect(renderTelegramOutcomeActions()[0]).toEqual({
       text: '💰 Deposit',
       callbackData: 'gd1.deposit',
     });

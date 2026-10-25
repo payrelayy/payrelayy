@@ -2,7 +2,7 @@ import type {
   TelegramPrivateActionEnvelope,
   TelegramPrivateActionResult,
 } from '@fetanagent/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   presentTelegramDepositOutcome,
@@ -56,6 +56,9 @@ describe('Telegram deposit outcome notifier', () => {
           if (action.kind === 'deposit_temporary_cleanup_claim') {
             return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
           }
+          if (action.kind === 'payment_instruction_expiry_claim') {
+            return { version: 1, outcome: 'payment_instruction_expiry_none' };
+          }
           throw new Error('Unexpected action.');
         },
         send: async () => {
@@ -73,6 +76,57 @@ describe('Telegram deposit outcome notifier', () => {
       controller.signal,
     );
     expect(waits).toEqual([2_000]);
+  });
+
+  it('retires an expired payment card in the background without sending a new chat message', async () => {
+    const controller = new AbortController();
+    const send = vi.fn(async () => ({ message_id: 1 }));
+    const deleted = vi.fn(async () => true);
+    const actions: TelegramPrivateActionEnvelope[] = [];
+    let expiryClaimed = false;
+    await runTelegramDepositOutcomeNotifier(
+      {
+        request: async (action) => {
+          actions.push(action);
+          if (action.kind === 'deposit_outcome_claim')
+            return { version: 1, outcome: 'deposit_outcome_none' };
+          if (action.kind === 'player_validation_outcome_claim')
+            return { version: 1, outcome: 'player_validation_outcome_none' };
+          if (action.kind === 'deposit_temporary_cleanup_claim')
+            return { version: 1, outcome: 'deposit_temporary_cleanup_none' };
+          if (action.kind === 'payment_instruction_expiry_claim') {
+            if (expiryClaimed) return { version: 1, outcome: 'payment_instruction_expiry_none' };
+            expiryClaimed = true;
+            return {
+              version: 1,
+              outcome: 'payment_instruction_expiry_delivery',
+              instructionEventId: '42cba976-cfea-48da-83e9-6b9d07cb36b1',
+              leaseToken: 'f76f14d1-2fce-4e72-9a24-07671ba702d5',
+              privateChatId: '4567',
+              telegramMessageId: 89,
+              suppressMenu: false,
+            };
+          }
+          if (action.kind === 'payment_instruction_expiry_complete')
+            return { version: 1, outcome: 'payment_instruction_expiry_completed', accepted: true };
+          throw new Error('Unexpected action.');
+        },
+        send,
+        delete: deleted,
+        sleep: async () => {
+          controller.abort();
+        },
+      },
+      controller.signal,
+    );
+    expect(deleted).toHaveBeenCalledExactlyOnceWith(4567, 89);
+    expect(send).not.toHaveBeenCalled();
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        kind: 'payment_instruction_expiry_complete',
+        expiryResult: 'complete',
+      }),
+    );
   });
 
   it('sends confirmed credit only after a final delivery is claimed, then acknowledges it', async () => {

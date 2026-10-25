@@ -22,6 +22,9 @@ export const messages = {
   stageZero: {
     en: 'Deposits are not available yet.',
   },
+  unrecognizedPrivateMessage: {
+    en: 'I didn’t understand that. Open /menu for Deposit or Player ID, or /support for help.',
+  },
   inboxUnavailable: {
     en: 'FetanAgent is unavailable right now. Please try again shortly.',
   },

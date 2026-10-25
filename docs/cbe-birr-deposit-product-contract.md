@@ -155,9 +155,9 @@ After a saved ID exists, a direct receipt/reference message may start deposit in
 tapping **Deposit**. A clearly provider-specific official link or receipt can select TeleBirr or
 CBE Birr; a bare reference whose format overlaps the providers must not be guessed when both are
 enabled. The bot should ask the customer to choose the payment method. A one-hour payment
-instruction is retired from the conversation when it expires and the main actions return. The
-main actions also return promptly after a definitive approval or rejection, rather than waiting
-for the instruction timeout. These are target behaviors, not currently deployed claims.
+instruction is retired from the conversation when it expires without sending a new menu. The
+main actions are available through `/menu` and on definitive payment outcome messages. CBE Birr
+financial activation remains subject to its separate verification checks.
 
 FetanAgent deliberately does not prove that the submitting user owns the Player ID and does not
 match the CBE sender to the customer or KemerBet account. Different Telegram and web accounts may

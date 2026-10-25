@@ -6,7 +6,6 @@ import type {
 export interface TelegramPaymentInstructionExpiryDependencies {
   readonly request: (action: TelegramPrivateActionEnvelope) => Promise<TelegramPrivateActionResult>;
   readonly delete: (privateChatId: number, messageId: number) => Promise<boolean>;
-  readonly sendMenu: (privateChatId: number) => Promise<unknown>;
 }
 
 function telegramErrorCode(error: unknown): number | undefined {
@@ -63,7 +62,7 @@ export async function recordTelegramPaymentInstruction(
   return false;
 }
 
-/** One bounded, durable expiry lease; the database is authoritative for the one-hour deadline. */
+/** Retire one expired instruction without sending a new message into an idle chat. */
 export async function processOneTelegramPaymentInstructionExpiry(
   dependencies: TelegramPaymentInstructionExpiryDependencies,
 ): Promise<'none' | 'processed'> {
@@ -81,16 +80,10 @@ export async function processOneTelegramPaymentInstructionExpiry(
     if (!(await dependencies.delete(chatId, claimed.telegramMessageId))) {
       throw new Error('Telegram did not confirm instruction deletion.');
     }
-    if (!claimed.suppressMenu) await dependencies.sendMenu(chatId);
     expiryResult = 'complete';
   } catch (error) {
     if (deletedAlready(error)) {
-      try {
-        if (!claimed.suppressMenu) await dependencies.sendMenu(chatId);
-        expiryResult = 'complete';
-      } catch (sendError) {
-        expiryResult = telegramErrorCode(sendError) === 403 ? 'unavailable' : 'retry';
-      }
+      expiryResult = 'complete';
     } else {
       expiryResult = telegramErrorCode(error) === 403 ? 'unavailable' : 'retry';
     }

@@ -29,7 +29,6 @@ export interface TelegramDepositOutcomeNotifierDependencies {
     showDepositButton: boolean,
   ) => Promise<{ readonly message_id: number }>;
   readonly delete: (privateChatId: number, messageId: number) => Promise<boolean>;
-  readonly sendMenu?: (privateChatId: number) => Promise<unknown>;
   readonly sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -203,13 +202,10 @@ export async function runTelegramDepositOutcomeNotifier(
       const outcome = await processOneTelegramDepositOutcome(dependencies);
       const playerValidation = await processOneTelegramPlayerValidationOutcome(dependencies);
       const cleanup = await processOneTelegramDepositTemporaryCleanup(dependencies);
-      const instruction = dependencies.sendMenu
-        ? await processOneTelegramPaymentInstructionExpiry({
-            request: dependencies.request,
-            delete: dependencies.delete,
-            sendMenu: dependencies.sendMenu,
-          })
-        : 'none';
+      const instruction = await processOneTelegramPaymentInstructionExpiry({
+        request: dependencies.request,
+        delete: dependencies.delete,
+      });
       pause =
         outcome === 'none' &&
         playerValidation === 'none' &&

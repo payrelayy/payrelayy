@@ -77,6 +77,11 @@ const delayedNavigationHtml = fixtureHtml
 </script>`,
   );
 
+const toggleNavigationHtml = delayedNavigationHtml.replace(
+  "  surface.querySelector('button').onclick = () => {\n    setTimeout(() => {",
+  "  surface.querySelector('button').onclick = () => {\n    const existingMenu = surface.querySelector('.rt--transfer-dropdown');\n    if (existingMenu) { existingMenu.remove(); return; }\n    setTimeout(() => {",
+);
+
 const delayedPreparedHtml = fixtureHtml.replace(
   `    surface.innerHTML = '<div class="ant-modal-content"><div class="rt--transfer-player-info">' +`,
   `    await new Promise((resolve) => setTimeout(resolve, 250));
@@ -367,6 +372,21 @@ describe.skipIf(process.platform !== 'win32')(
         'amount_prepared',
         'no_money_rehearsal_completed',
       ]);
+      expect(submitted).toEqual([]);
+      expect(blocked).toEqual([]);
+    }, 15000);
+
+    it('uses an already-open Financial Actions menu without toggling it closed', async () => {
+      const { page, lookup, submitted, blocked } = await startFixture(toggleNavigationHtml);
+      await page.locator('.rt--header-actions-content-icon').click();
+      await page.locator('.rt--transfer-dropdown').waitFor({ state: 'visible' });
+      const stages: string[] = [];
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+        stages.push(stage),
+      );
+      expect(stages).toContain('deposit_menu_selected');
+      expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
+      expect(stages).not.toContain('financial_actions_opened');
       expect(submitted).toEqual([]);
       expect(blocked).toEqual([]);
     }, 15000);

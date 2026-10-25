@@ -207,11 +207,18 @@ async function openSearchSurface(page: Page): Promise<void> {
     await requireSearchOnlySurface(page);
     return;
   }
-  await (
-    await waitForEnabledAuthenticatedControl(page, page.locator(selectors.financialActionsTrigger))
-  ).click({
-    timeout: LOOKUP_TIMEOUT_MS,
-  });
+  // Reuse the provider dropdown when it is already open. The trigger toggles
+  // it closed, which would otherwise turn a valid Player ID into a review case.
+  if ((await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0) {
+    await (
+      await waitForEnabledAuthenticatedControl(
+        page,
+        page.locator(selectors.financialActionsTrigger),
+      )
+    ).click({
+      timeout: LOOKUP_TIMEOUT_MS,
+    });
+  }
   await requireAuthenticatedAgentPage(page);
   await waitUntil(async () => {
     await requireAuthenticatedAgentPage(page);

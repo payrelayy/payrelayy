@@ -473,6 +473,34 @@ registerOwnerReceiverAccountControlSqlTests(
 );
 
 describe('disposable SQL migration baseline', () => {
+  it('bounds receiver-SMS admission planning without widening execution grants', async () => {
+    const assessor = await client.query<{
+      readonly bounded_join_planning: boolean;
+      readonly private_execution: boolean;
+      readonly security_definer: boolean;
+    }>(`
+      select routine.proconfig @> array[
+               'search_path=""', 'join_collapse_limit=1']::text[]
+             and cardinality(routine.proconfig) = 2 as bounded_join_planning,
+             routine.prosecdef as security_definer,
+             not has_function_privilege('public', routine.oid, 'EXECUTE')
+               and not has_function_privilege('anon', routine.oid, 'EXECUTE')
+               and not has_function_privilege('authenticated', routine.oid, 'EXECUTE')
+               and not has_function_privilege('service_role', routine.oid, 'EXECUTE')
+               as private_execution
+        from pg_proc routine
+       where routine.oid =
+         'app.assess_receiver_sms_execution_job(uuid)'::regprocedure
+    `);
+    expect(assessor.rows).toEqual([
+      {
+        bounded_join_planning: true,
+        private_execution: true,
+        security_definer: true,
+      },
+    ]);
+  });
+
   it('removes invite eligibility from every Telegram financial function', async () => {
     const routines = await client.query<{
       readonly signature: string;

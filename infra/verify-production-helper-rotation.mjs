@@ -433,7 +433,7 @@ const unifiedHelper = read(unifiedHelperPath).toString();
 const unifiedRotation = read(unifiedRotationPath).toString();
 const unifiedDocs = read(unifiedDocsPath).toString();
 assert.ok(
-  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='6fc3b00b492efb1b9ee7f6bbdad41d6225d62293'"),
+  unifiedHelper.includes("CBE_GUARDED_PREDECESSOR_SHA='2fb198cf9a4f2a7a2ac8a3b22d3ad43130f02943'"),
 );
 for (const value of [
   unifiedPredecessor,
@@ -931,7 +931,7 @@ const speedRotation = read(
 const speedRunbook = read('infra/operations/production-player-credit-speed-release.md').toString();
 for (const value of [
   '263535acea17f8c16fa2ef6cbc866989905a6134d7b7258ac091f1ec08ba67e4',
-  sha256(read(unifiedHelperPath)),
+  '64e976802d4f6719a4589ffe47e3029dba772d3690fa1f6762642d01cfb65e0e',
   '6fc3b00b492efb1b9ee7f6bbdad41d6225d62293',
   '593344964',
   'ROTATE EXACT PRODUCTION V2 PLAYER CREDIT SPEED HELPER V1',

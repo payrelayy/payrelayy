@@ -149,6 +149,23 @@ export function routineDepositAmountText(amountMinor: number): string {
   return `${Math.floor(amountMinor / ETB_SCALE)}.${String(amountMinor % ETB_SCALE).padStart(2, '0')}`;
 }
 
+/** Accept only exact, canonical renderings of the leased amount in KemerBet's input. */
+function exactAmountRenderings(amountMinor: number): readonly string[] {
+  const amount = routineDepositAmountText(amountMinor);
+  const integer = amount.slice(0, -3);
+  const groupedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/gu, ',');
+  const fraction = amount.slice(-3);
+  const renderings = [amount, `${groupedInteger}${fraction}`];
+  if (amountMinor % ETB_SCALE === 0) renderings.push(integer, groupedInteger);
+  return [...new Set(renderings)];
+}
+
+export function exactKemerBetAmountInputMatches(observed: string, amountMinor: number): boolean {
+  if (!isRoutineDepositAmountMinor(amountMinor)) return false;
+  const withoutDirectionMark = observed.startsWith('\u200e') ? observed.slice(1) : observed;
+  return exactAmountRenderings(amountMinor).includes(withoutDirectionMark);
+}
+
 /** KemerBet's newer success modal renders one recipient, one agent debit, and one PLAT row. */
 export function exactKemerBetSuccessTableMatches(
   dialogText: string,
@@ -172,24 +189,22 @@ export function exactKemerBetSuccessTableMatches(
   ) {
     return false;
   }
-  const exactAmount = routineDepositAmountText(amountMinor);
-  const amountWithOptionalZeroFraction =
-    amountMinor % ETB_SCALE === 0 ? [exactAmount, exactAmount.slice(0, -3)] : [exactAmount];
+  const amountRenderings = exactAmountRenderings(amountMinor);
   return (
     identities.includes(cells[5] ?? '') &&
     cells[6] === 'Balance' &&
-    amountWithOptionalZeroFraction.includes(cells[7] ?? '') &&
+    amountRenderings.includes(cells[7] ?? '') &&
     cells[8] === 'Success' &&
     typeof cells[9] === 'string' &&
     cells[9].length <= 256 &&
     !identities.includes(cells[9]) &&
     cells[9] !== 'PLAT' &&
     cells[10] === 'Balance' &&
-    amountWithOptionalZeroFraction.some((amount) => cells[11] === `-${amount}`) &&
+    amountRenderings.some((amount) => cells[11] === `-${amount}`) &&
     cells[12] === 'Success' &&
     cells[13] === 'PLAT' &&
     cells[14] === 'Balance' &&
-    amountWithOptionalZeroFraction.includes(cells[15] ?? '') &&
+    amountRenderings.includes(cells[15] ?? '') &&
     cells[16] === 'Success'
   );
 }
@@ -418,36 +433,43 @@ async function openSearchSurface(
     await requireSearchOnlySurface(page);
     return;
   }
-  // The provider can leave this dropdown open after navigation. Clicking its
-  // trigger again closes it and makes an otherwise ready deposit unavailable.
-  if ((await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0) {
-    await (
-      await waitForEnabledAuthenticatedControl(
-        page,
-        page.locator(selectors.financialActionsTrigger),
-      )
-    ).click({
-      timeout: TIMEOUT_MS,
-    });
-    reportPreflight(diagnostic, 'financial_actions_opened');
-  }
-  try {
-    await requireAuthenticatedAgentPage(page);
-  } catch {
-    reportPreflight(diagnostic, 'financial_actions_page_unavailable');
-    throw new LocalKemerBetDepositError();
-  }
   let enabledDepositItem: Locator;
   try {
+    let openAttempts = 0;
+    let nextOpenAt = 0;
+    let searchOpenedDuringRecovery = false;
     await waitUntil(async () => {
       await requireAuthenticatedAgentPage(page);
+      if (await searchSurfaceReady(page)) {
+        await requireSearchOnlySurface(page);
+        searchOpenedDuringRecovery = true;
+        return true;
+      }
       const item = await uniqueVisibleMenuItemWithText(
         page,
         selectors.financialActionsMenu,
         'Deposit',
       );
-      return item !== undefined && (await item.isEnabled());
+      if (item !== undefined && (await item.isEnabled())) return true;
+      // Identity rechecks or a provider rerender can close the dropdown after
+      // a successful click. Reopen only while it is actually closed, with a
+      // short settling interval so an opening animation cannot be toggled off.
+      if (
+        openAttempts < 3 &&
+        Date.now() >= nextOpenAt &&
+        (await page.locator(`${selectors.financialActionsMenu}:visible`).count()) === 0
+      ) {
+        const trigger = await exactlyOneVisible(page.locator(selectors.financialActionsTrigger));
+        if (trigger && (await trigger.isEnabled())) {
+          openAttempts += 1;
+          nextOpenAt = Date.now() + 2_000;
+          await trigger.click({ timeout: 3_000 });
+          reportPreflight(diagnostic, 'financial_actions_opened');
+        }
+      }
+      return false;
     });
+    if (searchOpenedDuringRecovery) return;
     await requireAuthenticatedAgentPage(page);
     const item = await uniqueVisibleMenuItemWithText(
       page,
@@ -553,7 +575,7 @@ type PreparedSurfaceFailureStage = Extract<
 async function inspectPreparedSurface(
   page: Page,
   identities: readonly string[],
-  amountText: string,
+  amountMinor: number,
 ): Promise<{ readonly transfer: Locator } | { readonly failure: PreparedSurfaceFailureStage }> {
   await requireAuthenticatedAgentPage(page);
   const root = await exactlyOneVisible(page.locator(selectors.lookupRoot));
@@ -573,10 +595,9 @@ async function inspectPreparedSurface(
   if ((await currency.innerText()).trim() !== 'ETB') {
     return { failure: 'prepared_currency_mismatch' };
   }
-  const observedAmount = await amount.inputValue();
-  // KemerBet's amount formatter can prepend exactly one invisible left-to-right mark.
-  // Accept that observed decoration only; a different number or any other text still fails closed.
-  if (observedAmount !== amountText && observedAmount !== `\u200e${amountText}`) {
+  // The input may insert canonical thousands separators or omit a zero fraction.
+  // Its displayed numeric value must still equal the immutable leased amount exactly.
+  if (!exactKemerBetAmountInputMatches(await amount.inputValue(), amountMinor)) {
     return { failure: 'prepared_amount_mismatch' };
   }
   if ((await notes.inputValue()) !== '') return { failure: 'prepared_notes_mismatch' };
@@ -587,12 +608,12 @@ async function inspectPreparedSurface(
 async function verifyPreparedSurface(
   page: Page,
   identities: readonly string[],
-  amountText: string,
+  amountMinor: number,
   waitForReady = false,
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
 ): Promise<Locator> {
   if (!waitForReady) {
-    const observed = await inspectPreparedSurface(page, identities, amountText);
+    const observed = await inspectPreparedSurface(page, identities, amountMinor);
     if ('failure' in observed) {
       reportPreflight(diagnostic, observed.failure);
       unavailable();
@@ -603,7 +624,7 @@ async function verifyPreparedSurface(
   let transfer: Locator | undefined;
   try {
     await waitUntil(async () => {
-      const observed = await inspectPreparedSurface(page, identities, amountText);
+      const observed = await inspectPreparedSurface(page, identities, amountMinor);
       if ('failure' in observed) {
         failure = observed.failure;
         return false;
@@ -669,7 +690,9 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
   );
   if (outcome.outcome !== 'submission_attempted') return outcome;
   if (privatePlayerIdentities.length < 1) unavailable();
-  const expectedCredit = `Player Balance +${routineDepositAmountText(amountMinor)} ETB Success`;
+  const expectedCredits = exactAmountRenderings(amountMinor).map(
+    (amount) => `Player Balance +${amount} ETB Success`,
+  );
   try {
     await waitUntil(async () => {
       await requireAuthenticatedAgentPage(page);
@@ -687,9 +710,16 @@ export async function executeRoutineOneUseLocalKemerBetDeposit(
         if (!title) continue;
         successDialogs += 1;
         if (successDialogs > 1) unavailable();
-        const credit = await exactlyOneVisible(dialog.getByText(expectedCredit, { exact: true }));
+        let creditFound = false;
+        for (const expectedCredit of expectedCredits) {
+          const credit = await exactlyOneVisible(dialog.getByText(expectedCredit, { exact: true }));
+          if (credit !== undefined) {
+            if (creditFound) unavailable();
+            creditFound = true;
+          }
+        }
         matched =
-          credit !== undefined ||
+          creditFound ||
           exactKemerBetSuccessTableMatches(
             await dialog.innerText(),
             privatePlayerIdentities,
@@ -719,7 +749,7 @@ async function executeLocalDepositForAmount(
   diagnostic?: LocalKemerBetRoutinePreflightReporter,
   onPlayerPrepared?: (identities: readonly string[]) => void,
 ): Promise<LocalKemerBetDepositDispatchOutcome> {
-  const { privatePlayer, amountText } = await prepareLocalDepositForAmount(
+  const { privatePlayer } = await prepareLocalDepositForAmount(
     page,
     playerId,
     amountMinor,
@@ -734,7 +764,7 @@ async function executeLocalDepositForAmount(
   const transfer = await verifyPreparedSurface(
     page,
     privatePlayer.identities,
-    amountText,
+    amountMinor,
     false,
     diagnostic,
   );
@@ -797,7 +827,6 @@ async function prepareLocalDepositForAmount(
     readonly internalPlayerId: number;
     readonly identities: readonly string[];
   };
-  readonly amountText: string;
 }> {
   if (!PLAYER_ID_PATTERN.test(playerId)) unavailable();
   const amountText = routineDepositAmountText(amountMinor);
@@ -864,14 +893,14 @@ async function prepareLocalDepositForAmount(
   const trialTransfer = await verifyPreparedSurface(
     page,
     privatePlayer.identities,
-    amountText,
+    amountMinor,
     true,
     diagnostic,
   );
   reportPreflight(diagnostic, 'prepared_surface_verified');
   await trialTransfer.click({ trial: true, timeout: TIMEOUT_MS });
   reportPreflight(diagnostic, 'amount_prepared');
-  return Object.freeze({ privatePlayer, amountText });
+  return Object.freeze({ privatePlayer });
 }
 
 /** Read-only Player lookup and local amount preparation. No fence or transfer is reachable here. */

@@ -152,9 +152,11 @@ assert.match(windowsStore, /attempt <= \(replayable \? 2 : 1\)/u);
 assert.match(windowsStore, /same_signed_request_retry/u);
 
 assert.match(localDeposit, /Transfer Successful!/u);
+assert.match(localDeposit, /const expectedCredits = exactAmountRenderings\(amountMinor\)\.map/u);
+assert.match(localDeposit, /Player Balance \+\$\{amount\} ETB Success/u);
 assert.match(
   localDeposit,
-  /Player Balance \+\$\{routineDepositAmountText\(amountMinor\)\} ETB Success/u,
+  /exactKemerBetAmountInputMatches\(await amount\.inputValue\(\), amountMinor\)/u,
 );
 assert.match(localDeposit, /exactPlayerCreditMatch: true/u);
 assert.match(worker, /dispatch\.exactPlayerCreditMatch !== true/u);

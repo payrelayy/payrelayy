@@ -8,6 +8,202 @@ const OWNER_DASHBOARD_SUPABASE_ORIGINS = {
   staging: OWNER_CONTROL_DATABASE_TARGETS.staging.supabaseUrl,
 } as const;
 
+export const OWNER_CONTROL_GROUPS = [
+  {
+    title: 'Review and decide',
+    controls: [
+      {
+        label: 'Review payments',
+        description:
+          'Approve or reject a payment case. Record a manual credit only after you have credited the Player outside FetanAgent.',
+        effect: 'Payment decision',
+        view: 'home',
+        section: 'receiver-sms-old-title',
+      },
+      {
+        label: 'TeleBirr payment alerts',
+        description: 'Inspect payments that need a closer look before making a decision.',
+        effect: 'Review only',
+        view: 'home',
+        section: 'telebirr-fast-alert-title',
+      },
+      {
+        label: 'Received payment SMS',
+        description:
+          'See incoming SMS and payment status. Mark a linked case manually credited only after crediting the Player outside FetanAgent.',
+        effect: 'Can record manual credit',
+        view: 'payments',
+        section: 'receiver-sms-inbox-title',
+      },
+      {
+        label: 'Transaction history',
+        description: 'Search older TeleBirr payments and their recorded outcomes.',
+        effect: 'Review only',
+        view: 'payments',
+        section: 'transactions-title',
+      },
+      {
+        label: 'Receiver-change cases',
+        description:
+          'Inspect payments fenced because the receiving wallet changed during an instruction.',
+        effect: 'Review only',
+        view: 'payments',
+        section: 'receiver-change-review-title',
+      },
+      {
+        label: 'Player ID requests',
+        description:
+          'Record whether a submitted KemerBet ID was found after an independent lookup.',
+        effect: 'Player decision',
+        view: 'players',
+        section: 'player-review-title',
+      },
+      {
+        label: 'Player ownership',
+        description:
+          'Confirm or revoke the link between a customer and a Player ID after checking ownership.',
+        effect: 'Player decision',
+        view: 'players',
+        section: 'player-association-title',
+      },
+      {
+        label: 'Deposit eligibility',
+        description:
+          'Approve or revoke whether a verified Player can make future deposit requests.',
+        effect: 'Affects future deposits',
+        view: 'players',
+        section: 'player-eligibility-title',
+      },
+    ],
+  },
+  {
+    title: 'Payment and customer settings',
+    controls: [
+      {
+        label: 'Payment methods',
+        description: 'Check TeleBirr and CBE Birr and turn either method on or off.',
+        effect: 'Affects new deposits',
+        view: 'methods',
+        section: 'payment-methods-title',
+      },
+      {
+        label: 'Change a receiver',
+        description: 'Review and update the destination account customers are instructed to pay.',
+        effect: 'Changes payment destination',
+        view: 'methods',
+        section: 'receiver-title',
+      },
+      {
+        label: 'Routine processing',
+        description: 'Review, save, or stop the persistent TeleBirr processing policy.',
+        effect: 'Can resume or stop processing',
+        view: 'system',
+        section: 'routine-processing-title',
+      },
+      {
+        label: 'Customer support contact',
+        description: 'Set or remove the Telegram contact shown to customers.',
+        effect: 'Changes public contact',
+        view: 'system',
+        section: 'support-contact-title',
+      },
+    ],
+  },
+  {
+    title: 'Devices and recovery',
+    controls: [
+      {
+        label: 'Receiver phone setup and recovery',
+        description: 'Pair, inspect, or revoke an Android phone used for routine payment evidence.',
+        effect: 'Device setup',
+        view: 'system',
+        section: 'routine-processing-title',
+        focus: 'routine-phone-pairing-title',
+      },
+      {
+        label: 'Windows Companion connection',
+        description: 'Check its last authenticated check-in and find setup guidance.',
+        effect: 'Connection check',
+        view: 'advanced',
+        section: 'kemerbet-companion-title',
+        focus: 'companion-connection-title',
+      },
+      {
+        label: 'Windows Companion pairing',
+        description: 'Download the Companion or create a one-use pairing package.',
+        effect: 'No-money setup',
+        view: 'advanced',
+        section: 'kemerbet-companion-title',
+        focus: 'companion-device-pairing-title',
+      },
+      {
+        label: 'KemerBet lookup profile',
+        description: 'Prepare or rotate the server-side profile used for signed read-only lookups.',
+        effect: 'No-money setup',
+        view: 'advanced',
+        section: 'kemerbet-companion-title',
+        focus: 'kemerbet-agent-title',
+      },
+      {
+        label: 'Run read-only Player lookups',
+        description: 'Issue the signed exact-five lookup to a paired Companion.',
+        effect: 'No money moves',
+        view: 'advanced',
+        section: 'kemerbet-companion-title',
+        focus: 'companion-lookup-title',
+      },
+    ],
+  },
+  {
+    title: 'Advanced and test controls',
+    controls: [
+      {
+        label: 'Execution readiness',
+        description: 'Inspect the private pilot prerequisites without activating execution.',
+        effect: 'Read only',
+        view: 'advanced',
+        section: 'execution-readiness-title',
+      },
+      {
+        label: 'One-deposit approvals',
+        description: 'Review verified deposits awaiting a one-time execution approval.',
+        effect: 'Can authorize one deposit',
+        view: 'advanced',
+        section: 'execution-approvals-title',
+      },
+      {
+        label: 'KemerBet readiness cohort',
+        description: 'Prepare the exact-five Player cohort for a no-transfer readiness check.',
+        effect: 'No money moves',
+        view: 'advanced',
+        section: 'kemerbet-readiness-cohort-title',
+      },
+      {
+        label: 'TeleBirr pilot',
+        description: 'Prepare or arm the fixed five-Player dry run, or apply its emergency stop.',
+        effect: 'Pilot setup / emergency stop',
+        view: 'advanced',
+        section: 'pilot-title',
+      },
+      {
+        label: 'Pilot phone pairing',
+        description: 'Create a one-use pairing package for the dedicated pilot verifier phone.',
+        effect: 'Device setup',
+        view: 'advanced',
+        section: 'pilot-title',
+        focus: 'telebirr-device-pairing-title',
+      },
+      {
+        label: 'Dry-run deposit intake',
+        description: 'Inspect customer-entered CBE Birr intents and advisory assessments.',
+        effect: 'Read only',
+        view: 'advanced',
+        section: 'deposit-intake-title',
+      },
+    ],
+  },
+] as const;
+
 export function ownerDashboardContentSecurityPolicy(
   runtime: Extract<OwnerControlRuntimeConfig, { enabled: true }>,
 ) {
@@ -34,6 +230,25 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
     runtime.deploymentTarget === 'production'
       ? 'Production control. Financial actions remain governed by explicit audited switches.'
       : 'Staging only. Payments and KemerBet actions are disabled.';
+  const controlDirectory = OWNER_CONTROL_GROUPS.map(
+    (group) => `
+          <div class="owner-control-group">
+            <h3>${group.title}</h3>
+            <div class="owner-control-grid">
+              ${group.controls
+                .map(
+                  (control) => `<button class="owner-control-link" type="button"
+                data-owner-control-view="${control.view}" data-owner-control-section="${control.section}"
+                ${'focus' in control ? `data-owner-control-focus="${control.focus}"` : ''}>
+                <span class="owner-control-label">${control.label}</span>
+                <span class="owner-control-effect">${control.effect}</span>
+                <span class="owner-control-description">${control.description}</span>
+              </button>`,
+                )
+                .join('')}
+            </div>
+          </div>`,
+  ).join('');
 
   return `<!doctype html>
 <html lang="en">
@@ -71,8 +286,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
         <div class="panel-heading owner-heading">
           <div>
             <p class="status-ok">${deploymentLabel} · Owner access</p>
-            <h2 id="owner-title">Your workspace</h2>
-            <p class="receipt-label">Every active Owner control is available in the sections below.</p>
+            <h2 id="owner-title">Owner control panel</h2>
+            <p class="receipt-label">See current status, review work, and open every available Owner control.</p>
           </div>
           <button class="secondary" id="logout-button" type="button">Sign out</button>
         </div>
@@ -81,6 +296,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <nav class="owner-navigation" aria-label="Owner workspace">
             <p class="owner-navigation-label">WORKSPACE</p>
             <button id="owner-nav-home" type="button" data-owner-view="home" aria-current="page">Home</button>
+            <button id="owner-nav-controls" type="button">All controls</button>
             <button id="owner-nav-payments" type="button" data-owner-view="payments">Payments &amp; SMS</button>
             <button id="owner-nav-methods" type="button" data-owner-view="methods">Payment methods</button>
             <button id="owner-nav-players" type="button" data-owner-view="players">Players</button>
@@ -90,9 +306,14 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
           <div class="owner-workspace-content">
             <div class="owner-view-intro">
               <p class="eyebrow" id="owner-view-eyebrow">HOME</p>
-              <h3 id="owner-view-title" tabindex="-1">Needs your attention</h3>
-              <p id="owner-view-description">Review payments and finish any manual credits.</p>
+              <h3 id="owner-view-title" tabindex="-1">Control panel</h3>
+              <p id="owner-view-description">See what needs attention and choose the exact control you need.</p>
             </div>
+        <section class="review-section owner-control-directory" id="owner-control-directory" aria-labelledby="owner-controls-title">
+          <h2 id="owner-controls-title">All Owner controls</h2>
+          <p class="receipt-label">Opening a control does not run it. Read its current status and the confirmation before changing payments, receivers, or Player eligibility.</p>
+          ${controlDirectory}
+        </section>
         <section class="review-section" aria-labelledby="system-overview-title">
           <div class="panel-heading">
             <div>
@@ -101,11 +322,12 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             </div>
             <button class="secondary" id="system-overview-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See payment switches, recorded SMS activity, and deposit-job counts. A recent SMS does not confirm phone connectivity or Windows Companion readiness.</p>
+          <p class="receipt-label">See payment switches, recorded SMS activity, and deposit-job counts. This page does not currently measure bot or receiver-phone connectivity. A recent SMS is activity, not proof that the phone is online.</p>
+          <p class="owner-attention" id="system-overview-attention" role="status" aria-live="polite">Sign in to check work that needs attention.</p>
           <dl class="overview-grid" id="system-overview-facts"></dl>
           <p class="request-meta">Windows Companion check-in: <strong id="system-overview-companion">Sign in to check.</strong></p>
           <p class="request-meta" id="system-overview-status" role="status" aria-live="polite">Sign in to load system status.</p>
-          <button class="secondary" id="system-overview-open-system" type="button">Open system controls</button>
+          <button class="secondary" id="system-overview-open-system" type="button">Open processing policy</button>
         </section>
         <section class="review-section transactions-section" aria-labelledby="transactions-title">
           <div class="panel-heading">
@@ -897,7 +1119,7 @@ h2 { margin: 0 0 18px; font-size: 1.3rem; letter-spacing: -0.02em; }
 .owner-view-intro h3 { margin: 0 0 5px; font-size: clamp(1.55rem, 3vw, 2rem); letter-spacing: -.035em; }
 .owner-view-intro p:last-child { margin: 0; color: #51656d; }
 .owner-view-intro { order: -1; }
-section[aria-labelledby="system-overview-title"] { order: 2; }
+section[aria-labelledby="system-overview-title"] { order: 0; }
 section[aria-labelledby="receiver-sms-old-title"],
 section[aria-labelledby="receiver-sms-inbox-title"],
 section[aria-labelledby="execution-readiness-title"] { order: 1; }
@@ -912,6 +1134,17 @@ section[aria-labelledby="kemerbet-companion-title"],
 section[aria-labelledby="kemerbet-readiness-cohort-title"] { order: 4; }
 section[aria-labelledby="support-contact-title"],
 section[aria-labelledby="deposit-intake-title"] { order: 5; }
+.owner-control-directory { order: 3; }
+.owner-control-directory > .receipt-label { margin-top: -8px; }
+.owner-control-group { margin-top: 24px; }
+.owner-control-group h3 { margin: 0 0 12px; font-size: 1rem; }
+.owner-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.owner-control-link { display: grid; gap: 6px; align-content: start; min-width: 0; min-height: 124px; border: 1px solid #dbe5e8; border-radius: 12px; background: #fbfdfd; color: #173039; padding: 15px; text-align: left; }
+.owner-control-link:hover { border-color: #087d71; background: #f0f9f6; }
+.owner-control-label { font-size: 1rem; font-weight: 800; }
+.owner-control-effect { color: #075f55; font-size: .76rem; font-weight: 800; }
+.owner-control-description { color: #51656d; font-size: .83rem; font-weight: 500; line-height: 1.45; }
+.owner-attention { border-left: 4px solid #087d71; border-radius: 8px; background: #f0f9f6; padding: 12px 14px; color: #173039; font-weight: 700; line-height: 1.5; }
 form { display: grid; gap: 10px; }
 label { color: #2d4951; font-size: 0.9rem; font-weight: 700; }
 input, select { width: 100%; border: 1px solid #c8d6db; border-radius: 10px; color: #173039; background: #fff; padding: 12px 14px; }
@@ -996,6 +1229,8 @@ footer { margin-top: 30px; font-size: 0.85rem; }
   .owner-heading .receipt-label { display: none; }
   .owner-workspace { gap: 18px; margin-top: 20px; }
   .review-section { padding: 16px; }
+  .owner-control-grid { grid-template-columns: 1fr; }
+  .owner-control-link { min-height: 0; }
   .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions { grid-template-columns: 1fr; }
   .panel-heading { gap: 12px; }
   .panel-heading .secondary { flex: 0 0 auto; }
@@ -1009,9 +1244,9 @@ const ownerViewTitle = document.querySelector('#owner-view-title');
 const ownerViewDescription = document.querySelector('#owner-view-description');
 const ownerViews = {
   home: {
-    title: 'Needs your attention',
-    description: 'Review payments and finish any manual credits.',
-    sections: ['system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
+    title: 'Control panel',
+    description: 'See what needs attention and choose the exact control you need.',
+    sections: ['owner-controls-title', 'system-overview-title', 'receiver-sms-old-title', 'telebirr-fast-alert-title'],
   },
   payments: {
     title: 'Payments & SMS',
@@ -1059,6 +1294,25 @@ function showOwnerView(view, focusHeading = false) {
 for (const view of Object.keys(ownerViews)) {
   document.querySelector('#owner-nav-' + view).addEventListener('click', () => showOwnerView(view, true));
 }
+function openOwnerControl(view, sectionId, focusId = sectionId) {
+  if (!Object.hasOwn(ownerViews, view) || !ownerViews[view].sections.includes(sectionId)) return;
+  showOwnerView(view);
+  const target = document.querySelector('#' + focusId);
+  if (!target) return;
+  const disclosure = target.closest?.('details');
+  if (disclosure) disclosure.open = true;
+  target.tabIndex = -1;
+  target.focus();
+  target.scrollIntoView?.({ block: 'start' });
+}
+document.querySelector('#owner-control-directory').addEventListener('click', (event) => {
+  const button = event.target?.closest?.('button[data-owner-control-view]');
+  if (!button) return;
+  openOwnerControl(button.dataset.ownerControlView, button.dataset.ownerControlSection,
+    button.dataset.ownerControlFocus || button.dataset.ownerControlSection);
+});
+document.querySelector('#owner-nav-controls').addEventListener('click', () =>
+  openOwnerControl('home', 'owner-controls-title'));
 showOwnerView('home');
 const loginForm = document.querySelector('#login-form');
 const passwordInput = document.querySelector('#password');
@@ -1066,6 +1320,7 @@ const logoutButton = document.querySelector('#logout-button');
 const ownerSessionStatus = document.querySelector('#owner-session-status');
 const systemOverviewRefresh = document.querySelector('#system-overview-refresh');
 const systemOverviewStatus = document.querySelector('#system-overview-status');
+const systemOverviewAttention = document.querySelector('#system-overview-attention');
 const systemOverviewFacts = document.querySelector('#system-overview-facts');
 const systemOverviewCompanion = document.querySelector('#system-overview-companion');
 const systemOverviewOpenSystem = document.querySelector('#system-overview-open-system');
@@ -3219,6 +3474,7 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxMore.hidden = true;
   systemOverviewLoadGeneration += 1;
   systemOverviewFacts.replaceChildren();
+  systemOverviewAttention.textContent = 'Sign in to check work that needs attention.';
   systemOverviewStatus.textContent = 'Sign in to load system status.';
   manualPaymentMore.hidden = true;
   manualReceiverAccounts = [];
@@ -6127,6 +6383,7 @@ async function loadSystemOverview() {
   const loadGeneration = ++systemOverviewLoadGeneration;
   systemOverviewRefresh.disabled = true;
   systemOverviewStatus.textContent = 'Loading system status…';
+  systemOverviewAttention.textContent = 'Checking work that needs attention…';
   try {
     const response = await ownerRequest('/v1/owner/system-overview',
       { method: 'GET', headers: {} });
@@ -6148,12 +6405,24 @@ async function loadSystemOverview() {
       transactionDate(value.cbeSmsLastReceivedAt) : 'None recorded');
     systemOverviewFact('Dead deposit jobs',String(value.deadDepositJobs));
     systemOverviewFact('Awaiting manual credit',String(value.awaitingManualCredits));
+    const attention = [];
+    if (value.awaitingManualCredits > 0) attention.push(value.awaitingManualCredits +
+      (value.awaitingManualCredits === 1 ? ' manual credit' : ' manual credits') +
+      ' waiting for Owner follow-up');
+    if (value.deadDepositJobs > 0) attention.push(value.deadDepositJobs +
+      (value.deadDepositJobs === 1 ? ' stopped deposit job' : ' stopped deposit jobs') +
+      ' needing investigation');
+    systemOverviewAttention.textContent = attention.length > 0
+      ? attention.join(' · ') + '.'
+      : 'No manual credits are waiting and no stopped deposit jobs were reported at this check.';
     systemOverviewStatus.textContent = 'Checked ' + transactionDate(value.checkedAt) +
       ' · Ethiopia time';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration &&
-        !isSignedOutError(error))
+        !isSignedOutError(error)) {
       systemOverviewStatus.textContent = 'System status is unavailable. Refresh to try again.';
+      systemOverviewAttention.textContent = 'Work needing attention could not be checked. Refresh to try again.';
+    }
   } finally {
     if (generation === ownerAuthGeneration && loadGeneration === systemOverviewLoadGeneration)
       systemOverviewRefresh.disabled = false;
@@ -6258,7 +6527,8 @@ manualPaymentStatusFilter.addEventListener('change', () => void loadManualPaymen
 manualPaymentMore.addEventListener('click', () => void loadManualPaymentCases(false));
 receiverSmsInboxRefresh.addEventListener('click', () => void loadReceiverSmsInbox(true));
 systemOverviewRefresh.addEventListener('click', () => void loadSystemOverview());
-systemOverviewOpenSystem.addEventListener('click', () => showOwnerView('system',true));
+systemOverviewOpenSystem.addEventListener('click', () =>
+  openOwnerControl('system', 'routine-processing-title'));
 receiverSmsInboxMore.addEventListener('click', () => void loadReceiverSmsInbox(false));
 receiverSmsInboxFilters.addEventListener('submit', (event) => {
   event.preventDefault();

@@ -50,7 +50,7 @@ export const messages = {
     en: 'That Player ID is already saved.',
   },
   invalidPlayerId: {
-    en: 'That Player ID doesn’t look right. Send it again without spaces.',
+    en: 'That Player ID doesn’t look right. Please try again.',
   },
   playerActionRestart: {
     en: 'That action expired. Open /menu and try again.',

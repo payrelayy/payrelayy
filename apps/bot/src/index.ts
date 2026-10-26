@@ -175,7 +175,6 @@ async function deliverPlayerAction(
   reply: (text: string, keyboard?: InlineKeyboard) => Promise<unknown>,
   temporaryAttempt?: {
     readonly handle: TelegramTemporaryMessageHandle | undefined;
-    readonly mediaReferenceMask?: string | undefined;
   },
 ): Promise<void> {
   if (!playerActions.enabled) return;
@@ -218,14 +217,7 @@ async function deliverPlayerAction(
     }
     await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);
     if (presentation.kind === 'message') {
-      const mediaReferenceMask = temporaryAttempt?.mediaReferenceMask;
-      await reply(
-        result.outcome === 'receiver_sms_candidate_received' &&
-          result.matchStatus === 'pending_sms' &&
-          mediaReferenceMask
-          ? `${presentation.text}\nRead reference ending ${mediaReferenceMask.slice(-4)}. If it’s wrong, send the correct reference.`
-          : presentation.text,
-      );
+      await reply(presentation.text);
       return;
     }
     if (presentation.kind === 'prompt') {
@@ -448,19 +440,11 @@ bot.on('message', async (context) => {
           ? reduceTelegramGuidedDepositMediaSubmission({ ...mediaMetadata, replyToMessage })
           : reduceTelegramSavedTelebirrMediaSubmission(mediaMetadata);
       if (mediaSubmission?.kind === 'action') {
-        const reference =
-          'transactionReference' in mediaSubmission.action
-            ? mediaSubmission.action.transactionReference
-            : undefined;
-        const mediaReferenceMask =
-          typeof reference === 'string' && /^[A-Z0-9]{8,32}$/u.test(reference)
-            ? `***${reference.slice(-4)}`
-            : undefined;
         await deliverPlayerAction(
           mediaSubmission.action,
           (replyText, keyboard) =>
             context.reply(replyText, keyboard ? { reply_markup: keyboard } : undefined),
-          { handle: temporary, mediaReferenceMask },
+          { handle: temporary },
         );
       } else {
         await cancelTelegramTemporaryMessage(temporaryMessageDependencies, temporary);

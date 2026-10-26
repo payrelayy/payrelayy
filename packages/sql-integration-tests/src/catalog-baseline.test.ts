@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -55,7 +56,10 @@ import { registerTrustedTelebirrActivationEpochSqlTests } from './trusted-telebi
 import { registerTrustedTelebirrVerifierRuntimeSqlTests } from './trusted-telebirr-verifier-runtime.suite.js';
 import { applySyntheticSupabaseBootstrap } from './synthetic-bootstrap.js';
 import { registerVerificationSettlementSqlTests } from './verification-settlement.suite.js';
-import { registerReceiverSmsPaymentLedgerSqlTests } from './receiver-sms-payment-ledger.suite.js';
+import {
+  registerPostCutoverReceiverSmsRangeSqlTests,
+  registerReceiverSmsPaymentLedgerSqlTests,
+} from './receiver-sms-payment-ledger.suite.js';
 
 type RoleRow = {
   readonly rolbypassrls: boolean;
@@ -160,6 +164,7 @@ const betaAdmissionNoncePurgeProcedure =
   'app.purge_expired_telegram_beta_invite_admission_nonce_reservations(integer)';
 const betaInviteAdmissionMigrationName =
   '20260809195620_private_telegram_beta_invite_admission.sql';
+const depositRangeMigrationName = '20261027021500_auto_deposit_100_etb_manual_review.sql';
 
 const payloadHmac = (hexCharacter: string): string => `hmac-sha256-v1:${hexCharacter.repeat(64)}`;
 const inviteDigest = (hexCharacter: string): string => `sha256-v1:${hexCharacter.repeat(64)}`;
@@ -450,7 +455,13 @@ beforeAll(async () => {
 
   await client.connect();
   await applySyntheticSupabaseBootstrap(client);
-  appliedMigrationNames = await applyMigrationsLexically(client, environment.migrationsDirectory);
+  // Historical pilot scenarios assert the prior 25 ETB policy. Exercise the
+  // production cutover after those scenarios have finished.
+  appliedMigrationNames = await applyMigrationsLexically(
+    client,
+    environment.migrationsDirectory,
+    depositRangeMigrationName,
+  );
   await client.query(
     `insert into auth.users (id, email) values ($1::uuid, 'owner@example.invalid')`,
     [ownerAuthUserId],
@@ -460,11 +471,6 @@ beforeAll(async () => {
     [ownerAuthUserId],
   );
   ownerAdminId = owner.rows[0]!.admin_id;
-  // The initial policy seed has no Owner authority. Model the first Owner
-  // selecting the current production range before exercising live deposits.
-  await client.query('select app.set_deposit_policy($1::uuid,10000,2500000,3600)', [
-    ownerAdminId,
-  ]);
 });
 
 afterAll(async () => {
@@ -623,8 +629,10 @@ describe('disposable SQL migration baseline', () => {
     }
   });
 
-  it('applies every checked-in migration in lexical filename order', async () => {
-    const expectedMigrationNames = await listMigrationsLexically(environment.migrationsDirectory);
+  it('applies historical migrations in lexical filename order', async () => {
+    const expectedMigrationNames = (
+      await listMigrationsLexically(environment.migrationsDirectory)
+    ).filter((name) => name !== depositRangeMigrationName);
     const appliedRows = await client.query<{ readonly filename: string }>(`
       select filename
       from sql_integration.applied_migrations
@@ -10186,3 +10194,58 @@ registerVerificationSettlementSqlTests(
   () => client,
   () => createSqlIntegrationClient(environment),
 );
+
+describe('100 ETB production deposit policy cutover', () => {
+  beforeAll(async () => {
+    const migrationSource = await readFile(
+      join(environment.migrationsDirectory, depositRangeMigrationName),
+      'utf8',
+    );
+    await client.query(migrationSource);
+    await client.query('insert into sql_integration.applied_migrations (filename) values ($1)', [
+      depositRangeMigrationName,
+    ]);
+    const activeAgent = await client.query<{ id: string }>(
+      `select agent.id from app.platform_agent_accounts agent
+        join app.platforms platform on platform.id=agent.platform_id
+        where platform.code='kemerbet' and agent.status='active'
+        order by agent.created_at,agent.id limit 1`,
+    );
+    const agentId =
+      activeAgent.rows[0]?.id ??
+      (
+        await client.query<{ id: string }>(
+          `insert into app.platform_agent_accounts (platform_id,label,credential_ref)
+          select id,'deposit-range-cutover','secret://deposit-range-cutover'
+          from app.platforms where code='kemerbet' returning id`,
+        )
+      ).rows[0]!.id;
+    await client.query(
+      `select app.save_owner_routine_telebirr_processing($1::uuid,$2::uuid,$3::uuid)`,
+      [ownerAuthUserId, agentId, randomUUID()],
+    );
+  });
+
+  it('records the new active Owner policy while preserving the complete migration order', async () => {
+    const policy = await client.query<{
+      minimum_amount_minor: string;
+      maximum_amount_minor: string;
+    }>(
+      `select minimum_amount_minor::text,maximum_amount_minor::text
+        from app.deposit_policy_versions where status='active'`,
+    );
+    expect(policy.rows).toEqual([
+      { minimum_amount_minor: '10000', maximum_amount_minor: '2500000' },
+    ]);
+    const expected = await listMigrationsLexically(environment.migrationsDirectory);
+    const applied = await client.query<{ filename: string }>(
+      'select filename from sql_integration.applied_migrations order by filename',
+    );
+    expect(applied.rows.map((row) => row.filename)).toEqual(expected);
+  });
+
+  registerPostCutoverReceiverSmsRangeSqlTests(
+    () => client,
+    () => ownerAuthUserId,
+  );
+});

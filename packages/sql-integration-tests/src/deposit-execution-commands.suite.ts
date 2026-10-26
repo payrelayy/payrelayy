@@ -191,7 +191,7 @@ export async function createVerifiedDepositFixture(
     };
   } = {},
 ): Promise<VerifiedDepositFixture> {
-  const amountMinor = options.amountMinor ?? 10000;
+  const amountMinor = options.amountMinor ?? 2500;
   const referenceFingerprint = createHash('sha256')
     .update(`production-command-reference:${suffix}`, 'utf8')
     .digest('hex');
@@ -420,7 +420,7 @@ async function enqueueAndLease(
   }>(client, `select * from app.lease_next_deposit_execution($1::uuid, 300)`, [workerId]);
   expect(leased).toEqual([
     {
-      amount_minor: '10000',
+      amount_minor: '2500',
       currency_code: 'ETB',
       deposit_intent_id: fixture.depositIntentId,
       execution_attempt_id: expect.any(String),
@@ -615,7 +615,7 @@ export function registerDepositExecutionCommandSqlTests(
           'app.enqueue_verified_deposit_execution(uuid)'::regprocedure
         )) as source
       `);
-      expect(functionSource.rows[0]!.source).toContain('expected_amount_minor < 10000');
+      expect(functionSource.rows[0]!.source).toContain('expected_amount_minor < 2500');
       expect(functionSource.rows[0]!.source).toContain('expected_amount_minor > 2500000');
       expect(functionSource.rows[0]!.source).toContain('maximum_amount_minor');
       expect(functionSource.rows[0]!.source).toContain('deposit_payment_claims');
@@ -955,7 +955,7 @@ export function registerDepositExecutionCommandSqlTests(
         ]);
         expect(reconciliationLease).toHaveLength(1);
         expect(reconciliationLease[0]).toMatchObject({
-          amount_minor: '10000',
+          amount_minor: '2500',
           deposit_intent_id: fixture.depositIntentId,
           exact_player_credit_match: true,
           execution_attempt_id: execution.executionAttemptId,

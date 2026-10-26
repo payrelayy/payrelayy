@@ -482,7 +482,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
               client,
               'fetanagent_player_actions',
               `select * from app.open_telegram_live_deposit_intent(
-                 $1::uuid, $2::text, 10000::bigint, $3::text
+                 $1::uuid, $2::text, 2500::bigint, $3::text
                )`,
               [inboundEventId, fixture.playerId, payloadHmac('3')],
             ),
@@ -539,7 +539,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
               'fetanagent_customer_web',
               `select * from app.open_customer_web_deposit_intent(
                  $1::uuid, '44000000-0000-4000-8000-000000000404'::uuid,
-                 $2::text, 10000::bigint
+                 $2::text, 2500::bigint
                )`,
               [fixture.authUserId, fixture.playerId],
             ),
@@ -580,7 +580,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
           client,
           'fetanagent_player_actions',
           `select * from app.open_telegram_live_deposit_intent(
-             $1::uuid, $2::text, 10000::bigint, $3::text
+             $1::uuid, $2::text, 2500::bigint, $3::text
            )`,
           [openEventId, fixture.playerId, openHmac],
         );
@@ -589,7 +589,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
             currency_code: 'ETB',
             deposit_intent_id: expect.any(String),
             deposit_status: 'intake_received',
-            expected_amount_minor: '10000',
+            expected_amount_minor: '2500',
             origin_inbound_event_already_consumed: false,
             payment_deadline_at: expect.any(Date),
             provider_code: 'cbe_birr',
@@ -604,7 +604,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
           client,
           'fetanagent_player_actions',
           `select * from app.open_telegram_live_deposit_intent(
-             $1::uuid, $2::text, 10000::bigint, $3::text
+             $1::uuid, $2::text, 2500::bigint, $3::text
            )`,
           [openEventId, fixture.playerId, openHmac],
         );
@@ -813,7 +813,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
               client,
               'fetanagent_player_actions',
               `select * from app.open_telegram_live_deposit_intent(
-                 $1::uuid, $2::text, 10000::bigint, $3::text
+                 $1::uuid, $2::text, 2500::bigint, $3::text
                )`,
               [openEventId, fixture.playerId, openHmac],
             ),
@@ -904,7 +904,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
             currency_code: 'ETB',
             deposit_intent_id: depositIntentId,
             deposit_status: 'verification_pending',
-            expected_amount_minor: '10000',
+            expected_amount_minor: '2500',
             updated_at: expect.any(Date),
           },
         ]);
@@ -942,14 +942,14 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
           client,
           'fetanagent_customer_web',
           `select * from app.open_customer_web_deposit_intent(
-             $1::uuid, $2::uuid, $3::text, 10000::bigint
+             $1::uuid, $2::uuid, $3::text, 2500::bigint
            )`,
           [fixture.authUserId, openRequestKey, fixture.playerId],
         );
         expect(opened[0]).toMatchObject({
           currency_code: 'ETB',
           deposit_status: 'intake_received',
-          expected_amount_minor: '10000',
+          expected_amount_minor: '2500',
           provider_code: 'cbe_birr',
           request_key_already_used: false,
         });
@@ -1110,7 +1110,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
               client,
               'fetanagent_customer_web',
               `select * from app.open_customer_web_deposit_intent(
-                 $1::uuid, $2::uuid, $3::text, 10000::bigint
+                 $1::uuid, $2::uuid, $3::text, 2500::bigint
                )`,
               [fixture.authUserId, openRequestKey, fixture.playerId],
             ),
@@ -1149,7 +1149,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
             currency_code: 'ETB',
             deposit_intent_id: depositIntentId,
             deposit_status: 'verification_pending',
-            expected_amount_minor: '10000',
+            expected_amount_minor: '2500',
             updated_at: expect.any(Date),
           },
         ]);
@@ -1191,7 +1191,7 @@ export function registerLiveCustomerDepositIntakeSqlTests(getClient: () => Clien
               'fetanagent_customer_web',
               `select * from app.open_customer_web_deposit_intent(
                  $1::uuid, '43000000-0000-1000-8000-000000000399'::uuid,
-                 $2::text, 10000::bigint
+                 $2::text, 2500::bigint
                )`,
               [fixture.authUserId, fixture.playerId],
             ),

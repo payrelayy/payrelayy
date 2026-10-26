@@ -269,7 +269,7 @@ async function createSettlementFixture(
     `insert into app.deposit_intents (
        customer_id, platform_id, player_account_id, payment_provider_id,
        receiver_account_id, expected_amount_minor
-     ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 10000)
+     ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 2500)
      returning id, opened_at`,
     [
       customer.rows[0]!.id,
@@ -342,7 +342,7 @@ async function createSettlementFixture(
       canonicalReferenceCiphertext,
       canonicalReferenceFingerprint,
       canonicalReferenceMasked,
-      options.evidenceAmountMinor ?? 10000,
+      options.evidenceAmountMinor ?? 2500,
       occurredAt,
       options.evidenceReceiverMatches === false
         ? null

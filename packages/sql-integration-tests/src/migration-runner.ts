@@ -38,8 +38,13 @@ export async function listMigrationsLexically(
 export async function applyMigrationsLexically(
   client: Client,
   migrationsDirectory: string,
+  stopBefore?: string,
 ): Promise<readonly string[]> {
   const migrationNames = await listMigrationsLexically(migrationsDirectory);
+  const stopIndex =
+    stopBefore === undefined ? migrationNames.length : migrationNames.indexOf(stopBefore);
+  if (stopIndex < 0) throw new Error(`Missing migration cutover ${stopBefore}.`);
+  const selectedMigrations = migrationNames.slice(0, stopIndex);
 
   await client.query('create schema if not exists sql_integration');
   await client.query(`
@@ -49,7 +54,7 @@ export async function applyMigrationsLexically(
     )
   `);
 
-  for (const migrationName of migrationNames) {
+  for (const migrationName of selectedMigrations) {
     const migrationSource = await readFile(join(migrationsDirectory, migrationName), 'utf8');
 
     if (migrationSource.trim() === '') {
@@ -67,5 +72,5 @@ export async function applyMigrationsLexically(
     ]);
   }
 
-  return migrationNames;
+  return selectedMigrations;
 }

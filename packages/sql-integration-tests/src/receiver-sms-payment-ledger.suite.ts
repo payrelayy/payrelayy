@@ -76,6 +76,7 @@ async function fixturePaymentEvent(
   fingerprint: string,
   occurredAt: string,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
+  amountMinor = 12500,
 ): Promise<string> {
   const receiver = await client.query<{ id: string; version: number; provider_id: string }>(
     `select receiver.id, receiver.version, receiver.provider_id
@@ -117,7 +118,7 @@ async function fixturePaymentEvent(
       source_subscription_id,device_enrollment_id,device_id,device_key_id,
       device_public_key_spki_sha256
     ) values ($13::text,$1::uuid,$2::uuid,$3::integer,$4::text,$5::text,
-      12500,$6::timestamptz,$6::timestamptz,$6::timestamptz,$7::text,
+      $14::bigint,$6::timestamptz,$6::timestamptz,$6::timestamptz,$7::text,
       $8::text,1,$9::uuid,$10::text,$11::text,$12::text) returning id`,
     [
       receiver.rows[0]!.provider_id,
@@ -133,6 +134,7 @@ async function fixturePaymentEvent(
       keyId,
       keyDigest,
       providerCode,
+      amountMinor,
     ],
   );
   return event.rows[0]!.id;
@@ -892,87 +894,84 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
-    it.each([3300, 7500, 2500100])(
-      'approves %i minor units before outside credit and queues the normal customer success message atomically',
-      async (amountMinor) => {
-        const client = getClient();
-        await client.query('begin');
-        try {
-          const fingerprint = hexDigest();
-          const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
-          const account = await client.query<{ id: string; player_id: string }>(
-            `select receiver.id, player.player_id from app.receiver_sms_deposit_candidates candidate
+    it('approves before outside credit and queues the normal customer success message atomically', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const fingerprint = hexDigest();
+        const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+        const account = await client.query<{ id: string; player_id: string }>(
+          `select receiver.id, player.player_id from app.receiver_sms_deposit_candidates candidate
             join app.customer_platform_players player on player.id = candidate.player_account_id
             join app.receiver_accounts receiver on receiver.provider_id = candidate.payment_provider_id
             where candidate.id = $1::uuid and receiver.status = 'active'
               and receiver.retired_at is null`,
-            [candidate],
-          );
-          expect(account.rows).toHaveLength(1);
-          await client.query('set session authorization fetanagent_owner_control_runtime');
-          const pending = await client.query<{
-            player_id: string;
-            payment_status: string;
-            can_approve: boolean;
-          }>(
-            `select player_id,payment_status,can_approve
+          [candidate],
+        );
+        expect(account.rows).toHaveLength(1);
+        await client.query('set session authorization fetanagent_owner_control_runtime');
+        const pending = await client.query<{
+          player_id: string;
+          payment_status: string;
+          can_approve: boolean;
+        }>(
+          `select player_id,payment_status,can_approve
             from app.list_owner_submitted_payments($1::uuid,'pending',25,0)
             where candidate_id = $2::uuid`,
-            [getOwner(), candidate],
-          );
-          expect(pending.rows).toEqual([
-            {
-              player_id: account.rows[0]!.player_id,
-              payment_status: 'pending',
-              can_approve: true,
-            },
-          ]);
-          await client.query('savepoint incomplete_approval');
-          await expect(
-            client.query(
-              `select app.approve_owner_manual_payment_for_immediate_credit(
-            $1::uuid,$2::uuid,$3::bigint,$4::uuid,false)`,
-              [getOwner(), candidate, amountMinor, account.rows[0]!.id],
-            ),
-          ).rejects.toThrow('bank confirmation');
-          await client.query('rollback to savepoint incomplete_approval');
-          const approved = await client.query<{ result: { status: string } }>(
+          [getOwner(), candidate],
+        );
+        expect(pending.rows).toEqual([
+          {
+            player_id: account.rows[0]!.player_id,
+            payment_status: 'pending',
+            can_approve: true,
+          },
+        ]);
+        await client.query('savepoint incomplete_approval');
+        await expect(
+          client.query(
             `select app.approve_owner_manual_payment_for_immediate_credit(
-            $1::uuid,$2::uuid,$3::bigint,$4::uuid,true) as result`,
-            [getOwner(), candidate, amountMinor, account.rows[0]!.id],
-          );
-          expect(approved.rows[0]?.result.status).toBe('manually_credited');
-          const listed = await client.query<{ payment_status: string; can_approve: boolean }>(
-            `select payment_status,can_approve
+            $1::uuid,$2::uuid,3300,$3::uuid,false)`,
+            [getOwner(), candidate, account.rows[0]!.id],
+          ),
+        ).rejects.toThrow('bank confirmation');
+        await client.query('rollback to savepoint incomplete_approval');
+        const approved = await client.query<{ result: { status: string } }>(
+          `select app.approve_owner_manual_payment_for_immediate_credit(
+            $1::uuid,$2::uuid,3300,$3::uuid,true) as result`,
+          [getOwner(), candidate, account.rows[0]!.id],
+        );
+        expect(approved.rows[0]?.result.status).toBe('manually_credited');
+        const listed = await client.query<{ payment_status: string; can_approve: boolean }>(
+          `select payment_status,can_approve
             from app.list_owner_submitted_payments($1::uuid,'approved',25,0)
             where candidate_id = $2::uuid`,
-            [getOwner(), candidate],
-          );
-          expect(listed.rows).toEqual([{ payment_status: 'approved', can_approve: false }]);
-          await client.query('reset session authorization');
-          const fences = await client.query<{
-            jobs: string;
-            cases: string;
-            customer_notice: string;
-          }>(
-            `select
+          [getOwner(), candidate],
+        );
+        expect(listed.rows).toEqual([{ payment_status: 'approved', can_approve: false }]);
+        await client.query('reset session authorization');
+        const fences = await client.query<{
+          jobs: string;
+          cases: string;
+          customer_notice: string;
+        }>(
+          `select
             (select count(*)::text from app.receiver_sms_settlement_lineages
               where candidate_id=$1::uuid) as jobs,
             (select count(*)::text from app.owner_manual_payment_cases
               where candidate_id=$1::uuid and status='manually_credited') as cases,
             (select count(*)::text from app.telegram_deposit_outcome_deliveries
               where candidate_id=$1::uuid and notification_stage='manual_final'
-                and outcome_code='credited' and amount_minor=$2::bigint
+                and outcome_code='credited' and amount_minor=3300
                 and status='pending') as customer_notice`,
-            [candidate, amountMinor],
-          );
-          expect(fences.rows).toEqual([{ jobs: '0', cases: '1', customer_notice: '1' }]);
-        } finally {
-          await client.query('reset session authorization').catch(() => undefined);
-          await client.query('rollback');
-        }
-      },
-    );
+          [candidate],
+        );
+        expect(fences.rows).toEqual([{ jobs: '0', cases: '1', customer_notice: '1' }]);
+      } finally {
+        await client.query('reset session authorization').catch(() => undefined);
+        await client.query('rollback');
+      }
+    });
 
     it('records a later manual credit correction while retaining the rejected audit reason', async () => {
       const client = getClient();
@@ -1521,5 +1520,131 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         await client.query('rollback');
       }
     });
+  });
+}
+
+export function registerPostCutoverReceiverSmsRangeSqlTests(
+  getClient: () => Client,
+  getOwner: () => string,
+): void {
+  describe('100–25,000 ETB receiver SMS cutover', () => {
+    it.each([10000, 2500000])(
+      'queues an exact %i minor signed payment once',
+      async (amountMinor) => {
+        const client = getClient();
+        await client.query('begin');
+        try {
+          await client.query(`update app.feature_switches set mode='live'
+          where feature_key in ('payment_verification','deposit_execution')`);
+          await client.query(`update app.receiver_sms_route_control set enabled=true,
+          cutover_at=clock_timestamp()-interval '1 day' where singleton`);
+          const fingerprint = hexDigest();
+          const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+          await client.query(
+            `update app.inbound_events inbound set processed_at=candidate.submitted_at
+          from app.receiver_sms_deposit_candidates candidate
+          where inbound.id=candidate.origin_inbound_event_id and candidate.id=$1::uuid`,
+            [candidate],
+          );
+          await fixturePaymentEvent(
+            client,
+            fingerprint,
+            new Date().toISOString(),
+            'telebirr',
+            amountMinor,
+          );
+          const settled = await client.query<{ outcome: string }>(
+            'select app.settle_next_receiver_sms_match() as outcome',
+          );
+          expect(settled.rows).toEqual([{ outcome: 'queued' }]);
+          const counts = await client.query<{ jobs: string; cases: string }>(
+            `select (select count(*)::text from app.receiver_sms_settlement_lineages
+            where candidate_id=$1::uuid) as jobs,
+            (select count(*)::text from app.owner_manual_payment_cases
+            where candidate_id=$1::uuid) as cases`,
+            [candidate],
+          );
+          expect(counts.rows).toEqual([{ jobs: '1', cases: '0' }]);
+        } finally {
+          await client.query('rollback');
+        }
+      },
+    );
+
+    it.each([7500, 9999, 2500001, 2500100])(
+      'keeps %i minor out of automatic credit and allows one Owner manual approval',
+      async (amountMinor) => {
+        const client = getClient();
+        await client.query('begin');
+        try {
+          await client.query(`update app.feature_switches set mode='live'
+            where feature_key in ('payment_verification','deposit_execution')`);
+          await client.query(`update app.receiver_sms_route_control set enabled=true,
+            cutover_at=clock_timestamp()-interval '1 day' where singleton`);
+          const fingerprint = hexDigest();
+          const candidate = await fixtureCandidate(client, fingerprint, new Date().toISOString());
+          await client.query(
+            `update app.inbound_events inbound set processed_at=candidate.submitted_at
+            from app.receiver_sms_deposit_candidates candidate
+            where inbound.id=candidate.origin_inbound_event_id and candidate.id=$1::uuid`,
+            [candidate],
+          );
+          const event = await fixturePaymentEvent(
+            client,
+            fingerprint,
+            new Date().toISOString(),
+            'telebirr',
+            amountMinor,
+          );
+          const settled = await client.query<{ outcome: string }>(
+            'select app.settle_next_receiver_sms_match() as outcome',
+          );
+          expect(settled.rows).toEqual([{ outcome: 'held_review' }]);
+          const automatic = await client.query<{ claims: string; jobs: string }>(
+            `select (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as claims,
+              (select count(*)::text from app.deposit_jobs job
+                join app.receiver_sms_intent_openings opening on opening.deposit_intent_id=job.deposit_intent_id
+                where opening.candidate_id=$1::uuid) as jobs`,
+            [candidate],
+          );
+          expect(automatic.rows).toEqual([{ claims: '0', jobs: '0' }]);
+          await client.query('set session authorization fetanagent_owner_control_runtime');
+          const pending = await client.query<{ can_approve: boolean; player_id: string }>(
+            `select can_approve,player_id from app.list_owner_submitted_payments($1::uuid,'pending',25,0)
+              where candidate_id=$2::uuid`,
+            [getOwner(), candidate],
+          );
+          expect(pending.rows).toEqual([{ can_approve: true, player_id: expect.any(String) }]);
+          const credited = await client.query<{ result: { status: string } }>(
+            `select app.approve_owner_manual_payment_for_immediate_credit(
+              $1::uuid,$2::uuid,null,null,true) as result`,
+            [getOwner(), candidate],
+          );
+          expect(credited.rows[0]?.result.status).toBe('manually_credited');
+          const inbox = await client.query<{ can_mark_manually_credited: boolean }>(
+            `select can_mark_manually_credited from app.list_owner_receiver_sms_inbox($1::uuid,25,0)
+              where payment_event_id=$2::uuid`,
+            [getOwner(), event],
+          );
+          expect(inbox.rows).toEqual([{ can_mark_manually_credited: false }]);
+          await client.query('reset session authorization');
+          const final = await client.query<{ cases: string; notices: string; jobs: string }>(
+            `select (select count(*)::text from app.owner_manual_payment_cases
+              where candidate_id=$1::uuid and status='manually_credited') as cases,
+              (select count(*)::text from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$1::uuid and notification_stage='manual_final'
+                and outcome_code='credited' and amount_minor=$2::bigint) as notices,
+              (select count(*)::text from app.receiver_sms_settlement_lineages
+              where candidate_id=$1::uuid) as jobs`,
+            [candidate, amountMinor],
+          );
+          expect(final.rows).toEqual([{ cases: '1', notices: '1', jobs: '0' }]);
+        } finally {
+          await client.query('reset session authorization').catch(() => undefined);
+          await client.query('rollback');
+        }
+      },
+    );
   });
 }

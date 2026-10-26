@@ -135,6 +135,15 @@ begin
       raise exception 'Unexpected old range in app.%', v_row.name;
     end if;
     v_definition := pg_catalog.regexp_replace(v_definition, '\m2500\M', '10000', 'g');
+    if v_row.name = 'resolve_current_live_customer_deposit_boundary' then
+      if pg_catalog.strpos(v_definition,
+          'The current 25 to 25000 ETB deposit policy is unavailable.') = 0 then
+        raise exception 'The customer deposit policy message has changed.';
+      end if;
+      v_definition := pg_catalog.replace(v_definition,
+        'The current 25 to 25000 ETB deposit policy is unavailable.',
+        'The current 100 to 25000 ETB deposit policy is unavailable.');
+    end if;
     if v_row.name = 'save_owner_routine_telebirr_processing' then
       if pg_catalog.strpos(v_definition,
           'if policy_id is null then raise exception ''The documented deposit policy is required.''; end if;') = 0 then

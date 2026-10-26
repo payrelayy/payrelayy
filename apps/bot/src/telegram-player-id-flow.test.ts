@@ -260,7 +260,7 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).not.toContain('Valid for 1 hour');
       expect(presentation.text).not.toContain('Check the receiver name before paying.');
       expect(presentation.text).not.toContain('valid for 12 hours');
-      expect(presentation.text).toContain('send reference, SMS, receipt link, screenshot or PDF');
+      expect(presentation.text).toContain('send your receipt or reference here.');
       expect(presentation.text).not.toContain('first line');
       expect(presentation.text).not.toContain('second line');
     }
@@ -286,7 +286,7 @@ describe('Telegram Player-ID flow presentation', () => {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
       expect(presentation.text).toContain('📱 Number: 900000042');
       expect(presentation.text).not.toContain('251900000042');
-      expect(presentation.text).toContain('send reference');
+      expect(presentation.text).toContain('send your receipt or reference here.');
       expect(presentation.text).not.toContain('identifies CBE Birr automatically');
     }
   });
@@ -446,10 +446,7 @@ describe('Telegram Player-ID flow presentation', () => {
     expect(presentation).toEqual({
       kind: 'menu',
       menu: {
-        text: [
-          '⏳ Payment details received. We’ll update you here.',
-          'Status: /deposit_status p1.AAAAAAAAAAAAAAAAAAAAAA',
-        ].join('\n'),
+        text: '⏳ Payment details received. We’ll update you here.',
         buttons: [
           { text: 'Check status', callbackData: 'dps1.AAAAAAAAAAAAAAAAAAAAAA' },
           { text: '💰 Deposit', callbackData: 'gd1.deposit' },
@@ -489,7 +486,7 @@ describe('Telegram Player-ID flow presentation', () => {
 
   it('explains the button-first flow and tracking without requiring command syntax', () => {
     expect(telegramDepositHelpText()).toContain('Tap Deposit for payment details');
-    expect(telegramDepositHelpText()).toContain('receipt link, screenshot or PDF');
+    expect(telegramDepositHelpText()).toContain('send your receipt or reference here.');
     expect(telegramDepositHelpText()).not.toContain('first line');
     expect(telegramDepositHelpText()).not.toContain('second line');
     expect(telegramDepositHelpText()).not.toContain('PROVIDER PLAYER_ID TRANSACTION_ID');

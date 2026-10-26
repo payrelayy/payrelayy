@@ -239,7 +239,7 @@ afterEach(() => {
 });
 
 describe('Telegram admission, private action, and ingress composition', () => {
-  it('shows only the OCR reference ending so a customer can correct a misread image', async () => {
+  it('acknowledges a receipt without exposing the extracted reference', async () => {
     await loadComposition(false, true, false, false, true);
     runtime.mediaResult = { kind: 'text', text: 'Transaction ID: TB12345678' };
     runtime.actionResult = {
@@ -254,10 +254,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       ...context,
       message: { photo: [{ file_id: 'photo-id', file_size: 100 }] },
     });
-    expect(context.replies).toHaveLength(1);
-    expect(context.replies[0]).toContain('ending 5678');
-    expect(context.replies[0]).toContain('send the correct reference');
-    expect(context.replies[0]).not.toContain('TB12345678');
+    expect(context.replies).toEqual(['⏳ Payment details received. We’ll update you here.']);
     expect(runtime.actionDeliveries).toHaveLength(1);
   });
 
@@ -731,9 +728,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).not.toContain(
       'Valid for 1 hour. Check the receiver name before paying.',
     );
-    expect(replies[0]!.text).toContain(
-      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
-    );
+    expect(replies[0]!.text).toContain('After paying, send your receipt or reference here.');
     expect(replies[0]!.options?.reply_markup).toBeUndefined();
     expect(
       replies[0]!.options?.entities?.map((entity) => ({
@@ -1392,7 +1387,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     const context = messageContext('/help');
     await runtime.messageHandler!(context);
     expect(context.replies[0]).toContain('Tap Deposit for payment details.');
-    expect(context.replies[0]).toContain('send your reference');
+    expect(context.replies[0]).toContain('send your receipt or reference');
     expect(context.replies[0]).toContain('/support');
     expect(runtime.actionDeliveries).toHaveLength(0);
     expect(runtime.ingressDeliveries).toHaveLength(0);

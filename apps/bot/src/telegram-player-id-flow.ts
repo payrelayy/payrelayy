@@ -259,10 +259,7 @@ export function presentTelegramPlayerIdFlowResult(
       return {
         kind: 'menu',
         menu: {
-          text: [
-            TELEGRAM_PAYMENT_RECEIVED_TEXT,
-            `Status: /deposit_status ${formatTelegramDepositProofTrackingHandle(result.proofToken)}`,
-          ].join('\n'),
+          text: TELEGRAM_PAYMENT_RECEIVED_TEXT,
           buttons: [
             {
               text: 'Check status',
@@ -323,14 +320,14 @@ export function telegramDepositHelpText(receiverSmsCandidateEnabled = false): st
     return [
       '💰 Deposits',
       'Tap Deposit for payment details.',
-      'After paying, send your reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send your receipt or reference here.',
       'Help: /support.',
     ].join('\n');
   }
   return [
     '💰 TeleBirr deposits',
     'Tap Deposit for payment details.',
-    'After paying, send your reference, SMS, receipt link, screenshot or PDF here.',
+    'After paying, send your receipt or reference here.',
     'Help: /support.',
   ].join('\n');
 }

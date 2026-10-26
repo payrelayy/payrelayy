@@ -123,9 +123,7 @@ describe('private Telegram action reducers', () => {
     expect(prompt).toContain('Send 25–25,000 ETB.');
     expect(prompt).not.toContain('Choose one available method');
     expect(prompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
-    expect(prompt).toContain(
-      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
-    );
+    expect(prompt).toContain('After paying, send your receipt or reference here.');
     expect(
       telegramReceiverNumberCodeEntities(prompt).map((entity) => ({
         type: entity.type,
@@ -139,9 +137,18 @@ describe('private Telegram action reducers', () => {
       true,
     );
     const priorLocalPrompt = prompt.replace(
-      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send your receipt or reference here.',
       'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
     );
+    expect(
+      isTelegramCombinedPaymentPromptReply({
+        from: { is_bot: true },
+        text: prompt.replace(
+          'After paying, send your receipt or reference here.',
+          'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+        ),
+      }),
+    ).toBe(true);
     expect(
       isTelegramCombinedPaymentPromptReply({ from: { is_bot: true }, text: priorLocalPrompt }),
     ).toBe(true);
@@ -216,7 +223,7 @@ describe('private Telegram action reducers', () => {
         from: { is_bot: true },
         text: cbeOnly
           .replace(
-            'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+            'After paying, send your receipt or reference here.',
             'After paying, send one reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
           )
           .replace('Send 25–25,000 ETB.', 'Choose one available method. Send 25–25,000 ETB.')
@@ -242,13 +249,30 @@ describe('private Telegram action reducers', () => {
     expect(telePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     expect(cbePrompt).not.toContain('Valid for 1 hour. Check the receiver name before paying.');
     const previouslyIssuedTeleBirrCard = telePrompt.replace(
-      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send your receipt or reference here.',
       'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.',
     );
     const previouslyIssuedCbeCard = cbePrompt.replace(
-      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+      'After paying, send your receipt or reference here.',
       'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
     );
+    const recentlyIssuedTeleBirrCard = telePrompt.replace(
+      'After paying, send your receipt or reference here.',
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+    );
+    const recentlyIssuedCbeCard = cbePrompt.replace(
+      'After paying, send your receipt or reference here.',
+      'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
+    );
+    expect(
+      parseTelegramTelebirrPaymentPromptReply({
+        from: { is_bot: true },
+        text: recentlyIssuedTeleBirrCard,
+      }),
+    ).toBe('PLAYER-DEMO-42');
+    expect(
+      isTelegramCbeSmsPaymentPromptReply({ from: { is_bot: true }, text: recentlyIssuedCbeCard }),
+    ).toBe(true);
     expect(
       parseTelegramTelebirrPaymentPromptReply({
         from: { is_bot: true },
@@ -276,7 +300,7 @@ describe('private Telegram action reducers', () => {
     expect(
       parseTelegramTelebirrPaymentPromptReply({
         from: { is_bot: true },
-        text: telePrompt.replace(
+        text: recentlyIssuedTeleBirrCard.replace(
           '\nAfter paying,',
           '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
         ),
@@ -503,6 +527,10 @@ describe('private Telegram action reducers', () => {
     const replyToMessage = { from: { is_bot: true }, text: prompt };
     const previousPrompt = prompt
       .replace(
+        'After paying, send your receipt or reference here.',
+        'After paying, send the reference, SMS, receipt link, screenshot or PDF (max 5 MB) here.\nThe reference identifies CBE Birr automatically.',
+      )
+      .replace(
         '\nAfter paying,',
         '\nValid for 1 hour. Check the receiver name before paying.\nAfter paying,',
       )
@@ -624,6 +652,7 @@ describe('private Telegram action reducers', () => {
   });
 
   it('turns the first one-value reply into a destination lookup', () => {
+    expect(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT).toBe('🎮 Send your KemerBet Player ID.');
     expect(
       reduceTelegramGuidedDepositDestinationSubmission({
         ...privateMetadata,
@@ -668,6 +697,16 @@ describe('private Telegram action reducers', () => {
   });
 
   it('still accepts a reply to the previous Player ID question', () => {
+    expect(
+      reduceTelegramGuidedDepositDestinationSubmission({
+        ...privateMetadata,
+        text: 'PLAYER-DEMO-42',
+        replyToMessage: {
+          text: '🎮 Send your 8-digit KemerBet Player ID.',
+          from: { is_bot: true },
+        },
+      }),
+    ).toMatchObject({ kind: 'action', action: { playerId: 'PLAYER-DEMO-42' } });
     const priorPlayerPrompt = [
       '🎮 Choose Player ID',
       '',

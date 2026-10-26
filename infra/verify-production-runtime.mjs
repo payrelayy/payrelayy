@@ -40,6 +40,8 @@ const [
   ownerSmsInboxHelperRotation,
   telegramNaturalMessagesHelperRotation,
   telegramNaturalMessagesReleaseRunbook,
+  shortCustomerCopyHelperRotation,
+  shortCustomerCopyReleaseRunbook,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -101,6 +103,8 @@ const [
   read('infra/operations/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-telegram-natural-messages-helper-rotation-v1.sh'),
   read('infra/operations/production-telegram-natural-messages-release.md'),
+  read('infra/operations/fetanagent-production-v2-short-customer-copy-helper-rotation-v1.sh'),
+  read('infra/operations/production-short-customer-copy-release.md'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -770,14 +774,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status 'c1e9e91e209eb8d50563accafd7112bbbdafdc50'/gu)].length,
+  [...workflow.matchAll(/status '4e4faa65ae2b536424a857b5003fbc675343b4c8'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='c1e9e91e209eb8d50563accafd7112bbbdafdc50'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='4e4faa65ae2b536424a857b5003fbc675343b4c8'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1679,7 +1683,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='c1e9e91e209eb8d50563accafd7112bbbdafdc50'",
   "readonly PREDECESSOR_SHA256='9a45d0e999335b923fcc2506e7e985b063bc7e5d124cc67d4def8b4e50a209df'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43'",
   "readonly SOURCE_REVIEW='telegram-natural-messages-release-v1'",
   "readonly STAGED_HELPER='/root/fetanagent-production-v2-telegram-natural-messages-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
   'require_current_release',
@@ -1719,11 +1723,59 @@ assert.doesNotMatch(
 for (const value of [
   'c1e9e91e209eb8d50563accafd7112bbbdafdc50',
   '9a45d0e999335b923fcc2506e7e985b063bc7e5d124cc67d4def8b4e50a209df',
-  helperDigest,
+  '6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43',
   'cbe-live-v1',
   'ROTATE EXACT PRODUCTION V2 TELEGRAM NATURAL MESSAGES HELPER V1',
 ]) {
   assert.ok(telegramNaturalMessagesReleaseRunbook.includes(value));
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='4e4faa65ae2b536424a857b5003fbc675343b4c8'",
+  "readonly PREDECESSOR_SHA256='6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='short-customer-copy-release-v1'",
+  "readonly STAGED_HELPER='/root/fetanagent-production-v2-short-customer-copy-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'flock --nonblock 9',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 SHORT CUSTOMER COPY HELPER V1',
+]) {
+  assert.ok(shortCustomerCopyHelperRotation.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-short-customer-copy-helper-rotation-v1\.sh/u,
+);
+const shortCustomerCopyRotationSteps = shortCustomerCopyHelperRotation.slice(
+  shortCustomerCopyHelperRotation.indexOf('rotate() {'),
+);
+for (const [before, after] of [
+  ['acquire_lock', 'install_record "$INTENT" intent_body'],
+  ['install_record "$INTENT" intent_body', 'mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'],
+  ['mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"', 'mv -T -- "$NEXT_HELPER" "$HELPER"'],
+  ['mv -T -- "$NEXT_HELPER" "$HELPER"', 'mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'],
+  [
+    'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+    'install_record "$COMPLETE" complete_body',
+  ],
+]) {
+  assert.ok(
+    shortCustomerCopyRotationSteps.indexOf(before) >= 0 &&
+      shortCustomerCopyRotationSteps.indexOf(before) <
+        shortCustomerCopyRotationSteps.indexOf(after),
+  );
+}
+assert.doesNotMatch(shortCustomerCopyHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+for (const value of [
+  '4e4faa65ae2b536424a857b5003fbc675343b4c8',
+  '6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43',
+  helperDigest,
+  'cbe-live-v1',
+  'ROTATE EXACT PRODUCTION V2 SHORT CUSTOMER COPY HELPER V1',
+]) {
+  assert.ok(shortCustomerCopyReleaseRunbook.includes(value));
 }
 assert.equal(
   sudoers,

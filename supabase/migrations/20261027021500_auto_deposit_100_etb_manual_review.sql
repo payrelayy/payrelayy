@@ -52,8 +52,7 @@ begin
     and v_policy.minimum_amount_minor = 2500
     and v_policy.maximum_amount_minor = 2500000
     and v_policy.freshness_window_seconds = 3600
-    and not exists (select 1 from app.routine_telebirr_processing_authorizations)
-    and not exists (select 1 from app.deposit_intents) then
+    and not exists (select 1 from app.routine_telebirr_processing_authorizations) then
     update app.deposit_policy_versions set status = 'inactive', retired_at = pg_catalog.now()
       where id = v_policy.id;
     insert into app.deposit_policy_versions
@@ -164,6 +163,7 @@ declare
   v_name text;
   v_oid oid;
   v_count integer;
+  v_expected_hits integer;
   v_definition text;
 begin
   foreach v_name in array array[
@@ -177,8 +177,9 @@ begin
       where n.nspname = 'app' and p.proname = v_name;
     if v_count <> 1 then raise exception 'Expected one app.% function', v_name; end if;
     v_definition := pg_catalog.pg_get_functiondef(v_oid);
+    v_expected_hits := case when v_name = 'complete_owner_manual_payment_case' then 2 else 1 end;
     if pg_catalog.regexp_count(v_definition, 'between 2500 and 2500000') <>
-      case when v_name = 'complete_owner_manual_payment_case' then 2 else 1 end then
+      v_expected_hits then
       raise exception 'Unexpected manual range in app.%', v_name;
     end if;
     execute pg_catalog.replace(v_definition,

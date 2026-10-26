@@ -4,7 +4,11 @@ PR #962 contains the Owner SMS and Submitted payments controls. Its first
 production application deployment stopped before activation because the CBE
 predecessor checks still named the older release. This follow-up pins those
 checks to the release observed running on 2026-10-26. The failed run did not
-activate an application, apply a migration, or change payment switches.
+activate an application, apply a migration, or change payment switches. A
+subsequent read-only production check at 2026-10-26 01:14 UTC found the new
+migration already installed through a separate path. The old application is
+still running and healthy. The remaining release must verify that exact schema
+and deploy the matching application; it must not reapply the migration.
 
 | Boundary                                    | Reviewed value                                                                             |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -20,9 +24,11 @@ activate an application, apply a migration, or change payment switches.
 1. Require passing follow-up PR and exact-main push CI. Recheck the Droplet
    identity, running release and routine marker, installed helper and sudoers
    digests, Owner and customer health, all seven payment switches, SMS route,
-   and absence of nonterminal jobs and unresolved attempts. Require the new
-   migration and its two Owner functions to be absent. A changed predecessor,
-   helper, payment profile, or migration history is a stop condition.
+   and absence of nonterminal jobs and unresolved attempts. Require migration
+   `20261026001036` to be the latest and present exactly once, with both new
+   Owner function signatures owned by `postgres`, security-definer with fixed
+   search paths and only the intended grants. A changed predecessor, helper,
+   payment profile, migration history, or function catalog is a stop condition.
 2. Stage the exact merged-main helper Git blob as
    `/root/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next`
    in a root-owned mode-`0700` directory, with the file root-owned mode-`0600`.
@@ -41,16 +47,14 @@ activate an application, apply a migration, or change payment switches.
    `confirm_financial_switch_profile=cbe-live-v1`, and
    `confirm_database_route=pooler`. The workflow must confirm the predecessor,
    idle cutover, healthy app and bot, carried routine marker, and unchanged
-   switch fingerprint. The new Admin preflight tolerates the absent additive
-   Owner functions during this short app-first transition.
-4. Once the new application is healthy, dispatch
-   `supabase-production-release.yml` for the same main SHA with
-   `confirm_production_project_ref=xzztugbgtulptnbpoelr` and
-   `confirm_production_apply=APPLY PRODUCTION MIGRATIONS`. Verify the migration
-   ledger, both Owner function signatures and restricted grants, the Owner
-   SMS and Submitted payments views, public health, notification queue, SMS
-   route, and unchanged payment switches. Do not submit or replay a real
-   payment to test this release.
+   switch fingerprint. The new Admin preflight accepts the exact installed
+   additive Owner functions.
+4. Once the new application is healthy, verify the installed migration ledger,
+   both Owner function signatures and restricted grants, the Owner SMS and
+   Submitted payments views, public health, notification queue, SMS route, and
+   unchanged payment switches. Do not dispatch the database release workflow
+   for a migration already present. Do not submit or replay a real payment to
+   test this release.
 
 If the application deploy or migration fails, stop and investigate the exact
 guard failure. After the new migration is installed, do not restart a

@@ -1599,7 +1599,13 @@ export function registerPostCutoverReceiverSmsRangeSqlTests(
           const settled = await client.query<{ outcome: string }>(
             'select app.settle_next_receiver_sms_match() as outcome',
           );
-          expect(settled.rows).toEqual([{ outcome: 'held_review' }]);
+          expect(settled.rows).toEqual([{ outcome: 'empty' }]);
+          const matched = await client.query<{ disposition: string }>(
+            `select disposition from app.receiver_sms_payment_matches
+              where candidate_id=$1::uuid and payment_event_id=$2::uuid`,
+            [candidate, event],
+          );
+          expect(matched.rows).toEqual([{ disposition: 'held_review' }]);
           const automatic = await client.query<{ claims: string; jobs: string }>(
             `select (select count(*)::text from app.receiver_sms_settlement_lineages
               where candidate_id=$1::uuid) as claims,

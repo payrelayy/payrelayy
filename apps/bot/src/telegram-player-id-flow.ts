@@ -26,9 +26,8 @@ export type TelegramPlayerIdFlowPresentation =
   | { readonly kind: 'menu'; readonly menu: PrivateTelegramMenu }
   | { readonly kind: 'message'; readonly text: string }
   | {
-      readonly kind: 'force_reply';
+      readonly kind: 'prompt';
       readonly text: string;
-      readonly placeholder: string;
     };
 
 export interface TelegramPlayerIdFlowContext {
@@ -84,9 +83,8 @@ export function presentTelegramPlayerIdFlowResult(
       };
     case 'player_selection_missing':
       return {
-        kind: 'force_reply',
+        kind: 'prompt',
         text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
-        placeholder: 'KemerBet Player ID',
       };
     case 'player_selection_saved':
       return {
@@ -115,12 +113,11 @@ export function presentTelegramPlayerIdFlowResult(
       };
     case 'combined_deposit_destination':
       return {
-        kind: 'force_reply',
+        kind: 'prompt',
         text: buildTelegramCombinedPaymentPrompt({
           playerId: result.selectedPlayerId,
           receivers: result.receivers,
         }),
-        placeholder: 'Payment reference or receipt',
       };
     case 'telebirr_deposit_destination_review': {
       const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
@@ -140,24 +137,22 @@ export function presentTelegramPlayerIdFlowResult(
       const selectedPlayerId = context.selectedPlayerId ?? result.selectedPlayerId;
       if (!selectedPlayerId) throw new Error('The selected Player ID is unavailable.');
       return {
-        kind: 'force_reply',
+        kind: 'prompt',
         text: buildTelegramTelebirrPaymentPrompt({
           playerId: selectedPlayerId,
           receiverAccountHolderName: result.receiverAccountHolderName,
           receiverAccountReference: result.receiverAccountReference,
         }),
-        placeholder: 'TeleBirr transaction number',
       };
     }
     case 'cbe_sms_deposit_destination':
       return {
-        kind: 'force_reply',
+        kind: 'prompt',
         text: buildTelegramCbeSmsPaymentPrompt({
           playerId: result.selectedPlayerId,
           receiverAccountHolderName: result.receiverAccountHolderName,
           receiverAccountReference: result.receiverAccountReference,
         }),
-        placeholder: 'CBE Birr transaction reference',
       };
     case 'deposit_instructions':
       return {

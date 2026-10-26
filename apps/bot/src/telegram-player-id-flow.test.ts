@@ -58,7 +58,7 @@ describe('Telegram Player-ID flow presentation', () => {
       version: 1,
       outcome: 'player_selection_missing',
     });
-    expect(missing.kind).toBe('force_reply');
+    expect(missing.kind).toBe('prompt');
   });
   it('renders the guided deposit before the opaque Player-ID action', () => {
     const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
@@ -232,7 +232,7 @@ describe('Telegram Player-ID flow presentation', () => {
     }
   });
 
-  it('renders a concise force-reply payment card with a local copyable number', () => {
+  it('renders a concise payment card with a local copyable number', () => {
     const presentation = presentTelegramPlayerIdFlowResult(
       {
         version: 1,
@@ -248,11 +248,10 @@ describe('Telegram Player-ID flow presentation', () => {
     );
 
     expect(presentation).toEqual({
-      kind: 'force_reply',
+      kind: 'prompt',
       text: expect.stringContaining('👤 Name: Demo Receiver'),
-      placeholder: 'TeleBirr transaction number',
     });
-    if (presentation.kind === 'force_reply') {
+    if (presentation.kind === 'prompt') {
       expect(presentation.text).toContain('📱 Number: 900000042');
       expect(presentation.text).not.toContain('251900000042');
       expect(presentation.text).toContain('🎮 KemerBet Player ID: PLAYER-DEMO-42');
@@ -280,11 +279,10 @@ describe('Telegram Player-ID flow presentation', () => {
       acceptsPayments: true,
     });
     expect(presentation).toEqual({
-      kind: 'force_reply',
+      kind: 'prompt',
       text: expect.stringContaining('💳 CBE Birr deposit'),
-      placeholder: 'CBE Birr transaction reference',
     });
-    if (presentation.kind === 'force_reply') {
+    if (presentation.kind === 'prompt') {
       expect(presentation.text).toContain('👤 Name: Demo Receiver');
       expect(presentation.text).toContain('📱 Number: 900000042');
       expect(presentation.text).not.toContain('251900000042');

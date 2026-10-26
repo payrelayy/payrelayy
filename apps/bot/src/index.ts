@@ -155,20 +155,10 @@ function inlineMenu(buttons: readonly PrivateTelegramMenuButton[]): InlineKeyboa
   return keyboard;
 }
 
-function replyOptions(keyboard?: InlineKeyboard, placeholder?: string, text?: string) {
+function replyOptions(keyboard?: InlineKeyboard, text?: string) {
   if (keyboard) return { reply_markup: keyboard };
-  if (placeholder) {
-    const entities = text ? telegramReceiverNumberCodeEntities(text) : [];
-    return {
-      ...(entities.length > 0 ? { entities } : {}),
-      reply_markup: {
-        force_reply: true as const,
-        selective: true,
-        input_field_placeholder: placeholder,
-      },
-    };
-  }
-  return undefined;
+  const entities = text ? telegramReceiverNumberCodeEntities(text) : [];
+  return entities.length > 0 ? { entities } : undefined;
 }
 
 const temporaryMessageDependencies = {
@@ -182,11 +172,7 @@ const temporaryMessageDependencies = {
 
 async function deliverPlayerAction(
   action: TelegramPrivateActionEnvelope,
-  reply: (
-    text: string,
-    keyboard?: InlineKeyboard,
-    forceReplyPlaceholder?: string,
-  ) => Promise<unknown>,
+  reply: (text: string, keyboard?: InlineKeyboard) => Promise<unknown>,
   temporaryAttempt?: {
     readonly handle: TelegramTemporaryMessageHandle | undefined;
     readonly mediaReferenceMask?: string | undefined;
@@ -242,8 +228,8 @@ async function deliverPlayerAction(
       );
       return;
     }
-    if (presentation.kind === 'force_reply') {
-      const sent = await reply(presentation.text, undefined, presentation.placeholder);
+    if (presentation.kind === 'prompt') {
+      const sent = await reply(presentation.text);
       if (
         (result.outcome === 'telebirr_deposit_destination' &&
           (action.kind === 'saved_telebirr_destination_command' ||
@@ -348,8 +334,8 @@ bot.on('message', async (context) => {
           ? reduceTelegramSavedTelebirrDestinationAction(metadata)
           : undefined;
       if (action)
-        await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
-          context.reply(replyText, replyOptions(keyboard, placeholder, replyText)),
+        await deliverPlayerAction(action, (replyText, keyboard) =>
+          context.reply(replyText, replyOptions(keyboard, replyText)),
         );
       else await context.reply(message('en', 'depositUnavailable'));
       return;
@@ -360,8 +346,8 @@ bot.on('message', async (context) => {
     ) {
       const action = reduceTelegramSavedCbeSmsDestinationAction(metadata);
       if (action)
-        await deliverPlayerAction(action, (replyText, keyboard, placeholder) =>
-          context.reply(replyText, replyOptions(keyboard, placeholder, replyText)),
+        await deliverPlayerAction(action, (replyText, keyboard) =>
+          context.reply(replyText, replyOptions(keyboard, replyText)),
         );
       return;
     }
@@ -384,10 +370,8 @@ bot.on('message', async (context) => {
     });
     if (destinationSubmission) {
       if (destinationSubmission.kind === 'action') {
-        await deliverPlayerAction(
-          destinationSubmission.action,
-          (replyText, keyboard, forceReplyPlaceholder) =>
-            context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder, replyText)),
+        await deliverPlayerAction(destinationSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, replyOptions(keyboard, replyText)),
         );
       } else {
         await context.reply(TELEGRAM_GUIDED_DEPOSIT_PLAYER_INVALID_TEXT);
@@ -530,10 +514,8 @@ bot.on('message', async (context) => {
       : reduceTelegramGuidedDepositProofSubmission({ ...metadata, text, replyToMessage });
     if (guidedSubmission) {
       if (guidedSubmission.kind === 'action') {
-        await deliverPlayerAction(
-          guidedSubmission.action,
-          (replyText, keyboard, forceReplyPlaceholder) =>
-            context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder, replyText)),
+        await deliverPlayerAction(guidedSubmission.action, (replyText, keyboard) =>
+          context.reply(replyText, replyOptions(keyboard, replyText)),
         );
       } else {
         await context.reply(
@@ -700,30 +682,18 @@ if (playerActions.enabled) {
           ? reduceTelegramSavedTelebirrDestinationAction(callbackMetadata)
           : undefined;
       if (savedAction)
-        await deliverPlayerAction(savedAction, (replyText, keyboard, placeholder) =>
-          context.reply(replyText, replyOptions(keyboard, placeholder, replyText)),
+        await deliverPlayerAction(savedAction, (replyText, keyboard) =>
+          context.reply(replyText, replyOptions(keyboard, replyText)),
         );
       else await context.reply(message('en', 'depositUnavailable'));
       return;
     }
     if (changePlayer) {
-      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
-        reply_markup: {
-          force_reply: true,
-          selective: true,
-          input_field_placeholder: 'KemerBet Player ID',
-        },
-      });
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT);
       return;
     }
     if (config.playerValidationIntakeEnabled && action?.kind === 'player_registration_callback') {
-      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, {
-        reply_markup: {
-          force_reply: true,
-          selective: true,
-          input_field_placeholder: 'KemerBet Player ID',
-        },
-      });
+      await context.reply(TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT);
       return;
     }
     if (!action) {
@@ -732,8 +702,8 @@ if (playerActions.enabled) {
       }
       return;
     }
-    await deliverPlayerAction(action, (replyText, keyboard, forceReplyPlaceholder) =>
-      context.reply(replyText, replyOptions(keyboard, forceReplyPlaceholder, replyText)),
+    await deliverPlayerAction(action, (replyText, keyboard) =>
+      context.reply(replyText, replyOptions(keyboard, replyText)),
     );
   });
 }

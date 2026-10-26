@@ -188,6 +188,10 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         {
           signature: 'app.advance_owner_kemerbet_readiness_cohort_claim(uuid,uuid,uuid,text)',
         },
+        {
+          signature:
+            'app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)',
+        },
         { signature: 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)' },
         {
           signature: 'app.arm_companion_verified_private_live_telebirr_pilot(uuid,uuid)',
@@ -264,6 +268,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
           signature:
             'app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)',
         },
+        { signature: 'app.list_owner_submitted_payments(uuid,text,integer,integer)' },
         {
           signature:
             'app.prepare_approved_private_live_telebirr_pilot(uuid,uuid,text[],timestamp with time zone,timestamp with time zone)',

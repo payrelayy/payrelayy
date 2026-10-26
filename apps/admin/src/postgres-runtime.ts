@@ -45,7 +45,12 @@ export interface OwnerControlPostgresRuntime {
   readonly receiverSmsOldPayments?: Pick<PostgresOwnerReceiverSmsOldPayments, 'list'> | undefined;
   readonly manualPayments?:
     | (Pick<PostgresOwnerManualPayments, 'listCases' | 'listSms' | 'decide' | 'complete'> &
-        Partial<Pick<PostgresOwnerManualPayments, 'systemOverview'>>)
+        Partial<
+          Pick<
+            PostgresOwnerManualPayments,
+            'systemOverview' | 'listSubmittedPayments' | 'approveAfterCredit'
+          >
+        >)
     | undefined;
   readonly telebirrTransactions?: Pick<PostgresOwnerTelebirrTransactions, 'list'> | undefined;
   readonly supportContact?:
@@ -267,6 +272,30 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
     coalesce(has_function_privilege(current_user,
       to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid,
       'execute'), true) as manual_payment_complete_allowed,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid,
+      'execute'), true) as submitted_payments_list_allowed,
+    coalesce(has_function_privilege(current_user,
+      to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid,
+      'execute'), true) as submitted_payment_approve_allowed,
+    coalesce((
+      select routine.prosecdef and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and not exists (select 1 from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+          where acl.privilege_type = 'EXECUTE'
+            and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole))
+      from pg_proc routine
+      where routine.oid = to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid
+    ), true) as submitted_payments_list_catalog_safe,
+    coalesce((
+      select routine.prosecdef and routine.proowner = 'postgres'::regrole
+        and routine.proconfig = array['search_path=pg_catalog, pg_temp']::text[]
+        and not exists (select 1 from aclexplode(coalesce(routine.proacl, acldefault('f', routine.proowner))) acl
+          where acl.privilege_type = 'EXECUTE'
+            and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole))
+      from pg_proc routine
+      where routine.oid = to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid
+    ), true) as submitted_payment_approve_catalog_safe,
     (
       coalesce(not has_function_privilege(current_user,
         to_regprocedure('app.decide_owner_receiver_sms_old_payment(uuid,uuid,text)')::oid,
@@ -380,6 +409,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.get_owner_system_overview(uuid)') is not null)::integer
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
+        + (to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)') is not null)::integer
+        + (to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user,
             to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid,
@@ -450,6 +481,8 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.get_owner_system_overview(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)

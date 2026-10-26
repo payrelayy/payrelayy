@@ -13,6 +13,82 @@ const ownerCase = '33333333-3333-4333-8333-333333333333';
 const sms = '44444444-4444-4444-8444-444444444444';
 
 describe('Owner manual payment boundary', () => {
+  it('returns the full Player ID for the protected submitted-payment list', async () => {
+    const calls: unknown[] = [];
+    const service = new PostgresOwnerManualPayments({
+      query: async (sql, values) => {
+        calls.push([sql, values]);
+        return {
+          rows: [
+            {
+              case_id: null,
+              candidate_id: candidate,
+              legacy_candidate_id: null,
+              payment_event_id: null,
+              provider_code: 'cbe_birr',
+              reference_masked: '***AB12',
+              submitted_at: new Date('2026-10-23T09:00:00Z'),
+              payment_at: null,
+              amount_minor: null,
+              receiver_account_id: null,
+              receiver_account_masked: null,
+              player_id: '12345678',
+              payment_status: 'pending',
+              status_detail: 'Waiting for incoming SMS',
+              owner_case_status: null,
+              rejection_reason: null,
+              decided_at: null,
+              completed_at: null,
+              can_approve: true,
+              can_reject: true,
+            },
+          ],
+        };
+      },
+    });
+    expect(await service.listSubmittedPayments(actor, 'pending')).toMatchObject([
+      { playerId: '12345678', canApprove: true, status: 'pending' },
+    ]);
+    expect(calls[0]).toEqual([
+      expect.stringContaining('app.list_owner_submitted_payments'),
+      [actor, 'pending', 25, 0],
+    ]);
+  });
+
+  it('passes one confirmed manual approval to the atomic database function', async () => {
+    const calls: unknown[] = [];
+    const service = new PostgresOwnerManualPayments({
+      query: async (sql, values) => {
+        calls.push([sql, values]);
+        return { rows: [{ approved: { caseId: ownerCase, status: 'manually_credited' } }] };
+      },
+    });
+    const receiverAccountId = '55555555-5555-4555-8555-555555555555';
+    expect(
+      await service.approveAfterCredit(actor, candidate, {
+        amountMinor: '3300',
+        receiverAccountId,
+        bankPaymentConfirmed: true,
+        playerCreditedConfirmed: true,
+      }),
+    ).toEqual({ caseId: ownerCase, status: 'manually_credited' });
+    expect(calls).toEqual([
+      [
+        expect.stringContaining('app.approve_owner_manual_payment_after_credit'),
+        [actor, candidate, '3300', receiverAccountId, true, true],
+      ],
+    ]);
+    await expect(
+      service.approveAfterCredit(actor, candidate, {
+        amountMinor: null,
+        receiverAccountId: null,
+        bankPaymentConfirmed: false,
+        playerCreditedConfirmed: false as true,
+      }),
+    ).rejects.toBeInstanceOf(OwnerManualPaymentRejectedError);
+    expect(calls).toHaveLength(1);
+  });
+
   it('returns only checked Owner system facts from the read-only overview', async () => {
     const service = new PostgresOwnerManualPayments({
       query: async () => ({

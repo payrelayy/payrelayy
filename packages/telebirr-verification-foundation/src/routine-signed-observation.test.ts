@@ -55,7 +55,7 @@ function fixture() {
     receiverProfileDigest: trustedLookup.receiverProfileDigest,
   };
   const facts = {
-    amountMinor: 2_500,
+    amountMinor: 10_000,
     canonicalReferencePresent: true,
     creditedPartyNameDigest: trustedLookup.expectedReceiverNameDigest,
     currencyCode: 'ETB',
@@ -123,7 +123,7 @@ describe('routine TeleBirr paired-device observation', () => {
       occurredAt: '2026-10-05T18:01:45.000Z',
     };
     expect(digestRoutineTelebirrObservationFacts(facts)).toBe(
-      'sha256:e3a4bd12da42132a07bf3fbcefc0ce16e2ab20a4e2068797645d96b241c78b6f',
+      'sha256:2b34135b6d0067894f200cccd1b4e2dac33a1e62183d6c3df4f6e957dff65770',
     );
     const body = {
       ...input.signedObservation.body,
@@ -132,7 +132,7 @@ describe('routine TeleBirr paired-device observation', () => {
       facts,
     };
     expect(digestRoutineTelebirrObservationBody(body)).toBe(
-      'sha256:a314d72dbfd5efc47b9575e393ba4453930e24aa5978311a082b437016e447ba',
+      'sha256:dc03864616c6caf115cca6d05299702f57e2a21421fe0fb6a020913027d412c3',
     );
   });
 

@@ -129,7 +129,7 @@ function fixture() {
     ).toString('base64url'),
   };
   const facts = {
-    amountMinor: 2_500,
+    amountMinor: 10_000,
     canonicalReferencePresent: true,
     creditedPartyNameDigest: trustedLookup.expectedReceiverNameDigest,
     currencyCode: 'ETB',

@@ -18,7 +18,7 @@ try {
   }
   if ($preflightPlayerProvided -and (
       $NoMoneyPreflightPlayerId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or
-      $NoMoneyPreflightAmountMinor -lt 2500 -or
+      $NoMoneyPreflightAmountMinor -lt 10000 -or
       $NoMoneyPreflightAmountMinor -gt 2500000)) {
     throw 'The no-money preflight target is invalid.'
   }

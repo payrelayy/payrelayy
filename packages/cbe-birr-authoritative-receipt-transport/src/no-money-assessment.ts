@@ -41,7 +41,7 @@ export interface CbeBirrNoMoneyInstructionSnapshot {
   readonly receiverRevisionActiveAtSubmission: boolean;
 }
 
-const MIN_PRINCIPAL_MINOR = 2_500n;
+const MIN_PRINCIPAL_MINOR = 10_000n;
 const MAX_PRINCIPAL_MINOR = 2_500_000n;
 const CANONICAL_MINOR_UNITS = /^(0|[1-9][0-9]{0,17})$/u;
 

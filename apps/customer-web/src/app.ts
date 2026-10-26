@@ -489,7 +489,7 @@ function amountEtbToMinor(value: unknown): string | undefined {
   if (!major) return undefined;
   const minor = `${match?.[2] ?? ''}00`.slice(0, 2);
   const amountMinor = BigInt(major) * 100n + BigInt(minor);
-  return amountMinor >= 2_500n && amountMinor <= 2_500_000n ? amountMinor.toString() : undefined;
+  return amountMinor >= 10_000n && amountMinor <= 2_500_000n ? amountMinor.toString() : undefined;
 }
 
 function validTransactionReference(value: unknown): value is string {

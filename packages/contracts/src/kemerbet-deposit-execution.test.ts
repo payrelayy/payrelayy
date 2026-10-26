@@ -273,7 +273,7 @@ describe('KemerBet deposit attempt planner', () => {
     expectNoRetryAuthority(plan);
   });
 
-  it('accepts only policy-valid ETB minor amounts from 25 through 25,000 ETB', () => {
+  it('accepts only policy-valid ETB minor amounts from 100 through 25,000 ETB', () => {
     for (const expectedAmountMinor of [DEPOSIT_MINIMUM_MINOR, DEPOSIT_MAXIMUM_MINOR]) {
       expect(
         planKemerBetDepositAttempt(attemptCandidate('success_dialog_lost', { expectedAmountMinor }))

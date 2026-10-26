@@ -40,7 +40,7 @@ const leaseBinding = {
   paymentClaimId: '44444444-4444-4444-8444-444444444444',
   platformAgentAccountId: accountId,
   playerId: '12345678',
-  amountMinor: 2500,
+  amountMinor: 10000,
   currencyCode: 'ETB',
 } as unknown as RoutineDepositLease;
 
@@ -53,7 +53,7 @@ const fullLease: RoutineDepositLease = {
     provider: 'telebirr',
     platformCode: 'kemerbet',
     currencyCode: 'ETB',
-    minimumAmountMinor: 2500,
+    minimumAmountMinor: 10000,
     maximumAmountMinor: 2500000,
     playerScope: 'all_active_deposit_eligible',
     playerOwnershipRequired: false,

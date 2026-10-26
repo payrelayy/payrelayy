@@ -26,7 +26,7 @@ const policy: RoutineDepositPolicy = Object.freeze({
   provider: 'telebirr',
   platformCode: 'kemerbet',
   currencyCode: 'ETB',
-  minimumAmountMinor: 2500,
+  minimumAmountMinor: 10000,
   maximumAmountMinor: 2500000,
   playerScope: 'all_active_deposit_eligible',
   playerOwnershipRequired: false,
@@ -295,7 +295,7 @@ describe('routine production serial deposit worker', () => {
   it('can process more than five distinct deposits for the same Player without a business quota', async () => {
     const { worker, store, session } = fixture();
     store.leaseNext.mockImplementation(async () =>
-      makeLease({ playerId: 'SAME-PLAYER', amountMinor: 2501 }),
+      makeLease({ playerId: 'SAME-PLAYER', amountMinor: 10001 }),
     );
     for (let count = 0; count < 8; count += 1) {
       expect(await worker.runOnce()).toEqual({ status: 'completed' });
@@ -316,9 +316,10 @@ describe('routine production serial deposit worker', () => {
   });
 
   it.each([
-    { amountMinor: 2499 },
+    { amountMinor: 2500 },
+    { amountMinor: 9999 },
     { amountMinor: 2500001 },
-    { amountMinor: 2500.1 },
+    { amountMinor: 10000.1 },
     { paymentVerified: false },
     { playerActive: false },
     { playerDepositEligible: false },

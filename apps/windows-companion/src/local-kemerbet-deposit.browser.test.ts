@@ -144,39 +144,39 @@ const successTableHtml = fixtureHtml.replace(
 const successTableText = [
   'Transfer Successful!',
   'Name\tWallet Type\tAmount\tMessage',
-  'fixture-identity\tBalance\t30\tSuccess',
-  'fixture-agent\tBalance\t-30\tSuccess',
-  'PLAT\tBalance\t30\tSuccess',
+  'fixture-identity\tBalance\t100\tSuccess',
+  'fixture-agent\tBalance\t-100\tSuccess',
+  'PLAT\tBalance\t100\tSuccess',
   'Close',
 ].join('\n');
 
 describe('strict KemerBet success table', () => {
   it('matches the selected recipient and all three exact success rows', () => {
-    expect(exactKemerBetSuccessTableMatches(successTableText, ['fixture-identity'], 3000)).toBe(
+    expect(exactKemerBetSuccessTableMatches(successTableText, ['fixture-identity'], 10000)).toBe(
       true,
     );
     expect(
       exactKemerBetSuccessTableMatches(
-        successTableText.replaceAll('\t30\t', '\t30.00\t').replace('\t-30\t', '\t-30.00\t'),
+        successTableText.replaceAll('\t100\t', '\t100.00\t').replace('\t-100\t', '\t-100.00\t'),
         ['fixture-identity'],
-        3000,
+        10000,
       ),
     ).toBe(true);
   });
 
   it.each([
     ['wrong recipient', successTableText.replace('fixture-identity', 'someone-else')],
-    ['wrong credit amount', successTableText.replace('\t30\tSuccess', '\t31\tSuccess')],
-    ['wrong agent debit', successTableText.replace('\t-30\tSuccess', '\t-29\tSuccess')],
-    ['failed credit', successTableText.replace('\t30\tSuccess', '\t30\tFailed')],
+    ['wrong credit amount', successTableText.replace('\t100\tSuccess', '\t101\tSuccess')],
+    ['wrong agent debit', successTableText.replace('\t-100\tSuccess', '\t-99\tSuccess')],
+    ['failed credit', successTableText.replace('\t100\tSuccess', '\t100\tFailed')],
     [
       'duplicate row',
-      successTableText.replace('\nClose', '\nfixture-identity\tBalance\t30\tSuccess\nClose'),
+      successTableText.replace('\nClose', '\nfixture-identity\tBalance\t100\tSuccess\nClose'),
     ],
     ['missing title', successTableText.replace('Transfer Successful!', 'Transfer Pending')],
     ['missing close', successTableText.replace('\nClose', '')],
   ])('rejects %s', (_caseName, text) => {
-    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 3000)).toBe(false);
+    expect(exactKemerBetSuccessTableMatches(text, ['fixture-identity'], 10000)).toBe(false);
   });
 
   it('accepts only exact canonical grouped renderings of the leased amount', () => {
@@ -194,8 +194,8 @@ describe('strict KemerBet success table', () => {
     expect(exactKemerBetAmountInputMatches('11,02.00', 110200)).toBe(false);
     expect(exactKemerBetAmountInputMatches('1,102.00\u200e', 110200)).toBe(false);
     const groupedTable = successTableText
-      .replaceAll('\t30\t', '\t1,102.00\t')
-      .replace('\t-30\t', '\t-1,102.00\t');
+      .replaceAll('\t100\t', '\t1,102.00\t')
+      .replace('\t-100\t', '\t-1,102.00\t');
     expect(exactKemerBetSuccessTableMatches(groupedTable, ['fixture-identity'], 110200)).toBe(true);
     expect(
       exactKemerBetSuccessTableMatches(
@@ -205,8 +205,8 @@ describe('strict KemerBet success table', () => {
       ),
     ).toBe(false);
     const spaceGroupedTable = successTableText
-      .replaceAll('\t30\t', '\t3 000.00\t')
-      .replace('\t-30\t', '\t-3 000.00\t');
+      .replaceAll('\t100\t', '\t3 000.00\t')
+      .replace('\t-100\t', '\t-3 000.00\t');
     expect(exactKemerBetSuccessTableMatches(spaceGroupedTable, ['fixture-identity'], 300000)).toBe(
       true,
     );
@@ -306,8 +306,8 @@ describe.skipIf(process.platform !== 'win32')(
     }
 
     it.each([
-      [2500, '25.00'],
-      [2501, '25.01'],
+      [10000, '100.00'],
+      [10001, '100.01'],
       [2500000, '25000.00'],
     ])(
       'prepares and submits the exact bound amount %s once',
@@ -352,20 +352,20 @@ describe.skipIf(process.platform !== 'win32')(
       const outcome = await executeRoutineOneUseLocalKemerBetDeposit(
         page,
         PLAYER_ID,
-        3000,
+        10000,
         lookup,
         deposit,
-        async () => ({ playerId: PLAYER_ID, amountMinor: 3000, isFresh: () => true }),
+        async () => ({ playerId: PLAYER_ID, amountMinor: 10000, isFresh: () => true }),
         (stage) => stages.push(stage),
       );
       expect(await page.locator('.ant-modal-content table').count()).toBe(1);
-      expect(await page.getByText('Player Balance +30.00 ETB Success').count()).toBe(0);
+      expect(await page.getByText('Player Balance +100.00 ETB Success').count()).toBe(0);
       expect(outcome).toEqual({
         outcome: 'submission_attempted',
         providerResponseDigest: DIGEST,
         exactPlayerCreditMatch: true,
       });
-      expect(submitted).toEqual([{ playerId: 42, amount: 30, notes: null }]);
+      expect(submitted).toEqual([{ playerId: 42, amount: 100, notes: null }]);
       expect(stages.at(-1)).toBe('success_modal_confirmed');
     }, 15000);
 
@@ -376,12 +376,12 @@ describe.skipIf(process.platform !== 'win32')(
         executeRoutineOneUseLocalKemerBetDeposit(
           page,
           PLAYER_ID,
-          2500,
+          10000,
           lookup,
           deposit,
           async () => {
             await page.locator('[data-placeholder="Enter Amount"] input').fill('1.00');
-            return { playerId: PLAYER_ID, amountMinor: 2500, isFresh: () => true };
+            return { playerId: PLAYER_ID, amountMinor: 10000, isFresh: () => true };
           },
           (stage) => stages.push(stage),
         ),
@@ -396,10 +396,10 @@ describe.skipIf(process.platform !== 'win32')(
     it('rehearses the real preparation path without granting a transfer or submitting', async () => {
       const { page, lookup, deposit, submitted, blocked } = await startFixture();
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
-      expect(await amountText(page)).toBe('25.00');
+      expect(await amountText(page)).toBe('100.00');
       expect(stages).toEqual([
         'preflight_started',
         'search_surface_ready',
@@ -415,7 +415,7 @@ describe.skipIf(process.platform !== 'win32')(
       expect(
         deposit.consumeExactRequest('POST', DEPOSIT_URL, {
           playerId: 42,
-          amount: 25,
+          amount: 100,
           notes: '',
         }),
       ).toBeUndefined();
@@ -424,7 +424,7 @@ describe.skipIf(process.platform !== 'win32')(
     it('uses the delayed Ant Financial Actions menu despite an unrelated Deposit item', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(delayedNavigationHtml);
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
       expect(stages).toEqual([
@@ -450,7 +450,7 @@ describe.skipIf(process.platform !== 'win32')(
       await page.locator('.rt--header-actions-content-icon').click();
       await page.locator('.rt--transfer-dropdown').waitFor({ state: 'visible' });
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
       expect(stages).toContain('deposit_menu_selected');
@@ -463,7 +463,7 @@ describe.skipIf(process.platform !== 'win32')(
     it('reopens the Financial Actions menu when a first click is lost', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(missedFirstMenuHtml);
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
       expect(stages.filter((stage) => stage === 'financial_actions_opened')).toHaveLength(2);
@@ -522,7 +522,7 @@ describe.skipIf(process.platform !== 'win32')(
     it('waits for the exact prepared form after the verified read-only response', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(delayedPreparedHtml);
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
       expect(stages).toContain('prepared_surface_verified');
@@ -534,10 +534,10 @@ describe.skipIf(process.platform !== 'win32')(
     it('accepts the observed single direction mark on the exact amount without submitting', async () => {
       const { page, lookup, submitted, blocked } = await startFixture(directionMarkedAmountHtml);
       const stages: string[] = [];
-      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 2500, lookup, (stage) =>
+      await rehearseNoMoneyRoutineDepositPreflight(page, PLAYER_ID, 10000, lookup, (stage) =>
         stages.push(stage),
       );
-      expect(await amountText(page)).toBe('\u200e25.00');
+      expect(await amountText(page)).toBe('\u200e100.00');
       expect(stages.at(-1)).toBe('no_money_rehearsal_completed');
       expect(submitted).toEqual([]);
       expect(blocked).toEqual([]);

@@ -285,7 +285,7 @@ function amountEtbToMinor(value: string): string | undefined {
   if (!major) return undefined;
   const minor = `${match[2] ?? ''}00`.slice(0, 2);
   const amountMinor = BigInt(major) * 100n + BigInt(minor);
-  if (amountMinor < 2_500n || amountMinor > 2_500_000n) return undefined;
+  if (amountMinor < 10_000n || amountMinor > 2_500_000n) return undefined;
   return amountMinor.toString();
 }
 

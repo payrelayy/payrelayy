@@ -226,8 +226,8 @@ function depositsPage(model: ProductPreviewModel): string {
     body = `<form class="deposit-form" method="get" action="/preview/deposits">
       <input type="hidden" name="step" value="review">
       <label>Ready Player ID<select name="playerId"><option value="PLAYER-DEMO-42">PLAYER-DEMO-42 · KemerBet</option></select></label>
-      <label>Amount in ETB<div class="amount-input"><span>ETB</span><input name="amount" type="number" inputmode="decimal" min="25" max="25000" step="1" value="${model.amountEtb}" required></div></label>
-      <p class="field-help">Preview limits: 25–25,000 ETB.</p>
+      <label>Amount in ETB<div class="amount-input"><span>ETB</span><input name="amount" type="number" inputmode="decimal" min="100" max="25000" step="1" value="${model.amountEtb}" required></div></label>
+      <p class="field-help">Automatic deposits: 100–25,000 ETB.</p>
       <button type="submit">Review deposit</button>
     </form>`;
   } else if (model.depositStage === 'review') {

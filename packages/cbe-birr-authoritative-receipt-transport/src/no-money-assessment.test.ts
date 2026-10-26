@@ -82,7 +82,7 @@ function observedReceipt(parserResult: unknown): CbeBirrReceiverBoundAdvisoryRes
 }
 
 describe('CBE Birr protected-receiver no-money assessment', () => {
-  it.each(['2500', '10000', '2500000'])(
+  it.each(['10000', '10001', '2500000'])(
     'accepts a consistent %s-minor-unit principal without granting a financial action',
     (principal) => {
       const result = assessCbeBirrProtectedReceiptNoMoney(
@@ -105,7 +105,7 @@ describe('CBE Birr protected-receiver no-money assessment', () => {
     },
   );
 
-  it.each(['2499', '2500001'])(
+  it.each(['2500', '9999', '2500001'])(
     'reviews an out-of-range %s-minor-unit principal rather than crediting fees',
     (principal) => {
       const result = assessCbeBirrProtectedReceiptNoMoney(

@@ -79,7 +79,7 @@ describe('Owner manual payment boundary', () => {
     ]);
     await expect(
       service.approveForImmediateCredit(actor, candidate, {
-        amountMinor: '1',
+        amountMinor: '0',
         receiverAccountId: null,
         bankPaymentConfirmed: false,
       }),
@@ -219,7 +219,7 @@ describe('Owner manual payment boundary', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('keeps low-value SMS visible without offering an ineligible manual credit action', async () => {
+  it('keeps low-value SMS visible and available for manual credit', async () => {
     const service = new PostgresOwnerManualPayments({
       query: async () => ({
         rows: [
@@ -242,7 +242,7 @@ describe('Owner manual payment boundary', () => {
       }),
     });
     expect(await service.listSms(actor)).toMatchObject([
-      { amountMinor: '100', canMarkManuallyCredited: false, status: 'unmatched' },
+      { amountMinor: '100', canMarkManuallyCredited: true, status: 'unmatched' },
     ]);
   });
 

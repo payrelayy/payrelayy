@@ -20,7 +20,7 @@ describe('routine receipt-derived amount binding', () => {
       executeRoutineOneUseLocalKemerBetDeposit(
         {} as Page,
         'private-player-id',
-        2500,
+        10000,
         createLocalKemerBetLookupAuthorization(),
         createLocalKemerBetDepositAuthorization(),
         acquireFinalAction,
@@ -37,7 +37,7 @@ describe('routine receipt-derived amount binding', () => {
       executeRoutineOneUseLocalKemerBetDeposit(
         {} as Page,
         '12345',
-        2500,
+        10000,
         createLocalKemerBetLookupAuthorization(),
         createLocalKemerBetDepositAuthorization(),
         vi.fn(),
@@ -49,8 +49,8 @@ describe('routine receipt-derived amount binding', () => {
   });
 
   it.each([
-    [2500, '25.00'],
-    [2501, '25.01'],
+    [10000, '100.00'],
+    [10001, '100.01'],
     [1999999, '19999.99'],
     [2500000, '25000.00'],
   ])('formats %s minor units without truncating cents', (minor, text) => {
@@ -58,7 +58,7 @@ describe('routine receipt-derived amount binding', () => {
     expect(routineDepositAmountText(minor as number)).toBe(text);
   });
 
-  it.each([0, -2500, 2499, 2500001, 2500.1, NaN, Infinity, '2500', null, undefined])(
+  it.each([0, -2500, 9999, 2500001, 10000.1, NaN, Infinity, '10000', null, undefined])(
     'rejects invalid minor-unit amount %s',
     (amount) => {
       expect(isRoutineDepositAmountMinor(amount)).toBe(false);
@@ -86,7 +86,7 @@ describe('routine receipt-derived amount binding', () => {
     ).toBeUndefined();
   });
 
-  it.each([2500, 2501, 1999999, 2500000])(
+  it.each([10000, 10001, 1999999, 2500000])(
     'consumes exact routine amount %s only once',
     async (minor) => {
       const authorization = createLocalKemerBetDepositAuthorization();
@@ -105,17 +105,17 @@ describe('routine receipt-derived amount binding', () => {
 
   it('accepts only the provider-normalized empty Notes value', async () => {
     const authorization = createLocalKemerBetDepositAuthorization();
-    const outcome = authorization.beginRoutine(42, 2500, () => true);
+    const outcome = authorization.beginRoutine(42, 10000, () => true);
     const consumed = authorization.consumeExactRequest('POST', URL, {
       playerId: 42,
-      amount: 25,
+      amount: 100,
       notes: null,
     });
     expect(consumed).toBeDefined();
     expect(
       authorization.consumeExactRequest('POST', URL, {
         playerId: 42,
-        amount: 25,
+        amount: 100,
         notes: null,
       }),
     ).toBeUndefined();
@@ -152,7 +152,7 @@ describe('routine receipt-derived amount binding', () => {
   it('does not allow overlapping routine requests', async () => {
     const authorization = createLocalKemerBetDepositAuthorization();
     const pending = authorization.beginRoutine(42, 2500000, () => true);
-    await expect(authorization.beginRoutine(43, 2500, () => true)).rejects.toThrow();
+    await expect(authorization.beginRoutine(43, 10000, () => true)).rejects.toThrow();
     authorization.clear();
     await expect(pending).resolves.toMatchObject({ outcome: 'local_uncertain' });
   });
@@ -165,11 +165,11 @@ describe('routine receipt-derived amount binding', () => {
       },
     ]) {
       const authorization = createLocalKemerBetDepositAuthorization();
-      const pending = authorization.beginRoutine(42, 2500, isFresh);
+      const pending = authorization.beginRoutine(42, 10000, isFresh);
       expect(
         authorization.consumeExactRequest('POST', URL, {
           playerId: 42,
-          amount: 25,
+          amount: 100,
           notes: '',
         }),
       ).toBeUndefined();
@@ -179,23 +179,23 @@ describe('routine receipt-derived amount binding', () => {
 
   it('holds the route slot after consumption until the provider outcome is settled', async () => {
     const authorization = createLocalKemerBetDepositAuthorization();
-    const pending = authorization.beginRoutine(42, 2501, () => true);
+    const pending = authorization.beginRoutine(42, 10001, () => true);
     const consumed = authorization.consumeExactRequest('POST', URL, {
       playerId: 42,
-      amount: 25.01,
+      amount: 100.01,
       notes: '',
     });
     expect(consumed).toBeDefined();
-    await expect(authorization.beginRoutine(43, 2500, () => true)).rejects.toThrow();
+    await expect(authorization.beginRoutine(43, 10000, () => true)).rejects.toThrow();
     authorization.clear();
     await expect(pending).resolves.toMatchObject({ outcome: 'local_uncertain' });
-    const replacement = authorization.beginRoutine(43, 2500, () => true);
+    const replacement = authorization.beginRoutine(43, 10000, () => true);
     // A late response from the former route must not settle or clear the new slot.
     consumed?.settle({
       outcome: 'submission_attempted',
       providerResponseDigest: `sha256:${'a'.repeat(64)}`,
     });
-    await expect(authorization.beginRoutine(44, 2500, () => true)).rejects.toThrow();
+    await expect(authorization.beginRoutine(44, 10000, () => true)).rejects.toThrow();
     authorization.clear();
     await expect(replacement).resolves.toMatchObject({ outcome: 'local_uncertain' });
   });

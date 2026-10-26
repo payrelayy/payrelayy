@@ -1655,7 +1655,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
           };
         }
         if (query.includes('open_telegram_dry_run_deposit_intent')) {
-          expect(values.slice(0, 3)).toEqual([inboundEventId, 'PLAYER-DEMO-42', '2500']);
+          expect(values.slice(0, 3)).toEqual([inboundEventId, 'PLAYER-DEMO-42', '10000']);
           expect(values[3]).toMatch(/^hmac-sha256-v1:[0-9a-f]{64}$/u);
           return {
             rows: [
@@ -1665,7 +1665,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
                 receiver_account_holder_name: 'FetanAgent Staging',
                 receiver_account_masked: '****1234',
                 receiver_customer_instruction: 'Send only CBE Birr to the shown account.',
-                expected_amount_minor: '2500',
+                expected_amount_minor: '10000',
                 currency_code: 'ETB',
                 payment_deadline_at: new Date('2026-08-12T13:00:00.000Z'),
                 deposit_status: 'intake_received',
@@ -1682,7 +1682,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       ...rootAction,
       kind: 'deposit_intent_command',
       playerId: 'PLAYER-DEMO-42',
-      amountEtb: '25',
+      amountEtb: '100',
     };
 
     await expect(
@@ -1694,7 +1694,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
       version: 1,
       outcome: 'deposit_instructions',
       depositToken: encodeTelegramCapabilityId(depositIntentId),
-      amountMinor: '2500',
+      amountMinor: '10000',
       currencyCode: 'ETB',
       providerName: 'CBE Birr',
       receiverAccountHolderName: 'FetanAgent Staging',
@@ -1707,7 +1707,7 @@ describe('Postgres Telegram Player-ID action runtime', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it.each(['24.99', '25000.01'])(
+  it.each(['99.99', '25000.01'])(
     'rejects the out-of-range amount %s before opening an intent',
     async (amountEtb) => {
       const calls: string[] = [];

@@ -70,7 +70,7 @@ function exactHistoryRow(): KemerBetAgentHistoryView {
     operationLabel: 'Player Epos Deposit',
     paymentMethod: 'EPOS',
     playerId: lease.target.playerId,
-    amountText: '25.00 ETB',
+    amountText: '100.00 ETB',
     currencyCode: 'ETB',
     occurredAt: '2030-01-02T03:04:10.000Z',
     externalReference: 'bounded-external-reference',
@@ -84,7 +84,7 @@ class FakeAgentPage implements KemerBetBrowserPage {
   transfers = 0;
   preparedReads = 0;
   driftAfterFirstPreparedRead = false;
-  transferResultText = 'Player Balance +25.00 ETB Success';
+  transferResultText = 'Player Balance +100.00 ETB Success';
   history: readonly KemerBetAgentHistoryView[] = [];
   transferResultError: Error | null = null;
   historyError: Error | null = null;
@@ -298,7 +298,7 @@ describe('KemerBet deposit browser boundary', () => {
       exactCurrencyMatch: true,
       amountFilledMinor: DEPOSIT_MINIMUM_MINOR,
     });
-    expect(fixture.page.amount).toBe('25.00');
+    expect(fixture.page.amount).toBe('100.00');
     await expect(
       browser.submitOnceAfterFence(lease, {
         firstFenceAcquired: true,
@@ -484,7 +484,7 @@ describe('KemerBet deposit browser boundary', () => {
 
   it('requires the exact observed modal punctuation and case', async () => {
     const fixture = dependencies();
-    fixture.page.transferResultText = 'Player Balance 25.00 ETB success';
+    fixture.page.transferResultText = 'Player Balance 100.00 ETB success';
     const browser = createKemerBetDepositBrowser(fixture.value);
     await browser.prepare(lease);
 

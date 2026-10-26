@@ -122,7 +122,7 @@ function fixture() {
     ).toString('base64url'),
   };
   const facts = {
-    amountMinor: 2_500,
+    amountMinor: 10_000,
     canonicalReferencePresent: true,
     creditedPartyNameDigest: trustedLookup.expectedReceiverNameDigest,
     currencyCode: 'ETB',
@@ -373,7 +373,7 @@ describe('paid TeleBirr phone observation upload boundary', () => {
       providerCode: 'telebirr',
       candidateId: context.trustedLookup.candidateId,
       challengeId: context.trustedLookup.challengeId,
-      amountMinor: 2500,
+      amountMinor: 10000,
     });
     expect(JSON.stringify(stageObservation.mock.calls)).not.toContain(rawReference);
     expect(JSON.stringify(decoded(responses[0]!))).not.toContain(rawReference);

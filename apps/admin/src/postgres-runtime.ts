@@ -48,7 +48,7 @@ export interface OwnerControlPostgresRuntime {
         Partial<
           Pick<
             PostgresOwnerManualPayments,
-            'systemOverview' | 'listSubmittedPayments' | 'approveAfterCredit'
+            'systemOverview' | 'listSubmittedPayments' | 'approveForImmediateCredit'
           >
         >)
     | undefined;
@@ -276,7 +276,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
       to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid,
       'execute'), true) as submitted_payments_list_allowed,
     coalesce(has_function_privilege(current_user,
-      to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid,
+      to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)')::oid,
       'execute'), true) as submitted_payment_approve_allowed,
     coalesce((
       select routine.prosecdef and routine.proowner = 'postgres'::regrole
@@ -294,7 +294,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           where acl.privilege_type = 'EXECUTE'
             and acl.grantee not in ('postgres'::regrole, 'fetanagent_owner_control'::regrole))
       from pg_proc routine
-      where routine.oid = to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid
+      where routine.oid = to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)')::oid
     ), true) as submitted_payment_approve_catalog_safe,
     (
       coalesce(not has_function_privilege(current_user,
@@ -410,7 +410,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
         + (to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)') is not null)::integer
         + (to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)') is not null)::integer
-        + (to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)') is not null)::integer
+        + (to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)') is not null)::integer
         + (to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)') is not null)::integer
         + coalesce(has_function_privilege(current_user,
             to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid,
@@ -482,7 +482,7 @@ export const OWNER_CONTROL_PREFLIGHT_SQL = `
           ,coalesce(to_regprocedure('app.decide_owner_manual_payment_case(uuid,uuid,text,text)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.complete_owner_manual_payment_case(uuid,uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_submitted_payments(uuid,text,integer,integer)')::oid, 0::oid)
-          ,coalesce(to_regprocedure('app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)')::oid, 0::oid)
+          ,coalesce(to_regprocedure('app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.list_owner_routine_telebirr_transactions(uuid,text,date,date,text,integer,integer)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.finalize_routine_telebirr_paid_observation(uuid)')::oid, 0::oid)
           ,coalesce(to_regprocedure('app.issue_owner_routine_telebirr_device_pairing_challenge(uuid,uuid)')::oid, 0::oid)

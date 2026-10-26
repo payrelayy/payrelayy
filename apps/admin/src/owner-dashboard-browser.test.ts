@@ -691,7 +691,7 @@ describe('Owner manual payment review', () => {
     completedAt: null,
   };
 
-  it('shows and copies the full Player ID and records one-step approval after outside credit', async () => {
+  it('shows the full Player ID, then instructs the Owner to credit it after approval', async () => {
     let approved = false;
     const browser = ownerBrowserHarness(503, {
       confirm: false,
@@ -704,7 +704,6 @@ describe('Owner manual payment review', () => {
             amountMinor: '3300',
             receiverAccountId: '55555555-5555-4555-8555-555555555555',
             bankPaymentConfirmed: true,
-            playerCreditedConfirmed: true,
             confirmed: true,
           });
           approved = true;
@@ -748,6 +747,12 @@ describe('Owner manual payment review', () => {
     });
     expect(approved).toBe(true);
     expect(browser.element('#manual-payment-status-filter').value).toBe('approved');
+    expect(browser.element('#receiver-sms-old-status').textContent).toContain(
+      'Credit Player ID 12345678 with 33.00 ETB in KemerBet now',
+    );
+    expect(browser.element('#receiver-sms-old-status').textContent).toContain(
+      'Customer approval message queued',
+    );
     expect(browser.element('#receiver-sms-old-badge').hidden).toBe(true);
     expect(list.children).toHaveLength(0);
     expect(

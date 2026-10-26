@@ -2745,7 +2745,6 @@ export function buildOwnerControlApp(
           'amountMinor',
           'receiverAccountId',
           'bankPaymentConfirmed',
-          'playerCreditedConfirmed',
           'requestId',
           'confirmed',
         ]);
@@ -2760,7 +2759,6 @@ export function buildOwnerControlApp(
             (typeof body.receiverAccountId !== 'string' ||
               !UUID_V4_PATTERN.test(body.receiverAccountId))) ||
           typeof body.bankPaymentConfirmed !== 'boolean' ||
-          body.playerCreditedConfirmed !== true ||
           body.confirmed !== true ||
           Object.keys(request.query as object).length !== 0 ||
           exactRawHeader(request.raw.rawHeaders, 'content-type') !== 'application/json' ||
@@ -2773,16 +2771,15 @@ export function buildOwnerControlApp(
         )
           return reply.code(400).send({ error: 'invalid_request' });
         const actor = await ownerSubject(request.raw.rawHeaders);
-        if (!dependencies.runtime.manualPayments?.approveAfterCredit)
+        if (!dependencies.runtime.manualPayments?.approveForImmediateCredit)
           return reply.code(503).send({ error: 'owner_control_unavailable' });
-        const approved = await dependencies.runtime.manualPayments.approveAfterCredit(
+        const approved = await dependencies.runtime.manualPayments.approveForImmediateCredit(
           actor,
           request.params.candidateId,
           {
             amountMinor: body.amountMinor as string | null,
             receiverAccountId: body.receiverAccountId as string | null,
             bankPaymentConfirmed: body.bankPaymentConfirmed as boolean,
-            playerCreditedConfirmed: true,
           },
         );
         return reply.header('Cache-Control', 'no-store').code(200).send({ approved });

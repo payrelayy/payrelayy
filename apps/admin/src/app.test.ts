@@ -1082,7 +1082,7 @@ describe('Owner-control HTTP boundary', () => {
             calls.push(['list', actor, status]);
             return [];
           },
-          approveAfterCredit: async (actor, candidate, details) => {
+          approveForImmediateCredit: async (actor, candidate, details) => {
             calls.push(['approve', actor, candidate, details]);
             return { caseId: candidateId, status: 'manually_credited' as const };
           },
@@ -1105,7 +1105,6 @@ describe('Owner-control HTTP boundary', () => {
         amountMinor: '3300',
         receiverAccountId: '55555555-5555-4555-8555-555555555555',
         bankPaymentConfirmed: true,
-        playerCreditedConfirmed: true,
         requestId,
         confirmed: true,
       };
@@ -1121,7 +1120,7 @@ describe('Owner-control HTTP boundary', () => {
           await app.inject({
             method: 'POST',
             url: approvalUrl,
-            payload: { ...payload, playerCreditedConfirmed: false },
+            payload: { ...payload, playerCreditedConfirmed: true },
             headers,
           })
         ).statusCode,
@@ -1141,7 +1140,6 @@ describe('Owner-control HTTP boundary', () => {
             amountMinor: '3300',
             receiverAccountId: payload.receiverAccountId,
             bankPaymentConfirmed: true,
-            playerCreditedConfirmed: true,
           },
         ],
       ]);

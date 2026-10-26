@@ -1,4 +1,5 @@
--- Owner approvals record an already-completed outside credit in one transaction.
+-- Owner approval records the reference as credited and queues the normal
+-- customer success message before the Owner performs the outside KemerBet credit.
 -- The existing decision and completion functions retain their reference locks and
 -- one-use checks. No automatic execution job is created here.
 begin;
@@ -9,10 +10,9 @@ set local statement_timeout = '30s';
 alter default privileges for role postgres in schema app
   revoke execute on functions from public;
 
-create function app.approve_owner_manual_payment_after_credit(
+create function app.approve_owner_manual_payment_for_immediate_credit(
   p_actor_auth_user_id uuid, p_candidate_id uuid, p_amount_minor bigint,
-  p_receiver_account_id uuid, p_bank_payment_confirmed boolean,
-  p_player_credited_confirmed boolean
+  p_receiver_account_id uuid, p_bank_payment_confirmed boolean
 ) returns jsonb language plpgsql security definer
 set search_path = pg_catalog, pg_temp as $$
 declare
@@ -20,30 +20,31 @@ declare
   v_completed jsonb;
 begin
   if session_user <> 'fetanagent_owner_control_runtime'
-    or p_actor_auth_user_id is null or p_candidate_id is null
-    or p_player_credited_confirmed is distinct from true then
+    or p_actor_auth_user_id is null or p_candidate_id is null then
     raise exception using errcode = '42501', message = 'An active Owner is required.';
   end if;
 
   -- Both calls run inside this statement's transaction. A failed completion
   -- rolls the reservation back, so no half-approved case can be left behind.
+  -- The legacy completion helper uses true to record the Owner's immediate
+  -- post-approval credit commitment. The outside credit remains the Owner's
+  -- next action and cannot be part of this database transaction.
   v_decision := app.decide_owner_manual_payment_case(
     p_actor_auth_user_id, p_candidate_id, 'approve', null);
   v_completed := app.complete_owner_manual_payment_case(
     p_actor_auth_user_id, (v_decision->>'caseId')::uuid, null,
-    p_amount_minor, p_receiver_account_id, p_bank_payment_confirmed,
-    p_player_credited_confirmed);
+    p_amount_minor, p_receiver_account_id, p_bank_payment_confirmed, true);
   if v_completed->>'status' <> 'manually_credited' then
-    raise exception 'The Owner manual credit was not completed.';
+    raise exception 'The Owner approval could not be recorded.';
   end if;
   return v_completed;
 end;
 $$;
-alter function app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)
+alter function app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)
   owner to postgres;
-revoke all on function app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)
+revoke all on function app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)
   from public, anon, authenticated, service_role, fetanagent_owner_control_runtime;
-grant execute on function app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)
+grant execute on function app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)
   to fetanagent_owner_control;
 
 -- A dedicated Owner-only projection exposes the full Player ID needed for

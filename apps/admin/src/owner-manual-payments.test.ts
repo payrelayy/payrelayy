@@ -55,7 +55,7 @@ describe('Owner manual payment boundary', () => {
     ]);
   });
 
-  it('passes one confirmed manual approval to the atomic database function', async () => {
+  it('records approval before outside credit through one atomic database function', async () => {
     const calls: unknown[] = [];
     const service = new PostgresOwnerManualPayments({
       query: async (sql, values) => {
@@ -65,25 +65,23 @@ describe('Owner manual payment boundary', () => {
     });
     const receiverAccountId = '55555555-5555-4555-8555-555555555555';
     expect(
-      await service.approveAfterCredit(actor, candidate, {
+      await service.approveForImmediateCredit(actor, candidate, {
         amountMinor: '3300',
         receiverAccountId,
         bankPaymentConfirmed: true,
-        playerCreditedConfirmed: true,
       }),
     ).toEqual({ caseId: ownerCase, status: 'manually_credited' });
     expect(calls).toEqual([
       [
-        expect.stringContaining('app.approve_owner_manual_payment_after_credit'),
-        [actor, candidate, '3300', receiverAccountId, true, true],
+        expect.stringContaining('app.approve_owner_manual_payment_for_immediate_credit'),
+        [actor, candidate, '3300', receiverAccountId, true],
       ],
     ]);
     await expect(
-      service.approveAfterCredit(actor, candidate, {
-        amountMinor: null,
+      service.approveForImmediateCredit(actor, candidate, {
+        amountMinor: '1',
         receiverAccountId: null,
         bankPaymentConfirmed: false,
-        playerCreditedConfirmed: false as true,
       }),
     ).rejects.toBeInstanceOf(OwnerManualPaymentRejectedError);
     expect(calls).toHaveLength(1);

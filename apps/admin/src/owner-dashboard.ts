@@ -15,7 +15,7 @@ export const OWNER_CONTROL_GROUPS = [
       {
         label: 'Submitted payments',
         description:
-          'See every submitted payment. Approve only after manually crediting the Player in KemerBet.',
+          'Approve a verified payment, then immediately credit its Player ID in KemerBet.',
         effect: 'Payment decision',
         view: 'submitted',
         section: 'receiver-sms-old-title',
@@ -375,7 +375,7 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-old-title">Submitted payments <span class="waiting-badge" id="receiver-sms-old-badge" hidden></span></h2>
             <button class="secondary" id="receiver-sms-old-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">Automatic credit continues normally. Emergency Approve means you have already credited the displayed Player ID in KemerBet. If no SMS arrived, first confirm the payment in your bank record. FetanAgent then blocks the reference from automatic credit.</p>
+          <p class="receipt-label">Automatic credit continues normally. For an emergency manual credit, verify the payment, then click Approve. FetanAgent immediately records the reference as credited and queues the normal customer approval message. Credit the displayed Player ID in KemerBet immediately afterward. If no SMS arrived, first confirm the payment in your bank record.</p>
           <label for="manual-payment-status-filter">Show payments</label>
           <select id="manual-payment-status-filter">
             <option value="pending">Pending</option>
@@ -6160,24 +6160,37 @@ async function approveSubmittedPayment(value, form) {
   }
   receiverSmsOldBusy = true;
   const requestId = crypto.randomUUID();
+  let nextStep = null;
+  let uncertainStep = null;
   try {
     const response = await ownerRequest('/v1/owner/submitted-payments/' +
       encodeURIComponent(value.candidateId || value.legacyCandidateId) + '/approve', {
         method: 'POST', headers: manualPaymentHeaders(requestId),
         body: JSON.stringify({ amountMinor, receiverAccountId, bankPaymentConfirmed,
-          playerCreditedConfirmed: true, requestId, confirmed: true }),
+          requestId, confirmed: true }),
       });
     if (!response.ok) throw new Error('manual_approval');
     const payload = await response.json();
     if (payload?.approved?.status !== 'manually_credited') throw new Error('manual_approval');
     manualPaymentStatusFilter.value = 'approved';
-    setNotice('Manual credit recorded. This payment reference cannot be credited again.');
+    const amount = minorEtb(hasSms ? value.amountMinor : amountMinor);
+    nextStep = 'Approved. Customer approval message queued. Credit Player ID ' +
+      value.playerId + ' with ' + amount + ' in KemerBet now.';
+    setNotice(nextStep);
+    receiverSmsOldStatus.textContent = nextStep;
   } catch (error) {
-    if (!isSignedOutError(error))
-      setNotice('Approval could not be confirmed. Check the payment status before doing anything else.');
+    if (!isSignedOutError(error)) {
+      manualPaymentStatusFilter.value = 'approved';
+      uncertainStep = 'Approval status is uncertain. Check Approved payments for Player ID ' +
+        value.playerId + '. If it appears, credit the Player in KemerBet now. Otherwise return to Pending and retry.';
+      setNotice(uncertainStep);
+    }
   } finally {
     receiverSmsOldBusy = false;
     if (accessToken) await Promise.all([loadManualPaymentCases(true),loadReceiverSmsInbox(true)]);
+    if (accessToken && manualPaymentStatusFilter.value === 'approved' &&
+        (nextStep !== null || uncertainStep !== null))
+      receiverSmsOldStatus.textContent = nextStep || uncertainStep;
   }
 }
 
@@ -6390,7 +6403,7 @@ function renderManualPaymentCase(value) {
     if (value.canApprove) {
       const guidance = document.createElement('p');
       guidance.className = 'request-meta';
-      guidance.textContent = 'Approve only after you have credited this Player ID in KemerBet. Approval records that credit in one step.';
+      guidance.textContent = 'Approve records this payment as credited and sends the normal customer approval message. Immediately credit this Player ID in KemerBet afterward.';
       actions.append(guidance,manualApprovalForm(value));
     }
     else {

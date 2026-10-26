@@ -892,7 +892,7 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
       }
     });
 
-    it('shows the full Player ID only to the Owner and approves a no-SMS manual credit atomically', async () => {
+    it('approves before outside credit and queues the normal customer success message atomically', async () => {
       const client = getClient();
       await client.query('begin');
       try {
@@ -928,15 +928,15 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         await client.query('savepoint incomplete_approval');
         await expect(
           client.query(
-            `select app.approve_owner_manual_payment_after_credit(
-            $1::uuid,$2::uuid,3300,$3::uuid,false,true)`,
+            `select app.approve_owner_manual_payment_for_immediate_credit(
+            $1::uuid,$2::uuid,3300,$3::uuid,false)`,
             [getOwner(), candidate, account.rows[0]!.id],
           ),
         ).rejects.toThrow('bank confirmation');
         await client.query('rollback to savepoint incomplete_approval');
         const approved = await client.query<{ result: { status: string } }>(
-          `select app.approve_owner_manual_payment_after_credit(
-            $1::uuid,$2::uuid,3300,$3::uuid,true,true) as result`,
+          `select app.approve_owner_manual_payment_for_immediate_credit(
+            $1::uuid,$2::uuid,3300,$3::uuid,true) as result`,
           [getOwner(), candidate, account.rows[0]!.id],
         );
         expect(approved.rows[0]?.result.status).toBe('manually_credited');
@@ -948,15 +948,23 @@ export function registerReceiverSmsPaymentLedgerSqlTests(
         );
         expect(listed.rows).toEqual([{ payment_status: 'approved', can_approve: false }]);
         await client.query('reset session authorization');
-        const fences = await client.query<{ jobs: string; cases: string }>(
+        const fences = await client.query<{
+          jobs: string;
+          cases: string;
+          customer_notice: string;
+        }>(
           `select
             (select count(*)::text from app.receiver_sms_settlement_lineages
               where candidate_id=$1::uuid) as jobs,
             (select count(*)::text from app.owner_manual_payment_cases
-              where candidate_id=$1::uuid and status='manually_credited') as cases`,
+              where candidate_id=$1::uuid and status='manually_credited') as cases,
+            (select count(*)::text from app.telegram_deposit_outcome_deliveries
+              where candidate_id=$1::uuid and notification_stage='manual_final'
+                and outcome_code='credited' and amount_minor=3300
+                and status='pending') as customer_notice`,
           [candidate],
         );
-        expect(fences.rows).toEqual([{ jobs: '0', cases: '1' }]);
+        expect(fences.rows).toEqual([{ jobs: '0', cases: '1', customer_notice: '1' }]);
       } finally {
         await client.query('reset session authorization').catch(() => undefined);
         await client.query('rollback');

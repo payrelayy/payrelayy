@@ -190,7 +190,7 @@ export function registerPrivateLivePilotOwnerControlSqlTests(
         },
         {
           signature:
-            'app.approve_owner_manual_payment_after_credit(uuid,uuid,bigint,uuid,boolean,boolean)',
+            'app.approve_owner_manual_payment_for_immediate_credit(uuid,uuid,bigint,uuid,boolean)',
         },
         { signature: 'app.approve_owner_telebirr_execution(uuid,uuid,uuid)' },
         {

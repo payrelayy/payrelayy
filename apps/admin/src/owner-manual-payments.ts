@@ -358,14 +358,13 @@ export class PostgresOwnerManualPayments {
     }
   }
 
-  async approveAfterCredit(
+  async approveForImmediateCredit(
     actor: string,
     candidateId: string,
     request: {
       readonly amountMinor: string | null;
       readonly receiverAccountId: string | null;
       readonly bankPaymentConfirmed: boolean;
-      readonly playerCreditedConfirmed: true;
     },
   ): Promise<{ readonly caseId: string; readonly status: 'manually_credited' }> {
     if (
@@ -376,14 +375,13 @@ export class PostgresOwnerManualPayments {
           BigInt(request.amountMinor) < 2500n ||
           BigInt(request.amountMinor) > 2500000n)) ||
       (request.receiverAccountId !== null && !UUID.test(request.receiverAccountId)) ||
-      typeof request.bankPaymentConfirmed !== 'boolean' ||
-      request.playerCreditedConfirmed !== true
+      typeof request.bankPaymentConfirmed !== 'boolean'
     )
       throw new OwnerManualPaymentRejectedError();
     try {
       const result = await this.database.query(
-        `select app.approve_owner_manual_payment_after_credit(
-          $1::uuid,$2::uuid,$3::bigint,$4::uuid,$5::boolean,$6::boolean
+        `select app.approve_owner_manual_payment_for_immediate_credit(
+          $1::uuid,$2::uuid,$3::bigint,$4::uuid,$5::boolean
         ) as approved`,
         [
           actor,
@@ -391,7 +389,6 @@ export class PostgresOwnerManualPayments {
           request.amountMinor,
           request.receiverAccountId,
           request.bankPaymentConfirmed,
-          true,
         ],
       );
       if (result.rows.length !== 1) throw new OwnerManualPaymentUnavailableError();

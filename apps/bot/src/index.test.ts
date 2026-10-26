@@ -698,7 +698,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       text: string;
       options:
         | {
-            reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+            reply_markup?: { buttons?: unknown[] };
             entities?: { type: string; offset: number; length: number }[];
           }
         | undefined;
@@ -708,7 +708,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       reply: async (
         text: string,
         options?: {
-          reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+          reply_markup?: { buttons?: unknown[] };
           entities?: { type: string; offset: number; length: number }[];
         },
       ) => {
@@ -734,8 +734,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).toContain(
       'After paying, send reference, SMS, receipt link, screenshot or PDF here.',
     );
-    expect(replies[0]!.options?.reply_markup).toMatchObject({ force_reply: true });
-    expect(replies[0]!.options?.reply_markup).not.toHaveProperty('buttons');
+    expect(replies[0]!.options?.reply_markup).toBeUndefined();
     expect(
       replies[0]!.options?.entities?.map((entity) => ({
         type: entity.type,
@@ -782,7 +781,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       text: string;
       options:
         | {
-            reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+            reply_markup?: { buttons?: unknown[] };
             entities?: { type: string; offset: number; length: number }[];
           }
         | undefined;
@@ -794,7 +793,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
       reply: async (
         text: string,
         options?: {
-          reply_markup?: { buttons?: unknown[]; force_reply?: boolean };
+          reply_markup?: { buttons?: unknown[] };
           entities?: { type: string; offset: number; length: number }[];
         },
       ) => {
@@ -809,8 +808,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
     expect(replies[0]!.text).toContain('Name: CBE Owner Name\nNumber: 900000043');
     expect(replies[0]!.text).not.toContain('TeleBirr\n');
     expect(replies[0]!.text).not.toContain('Valid for 1 hour');
-    expect(replies[0]!.options?.reply_markup).toMatchObject({ force_reply: true });
-    expect(replies[0]!.options?.reply_markup).not.toHaveProperty('buttons');
+    expect(replies[0]!.options?.reply_markup).toBeUndefined();
     expect(
       replies[0]!.options?.entities?.map((entity) =>
         replies[0]!.text.slice(entity.offset, entity.offset + entity.length),
@@ -962,7 +960,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
   });
 
   it.each(['command', 'button'] as const)(
-    'opens the same Force Reply deposit prompt from the %s entry point',
+    'opens the same normal Player ID prompt from the %s entry point',
     async (entryPoint) => {
       await loadComposition(false, true);
       runtime.actionResult = { version: 1, outcome: 'player_selection_missing' };
@@ -985,24 +983,38 @@ describe('Telegram admission, private action, and ingress composition', () => {
         expect(answerCallbackQuery).toHaveBeenCalledOnce();
       }
 
-      expect(replies).toEqual([
-        {
-          text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT,
-          options: {
-            reply_markup: {
-              force_reply: true,
-              selective: true,
-              input_field_placeholder: 'KemerBet Player ID',
-            },
-          },
-        },
-      ]);
+      expect(replies).toEqual([{ text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, options: undefined }]);
       expect(runtime.actionDeliveries).toEqual([
         expect.objectContaining({ kind: 'saved_telebirr_destination_command' }),
       ]);
       expect(runtime.ingressDeliveries).toHaveLength(0);
     },
   );
+
+  it('opens Change Player ID without forcing a Telegram reply', async () => {
+    await loadComposition(false, true, true, false, true);
+    const replies: { text: string; options?: unknown }[] = [];
+    await runtime.callbackHandler!({
+      ...messageContext(''),
+      callbackQuery: { data: 'sp1.change' },
+      answerCallbackQuery: async () => {},
+      reply: async (text: string, options?: unknown) => {
+        replies.push({ text, options });
+      },
+    });
+
+    expect(replies).toEqual([{ text: TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT, options: undefined }]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+
+    runtime.actionResult = { version: 1, outcome: 'player_validation_queued' };
+    await runtime.messageHandler!(messageContext('28379330'));
+    expect(runtime.actionDeliveries).toEqual([
+      expect.objectContaining({
+        kind: 'player_validation_request_command',
+        playerId: '28379330',
+      }),
+    ]);
+  });
 
   it('saves one Player ID and offers Deposit without starting payment', async () => {
     await loadComposition(false, true);

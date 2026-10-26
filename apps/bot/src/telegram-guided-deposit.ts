@@ -7,7 +7,7 @@ import {
 } from './telegram-customer-copy.js';
 
 /**
- * This callback only opens a Telegram reply prompt. It carries no capability, customer data,
+ * This callback only opens a Telegram Player ID prompt. It carries no capability, customer data,
  * Player ID, payment reference, or authority to call the API.
  */
 export const TELEGRAM_GUIDED_TELEBIRR_CALLBACK_DATA = 'gd1.telebirr';
@@ -32,8 +32,10 @@ const CURRENT_TELEBIRR_PROOF_OPTIONS_TEXT =
 
 export const TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT = 'FetanAgent';
 
-/** First step of the current deposit wizard. */
-export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = [
+/** A normal chat message; an eight-digit ID is accepted without replying to it. */
+export const TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT = '🎮 Send your 8-digit KemerBet Player ID.';
+
+const RECENT_GUIDED_DEPOSIT_PROMPT_TEXT = [
   '🎮 Send your KemerBet Player ID.',
   '/menu to cancel.',
 ].join('\n');
@@ -108,6 +110,7 @@ export function isTelegramGuidedDepositPlayerPromptReply(value: unknown): boolea
   const message = value as TelegramReplyMessageShape;
   return (
     (message.text === TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT ||
+      message.text === RECENT_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PRECEDING_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PRIOR_GUIDED_DEPOSIT_PROMPT_TEXT ||
       message.text === PREVIOUS_GUIDED_DEPOSIT_PROMPT_TEXT) &&

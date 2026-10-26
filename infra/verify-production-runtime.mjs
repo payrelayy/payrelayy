@@ -42,6 +42,8 @@ const [
   telegramNaturalMessagesReleaseRunbook,
   shortCustomerCopyHelperRotation,
   shortCustomerCopyReleaseRunbook,
+  releaseGuardRefreshHelperRotation,
+  releaseGuardRefreshRunbook,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -105,6 +107,8 @@ const [
   read('infra/operations/production-telegram-natural-messages-release.md'),
   read('infra/operations/fetanagent-production-v2-short-customer-copy-helper-rotation-v1.sh'),
   read('infra/operations/production-short-customer-copy-release.md'),
+  read('infra/operations/fetanagent-production-v2-release-guard-refresh-helper-rotation-v1.sh'),
+  read('infra/operations/production-release-guard-refresh.md'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -774,14 +778,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '4e4faa65ae2b536424a857b5003fbc675343b4c8'/gu)].length,
+  [...workflow.matchAll(/status '09cf011cd8d0cc381763ac63a65e3056533f032f'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='4e4faa65ae2b536424a857b5003fbc675343b4c8'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='09cf011cd8d0cc381763ac63a65e3056533f032f'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1733,7 +1737,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='4e4faa65ae2b536424a857b5003fbc675343b4c8'",
   "readonly PREDECESSOR_SHA256='6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b'",
   "readonly SOURCE_REVIEW='short-customer-copy-release-v1'",
   "readonly STAGED_HELPER='/root/fetanagent-production-v2-short-customer-copy-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
   'require_current_release',
@@ -1771,11 +1775,38 @@ assert.doesNotMatch(shortCustomerCopyHelperRotation, /\b(?:docker|psql|rm|sed|ch
 for (const value of [
   '4e4faa65ae2b536424a857b5003fbc675343b4c8',
   '6280df25be1900634a2fc50111fd1161105b73dc92b5ef187c931ae8580b2e43',
-  helperDigest,
+  '90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b',
   'cbe-live-v1',
   'ROTATE EXACT PRODUCTION V2 SHORT CUSTOMER COPY HELPER V1',
 ]) {
   assert.ok(shortCustomerCopyReleaseRunbook.includes(value));
+}
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='09cf011cd8d0cc381763ac63a65e3056533f032f'",
+  "readonly PREDECESSOR_SHA256='90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='release-guard-refresh-v1'",
+  'flock --nonblock 9',
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 RELEASE GUARD REFRESH HELPER V1',
+]) {
+  assert.ok(releaseGuardRefreshHelperRotation.includes(value));
+}
+assert.doesNotMatch(releaseGuardRefreshHelperRotation, /\b(?:docker|psql|rm|sed|chmod|chown)\s/u);
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-release-guard-refresh-helper-rotation-v1\.sh/u,
+);
+for (const value of [
+  '09cf011cd8d0cc381763ac63a65e3056533f032f',
+  '90778252cd69601243cb68e90b208cbac08e10eecd7ce95582c0686983516d1b',
+  helperDigest,
+  'ROTATE EXACT PRODUCTION V2 RELEASE GUARD REFRESH HELPER V1',
+]) {
+  assert.ok(releaseGuardRefreshRunbook.includes(value));
 }
 assert.equal(
   sudoers,

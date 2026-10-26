@@ -10233,6 +10233,17 @@ describe('100 ETB production deposit policy cutover', () => {
       'insert into sql_integration.applied_migrations (filename) values ($1)',
       [depositRangeMigrationName],
     );
+    await postCutoverClient.query(
+      `insert into app.receiver_accounts (
+        provider_id,version,account_holder_name,account_reference_ciphertext,
+        account_reference_masked,account_reference_fingerprint,
+        protection_profile_version,encryption_key_version,fingerprint_key_version,
+        rotation_request_id,rotation_reason
+      ) select provider.id,1,'Synthetic Range Test Receiver',$1::text,
+        '***7300',repeat('7',64),1,1,1,$2::uuid,'initial_configuration'
+        from app.payment_providers provider where provider.code='telebirr'`,
+      [`receiver-v1.telebirr.${'A'.repeat(16)}.${'B'.repeat(22)}.${'C'.repeat(16)}`, randomUUID()],
+    );
   });
 
   afterAll(async () => {

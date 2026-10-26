@@ -131,8 +131,9 @@ reconciliation.
 
 ## Safety invariants
 
-- The fixed 25 ETB v2 protocol, worker, handoff, and Owner-approved one-job path retain their old
-  capability and semantics.
+- Historical fixed 25 ETB v2 records and replay semantics remain intact. Under the current
+  100–25,000 ETB automatic policy, a new 25 ETB payment is held for Owner manual review and cannot
+  enter automatic settlement, lease, or transfer.
 - The bridge's no-money database login never receives the routine broker function. The routine
   login never receives pairing, lookup, v2 execution, table, sequence, or column privileges.
 - The certificate signer and execution-response signer must have different key IDs and keys.

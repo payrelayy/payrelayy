@@ -2814,7 +2814,7 @@ export function buildOwnerControlApp(
         )
       )
         return reply.code(400).send({ error: 'invalid_request' });
-      const limit = request.query.limit === undefined ? 25 : Number(request.query.limit);
+      const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
       const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
       const provider = request.query.provider ?? 'all';
       const status = request.query.status ?? 'all';

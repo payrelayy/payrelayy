@@ -867,12 +867,13 @@ describe('Owner manual payment review', () => {
           : undefined,
     });
     await browser.signIn();
+    await browser.call('loadReceiverSmsInbox', true);
     const inbox = JSON.stringify(browser.element('#receiver-sms-inbox-list'));
     expect(inbox).toContain('I manually credited the selected Player');
     expect(inbox).toContain('Mark manually credited');
   });
 
-  it('searches received SMS across pages with the applied filters', async () => {
+  it('loads the latest 50 SMS on opening and applies the simple filters automatically', async () => {
     const browser = ownerBrowserHarness(503, {
       fetchOverride: (url) =>
         url.startsWith('/v1/owner/receiver-sms-inbox?')
@@ -880,27 +881,65 @@ describe('Owner manual payment review', () => {
           : undefined,
     });
     await browser.signIn();
-    browser.element('#receiver-sms-inbox-provider-filter').value = 'cbe_birr';
-    browser.element('#receiver-sms-inbox-status-filter').value = 'unmatched';
-    browser.element('#receiver-sms-inbox-last4').value = 'ab12';
-    browser.element('#receiver-sms-inbox-from').value = '2026-10-01';
-    browser.element('#receiver-sms-inbox-to').value = '2026-10-23';
-    await browser.call('loadReceiverSmsInbox', true);
     const requests = () =>
       browser.fetchCalls.filter(({ url }) => url.startsWith('/v1/owner/receiver-sms-inbox?'));
-    expect(requests().at(-1)?.url).toContain(
-      'provider=cbe_birr&status=unmatched&last4=AB12&from=2026-10-01&to=2026-10-23',
+    expect(requests()).toHaveLength(0);
+    await browser.call('showOwnerView', 'sms');
+    await vi.waitFor(() =>
+      expect(requests().at(-1)?.url).toBe('/v1/owner/receiver-sms-inbox?limit=50&offset=0'),
+    );
+    browser.element('#receiver-sms-inbox-provider-filter').value = 'cbe_birr';
+    browser.element('#receiver-sms-inbox-status-filter').value = 'unmatched';
+    await browser.element('#receiver-sms-inbox-status-filter').listeners.get('change')?.({
+      preventDefault() {},
+    });
+    await vi.waitFor(() =>
+      expect(requests().at(-1)?.url).toBe(
+        '/v1/owner/receiver-sms-inbox?limit=50&offset=0&provider=cbe_birr&status=unmatched',
+      ),
     );
     browser.element('#receiver-sms-inbox-provider-filter').value = 'telebirr';
     await browser.call('loadReceiverSmsInbox', false);
     expect(requests().at(-1)?.url).toContain('provider=cbe_birr&status=unmatched');
-    browser.element('#receiver-sms-inbox-last4').value = 'BAD!';
-    const requestCount = requests().length;
-    await browser.call('loadReceiverSmsInbox', true);
-    expect(requests()).toHaveLength(requestCount);
-    expect(browser.element('#receiver-sms-inbox-status').textContent).toContain(
-      'Check the reference',
+    await browser.element('#receiver-sms-inbox-clear').listeners.get('click')?.({
+      preventDefault() {},
+    });
+    await vi.waitFor(() =>
+      expect(requests().at(-1)?.url).toBe('/v1/owner/receiver-sms-inbox?limit=50&offset=0'),
     );
+    expect(browser.element('#receiver-sms-inbox-provider-filter').value).toBe('all');
+    expect(browser.element('#receiver-sms-inbox-status-filter').value).toBe('all');
+  });
+
+  it('shows 50 SMS before offering the next page', async () => {
+    const messages = Array.from({ length: 50 }, (_, index) => ({
+      paymentEventId: `44444444-4444-4444-8444-${String(index + 1).padStart(12, '0')}`,
+      providerCode: 'telebirr',
+      paymentAt: '2026-10-23T09:00:00Z',
+      receivedAt: '2026-10-23T09:00:10Z',
+      amountMinor: '3300',
+      receiverAccountMasked: '***1234',
+      receiverHolderName: 'Receiver',
+      referenceMasked: null,
+      candidateId: null,
+      playerMasked: null,
+      status: 'unmatched',
+      caseId: null,
+      canMarkManuallyCredited: false,
+    }));
+    const browser = ownerBrowserHarness(503, {
+      fetchOverride: (url) =>
+        url.startsWith('/v1/owner/receiver-sms-inbox?')
+          ? response(200, { payments: url.includes('offset=50') ? [] : messages })
+          : undefined,
+    });
+    await browser.signIn();
+    await browser.call('loadReceiverSmsInbox', true);
+    expect(browser.element('#receiver-sms-inbox-list').children).toHaveLength(50);
+    expect(browser.element('#receiver-sms-inbox-more').hidden).toBe(false);
+    await browser.call('loadReceiverSmsInbox', false);
+    expect(browser.fetchCalls.at(-1)?.url).toBe('/v1/owner/receiver-sms-inbox?limit=50&offset=50');
+    expect(browser.element('#receiver-sms-inbox-more').hidden).toBe(true);
   });
 });
 

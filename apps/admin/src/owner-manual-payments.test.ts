@@ -219,6 +219,33 @@ describe('Owner manual payment boundary', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('keeps low-value SMS visible without offering an ineligible manual credit action', async () => {
+    const service = new PostgresOwnerManualPayments({
+      query: async () => ({
+        rows: [
+          {
+            payment_event_id: sms,
+            provider_code: 'telebirr',
+            payment_at: new Date('2026-10-25T21:19:00Z'),
+            received_at: new Date('2026-10-25T21:19:15Z'),
+            amount_minor: '100',
+            receiver_account_masked: '***1234',
+            receiver_holder_name: 'Receiving account',
+            reference_masked: null,
+            candidate_id: null,
+            player_masked: null,
+            payment_status: 'unmatched',
+            case_id: null,
+            can_mark_manually_credited: true,
+          },
+        ],
+      }),
+    });
+    expect(await service.listSms(actor)).toMatchObject([
+      { amountMinor: '100', canMarkManuallyCredited: false, status: 'unmatched' },
+    ]);
+  });
+
   it('lists older signed TeleBirr submissions in the same manual queue', async () => {
     const service = new PostgresOwnerManualPayments({
       query: async () => ({

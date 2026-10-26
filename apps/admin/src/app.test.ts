@@ -1196,13 +1196,20 @@ describe('Owner-control HTTP boundary', () => {
       expect(calls).toEqual([
         [authUserId, 25, 50, 'cbe_birr', 'unmatched', 'AB12', '2026-10-01', '2026-10-23'],
       ]);
+      const latest = await app.inject({
+        method: 'GET',
+        url: '/v1/owner/receiver-sms-inbox',
+        headers: { authorization: `Bearer ${bearer}` },
+      });
+      expect(latest.statusCode).toBe(200);
+      expect(calls[1]).toEqual([authUserId, 50, 0, 'all', 'all', undefined, undefined, undefined]);
       const invalid = await app.inject({
         method: 'GET',
         url: '/v1/owner/receiver-sms-inbox?provider=other&limit=25',
         headers: { authorization: `Bearer ${bearer}` },
       });
       expect(invalid.statusCode).toBe(400);
-      expect(calls).toHaveLength(1);
+      expect(calls).toHaveLength(2);
       const overview = await app.inject({
         method: 'GET',
         url: '/v1/owner/system-overview',

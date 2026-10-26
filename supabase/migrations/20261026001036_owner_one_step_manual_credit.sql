@@ -9,9 +9,6 @@ set local statement_timeout = '30s';
 alter default privileges for role postgres in schema app
   revoke execute on functions from public;
 
-create index receiver_sms_candidates_owner_submitted_idx
-  on app.receiver_sms_deposit_candidates (submitted_at desc, id desc);
-
 create function app.approve_owner_manual_payment_after_credit(
   p_actor_auth_user_id uuid, p_candidate_id uuid, p_amount_minor bigint,
   p_receiver_account_id uuid, p_bank_payment_confirmed boolean,

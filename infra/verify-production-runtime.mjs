@@ -38,6 +38,8 @@ const [
   ownerControlPanelHelperRotation,
   ownerEmergencyApprovalHelperRotation,
   ownerSmsInboxHelperRotation,
+  telegramNaturalMessagesHelperRotation,
+  telegramNaturalMessagesReleaseRunbook,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -97,6 +99,8 @@ const [
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-telegram-natural-messages-helper-rotation-v1.sh'),
+  read('infra/operations/production-telegram-natural-messages-release.md'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -766,14 +770,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '03c65fe835f952a7b5e6ef628a60893ff7229caf'/gu)].length,
+  [...workflow.matchAll(/status 'c1e9e91e209eb8d50563accafd7112bbbdafdc50'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='03c65fe835f952a7b5e6ef628a60893ff7229caf'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='c1e9e91e209eb8d50563accafd7112bbbdafdc50'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1656,7 +1660,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='03c65fe835f952a7b5e6ef628a60893ff7229caf'",
   "readonly PREDECESSOR_SHA256='f9dff78b64bec9722e1170ac7e36fa084d6c01233dee15741f0cf5a5d2836027'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='9a45d0e999335b923fcc2506e7e985b063bc7e5d124cc67d4def8b4e50a209df'",
   "readonly SOURCE_REVIEW='owner-sms-inbox-release-v1'",
   "readonly STAGED_HELPER='/root/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
   'require_current_release',
@@ -1671,6 +1675,56 @@ assert.match(
   workflow,
   /bash -n infra\/operations\/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1\.sh/u,
 );
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='c1e9e91e209eb8d50563accafd7112bbbdafdc50'",
+  "readonly PREDECESSOR_SHA256='9a45d0e999335b923fcc2506e7e985b063bc7e5d124cc67d4def8b4e50a209df'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='telegram-natural-messages-release-v1'",
+  "readonly STAGED_HELPER='/root/fetanagent-production-v2-telegram-natural-messages-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'flock --nonblock 9',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 TELEGRAM NATURAL MESSAGES HELPER V1',
+]) {
+  assert.ok(telegramNaturalMessagesHelperRotation.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-telegram-natural-messages-helper-rotation-v1\.sh/u,
+);
+const naturalMessagesRotationSteps = telegramNaturalMessagesHelperRotation.slice(
+  telegramNaturalMessagesHelperRotation.indexOf('rotate() {'),
+);
+for (const [before, after] of [
+  ['acquire_lock', 'install_record "$INTENT" intent_body'],
+  ['install_record "$INTENT" intent_body', 'mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"'],
+  ['mv -T -- "$SUDOERS" "$DISABLED_SUDOERS"', 'mv -T -- "$NEXT_HELPER" "$HELPER"'],
+  ['mv -T -- "$NEXT_HELPER" "$HELPER"', 'mv -T -- "$NEXT_SUDOERS" "$SUDOERS"'],
+  [
+    'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+    'install_record "$COMPLETE" complete_body',
+  ],
+]) {
+  assert.ok(
+    naturalMessagesRotationSteps.indexOf(before) >= 0 &&
+      naturalMessagesRotationSteps.indexOf(before) < naturalMessagesRotationSteps.indexOf(after),
+  );
+}
+assert.doesNotMatch(
+  telegramNaturalMessagesHelperRotation,
+  /\b(?:docker|psql|rm|sed|chmod|chown)\s/u,
+);
+for (const value of [
+  'c1e9e91e209eb8d50563accafd7112bbbdafdc50',
+  '9a45d0e999335b923fcc2506e7e985b063bc7e5d124cc67d4def8b4e50a209df',
+  helperDigest,
+  'cbe-live-v1',
+  'ROTATE EXACT PRODUCTION V2 TELEGRAM NATURAL MESSAGES HELPER V1',
+]) {
+  assert.ok(telegramNaturalMessagesReleaseRunbook.includes(value));
+}
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

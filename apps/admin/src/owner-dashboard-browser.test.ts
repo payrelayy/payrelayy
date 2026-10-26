@@ -733,8 +733,9 @@ describe('Owner manual payment review', () => {
     expect(JSON.stringify(list)).toContain('Approve');
     expect(JSON.stringify(list)).toContain('Reject');
     expect(JSON.stringify(list)).not.toContain('FULL_REFERENCE');
-    const copyButton = list.children[0]?.children.find(
-      (child) => child.textContent === 'Copy Player ID',
+    const copyButton = (list.children[0] as FakeElement).children.find(
+      (child): child is FakeElement =>
+        child instanceof FakeElement && child.textContent === 'Copy Player ID',
     );
     await copyButton?.listeners.get('click')?.({ preventDefault() {} });
     expect(browser.copiedText).toEqual(['12345678']);

@@ -10196,38 +10196,51 @@ registerVerificationSettlementSqlTests(
 );
 
 describe('100 ETB production deposit policy cutover', () => {
+  let postCutoverClient: Client;
+
   beforeAll(async () => {
+    postCutoverClient = createSqlIntegrationClient(environment, environment.postCutoverHost);
+    await postCutoverClient.connect();
+    await applySyntheticSupabaseBootstrap(postCutoverClient);
+    await applyMigrationsLexically(
+      postCutoverClient,
+      environment.migrationsDirectory,
+      depositRangeMigrationName,
+    );
+    await postCutoverClient.query(
+      `insert into auth.users (id,email) values ($1::uuid,'cutover-owner@example.invalid')`,
+      [ownerAuthUserId],
+    );
+    await postCutoverClient.query(
+      `select app.bootstrap_first_owner($1::uuid,'Cutover Test Owner')`,
+      [ownerAuthUserId],
+    );
+    const agent = await postCutoverClient.query<{ id: string }>(
+      `insert into app.platform_agent_accounts (platform_id,label,credential_ref)
+          select id,'deposit-range-cutover','secret://deposit-range-cutover'
+          from app.platforms where code='kemerbet' returning id`,
+    );
+    await postCutoverClient.query(
+      `select app.save_owner_routine_telebirr_processing($1::uuid,$2::uuid,$3::uuid)`,
+      [ownerAuthUserId, agent.rows[0]!.id, randomUUID()],
+    );
     const migrationSource = await readFile(
       join(environment.migrationsDirectory, depositRangeMigrationName),
       'utf8',
     );
-    await client.query(migrationSource);
-    await client.query('insert into sql_integration.applied_migrations (filename) values ($1)', [
-      depositRangeMigrationName,
-    ]);
-    const activeAgent = await client.query<{ id: string }>(
-      `select agent.id from app.platform_agent_accounts agent
-        join app.platforms platform on platform.id=agent.platform_id
-        where platform.code='kemerbet' and agent.status='active'
-        order by agent.created_at,agent.id limit 1`,
-    );
-    const agentId =
-      activeAgent.rows[0]?.id ??
-      (
-        await client.query<{ id: string }>(
-          `insert into app.platform_agent_accounts (platform_id,label,credential_ref)
-          select id,'deposit-range-cutover','secret://deposit-range-cutover'
-          from app.platforms where code='kemerbet' returning id`,
-        )
-      ).rows[0]!.id;
-    await client.query(
-      `select app.save_owner_routine_telebirr_processing($1::uuid,$2::uuid,$3::uuid)`,
-      [ownerAuthUserId, agentId, randomUUID()],
+    await postCutoverClient.query(migrationSource);
+    await postCutoverClient.query(
+      'insert into sql_integration.applied_migrations (filename) values ($1)',
+      [depositRangeMigrationName],
     );
   });
 
+  afterAll(async () => {
+    await postCutoverClient?.end();
+  });
+
   it('records the new active Owner policy while preserving the complete migration order', async () => {
-    const policy = await client.query<{
+    const policy = await postCutoverClient.query<{
       minimum_amount_minor: string;
       maximum_amount_minor: string;
     }>(
@@ -10238,14 +10251,14 @@ describe('100 ETB production deposit policy cutover', () => {
       { minimum_amount_minor: '10000', maximum_amount_minor: '2500000' },
     ]);
     const expected = await listMigrationsLexically(environment.migrationsDirectory);
-    const applied = await client.query<{ filename: string }>(
+    const applied = await postCutoverClient.query<{ filename: string }>(
       'select filename from sql_integration.applied_migrations order by filename',
     );
     expect(applied.rows.map((row) => row.filename)).toEqual(expected);
   });
 
   registerPostCutoverReceiverSmsRangeSqlTests(
-    () => client,
+    () => postCutoverClient,
     () => ownerAuthUserId,
   );
 });

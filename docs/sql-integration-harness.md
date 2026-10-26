@@ -30,6 +30,9 @@ inbound rows cannot be adopted, and that exact stored receipts remain replayable
 administrator deactivates their customer or identity; new updates remain rejected. Two independent
 database sessions racing to redeem the same invite for different private Telegram users must settle
 with exactly one admitted graph and one generic rejection.
+Historical 25 ETB pilot cases run against the migrations that created them. A separate disposable
+PostgreSQL service applies the 100 ETB cutover to an Owner-authorized 25 ETB policy, then checks
+automatic settlement at both new boundaries and Owner approval for signed payments outside them.
 A signal requests teardown rather than leaving the disposable Compose project running.
 
 Do not add an external hostname, a published port, a mounted filesystem, an environment file,

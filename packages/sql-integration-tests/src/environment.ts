@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const expectedHost = 'postgres';
 const expectedStagingRehearsalHost = 'staging-ledger-postgres';
+const expectedPostCutoverHost = 'post-cutover-postgres';
 const expectedMode = 'local-disposable';
 const expectedMigrationsDirectory = '/workspace/supabase/migrations';
 const expectedPostgresPassword = 'TEST-ONLY-NOT-A-SECRET-fetanagent-sql-admin-v1';
@@ -43,6 +44,7 @@ export interface SqlIntegrationEnvironment {
   readonly host: typeof expectedHost;
   readonly migrationsDirectory: typeof expectedMigrationsDirectory;
   readonly stagingRehearsalHost: typeof expectedStagingRehearsalHost;
+  readonly postCutoverHost: typeof expectedPostCutoverHost;
 }
 
 export function readSqlIntegrationEnvironment(
@@ -70,6 +72,10 @@ export function readSqlIntegrationEnvironment(
     throw new Error('Staging rehearsal must use only its internal disposable postgres hostname.');
   }
 
+  if (environment.SQL_INTEGRATION_POST_CUTOVER_POSTGRES_HOST !== expectedPostCutoverHost) {
+    throw new Error('Post-cutover SQL integration must use its internal disposable hostname.');
+  }
+
   if (environment.SQL_INTEGRATION_POSTGRES_PASSWORD !== expectedPostgresPassword) {
     throw new Error('SQL integration must use only the fixed disposable administrator credential.');
   }
@@ -83,12 +89,16 @@ export function readSqlIntegrationEnvironment(
     host: expectedHost,
     migrationsDirectory: expectedMigrationsDirectory,
     stagingRehearsalHost: expectedStagingRehearsalHost,
+    postCutoverHost: expectedPostCutoverHost,
   };
 }
 
 export function createSqlIntegrationClient(
   environment: SqlIntegrationEnvironment,
-  host: typeof expectedHost | typeof expectedStagingRehearsalHost = expectedHost,
+  host:
+    | typeof expectedHost
+    | typeof expectedStagingRehearsalHost
+    | typeof expectedPostCutoverHost = expectedHost,
 ): Client {
   const config: ClientConfig = {
     application_name: 'fetanagent_sql_integration',

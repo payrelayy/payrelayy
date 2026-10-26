@@ -81,7 +81,7 @@ export async function persistentPolicyFixture(
 
 export async function paidJob(
   client: Client,
-  amountMinor = 2500,
+  amountMinor = 10000,
   providerCode: 'telebirr' | 'cbe_birr' = 'telebirr',
   withPaidLineage = true,
   existingPlayer?: {
@@ -349,7 +349,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
           configurationState: 'authorized',
           executionEnabled: false,
           policy: {
-            minimumAmountMinor: 2500,
+            minimumAmountMinor: 10000,
             maximumAmountMinor: 2500000,
             dailyQuotaMinor: null,
             successfulDepositQuota: null,
@@ -471,7 +471,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       });
     });
 
-    it.each([2500, 2501, 2500000])(
+    it.each([10000, 10001, 2500000])(
       'admits only the exact verified receipt amount %s without leasing or approving',
       async (amountMinor) => {
         const client = getClient();
@@ -570,7 +570,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       const client = getClient();
       await rollback(client, async () => {
         await persistentPolicyFixture(client, getOwner());
-        const deposit = await paidJob(client, 2500, 'telebirr', false);
+        const deposit = await paidJob(client, 10000, 'telebirr', false);
         expect(
           (
             await client.query(
@@ -618,7 +618,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       await rollback(client, async () => {
         await persistentPolicyFixture(client, getOwner());
         for (let index = 0; index < 7; index += 1) {
-          const deposit = await paidJob(client, 2500 + index);
+          const deposit = await paidJob(client, 10000 + index);
           await client.query(`select app.admit_routine_telebirr_execution_job($1::uuid)`, [
             deposit.jobId,
           ]);
@@ -690,7 +690,7 @@ export function registerRoutineTelebirrProcessingPolicySqlTests(
       await rollback(client, async () => {
         const old = await paidJob(client);
         await save(client, getOwner(), await account(client));
-        const cbe = await paidJob(client, 2500, 'cbe_birr');
+        const cbe = await paidJob(client, 10000, 'cbe_birr');
         for (const jobId of [old.jobId, cbe.jobId, randomUUID()]) {
           expect(
             (

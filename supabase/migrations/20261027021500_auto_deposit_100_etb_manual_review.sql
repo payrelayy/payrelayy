@@ -134,8 +134,33 @@ begin
     if pg_catalog.regexp_count(v_definition, '\m2500\M') <> v_row.expected_hits then
       raise exception 'Unexpected old range in app.%', v_row.name;
     end if;
-    execute pg_catalog.regexp_replace(
-      v_definition, '\m2500\M', '10000', 'g');
+    v_definition := pg_catalog.regexp_replace(v_definition, '\m2500\M', '10000', 'g');
+    if v_row.name = 'save_owner_routine_telebirr_processing' then
+      if pg_catalog.strpos(v_definition,
+          'if policy_id is null then raise exception ''The documented deposit policy is required.''; end if;') = 0 then
+        raise exception 'The Owner policy save has changed.';
+      end if;
+      v_definition := pg_catalog.replace(v_definition,
+        'if policy_id is null then raise exception ''The documented deposit policy is required.''; end if;',
+        $first_owner_policy$
+if policy_id is null then
+  if exists (select 1 from app.deposit_policy_versions policy
+      where policy.status = 'active' and policy.version = 1
+        and policy.created_by_admin_id is null
+        and policy.minimum_amount_minor = 2500
+        and policy.maximum_amount_minor = 2500000
+        and policy.freshness_window_seconds = 3600)
+    and not exists (select 1 from app.routine_telebirr_processing_authorizations)
+    and not exists (select 1 from app.deposit_jobs job
+      where job.status not in ('succeeded','cancelled','dead')) then
+    policy_id := app.set_deposit_policy(actor_id,10000,2500000,3600);
+  else
+    raise exception 'The documented deposit policy is required.';
+  end if;
+end if;
+$first_owner_policy$);
+    end if;
+    execute v_definition;
   end loop;
 end;
 $automatic_functions$;

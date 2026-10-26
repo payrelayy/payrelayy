@@ -402,7 +402,7 @@ export class PostgresOwnerManualPayments {
 
   async listSms(
     actor: string,
-    limit = 25,
+    limit = 50,
     offset = 0,
     providerFilter = 'all',
     statusFilter = 'all',
@@ -456,12 +456,13 @@ export class PostgresOwnerManualPayments {
           typeof row.can_mark_manually_credited !== 'boolean'
         )
           throw new OwnerManualPaymentUnavailableError();
+        const amountMinor = displayedPaymentAmount(row.amount_minor)!;
         return {
           paymentEventId: uuid(row.payment_event_id)!,
           providerCode: provider(row.provider_code),
           paymentAt: date(row.payment_at)!,
           receivedAt: date(row.received_at)!,
-          amountMinor: amount(row.amount_minor)!,
+          amountMinor,
           receiverAccountMasked: masked(row.receiver_account_masked, MASKED_RECEIVER)!,
           receiverHolderName: row.receiver_holder_name,
           referenceMasked: masked(row.reference_masked, MASKED_REFERENCE, true),
@@ -469,7 +470,10 @@ export class PostgresOwnerManualPayments {
           playerMasked: masked(row.player_masked, MASKED_PLAYER, true),
           status: String(row.payment_status),
           caseId: uuid(row.case_id, true),
-          canMarkManuallyCredited: row.can_mark_manually_credited,
+          canMarkManuallyCredited:
+            row.can_mark_manually_credited &&
+            BigInt(amountMinor) >= 2500n &&
+            BigInt(amountMinor) <= 2500000n,
         };
       });
     } catch (error) {

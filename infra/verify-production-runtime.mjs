@@ -37,6 +37,7 @@ const [
   botExpiryMenuHelperRotation,
   ownerControlPanelHelperRotation,
   ownerEmergencyApprovalHelperRotation,
+  ownerSmsInboxHelperRotation,
   predecessorHelper,
   predecessorSudoers,
   provisionSql,
@@ -95,6 +96,7 @@ const [
   read('infra/operations/fetanagent-production-v2-bot-expiry-menu-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-control-panel-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1.sh'),
+  read('infra/operations/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sh'),
   read('infra/operations/fetanagent-production-deploy-helper.sudoers'),
   read('infra/sql/production-nonfinancial-runtimes-provision.sql'),
@@ -764,14 +766,14 @@ assert.match(
 assert.match(workflow, /Verify the payment switches remained unchanged/u);
 assert.match(workflow, /steps\.payment_profile\.outputs\.fingerprint/u);
 assert.equal(
-  [...workflow.matchAll(/status '97ff2764fed63679b102d2d7649650a4119c66a2'/gu)].length,
+  [...workflow.matchAll(/status '03c65fe835f952a7b5e6ef628a60893ff7229caf'/gu)].length,
   2,
   'both guarded CBE predecessor checks must target the running release',
 );
 assert.match(workflow, /activate '\$GITHUB_SHA' carry-routine-marker/u);
 assert.match(
   helper,
-  /readonly CBE_GUARDED_PREDECESSOR_SHA='97ff2764fed63679b102d2d7649650a4119c66a2'/u,
+  /readonly CBE_GUARDED_PREDECESSOR_SHA='03c65fe835f952a7b5e6ef628a60893ff7229caf'/u,
 );
 assert.match(helper, /handoff_routine_marker\(\)/u);
 assert.match(helper, /restore_routine_marker_for_rollback\(\)/u);
@@ -1621,7 +1623,7 @@ for (const value of [
   "readonly EXPECTED_DROPLET_ID='593344964'",
   "readonly EXPECTED_CURRENT_SHA='97ff2764fed63679b102d2d7649650a4119c66a2'",
   "readonly PREDECESSOR_SHA256='238b1068123b434128def98334c01e367df2edb4912684b7cd57d8d7cb6932b7'",
-  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SUCCESSOR_SHA256='f9dff78b64bec9722e1170ac7e36fa084d6c01233dee15741f0cf5a5d2836027'",
   "readonly SOURCE_REVIEW='owner-emergency-approval-release-v1'",
   "readonly STAGED_HELPER='/root/fetanagent-production-v2-owner-emergency-approval-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
   'require_current_release',
@@ -1650,6 +1652,25 @@ for (const [before, after] of [
       emergencyRotationSteps.indexOf(before) < emergencyRotationSteps.indexOf(after),
   );
 }
+for (const value of [
+  "readonly EXPECTED_DROPLET_ID='593344964'",
+  "readonly EXPECTED_CURRENT_SHA='03c65fe835f952a7b5e6ef628a60893ff7229caf'",
+  "readonly PREDECESSOR_SHA256='f9dff78b64bec9722e1170ac7e36fa084d6c01233dee15741f0cf5a5d2836027'",
+  `readonly SUCCESSOR_SHA256='${helperDigest}'`,
+  "readonly SOURCE_REVIEW='owner-sms-inbox-release-v1'",
+  "readonly STAGED_HELPER='/root/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1-input/fetanagent-production-deploy-helper-v2.next'",
+  'require_current_release',
+  'require_sudoers "$SUDOERS" "$SUCCESSOR_SHA256"',
+  'flock --nonblock 9',
+  'runuser -u fetanagent-admin -- sudo -n "$HELPER" verify "$SUCCESSOR_SHA256"',
+  'ROTATE EXACT PRODUCTION V2 OWNER SMS INBOX HELPER V1',
+]) {
+  assert.ok(ownerSmsInboxHelperRotation.includes(value));
+}
+assert.match(
+  workflow,
+  /bash -n infra\/operations\/fetanagent-production-v2-owner-sms-inbox-helper-rotation-v1\.sh/u,
+);
 assert.equal(
   sudoers,
   `fetanagent-admin ALL=(root) NOPASSWD: sha256:${helperDigest} /usr/local/sbin/fetanagent-production-deploy-helper-v2 *\n`,

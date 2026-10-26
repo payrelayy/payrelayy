@@ -391,8 +391,8 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
             <h2 id="receiver-sms-inbox-title">Received payment SMS</h2>
             <button class="secondary" id="receiver-sms-inbox-refresh" type="button">Refresh</button>
           </div>
-          <p class="receipt-label">See incoming TeleBirr and CBE Birr SMS, including payments without a customer submission. Use Mark manually credited only after resolving the payment outside FetanAgent; the reference is then blocked from automatic credit.</p>
-          <form id="receiver-sms-inbox-filters" class="transactions-filters" autocomplete="off">
+          <p class="receipt-label">The latest 50 TeleBirr and CBE Birr payment SMS appear here automatically, newest first. Mark manually credited only after resolving a payment outside FetanAgent.</p>
+          <form id="receiver-sms-inbox-filters" class="sms-inbox-filters" autocomplete="off">
             <div>
               <label for="receiver-sms-inbox-provider-filter">Provider</label>
               <select id="receiver-sms-inbox-provider-filter">
@@ -402,39 +402,27 @@ export function ownerDashboardHtml(runtime: Extract<OwnerControlRuntimeConfig, {
               </select>
             </div>
             <div>
-              <label for="receiver-sms-inbox-status-filter">Status</label>
+              <label for="receiver-sms-inbox-status-filter">Show</label>
               <select id="receiver-sms-inbox-status-filter">
                 <option value="all">All statuses</option>
-                <option value="unmatched">No customer submission</option>
-                <option value="submission_waiting">Waiting for payment match</option>
-                <option value="pending_review">Pending review</option>
-                <option value="awaiting_manual_credit">Awaiting manual credit</option>
-                <option value="auto_processing">Automatic credit processing</option>
-                <option value="auto_credited">Automatically credited</option>
-                <option value="manually_credited">Manually credited</option>
-                <option value="auto_not_credited">Automatic credit stopped</option>
-                <option value="auto_used">Reference already used</option>
-                <option value="rejected">Rejected</option>
+                <optgroup label="Needs attention">
+                  <option value="unmatched">No customer submission</option>
+                  <option value="submission_waiting">Waiting for payment match</option>
+                  <option value="pending_review">Pending review</option>
+                  <option value="awaiting_manual_credit">Awaiting manual credit</option>
+                  <option value="auto_not_credited">Automatic credit stopped</option>
+                </optgroup>
+                <optgroup label="Processing or finished">
+                  <option value="auto_processing">Automatic credit processing</option>
+                  <option value="auto_credited">Automatically credited</option>
+                  <option value="manually_credited">Manually credited</option>
+                  <option value="auto_used">Reference already used</option>
+                  <option value="rejected">Rejected</option>
+                </optgroup>
               </select>
             </div>
-            <div>
-              <label for="receiver-sms-inbox-last4">Reference last 4 (linked only)</label>
-              <input id="receiver-sms-inbox-last4" type="text" maxlength="4" pattern="[A-Za-z0-9]{4}" placeholder="AB12" spellcheck="false" autocapitalize="characters" />
-            </div>
-            <div>
-              <label for="receiver-sms-inbox-from">Received from</label>
-              <input id="receiver-sms-inbox-from" type="date" />
-            </div>
-            <div>
-              <label for="receiver-sms-inbox-to">Received through</label>
-              <input id="receiver-sms-inbox-to" type="date" />
-            </div>
-            <div class="transactions-filter-actions">
-              <button type="submit">Find payments</button>
-              <button class="secondary" id="receiver-sms-inbox-clear" type="button">Clear</button>
-            </div>
+            <button class="secondary" id="receiver-sms-inbox-clear" type="button">Clear filters</button>
           </form>
-          <p class="receipt-label">Times use Ethiopia time. Reference search applies only after a customer submission provides a visible ending.</p>
           <p class="request-meta" id="receiver-sms-inbox-status" role="status" aria-live="polite">Sign in to load received payments.</p>
           <div class="request-list" id="receiver-sms-inbox-list"></div>
           <button class="secondary transactions-more" id="receiver-sms-inbox-more" type="button" hidden>Show older SMS</button>
@@ -1168,6 +1156,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .transactions-filters > div { display: grid; gap: 6px; }
 .transactions-filter-actions { grid-column: 1 / -1; grid-template-columns: repeat(2, 1fr); }
 .transactions-filter-actions button { margin-top: 0; }
+.sms-inbox-filters { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 10px; margin-top: 14px; }
+.sms-inbox-filters > div { display: grid; gap: 6px; min-width: 0; }
+.sms-inbox-filters button { margin-top: 0; white-space: nowrap; }
 .transactions-summary { margin-top: 16px; }
 .transaction-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .transaction-heading h3 { margin: 0; }
@@ -1234,7 +1225,7 @@ footer { margin-top: 30px; font-size: 0.85rem; }
   .review-section { padding: 16px; }
   .owner-control-grid { grid-template-columns: 1fr; }
   .owner-control-link { min-height: 0; }
-  .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions { grid-template-columns: 1fr; }
+  .actions, .review-actions, .companion-actions, .transactions-filters, .transactions-filter-actions, .sms-inbox-filters { grid-template-columns: 1fr; }
   .panel-heading { gap: 12px; }
   .panel-heading .secondary { flex: 0 0 auto; }
 }
@@ -1298,6 +1289,7 @@ function showOwnerView(view, focusHeading = false) {
   ownerViewTitle.textContent = details.title;
   ownerViewDescription.textContent = details.description;
   if (focusHeading) ownerViewTitle.focus();
+  if (selectedView === 'sms' && accessToken) void loadReceiverSmsInbox(true);
 }
 for (const view of Object.keys(ownerViews)) {
   document.querySelector('#owner-nav-' + view).addEventListener('click', () => showOwnerView(view, true));
@@ -1355,9 +1347,6 @@ const receiverSmsInboxRefresh = document.querySelector('#receiver-sms-inbox-refr
 const receiverSmsInboxFilters = document.querySelector('#receiver-sms-inbox-filters');
 const receiverSmsInboxProviderFilter = document.querySelector('#receiver-sms-inbox-provider-filter');
 const receiverSmsInboxStatusFilter = document.querySelector('#receiver-sms-inbox-status-filter');
-const receiverSmsInboxLast4 = document.querySelector('#receiver-sms-inbox-last4');
-const receiverSmsInboxFrom = document.querySelector('#receiver-sms-inbox-from');
-const receiverSmsInboxTo = document.querySelector('#receiver-sms-inbox-to');
 const receiverSmsInboxClear = document.querySelector('#receiver-sms-inbox-clear');
 const receiverSmsInboxStatus = document.querySelector('#receiver-sms-inbox-status');
 const receiverSmsInboxList = document.querySelector('#receiver-sms-inbox-list');
@@ -1370,7 +1359,7 @@ let manualPaymentOffset = 0;
 let receiverSmsInboxOffset = 0;
 let receiverSmsInboxLoadGeneration = 0;
 let receiverSmsInboxAppliedFilters = {
-  provider: 'all', status: 'all', last4: '', from: '', to: '',
+  provider: 'all', status: 'all',
 };
 let manualReceiverAccounts = [];
 const supportContactForm = document.querySelector('#support-contact-form');
@@ -3471,11 +3460,8 @@ function signOut(message = 'Signed out.') {
   receiverSmsInboxLoadGeneration += 1;
   receiverSmsInboxProviderFilter.value = 'all';
   receiverSmsInboxStatusFilter.value = 'all';
-  receiverSmsInboxLast4.value = '';
-  receiverSmsInboxFrom.value = '';
-  receiverSmsInboxTo.value = '';
   receiverSmsInboxAppliedFilters = {
-    provider: 'all', status: 'all', last4: '', from: '', to: '',
+    provider: 'all', status: 'all',
   };
   receiverSmsInboxList.replaceChildren();
   receiverSmsInboxStatus.textContent = 'Sign in to load received payments.';
@@ -6606,19 +6592,8 @@ async function loadReceiverSmsInbox(reset) {
   const filters = reset ? {
     provider: receiverSmsInboxProviderFilter.value,
     status: receiverSmsInboxStatusFilter.value,
-    last4: receiverSmsInboxLast4.value.trim().toUpperCase(),
-    from: receiverSmsInboxFrom.value,
-    to: receiverSmsInboxTo.value,
   } : receiverSmsInboxAppliedFilters;
-  if ((filters.last4 && !/^[A-Z0-9]{4}$/.test(filters.last4)) ||
-      (filters.from && filters.to && filters.from > filters.to)) {
-    receiverSmsInboxStatus.textContent = 'Check the reference ending and received dates.';
-    return;
-  }
-  if (reset) {
-    receiverSmsInboxLast4.value = filters.last4;
-    receiverSmsInboxAppliedFilters = filters;
-  }
+  if (reset) receiverSmsInboxAppliedFilters = filters;
   const generation = ownerAuthGeneration;
   const loadGeneration = ++receiverSmsInboxLoadGeneration;
   const offset = reset ? 0 : receiverSmsInboxOffset;
@@ -6626,27 +6601,25 @@ async function loadReceiverSmsInbox(reset) {
   receiverSmsInboxMore.disabled = true;
   receiverSmsInboxStatus.textContent = 'Loading received payments…';
   try {
-    const query = 'limit=25&offset=' + offset +
-      '&provider=' + encodeURIComponent(filters.provider) +
-      '&status=' + encodeURIComponent(filters.status) +
-      (filters.last4 ? '&last4=' + encodeURIComponent(filters.last4) : '') +
-      (filters.from ? '&from=' + encodeURIComponent(filters.from) : '') +
-      (filters.to ? '&to=' + encodeURIComponent(filters.to) : '');
+    const query = 'limit=50&offset=' + offset +
+      (filters.provider !== 'all' ? '&provider=' + encodeURIComponent(filters.provider) : '') +
+      (filters.status !== 'all' ? '&status=' + encodeURIComponent(filters.status) : '');
     const response = await ownerRequest('/v1/owner/receiver-sms-inbox?' + query,
       { method: 'GET', headers: {} });
     if (!response.ok) throw new Error('sms_inbox');
     const payload = await response.json();
-    if (!payload || !Array.isArray(payload.payments) || payload.payments.length > 25 ||
+    if (!payload || !Array.isArray(payload.payments) || payload.payments.length > 50 ||
         !payload.payments.every(validSmsInboxPayment)) throw new Error('sms_inbox');
     if (generation !== ownerAuthGeneration || loadGeneration !== receiverSmsInboxLoadGeneration ||
         !accessToken) return;
     if (reset) receiverSmsInboxList.replaceChildren();
     for (const value of payload.payments) receiverSmsInboxList.append(renderSmsInboxPayment(value));
     receiverSmsInboxOffset = offset + payload.payments.length;
-    receiverSmsInboxMore.hidden = payload.payments.length < 25 || receiverSmsInboxOffset > 10000;
+    receiverSmsInboxMore.hidden = payload.payments.length < 50 || receiverSmsInboxOffset > 10000;
     receiverSmsInboxStatus.textContent = payload.payments.length === 0 && reset
-      ? 'No received payments match these filters.'
-      : 'Showing ' + receiverSmsInboxOffset + ' received payment(s).';
+      ? (filters.provider === 'all' && filters.status === 'all'
+          ? 'No payment SMS received yet.' : 'No payment SMS match these filters.')
+      : 'Showing ' + receiverSmsInboxOffset + ' payment SMS, newest first.';
   } catch (error) {
     if (generation === ownerAuthGeneration && loadGeneration === receiverSmsInboxLoadGeneration &&
         !isSignedOutError(error))
@@ -6671,12 +6644,11 @@ receiverSmsInboxFilters.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadReceiverSmsInbox(true);
 });
+receiverSmsInboxProviderFilter.addEventListener('change', () => void loadReceiverSmsInbox(true));
+receiverSmsInboxStatusFilter.addEventListener('change', () => void loadReceiverSmsInbox(true));
 receiverSmsInboxClear.addEventListener('click', () => {
   receiverSmsInboxProviderFilter.value = 'all';
   receiverSmsInboxStatusFilter.value = 'all';
-  receiverSmsInboxLast4.value = '';
-  receiverSmsInboxFrom.value = '';
-  receiverSmsInboxTo.value = '';
   void loadReceiverSmsInbox(true);
 });
 
@@ -7524,7 +7496,6 @@ async function loadOwnerPlayerQueues() {
       loadTelebirrFastAlerts(),
       loadTransactions(true),
       loadManualPaymentCases(true),
-      loadReceiverSmsInbox(true),
       loadCurrentPilot(),
       loadExecutionReadiness(),
       loadExecutionApprovals(),

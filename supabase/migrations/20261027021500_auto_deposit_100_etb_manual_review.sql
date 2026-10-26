@@ -44,8 +44,8 @@ begin
     where id = v_event.authorization_id;
   select * into v_policy from app.deposit_policy_versions
     where status = 'active' for update;
-  -- The untouched initial seed has no Owner yet. Retire it as a versioned
-  -- migration so the first Owner authorization uses the current range.
+  -- An unowned initial seed has no execution authorization. Keep its historic
+  -- version until an Owner establishes the new policy; it cannot credit.
   if v_event.event_sequence is null
     and v_policy.version = 1
     and v_policy.created_by_admin_id is null
@@ -53,11 +53,6 @@ begin
     and v_policy.maximum_amount_minor = 2500000
     and v_policy.freshness_window_seconds = 3600
     and not exists (select 1 from app.routine_telebirr_processing_authorizations) then
-    update app.deposit_policy_versions set status = 'inactive', retired_at = pg_catalog.now()
-      where id = v_policy.id;
-    insert into app.deposit_policy_versions
-      (version, minimum_amount_minor, maximum_amount_minor, freshness_window_seconds)
-    values (2, 10000, 2500000, 3600);
     return;
   end if;
   if v_event.event_kind is distinct from 'authorize'

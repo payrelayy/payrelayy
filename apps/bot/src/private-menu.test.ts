@@ -10,16 +10,12 @@ const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
 });
 
 describe('English-only private customer menu', () => {
-  it('puts one Deposit action first and preserves the opaque Player ID action', () => {
+  it('shows only Add Player ID before a Player is saved', () => {
     const menu = renderPlayerRegistrationMenu(callbackData);
 
     expect(menu).toEqual({
       text: 'FetanAgent',
-      buttons: [
-        { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-        { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
-        { text: '➕ Request Player ID review', callbackData },
-      ],
+      buttons: [{ text: '➕ Add Player ID', callbackData: 'sp1.change' }],
     });
     expect(Buffer.byteLength(menu.buttons[0]!.callbackData, 'utf8')).toBeLessThanOrEqual(64);
     expect(JSON.stringify(menu)).not.toMatch(/withdrawal|language/i);
@@ -31,23 +27,18 @@ describe('English-only private customer menu', () => {
     );
   });
 
-  it('hides the manual-review entry only for the automatic Find menu', () => {
-    expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
-    ]);
-  });
-
   it('shows the saved Player ID without explaining message routing', () => {
-    expect(renderPlayerRegistrationMenu(callbackData, '28379330', true).text).toBe(
+    expect(renderPlayerRegistrationMenu(callbackData, '28379330').text).toBe(
       'FetanAgent\nPlayer ID: 28379330',
     );
+    expect(renderPlayerRegistrationMenu(callbackData, '28379330').buttons).toEqual([
+      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
+    ]);
   });
 
   it('shows compact outcome actions without an expiry alert or unavailable action', () => {
     expect(renderTelegramOutcomeActions()).toEqual([
       { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '🔄 Change Player ID', callbackData: 'sp1.change' },
     ]);
     expect(JSON.stringify(renderTelegramOutcomeActions())).not.toMatch(
       /expir|withdraw|unavailable/iu,
@@ -55,9 +46,8 @@ describe('English-only private customer menu', () => {
   });
 
   it('keeps the menu provider-neutral when the SMS route is configured', () => {
-    expect(renderPlayerRegistrationMenu(callbackData, null, true).buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
+    expect(renderPlayerRegistrationMenu(callbackData).buttons).toEqual([
+      { text: '➕ Add Player ID', callbackData: 'sp1.change' },
     ]);
     expect(renderTelegramOutcomeActions()[0]).toEqual({
       text: '💰 Deposit',

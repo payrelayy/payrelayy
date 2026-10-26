@@ -43,7 +43,7 @@ describe('Telegram Player-ID flow presentation', () => {
     }
   });
 
-  it('presents the saved selection and a one-tap repeat deposit', () => {
+  it('confirms the saved selection and offers a one-tap deposit', () => {
     const saved = presentTelegramPlayerIdFlowResult({
       version: 1,
       outcome: 'player_selection_saved',
@@ -51,7 +51,7 @@ describe('Telegram Player-ID flow presentation', () => {
     });
     expect(saved.kind).toBe('menu');
     if (saved.kind === 'menu') {
-      expect(saved.menu.text).toContain('PLAYER-DEMO-42 saved');
+      expect(saved.menu.text).toBe('✅ Player ID verified. You can deposit now.');
       expect(saved.menu.buttons[0]).toEqual({ text: '💰 Deposit', callbackData: 'gd1.deposit' });
     }
     const missing = presentTelegramPlayerIdFlowResult({
@@ -60,7 +60,7 @@ describe('Telegram Player-ID flow presentation', () => {
     });
     expect(missing.kind).toBe('prompt');
   });
-  it('renders the guided deposit before the opaque Player-ID action', () => {
+  it('shows only Add Player ID before an ID is saved', () => {
     const callbackData = formatTelegramPlayerRegistrationCapabilityCallback({
       compactCapabilityId: 'AAAAAAAAAAAAAAAAAAAAAA',
       token: '_____________________w',
@@ -76,11 +76,7 @@ describe('Telegram Player-ID flow presentation', () => {
       kind: 'menu',
       menu: {
         text: 'FetanAgent',
-        buttons: [
-          { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-          { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
-          { text: '➕ Request Player ID review', callbackData },
-        ],
+        buttons: [{ text: '➕ Add Player ID', callbackData: 'sp1.change' }],
       },
     });
   });

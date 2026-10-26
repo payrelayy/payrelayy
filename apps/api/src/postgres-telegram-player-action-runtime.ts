@@ -256,6 +256,21 @@ function isPgRejection(error: unknown): boolean {
   return isRecord(error) && error.code === 'P0001';
 }
 
+function shouldQueueSignedPlayerFind(error: unknown): boolean {
+  return (
+    isPgRejection(error) &&
+    isRecord(error) &&
+    typeof error.message === 'string' &&
+    [
+      'The dry-run deposit proof destination is unavailable.',
+      'The dry-run deposit proof destination is not currently eligible.',
+      'The Player ID is not currently eligible.',
+      'The Player ID has no reusable signed verification.',
+      'The Telegram event already has another action.',
+    ].includes(error.message)
+  );
+}
+
 function payloadHmac(secret: string, rawBody: Buffer): string {
   return `hmac-sha256-v1:${createHmac('sha256', Buffer.from(secret, 'hex'))
     .update('fetanagent:telegram:private-action:payload:v1\n', 'utf8')
@@ -721,6 +736,21 @@ async function handlePlayerValidationRequest(
     { readonly kind: 'player_validation_request_command' }
   >,
 ): Promise<TelegramPrivateActionResult> {
+  try {
+    const selected = oneRow(
+      (await database.query(SAVE_PLAYER_SELECTION_SQL, [originInboundEventId, action.playerId]))
+        .rows,
+    );
+    if (
+      selected.selected_player_id !== action.playerId ||
+      typeof selected.request_replayed !== 'boolean'
+    ) {
+      throw new TelegramPlayerActionRuntimeUnavailableError();
+    }
+    return { version: 1, outcome: 'player_selection_saved', playerId: action.playerId };
+  } catch (error) {
+    if (!shouldQueueSignedPlayerFind(error)) throw error;
+  }
   const row = oneRow(
     (await database.query(REQUEST_PLAYER_VALIDATION_SQL, [originInboundEventId, action.playerId]))
       .rows,

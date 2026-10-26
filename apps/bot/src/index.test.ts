@@ -14,6 +14,7 @@ const runtime = vi.hoisted(() => ({
   admissionOutcome: 'ignored' as 'ignored' | 'admitted' | 'unavailable',
   callbackHandler: undefined as ((context: unknown) => Promise<void>) | undefined,
   catchHandler: undefined as ((error: unknown) => void) | undefined,
+  commandUpdates: [] as { kind: string; commands?: unknown; scope: unknown }[],
   config: undefined as unknown,
   ingressDeliveries: [] as unknown[],
   instructionRecords: [] as unknown[],
@@ -23,7 +24,7 @@ const runtime = vi.hoisted(() => ({
   startOptions: undefined as
     | {
         readonly allowed_updates: readonly string[];
-        readonly onStart: (botInfo: { readonly username: string }) => void;
+        readonly onStart: (botInfo: { readonly username: string }) => void | Promise<void>;
       }
     | undefined,
 }));
@@ -36,7 +37,17 @@ vi.mock('@fetanagent/config/bot', () => ({
 
 vi.mock('grammy', () => ({
   Bot: class {
-    public api = { config: { use: vi.fn() } };
+    public api = {
+      config: { use: vi.fn() },
+      setMyCommands: async (commands: unknown, options: { scope: unknown }) => {
+        runtime.commandUpdates.push({ kind: 'set', commands, scope: options.scope });
+        return true;
+      },
+      deleteMyCommands: async (options: { scope: unknown }) => {
+        runtime.commandUpdates.push({ kind: 'delete', scope: options.scope });
+        return true;
+      },
+    };
     public async init(): Promise<void> {}
 
     public on(event: string, handler: (context: unknown) => Promise<void>): void {
@@ -70,6 +81,10 @@ vi.mock('grammy', () => ({
 
 vi.mock('./telegram-polling-readiness.js', () => ({
   createTelegramPollingReadiness: () => ({ transformer: vi.fn(), stop: vi.fn() }),
+}));
+
+vi.mock('./telegram-deposit-outcome-notifier.js', () => ({
+  runTelegramDepositOutcomeNotifier: async () => {},
 }));
 
 vi.mock('./telegram-beta-invite-admission.js', () => ({
@@ -218,6 +233,7 @@ beforeEach(() => {
   runtime.admissionOutcome = 'ignored';
   runtime.callbackHandler = undefined;
   runtime.catchHandler = undefined;
+  runtime.commandUpdates = [];
   runtime.config = undefined;
   runtime.ingressDeliveries = [];
   runtime.instructionRecords = [];
@@ -239,6 +255,21 @@ afterEach(() => {
 });
 
 describe('Telegram admission, private action, and ingress composition', () => {
+  it('publishes a short blue command menu only for private chats', async () => {
+    await loadComposition(false, true, true, false, true);
+    await runtime.startOptions!.onStart({ username: 'FetanAgentBot' });
+    expect(runtime.commandUpdates).toEqual([
+      {
+        kind: 'set',
+        commands: [
+          { command: 'start', description: 'Home' },
+          { command: 'help', description: 'Help' },
+        ],
+        scope: { type: 'all_private_chats' },
+      },
+    ]);
+  });
+
   it('acknowledges a receipt without exposing the extracted reference', async () => {
     await loadComposition(false, true, false, false, true);
     runtime.mediaResult = { kind: 'text', text: 'Transaction ID: TB12345678' };
@@ -584,13 +615,9 @@ describe('Telegram admission, private action, and ingress composition', () => {
     });
 
     expect(context.replies[0]).toContain('FetanAgent');
-    expect(keyboard?.buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
-      {
-        text: '➕ Request Player ID review',
-        callbackData: 'prc1.AAAAAAAAAAAAAAAAAAAAAA._____________________w',
-      },
+    expect(keyboard?.buttons).toEqual([{ text: '➕ Add Player ID', callbackData: 'sp1.change' }]);
+    expect(runtime.commandUpdates).toEqual([
+      { kind: 'delete', scope: { type: 'chat', chat_id: 123456789 } },
     ]);
   });
 
@@ -609,7 +636,18 @@ describe('Telegram admission, private action, and ingress composition', () => {
         buttons = options?.reply_markup?.buttons ?? [];
       },
     });
-    expect(buttons.map((button) => button.text)).toEqual(['💰 Deposit', '🔄 Change Player ID']);
+    expect(buttons.map((button) => button.text)).toEqual(['💰 Deposit']);
+    expect(runtime.commandUpdates).toEqual([
+      {
+        kind: 'set',
+        commands: [
+          { command: 'start', description: 'Home' },
+          { command: 'change_player_id', description: 'Change Player ID' },
+          { command: 'help', description: 'Help' },
+        ],
+        scope: { type: 'chat', chat_id: 123456789 },
+      },
+    ]);
     runtime.actionDeliveries = [];
     runtime.actionResult = { version: 1, outcome: 'player_selection_missing' };
     await runtime.callbackHandler!({
@@ -872,10 +910,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
         keyboard = options?.reply_markup;
       },
     });
-    expect(keyboard?.buttons).toEqual([
-      { text: '💰 Deposit', callbackData: 'gd1.deposit' },
-      { text: '🎮 Set Player ID', callbackData: 'sp1.change' },
-    ]);
+    expect(keyboard?.buttons).toEqual([{ text: '➕ Add Player ID', callbackData: 'sp1.change' }]);
 
     runtime.actionDeliveries = [];
     const replies: string[] = [];
@@ -1011,6 +1046,14 @@ describe('Telegram admission, private action, and ingress composition', () => {
     ]);
   });
 
+  it('opens Change Player ID from the blue Telegram command menu', async () => {
+    await loadComposition(false, true, true, false, true);
+    const context = messageContext('/change_player_id');
+    await runtime.messageHandler!(context);
+    expect(context.replies).toEqual([TELEGRAM_GUIDED_DEPOSIT_PROMPT_TEXT]);
+    expect(runtime.actionDeliveries).toHaveLength(0);
+  });
+
   it('saves one Player ID and offers Deposit without starting payment', async () => {
     await loadComposition(false, true);
     runtime.actionResult = {
@@ -1045,7 +1088,7 @@ describe('Telegram admission, private action, and ingress composition', () => {
         playerId: 'PLAYER-DEMO-42',
       },
     ]);
-    expect(replies[0]?.text).toContain('Player ID PLAYER-DEMO-42 saved');
+    expect(replies[0]?.text).toBe('✅ Player ID verified. You can deposit now.');
     expect(replies[0]?.options).toBeDefined();
     expect(runtime.ingressDeliveries).toHaveLength(0);
   });

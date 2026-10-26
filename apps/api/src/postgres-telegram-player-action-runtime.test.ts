@@ -717,6 +717,11 @@ describe('Postgres Telegram Player-ID action runtime', () => {
             ],
           };
         }
+        if (query.includes('save_telegram_player_selection')) {
+          throw Object.assign(new Error('The Player ID has no reusable signed verification.'), {
+            code: 'P0001',
+          });
+        }
         if (query.includes('request_telegram_player_validation')) {
           return {
             rows: [{ request_id: 'c9a28bac-1e81-4b87-b225-872e63f1d0c5', request_replayed: false }],
@@ -737,11 +742,50 @@ describe('Postgres Telegram Player-ID action runtime', () => {
         Buffer.from(JSON.stringify(action)),
       ),
     ).resolves.toEqual({ version: 1, outcome: 'player_validation_queued' });
-    expect(calls).toHaveLength(2);
-    expect(calls[1]?.values).toEqual([inboundEventId, 'PLAYER-DEMO-42']);
+    expect(calls).toHaveLength(3);
+    expect(calls[1]?.query).toContain('save_telegram_player_selection');
+    expect(calls[2]?.values).toEqual([inboundEventId, 'PLAYER-DEMO-42']);
     expect(calls.map((call) => call.query).join('\n')).not.toMatch(
-      /save_telegram_player_selection|prepare_telegram|capture_telegram|transfer/u,
+      /prepare_telegram|capture_telegram|transfer/u,
     );
+  });
+
+  it('reuses a signed eligible Player without queuing another Companion Find', async () => {
+    const calls: string[] = [];
+    const database: TelegramPlayerActionDatabase = {
+      async query(query) {
+        calls.push(query);
+        if (query.includes('record_public_telegram_action_inbound_event')) {
+          return {
+            rows: [
+              {
+                inbound_event_id: inboundEventId,
+                received_at: new Date(),
+                inbound_event_already_recorded: false,
+              },
+            ],
+          };
+        }
+        if (query.includes('save_telegram_player_selection')) {
+          return { rows: [{ selected_player_id: '28379330', request_replayed: false }] };
+        }
+        throw new Error('Unexpected query.');
+      },
+      async end() {},
+    };
+    const action: TelegramPrivateActionEnvelope = {
+      ...rootAction,
+      kind: 'player_validation_request_command',
+      playerId: '28379330',
+    };
+    await expect(
+      createPostgresTelegramPlayerActionRuntime(actionConfig, database).handle(
+        action,
+        Buffer.from(JSON.stringify(action)),
+      ),
+    ).resolves.toEqual({ version: 1, outcome: 'player_selection_saved', playerId: '28379330' });
+    expect(calls).toHaveLength(2);
+    expect(calls.join('\n')).not.toContain('request_telegram_player_validation');
   });
 
   it('fails closed when Player validation intake does not return a request identity', async () => {
@@ -757,6 +801,11 @@ describe('Postgres Telegram Player-ID action runtime', () => {
               },
             ],
           };
+        }
+        if (query.includes('save_telegram_player_selection')) {
+          throw Object.assign(new Error('The Player ID has no reusable signed verification.'), {
+            code: 'P0001',
+          });
         }
         if (query.includes('request_telegram_player_validation')) {
           return { rows: [{ request_id: null, request_replayed: false }] };

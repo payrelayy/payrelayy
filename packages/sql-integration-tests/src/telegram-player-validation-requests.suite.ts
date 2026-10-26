@@ -54,12 +54,16 @@ export function registerTelegramPlayerValidationRequestSqlTests(getClient: () =>
       try {
         const fixture = await createPilotPrerequisites(client);
         const firstEvent = await recordInbound(client, '89630000001', '89640000001');
-        const selected = await asPlayerActions<{ selected_player_id: string }>(
-          client,
-          `select selected_player_id from app.save_telegram_player_selection($1::uuid, $2::text)`,
+        await client.query(
+          `insert into app.telegram_player_selections
+             (telegram_identity_id, player_account_id, origin_inbound_event_id, selected_at)
+           select inbound_event.customer_identity_id, player.id, inbound_event.id,
+                  pg_catalog.clock_timestamp()
+             from app.inbound_events inbound_event
+             join app.customer_platform_players player on player.player_id = $2::text
+            where inbound_event.id = $1::uuid`,
           [firstEvent, fixture.playerIds[0]!],
         );
-        expect(selected[0]!.selected_player_id).toBe(fixture.playerIds[0]);
 
         const before = (
           await client.query(`select

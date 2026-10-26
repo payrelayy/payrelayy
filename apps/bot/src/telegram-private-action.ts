@@ -250,6 +250,15 @@ export function isTelegramPrivateHelpCommand(metadata: TelegramDepositCommandMet
   return toTelegramPrivateActionIdentity(metadata) !== undefined && metadata.command === '/help';
 }
 
+export function isTelegramSavedPlayerChangeCommand(
+  metadata: TelegramDepositCommandMetadata,
+): boolean {
+  return (
+    toTelegramPrivateActionIdentity(metadata) !== undefined &&
+    metadata.command === '/change_player_id'
+  );
+}
+
 /**
  * Reduce only the exact root-menu commands. This is a pure local reducer; it is not wired to a
  * grammY handler, polling loop, HTTP client, or dispatcher.

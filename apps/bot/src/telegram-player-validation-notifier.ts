@@ -52,7 +52,7 @@ export async function processOneTelegramPlayerValidationOutcome(
     const sent = await dependencies.send(
       Number(claimed.privateChatId),
       presentTelegramPlayerValidationOutcome(claimed),
-      true,
+      claimed.outcomeCode === 'selected',
     );
     if (!Number.isSafeInteger(sent.message_id) || sent.message_id <= 0) {
       throw new Error('Telegram returned no valid message ID.');

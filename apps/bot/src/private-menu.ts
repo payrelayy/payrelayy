@@ -24,19 +24,17 @@ export function renderTelegramOutcomeActions(): readonly PrivateTelegramMenuButt
       text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
       callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
     },
-    { text: '🔄 Change Player ID', callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA },
   ];
 }
 
 /**
- * The privileged Player-ID action always uses the API-supplied opaque callback. The fixed deposit
- * callback below has no authority: it only opens a local reply prompt, and the completed input
- * still crosses the existing authenticated API and database boundary.
+ * Keep the API-issued capability structurally valid even though this compact menu opens the
+ * existing free-text Player ID path. The fixed buttons have no payment authority; submitted
+ * input still crosses the authenticated API and database boundary.
  */
 export function renderPlayerRegistrationMenu(
   capabilityCallbackData: string,
   selectedPlayerId: string | null = null,
-  playerValidationEnabled = false,
 ): PrivateTelegramMenu {
   if (!parseTelegramPlayerRegistrationCapabilityCallback(capabilityCallbackData)) {
     throw new Error('The Player ID menu requires a valid opaque capability callback.');
@@ -49,16 +47,12 @@ export function renderPlayerRegistrationMenu(
         : `${TELEGRAM_GUIDED_DEPOSIT_MENU_TEXT}\nPlayer ID: ${selectedPlayerId}`,
     buttons: [
       {
-        text: TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
-        callbackData: TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
+        text: selectedPlayerId === null ? '➕ Add Player ID' : TELEGRAM_GUIDED_COMBINED_BUTTON_TEXT,
+        callbackData:
+          selectedPlayerId === null
+            ? TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA
+            : TELEGRAM_GUIDED_COMBINED_CALLBACK_DATA,
       },
-      {
-        text: selectedPlayerId === null ? '🎮 Set Player ID' : '🔄 Change Player ID',
-        callbackData: TELEGRAM_CHANGE_PLAYER_CALLBACK_DATA,
-      },
-      ...(playerValidationEnabled
-        ? []
-        : [{ text: '➕ Request Player ID review', callbackData: capabilityCallbackData }]),
     ],
   };
 }

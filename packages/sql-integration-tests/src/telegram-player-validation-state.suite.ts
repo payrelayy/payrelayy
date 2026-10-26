@@ -236,6 +236,7 @@ async function acceptedFound(
   updateId: string,
   userId: string,
   playerId: string,
+  atomically = false,
 ): Promise<{ readonly eventId: string; readonly requestId: string }> {
   const eventId = await inbound(client, updateId, userId);
   const requestId = await requestValidation(client, eventId, playerId);
@@ -248,9 +249,13 @@ async function acceptedFound(
     [assignment.bodyDigest, assignment],
   );
   expect(complete.rows).toEqual([{ completed: true }]);
-  expect(await accept(client, assignment, resultEnvelope(assignment, 'found'))).toEqual([
-    { accepted: true, replayed: false },
-  ]);
+  expect(await accept(client, assignment, resultEnvelope(assignment, 'found'), atomically)).toEqual(
+    [
+      atomically
+        ? { accepted: true, replayed: false, finalization_state: 'selected' }
+        : { accepted: true, replayed: false },
+    ],
+  );
   return { eventId, requestId };
 }
 
@@ -388,6 +393,75 @@ export function registerTelegramPlayerValidationStateSqlTests(
             )
           ).rows,
         ).toEqual([{ status: 'validated' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('reuses a signed eligible Player across private chats without another Find or payment', async () => {
+      const client = getClient();
+      await client.query('begin');
+      try {
+        const paired = await createPairedDevice(client, getOwnerAdminId());
+        const playerId = 'SIGNED-REUSE-PLAYER-SQL';
+        const source = await acceptedFound(
+          client,
+          paired.certificateBody,
+          paired.signerKeyId,
+          '89660000130',
+          '89650000130',
+          playerId,
+          true,
+        );
+        const pendingEvent = await inbound(client, '89660000131', '89650000131');
+        const pendingRequestId = await requestValidation(client, pendingEvent, 'UNSEEN-PLAYER-SQL');
+        const reuseEvent = await inbound(client, '89660000132', '89650000131');
+        const before = (
+          await client.query(`select
+          (select count(*)::text from app.deposit_intents) as intents,
+          (select count(*)::text from app.deposit_jobs) as jobs,
+          (select count(*)::text from app.telegram_player_validation_results) as results`)
+        ).rows;
+        const reused = await asPlayerActions<{
+          selected_player_id: string;
+          request_replayed: boolean;
+        }>(client, 'select * from app.save_telegram_player_selection($1::uuid,$2::text)', [
+          reuseEvent,
+          playerId,
+        ]);
+        expect(reused).toEqual([{ selected_player_id: playerId, request_replayed: false }]);
+        expect(
+          await asPlayerActions(
+            client,
+            'select * from app.save_telegram_player_selection($1::uuid,$2::text)',
+            [reuseEvent, playerId],
+          ),
+        ).toEqual([{ selected_player_id: playerId, request_replayed: true }]);
+        expect(
+          (
+            await client.query(
+              `select source_validation_request_id from app.telegram_signed_player_reuses
+            where origin_inbound_event_id=$1::uuid`,
+              [reuseEvent],
+            )
+          ).rows,
+        ).toEqual([{ source_validation_request_id: source.requestId }]);
+        expect(
+          (
+            await client.query(
+              'select status from app.telegram_player_validation_requests where id=$1::uuid',
+              [pendingRequestId],
+            )
+          ).rows,
+        ).toEqual([{ status: 'superseded' }]);
+        expect(
+          (
+            await client.query(`select
+          (select count(*)::text from app.deposit_intents) as intents,
+          (select count(*)::text from app.deposit_jobs) as jobs,
+          (select count(*)::text from app.telegram_player_validation_results) as results`)
+          ).rows,
+        ).toEqual(before);
       } finally {
         await client.query('rollback');
       }
@@ -873,7 +947,12 @@ export function registerTelegramPlayerValidationStateSqlTests(
         expect(await processOneTelegramPlayerValidationOutcome(dependencies)).toBe('none');
         expect(sent).toHaveLength(2);
         expect(sent.map((message) => message.chatId).sort()).toEqual([89650000032, 89650000033]);
-        expect(sent.every((message) => message.showDepositButton)).toBe(true);
+        expect(sent.find((message) => message.chatId === 89650000032)?.showDepositButton).toBe(
+          true,
+        );
+        expect(sent.find((message) => message.chatId === 89650000033)?.showDepositButton).toBe(
+          false,
+        );
         expect(sent.find((message) => message.chatId === 89650000032)?.text).toContain(
           'Player ID verified. You can deposit now.',
         );
@@ -979,9 +1058,14 @@ export function registerTelegramPlayerValidationStateSqlTests(
         const paired = await createPairedDevice(client, getOwnerAdminId());
         const userId = '89650000001';
         const selectEvent = await inbound(client, '89660000001', userId);
-        await asPlayerActions(
-          client,
-          'select * from app.save_telegram_player_selection($1::uuid,$2::text)',
+        await client.query(
+          `insert into app.telegram_player_selections
+             (telegram_identity_id, player_account_id, origin_inbound_event_id, selected_at)
+           select inbound_event.customer_identity_id, player.id, inbound_event.id,
+                  pg_catalog.clock_timestamp()
+             from app.inbound_events inbound_event
+             join app.customer_platform_players player on player.player_id = $2::text
+            where inbound_event.id = $1::uuid`,
           [selectEvent, fixture.playerIds[0]!],
         );
         const before = (

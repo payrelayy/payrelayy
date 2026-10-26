@@ -20,6 +20,10 @@ create table app.telegram_signed_player_reuses (
 );
 create index telegram_signed_player_reuses_identity_idx
   on app.telegram_signed_player_reuses (telegram_identity_id, selected_at desc);
+create index telegram_signed_player_reuses_player_idx
+  on app.telegram_signed_player_reuses (player_account_id);
+create index telegram_signed_player_reuses_source_idx
+  on app.telegram_signed_player_reuses (source_validation_request_id);
 create trigger telegram_signed_player_reuses_immutable
   before update or delete on app.telegram_signed_player_reuses
   for each row execute function app.reject_telegram_player_validation_evidence_mutation();

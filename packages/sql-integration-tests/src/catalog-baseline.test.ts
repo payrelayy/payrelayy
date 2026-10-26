@@ -460,6 +460,11 @@ beforeAll(async () => {
     [ownerAuthUserId],
   );
   ownerAdminId = owner.rows[0]!.admin_id;
+  // The initial policy seed has no Owner authority. Model the first Owner
+  // selecting the current production range before exercising live deposits.
+  await client.query('select app.set_deposit_policy($1::uuid,10000,2500000,3600)', [
+    ownerAdminId,
+  ]);
 });
 
 afterAll(async () => {

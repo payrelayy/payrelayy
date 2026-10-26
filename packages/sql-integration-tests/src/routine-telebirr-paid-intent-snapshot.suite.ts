@@ -102,7 +102,7 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
       await client.query('begin');
       try {
         const authorization = await persistentPolicyFixture(client, getOwner());
-        const legacy = await paidJob(client, 2500, 'cbe_birr');
+        const legacy = await paidJob(client, 10000, 'cbe_birr');
         const snapshot = await client.query<{
           customer_id: string;
           platform_id: string;
@@ -163,7 +163,7 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
              clock_timestamp() - interval '250 milliseconds',
              clock_timestamp() - interval '200 milliseconds',
              clock_timestamp() - interval '100 milliseconds',
-             clock_timestamp() - interval '500 milliseconds', 2500
+             clock_timestamp() - interval '500 milliseconds', 10000
            ) returning occurred_at`,
           [
             challengeId,
@@ -236,7 +236,7 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
              receiver_account_id, expected_amount_minor,
              routine_telebirr_paid_opening_challenge_id
            ) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-                     $6::uuid, 2500, $7::uuid)
+                     $6::uuid, 10000, $7::uuid)
            returning opened_at, payment_deadline_at, expected_amount_minor,
                      routine_telebirr_paid_opening_challenge_id`,
           [
@@ -253,7 +253,7 @@ export function registerRoutineTelebirrPaidIntentSnapshotSqlTests(
         expect(intent.rows[0]!.payment_deadline_at.getTime()).toBe(
           insertedOpening.rows[0]!.occurred_at.getTime() + 3_600_000,
         );
-        expect(intent.rows[0]!.expected_amount_minor).toBe('2500');
+        expect(intent.rows[0]!.expected_amount_minor).toBe('10000');
         expect(intent.rows[0]!.routine_telebirr_paid_opening_challenge_id).toBe(challengeId);
         await rejected(
           client,

@@ -355,7 +355,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
           observed_at: Date;
           occurred_at: Date;
         }>(
-          `select 2500::bigint as amount_minor, candidate.payment_provider_id,
+          `select 10000::bigint as amount_minor, candidate.payment_provider_id,
                   candidate.candidate_reference_fingerprint as reference_fingerprint,
                   receiver.id as receiver_account_id, receiver.version as receiver_account_version,
                   date_trunc('milliseconds', clock_timestamp()) as observed_at,
@@ -555,7 +555,7 @@ export function registerRoutineTelebirrPaidAtomicClaimSqlTests(
         );
         expect(persisted.rows).toHaveLength(1);
         expect(persisted.rows[0]).toMatchObject({
-          amount_minor: '2500',
+          amount_minor: '10000',
           claim_count: '1',
           job_count: '1',
           binding_count: '1',

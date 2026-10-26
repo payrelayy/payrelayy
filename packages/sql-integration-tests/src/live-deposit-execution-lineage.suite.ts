@@ -346,7 +346,7 @@ async function createSyntheticOwnerVerification(
        evidence_digest, adapter_version, normalization_version, retrieved_at
      ) values (
        $1::uuid, 'lineage-provider-ciphertext', $2::text, '***7711', 1,
-       'provider_receipt_lookup', 2500, 'ETB', $3::timestamptz + interval '1 millisecond',
+       'provider_receipt_lookup', 10000, 'ETB', $3::timestamptz + interval '1 millisecond',
        $4::uuid, $5::integer, $6::text, 'lineage_fixture_v1',
        'lineage_fixture_v1', $3::timestamptz + interval '2 milliseconds'
      )
@@ -468,7 +468,7 @@ export function registerLiveDepositExecutionLineageSqlTests(getClient: () => Cli
           playerActionsRuntimeRole,
           `select deposit_intent_id, deposit_status, origin_inbound_event_already_consumed
              from app.open_telegram_live_deposit_intent(
-               $1::uuid, $2::text, 2500::bigint, $3::text
+               $1::uuid, $2::text, 10000::bigint, $3::text
              )`,
           [openEventId, fixture.playerId, openInputHmac],
         );
@@ -489,7 +489,7 @@ export function registerLiveDepositExecutionLineageSqlTests(getClient: () => Cli
           playerActionsRuntimeRole,
           `select deposit_intent_id, origin_inbound_event_already_consumed
              from app.open_telegram_live_deposit_intent(
-               $1::uuid, $2::text, 2500::bigint, $3::text
+               $1::uuid, $2::text, 10000::bigint, $3::text
              )`,
           [openEventId, fixture.playerId, openInputHmac],
         );
@@ -683,7 +683,7 @@ export function registerLiveDepositExecutionLineageSqlTests(getClient: () => Cli
         );
         expect(leased).toEqual([
           {
-            amount_minor: '2500',
+            amount_minor: '10000',
             currency_code: 'ETB',
             deposit_intent_id: depositIntentId,
             execution_attempt_id: expect.any(String),
